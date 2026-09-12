@@ -57,6 +57,14 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     .with_jit_symbol("jet_jit_zip_decompress"),
     CoreCallRecord::new(
         "core.archive",
+        "deflate",
+        "jet_foundation::CoreArchive::jet_archive_deflate",
+        false,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_archive_deflate"),
+    CoreCallRecord::new(
+        "core.archive",
         "crc32",
         "jet_foundation::CoreArchive::jet_archive_crc32",
         false,
@@ -145,6 +153,15 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     .with_jit_symbol("jet_jit_crypto_x25519_public")
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.crypto",
+        "__x25519_public_text",
+        "jet_crypto_x25519_public_text_impl",
+        false,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_crypto_x25519_public_text")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.crypto", "__signing_public", "jet_crypto_signing_public_impl", false, &[true],
     )
     .with_jit_symbol("jet_jit_crypto_signing_public")
@@ -206,8 +223,26 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     .without_direct_jit()
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.service",
+        "workflow_outcome",
+        "jet_services_workflow_outcome",
+        true,
+        &[true, false],
+    )
+    .without_direct_aot()
+    .without_direct_jit()
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.sync", "counter_new", "jet_sync_counter_new", true, &[false, false],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.sync",
+        "list_push",
+        "jet_sync_list_push",
+        true,
+        &[false, false, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.sync", "counter_inc", "jet_sync_counter_inc", true, &[true, false, false],
     )
