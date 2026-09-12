@@ -7744,6 +7744,34 @@ fn jet_jit_measurement_get(handle: i64, field: i64) -> f64 {
     })
 }
 
+fn jet_jit_measurement_value(handle: i64) -> f64 {
+    jet_jit_measurement_get(handle, 0)
+}
+
+fn jet_jit_measurement_uncertainty(handle: i64) -> f64 {
+    jet_jit_measurement_get(handle, 1)
+}
+
+fn jet_jit_measurement_add(left: i64, right: i64) -> i64 {
+    jet_jit_measurement_arithmetic(left, right, 0)
+}
+
+fn jet_jit_measurement_sub(left: i64, right: i64) -> i64 {
+    jet_jit_measurement_arithmetic(left, right, 1)
+}
+
+fn jet_jit_measurement_mul(left: i64, right: i64) -> i64 {
+    jet_jit_measurement_arithmetic(left, right, 2)
+}
+
+fn jet_jit_measurement_div(left: i64, right: i64) -> i64 {
+    jet_jit_measurement_arithmetic(left, right, 3)
+}
+
+fn jet_jit_measurement_sqrt(handle: i64) -> i64 {
+    jet_jit_measurement_arithmetic(handle, handle, 4)
+}
+
 fn jet_jit_measurement_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(value) = read_measurement(rt, handle) else {
@@ -13828,6 +13856,18 @@ host_fns! {
         sig_measurement_get.params.push(AbiParam::new(types::I64));
         sig_measurement_get.params.push(AbiParam::new(types::I64));
         sig_measurement_get.returns.push(AbiParam::new(types::F64));
+        let mut sig_measurement_value = Signature::new(cc);
+        sig_measurement_value.params.push(AbiParam::new(types::I64));
+        sig_measurement_value.returns.push(AbiParam::new(types::F64));
+        let mut sig_measurement_unary = Signature::new(cc);
+        sig_measurement_unary.params.push(AbiParam::new(types::I64));
+        sig_measurement_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_measurement_binary = Signature::new(cc);
+        sig_measurement_binary
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_measurement_binary.returns.push(AbiParam::new(types::I64));
+
         let mut sig_is_trapped = Signature::new(cc);
         sig_is_trapped.returns.push(AbiParam::new(types::I64));
         let mut sig_numeric_checked_widen = Signature::new(cc);
@@ -14201,6 +14241,13 @@ host_fns! {
     measurement_new: "jet_jit_measurement_new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
     measurement_get: "jet_jit_measurement_get" => jet_jit_measurement_get: sig_measurement_get;
+    measurement_value: "jet_std::JetMeasurement::value" => jet_jit_measurement_value: sig_measurement_value;
+    measurement_uncertainty: "jet_std::JetMeasurement::uncertainty" => jet_jit_measurement_uncertainty: sig_measurement_value;
+    measurement_add: "jet_std::JetMeasurement::add" => jet_jit_measurement_add: sig_measurement_binary;
+    measurement_sub: "jet_std::JetMeasurement::sub" => jet_jit_measurement_sub: sig_measurement_binary;
+    measurement_mul: "jet_std::JetMeasurement::mul" => jet_jit_measurement_mul: sig_measurement_binary;
+    measurement_div: "jet_std::JetMeasurement::div" => jet_jit_measurement_div: sig_measurement_binary;
+    measurement_sqrt: "jet_std::JetMeasurement::sqrt" => jet_jit_measurement_sqrt: sig_measurement_unary;
     result_new_i64: "jet_jit_result_new_i64" => jet_jit_result_new_i64: sig_result_new_i64;
     result_new_f64: "jet_jit_result_new_f64" => jet_jit_result_new_f64: sig_result_new_f64;
     result_new_i8: "jet_jit_result_new_i8" => jet_jit_result_new_i8: sig_result_new_i8;
