@@ -273,17 +273,27 @@ host_fns! {
 
     }
     new: "jet_jit_layout_new" => jet_jit_layout_new: unary;
+    new_canonical: "jet_layout::Handle::new" => jet_jit_layout_new: unary;
     from_const: "jet_jit_layout_from_const" => jet_jit_layout_from_const: from_const;
+    from_const_canonical: "jet_layout::LinExpr::from_const" => jet_jit_layout_from_const: from_const;
     ge: "jet_jit_layout_ge" => jet_jit_layout_ge: binary;
+    ge_canonical: "jet_layout::ge" => jet_jit_layout_ge: binary;
     le: "jet_jit_layout_le" => jet_jit_layout_le: binary;
+    le_canonical: "jet_layout::le" => jet_jit_layout_le: binary;
     eq: "jet_jit_layout_eq" => jet_jit_layout_eq: binary;
+    eq_canonical: "jet_layout::eq_" => jet_jit_layout_eq: binary;
     add: "jet_jit_layout_add" => jet_jit_layout_add: binary;
     sub: "jet_jit_layout_sub" => jet_jit_layout_sub: binary;
     h: "jet_jit_layout_h" => jet_jit_layout_h: ternary;
+    h_canonical: "jet_layout::Handle::h" => jet_jit_layout_h: ternary;
     v: "jet_jit_layout_v" => jet_jit_layout_v: ternary;
+    v_canonical: "jet_layout::Handle::v" => jet_jit_layout_v: ternary;
     value: "jet_jit_layout_value" => jet_jit_layout_value: value;
+    value_canonical: "jet_layout::Handle::value" => jet_jit_layout_value: value;
     suggest: "jet_jit_layout_suggest" => jet_jit_layout_suggest: suggest;
+    suggest_canonical: "jet_layout::Handle::suggest" => jet_jit_layout_suggest: suggest;
     is_feasible: "jet_jit_layout_is_feasible" => jet_jit_layout_is_feasible: is_feasible;
+    is_feasible_canonical: "jet_layout::Handle::is_feasible" => jet_jit_layout_is_feasible: is_feasible;
     add_constraint: "jet_jit_layout_add_constraint" => jet_jit_layout_add_constraint: add_c;
     strength: "jet_jit_layout_strength" => jet_jit_layout_strength: binary;
 }
