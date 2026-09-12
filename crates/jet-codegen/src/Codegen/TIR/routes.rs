@@ -2114,6 +2114,14 @@ fn builtin_collection_route(
             row("len", "jet_list_len", 1, &[true])
         }
         (TBuiltinOp::LenList, Type::Map { .. }) => row("len", "jet_map_len", 1, &[true]),
+        (TBuiltinOp::ContainsKey, Type::Map { .. }) => {
+            row("map_has_key", "jet_map_has_key", 2, &[true, true])
+        }
+        (TBuiltinOp::ContainsKey, Type::Apply { name, .. })
+            if name == crate::Syntax::TYPE_LRU =>
+        {
+            row("lru_has", "jet_lru_has", 2, &[true, false])
+        }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
             row("len", "jet_set_len", 1, &[true])
         }
@@ -2543,7 +2551,7 @@ impl TBuiltinOp {
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
-            | ContainsKey | ToString | Take | Skip | IterToList | IterCollect
+            | ToString | Take | Skip | IterToList | IterCollect
             | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
@@ -2603,7 +2611,7 @@ impl TBuiltinOp {
                     carrier,
                 ),
                 TBuiltinOp::LenList
-                | TBuiltinOp::Contains
+                | TBuiltinOp::ContainsKey
                 | TBuiltinOp::IsEmpty
                 | TBuiltinOp::DequeCapacity
                 | TBuiltinOp::GetMap

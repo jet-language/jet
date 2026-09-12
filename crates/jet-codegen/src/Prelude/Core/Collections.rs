@@ -491,6 +491,10 @@ fn jet_map_get_opt<K: Ord, V: Clone>(
 ) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(map.get(key).cloned())
 }
+#[inline(always)]
+fn jet_map_has_key<K: Ord, V>(map: &JetMap<K, V>, key: &K) -> bool {
+    map.contains_key(key)
+}
 
 #[inline(always)]
 fn jet_bag_has<T: Eq + std::hash::Hash>(
@@ -563,6 +567,10 @@ fn jet_lru_len<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> i64 {
 #[inline(always)]
 fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
     cache.is_empty()
+}
+#[inline(always)]
+fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
+    cache.contains_key(key)
 }
 
 #[inline(always)]

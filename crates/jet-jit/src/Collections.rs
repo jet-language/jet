@@ -5092,6 +5092,16 @@ fn jet_jit_map_contains_value(map: i64, needle: i64) -> i8 {
         needle,
     ))
 }
+fn jet_jit_map_has_key(map: i64, key: i64) -> i8 {
+    let Some(key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(key)) else {
+        return 0;
+    };
+    i8::from(
+        clone_map_pairs(map)
+            .iter()
+            .any(|(stored, _)| stored == &key),
+    )
+}
 fn map_callback_key(key: &str) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(key.to_owned()))
 }
@@ -10177,6 +10187,8 @@ host_fns! {
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     checked_map_contains_value: "jet_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
+    map_has_key: "jet_jit_map_has_key" => jet_jit_map_has_key: sig_list_eq;
+    checked_map_has_key: "jet_map_has_key" => jet_jit_map_has_key: sig_list_eq;
     map_any: "jet_jit_map_any" => jet_jit_map_any: sig_closure_predicate;
     checked_map_any: "jet_map_any" => jet_jit_map_any: sig_closure_predicate;
     map_all: "jet_jit_map_all" => jet_jit_map_all: sig_closure_predicate;
@@ -10344,6 +10356,7 @@ host_fns! {
     lru_put: "jet_jit_lru_put" => jet_jit_lru_put: sig_three_ret;
     lru_get: "jet_jit_lru_get" => jet_jit_lru_get: sig_get_opt;
     lru_has: "jet_jit_lru_has" => jet_jit_lru_has: sig_list_eq;
+    checked_lru_has: "jet_lru_has" => jet_jit_lru_has: sig_list_eq;
     lru_keys: "jet_jit_lru_keys" => jet_jit_lru_keys: sig_len;
     bit_set_new: "jet_jit_bit_set_new" => jet_jit_bit_set_new: sig_new;
     bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
