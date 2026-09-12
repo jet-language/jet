@@ -178,6 +178,26 @@ pub(crate) fn lower_fn_value_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    // A function-valued expression may itself be a fallible plain call. The
+    // enclosing call's `?`/`??` owns the final carrier, but the callee must be
+    // unwrapped before the function-value ABI is selected.
+    if let Type::Result { ok, .. } | Type::Option(ok) = &callee_t.ty {
+        if matches!(ok.as_ref(), Type::Fn { .. }) {
+            let callee_ty = (**ok).clone();
+            let line = crate::Diagnostics::span_line_col(&cx.src, site as usize).0;
+            callee_t = TExpr {
+                ty: callee_ty,
+                kind: TExprKind::Try {
+                    inner: Box::new(callee_t),
+                    note: None,
+                    convert: TTryConvert::None,
+                    file: escape_rust_str(&cx.file),
+                    line,
+                    fn_name: escape_rust_str(&env.fn_name),
+                },
+            };
+        }
+    }
     // Sema exposes the executable function-value signature at this boundary,
     // even when the local binding keeps the source-facing return spelling.
     // Keep both views: the raw view drives the actual call, while the

@@ -11072,7 +11072,7 @@ fn lower_method_call_impl(
                         resolved_ret,
                     )
                 };
-                let ret_ty = if operator_rhs.is_some() {
+                let source_ret_ty = if operator_rhs.is_some() {
                     resolved_ret
                         .cloned()
                         .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
@@ -11088,6 +11088,12 @@ fn lower_method_call_impl(
                 }
                 .map(|ty| resolve_self_ty(&ty, &type_name))
                 .unwrap_or_else(unit_type);
+                let ret_ty = if env.fallback_subject && resolved_ret.is_some() {
+                    jet_foundation::AST::FailureContract::from_return_type(Some(&source_ret_ty))
+                        .effective_type()
+                } else {
+                    source_ret_ty
+                };
                 let owner_type = if owner_type_args.is_empty() {
                     Type::Named(type_name.clone())
                 } else {
