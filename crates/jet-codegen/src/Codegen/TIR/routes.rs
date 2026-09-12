@@ -2116,6 +2116,9 @@ fn builtin_collection_route(
         (TBuiltinOp::ListDifference, Type::List(_) | Type::FixedList { .. }) => {
             row("difference", "jet_list_difference", 2, &[true, true])
         }
+        (TBuiltinOp::ListRandom, Type::List(_) | Type::FixedList { .. }) => {
+            row("random", "jet_list_random", 1, &[true])
+        }
         (TBuiltinOp::LenList, Type::List(_) | Type::FixedList { .. }) => {
             row("len", "jet_list_len", 1, &[true])
         }
@@ -2647,7 +2650,8 @@ impl TBuiltinOp {
                 | TBuiltinOp::Last
                 | TBuiltinOp::ListUnion
                 | TBuiltinOp::ListIntersection
-                | TBuiltinOp::ListDifference => builtin_collection_route(self, receiver, carrier)?,
+                | TBuiltinOp::ListDifference
+                | TBuiltinOp::ListRandom => builtin_collection_route(self, receiver, carrier)?,
                 _ => self.route_plan(result, carrier)?,
             }
         };
@@ -2815,6 +2819,20 @@ pub(super) fn string_method_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
+    if method == "equal" {
+        return Ok(prelude(
+            MirPreludeFamily::BuiltinMethod,
+            "core.compare",
+            "eq",
+            "jet_eq",
+            2,
+            2,
+            &[true, true],
+            None,
+            carrier,
+            MirPreludeAbi::Value,
+        ));
+    }
     let (member, symbol, arity) = match method {
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
         "last_index_of" => ("last_index_of", "jet_unicode_last_index_of", 2),
