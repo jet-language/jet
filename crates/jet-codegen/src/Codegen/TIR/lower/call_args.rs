@@ -1178,7 +1178,7 @@ pub(crate) fn lower_one_call_arg(
     // conversions such as `[T#N]` to `[T]`.
     let value = match (&a.expr, value.kind) {
         (Expr::Ident(name, _), TExprKind::Local(local)) => {
-            let ty = env.ty_of(name).cloned().or_else(|| {
+            let ty = env.ty_of(name).or_else(|| {
                 a.flags
                     .binder_refs
                     .iter()
