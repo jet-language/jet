@@ -2503,6 +2503,7 @@ impl TBuiltinOp {
             MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
             MapFirst => b("map_first", "jet_map_first_key", 1, 1, &[true], None, carrier),
             MapIntersection => b("map_intersection", "jet_map_intersection", 2, 2, &[true, true], None, carrier),
+            MapSliceKeys { .. } => b("map_slice", "jet_map_slice", 2, 2, &[true, false], None, carrier),
             BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
             DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
             PriorityQueueFrom => b("priority_queue_from", "jet_priority_queue_from", 1, 1, &[false], None, carrier),
@@ -2522,7 +2523,7 @@ impl TBuiltinOp {
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
-            | MapCopy | MapToList { .. } | MapSliceKeys
+            | MapCopy | MapToList { .. }
             | MapNew | MapContainsValue
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
