@@ -10233,6 +10233,7 @@ host_fns! {
     byte_buffer_new: "jet_jit_byte_buffer_new" => jet_jit_byte_buffer_new: sig_new;
     byte_buffer_with_capacity: "jet_jit_byte_buffer_with_capacity" => jet_jit_byte_buffer_with_capacity: sig_len;
     byte_buffer_from: "jet_jit_byte_buffer_from" => jet_jit_byte_buffer_from: sig_len;
+    checked_byte_buffer_from: "JetByteBuffer::from" => jet_jit_byte_buffer_from: sig_len;
     byte_buffer_write: "jet_jit_byte_buffer_write" => jet_jit_byte_buffer_write: sig_map_insert;
     byte_buffer_to_bytes: "jet_jit_byte_buffer_to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     checked_byte_buffer_to_bytes: "JetByteBuffer::to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
