@@ -2185,11 +2185,11 @@ host_fns! {
     task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
     task_group_close: "jet_std::JetTaskGroup::close" => jet_jit_task_group_close: sig_i64;
     task_join: "jet_std::JetTask::join" => jet_jit_task_join: sig_i64;
-    task_cancel: "jet_jit_task_cancel" => jet_jit_task_cancel: sig_void_i64;
+    task_cancel: "jet_std::JetTask::cancel" => jet_jit_task_cancel: sig_void_i64;
     task_join_result: "jet_std::jet_task_join_result" => jet_jit_task_join_result: sig_i64;
     task_detach: "jet_std::JetTask::detach" => jet_jit_task_detach: sig_void_i64;
-    task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
-    task_resume: "jet_jit_task_resume" => jet_jit_task_resume: sig_void_i64;
+    task_pause: "jet_std::JetTask::pause" => jet_jit_task_pause: sig_void_i64;
+    task_resume: "jet_std::JetTask::resume" => jet_jit_task_resume: sig_void_i64;
     task_yield: "jet_std::jet_task_yield" => jet_jit_task_yield: sig_noarg_i64;
     task_current_trace: "jet_std::jet_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
     task_all: "jet_std::jet_task_all" => jet_jit_task_all: sig_i64;
