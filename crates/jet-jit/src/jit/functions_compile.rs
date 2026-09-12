@@ -10510,8 +10510,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             if args.is_empty() && name.name == "Fraction"
                     )
                 });
+                let datetime =
+                    element_ty.is_some_and(|ty| is_named_type(ty, "DateTime"));
                 let host = if fraction && member == "list_sort" {
                     self.host.coll.list_sort_fraction
+                } else if datetime && member == "list_sort" {
+                    self.host.coll.list_sort_datetime
                 } else {
                     let element = element_ty
                         .and_then(comparison_element_kind)

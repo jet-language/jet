@@ -4115,6 +4115,31 @@ fn jet_jit_list_sort_f64_desc(list: i64) {
         }
     });
 }
+fn jet_jit_list_sort_datetime(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(mut pairs) = clone_list_ints_with_runtime(rt, list)
+            .into_iter()
+            .map(|handle| {
+                let index = usize::try_from(handle.checked_sub(1)?).ok()?;
+                let value = match rt.time_values.get(index)?.as_ref()? {
+                    crate::Time::TimeValue::DateTime(value) => value.clone(),
+                    _ => return None,
+                };
+                Some((value, handle))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        pairs.sort_by(|left, right| left.0.cmp(&right.0));
+        for (index, (_, handle)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, handle)
+                .expect("jit list sort_datetime: set");
+        }
+    });
+}
+
 
 /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
 fn jet_jit_list_indexes(n: i64) -> i64 {
@@ -10145,6 +10170,7 @@ host_fns! {
     list_sort_desc: "jet_jit_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
     list_sort_f64: "jet_jit_list_sort_f64" => jet_jit_list_sort_f64: sig_sort;
     list_sort_f64_desc: "jet_jit_list_sort_f64_desc" => jet_jit_list_sort_f64_desc: sig_sort;
+    list_sort_datetime: "jet_jit_list_sort_datetime" => jet_jit_list_sort_datetime: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
     list_sort_fraction: "jet_jit_list_sort_fraction" => jet_jit_list_sort_fraction: sig_sort;
     list_sort_str_desc: "jet_jit_list_sort_str_desc" => jet_jit_list_sort_str_desc: sig_sort;
