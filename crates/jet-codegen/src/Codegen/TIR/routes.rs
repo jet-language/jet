@@ -2548,6 +2548,7 @@ impl TBuiltinOp {
                 MirPreludeAbi::Aggregate,
             ),
             MapContainsValue => b("map_contains_value", "jet_map_contains_value", 2, 2, &[true, true], None, carrier),
+            ContainsKey => b("map_has_key", "jet_map_has_key", 2, 2, &[true, true], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
