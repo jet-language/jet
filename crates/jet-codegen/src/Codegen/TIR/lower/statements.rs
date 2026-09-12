@@ -1888,7 +1888,6 @@ struct SplitViewCandidate {
 
 struct PlannedSplitView {
     candidate: SplitViewCandidate,
-    initialize: bool,
     root: String,
     len: String,
     source: String,
@@ -2190,7 +2189,6 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx, env: &LowerEnv) -> HashMap<usize, Pl
                 candidate.stmt_index,
                 PlannedSplitView {
                     candidate,
-                    initialize: step == 0,
                     root: root.clone(),
                     len: len.clone(),
                     source: region.name,
