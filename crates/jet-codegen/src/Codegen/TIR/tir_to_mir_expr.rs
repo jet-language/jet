@@ -2033,7 +2033,7 @@ pub(super) fn lower_expr(
                     None => ctx.lower_child(recv)?,
                 };
                 let mut argument = mir_value_arg_with_access(ctx, value, access);
-                argument.place = place;
+                argument.place = if access == MirAccess::Write { place } else { None };
                 argument
             };
             let mut lowered = Vec::with_capacity(args.len() + 1);

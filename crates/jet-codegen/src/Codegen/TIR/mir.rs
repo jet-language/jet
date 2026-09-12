@@ -5955,6 +5955,7 @@ impl<'a> LowerCtx<'a> {
         } else {
             self.lower_child(&arg.value)?
         };
+        let call_place = if consumes_trait_box { None } else { place };
         Ok(MirCallArg {
             value,
             access,
@@ -5975,7 +5976,7 @@ impl<'a> LowerCtx<'a> {
                 Some(ty) => self.mir_type(ty)?.identity,
                 None => None,
             },
-            place,
+            place: call_place,
         })
     }
     pub(super) fn lower_plain_arg(&mut self, expr: &TExpr) -> Result<MirCallArg, LowerError> {

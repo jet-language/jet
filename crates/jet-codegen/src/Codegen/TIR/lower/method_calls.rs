@@ -44,6 +44,98 @@ use crate::AST::{
     AccessConvention, BinOp, EnumLitArg, Expr, Lambda, LambdaBody, LambdaMeta, LambdaParam, Stmt,
     StrPart, Type,
 };
+use crate::Syntax::{CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord};
+
+const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
+    CoreCallRecord::new(
+        "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true, true],
+    ).with_jit_symbol("jet_jit_json_canonical_checked"),
+    CoreCallRecord::new(
+        "core.encoding.xml", "expanded_name", "jet_std_xml_expanded_name", true, &[true],
+    ).with_jit_symbol("jet_jit_xml_expanded_name"),
+    CoreCallRecord::new(
+        "core.encoding.toml", "decode", "jet_enc_toml_decode", true, &[true],
+    ).without_direct_jit(),
+    CoreCallRecord::new(
+        "core.encoding.yaml", "decode", "jet_enc_yaml_decode", true, &[true],
+    ).without_direct_jit(),
+    CoreCallRecord::new(
+        "core.data", "bar_svg", "jet_data_bar_svg_checked", true, &[true],
+    ).with_jit_symbol("jet_jit_data_bar_svg"),
+    CoreCallRecord::new(
+        "core.data", "mean", "jet_data_mean_checked", true, &[true],
+    ).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.service", "set_state_event_log", "jet_services_set_state_event_log", true,
+        &[true, false, false, false, false],
+    ).without_direct_aot().without_direct_jit()
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.sync", "text_new", "jet_sync_text_new", true, &[false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "register_user", "jet_auth_register_user", true, &[false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "password_login", "jet_auth_password_login", true,
+        &[false, false, false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "magic_link_issue", "jet_auth_magic_link_issue", true,
+        &[false, false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "magic_link_consume", "jet_auth_magic_link_consume", true,
+        &[false, false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "oauth_begin", "jet_auth_oauth_begin", true, &[false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.auth", "oauth_finish", "jet_auth_oauth_finish", true,
+        &[false, false, false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "constant_time_equal_bytes", "jet_crypto_constant_time_equal_bytes_impl",
+        false, &[true, true],
+    ).with_jit_symbol("jet_jit_crypto_constant_time_equal_bytes")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "constant_time_equal", "jet_crypto_constant_time_secret_impl",
+        false, &[true, true],
+    ).with_jit_symbol("jet_jit_crypto_constant_time_equal")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "hkdf_sha256", "jet_crypto_hkdf_sha256_impl", false,
+        &[true, true, true, false],
+    ).with_jit_symbol("jet_jit_crypto_hkdf_sha256")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "x25519_public", "jet_crypto_x25519_public_impl", false, &[true],
+    ).with_jit_symbol("jet_jit_crypto_x25519_public_from_bytes")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "x25519_shared", "jet_crypto_x25519_shared_impl", false, &[true, true],
+    ).with_jit_symbol("jet_jit_crypto_x25519_shared")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "x25519", "jet_crypto_x25519_typed_impl", false, &[true, false],
+    ).with_jit_symbol("jet_jit_crypto_x25519")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "wrap", "jet_crypto_wrap_typed_impl", false, &[true, false],
+    ).with_jit_symbol("jet_jit_crypto_wrap")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "unwrap", "jet_crypto_unwrap_typed_impl", false, &[true, false],
+    ).with_jit_symbol("jet_jit_crypto_unwrap")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+];
+
+pub(crate) fn tir_core_call_records() -> &'static [CoreCallRecord] {
+    TIR_CORE_CALL_RECORDS
+}
+
 
 /// Preserve checked Core type arguments, including inferred encoding row types.
 fn checked_core_type_args(
@@ -470,96 +562,6 @@ fn checked_core_record(
     arity: usize,
     span: Span,
 ) -> Result<&'static crate::Syntax::CoreCallRecord, TExpr> {
-    use crate::Syntax::{CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord};
-
-    // These checked calls have plain kernel ABIs. Keep their complete records
-    // on the TIR node, including the exact resident host spelling, so MIR does
-    // not have to reconstruct a symbol from the public module/member pair.
-    const RECORDS: &[CoreCallRecord] = &[
-        CoreCallRecord::new(
-            "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true, true],
-        ).with_jit_symbol("jet_jit_json_canonical_checked"),
-        CoreCallRecord::new(
-            "core.encoding.xml", "expanded_name", "jet_std_xml_expanded_name", true, &[true],
-        ).with_jit_symbol("jet_jit_xml_expanded_name"),
-        CoreCallRecord::new(
-            "core.encoding.toml", "decode", "jet_enc_toml_decode", true, &[true],
-        ).without_direct_jit(),
-        CoreCallRecord::new(
-            "core.encoding.yaml", "decode", "jet_enc_yaml_decode", true, &[true],
-        ).without_direct_jit(),
-        CoreCallRecord::new(
-            "core.data", "bar_svg", "jet_data_bar_svg_checked", true, &[true],
-        ).with_jit_symbol("jet_jit_data_bar_svg"),
-        CoreCallRecord::new(
-            "core.data", "mean", "jet_data_mean_checked", true, &[true],
-        ).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.service", "set_state_event_log", "jet_services_set_state_event_log", true,
-            &[true, false, false, false, false],
-        ).without_direct_aot().without_direct_jit()
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.sync", "text_new", "jet_sync_text_new", true, &[false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "register_user", "jet_auth_register_user", true, &[false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "password_login", "jet_auth_password_login", true,
-            &[false, false, false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "magic_link_issue", "jet_auth_magic_link_issue", true,
-            &[false, false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "magic_link_consume", "jet_auth_magic_link_consume", true,
-            &[false, false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "oauth_begin", "jet_auth_oauth_begin", true, &[false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.auth", "oauth_finish", "jet_auth_oauth_finish", true,
-            &[false, false, false, false],
-        ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "constant_time_equal_bytes", "jet_crypto_constant_time_equal_bytes_impl",
-            false, &[true, true],
-        ).with_jit_symbol("jet_jit_crypto_constant_time_equal_bytes")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "constant_time_equal", "jet_crypto_constant_time_secret_impl",
-            false, &[true, true],
-        ).with_jit_symbol("jet_jit_crypto_constant_time_equal")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "hkdf_sha256", "jet_crypto_hkdf_sha256_impl", false,
-            &[true, true, true, false],
-        ).with_jit_symbol("jet_jit_crypto_hkdf_sha256")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "x25519_public", "jet_crypto_x25519_public_impl", false, &[true],
-        ).with_jit_symbol("jet_jit_crypto_x25519_public_from_bytes")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "x25519_shared", "jet_crypto_x25519_shared_impl", false, &[true, true],
-        ).with_jit_symbol("jet_jit_crypto_x25519_shared")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "x25519", "jet_crypto_x25519_typed_impl", false, &[true, false],
-        ).with_jit_symbol("jet_jit_crypto_x25519")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "wrap", "jet_crypto_wrap_typed_impl", false, &[true, false],
-        ).with_jit_symbol("jet_jit_crypto_wrap")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-        CoreCallRecord::new(
-            "core.crypto", "unwrap", "jet_crypto_unwrap_typed_impl", false, &[true, false],
-        ).with_jit_symbol("jet_jit_crypto_unwrap")
-            .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    ];
 
     crate::Syntax::core_call_projection(
         module,
@@ -569,7 +571,7 @@ fn checked_core_record(
     )
     .or_else(|error| match error {
         CoreCallProjectionError::Unknown => crate::Syntax::core_call_projection_in(
-            RECORDS,
+            TIR_CORE_CALL_RECORDS,
             module,
             method,
             crate::Syntax::CoreCallCoverage::TIR_SUBSET,

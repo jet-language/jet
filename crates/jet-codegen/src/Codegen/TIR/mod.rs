@@ -3216,7 +3216,10 @@ fn lower_mir_fragment_program(
             .collect(),
         declarations: declarations.clone(),
         artifact_facts,
-        core_calls: crate::Syntax::CORE_CALLS.iter().collect(),
+        core_calls: crate::Syntax::CORE_CALLS
+            .iter()
+            .chain(tir_core_call_records().iter())
+            .collect(),
         unreachable: Vec::new(),
         spawn_lambdas: Vec::new(),
         struct_fields: std::collections::HashMap::new(),
@@ -4988,7 +4991,10 @@ fn lower_checked_tir_program_on_stack(
             funcs,
             declarations,
             artifact_facts,
-            core_calls: crate::Syntax::CORE_CALLS.iter().collect(),
+            core_calls: crate::Syntax::CORE_CALLS
+                .iter()
+                .chain(tir_core_call_records().iter())
+                .collect(),
             unreachable,
             spawn_lambdas,
             struct_fields,
