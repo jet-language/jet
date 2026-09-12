@@ -6618,6 +6618,29 @@ fn jet_jit_iter_split(list: i64, n: i64) -> i64 {
         pair
     })
 }
+fn jet_jit_iter_split_at(list: i64, n: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let (left, right) = collection_semantics::iter_split_i64(clone_list_ints(list), n);
+    let (left, right) = Concurrency::with_runtime_mut(|rt| {
+        let left_handle = rt.heap.alloc_empty_list();
+        for value in left {
+            let _ = rt.heap.list_push_int(left_handle, value);
+        }
+        let right_handle = rt.heap.alloc_empty_list();
+        for value in right {
+            let _ = rt.heap.list_push_int(right_handle, value);
+        }
+        (left_handle, right_handle)
+    });
+    let result = invoke_closure_i64_pair(slot, left, right);
+    if closure_trapped() {
+        return 0;
+    }
+    result
+}
+
 
 fn jet_jit_list_equal(left: i64, right: i64) -> i8 {
     collection_semantics::list_equal(&clone_list_ints(left), &clone_list_ints(right)) as i8
@@ -9398,6 +9421,12 @@ host_fns! {
         let mut sig_closure_value = sig_closure_predicate.clone();
         sig_closure_value.returns.clear();
         sig_closure_value.returns.push(AbiParam::new(types::I64));
+        let mut sig_closure_split = Signature::new(cc);
+        sig_closure_split
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_closure_split.returns.push(AbiParam::new(types::I64));
+
         let mut sig_sort_by_compare = sig_closure_value.clone();
         sig_sort_by_compare.returns.clear();
         let mut sig_closure_fold = Signature::new(cc);
@@ -9975,4 +10004,5 @@ host_fns! {
     canonical_list_min_max: "jet_list_min_max" => jet_jit_list_min_max: sig_len;
     canonical_iter_filter_map: "jet_iter_filter_map" => checked_iter_filter_map_typed: sig_closure_value;
     canonical_iter_dedup_by: "jet_iter_dedup_by" => jet_jit_iter_dedup_by: sig_closure_value;
+    canonical_iter_split_at: "jet_iter_split_at" => jet_jit_iter_split_at: sig_closure_split;
 }
