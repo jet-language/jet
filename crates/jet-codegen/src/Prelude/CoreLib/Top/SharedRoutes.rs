@@ -140,37 +140,3 @@ pub fn jet_shared_weak_upgrade<T: 'static>(
 ) -> crate::JetOutcome<jet_std::JetShared<T>, crate::JetAbsent> {
     weak.upgrade()
 }
-
-pub(crate) fn jet_unit_conversion_exact_measurement(
-    value: f64,
-    scale_num: &str,
-    scale_den: &str,
-    offset_num: &str,
-    offset_den: &str,
-    relative_uncertainty: f64,
-) -> Option<jet_std::JetMeasurement<f64>> {
-    jet_unit_conversion_exact(value, scale_num, scale_den, offset_num, offset_den)
-        .map(|value| jet_std::JetMeasurement::from_relative(value, relative_uncertainty))
-}
-
-pub(crate) fn jet_unit_conversion_rounded_measurement(
-    value: f64,
-    scale_num: &str,
-    scale_den: &str,
-    offset_num: &str,
-    offset_den: &str,
-    mode: UnitRoundingMode,
-    digits: i64,
-    relative_uncertainty: f64,
-) -> Result<jet_std::JetMeasurement<f64>, &'static str> {
-    jet_unit_conversion_rounded(
-        value,
-        scale_num,
-        scale_den,
-        offset_num,
-        offset_den,
-        mode,
-        digits,
-    )
-    .map(|value| jet_std::JetMeasurement::from_relative(value, relative_uncertainty))
-}

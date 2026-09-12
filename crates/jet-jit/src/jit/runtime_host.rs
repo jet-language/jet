@@ -14385,8 +14385,8 @@ host_fns! {
     callable_has_env: "jet_jit_callable_has_env" => jet_jit_callable_has_env: sig_callable_flag;
     unit_convert_exact: "jet_unit_conversion_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
     unit_convert_rounded: "jet_unit_conversion_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
-    unit_convert_exact_measurement: "jet_unit_conversion_exact_measurement" => jet_jit_unit_convert_exact_measurement: sig_unit_convert_exact_measurement;
-    unit_convert_rounded_measurement: "jet_unit_conversion_rounded_measurement" => jet_jit_unit_convert_rounded_measurement: sig_unit_convert_rounded_measurement;
+    unit_convert_exact_measurement: "jet_std::jet_unit_conversion_exact_measurement" => jet_jit_unit_convert_exact_measurement: sig_unit_convert_exact_measurement;
+    unit_convert_rounded_measurement: "jet_std::jet_unit_conversion_rounded_measurement" => jet_jit_unit_convert_rounded_measurement: sig_unit_convert_rounded_measurement;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
     result_is_ok: "jet_jit_result_is_ok" => jet_jit_result_is_ok: sig_result_query_i8;
     result_get_i64: "jet_jit_result_get_i64" => jet_jit_result_get_i64: sig_result_query_i64;

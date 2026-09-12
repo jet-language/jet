@@ -2341,3 +2341,37 @@
             super::jet_measurement_kernel_show((self.value, self.uncertainty))
         }
     }
+
+    pub fn jet_unit_conversion_exact_measurement(
+        value: f64,
+        scale_num: &str,
+        scale_den: &str,
+        offset_num: &str,
+        offset_den: &str,
+        relative_uncertainty: f64,
+    ) -> Option<JetMeasurement<f64>> {
+        super::jet_unit_conversion_exact(value, scale_num, scale_den, offset_num, offset_den)
+            .map(|value| JetMeasurement::from_relative(value, relative_uncertainty))
+    }
+
+    pub fn jet_unit_conversion_rounded_measurement(
+        value: f64,
+        scale_num: &str,
+        scale_den: &str,
+        offset_num: &str,
+        offset_den: &str,
+        mode: super::UnitRoundingMode,
+        digits: i64,
+        relative_uncertainty: f64,
+    ) -> Result<JetMeasurement<f64>, &'static str> {
+        super::jet_unit_conversion_rounded(
+            value,
+            scale_num,
+            scale_den,
+            offset_num,
+            offset_den,
+            mode,
+            digits,
+        )
+        .map(|value| JetMeasurement::from_relative(value, relative_uncertainty))
+    }
