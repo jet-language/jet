@@ -22,7 +22,7 @@ use super::{
     THostCall, THandleOp, TMethodRef, TOptionProbe, TPattern, TPatternBinding, TPatternField,
     TPatternPosition, TPatternShape, TStrPart, TTryConvert, TPlace, TLocal, TNumericOp,
     TEnumArg, TEnumPayload, TTextPatternPart, TBinaryPatternPart, TBuiltinOp, TCoreClosureKind, TLambda,
-    TLambdaBody, TEffectFacts, TGcEditKind, TPreludeRoute,
+    TLambdaBody, TEffectFacts, TGcEditKind, TPreludeRoute, TCaptureFacts,
 };
 use jet_foundation::CanonicalPass;
 
