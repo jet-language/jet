@@ -10449,6 +10449,7 @@ host_fns! {
     bit_set_to_list: "jet_jit_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
     checked_bit_set_to_list: "jet_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
     bit_set_copy: "jet_jit_bit_set_copy" => jet_jit_bit_set_copy: sig_len;
+    checked_bit_set_copy: "jet_bits_copy" => jet_jit_bit_set_copy: sig_len;
     bit_set_len: "jet_jit_bit_set_len" => jet_jit_bit_set_len: sig_len;
     bit_set_count: "jet_jit_bit_set_count" => jet_jit_bit_set_count: sig_len;
     checked_bit_set_count: "jet_bit_set_count" => jet_jit_bit_set_count: sig_len;
