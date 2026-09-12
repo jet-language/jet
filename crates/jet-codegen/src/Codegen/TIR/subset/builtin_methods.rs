@@ -7,9 +7,11 @@ use crate::Codegen::TIR::TNumericOp;
 /// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
 /// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
 /// numeric queries (`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
-/// (FileWriter/TcpStream/HTTPRequest/… — Phase 10) carry a `Some(recv_type)`, so the
-/// gate's `recv_type.is_none()` guard already excludes them; this name list is the
-/// final filter. The arg count disambiguates `join()` (no separator) vs `join(sep)`.
+/// (FileWriter/TcpStream/HTTPRequest/… — Phase 10) carry a nominal
+/// `Some(recv_type)`, while parenthesized/fallible String receivers may carry
+/// `Some("String")`; the subset gate admits that one canonical String exception.
+/// This name list is the final filter. The arg count disambiguates `join()` (no
+/// separator) vs `join(sep)`.
 pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // Closure-taking methods are NEVER covered here (Phase 11), even by name.
     // Exception: 0-arg forms that share a name with a closure adapter
@@ -67,8 +69,9 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // one core.regex engine, composed for a String receiver.
         | ("to_int", 0) | ("to_float", 0)
         | ("matches", 1) | ("match", 1)
-        // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
-        // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
+        // `to_string` (String/Bool/Char receiver — String may retain
+        // `recv_type == Some("String")` through parentheses/fallibility; Bool/Char
+        // stay untyped here; numeric `to_string` sets another nominal `recv_type`).
         | ("to_string", 0)
         // D-ITER1: non-closure lazy adapters.
         | ("take", 1) | ("skip", 1) | ("step_by", 1)

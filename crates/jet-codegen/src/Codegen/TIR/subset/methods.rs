@@ -681,21 +681,24 @@ pub(crate) fn method_call_in_subset(
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
     // list/map/string receiver. Sema resolves these via `Collections::
-    // builtin_method_return` and leaves `recv_type == None` (it sets `recv_type`
-    // only for the numeric width conversions — Phase 12 — and for user instance /
-    // handle methods). So `recv_type.is_none()` + a covered builtin name + an
-    // in-subset *value* receiver uniquely identifies a builtin collection/string
-    // call: the receiver must be a collection/string (the program type-checked, and
-    // a struct/enum/handle/numeric receiver would have set `recv_type`). A bare
-    // type-name ident (a static-call receiver) is NOT in `locals`, so it fails
-    // `expr_in_subset` and is excluded here, falling through to the static shape.
+    // builtin_method_return` and normally leaves `recv_type == None`; a
+    // parenthesized/fallible String receiver may retain `Some("String")`.
+    // Both spellings are the same canonical String surface, while user
+    // instance/handle/numeric receivers carry another nominal `recv_type`.
+    // Therefore only `None` or `Some("String")`, plus a covered builtin name
+    // and an in-subset *value* receiver, uniquely identifies this route.
+    // A bare type-name ident (a static-call receiver) is NOT in `locals`, so it
+    // fails `expr_in_subset` and is excluded here, falling through to the
+    // static shape.
     //
     // The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is
     // resolved at LOWERING from the receiver's total type (reproducing the AST's
     // `expr_jet_ty`, incl. its `None` → default-branch partiality), never re-derived
     // in emit. Tried BEFORE the static/instance shapes (both keyed on the same
     // `recv_type`) to claim builtins first.
-    if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
+    if matches!(recv_type.as_deref(), None | Some("String"))
+        && is_covered_builtin_name(method, args.len())
+    {
         // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
         let labels_ok = if matches!(method, "zip" | "zip_short" | "zip_pad") {
             true
