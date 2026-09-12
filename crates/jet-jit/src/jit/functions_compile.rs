@@ -4560,7 +4560,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let equal = self
             .call_host(
                 builder,
-                self.host.coll.list_eq_nested,
+                self.host.coll.list_eq,
                 &[left_value, right_value],
             )?
             .first()
