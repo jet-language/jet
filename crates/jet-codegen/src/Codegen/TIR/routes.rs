@@ -2333,6 +2333,7 @@ impl TBuiltinOp {
             RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
             SortedSetFrom => b("sorted_set_from", "jet_sorted_set_from", 1, 1, &[false], None, carrier),
+            SortedSetToList => b("sorted_set_to_list", "jet_sorted_set_to_list", 1, 1, &[true], None, carrier),
             RemoveList { mode, .. } => match mode {
                 ListRemoveMode::Value => b("list_remove_value", "jet_list_remove_value", 2, 2, &[true, false], Some(Effect::Mem), carrier),
                 ListRemoveMode::Slot => b("list_remove_slot", "jet_list_remove_slot", 2, 2, &[true, false], Some(Effect::Mem), carrier),
@@ -2536,6 +2537,7 @@ impl TBuiltinOp {
                 carrier,
                 MirPreludeAbi::Aggregate,
             ),
+            MapContainsValue => b("map_contains_value", "jet_map_contains_value", 2, 2, &[true, true], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
@@ -2545,10 +2547,10 @@ impl TBuiltinOp {
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
             | MapCopy
-            | MapNew | MapContainsValue
+            | MapNew
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
-            | SetShuffle | SortedSetToList
+            | SetShuffle
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
             | BagLen => primitive(),

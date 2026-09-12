@@ -10067,6 +10067,7 @@ host_fns! {
     checked_map_slice: "jet_map_slice" => jet_jit_map_slice: sig_get_opt;
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
+    checked_map_contains_value: "jet_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
     iter_first: "jet_jit_iter_first" => jet_jit_iter_first: sig_len;
     iter_string_split: "jet_iter_string_split" => jet_jit_iter_string_split: sig_get_opt;
@@ -10197,6 +10198,7 @@ host_fns! {
     sorted_set_insert: "jet_jit_sorted_set_insert" => jet_jit_sorted_set_insert: sig_list_eq;
     sorted_set_remove: "jet_jit_sorted_set_remove" => jet_jit_sorted_set_remove: sig_push;
     sorted_set_to_list: "jet_jit_sorted_set_to_list" => jet_jit_sorted_set_to_list: sig_len;
+    checked_sorted_set_to_list: "jet_sorted_set_to_list" => jet_jit_sorted_set_to_list: sig_len;
     sorted_set_first: "jet_jit_sorted_set_first" => jet_jit_sorted_set_first: sig_len;
     sorted_set_last: "jet_jit_sorted_set_last" => jet_jit_sorted_set_last: sig_len;
     sorted_set_union: "jet_jit_sorted_set_union" => jet_jit_sorted_set_union: sig_get_opt;

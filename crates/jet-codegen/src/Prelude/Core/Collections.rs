@@ -2541,6 +2541,9 @@ fn jet_set_from<T: Eq + std::hash::Hash>(values: Vec<T>) -> std::collections::Ha
 fn jet_sorted_set_from<T: Ord>(values: Vec<T>) -> std::collections::BTreeSet<T> {
     values.into_iter().collect()
 }
+fn jet_sorted_set_to_list<T: Clone>(set: &std::collections::BTreeSet<T>) -> Vec<T> {
+    set.iter().cloned().collect()
+}
 
 
 
