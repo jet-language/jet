@@ -4777,6 +4777,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .copied()
                     .ok_or_else(|| "MIR list display host returned no value".to_string());
             }
+            MirTypeKind::FixedList { elem, .. } => {
+                let kind = list_format_kind(elem).map_err(|_| {
+                    format!(
+                        "MIR display fixed-list element type `{}` has no checked display carrier",
+                        elem.display_name()
+                    )
+                })?;
+                let value = self.cast(builder, value, types::I64)?;
+                let kind = builder.ins().iconst(types::I64, kind);
+                return self
+                    .call_host(builder, self.host.coll.list_display, &[value, kind])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR fixed-list display host returned no value".to_string());
+            }
             MirTypeKind::Map { .. }
             | MirTypeKind::Shared(_)
             | MirTypeKind::Fn(_)
@@ -4784,7 +4799,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             | MirTypeKind::Apply { .. }
             | MirTypeKind::TraitObject(_)
             | MirTypeKind::Tuple(_)
-            | MirTypeKind::FixedList { .. }
             | MirTypeKind::Union(_) => {
                 return Err(format!(
                     "MIR display type `{}` has no resident render",
