@@ -161,6 +161,20 @@ fn is_ordering_type(ty: &MirType) -> bool {
 fn is_comparison_scalar(ty: &MirType) -> bool {
     ty.is_scalar() || is_ordering_type(ty)
 }
+fn is_duration_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args }
+            if args.is_empty() && name.name == "Duration" =>
+        {
+            true
+        }
+        MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => is_duration_type(inner),
+        _ => false,
+    }
+}
+
 
 fn comparison_element_kind(ty: &MirType) -> Option<ComparisonElementKind> {
     if is_ordering_type(ty) {
@@ -6420,7 +6434,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 return self.exact_int_comparison(builder, op, left, right);
             }
             if !is_comparison_scalar(left_ty) || !is_comparison_scalar(right_ty) {
-                return self.typed_comparison(builder, op, left_ty, left, right);
+                return self.typed_comparison(builder, op, left_ty, left, right, location);
+
             }
             if op.is_comparison() {
                 return Ok(self.compare(builder, op, left, right));
@@ -6600,6 +6615,140 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .ok_or_else(|| "MIR structural comparison host returned no value".to_string())
     }
 
+    fn option_comparison(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        op: MirBinaryOp,
+        left_ty: &MirType,
+        left: Value,
+        right: Value,
+        location: MirPanicLoc,
+    ) -> Result<Value, String> {
+        let MirTypeKind::Option(inner) = left_ty.kind() else {
+            return Err("MIR option comparison has a non-option checked type".to_string());
+        };
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let left_present = self
+            .call_host(builder, self.host.result_is_ok, &[left])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option comparison left discriminator returned no value".to_string())?;
+        let right_present = self
+            .call_host(builder, self.host.result_is_ok, &[right])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option comparison right discriminator returned no value".to_string())?;
+        let left_present = self.bool_value(builder, left_present)?;
+        let right_present = self.bool_value(builder, right_present)?;
+
+        let result_type = if matches!(op, MirBinaryOp::Compare) {
+            types::I64
+        } else {
+            types::I8
+        };
+        let merge = builder.create_block();
+        builder.append_block_param(merge, result_type);
+        let both_present = builder.ins().band(left_present, right_present);
+        let both_present_block = builder.create_block();
+        let not_both_present_block = builder.create_block();
+        let left_present_only_block = builder.create_block();
+        let left_absent_only_block = builder.create_block();
+        let left_absent_right_present_block = builder.create_block();
+        let both_absent_block = builder.create_block();
+        builder.ins().brif(
+            both_present,
+            both_present_block,
+            &[],
+            not_both_present_block,
+            &[],
+        );
+
+        builder.switch_to_block(both_present_block);
+        let payload_type = clif_ty_from_mir(inner).ok_or_else(|| {
+            format!(
+                "MIR option comparison payload `{}` has no checked carrier",
+                inner.display_name()
+            )
+        })?;
+        let left_payload = self.result_value_get_raw(builder, left, Some(payload_type))?;
+        let right_payload = self.result_value_get_raw(builder, right, Some(payload_type))?;
+        let payload = self.binary(
+            builder,
+            op,
+            inner,
+            inner,
+            left_payload,
+            right_payload,
+            location,
+        )?;
+        builder.ins().jump(merge, &[payload]);
+
+        builder.switch_to_block(not_both_present_block);
+        builder.ins().brif(
+            left_present,
+            left_present_only_block,
+            &[],
+            left_absent_only_block,
+            &[],
+        );
+
+        builder.switch_to_block(left_present_only_block);
+        let value = self.option_ordering_result(builder, op, 1)?;
+        builder.ins().jump(merge, &[value]);
+
+        builder.switch_to_block(left_absent_only_block);
+        builder.ins().brif(
+            right_present,
+            left_absent_right_present_block,
+            &[],
+            both_absent_block,
+            &[],
+        );
+
+        builder.switch_to_block(left_absent_right_present_block);
+        let value = self.option_ordering_result(builder, op, -1)?;
+        builder.ins().jump(merge, &[value]);
+
+        builder.switch_to_block(both_absent_block);
+        let value = self.option_ordering_result(builder, op, 0)?;
+        builder.ins().jump(merge, &[value]);
+
+        builder.switch_to_block(merge);
+        builder
+            .block_params(merge)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option comparison merge has no result".to_string())
+    }
+
+    fn option_ordering_result(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        op: MirBinaryOp,
+        ordering: i64,
+    ) -> Result<Value, String> {
+        if matches!(op, MirBinaryOp::Compare) {
+            let ordering = builder.ins().iconst(types::I64, ordering);
+            return Ok(self.ordering_value(builder, ordering));
+        }
+        let value = match op {
+            MirBinaryOp::Eq => ordering == 0,
+            MirBinaryOp::Ne => ordering != 0,
+            MirBinaryOp::Lt => ordering < 0,
+            MirBinaryOp::Gt => ordering > 0,
+            MirBinaryOp::Le => ordering <= 0,
+            MirBinaryOp::Ge => ordering >= 0,
+            _ => {
+                return Err(format!(
+                    "MIR option comparison cannot implement `{}`",
+                    op.spell()
+                ))
+            }
+        };
+        Ok(builder.ins().iconst(types::I8, if value { 1 } else { 0 }))
+    }
+
     fn typed_comparison(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -6607,6 +6756,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         left_ty: &MirType,
         left: Value,
         right: Value,
+        location: MirPanicLoc,
     ) -> Result<Value, String> {
         let unsupported = || {
             format!(
@@ -6614,6 +6764,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 left_ty.display_name()
             )
         };
+        if is_duration_type(left_ty) {
+            return self.exact_int_comparison(builder, op, left, right);
+        }
+        if matches!(left_ty.kind(), MirTypeKind::Option(_)) {
+            return self.option_comparison(builder, op, left_ty, left, right, location);
+        }
+
 
         if comparison_element_kind(left_ty) == Some(ComparisonElementKind::Date) {
             if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne) {
