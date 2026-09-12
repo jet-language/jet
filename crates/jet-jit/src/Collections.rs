@@ -8826,6 +8826,18 @@ fn jet_jit_hyper_log_log_add(handle: i64, value: i64) {
         }
     });
 }
+fn jet_jit_hyper_log_log_count(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        match slot {
+            crate::Sketch::SketchSlot::Hll(sketch) => sketch.count(),
+            _ => 0,
+        }
+    })
+}
 
 fn jet_jit_priority_queue_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -10193,6 +10205,8 @@ host_fns! {
     list_try_push: "jet_jit_list_try_push" => jet_jit_list_try_push: sig_try_push;
     view_new: "jet_jit_view_new" => jet_jit_view_new: sig_view_new;
     checked_view_new: "jet_view_new" => jet_jit_view_new: sig_view_new;
+    view_mut_new: "jet_view_mut_new" => jet_jit_view_new_range: sig_get_opt;
+
     view_new_range: "jet_view_new_range" => jet_jit_view_new_range: sig_get_opt;
     view_fold: "jet_jit_view_fold" => jet_jit_view_fold: sig_view_fold;
     view_map: "jet_jit_view_map" => jet_jit_view_map: sig_view_map;
@@ -10590,6 +10604,7 @@ host_fns! {
     sorted_set_is_superset: "jet_jit_sorted_set_is_superset" => jet_jit_sorted_set_is_superset: sig_list_eq;
     sorted_set_is_disjoint: "jet_jit_sorted_set_is_disjoint" => jet_jit_sorted_set_is_disjoint: sig_list_eq;
     hll_add: "JetHyperLogLog::add" => jet_jit_hyper_log_log_add: sig_push;
+    hll_count: "JetHyperLogLog::count" => jet_jit_hyper_log_log_count: sig_len;
     priority_queue_new: "jet_jit_priority_queue_new" => jet_jit_priority_queue_new: sig_new;
     priority_queue_len: "jet_jit_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
     priority_queue_from: "jet_jit_priority_queue_from" => jet_jit_priority_queue_from: sig_len;
