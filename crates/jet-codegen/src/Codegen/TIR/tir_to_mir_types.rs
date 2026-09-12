@@ -2551,7 +2551,7 @@ fn compiler_owned_type_defs(
                 .map(move |(name, fields)| compiler_owned_core_record(module, *name, *fields)),
         )
 .chain(COMPILER_OWNED_MATH_RECORDS.iter().map(move |(name, fields)| {
-    let scalar = crate::Sema::CheckerCoreLib::math_scalar_ty(name);
+    let scalar = crate::Sema::math_scalar_ty(name);
     compiler_owned_record(
         module,
         name,
