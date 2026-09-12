@@ -1245,6 +1245,20 @@ fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
     if let Some(ids) = rt.heap.clone_int_list(list) {
         return ids;
     }
+    if let Some(fields) = rt.heap.clone_record_values(list) {
+        let Some(ids) = fields
+            .into_iter()
+            .map(|field| match field {
+                jet_rt::JetVal::Int(id) | jet_rt::JetVal::RecordRef(id) => Some(id),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            rt.set_host_fault("jit task combinator: bad task handle");
+            return Vec::new();
+        };
+        return ids;
+    }
     let Some(length) = crate::runtime_host::sequence_len(rt, list) else {
         rt.set_host_fault("jit task combinator: bad list handle");
         return Vec::new();

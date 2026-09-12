@@ -10652,10 +10652,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 });
                 let datetime =
                     element_ty.is_some_and(|ty| is_named_type(ty, "DateTime"));
+                let date = element_ty.is_some_and(|ty| {
+                    is_named_type(ty, "Date") || is_named_type(ty, "LocalDate")
+                });
                 let host = if fraction && member == "list_sort" {
                     self.host.coll.list_sort_fraction
                 } else if datetime && member == "list_sort" {
                     self.host.coll.list_sort_datetime
+                } else if date && member == "list_sort" {
+                    self.host.coll.list_sort_date
                 } else {
                     let element = element_ty
                         .and_then(comparison_element_kind)
