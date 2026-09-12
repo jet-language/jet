@@ -3359,12 +3359,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Some(self.field_load(builder, *base, *field, expected)?)
             }
             MirOperation::Global { name } => {
-                // No tier carries run-provided globals: the interpreter refuses
-                // the op at runtime ("not provided by the run") and this backend
-                // reports unsupported MIR at its execution boundary.
-                return Err(format!(
-                    "MIR global `{name}` is not provided by the resident run"
-                ));
+                if let Some(label) = name.strip_prefix("layout::") {
+                    let label = builder.ins().iconst(
+                        types::I64,
+                        self.runtime.heap.alloc_string(label.to_owned()),
+                    );
+                    let value = self
+                        .call_host(builder, self.host.layout.new, &[label])?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR layout global host returned no handle".to_string())?;
+                    Some(value)
+                } else {
+                    // No tier carries run-provided globals: the interpreter refuses
+                    // the op at runtime ("not provided by the run") and this backend
+                    // reports unsupported MIR at its execution boundary.
+                    return Err(format!(
+                        "MIR global `{name}` is not provided by the resident run"
+                    ));
+                }
             }
             MirOperation::Todo {
                 call,
@@ -4453,6 +4466,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     "Path" => Some(self.host.core.path_to_string),
                     "Complex" => Some(self.host.num.complex_to_string),
                     "ServiceRuntime" => Some(self.host.service_show),
+                    "ServiceDelivery" => Some(self.host.service_delivery_show),
                     _ => None,
                 };
                 if let Some(host) = host {
@@ -4755,6 +4769,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .copied()
                     .ok_or_else(|| {
                         "MIR ServiceRuntime display host returned no value".to_string()
+                    });
+            }
+            if args.is_empty() && name.name == "ServiceDelivery" {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.service_delivery_show, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| {
+                        "MIR ServiceDelivery display host returned no value".to_string()
                     });
             }
         }
@@ -10600,9 +10624,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 (host, vec![receiver, value])
             }
             "list_remove_slot" => {
-                if args.len() != 1 {
-                    return Err("MIR List.remove(slot) expects one index argument".to_string());
+                if !(1..=2).contains(&args.len()) {
+                    return Err(
+                        "MIR List.remove(slot) expects an index and optional RemoveBy selector"
+                            .to_string(),
+                    );
                 }
+                // TIR retains the compile-time `RemoveBy.Slot` selector in
+                // the value list; the canonical resident ABI consumes only
+                // the receiver and index.
                 let receiver = receiver_value!()?;
                 let index = integer_value!(args[0])?;
                 (
@@ -11247,6 +11277,37 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.display_value_of_type(builder, &ty, value, packed_optional)?
             };
             return expected.map_or(Ok(text), |ty| self.cast(builder, text, ty));
+        }
+        let is_typed_eq = row.family
+            == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            && row.module == "core.compare"
+            && row.member == "eq"
+            && row.symbol.name() == "jet_eq";
+        if is_typed_eq {
+            let [left, right] = args else {
+                return Err(format!(
+                    "MIR core.compare.eq expects two checked operands, got {}",
+                    args.len()
+                ));
+            };
+            if left.access != MirAccess::Read || right.access != MirAccess::Read {
+                return Err("MIR core.compare.eq operands must be checked reads".to_string());
+            }
+            let left_ty = self.mir_value_type(left.value)?;
+            let right_ty = self.mir_value_type(right.value)?;
+            if !left_ty.same_checked_type(&right_ty) {
+                return Err(format!(
+                    "MIR core.compare.eq operands have mismatched checked types `{}` and `{}`",
+                    left_ty.display_name(),
+                    right_ty.display_name()
+                ));
+            }
+            let left_value = self.value(left.value)?;
+            let right_value = self.value(right.value)?;
+            let value = self.typed_equal(builder, &left_ty, left_value, right_value)?;
+            return expected
+                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                .map(Some);
         }
         let symbol = row.symbol.name().to_owned();
         let host = self.lookup_prelude_host(row)?;
