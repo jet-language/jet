@@ -9089,14 +9089,12 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
             }
             28 => {
                 let out = rt.byte_buffers.get_mut(idx).and_then(|b| b.read().ok());
-                match out {
-                    Some(bytes) => {
-                        let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
-                        let list = copy_list(rt, values);
-                        list + 1
-                    }
-                    None => 0,
-                }
+                let Some(bytes) = out else {
+                    return crate::runtime_host::alloc_jit_result(rt, false, 0);
+                };
+                let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
+                let list = copy_list(rt, values);
+                crate::runtime_host::alloc_jit_result(rt, true, list as u64)
             }
             29 => i64::from(rt.byte_buffers.get(idx).is_some_and(|b| b.is_ascii())),
             30 => {
@@ -9132,25 +9130,31 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
                 }
                 0
             }
-            42 => match rt
-                .byte_buffers
-                .get_mut(idx)
-                .and_then(|b| b.read_bytes(arg0).ok())
-            {
-                Some(bytes) => {
-                    let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
-                    copy_list(rt, values) + 1
+            42 => {
+                let out = rt
+                    .byte_buffers
+                    .get_mut(idx)
+                    .and_then(|b| b.read_bytes(arg0).ok());
+                let Some(bytes) = out else {
+                    return crate::runtime_host::alloc_jit_result(rt, false, 0);
+                };
+                let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
+                let list = copy_list(rt, values);
+                crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+            }
+            43 => {
+                let out = rt
+                    .byte_buffers
+                    .get_mut(idx)
+                    .and_then(|b| b.read_string(arg0).ok());
+                match out {
+                    Some(s) => {
+                        let string = rt.heap.alloc_string(s);
+                        crate::runtime_host::alloc_jit_result(rt, true, string as u64)
+                    }
+                    None => crate::runtime_host::alloc_jit_result(rt, false, 0),
                 }
-                None => 0,
-            },
-            43 => match rt
-                .byte_buffers
-                .get_mut(idx)
-                .and_then(|b| b.read_string(arg0).ok())
-            {
-                Some(s) => rt.heap.alloc_string(s) + 1,
-                None => 0,
-            },
+            }
             44 | 45 | 46 => {
                 let Some(needle) = rt.heap.clone_string(arg0) else {
                     return 0;
@@ -9163,9 +9167,9 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
             }
             47 | 48 => {
                 let Some(needle) = rt.heap.clone_string(arg0) else {
-                    return 0;
+                    return crate::runtime_host::alloc_jit_result(rt, false, 0);
                 };
-                option_packed(rt.byte_buffers.get(idx).and_then(|b| {
+                option_i64(rt, rt.byte_buffers.get(idx).and_then(|b| {
                     if method == 47 {
                         b.index_of(&needle).ok()
                     } else {
