@@ -2039,8 +2039,13 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
                     .map(|param| param.name.clone())
                     .collect();
                 specialized.type_params.clear();
-                // Bounded operators retain their resolved source owner (`T::compare`).
-                let previous_type_params = cx.current_type_params.replace(residual_type_params);
+                // Keep both the enclosing lowering facts and the specialized
+                // function's source generic identities visible while the
+                // coverage gate and lowerer inspect bounded operations.
+                let previous_type_params = cx.current_type_params.borrow().clone();
+                let mut function_type_params = previous_type_params.clone();
+                function_type_params.extend(residual_type_params);
+                cx.current_type_params.replace(function_type_params);
                 if !tir_covers(&specialized, cx) {
                     cx.current_type_params.replace(previous_type_params);
                     continue;
