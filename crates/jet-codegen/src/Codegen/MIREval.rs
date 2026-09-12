@@ -4155,8 +4155,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(())
     }
 
-    fn run_runtime(
+    fn run_runtime(&mut self) -> Result<(RuntimeValue, MirExecutionStatus, Option<MirFrame>), Diagnostic> {
+        self.run_runtime_until(None)
+    }
+
+    fn run_runtime_until(
         &mut self,
+        stop_depth: Option<usize>,
     ) -> Result<(RuntimeValue, MirExecutionStatus, Option<MirFrame>), Diagnostic> {
         if self.hardware_setup_pending {
             self.install_hardware_setups()?;
@@ -4243,6 +4248,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.abort_frame_transactions(index);
                     self.frames.pop();
                     self.debug_statements.pop();
+                    if stop_depth.is_some_and(|depth| self.frames.len() == depth) {
+                        return Ok((value, MirExecutionStatus::Completed, None));
+                    }
                     if let Some(continuation) = continuation {
                         let caller = self
                             .frames
@@ -14982,41 +14990,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
-        let nested_function = program_function(self.program, function)?.name.clone();
+        let parent_depth = self.frames.len();
         let frame = Frame::with_capture_cells(
             program_function(self.program, function)?,
             args,
             captures,
             capture_cells,
         )?;
-
-        let nested_debugger = self.debugger.take();
-        let nested_debug_depth = self.debug_depth.saturating_add(self.frames.len());
-        let mut nested = Machine::new_with_realtime_tasks(
-            self.program,
-            self.config,
-            vec![frame],
-            self.execution.clone(),
-            self.static_values.clone(),
-            self.service_callbacks.clone(),
-            false,
-            self.dma_transfers.clone(),
-            self.realtime_tasks.clone(),
-            self.process_stdin_tokens.clone(),
-            self.next_dma_transfer_id.clone(),
-            self.data_pipeline.as_deref_mut(),
-        )
-        .with_debugger(nested_debugger, nested_function, nested_debug_depth);
-        let result = nested.run_runtime();
-        self.debugger = nested.take_debugger();
-        self.stdout.push_str(&nested.stdout);
-        self.stderr.push_str(&nested.stderr);
-        self.exit_code = self.exit_code.max(nested.exit_code);
-        if nested.last_runtime_stop.is_some() {
-            self.last_runtime_stop = nested.last_runtime_stop.take();
+        self.frames.push(frame);
+        self.debug_statements.push(None);
+        self.continuations.push(Some(Continuation { result: None }));
+        let (value, status, _) = self.run_runtime_until(Some(parent_depth))?;
+        if status != MirExecutionStatus::Completed {
+            return Err(mir_error_at(
+                "MIR callback suspended before returning",
+                span,
+            ));
         }
-        let (value, _, _) = result?;
-        let _ = span;
         Ok(value)
     }
     fn eval_foreign_call(
