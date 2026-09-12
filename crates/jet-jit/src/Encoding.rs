@@ -3633,6 +3633,7 @@ host_fns! {
     json_parse_ordered: "jet_jit_json_parse_ordered" => jet_jit_json_parse_ordered: sig_unary;
     json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
     json_decode_typed: "jet_jit_json_decode_typed" => jet_jit_json_decode_typed: sig_binary;
+    data_json_decode: "jet_data_json_decode" => jet_jit_json_decode_typed: sig_binary;
     db_decode: "jet_jit_db_decode" => jet_jit_db_decode: sig_binary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
     json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;

@@ -439,6 +439,7 @@ fixed_trap_hosts! {
     jet_jit_u32_trap_mul => (JET_FIXED_OP_MUL, false, 32),
     jet_jit_u32_trap_div => (JET_FIXED_OP_DIV, false, 32),
     jet_jit_u32_trap_rem => (JET_FIXED_OP_REM, false, 32),
+    jet_jit_u32_rotate_left => (JET_FIXED_OP_ROTATE_LEFT, false, 32),
     jet_jit_i64_trap_add => (JET_FIXED_OP_ADD, true, 64),
     jet_jit_i64_trap_sub => (JET_FIXED_OP_SUB, true, 64),
     jet_jit_i64_trap_mul => (JET_FIXED_OP_MUL, true, 64),
@@ -1091,6 +1092,7 @@ host_fns! {
     u32_trap_mul: "jet_u32_trap_mul" => jet_jit_u32_trap_mul: sig_located;
     u32_trap_div: "jet_u32_trap_div" => jet_jit_u32_trap_div: sig_located;
     u32_trap_rem: "jet_u32_trap_rem" => jet_jit_u32_trap_rem: sig_located;
+    u32_rotate_left: "jet_u32_rotate_left" => jet_jit_u32_rotate_left: sig_located;
     i64_trap_add: "jet_i64_trap_add" => jet_jit_i64_trap_add: sig_located;
     i64_trap_sub: "jet_i64_trap_sub" => jet_jit_i64_trap_sub: sig_located;
     i64_trap_mul: "jet_i64_trap_mul" => jet_jit_i64_trap_mul: sig_located;

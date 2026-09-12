@@ -1403,6 +1403,8 @@ host_fns! {
     stdout: "jet_jit_io_stdout" => jet_jit_io_stdout: nullary;
     stderr: "jet_jit_io_stderr" => jet_jit_io_stderr: nullary;
     stdin: "jet_jit_io_stdin" => jet_jit_io_stdin: nullary;
+    buffered_canonical: "jet_std_io_buffered" => jet_jit_io_stdin: nullary;
+    stdout_write_canonical: "jet_std_io_stdout_write" => jet_jit_stdout_write: binary;
     stdout_write: "jet_jit_stdout_write" => jet_jit_stdout_write: binary;
     stdout_write_line: "jet_jit_stdout_write_line" => jet_jit_stdout_write_line: binary;
     stdout_write_bytes: "jet_jit_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;

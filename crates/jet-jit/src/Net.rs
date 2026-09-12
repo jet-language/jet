@@ -1687,6 +1687,7 @@ host_fns! {
     url_from_parts: "jet_jit_url_from_parts" => jet_jit_url_from_parts: sig5;
     url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;
     url_typed_literal_canonical: "jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
+    url_typed_literal_std: "jet_std::jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
     url_file: "jet_jit_url_file" => jet_jit_url_file: sig1;
     url_data: "jet_jit_url_data" => jet_jit_url_data: sig2;
     url_query_value: "jet_jit_url_query_value" => jet_jit_url_query_value: sig1;
