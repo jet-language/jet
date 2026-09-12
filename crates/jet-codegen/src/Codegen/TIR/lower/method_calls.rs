@@ -1837,11 +1837,17 @@ fn lower_crypto_instance_fast(
         args.extend(call_args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
     }
     let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
-    let Some(ty) = resolved_ret.cloned() else {
-        return Some(invariant_method_expr(
-            method_span,
-            "crypto instance call without a resolved return type",
-        ));
+    let ty = match resolved_ret.cloned() {
+        Some(ty) => ty,
+        None if kind == "Hasher" && method == "update" => {
+            Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
+        }
+        None => {
+            return Some(invariant_method_expr(
+                method_span,
+                "crypto instance call without a resolved return type",
+            ));
+        }
     };
     let record = match checked_core_record("core.crypto", helper, args.len(), method_span) {
         Ok(record) => record,
@@ -4287,11 +4293,17 @@ fn lower_method_call_impl(
                     targs.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
                 }
                 let widen_to_vec = core_widen_to_vec("core.crypto", helper, &targs);
-                let Some(ty) = resolved_ret.cloned() else {
-                    return invariant_method_expr(
-                        method_span,
-                        "crypto instance call without a resolved return type",
-                    );
+                let ty = match resolved_ret.cloned() {
+                    Some(ty) => ty,
+                    None if kind == "Hasher" && method == "update" => {
+                        Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
+                    }
+                    None => {
+                        return invariant_method_expr(
+                            method_span,
+                            "crypto instance call without a resolved return type",
+                        );
+                    }
                 };
                 let record =
                     match checked_core_record("core.crypto", helper, targs.len(), method_span) {
