@@ -3685,6 +3685,30 @@ fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
 fn jet_jit_list_para_filter(list: i64, callback: i64) -> i64 {
     jet_jit_list_closure_filter(list, callback)
 }
+fn jet_jit_list_para_partition(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let (false_values, true_values) = collection_semantics::list_partition(values, |value| {
+        if closure_trapped() {
+            false
+        } else {
+            invoke_closure_bool(slot, *value) && !closure_trapped()
+        }
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let false_list = rt.heap.alloc_int_list(false_values);
+        let true_list = rt.heap.alloc_int_list(true_values);
+        let pair = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(pair, 0, false_list);
+        let _ = rt.heap.record_set_int(pair, 1, true_list);
+        pair
+    })
+}
 
 fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
@@ -10102,6 +10126,8 @@ host_fns! {
     list_closure_filter: "jet_jit_list_closure_filter" => jet_jit_list_closure_filter: sig_closure_value;
     list_para_filter: "jet_jit_list_para_filter" => jet_jit_list_para_filter: sig_closure_value;
     checked_list_para_filter: "jet_list_para_filter" => jet_jit_list_para_filter: sig_closure_value;
+    list_para_partition: "jet_jit_list_para_partition" => jet_jit_list_para_partition: sig_closure_value;
+    checked_list_para_partition: "jet_list_para_partition" => jet_jit_list_para_partition: sig_closure_value;
 
     list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_predicate;
     list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;
@@ -10544,6 +10570,7 @@ host_fns! {
     canonical_bag_add: "jet_bag_add" => jet_jit_bag_add: sig_list_eq;
     canonical_bag_remove: "jet_bag_remove" => jet_jit_bag_remove: sig_push;
     canonical_priority_queue_remove_value: "jet_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
+    canonical_priority_queue_remove_slot: "jet_priority_queue_remove_slot_canonical" => jet_jit_priority_queue_remove_slot: sig_priority_queue_slot;
     canonical_lru_put: "jet_lru_put" => jet_jit_lru_put: sig_three_ret;
     canonical_lru_get: "jet_lru_get" => jet_jit_lru_get: sig_get_opt;
     canonical_deque_push_front: "jet_deque_push_front" => jet_jit_deque_push_front: sig_push;
