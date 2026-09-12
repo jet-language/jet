@@ -2552,7 +2552,7 @@ impl TBuiltinOp {
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
             | SetShuffle
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
-            | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
+            | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew
             | BagLen => primitive(),
         };
         Ok(plan)
