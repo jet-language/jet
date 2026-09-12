@@ -1989,6 +1989,11 @@ fn builtin_collection_route(
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_QUEUE => {
             row("len", "jet_deque_len", 1, &[true])
         }
+        (TBuiltinOp::DequeCapacity, Type::Apply { name, .. })
+            if name == crate::Syntax::TYPE_QUEUE =>
+        {
+            row("capacity", "jet_deque_capacity", 1, &[true])
+        }
         (TBuiltinOp::LenList, Type::String) => row("len", "jet_char_len", 1, &[true]),
         (TBuiltinOp::IsEmpty, Type::List(_) | Type::FixedList { .. }) => {
             row("is_empty", "jet_list_is_empty", 1, &[true])
@@ -2377,6 +2382,7 @@ impl TBuiltinOp {
                 TBuiltinOp::LenList
                 | TBuiltinOp::Contains
                 | TBuiltinOp::IsEmpty
+                | TBuiltinOp::DequeCapacity
                 | TBuiltinOp::GetMap
                 | TBuiltinOp::GetList
                 | TBuiltinOp::First

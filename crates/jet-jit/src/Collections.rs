@@ -9512,6 +9512,7 @@ host_fns! {
     checked_builtin_set_len: "jet_set_len" => jet_jit_set_len: sig_len;
     checked_builtin_set_is_empty: "jet_set_is_empty" => jet_jit_set_is_empty: sig_bool;
     checked_builtin_deque_len: "jet_deque_len" => jet_jit_deque_len: sig_len;
+    checked_builtin_deque_capacity: "jet_deque_capacity" => jet_jit_deque_capacity: sig_len;
     checked_builtin_deque_is_empty: "jet_deque_is_empty" => jet_jit_deque_is_empty: sig_bool;
     checked_builtin_bag_len: "jet_bag_len" => jet_jit_bag_len: sig_len;
     checked_builtin_bag_is_empty: "jet_bag_is_empty" => jet_jit_bag_is_empty: sig_bool;

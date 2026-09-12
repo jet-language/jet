@@ -558,6 +558,11 @@ fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
 }
 
 #[inline(always)]
+fn jet_deque_capacity<T>(queue: &std::collections::VecDeque<T>) -> i64 {
+    queue.capacity() as i64
+}
+
+#[inline(always)]
 fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
     queue.is_empty()
 }
