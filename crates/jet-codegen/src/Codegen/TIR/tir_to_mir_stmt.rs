@@ -8,7 +8,7 @@ use super::mir::{LowerCtx, LowerError};
 use crate::AST::{BinOp, Type};
 use crate::Codegen::TIR::{
     ScopeMemberKind, TCoreClosureKind, TExpr, TExprKind, TForInMethod, TIfCond, TIndexFieldAssign, TLocal, TMatchArm,
-    TCallArg, TMethodRef, TNumericOp, TPattern, TPlace, TStaticOwner, TStmt, TLetTy,
+    TCallArg, TMethodRef, TNumericOp, TPattern, TPlace, TStaticOwner, TStmt, TLetTy, TBuiltinOp,
 };
 use jet_foundation::MIR::{
     MirAccess, MirBinaryDispatch, MirBlockId, MirCallArg, MirCallee, MirConstant, MirIndexKind,
@@ -1398,6 +1398,40 @@ fn lower_for_in(
     let iter_value_call = ctx.intern_prelude_route(routes.iter_value)?;
     let iter_advance_call = ctx.intern_prelude_route(routes.iter_advance)?;
     let source_kind = loop_source_kind(method_kind);
+    // A sequence's two-binding form is `(index, item)`, not a projection from
+    // the element itself. Reuse the canonical indexed adapter so the cursor
+    // receives the same named tuple shape as an explicit `.indexed()` call.
+    let (loop_collection, indexed_pair_types) = match (method_kind, &collection.ty, var2) {
+        (
+            None,
+            Type::List(elem) | Type::FixedList { elem, .. },
+            Some(_),
+        ) => {
+            let elem_ty = (**elem).clone();
+            let fields = vec![
+                ("idx".to_string(), Type::Int),
+                ("item".to_string(), elem_ty.clone()),
+            ];
+            let row_ty = Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                    .collect(),
+            );
+            let indexed = TExpr {
+                ty: crate::Collections::iter_ty(row_ty.clone()),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(collection.clone()),
+                    op: TBuiltinOp::Indexed {
+                        tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+                    },
+                    args: Vec::new(),
+                },
+            };
+            (indexed, Some((row_ty, elem_ty)))
+        }
+        _ => (collection.clone(), None),
+    };
     let owns_source = match &source_kind {
         MirLoopSourceKind::LinesFile
         | MirLoopSourceKind::LinesStdin
@@ -1405,12 +1439,16 @@ fn lower_for_in(
         | MirLoopSourceKind::ChannelReceiver
         | MirLoopSourceKind::EncodingReader { .. }
         | MirLoopSourceKind::Iterable { .. } => true,
-        MirLoopSourceKind::Plain => crate::Collections::iter_elem(&collection.ty).is_some(),
+        MirLoopSourceKind::Plain => crate::Collections::iter_elem(&loop_collection.ty).is_some(),
         MirLoopSourceKind::Chars => false,
     };
 
     let effective_by_value = owns_source || by_value;
-    let source = if method_kind.is_some() { source } else { collection };
+    let source = if method_kind.is_some() {
+        source
+    } else {
+        &loop_collection
+    };
     let source_value = match (&source.kind, owns_source) {
         (TExprKind::Local(local), true) => {
             let place = ctx.place_for_local(local, MirAccess::Move)?;
@@ -1435,7 +1473,10 @@ fn lower_for_in(
             source_kind,
         },
     )?;
-    let item_ty = for_item_type(collection, method_kind);
+    let item_ty = indexed_pair_types
+        .as_ref()
+        .map(|(row_ty, _)| row_ty.clone())
+        .unwrap_or_else(|| for_item_type(collection, method_kind));
     let header = ctx.new_block(ctx.span(), "for-in.header")?;
     let body_block = ctx.new_block(ctx.span(), "for-in.body")?;
     let advance = ctx.new_block(ctx.span(), "for-in.advance")?;
@@ -1465,12 +1506,21 @@ fn lower_for_in(
         },
     )?;
     if let Some(var2) = var2 {
-        let (key_ty, value_ty) = match &collection.ty {
-            Type::Map { key, value, .. } => ((**key).clone(), (**value).clone()),
-            _ => (Type::Int, item_ty.clone()),
-        };
-        let key_field = ctx.field_id_for_type(&item_ty, "key")?;
-        let value_field = ctx.field_id_for_type(&item_ty, "value")?;
+        let (key_ty, value_ty, key_name, value_name) =
+            match (&collection.ty, indexed_pair_types.as_ref()) {
+                (Type::Map { key, value, .. }, _) => (
+                    (**key).clone(),
+                    (**value).clone(),
+                    "key",
+                    "value",
+                ),
+                (_, Some((_, elem_ty))) => {
+                    (Type::Int, elem_ty.clone(), "idx", "item")
+                }
+                _ => (Type::Int, item_ty.clone(), "key", "value"),
+            };
+        let key_field = ctx.field_id_for_type(&item_ty, key_name)?;
+        let value_field = ctx.field_id_for_type(&item_ty, value_name)?;
         let key = ctx.emit(
             "for-in.key",
             Some(key_ty.clone()),
