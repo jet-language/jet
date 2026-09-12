@@ -1426,6 +1426,65 @@ fn typed_math_call(type_name: &str, func: &str, args: &[i64]) -> i64 {
     jet_jit_math_call(type_name, func, args)
 }
 
+fn typed_math_new_f64_value(type_name: &str, lanes: &[f64]) -> i64 {
+    match from_lanes(type_name, lanes) {
+        Some(value) => pack_handle(push_val(value)),
+        None => {
+            trap(&format!(
+                "jit math constructor {} expects {} lanes",
+                type_name,
+                lanes.len(),
+            ));
+            0
+        }
+    }
+}
+
+fn typed_math_new_int_value(type_name: &str, lanes: &[i64]) -> i64 {
+    match from_int_lanes(type_name, lanes) {
+        Some(value) => pack_handle(push_val(value)),
+        None => {
+            trap(&format!(
+                "jit math constructor {} expects {} integer lanes",
+                type_name,
+                lanes.len(),
+            ));
+            0
+        }
+    }
+}
+fn math_lane_count(type_name: &str) -> Option<usize> {
+    jet_foundation::Syntax::simd_lane_layout(type_name)
+        .map(|(_, len)| len)
+        .or_else(|| match type_name {
+            "Vec2" => Some(2),
+            "Vec3" => Some(3),
+            "Vec4" => Some(4),
+            "Mat3" => Some(9),
+            "Mat4" => Some(16),
+            _ => None,
+        })
+}
+
+fn typed_math_splat_f64_value(type_name: &str, value: f64) -> i64 {
+    let Some(len) = math_lane_count(type_name) else {
+        trap(&format!("jit math splat has unknown type {type_name}"));
+        return 0;
+    };
+    let lanes = [value; 32];
+    typed_math_new_f64_value(type_name, &lanes[..len])
+}
+
+fn typed_math_splat_int_value(type_name: &str, value: i64) -> i64 {
+    let Some(len) = math_lane_count(type_name) else {
+        trap(&format!("jit math splat has unknown type {type_name}"));
+        return 0;
+    };
+    let lanes = [value; 32];
+    typed_math_new_int_value(type_name, &lanes[..len])
+}
+
+
 fn typed_math_float(type_name: &str, func: &str, args: &[i64]) -> f64 {
     unpack_float(typed_math_call(type_name, func, args))
 }
@@ -1441,8 +1500,8 @@ fn typed_math_int(type_name: &str, func: &str, args: &[i64]) -> i64 {
 macro_rules! typed_math_new_f32 {
     ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
         fn $name($( $arg: f32 ),+) -> i64 {
-            let args = [$( f64_bits(f64::from($arg)) ),+];
-            typed_math_call($type_name, "new", &args)
+            let lanes = [$( f64::from($arg) ),+];
+            typed_math_new_f64_value($type_name, &lanes)
         }
     };
 }
@@ -1450,25 +1509,25 @@ macro_rules! typed_math_new_f32 {
 macro_rules! typed_math_new_f64 {
     ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
         fn $name($( $arg: f64 ),+) -> i64 {
-            let args = [$( f64_bits($arg) ),+];
-            typed_math_call($type_name, "new", &args)
+            let lanes = [$( $arg ),+];
+            typed_math_new_f64_value($type_name, &lanes)
+        }
+    };
+}
+macro_rules! typed_math_new_int {
+    ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+        fn $name($( $arg: i64 ),+) -> i64 {
+            let lanes = [$( $arg ),+];
+            typed_math_new_int_value($type_name, &lanes)
         }
     };
 }
 
-macro_rules! typed_math_new_int {
-    ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
-        fn $name($( $arg: i64 ),+) -> i64 {
-            let args = [$( $arg ),+];
-            typed_math_call($type_name, "new", &args)
-        }
-    };
-}
 
 macro_rules! typed_math_splat_f32 {
     ($name:ident, $type_name:literal) => {
         fn $name(value: f32) -> i64 {
-            typed_math_call($type_name, "splat", &[f64_bits(f64::from(value))])
+            typed_math_splat_f64_value($type_name, f64::from(value))
         }
     };
 }
@@ -1476,7 +1535,7 @@ macro_rules! typed_math_splat_f32 {
 macro_rules! typed_math_splat_f64 {
     ($name:ident, $type_name:literal) => {
         fn $name(value: f64) -> i64 {
-            typed_math_call($type_name, "splat", &[f64_bits(value)])
+            typed_math_splat_f64_value($type_name, value)
         }
     };
 }
@@ -1484,7 +1543,7 @@ macro_rules! typed_math_splat_f64 {
 macro_rules! typed_math_splat_int {
     ($name:ident, $type_name:literal) => {
         fn $name(value: i64) -> i64 {
-            typed_math_call($type_name, "splat", &[value])
+            typed_math_splat_int_value($type_name, value)
         }
     };
 }
