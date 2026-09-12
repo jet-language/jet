@@ -4953,7 +4953,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirTypeKind::List(inner)
                 if matches!(inner.kind(), MirTypeKind::Apply { name, args }
-                    if args.is_empty() && name.name == "DateTime") =>
+                    if args.is_empty() && matches!(name.name.as_str(), "DateTime" | "Duration")) =>
             {
                 let value = self.cast(builder, value, types::I64)?;
                 return self.render_display_list(builder, value, inner);
