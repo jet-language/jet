@@ -211,9 +211,9 @@ macro_rules! host_seam_arity {
     };
 }
 
-// Arities 0..=10 cover every host symbol this crate declares; `jet_deopt_call`
-// (10 words) is the widest. Adding an 11th-word seam is a compile error here
-// rather than a silently unguarded boundary.
+// Arities 0..=32 cover every host symbol this crate declares; the direct SIMD
+// constructors are the widest. Every width still receives the same generated
+// guarded C shim, so a new wide host cannot bypass the no-unwind boundary.
 host_seam_arity!();
 host_seam_arity!(A a);
 host_seam_arity!(A a, B b);
@@ -225,7 +225,28 @@ host_seam_arity!(A a, B b, C c, D d, E e, G g, H h);
 host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i);
 host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j);
 host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k);
-
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae, AF af);
+host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae, AF af, AG ag);
 /// The pointer `host_fns!` registers with `JITBuilder::symbol`.
 pub(crate) fn guarded<Marker, F: HostSeam<Marker>>(host_fn: F) -> *const u8 {
     host_fn.guarded_ptr()
