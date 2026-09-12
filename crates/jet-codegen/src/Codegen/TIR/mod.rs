@@ -10823,7 +10823,7 @@ pub enum TBuiltinOp {
     ToAsciiUpper,
     /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
     Repeat,
-    /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
+    /// `slice(a, b)` → `jet_string_slice_builtin(&(recv), a0, a1)`.
     Slice {
         line: usize,
     },

@@ -14288,6 +14288,7 @@ host_fns! {
     str_after_view: "jet_jit_str_after_view" => jet_jit_str_after_view: sig_str_binary_i64;
     str_before_view: "jet_jit_str_before_view" => jet_jit_str_before_view: sig_str_binary_i64;
     str_slice: "jet_jit_str_slice" => jet_jit_str_slice: sig_str_replace;
+    checked_string_slice_builtin: "jet_string_slice_builtin" => jet_jit_str_slice: sig_str_replace;
     str_slice_range: "jet_jit_str_slice_range" => jet_jit_str_slice_range: sig_str_slice_range;
     checked_list_join: "jet_list_join" => jet_jit_list_join: sig_i64_i64_i64_i64;
     checked_unicode_trim_view: "jet_unicode_trim_view" => jet_jit_str_trim_view: sig_str_unary_i64;

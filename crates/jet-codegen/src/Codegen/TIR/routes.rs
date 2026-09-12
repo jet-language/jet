@@ -2393,7 +2393,7 @@ impl TBuiltinOp {
             ToLower => b("string_lower", "jet_unicode_lower", 1, 1, &[true], None, carrier),
             ToAsciiLower => b("string_ascii_lower", "jet_text_ascii_lower", 1, 1, &[true], None, carrier),
             ToAsciiUpper => b("string_ascii_upper", "jet_text_ascii_upper", 1, 1, &[true], None, carrier),
-            Slice { .. } => b("string_slice", "jet_string_slice", 3, 3, &[true, false, false], None, carrier),
+            Slice { .. } => b("string_slice", "jet_string_slice_builtin", 3, 3, &[true, false, false], None, carrier),
             After => b("string_after", "jet_string_after", 2, 2, &[true, true], None, carrier),
             Before => b("string_before", "jet_string_before", 2, 2, &[true, true], None, carrier),
             TrimView => b("string_trim_view", "jet_unicode_trim_view", 1, 1, &[true], None, carrier),
