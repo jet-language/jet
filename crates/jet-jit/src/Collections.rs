@@ -10190,6 +10190,8 @@ host_fns! {
     range_equal: "jet_jit_range_equal" => jet_jit_range_equal: sig_range_equal;
     loop_stride_check: "jet_jit_loop_stride_check" => jet_jit_loop_stride_check: sig_len;
     map_new: "jet_jit_map_new" => jet_jit_map_new: sig_new;
+    checked_map_new: "std::collections::HashMap::new" => jet_jit_map_new: sig_new;
+
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
     map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
@@ -10431,6 +10433,7 @@ host_fns! {
     priority_queue_remove_value: "jet_jit_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
     priority_queue_remove_slot: "jet_jit_priority_queue_remove_slot" => jet_jit_priority_queue_remove_slot: sig_priority_queue_slot;
     lru_new: "jet_jit_lru_new" => jet_jit_lru_new: sig_len;
+    checked_lru_new: "JetCache::new" => jet_jit_lru_new: sig_len;
     lru_put: "jet_jit_lru_put" => jet_jit_lru_put: sig_three_ret;
     lru_get: "jet_jit_lru_get" => jet_jit_lru_get: sig_get_opt;
     lru_has: "jet_jit_lru_has" => jet_jit_lru_has: sig_list_eq;
