@@ -2556,6 +2556,7 @@ impl TBuiltinOp {
             ContainsKey => b("map_has_key", "jet_map_has_key", 2, 2, &[true, true], None, carrier),
             LruKeys => b("lru_keys", "jet_lru_keys", 1, 1, &[true], None, carrier),
             BitSetToList => b("bit_set_to_list", "jet_bit_set_to_list", 1, 1, &[true], None, carrier),
+            BitSetCount => b("bit_set_count", "jet_bit_set_count", 1, 1, &[true], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
@@ -2570,7 +2571,7 @@ impl TBuiltinOp {
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
             | SetShuffle
             | LruCapacity
-            | BitSetCount | BitSetNew | ByteBufferNew
+            | BitSetNew | ByteBufferNew
             | BagLen => primitive(),
         };
         Ok(plan)

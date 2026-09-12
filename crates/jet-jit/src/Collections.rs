@@ -10369,6 +10369,7 @@ host_fns! {
     bit_set_copy: "jet_jit_bit_set_copy" => jet_jit_bit_set_copy: sig_len;
     bit_set_len: "jet_jit_bit_set_len" => jet_jit_bit_set_len: sig_len;
     bit_set_count: "jet_jit_bit_set_count" => jet_jit_bit_set_count: sig_len;
+    checked_bit_set_count: "jet_bit_set_count" => jet_jit_bit_set_count: sig_len;
     byte_buffer_new: "jet_jit_byte_buffer_new" => jet_jit_byte_buffer_new: sig_new;
     byte_buffer_with_capacity: "jet_jit_byte_buffer_with_capacity" => jet_jit_byte_buffer_with_capacity: sig_len;
     byte_buffer_from: "jet_jit_byte_buffer_from" => jet_jit_byte_buffer_from: sig_len;
