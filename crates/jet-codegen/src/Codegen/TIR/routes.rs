@@ -2102,6 +2102,11 @@ fn builtin_collection_route(
         (TBuiltinOp::Contains, Type::InlineRange { .. }) => {
             row("contains", "jet_range_contains", 2, &[true, false])
         }
+        (TBuiltinOp::Contains, Type::Named(name))
+            if name == crate::Syntax::TYPE_BITS =>
+        {
+            row("bit_set_has", "jet_bit_set_has", 2, &[true, false])
+        }
         (TBuiltinOp::LenList, Type::List(_) | Type::FixedList { .. }) => {
             row("len", "jet_list_len", 1, &[true])
         }
@@ -2603,6 +2608,14 @@ impl TBuiltinOp {
                     if matches!(self, TBuiltinOp::StartsWith) { "jet_list_starts_with" } else { "jet_list_ends_with" },
                     2, 2, &[true, true], None, carrier,
                 ),
+                TBuiltinOp::Contains
+                    if matches!(
+                        receiver,
+                        Type::Named(name) if name == crate::Syntax::TYPE_BITS
+                    ) =>
+                {
+                    builtin_collection_route(self, receiver, carrier)?
+                },
                 TBuiltinOp::Contains if is_string_receiver(receiver) => b(
                     "contains",
                     "jet_string_contains",

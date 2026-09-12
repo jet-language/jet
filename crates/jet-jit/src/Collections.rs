@@ -10362,6 +10362,7 @@ host_fns! {
     bit_set_new: "jet_jit_bit_set_new" => jet_jit_bit_set_new: sig_new;
     bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
     bit_set_has: "jet_jit_bit_set_has" => jet_jit_bit_set_has: sig_list_eq;
+    checked_bit_set_has: "jet_bit_set_has" => jet_jit_bit_set_has: sig_list_eq;
     bit_set_remove: "jet_jit_bit_set_remove" => jet_jit_bit_set_remove: sig_push;
     bit_set_to_list: "jet_jit_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
     bit_set_copy: "jet_jit_bit_set_copy" => jet_jit_bit_set_copy: sig_len;

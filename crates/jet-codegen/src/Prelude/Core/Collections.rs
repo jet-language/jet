@@ -596,7 +596,10 @@ fn jet_bit_set_len(bits: &JetBitSet) -> i64 {
 fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
     bits.is_empty()
 }
-
+#[inline(always)]
+fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
+    bits.contains(&bit)
+}
 #[inline(always)]
 fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
     queue.len() as i64
