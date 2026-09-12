@@ -2479,6 +2479,24 @@ impl TBuiltinOp {
             Repeat => b("string_repeat", "jet_string_repeat", 2, 2, &[true, false], None, carrier),
             StartsWith => b("list_starts_with", "jet_list_starts_with", 2, 2, &[true, true], None, carrier),
             ListSlice => b("list_slice", "jet_list_slice", 3, 3, &[true, false, false], None, carrier),
+            ListBinarySearch => b(
+                "list_binary_search",
+                "jet_list_binary_search",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            ByteBufferToBytes => b(
+                "byte_buffer_to_bytes",
+                "JetByteBuffer::to_bytes",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
             BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
             DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
@@ -2495,7 +2513,7 @@ impl TBuiltinOp {
             | ContainsKey | ToString | Take | Skip | IterToList | IterCollect
             | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
-            | IterCompare | ListCopy | ListBinarySearch
+            | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
             | MapCopy | MapFirst | MapToList { .. } | MapIntersection | MapSliceKeys
             | MapNew | MapContainsValue
@@ -2504,7 +2522,7 @@ impl TBuiltinOp {
             | SetShuffle | SortedSetFrom | SortedSetToList | PriorityQueueFrom
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
-            | ByteBufferToBytes | BagHas | BagLen => primitive(),
+            | BagHas | BagLen => primitive(),
         };
         Ok(plan)
     }
