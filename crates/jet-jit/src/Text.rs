@@ -165,6 +165,9 @@ pub(crate) mod text_rt {
     pub(crate) fn unicode_scalar_count(s: &str) -> i64 {
         jet_text_unicode_scalar_count(&s.to_string())
     }
+    pub(crate) fn unicode_byte_count(s: &str) -> i64 {
+        jet_text_unicode_byte_count(&s.to_string())
+    }
     pub(crate) fn ascii_upper(s: &str) -> String {
         jet_text_ascii_upper(&s.to_string())
     }
@@ -281,6 +284,9 @@ pub(crate) mod text_rt {
     pub(crate) fn starts_any(s: &str, prefixes: &[String]) -> bool {
         jet_text_starts_any(&s.to_string(), &prefixes.to_vec())
     }
+    pub(crate) fn ends_any(s: &str, suffixes: &[String]) -> bool {
+        jet_text_ends_any(&s.to_string(), &suffixes.to_vec())
+    }
     pub(crate) fn char_indices(s: &str) -> Vec<String> {
         jet_text_char_indices(&s.to_string())
     }
@@ -353,6 +359,10 @@ fn jet_jit_text_casefold(s: i64) -> i64 {
 
 fn jet_jit_text_unicode_scalar_count(s: i64) -> i64 {
     text_rt::unicode_scalar_count(&clone_string(s))
+}
+
+fn jet_jit_text_unicode_byte_count(s: i64) -> i64 {
+    text_rt::unicode_byte_count(&clone_string(s))
 }
 
 fn jet_jit_string_lines(s: i64) -> i64 {
@@ -628,6 +638,11 @@ fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
 fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
     let prefs = list_of_strings(prefixes);
     i8::from(text_rt::starts_any(&clone_string(s), &prefs))
+}
+
+fn jet_jit_text_ends_any(s: i64, suffixes: i64) -> i8 {
+    let suffixes = list_of_strings(suffixes);
+    i8::from(text_rt::ends_any(&clone_string(s), &suffixes))
 }
 
 fn jet_jit_text_char_indices(s: i64) -> i64 {
@@ -1060,6 +1075,7 @@ host_fns! {
     ascii_upper: "jet_text_ascii_upper" => jet_jit_text_ascii_upper: unary;
     casefold: "jet_text_casefold" => jet_jit_text_casefold: unary;
     unicode_scalar_count: "jet_text_unicode_scalar_count" => jet_jit_text_unicode_scalar_count: unary;
+    unicode_byte_count: "jet_text_unicode_byte_count" => jet_jit_text_unicode_byte_count: unary;
     string_lines: "jet_string_lines" => jet_jit_string_lines: unary;
     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
@@ -1097,6 +1113,7 @@ host_fns! {
     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
+    ends_any: "jet_text_ends_any" => jet_jit_text_ends_any: binary_i8;
     inspect: "jet_jit_text_inspect" => jet_jit_text_inspect: unary;
     char_indices: "jet_jit_text_char_indices" => jet_jit_text_char_indices: unary;
     regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
