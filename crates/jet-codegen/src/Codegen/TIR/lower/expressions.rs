@@ -29,6 +29,7 @@ use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::lower_method_call_with_sig;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_panic_stop;
+use std::collections::HashSet;
 use crate::Codegen::TIR::lower_require_eq_stop;
 use crate::Codegen::TIR::lower_require_stop;
 use crate::Codegen::TIR::lower_stmts;
@@ -512,14 +513,14 @@ fn fallback_checked_method_return(
     cx: &Cx,
     env: &LowerEnv,
 ) -> Option<Type> {
-    let is_root = matches!(
-        recv_type,
-        Some(
-            name if name == Syntax::INTERNAL_ROOT_CALL_LOCAL
+    let is_root = match recv_type {
+        Some(name) => {
+            name == Syntax::INTERNAL_ROOT_CALL_LOCAL
                 || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
                 || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
-        )
-    );
+        }
+        None => false,
+    };
     if is_root {
         if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
             return Some(cx.expand_type_aliases(ret));
@@ -648,6 +649,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     err: Box::new(Type::Named("ParseError".to_string())),
                 }),
                 kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(recv),
                     op: TBuiltinOp::ParseFloat,
                     args: Vec::new(),
                 },

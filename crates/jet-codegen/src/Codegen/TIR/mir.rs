@@ -1445,7 +1445,7 @@ fn lower_impl_rows(
     // Separate inherent impl blocks share one canonical MIR identity. Merge their
     // checked method edges before validation rather than emitting duplicate IDs.
     let mut impl_indices = HashMap::<String, usize>::new();
-    let mut deduplicated = Vec::with_capacity(result.len());
+    let mut deduplicated: Vec<MirImplDef> = Vec::with_capacity(result.len());
     for mut row in result {
         if let Some(index) = impl_indices.get(&row.key).copied() {
             let existing = &mut deduplicated[index];
