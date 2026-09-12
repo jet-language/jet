@@ -3781,6 +3781,28 @@ impl<'a> LowerCtx<'a> {
             )),
         }
     }
+    /// Return the flattened MIR leaves rooted at a checked enum group path.
+    ///
+    /// Groups are a source/TIR pattern convenience.  Canonical MIR stores only
+    /// their dotted leaf variants, so consumers must test each descendant leaf.
+    pub(super) fn enum_group_leaves(
+        &self,
+        owner: MirTypeId,
+        group: &str,
+    ) -> Option<Vec<String>> {
+        let row = self.type_defs.iter().find(|row| row.id == owner)?;
+        let MirTypeDefKind::Enum { variants, .. } = &row.kind else {
+            return None;
+        };
+        let prefix = format!("{group}.");
+        let leaves = variants
+            .iter()
+            .filter(|variant| variant.name.starts_with(&prefix))
+            .map(|variant| variant.name.clone())
+            .collect::<Vec<_>>();
+        (!leaves.is_empty()).then_some(leaves)
+    }
+
 
     pub(super) fn mir_type(&mut self, ty: &Type) -> Result<MirType, LowerError> {
         let span = self.span();

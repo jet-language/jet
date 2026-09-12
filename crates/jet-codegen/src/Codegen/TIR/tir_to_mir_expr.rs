@@ -7176,11 +7176,40 @@ fn lower_pattern_shape(
             bindings,
             leading_dot,
             span,
-        } => MirPatternShape::Variant {
-            variant: variant.clone(),
-            bindings: bindings.iter().map(lower_pattern_binding).collect(),
-            leading_dot: *leading_dot,
-            span: *span,
+        } => {
+            let bindings = bindings.iter().map(lower_pattern_binding).collect::<Vec<_>>();
+            if bindings.is_empty() {
+                if let Some(leaves) = owner
+                    .and_then(|owner| ctx.enum_group_leaves(owner, variant))
+                {
+                    MirPatternShape::Or {
+                        alternatives: leaves
+                            .into_iter()
+                            .map(|variant| MirPatternShape::Variant {
+                                variant,
+                                bindings: Vec::new(),
+                                leading_dot: *leading_dot,
+                                span: *span,
+                            })
+                            .collect(),
+                        span: *span,
+                    }
+                } else {
+                    MirPatternShape::Variant {
+                        variant: variant.clone(),
+                        bindings,
+                        leading_dot: *leading_dot,
+                        span: *span,
+                    }
+                }
+            } else {
+                MirPatternShape::Variant {
+                    variant: variant.clone(),
+                    bindings,
+                    leading_dot: *leading_dot,
+                    span: *span,
+                }
+            }
         },
         TPatternShape::Present {
             binding,
