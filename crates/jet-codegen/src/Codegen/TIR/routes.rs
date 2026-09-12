@@ -2683,12 +2683,54 @@ fn byte_buffer_method_route(
         ));
     }
     let arity = match method {
-        "clear" | "rewind" | "next" | "read" | "read_byte" | "flush" | "close" | "shutdown" => 1,
-        "seek" | "read_bytes" | "read_string" | "copy_to" | "write_to" => 2,
+        "len"
+        | "is_empty"
+        | "clear"
+        | "position"
+        | "eof"
+        | "rewind"
+        | "flush"
+        | "close"
+        | "shutdown"
+        | "get_buffer"
+        | "buffer"
+        | "to_string"
+        | "string"
+        | "trim"
+        | "trim_start"
+        | "trim_end"
+        | "to_lower"
+        | "to_upper"
+        | "to_title"
+        | "title"
+        | "clone"
+        | "copy"
+        | "lines"
+        | "first"
+        | "next"
+        | "read_byte"
+        | "read"
+        | "is_ascii" => 1,
+        "get"
+        | "seek"
+        | "read_bytes"
+        | "read_string"
+        | "contains"
+        | "starts_with"
+        | "ends_with"
+        | "index_of"
+        | "last_index_of"
+        | "split"
+        | "join"
+        | "equal"
+        | "compare"
+        | "copy_to"
+        | "write_to" => 2,
+        "replace" => 3,
         _ => return Ok(primitive()),
     };
     let member = format!("byte_buffer_{method}");
-    let symbol = format!("jet_byte_buffer_{method}");
+    let symbol = format!("JetByteBuffer::{method}");
     Ok(b(
         &member,
         &symbol,
@@ -2705,7 +2747,7 @@ fn byte_buffer_write_route(
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
     let member = format!("byte_buffer_{method}");
-    let symbol = format!("jet_byte_buffer_{method}");
+    let symbol = format!("JetByteBuffer::{method}");
     Ok(b(
         &member,
         &symbol,

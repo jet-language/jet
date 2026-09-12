@@ -9158,6 +9158,262 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
 fn jet_jit_byte_buffer_capacity(handle: i64) -> i64 {
     jet_jit_byte_buffer_method(handle, 3, 0, 0)
 }
+fn jet_jit_byte_buffer_len(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 0, 0, 0)
+}
+
+fn jet_jit_byte_buffer_is_empty(handle: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 1, 0, 0) as i8
+}
+
+fn jet_jit_byte_buffer_clear(handle: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 2, 0, 0);
+}
+
+fn jet_jit_byte_buffer_position(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 4, 0, 0)
+}
+
+fn jet_jit_byte_buffer_eof(handle: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 5, 0, 0) as i8
+}
+
+fn jet_jit_byte_buffer_rewind(handle: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 6, 0, 0);
+}
+
+fn jet_jit_byte_buffer_flush(handle: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 7, 0, 0);
+}
+
+fn jet_jit_byte_buffer_close(handle: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 8, 0, 0);
+}
+
+fn jet_jit_byte_buffer_shutdown(handle: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 9, 0, 0);
+}
+
+fn jet_jit_byte_buffer_get_buffer(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 11, 0, 0)
+}
+
+fn jet_jit_byte_buffer_buffer(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 12, 0, 0)
+}
+
+fn jet_jit_byte_buffer_to_string(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 13, 0, 0)
+}
+
+fn jet_jit_byte_buffer_string(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 14, 0, 0)
+}
+
+fn jet_jit_byte_buffer_trim(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 15, 0, 0)
+}
+
+fn jet_jit_byte_buffer_trim_start(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 16, 0, 0)
+}
+
+fn jet_jit_byte_buffer_trim_end(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 17, 0, 0)
+}
+
+fn jet_jit_byte_buffer_to_lower(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 18, 0, 0)
+}
+
+fn jet_jit_byte_buffer_to_upper(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 19, 0, 0)
+}
+
+fn jet_jit_byte_buffer_to_title(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 20, 0, 0)
+}
+
+fn jet_jit_byte_buffer_title(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 21, 0, 0)
+}
+
+fn jet_jit_byte_buffer_clone(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 22, 0, 0)
+}
+
+fn jet_jit_byte_buffer_copy(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 23, 0, 0)
+}
+
+fn jet_jit_byte_buffer_lines(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 24, 0, 0)
+}
+
+fn jet_jit_byte_buffer_first(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 25, 0, 0)
+}
+
+fn jet_jit_byte_buffer_next(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 26, 0, 0)
+}
+
+fn jet_jit_byte_buffer_read_byte(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 27, 0, 0)
+}
+
+fn jet_jit_byte_buffer_read(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 28, 0, 0)
+}
+
+fn jet_jit_byte_buffer_is_ascii(handle: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 29, 0, 0) as i8
+}
+
+fn jet_jit_byte_buffer_get(handle: i64, index: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 40, index, 0)
+}
+
+fn jet_jit_byte_buffer_seek(handle: i64, index: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 41, index, 0);
+}
+
+fn jet_jit_byte_buffer_read_bytes(handle: i64, n: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 42, n, 0)
+}
+
+fn jet_jit_byte_buffer_read_string(handle: i64, n: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 43, n, 0)
+}
+
+fn jet_jit_byte_buffer_contains(handle: i64, needle: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 44, needle, 0) as i8
+}
+
+fn jet_jit_byte_buffer_starts_with(handle: i64, prefix: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 45, prefix, 0) as i8
+}
+
+fn jet_jit_byte_buffer_ends_with(handle: i64, suffix: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 46, suffix, 0) as i8
+}
+
+fn jet_jit_byte_buffer_index_of(handle: i64, needle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 47, needle, 0)
+}
+
+fn jet_jit_byte_buffer_last_index_of(handle: i64, needle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 48, needle, 0)
+}
+
+fn jet_jit_byte_buffer_split(handle: i64, separator: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 49, separator, 0)
+}
+
+fn jet_jit_byte_buffer_join(handle: i64, parts: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 50, parts, 0)
+}
+
+fn jet_jit_byte_buffer_equal(handle: i64, other: i64) -> i8 {
+    jet_jit_byte_buffer_method(handle, 51, other, 0) as i8
+}
+
+fn jet_jit_byte_buffer_compare(handle: i64, other: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 52, other, 0)
+}
+
+fn jet_jit_byte_buffer_copy_to(handle: i64, other: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 53, other, 0);
+}
+
+fn jet_jit_byte_buffer_write_to(handle: i64, other: i64) {
+    let _ = jet_jit_byte_buffer_method(handle, 54, other, 0);
+}
+
+fn jet_jit_byte_buffer_replace(handle: i64, from: i64, to: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 60, from, to)
+}
+
+fn jet_jit_byte_buffer_write_u8(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 0);
+}
+
+fn jet_jit_byte_buffer_write_i8(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 10);
+}
+
+fn jet_jit_byte_buffer_write_u16_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 1);
+}
+
+fn jet_jit_byte_buffer_write_u16_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 2);
+}
+
+fn jet_jit_byte_buffer_write_i16_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 11);
+}
+
+fn jet_jit_byte_buffer_write_i16_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 12);
+}
+
+fn jet_jit_byte_buffer_write_u32_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 3);
+}
+
+fn jet_jit_byte_buffer_write_u32_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 4);
+}
+
+fn jet_jit_byte_buffer_write_i32_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 13);
+}
+
+fn jet_jit_byte_buffer_write_i32_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 14);
+}
+
+fn jet_jit_byte_buffer_write_u64_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 5);
+}
+
+fn jet_jit_byte_buffer_write_u64_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 6);
+}
+
+fn jet_jit_byte_buffer_write_i64_le(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 15);
+}
+
+fn jet_jit_byte_buffer_write_i64_be(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 16);
+}
+
+fn jet_jit_byte_buffer_write_f32_le(handle: i64, value: f64) {
+    jet_jit_byte_buffer_write(handle, value.to_bits() as i64, 17);
+}
+
+fn jet_jit_byte_buffer_write_f32_be(handle: i64, value: f64) {
+    jet_jit_byte_buffer_write(handle, value.to_bits() as i64, 18);
+}
+
+fn jet_jit_byte_buffer_write_f64_le(handle: i64, value: f64) {
+    jet_jit_byte_buffer_write(handle, value.to_bits() as i64, 19);
+}
+
+fn jet_jit_byte_buffer_write_f64_be(handle: i64, value: f64) {
+    jet_jit_byte_buffer_write(handle, value.to_bits() as i64, 20);
+}
+
+fn jet_jit_byte_buffer_write_bytes(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 7);
+}
+
+fn jet_jit_byte_buffer_write_method(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 9);
+}
+
 
 
 /// Packed-enum JetShow table: variant mangled names + payload kind codes.
@@ -9982,6 +10238,70 @@ host_fns! {
     checked_byte_buffer_to_bytes: "JetByteBuffer::to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
     checked_byte_buffer_capacity: "JetByteBuffer::capacity" => jet_jit_byte_buffer_capacity: sig_len;
+    checked_byte_buffer_len: "JetByteBuffer::len" => jet_jit_byte_buffer_len: sig_len;
+    checked_byte_buffer_is_empty: "JetByteBuffer::is_empty" => jet_jit_byte_buffer_is_empty: sig_bool;
+    checked_byte_buffer_clear: "JetByteBuffer::clear" => jet_jit_byte_buffer_clear: sig_sort;
+    checked_byte_buffer_position: "JetByteBuffer::position" => jet_jit_byte_buffer_position: sig_len;
+    checked_byte_buffer_eof: "JetByteBuffer::eof" => jet_jit_byte_buffer_eof: sig_bool;
+    checked_byte_buffer_rewind: "JetByteBuffer::rewind" => jet_jit_byte_buffer_rewind: sig_sort;
+    checked_byte_buffer_flush: "JetByteBuffer::flush" => jet_jit_byte_buffer_flush: sig_sort;
+    checked_byte_buffer_close: "JetByteBuffer::close" => jet_jit_byte_buffer_close: sig_sort;
+    checked_byte_buffer_shutdown: "JetByteBuffer::shutdown" => jet_jit_byte_buffer_shutdown: sig_sort;
+    checked_byte_buffer_get_buffer: "JetByteBuffer::get_buffer" => jet_jit_byte_buffer_get_buffer: sig_len;
+    checked_byte_buffer_buffer: "JetByteBuffer::buffer" => jet_jit_byte_buffer_buffer: sig_len;
+    checked_byte_buffer_to_string: "JetByteBuffer::to_string" => jet_jit_byte_buffer_to_string: sig_len;
+    checked_byte_buffer_string: "JetByteBuffer::string" => jet_jit_byte_buffer_string: sig_len;
+    checked_byte_buffer_trim: "JetByteBuffer::trim" => jet_jit_byte_buffer_trim: sig_len;
+    checked_byte_buffer_trim_start: "JetByteBuffer::trim_start" => jet_jit_byte_buffer_trim_start: sig_len;
+    checked_byte_buffer_trim_end: "JetByteBuffer::trim_end" => jet_jit_byte_buffer_trim_end: sig_len;
+    checked_byte_buffer_to_lower: "JetByteBuffer::to_lower" => jet_jit_byte_buffer_to_lower: sig_len;
+    checked_byte_buffer_to_upper: "JetByteBuffer::to_upper" => jet_jit_byte_buffer_to_upper: sig_len;
+    checked_byte_buffer_to_title: "JetByteBuffer::to_title" => jet_jit_byte_buffer_to_title: sig_len;
+    checked_byte_buffer_title: "JetByteBuffer::title" => jet_jit_byte_buffer_title: sig_len;
+    checked_byte_buffer_clone: "JetByteBuffer::clone" => jet_jit_byte_buffer_clone: sig_len;
+    checked_byte_buffer_copy: "JetByteBuffer::copy" => jet_jit_byte_buffer_copy: sig_len;
+    checked_byte_buffer_lines: "JetByteBuffer::lines" => jet_jit_byte_buffer_lines: sig_len;
+    checked_byte_buffer_first: "JetByteBuffer::first" => jet_jit_byte_buffer_first: sig_len;
+    checked_byte_buffer_next: "JetByteBuffer::next" => jet_jit_byte_buffer_next: sig_len;
+    checked_byte_buffer_read_byte: "JetByteBuffer::read_byte" => jet_jit_byte_buffer_read_byte: sig_len;
+    checked_byte_buffer_read: "JetByteBuffer::read" => jet_jit_byte_buffer_read: sig_len;
+    checked_byte_buffer_is_ascii: "JetByteBuffer::is_ascii" => jet_jit_byte_buffer_is_ascii: sig_bool;
+    checked_byte_buffer_get: "JetByteBuffer::get" => jet_jit_byte_buffer_get: sig_get_opt;
+    checked_byte_buffer_seek: "JetByteBuffer::seek" => jet_jit_byte_buffer_seek: sig_push;
+    checked_byte_buffer_read_bytes: "JetByteBuffer::read_bytes" => jet_jit_byte_buffer_read_bytes: sig_get_opt;
+    checked_byte_buffer_read_string: "JetByteBuffer::read_string" => jet_jit_byte_buffer_read_string: sig_get_opt;
+    checked_byte_buffer_contains: "JetByteBuffer::contains" => jet_jit_byte_buffer_contains: sig_list_eq;
+    checked_byte_buffer_starts_with: "JetByteBuffer::starts_with" => jet_jit_byte_buffer_starts_with: sig_list_eq;
+    checked_byte_buffer_ends_with: "JetByteBuffer::ends_with" => jet_jit_byte_buffer_ends_with: sig_list_eq;
+    checked_byte_buffer_index_of: "JetByteBuffer::index_of" => jet_jit_byte_buffer_index_of: sig_get_opt;
+    checked_byte_buffer_last_index_of: "JetByteBuffer::last_index_of" => jet_jit_byte_buffer_last_index_of: sig_get_opt;
+    checked_byte_buffer_split: "JetByteBuffer::split" => jet_jit_byte_buffer_split: sig_get_opt;
+    checked_byte_buffer_join: "JetByteBuffer::join" => jet_jit_byte_buffer_join: sig_get_opt;
+    checked_byte_buffer_equal: "JetByteBuffer::equal" => jet_jit_byte_buffer_equal: sig_list_eq;
+    checked_byte_buffer_compare: "JetByteBuffer::compare" => jet_jit_byte_buffer_compare: sig_get_opt;
+    checked_byte_buffer_copy_to: "JetByteBuffer::copy_to" => jet_jit_byte_buffer_copy_to: sig_push;
+    checked_byte_buffer_write_to: "JetByteBuffer::write_to" => jet_jit_byte_buffer_write_to: sig_push;
+    checked_byte_buffer_replace: "JetByteBuffer::replace" => jet_jit_byte_buffer_replace: sig_three_ret;
+    checked_byte_buffer_write_u8: "JetByteBuffer::write_u8" => jet_jit_byte_buffer_write_u8: sig_push;
+    checked_byte_buffer_write_i8: "JetByteBuffer::write_i8" => jet_jit_byte_buffer_write_i8: sig_push;
+    checked_byte_buffer_write_u16_le: "JetByteBuffer::write_u16_le" => jet_jit_byte_buffer_write_u16_le: sig_push;
+    checked_byte_buffer_write_u16_be: "JetByteBuffer::write_u16_be" => jet_jit_byte_buffer_write_u16_be: sig_push;
+    checked_byte_buffer_write_i16_le: "JetByteBuffer::write_i16_le" => jet_jit_byte_buffer_write_i16_le: sig_push;
+    checked_byte_buffer_write_i16_be: "JetByteBuffer::write_i16_be" => jet_jit_byte_buffer_write_i16_be: sig_push;
+    checked_byte_buffer_write_u32_le: "JetByteBuffer::write_u32_le" => jet_jit_byte_buffer_write_u32_le: sig_push;
+    checked_byte_buffer_write_u32_be: "JetByteBuffer::write_u32_be" => jet_jit_byte_buffer_write_u32_be: sig_push;
+    checked_byte_buffer_write_i32_le: "JetByteBuffer::write_i32_le" => jet_jit_byte_buffer_write_i32_le: sig_push;
+    checked_byte_buffer_write_i32_be: "JetByteBuffer::write_i32_be" => jet_jit_byte_buffer_write_i32_be: sig_push;
+    checked_byte_buffer_write_u64_le: "JetByteBuffer::write_u64_le" => jet_jit_byte_buffer_write_u64_le: sig_push;
+    checked_byte_buffer_write_u64_be: "JetByteBuffer::write_u64_be" => jet_jit_byte_buffer_write_u64_be: sig_push;
+    checked_byte_buffer_write_i64_le: "JetByteBuffer::write_i64_le" => jet_jit_byte_buffer_write_i64_le: sig_push;
+    checked_byte_buffer_write_i64_be: "JetByteBuffer::write_i64_be" => jet_jit_byte_buffer_write_i64_be: sig_push;
+    checked_byte_buffer_write_f32_le: "JetByteBuffer::write_f32_le" => jet_jit_byte_buffer_write_f32_le: sig_push_f64;
+    checked_byte_buffer_write_f32_be: "JetByteBuffer::write_f32_be" => jet_jit_byte_buffer_write_f32_be: sig_push_f64;
+    checked_byte_buffer_write_f64_le: "JetByteBuffer::write_f64_le" => jet_jit_byte_buffer_write_f64_le: sig_push_f64;
+    checked_byte_buffer_write_f64_be: "JetByteBuffer::write_f64_be" => jet_jit_byte_buffer_write_f64_be: sig_push_f64;
+    checked_byte_buffer_write_bytes: "JetByteBuffer::write_bytes" => jet_jit_byte_buffer_write_bytes: sig_push;
+    checked_byte_buffer_write_method: "JetByteBuffer::write" => jet_jit_byte_buffer_write_method: sig_push;
     canonical_list_try_new: "jet_list_try_new" => jet_jit_list_try_new: sig_try_new;
     canonical_list_try_with_capacity: "jet_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
     canonical_list_try_push: "jet_list_try_push" => jet_jit_list_try_push: sig_try_push;
