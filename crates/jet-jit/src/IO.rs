@@ -1413,6 +1413,7 @@ host_fns! {
     stdout_flush: "jet_jit_stdout_flush" => jet_jit_stdout_flush: unary;
     stdout_flush_canonical: "jet_std_io_stdout_flush" => jet_jit_stdout_flush: unary;
     stdout_is_tty: "jet_jit_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
+    stdout_is_tty_canonical: "jet_std_io_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
     stderr_write: "jet_jit_stderr_write" => jet_jit_stderr_write: binary;
     stderr_write_canonical: "jet_std_io_stderr_write" => jet_jit_stderr_write: binary;
     stderr_write_line: "jet_jit_stderr_write_line" => jet_jit_stderr_write_line: binary;
