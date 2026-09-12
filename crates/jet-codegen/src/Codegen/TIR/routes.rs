@@ -2353,6 +2353,7 @@ impl TBuiltinOp {
             MatchGroup => b("match_group", "jet_std::JetRegexMatch::group", 2, 2, &[true, false], None, carrier),
             IterSplit { .. } => b("iter_split", "jet_iter_split_at", 3, 3, &[false, false, false], None, carrier),
             Indexed { .. } => b("iter_enumerate", "jet_iter_enumerate", 2, 2, &[false, false], None, carrier),
+            Indexes => b("indexes", "jet_iter_indexes", 1, 1, &[false], None, carrier),
             MapMergeWith => b("map_merge_with", "jet_map_merge_with", 3, 3, &[true, true, false], None, carrier),
             InsertList => b("list_insert", "jet_list_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
@@ -2579,7 +2580,7 @@ impl TBuiltinOp {
             | ListUnion | ListIntersection | ListDifference | ListRandom
             | MapCopy
             | MapNew
-            | Indexes | Zip { .. } | OptionZip { .. }
+            | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
             | SetShuffle
             | LruCapacity

@@ -2266,6 +2266,9 @@ pub(super) fn lower_expr(
             if matches!(op, TBuiltinOp::Unzip { .. }) {
                 return lower_unzip(ctx, expr, recv);
             }
+            if matches!(op, TBuiltinOp::Indexes) {
+                return lower_indexes(ctx, expr, recv, args, &carrier);
+            }
             if matches!(op, TBuiltinOp::Indexed { .. } | TBuiltinOp::IterSplit { .. }) {
                 return lower_tuple_builtin(ctx, expr, recv, op, args, &carrier);
             }
@@ -6302,6 +6305,34 @@ fn lower_builtin_native_int(
     let route = super::distinct_conversion_route("", source, &op, None, &target, &carrier)?;
     let kind = lower_conversion_int(ctx, host_kind)?;
     lower_prelude_conversion(ctx, value, vec![kind], &target, route, &carrier)
+}
+fn lower_indexes(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    recv: &TExpr,
+    args: &[TExpr],
+    carrier: &TFailureCarrier,
+) -> Result<MirValueId, LowerError> {
+    if !args.is_empty() {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked indexes operation received unexpected arguments",
+        ));
+    }
+    let (receiver, _) = lower_builtin_receiver(ctx, recv, false)?;
+    let length_route = TBuiltinOp::LenList
+        .prelude_route(&recv.ty, &Type::Int, &TFailureCarrier::Infallible)
+        .map_err(|error| {
+            ctx.error(ctx.span(), format!("builtin method LenList: {error:?}"))
+        })?;
+    let length = emit_static_call(ctx, &Type::Int, length_route, vec![receiver])?;
+    let length = lower_builtin_native_int(ctx, length, &Type::Int)?;
+    let route = TBuiltinOp::Indexes
+        .prelude_route(&recv.ty, &expr.ty, carrier)
+        .map_err(|error| {
+            ctx.error(ctx.span(), format!("builtin method Indexes: {error:?}"))
+        })?;
+    emit_static_call(ctx, &expr.ty, route, vec![length])
 }
 
 fn lower_tuple_builtin(
