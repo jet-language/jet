@@ -1209,7 +1209,10 @@ fn sequence_element_type(ty: &MirType) -> Option<&MirType> {
         MirTypeKind::List(inner) => Some(inner),
         MirTypeKind::FixedList { elem, .. } => Some(elem),
         MirTypeKind::Apply { name, args }
-            if matches!(name.name.as_str(), "List" | "Iter" | "View" | "ViewIter")
+            if matches!(
+                name.name.as_str(),
+                "List" | "Iter" | "View" | "ViewMut" | "ViewIter"
+            )
                 && args.len() == 1 =>
         {
             args.first()
@@ -3396,7 +3399,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirOperation::Never { .. } => Some(self.trap(builder)?),
             MirOperation::Semantic(operation) => {
-                self.semantic(builder, operation, instruction.source_line, expected)?
+                self.semantic(builder, operation, instruction, expected)?
             }
             MirOperation::LoopRangeInit {
                 call,
@@ -4409,6 +4412,176 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.display_push_literal(builder, buffer, "]")?;
         Ok(buffer)
     }
+    fn render_display_tuple(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        tuple: Value,
+        fields: &[(String, MirType)],
+    ) -> Result<Value, String> {
+        let tuple = self.cast(builder, tuple, types::I64)?;
+        let buffer = self
+            .call_host(builder, self.host.str_begin, &[])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR string host returned no buffer".to_string())?;
+        if fields.is_empty() {
+            self.display_push_literal(builder, buffer, "()")?;
+            return Ok(buffer);
+        }
+        self.display_push_literal(builder, buffer, "(")?;
+        for (index, (name, _)) in fields.iter().enumerate() {
+            if index != 0 {
+                self.display_push_literal(builder, buffer, ",")?;
+            }
+            let name = name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(name);
+            self.display_push_literal(builder, buffer, name)?;
+        }
+        self.display_push_literal(builder, buffer, ") { ")?;
+        for (index, (name, field_ty)) in fields.iter().enumerate() {
+            if index != 0 {
+                self.display_push_literal(builder, buffer, ", ")?;
+            }
+            let field_index = builder.ins().iconst(types::I64, index as i64);
+            let getter = self.field_getter(field_ty)?;
+            let field = self
+                .call_host(builder, getter, &[tuple, field_index])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR tuple field getter returned no value".to_string())?;
+            let field_abi = clif_ty_from_mir(field_ty).ok_or_else(|| {
+                format!(
+                    "MIR tuple display field `{}` has no checked carrier",
+                    field_ty.display_name()
+                )
+            })?;
+            let field = self.cast(builder, field, field_abi)?;
+            let rendered = self.display_value_of_type(builder, field_ty, field, false)?;
+            let name = name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(name);
+            self.display_push_literal(builder, buffer, name)?;
+            self.display_push_literal(builder, buffer, ": ")?;
+            let _ = self
+                .call_host(builder, self.host.str_push_str, &[buffer, rendered])?;
+        }
+        self.display_push_literal(builder, buffer, " }")?;
+        Ok(buffer)
+    }
+
+    fn map_equal_nested_int_lists(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        left: Value,
+        right: Value,
+        line: u32,
+    ) -> Result<Value, String> {
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let left_len = self
+            .call_host(builder, self.host.coll.map_len, &[left])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map length host returned no value".to_string())?;
+        let right_len = self
+            .call_host(builder, self.host.coll.map_len, &[right])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map length host returned no value".to_string())?;
+        let lengths_equal = builder.ins().icmp(IntCC::Equal, left_len, right_len);
+        let header = builder.create_block();
+        let body = builder.create_block();
+        let value = builder.create_block();
+        let failed = builder.create_block();
+        let done = builder.create_block();
+        builder.append_block_param(header, types::I64);
+        builder.append_block_param(body, types::I64);
+        builder.append_block_param(value, types::I64);
+        builder.append_block_param(value, types::I64);
+        builder.append_block_param(done, types::I8);
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder
+            .ins()
+            .brif(lengths_equal, header, &[zero], failed, &[]);
+
+        builder.switch_to_block(header);
+        let index = builder
+            .block_params(header)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map equality header has no index".to_string())?;
+        let has_next = builder.ins().icmp(IntCC::UnsignedLessThan, index, left_len);
+        let equal = builder.ins().iconst(types::I8, 1);
+        builder
+            .ins()
+            .brif(has_next, body, &[index], done, &[equal]);
+
+        builder.switch_to_block(body);
+        let index = builder
+            .block_params(body)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map equality body has no index".to_string())?;
+        let key = self
+            .call_host(builder, self.host.coll.map_key_at, &[left, index])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map key host returned no value".to_string())?;
+        let present = self
+            .call_host(builder, self.host.coll.map_has_key, &[right, key])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map key presence host returned no value".to_string())?;
+        let present = self.bool_value(builder, present)?;
+        builder
+            .ins()
+            .brif(present, value, &[index, key], failed, &[]);
+
+        builder.switch_to_block(value);
+        let params = builder.block_params(value).to_vec();
+        let index = *params
+            .first()
+            .ok_or_else(|| "MIR map equality value block has no index".to_string())?;
+        let key = *params
+            .get(1)
+            .ok_or_else(|| "MIR map equality value block has no key".to_string())?;
+        let left_value = self
+            .call_host(builder, self.host.coll.map_value_at, &[left, index])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map value host returned no value".to_string())?;
+        let line = builder.ins().iconst(types::I32, i64::from(line));
+        let right_value = self
+            .call_host(builder, self.host.coll.map_get, &[right, key, line])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map value lookup host returned no value".to_string())?;
+        let equal = self
+            .call_host(
+                builder,
+                self.host.coll.list_eq_nested,
+                &[left_value, right_value],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR nested map value equality host returned no value".to_string())?;
+        let equal = self.bool_value(builder, equal)?;
+        let next = builder.ins().iadd_imm(index, 1);
+        builder.ins().brif(equal, header, &[next], failed, &[]);
+
+        builder.switch_to_block(failed);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        builder.ins().jump(done, &[false_value]);
+
+        builder.switch_to_block(done);
+        builder
+            .block_params(done)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR map equality merge has no result".to_string())
+    }
+
 
     fn debug_value(
         &mut self,
@@ -4982,6 +5155,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let value = self.cast(builder, value, types::I64)?;
                 return self.render_display_list(builder, value, inner);
             }
+            MirTypeKind::List(inner)
+                if inner.tuple_fields().is_some() =>
+            {
+                let value = self.cast(builder, value, types::I64)?;
+                return self.render_display_list(builder, value, inner);
+            }
             MirTypeKind::List(inner) => {
                 let kind = list_format_kind(inner).map_err(|_| {
                     format!(
@@ -4996,6 +5175,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "MIR list display host returned no value".to_string());
+            }
+            MirTypeKind::FixedList { elem, .. }
+                if elem.tuple_fields().is_some() =>
+            {
+                let value = self.cast(builder, value, types::I64)?;
+                return self.render_display_list(builder, value, elem);
             }
             MirTypeKind::FixedList { elem, .. } => {
                 let kind = list_format_kind(elem).map_err(|_| {
@@ -5012,13 +5197,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .copied()
                     .ok_or_else(|| "MIR fixed-list display host returned no value".to_string());
             }
+            MirTypeKind::Tuple(fields) => {
+                return self.render_display_tuple(builder, value, fields);
+            }
             MirTypeKind::Map { .. }
             | MirTypeKind::Shared(_)
             | MirTypeKind::Fn(_)
             | MirTypeKind::SendFn { .. }
             | MirTypeKind::Apply { .. }
             | MirTypeKind::TraitObject(_)
-            | MirTypeKind::Tuple(_)
+
             | MirTypeKind::Union(_) => {
                 return Err(format!(
                     "MIR display type `{}` has no resident render",
@@ -7177,6 +7365,26 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
         }
 
+        if let Some((key, value)) = comparison_map_parts(left_ty) {
+            if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
+                && comparison_element_kind(key) == Some(ComparisonElementKind::String)
+                && matches!(
+                    value.kind(),
+                    MirTypeKind::List(inner)
+                        if comparison_element_kind(inner)
+                            == Some(ComparisonElementKind::Integer)
+                )
+            {
+                let equal =
+                    self.map_equal_nested_int_lists(builder, left, right, location.line)?;
+                if matches!(op, MirBinaryOp::Ne) {
+                    let equal = self.bool_value(builder, equal)?;
+                    let one = builder.ins().iconst(types::I8, 1);
+                    return Ok(builder.ins().bxor(equal, one));
+                }
+                return Ok(equal);
+            }
+        }
         if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
             && comparison_map_parts(left_ty).is_none()
             && matches!(
@@ -11305,9 +11513,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let left_value = self.value(left.value)?;
             let right_value = self.value(right.value)?;
             let value = self.typed_equal(builder, &left_ty, left_value, right_value)?;
-            return expected
-                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
-                .map(Some);
+            return expected.map_or(Ok(value), |ty| self.cast(builder, value, ty));
         }
         let symbol = row.symbol.name().to_owned();
         let host = self.lookup_prelude_host(row)?;
@@ -12281,6 +12487,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         operation: &MirSemanticOp,
+        instruction: &MirInstruction,
         source_line: Option<u32>,
         expected: Option<types::Type>,
     ) -> Result<Option<Value>, String> {
@@ -13565,9 +13772,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
                     return Err("MIR columnar accessor has unsupported Prelude ABI".to_string());
                 }
-                let line = source_line.ok_or_else(|| {
-                    "MIR columnar read is missing its instruction source location".to_string()
-                })?;
+                let line = match source_line {
+                    Some(line) => line,
+                    None => self.instruction_location(instruction)?.line,
+                };
                 let list = self.cast(builder, self.value(*base)?, types::I64)?;
                 let at =
                     self.index_operand(builder, *index, jet_foundation::MIR::MirIndexKind::List)?;
