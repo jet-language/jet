@@ -4316,6 +4316,86 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.display_push_literal(builder, buffer, "]")?;
         Ok(buffer)
     }
+    fn render_display_list(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        list: Value,
+        inner: &MirType,
+    ) -> Result<Value, String> {
+        let element_type = clif_ty_from_mir(inner).ok_or_else(|| {
+            format!(
+                "MIR display list element type `{}` has no checked carrier",
+                inner.display_name()
+            )
+        })?;
+        let list = self.cast(builder, list, types::I64)?;
+        let buffer = self
+            .call_host(builder, self.host.str_begin, &[])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR string host returned no buffer".to_string())?;
+        self.display_push_literal(builder, buffer, "[")?;
+        let header = builder.create_block();
+        let body = builder.create_block();
+        let done = builder.create_block();
+        builder.append_block_param(header, types::I64);
+        builder.append_block_param(header, types::I64);
+        builder.append_block_param(body, types::I64);
+        builder.append_block_param(body, types::I64);
+        builder.append_block_param(done, types::I64);
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.ins().jump(header, &[buffer, zero]);
+        builder.switch_to_block(header);
+        let header_params = builder.block_params(header).to_vec();
+        let current_buffer = header_params[0];
+        let index = header_params[1];
+        let len = self
+            .call_host(builder, self.host.coll.list_len, &[list])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list length host returned no value".to_string())?;
+        let has_next = builder.ins().icmp(IntCC::UnsignedLessThan, index, len);
+        builder.ins().brif(
+            has_next,
+            body,
+            &[current_buffer, index],
+            done,
+            &[current_buffer],
+        );
+        builder.switch_to_block(body);
+        let body_params = builder.block_params(body).to_vec();
+        let current_buffer = body_params[0];
+        let index = body_params[1];
+        let line = builder.ins().iconst(types::I32, 0);
+        let element = self
+            .call_host(builder, self.host.coll.list_get, &[list, index, line])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list element host returned no value".to_string())?;
+        let element = self.cast(builder, element, element_type)?;
+        let rendered = self.display_value_of_type(builder, inner, element, false)?;
+        let first = builder.ins().icmp_imm(IntCC::Equal, index, 0);
+        let comma = builder.create_block();
+        let append = builder.create_block();
+        builder.ins().brif(first, append, &[], comma, &[]);
+        builder.switch_to_block(comma);
+        self.display_push_literal(builder, current_buffer, ", ")?;
+        builder.ins().jump(append, &[]);
+        builder.switch_to_block(append);
+        let append_buffer = current_buffer;
+        let _ = self
+            .call_host(builder, self.host.str_push_str, &[append_buffer, rendered])?;
+        let next = builder.ins().iadd_imm(index, 1);
+        builder.ins().jump(header, &[append_buffer, next]);
+        builder.switch_to_block(done);
+        let buffer = builder
+            .block_params(done)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list render merge has no buffer".to_string())?;
+        self.display_push_literal(builder, buffer, "]")?;
+        Ok(buffer)
+    }
 
     fn debug_value(
         &mut self,
@@ -4870,6 +4950,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             {
                 let value = self.cast(builder, value, types::I64)?;
                 return self.render_nominal_list(builder, value, inner, false);
+            }
+            MirTypeKind::List(inner)
+                if matches!(inner.kind(), MirTypeKind::Apply { name, args }
+                    if args.is_empty() && name.name == "DateTime") =>
+            {
+                let value = self.cast(builder, value, types::I64)?;
+                return self.render_display_list(builder, value, inner);
             }
             MirTypeKind::List(inner) => {
                 let kind = list_format_kind(inner).map_err(|_| {
