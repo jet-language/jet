@@ -267,6 +267,35 @@ fn comparison_map_parts(ty: &MirType) -> Option<(&MirType, &MirType)> {
         _ => None,
     }
 }
+fn equality_contains_map(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Map { .. } => true,
+        MirTypeKind::List(inner)
+        | MirTypeKind::FixedList { elem: inner, .. }
+        | MirTypeKind::Option(inner)
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => equality_contains_map(inner),
+        MirTypeKind::Result { ok, err } => {
+            equality_contains_map(ok) || equality_contains_map(err)
+        }
+        MirTypeKind::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| equality_contains_map(field)),
+        MirTypeKind::Apply { name, args }
+            if name.name == "List" && args.len() == 1 =>
+        {
+            args.first().is_some_and(equality_contains_map)
+        }
+        MirTypeKind::Apply { name, args }
+            if name.name == "Result" && args.len() == 2 =>
+        {
+            args.iter().any(equality_contains_map)
+        }
+        _ => false,
+    }
+}
+
 
 fn callable_signature(ty: &MirType) -> Option<(&[MirType], Option<&MirType>)> {
     ty.function_signature()
@@ -4470,13 +4499,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok(buffer)
     }
 
-    fn map_equal_nested_int_lists(
+    fn map_equal_recursive(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
+        left_ty: &MirType,
         left: Value,
         right: Value,
-        line: u32,
     ) -> Result<Value, String> {
+        let Some((key_ty, value_ty)) = comparison_map_parts(left_ty) else {
+            return Err(format!(
+                "MIR map equality type `{}` has no key/value types",
+                left_ty.display_name()
+            ));
+        };
         let left = self.cast(builder, left, types::I64)?;
         let right = self.cast(builder, right, types::I64)?;
         let left_len = self
@@ -4492,18 +4527,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let lengths_equal = builder.ins().icmp(IntCC::Equal, left_len, right_len);
         let header = builder.create_block();
         let body = builder.create_block();
-        let value = builder.create_block();
-        let failed = builder.create_block();
         let done = builder.create_block();
         builder.append_block_param(header, types::I64);
         builder.append_block_param(body, types::I64);
-        builder.append_block_param(value, types::I64);
-        builder.append_block_param(value, types::I64);
         builder.append_block_param(done, types::I8);
         let zero = builder.ins().iconst(types::I64, 0);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        let true_value = builder.ins().iconst(types::I8, 1);
         builder
             .ins()
-            .brif(lengths_equal, header, &[zero], failed, &[]);
+            .brif(lengths_equal, header, &[zero], done, &[false_value]);
 
         builder.switch_to_block(header);
         let index = builder
@@ -4512,67 +4545,44 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .copied()
             .ok_or_else(|| "MIR map equality header has no index".to_string())?;
         let has_next = builder.ins().icmp(IntCC::UnsignedLessThan, index, left_len);
-        let equal = builder.ins().iconst(types::I8, 1);
         builder
             .ins()
-            .brif(has_next, body, &[index], done, &[equal]);
+            .brif(has_next, body, &[index], done, &[true_value]);
 
         builder.switch_to_block(body);
-        let index = builder
-            .block_params(body)
-            .first()
-            .copied()
-            .ok_or_else(|| "MIR map equality body has no index".to_string())?;
-        let key = self
+        let left_key = self
             .call_host(builder, self.host.coll.map_key_at, &[left, index])?
             .first()
             .copied()
-            .ok_or_else(|| "MIR map key host returned no value".to_string())?;
-        let present = self
-            .call_host(builder, self.host.coll.map_has_key, &[right, key])?
+            .ok_or_else(|| "MIR map equality left key host returned no value".to_string())?;
+        let right_key = self
+            .call_host(builder, self.host.coll.map_key_at, &[right, index])?
             .first()
             .copied()
-            .ok_or_else(|| "MIR map key presence host returned no value".to_string())?;
-        let present = self.bool_value(builder, present)?;
-        builder
-            .ins()
-            .brif(present, value, &[index, key], failed, &[]);
-
-        builder.switch_to_block(value);
-        let params = builder.block_params(value).to_vec();
-        let index = *params
-            .first()
-            .ok_or_else(|| "MIR map equality value block has no index".to_string())?;
-        let key = *params
-            .get(1)
-            .ok_or_else(|| "MIR map equality value block has no key".to_string())?;
+            .ok_or_else(|| "MIR map equality right key host returned no value".to_string())?;
+        let left_key = self.decode_equality_raw(builder, left_key, key_ty)?;
+        let right_key = self.decode_equality_raw(builder, right_key, key_ty)?;
+        let key_equal = self.typed_equal(builder, key_ty, left_key, right_key)?;
+        let key_equal = self.bool_value(builder, key_equal)?;
         let left_value = self
             .call_host(builder, self.host.coll.map_value_at, &[left, index])?
             .first()
             .copied()
-            .ok_or_else(|| "MIR map value host returned no value".to_string())?;
-        let line = builder.ins().iconst(types::I32, i64::from(line));
+            .ok_or_else(|| "MIR map equality left value host returned no value".to_string())?;
         let right_value = self
-            .call_host(builder, self.host.coll.map_get, &[right, key, line])?
+            .call_host(builder, self.host.coll.map_value_at, &[right, index])?
             .first()
             .copied()
-            .ok_or_else(|| "MIR map value lookup host returned no value".to_string())?;
-        let equal = self
-            .call_host(
-                builder,
-                self.host.coll.list_equal,
-                &[left_value, right_value],
-            )?
-            .first()
-            .copied()
-            .ok_or_else(|| "MIR nested map value equality host returned no value".to_string())?;
-        let equal = self.bool_value(builder, equal)?;
+            .ok_or_else(|| "MIR map equality right value host returned no value".to_string())?;
+        let left_value = self.decode_equality_raw(builder, left_value, value_ty)?;
+        let right_value = self.decode_equality_raw(builder, right_value, value_ty)?;
+        let value_equal = self.typed_equal(builder, value_ty, left_value, right_value)?;
+        let value_equal = self.bool_value(builder, value_equal)?;
+        let equal = builder.ins().band(key_equal, value_equal);
         let next = builder.ins().iadd_imm(index, 1);
-        builder.ins().brif(equal, header, &[next], failed, &[]);
-
-        builder.switch_to_block(failed);
-        let false_value = builder.ins().iconst(types::I8, 0);
-        builder.ins().jump(done, &[false_value]);
+        builder
+            .ins()
+            .brif(equal, header, &[next], done, &[false_value]);
 
         builder.switch_to_block(done);
         builder
@@ -4580,6 +4590,266 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR map equality merge has no result".to_string())
+    }
+
+    fn list_equal_recursive(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        list_ty: &MirType,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let Some(element_ty) = comparison_sequence_element_type(list_ty) else {
+            return Err(format!(
+                "MIR list equality type `{}` has no element type",
+                list_ty.display_name()
+            ));
+        };
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let left_len = self
+            .call_host(builder, self.host.coll.list_len, &[left])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list length host returned no value".to_string())?;
+        let right_len = self
+            .call_host(builder, self.host.coll.list_len, &[right])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list length host returned no value".to_string())?;
+        let lengths_equal = builder.ins().icmp(IntCC::Equal, left_len, right_len);
+        let header = builder.create_block();
+        let body = builder.create_block();
+        let done = builder.create_block();
+        builder.append_block_param(header, types::I64);
+        builder.append_block_param(body, types::I64);
+        builder.append_block_param(done, types::I8);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        let true_value = builder.ins().iconst(types::I8, 1);
+        builder
+            .ins()
+            .brif(lengths_equal, header, &[zero], done, &[false_value]);
+
+        builder.switch_to_block(header);
+        let index = builder
+            .block_params(header)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list equality header has no index".to_string())?;
+        let has_next = builder.ins().icmp(IntCC::UnsignedLessThan, index, left_len);
+        builder
+            .ins()
+            .brif(has_next, body, &[index], done, &[true_value]);
+
+        builder.switch_to_block(body);
+        let line = builder.ins().iconst(types::I32, 0);
+        let left_value = self
+            .call_host(builder, self.host.coll.list_get, &[left, index, line])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list equality left value host returned no value".to_string())?;
+        let right_value = self
+            .call_host(builder, self.host.coll.list_get, &[right, index, line])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list equality right value host returned no value".to_string())?;
+        let left_value = self.decode_equality_raw(builder, left_value, element_ty)?;
+        let right_value = self.decode_equality_raw(builder, right_value, element_ty)?;
+        let equal = self.typed_equal(builder, element_ty, left_value, right_value)?;
+        let equal = self.bool_value(builder, equal)?;
+        let next = builder.ins().iadd_imm(index, 1);
+        builder
+            .ins()
+            .brif(equal, header, &[next], done, &[false_value]);
+
+        builder.switch_to_block(done);
+        builder
+            .block_params(done)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR list equality merge has no result".to_string())
+    }
+
+    fn tuple_equal_recursive(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        fields: &[(String, MirType)],
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let mut equal = builder.ins().iconst(types::I8, 1);
+        for (index, (_, field_ty)) in fields.iter().enumerate() {
+            let index_value = builder.ins().iconst(types::I64, index as i64);
+            let getter = self.field_getter(field_ty)?;
+            let left_field = self
+                .call_host(builder, getter, &[left, index_value])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR tuple equality left field host returned no value".to_string())?;
+            let right_field = self
+                .call_host(builder, getter, &[right, index_value])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR tuple equality right field host returned no value".to_string())?;
+            let field_abi = clif_ty_from_mir(field_ty).ok_or_else(|| {
+                format!(
+                    "MIR tuple equality field `{}` has no checked carrier",
+                    field_ty.display_name()
+                )
+            })?;
+            let left_field = self.cast(builder, left_field, field_abi)?;
+            let right_field = self.cast(builder, right_field, field_abi)?;
+            let field_equal = self.typed_equal(builder, field_ty, left_field, right_field)?;
+            let field_equal = self.bool_value(builder, field_equal)?;
+            equal = builder.ins().band(equal, field_equal);
+        }
+        Ok(equal)
+    }
+
+    fn option_equal_recursive(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        inner_ty: &MirType,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let left_present = self
+            .call_host(builder, self.host.result_is_ok, &[left])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option equality left discriminator returned no value".to_string())?;
+        let right_present = self
+            .call_host(builder, self.host.result_is_ok, &[right])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option equality right discriminator returned no value".to_string())?;
+        let left_present = self.bool_value(builder, left_present)?;
+        let right_present = self.bool_value(builder, right_present)?;
+        let same_presence = builder.ins().icmp(IntCC::Equal, left_present, right_present);
+        let both_present = builder.ins().band(left_present, right_present);
+        let same_block = builder.create_block();
+        let payload_block = builder.create_block();
+        let done = builder.create_block();
+        builder.append_block_param(done, types::I8);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        let true_value = builder.ins().iconst(types::I8, 1);
+        builder
+            .ins()
+            .brif(same_presence, same_block, &[], done, &[false_value]);
+        builder.switch_to_block(same_block);
+        builder
+            .ins()
+            .brif(both_present, payload_block, &[], done, &[true_value]);
+        builder.switch_to_block(payload_block);
+        let payload_abi = clif_ty_from_mir(inner_ty).ok_or_else(|| {
+            format!(
+                "MIR option equality payload `{}` has no checked carrier",
+                inner_ty.display_name()
+            )
+        })?;
+        let left_payload = self.result_value_get_raw(builder, left, Some(payload_abi))?;
+        let right_payload = self.result_value_get_raw(builder, right, Some(payload_abi))?;
+        let equal = self.typed_equal(builder, inner_ty, left_payload, right_payload)?;
+        let equal = self.bool_value(builder, equal)?;
+        builder.ins().jump(done, &[equal]);
+        builder.switch_to_block(done);
+        builder
+            .block_params(done)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR option equality merge has no result".to_string())
+    }
+
+    fn result_equal_recursive(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ok_ty: &MirType,
+        err_ty: &MirType,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let left = self.cast(builder, left, types::I64)?;
+        let right = self.cast(builder, right, types::I64)?;
+        let left_ok = self
+            .call_host(builder, self.host.result_is_ok, &[left])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR result equality left discriminator returned no value".to_string())?;
+        let right_ok = self
+            .call_host(builder, self.host.result_is_ok, &[right])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR result equality right discriminator returned no value".to_string())?;
+        let left_ok = self.bool_value(builder, left_ok)?;
+        let right_ok = self.bool_value(builder, right_ok)?;
+        let same_discriminator = builder.ins().icmp(IntCC::Equal, left_ok, right_ok);
+        let same_block = builder.create_block();
+        let ok_block = builder.create_block();
+        let err_block = builder.create_block();
+        let done = builder.create_block();
+        builder.append_block_param(done, types::I8);
+        let false_value = builder.ins().iconst(types::I8, 0);
+        builder
+            .ins()
+            .brif(same_discriminator, same_block, &[], done, &[false_value]);
+        builder.switch_to_block(same_block);
+        builder
+            .ins()
+            .brif(left_ok, ok_block, &[], err_block, &[]);
+        builder.switch_to_block(ok_block);
+        let ok_abi = clif_ty_from_mir(ok_ty).ok_or_else(|| {
+            format!(
+                "MIR result equality Ok payload `{}` has no checked carrier",
+                ok_ty.display_name()
+            )
+        })?;
+        let left_ok_value = self.result_value_get_raw(builder, left, Some(ok_abi))?;
+        let right_ok_value = self.result_value_get_raw(builder, right, Some(ok_abi))?;
+        let ok_equal = self.typed_equal(builder, ok_ty, left_ok_value, right_ok_value)?;
+        let ok_equal = self.bool_value(builder, ok_equal)?;
+        builder.ins().jump(done, &[ok_equal]);
+        builder.switch_to_block(err_block);
+        let err_abi = clif_ty_from_mir(err_ty).ok_or_else(|| {
+            format!(
+                "MIR result equality Err payload `{}` has no checked carrier",
+                err_ty.display_name()
+            )
+        })?;
+        let left_err_value = self.result_value_get_raw(builder, left, Some(err_abi))?;
+        let right_err_value = self.result_value_get_raw(builder, right, Some(err_abi))?;
+        let err_equal = self.typed_equal(builder, err_ty, left_err_value, right_err_value)?;
+        let err_equal = self.bool_value(builder, err_equal)?;
+        builder.ins().jump(done, &[err_equal]);
+        builder.switch_to_block(done);
+        builder
+            .block_params(done)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR result equality merge has no result".to_string())
+    }
+
+    fn decode_equality_raw(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        raw: Value,
+        ty: &MirType,
+    ) -> Result<Value, String> {
+        let carrier = clif_ty_from_mir(ty).ok_or_else(|| {
+            format!(
+                "MIR equality type `{}` has no checked carrier",
+                ty.display_name()
+            )
+        })?;
+        if carrier == types::F32 {
+            let bits = builder.ins().ireduce(types::I32, raw);
+            return Ok(builder.ins().bitcast(types::F32, MemFlags::new(), bits));
+        }
+        self.cast(builder, raw, carrier)
     }
 
 
@@ -6988,6 +7258,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         left: Value,
         right: Value,
     ) -> Result<Value, String> {
+        if equality_contains_map(left_ty) {
+            return self.typed_equal_with_maps(builder, left_ty, left, right);
+        }
+        if matches!(
+            left_ty.layout.abi,
+            MirAbi::Scalar(MirScalarKind::Float | MirScalarKind::Float32)
+        ) {
+            let carrier = clif_ty_from_mir(left_ty).ok_or_else(|| {
+                format!(
+                    "MIR floating-point equality type `{}` has no checked carrier",
+                    left_ty.display_name()
+                )
+            })?;
+            let left = self.cast(builder, left, carrier)?;
+            let right = self.cast(builder, right, carrier)?;
+            return Ok(builder.ins().fcmp(FloatCC::Equal, left, right));
+        }
         let type_id = runtime_type_id(left_ty).ok_or_else(|| {
             format!(
                 "MIR structural comparison type `{}` has no runtime identity",
@@ -7001,6 +7288,49 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR structural comparison host returned no value".to_string())
+    }
+
+    fn typed_equal_with_maps(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        left_ty: &MirType,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        match left_ty.kind() {
+            MirTypeKind::Map { .. } => self.map_equal_recursive(builder, left_ty, left, right),
+            MirTypeKind::List(_) | MirTypeKind::FixedList { .. } => {
+                self.list_equal_recursive(builder, left_ty, left, right)
+            }
+            MirTypeKind::Apply { name, args }
+                if name.name == "List" && args.len() == 1 =>
+            {
+                self.list_equal_recursive(builder, left_ty, left, right)
+            }
+            MirTypeKind::Option(inner) => {
+                self.option_equal_recursive(builder, inner, left, right)
+            }
+            MirTypeKind::Result { ok, err } => {
+                self.result_equal_recursive(builder, ok, err, left, right)
+            }
+            MirTypeKind::Apply { name, args }
+                if name.name == "Result" && args.len() == 2 =>
+            {
+                self.result_equal_recursive(builder, &args[0], &args[1], left, right)
+            }
+            MirTypeKind::Tuple(fields) => {
+                self.tuple_equal_recursive(builder, fields, left, right)
+            }
+            MirTypeKind::Tagged { inner, .. }
+            | MirTypeKind::InlineRange { base: inner, .. }
+            | MirTypeKind::Quantity { base: inner, .. } => {
+                self.typed_equal_with_maps(builder, inner, left, right)
+            }
+            _ => Err(format!(
+                "MIR nested Map equality type `{}` has no recursive lowering",
+                left_ty.display_name()
+            )),
+        }
     }
 
     fn option_comparison(
@@ -7377,44 +7707,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             return Ok(comparison);
         }
 
-        if let Some((key, value)) = comparison_map_parts(left_ty) {
-            if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
-                && comparison_element_kind(key) == Some(ComparisonElementKind::String)
-                && comparison_element_kind(value) == Some(ComparisonElementKind::Integer)
-            {
-                let equal = self
-                    .call_host(builder, self.host.coll.map_equal, &[left, right])?
-                    .first()
-                    .copied()
-                    .ok_or_else(|| "MIR map comparison host returned no value".to_string())?;
-                if matches!(op, MirBinaryOp::Ne) {
-                    let equal = self.bool_value(builder, equal)?;
-                    let one = builder.ins().iconst(types::I8, 1);
-                    return Ok(builder.ins().bxor(equal, one));
-                }
-                return Ok(equal);
+        if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
+            && comparison_map_parts(left_ty).is_some()
+        {
+            let equal = self.typed_equal(builder, left_ty, left, right)?;
+            if matches!(op, MirBinaryOp::Ne) {
+                let equal = self.bool_value(builder, equal)?;
+                let one = builder.ins().iconst(types::I8, 1);
+                return Ok(builder.ins().bxor(equal, one));
             }
-        }
-
-        if let Some((key, value)) = comparison_map_parts(left_ty) {
-            if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
-                && comparison_element_kind(key) == Some(ComparisonElementKind::String)
-                && matches!(
-                    value.kind(),
-                    MirTypeKind::List(inner)
-                        if comparison_element_kind(inner)
-                            == Some(ComparisonElementKind::Integer)
-                )
-            {
-                let equal =
-                    self.map_equal_nested_int_lists(builder, left, right, location.line)?;
-                if matches!(op, MirBinaryOp::Ne) {
-                    let equal = self.bool_value(builder, equal)?;
-                    let one = builder.ins().iconst(types::I8, 1);
-                    return Ok(builder.ins().bxor(equal, one));
-                }
-                return Ok(equal);
-            }
+            return Ok(equal);
         }
         if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
             && comparison_map_parts(left_ty).is_none()
