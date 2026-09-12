@@ -960,7 +960,10 @@ host_fns! {
     count: "jet_jit_text_count" => jet_jit_text_count: binary;
     title: "jet_jit_text_title" => jet_jit_text_title: unary;
     split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
+    checked_unicode_split_once: "jet_unicode_split_once" => jet_jit_text_split_once: binary;
+
     cut_last: "jet_jit_text_cut_last" => jet_jit_text_cut_last: binary;
+    checked_unicode_cut_last: "jet_unicode_cut_last" => jet_jit_text_cut_last: binary;
     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;

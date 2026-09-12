@@ -493,6 +493,14 @@ fn jet_map_get_opt<K: Ord, V: Clone>(
 }
 
 #[inline(always)]
+fn jet_bag_count<T: Eq + std::hash::Hash>(
+    bag: &std::collections::HashMap<T, usize>,
+    value: &T,
+) -> i64 {
+    bag.get(value).copied().unwrap_or(0) as i64
+}
+
+#[inline(always)]
 fn jet_set_len<T>(set: &std::collections::HashSet<T>) -> i64 {
     set.len() as i64
 }
@@ -561,6 +569,63 @@ fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
 fn jet_deque_capacity<T>(queue: &std::collections::VecDeque<T>) -> i64 {
     queue.capacity() as i64
 }
+#[inline(always)]
+fn jet_deque_peek_front<T: Clone>(
+    queue: &std::collections::VecDeque<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(queue.front().cloned())
+}
+
+#[inline(always)]
+fn jet_deque_peek_back<T: Clone>(
+    queue: &std::collections::VecDeque<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(queue.back().cloned())
+}
+
+#[inline(always)]
+fn jet_deque_contains<T: PartialEq>(
+    queue: &std::collections::VecDeque<T>,
+    value: &T,
+) -> bool {
+    queue.contains(value)
+}
+
+#[inline(always)]
+fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
+    text.starts_with(prefix)
+}
+
+#[inline(always)]
+fn jet_deque_get<T: Clone>(
+    queue: &std::collections::VecDeque<T>,
+    index: i64,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(usize::try_from(index).ok().and_then(|index| queue.get(index).cloned()))
+}
+
+#[inline(always)]
+fn jet_deque_to_list<T: Clone>(queue: &std::collections::VecDeque<T>) -> Vec<T> {
+    queue.iter().cloned().collect()
+}
+
+#[inline(always)]
+fn jet_deque_join<T: JetShow>(
+    queue: &std::collections::VecDeque<T>,
+    separator: &String,
+) -> String {
+    queue
+        .iter()
+        .map(|value| value.jet_show())
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
+#[inline(always)]
+fn jet_deque_from<T>(values: Vec<T>) -> std::collections::VecDeque<T> {
+    values.into_iter().collect()
+}
+
 
 #[inline(always)]
 fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
@@ -576,6 +641,11 @@ fn jet_string_is_empty(text: &String) -> bool {
 pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
     text.contains(needle)
 }
+#[inline(always)]
+fn jet_string_repeat(text: &String, count: i64) -> String {
+    text.repeat(count.max(0) as usize)
+}
+
 
 #[inline(always)]
 fn jet_string_count_bytes(text: &String) -> i64 {
@@ -2395,6 +2465,7 @@ fn jet_iter_average_int(it: JetIter<i64>) -> f64 {
     let xs = it.to_list();
     if xs.is_empty() {
         0.0
+
     } else {
         xs.iter().sum::<i64>() as f64 / xs.len() as f64
     }
@@ -2453,6 +2524,10 @@ where
 fn jet_iter_to_set<T: Eq + std::hash::Hash>(it: JetIter<T>) -> std::collections::HashSet<T> {
     it.into_iter().collect()
 }
+fn jet_set_from<T: Eq + std::hash::Hash>(values: Vec<T>) -> std::collections::HashSet<T> {
+    values.into_iter().collect()
+}
+
 
 // #1477 List ledger surface
 fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {

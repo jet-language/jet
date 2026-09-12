@@ -620,6 +620,12 @@ pub(crate) enum JitLazyIter {
         source: i64,
         callback: JitCallableSlot,
     },
+    Enumerate {
+        source: i64,
+        index: usize,
+        callback: JitCallableSlot,
+    },
+
     FilterMap {
         source: i64,
         callback: JitCallableSlot,
@@ -686,6 +692,20 @@ impl JitLazyIter {
                 }
                 mapped
             }
+            Self::Enumerate { source, index, callback } => {
+                let value = lazy_iter_next(rt, *source)?;
+                let index_value = *index as i64;
+                *index = index.saturating_add(1);
+                let Some(mapped) = invoke_universal_pair(*callback, index_value, value) else {
+                    rt.set_host_fault("lazy iterator enumerate callback has no pair universal thunk");
+                    return None;
+                };
+                if runtime_stop_pending(rt) {
+                    return None;
+                }
+                Some(mapped)
+            }
+
             Self::FilterMap { source, callback } => loop {
                 let value = lazy_iter_next(rt, *source)?;
                 let Some(mapped) = invoke_universal_unary(*callback, value) else {
@@ -1819,6 +1839,8 @@ pub(crate) fn lazy_iter_exact_len(rt: &JitRuntime, handle: i64) -> Option<usize>
             sequence_len(rt, *source)?.checked_sub(*index)
         }
         JitLazyIter::Map { source, .. } => lazy_iter_exact_len(rt, *source),
+        JitLazyIter::Enumerate { source, .. } => lazy_iter_exact_len(rt, *source),
+
         JitLazyIter::Take { source, remaining } => {
             Some(lazy_iter_exact_len(rt, *source)?.min(*remaining))
         }
@@ -1864,6 +1886,25 @@ pub(crate) fn lazy_iter_map(
     }
     lazy_iter_push(rt, JitLazyIter::Map { source, callback })
 }
+pub(crate) fn lazy_iter_enumerate(
+    rt: &mut JitRuntime,
+    source: i64,
+    callback: JitCallableSlot,
+) -> i64 {
+    if !lazy_source_valid(rt, source) {
+        rt.set_host_fault("lazy iterator enumerate source is not a sequence handle");
+        return 0;
+    }
+    lazy_iter_push(
+        rt,
+        JitLazyIter::Enumerate {
+            source,
+            index: 0,
+            callback,
+        },
+    )
+}
+
 
 pub(crate) fn lazy_iter_filter_map(
     rt: &mut JitRuntime,
@@ -6381,6 +6422,13 @@ fn jet_jit_str_starts_with(hay: i64, needle: i64) -> i8 {
         }
     })
 }
+fn jet_jit_str_repeat(text_id: i64, count: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(text_id).unwrap_or_default();
+        rt.heap.alloc_string(text.repeat(count.max(0) as usize))
+    })
+}
+
 
 fn jet_jit_str_ends_with(hay: i64, needle: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
@@ -14030,6 +14078,9 @@ host_fns! {
     typed_eq: "jet_jit_typed_eq" => jet_jit_typed_eq: sig_typed_eq;
     str_order: "jet_jit_str_order" => jet_jit_str_order: sig_str_binary_i64;
     pattern_text_match: "jet_text_pattern_match" => jet_jit_pattern_text_match: sig_i64_i64_i64;
+    checked_string_starts_with: "jet_string_starts_with" => jet_jit_str_starts_with: sig_str_eq;
+    string_repeat: "jet_string_repeat" => jet_jit_str_repeat: sig_i64_i64_i64;
+
     pattern_binary_match: "jet_binary_pattern_match" => jet_jit_pattern_binary_match: sig_i64_i64_i64;
     str_contains: "jet_jit_str_contains" => jet_jit_str_contains: sig_str_eq;
     checked_string_contains: "jet_string_contains" => jet_jit_str_contains: sig_str_eq;
@@ -14068,6 +14119,7 @@ host_fns! {
     checked_string_slice: "jet_string_slice" => jet_jit_str_slice: sig_str_replace;
     checked_string_after: "jet_string_after" => jet_jit_str_after: sig_str_binary_i64;
     checked_string_before: "jet_string_before" => jet_jit_str_before: sig_str_binary_i64;
+    parse_float: "jet_std::jet_float_parse" => jet_jit_parse_f64: sig_str_unary_i64;
     checked_string_after_view: "jet_string_after_view" => jet_jit_str_after_view: sig_str_binary_i64;
     checked_string_before_view: "jet_string_before_view" => jet_jit_str_before_view: sig_str_binary_i64;
     checked_string_from_bytes: "jet_string_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;

@@ -2183,6 +2183,7 @@ impl TBuiltinOp {
             MapMergeWith => b("map_merge_with", "jet_map_merge_with", 3, 3, &[true, true, false], None, carrier),
             InsertList => b("list_insert", "jet_list_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
             RemoveList { mode, .. } => match mode {
                 ListRemoveMode::Value => b("list_remove_value", "jet_list_remove_value", 2, 2, &[true, false], Some(Effect::Mem), carrier),
                 ListRemoveMode::Slot => b("list_remove_slot", "jet_list_remove_slot", 2, 2, &[true, false], Some(Effect::Mem), carrier),
@@ -2323,25 +2324,39 @@ impl TBuiltinOp {
                 carrier,
                 MirPreludeAbi::Aggregate,
             ),
+            Product { float: false, .. } => b("product", "jet_list_product", 1, 1, &[false], None, carrier),
+            StringSplitOnce { .. } => b("string_split_once", "jet_unicode_split_once", 2, 2, &[true, true], None, carrier),
+            StringCutLast { .. } => b("string_cut_last", "jet_unicode_cut_last", 2, 2, &[true, true], None, carrier),
+            ParseFloat => b("float_parse", "jet_std::jet_float_parse", 1, 1, &[true], None, carrier),
+            Repeat => b("string_repeat", "jet_string_repeat", 2, 2, &[true, false], None, carrier),
+            StartsWith => b("list_starts_with", "jet_list_starts_with", 2, 2, &[true, true], None, carrier),
+            ListSlice => b("list_slice", "jet_list_slice", 3, 3, &[true, false, false], None, carrier),
+            MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
+            BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
+            DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
+            DequePeekBack => b("deque_peek_back", "jet_deque_peek_back", 1, 1, &[true], None, carrier),
+            DequeCapacity => b("deque_capacity", "jet_deque_capacity", 1, 1, &[true], None, carrier),
+            DequeContains => b("deque_contains", "jet_deque_contains", 2, 2, &[true, true], None, carrier),
+            DequeGet => b("deque_get", "jet_deque_get", 2, 2, &[true, false], None, carrier),
+            DequeToList => b("deque_to_list", "jet_deque_to_list", 1, 1, &[true], None, carrier),
+            DequeJoin => b("deque_join", "jet_deque_join", 2, 2, &[true, true], None, carrier),
+            DequeFrom => b("deque_from", "jet_deque_from", 1, 1, &[false], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. } | Min { .. }
-            | Max { .. } | Unzip { .. } | Chars | StringSplitOnce { .. }
-            | StringCutLast { .. } | ParseFloat | StartsWith | EndsWith | Replace | Repeat
+            | Max { .. } | Unzip { .. } | Chars | EndsWith | Replace
             | ContainsKey | ToString | Take | Skip | IterToList | IterCollect
             | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
-            | IterCompare | ListSlice | ListCopy | ListBinarySearch
+            | IterCompare | ListCopy | ListBinarySearch
             | ListUnion | ListIntersection | ListDifference | ListRandom
-            | MapCopy | MapEqual | MapFirst | MapToList { .. } | MapIntersection | MapSliceKeys
+            | MapCopy | MapFirst | MapToList { .. } | MapIntersection | MapSliceKeys
             | MapNew | MapContainsValue
             | Indexes | Zip { .. } | OptionZip { .. }
-            | SetFrom | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
+            | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
             | SetShuffle | SortedSetFrom | SortedSetToList | PriorityQueueFrom
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
-            | ByteBufferToBytes | BagHas | BagCount | BagLen
-            | DequePeekFront | DequePeekBack | DequeCapacity | DequeContains | DequeGet
-            | DequeToList | DequeJoin | DequeFrom => primitive(),
+            | ByteBufferToBytes | BagHas | BagLen => primitive(),
         };
         Ok(plan)
     }
@@ -2359,6 +2374,15 @@ impl TBuiltinOp {
                 TBuiltinOp::JoinSep => b(
                     "join",
                     "jet_list_join",
+                    2,
+                    2,
+                    &[true, true],
+                    None,
+                    carrier,
+                ),
+                TBuiltinOp::StartsWith if is_string_receiver(receiver) => b(
+                    "string_starts_with",
+                    "jet_string_starts_with",
                     2,
                     2,
                     &[true, true],
@@ -2461,6 +2485,17 @@ fn byte_buffer_method_route(
     method: &str,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
+    if method == "capacity" {
+        return Ok(b(
+            "byte_buffer_capacity",
+            "JetByteBuffer::capacity",
+            1,
+            1,
+            &[true],
+            None,
+            carrier,
+        ));
+    }
     let arity = match method {
         "clear" | "rewind" | "next" | "read" | "read_byte" | "flush" | "close" | "shutdown" => 1,
         "seek" | "read_bytes" | "read_string" | "copy_to" | "write_to" => 2,

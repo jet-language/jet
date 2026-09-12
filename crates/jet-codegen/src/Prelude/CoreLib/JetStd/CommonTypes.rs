@@ -4059,6 +4059,13 @@ pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
 pub fn jet_int_parse(value: &str) -> Result<i64, String> {
     jet_int_from_str(value.trim()).map_err(|_| format!("cannot parse `{value}` as an integer"))
 }
+pub fn jet_float_parse(value: &str) -> Result<f64, String> {
+    value
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| format!("cannot parse `{value}` as a float"))
+}
+
 
 pub fn jet_int_to_radix(value: i64, radix: i64) -> Result<String, String> {
     let radix = u32::try_from(radix)

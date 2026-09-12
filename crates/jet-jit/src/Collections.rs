@@ -3102,6 +3102,19 @@ fn checked_iter_map_typed(source: i64, callback: i64) -> i64 {
         crate::runtime_host::lazy_iter_map(rt, source, slot)
     })
 }
+fn checked_iter_enumerate(source: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, source);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_enumerate(rt, source, slot)
+    })
+}
+
 
 fn checked_iter_filter_typed(source: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
@@ -4708,6 +4721,10 @@ fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
         out
     })
 }
+fn jet_jit_list_slice_direct(list: i64, start: i64, end: i64) -> i64 {
+    jet_jit_list_slice(list, start, end, 0)
+}
+
 
 fn jet_jit_list_range_end(list: i64, start: i64, end: i64, exclusive: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -7214,6 +7231,10 @@ fn jet_jit_set_from_list(list: i64, string_kind: i64) -> i64 {
     })
 }
 
+fn jet_jit_set_from_list_int(list: i64) -> i64 {
+    jet_jit_set_from_list(list, 0)
+}
+
 // #1478: empty Set constructor + remaining non-closure surface.
 fn jet_jit_set_new(string_kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| set_handle(rt, HashSet::new(), string_kind != 0))
@@ -8916,6 +8937,10 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
         }
     })
 }
+fn jet_jit_byte_buffer_capacity(handle: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 3, 0, 0)
+}
+
 
 /// Packed-enum JetShow table: variant mangled names + payload kind codes.
 /// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8), 3 = String handle (>>8).
@@ -9132,6 +9157,9 @@ host_fns! {
         sig_slice.params.push(AbiParam::new(types::I64));
         sig_slice.params.push(AbiParam::new(types::I32));
         sig_slice.returns.push(AbiParam::new(types::I64));
+        let mut sig_slice_direct = sig_get_opt.clone();
+        sig_slice_direct.params.push(AbiParam::new(types::I64));
+
         let mut sig_range_end = Signature::new(cc);
         sig_range_end.params.push(AbiParam::new(types::I64));
         sig_range_end.params.push(AbiParam::new(types::I64));
@@ -9310,6 +9338,7 @@ host_fns! {
     checked_try_map_typed: "jet_jit_checked_try_map" => checked_list_try_map_typed: sig_view_map;
     checked_try_filter_typed: "jet_jit_checked_try_filter" => checked_list_try_filter_typed: sig_view_map;
     checked_iter_map_typed: "jet_jit_checked_iter_map" => checked_iter_map_typed: sig_closure_value;
+    checked_iter_enumerate: "jet_iter_enumerate" => checked_iter_enumerate: sig_closure_value;
     checked_iter_zip_typed: "jet_jit_checked_iter_zip" => checked_iter_zip_typed: sig_iter_zip;
     checked_iter_zip_strict_typed: "jet_jit_checked_iter_zip_strict" => checked_iter_zip_strict_typed: sig_iter_zip;
     checked_iter_zip_pad_typed: "jet_jit_checked_iter_zip_pad" => checked_iter_zip_pad_typed: sig_iter_zip_pad;
@@ -9461,7 +9490,11 @@ host_fns! {
     list_remove_value_str: "jet_jit_list_remove_value_str" => jet_jit_list_remove_value_str: sig_get_opt;
     list_remove_slot_generic: "jet_jit_list_remove_slot_generic" => jet_jit_list_remove_slot_generic: sig_get_opt;
     list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
+    checked_list_slice: "jet_list_slice" => jet_jit_list_slice_direct: sig_slice_direct;
+
     list_starts_with: "jet_jit_list_starts_with" => jet_jit_list_starts_with: sig_list_eq;
+    checked_list_starts_with: "jet_list_starts_with" => jet_jit_list_starts_with: sig_list_eq;
+
     list_ends_with: "jet_jit_list_ends_with" => jet_jit_list_ends_with: sig_list_eq;
     list_equal: "jet_jit_list_equal" => jet_jit_list_equal: sig_list_eq;
     list_binary_search: "jet_jit_list_binary_search" => jet_jit_list_binary_search: sig_get_opt;
@@ -9532,6 +9565,8 @@ host_fns! {
     map_keys: "jet_jit_map_keys" => jet_jit_map_keys: sig_len;
     map_values: "jet_jit_map_values" => jet_jit_map_values: sig_len;
     map_equal: "jet_jit_map_equal" => jet_jit_map_equal: sig_list_eq;
+    checked_map_equal: "jet_map_equal" => jet_jit_map_equal: sig_list_eq;
+
     map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
     map_top_n: "jet_map_top_n" => jet_jit_map_top_n: sig_get_opt;
@@ -9566,7 +9601,11 @@ host_fns! {
     iter_compare: "jet_iter_compare" => jet_jit_iter_compare: sig_get_opt;
     iter_split: "jet_iter_split" => jet_jit_iter_split: sig_get_opt;
     list_sum_i64: "jet_jit_list_sum_i64" => jet_jit_list_sum_i64: sig_len;
+    checked_list_sum: "jet_list_sum" => jet_jit_list_sum_i64: sig_len;
+
     list_product_i64: "jet_jit_list_product_i64" => jet_jit_list_product_i64: sig_len;
+    checked_list_product: "jet_list_product" => jet_jit_list_product_i64: sig_len;
+
     list_min_i64: "jet_jit_list_min_i64" => jet_jit_list_min_i64: sig_len;
     list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
     list_flatten: "jet_list_flatten" => jet_jit_list_flatten: sig_len;
@@ -9594,6 +9633,8 @@ host_fns! {
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;
     list_insert_f64: "jet_jit_list_insert_f64" => jet_jit_list_insert_f64: sig_list_insert_f64;
     set_from_list: "jet_jit_set_from_list" => jet_jit_set_from_list: sig_set_from;
+    checked_set_from: "jet_set_from" => jet_jit_set_from_list_int: sig_len;
+
     set_new: "jet_jit_set_new" => jet_jit_set_new: sig_sorted_set_new;
     set_insert: "jet_jit_set_insert" => jet_jit_set_insert: sig_list_eq;
     set_remove: "jet_jit_set_remove" => jet_jit_set_remove: sig_push;
@@ -9618,22 +9659,35 @@ host_fns! {
     deque_pop_front: "jet_jit_deque_pop_front" => jet_jit_deque_pop_front: sig_len;
     deque_pop_back: "jet_jit_deque_pop_back" => jet_jit_deque_pop_back: sig_len;
     deque_peek_front: "jet_jit_deque_peek_front" => jet_jit_deque_peek_front: sig_len;
+    checked_deque_peek_front: "jet_deque_peek_front" => jet_jit_deque_peek_front: sig_len;
+    checked_deque_peek_back: "jet_deque_peek_back" => jet_jit_deque_peek_back: sig_len;
+
     deque_peek_back: "jet_jit_deque_peek_back" => jet_jit_deque_peek_back: sig_len;
     deque_len: "jet_jit_deque_len" => jet_jit_deque_len: sig_len;
     deque_capacity: "jet_jit_deque_capacity" => jet_jit_deque_capacity: sig_len;
     deque_contains: "jet_jit_deque_contains" => jet_jit_deque_contains: sig_list_eq;
+    checked_deque_contains: "jet_deque_contains" => jet_jit_deque_contains: sig_list_eq;
+    checked_deque_get: "jet_deque_get" => jet_jit_deque_get: sig_get_opt;
+
     deque_get: "jet_jit_deque_get" => jet_jit_deque_get: sig_get_opt;
     deque_delete: "jet_jit_deque_delete" => jet_jit_deque_delete: sig_push;
     deque_to_list: "jet_jit_deque_to_list" => jet_jit_deque_to_list: sig_len;
+    checked_deque_to_list: "jet_deque_to_list" => jet_jit_deque_to_list: sig_len;
+    checked_deque_join: "jet_deque_join" => jet_jit_deque_join: sig_join;
+
     deque_join: "jet_jit_deque_join" => jet_jit_deque_join: sig_join;
     deque_reverse: "jet_jit_deque_reverse" => jet_jit_deque_reverse: sig_len;
     deque_split: "jet_jit_deque_split" => jet_jit_deque_split: sig_get_opt;
     deque_from: "jet_jit_deque_from" => jet_jit_deque_from: sig_len;
+    checked_deque_from: "jet_deque_from" => jet_jit_deque_from: sig_len;
+
     bag_new: "jet_jit_bag_new" => jet_jit_bag_new: sig_new;
     bag_add: "jet_jit_bag_add" => jet_jit_bag_add: sig_list_eq;
     bag_remove: "jet_jit_bag_remove" => jet_jit_bag_remove: sig_push;
     bag_has: "jet_jit_bag_has" => jet_jit_bag_has: sig_list_eq;
     bag_count: "jet_jit_bag_count" => jet_jit_bag_count: sig_get_opt;
+    checked_bag_count: "jet_bag_count" => jet_jit_bag_count: sig_get_opt;
+
     bag_len: "jet_jit_bag_len" => jet_jit_bag_len: sig_len;
     sorted_set_new: "jet_jit_sorted_set_new" => jet_jit_sorted_set_new: sig_sorted_set_new;
     authority_workspace: "jet_jit_authority_workspace" => jet_jit_authority_workspace: sig_new;
@@ -9683,4 +9737,5 @@ host_fns! {
     byte_buffer_write: "jet_jit_byte_buffer_write" => jet_jit_byte_buffer_write: sig_map_insert;
     byte_buffer_to_bytes: "jet_jit_byte_buffer_to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
+    checked_byte_buffer_capacity: "JetByteBuffer::capacity" => jet_jit_byte_buffer_capacity: sig_len;
 }
