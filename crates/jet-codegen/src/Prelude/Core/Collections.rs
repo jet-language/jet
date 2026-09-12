@@ -572,6 +572,10 @@ fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
 fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
     cache.contains_key(key)
 }
+#[inline(always)]
+fn jet_lru_keys<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> Vec<K> {
+    cache.keys()
+}
 
 #[inline(always)]
 fn jet_bag_len<T>(bag: &std::collections::HashMap<T, usize>) -> i64 {
