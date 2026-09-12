@@ -288,6 +288,59 @@ pub(crate) fn lower_fn_value_call(
     }
 }
 
+/// Recover the canonical index route when a pre-sema fragment still carries
+/// the parser's `IndexKind::Unknown`. Normal checked functions already carry
+/// this fact from sema; fragment lowering can instead use the lowered operand
+/// types, which are the same canonical collection identities.
+pub(crate) fn resolve_unknown_index_kind(
+    base_t: &TExpr,
+    index_t: &TExpr,
+    index: &Expr,
+    cx: &Cx,
+) -> Option<IndexKind> {
+    if let Expr::Ident(name, _) = index {
+        if let Some(field) = Syntax::layout_selector_name(name) {
+            return matches!(
+                base_t.ty.without_user_tags(),
+                Type::Named(name) if name == Syntax::TYPE_LAYOUT_INFO
+            )
+            .then(|| IndexKind::LayoutField(field.to_string()));
+        }
+    }
+
+    let base_ty = base_t.ty.without_user_tags();
+    let index_ty = index_t.ty.without_user_tags();
+    let is_range = matches!(index_ty, Type::Named(name) if name == Syntax::TYPE_RANGE);
+    match base_ty {
+        Type::List(_) => Some(if is_range {
+            IndexKind::Range
+        } else {
+            IndexKind::List
+        }),
+        Type::FixedList { .. } => Some(IndexKind::List),
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                && args.len() == 1 =>
+        {
+            Some(IndexKind::List)
+        }
+        Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
+            Some(IndexKind::Pool)
+        }
+        ty if ty.is_compute_tensor_family() && is_range => Some(IndexKind::Range),
+        Type::Map { .. } => Some(IndexKind::Map),
+        Type::Named(name)
+            if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) =>
+        {
+            Some(IndexKind::Lane(name.clone()))
+        }
+        Type::Named(name) if cx.index_hooks.contains_key(name) => {
+            Some(IndexKind::User(name.clone()))
+        }
+        _ => None,
+    }
+}
+
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; indexed collections
 /// and their fields must retain a recursive place shape, while a Pool index
@@ -6997,10 +7050,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::MapLit(tentries),
             }
         }),
-        // c109 Phase 5: indexing `coll[i]`. The `IndexKind` (List/Map) is the total
-        // sema fact (`is_map`); the helper line is resolved at lowering. The result
-        // type is the list element / map value type, read from the base's resolved
-        // type (totality) — never re-inferred in emit.
+        // c109 Phase 5: indexing `coll[i]`. Checked functions carry the
+        // canonical `IndexKind` from sema; pre-sema fragments may leave it
+        // unknown, so the same route is recovered from lowered operand types.
+        // The result type remains the element/value type of the lowered base.
+        // Nothing here re-infers a checked index contract during emission.
         Expr::Index {
             base,
             index,
@@ -7008,6 +7062,24 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             kind,
         } => {
             in_own_frame(|| {
+                let base_t = lower_expr(base, cx, env);
+                let index_t = lower_expr(index, cx, env);
+                let inferred_kind = if matches!(kind, IndexKind::Unknown) {
+                    resolve_unknown_index_kind(&base_t, &index_t, index, cx)
+                } else {
+                    None
+                };
+                let kind = inferred_kind.as_ref().unwrap_or(kind);
+                debug_assert!(
+                    !matches!(kind, IndexKind::Unknown),
+                    "sema-to-TIR handoff violated: unresolved index kind"
+                );
+                if matches!(kind, IndexKind::Unknown) {
+                    return invariant_violation_expr(
+                        *span,
+                        "sema-to-TIR handoff violated: unresolved index kind",
+                    );
+                }
                 // D-LAYOUT-FACTS1=B: select the checked layout field through
                 // the typed `fields.find(...).unwrap()` path. The exact-name
                 // predicate preserves the checked selector meaning: an absent
@@ -7018,7 +7090,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     let fields = TExpr {
                         ty: Type::List(Box::new(layout_field_ty.clone())),
                         kind: TExprKind::Field {
-                            recv: Box::new(lower_expr(base, cx, env)),
+                            recv: Box::new(base_t.clone()),
                             field: "fields".to_string(),
                             boxed: false,
                         },
@@ -7094,14 +7166,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         })),
                     };
                 }
-                let base_t = lower_expr(base, cx, env);
-                // `IndexKind` is a total sema fact. An unresolved kind is an
-                // invariant violation now that fragment evaluation is gone.
-                debug_assert!(
-                    !matches!(kind, IndexKind::Unknown),
-                    "sema-to-TIR handoff violated: unresolved index kind"
-                );
-                let index_t = lower_expr(index, cx, env);
                 let base_ty = base_t.ty.without_user_tags();
                 let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
                 if matches!(kind, IndexKind::Range) {

@@ -3385,9 +3385,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     })
                 });
             }
-            // c109 Phase 5: `coll[i] = v`. The `IndexKind` is resolved by sema; carry
-            // it as the total `is_map` fact (the gate excluded `Unknown`). No compound
-            // op on an index lvalue (parser admits only `=`).
+            // c109 Phase 5: `coll[i] = v`. Checked functions carry the
+            // canonical `IndexKind` from sema; pre-sema fragments may leave it
+            // unknown, so the lowering helper recovers it from operand types.
             LValue::Index {
                 base,
                 index,
@@ -3396,12 +3396,33 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             } => {
                 return in_own_frame(|| {
                     LowerStmtPlan::ready({
+                        let base_t = lower_expr(base, cx, env);
+                        let index_t = lower_expr(index, cx, env);
+                        let inferred_kind = if matches!(kind, IndexKind::Unknown) {
+                            super::expressions::resolve_unknown_index_kind(
+                                &base_t, &index_t, index, cx,
+                            )
+                        } else {
+                            None
+                        };
+                        let kind = inferred_kind.as_ref().unwrap_or(kind);
                         debug_assert!(
                             !matches!(kind, IndexKind::Unknown),
                             "sema-to-TIR handoff violated: unresolved index kind"
                         );
-                        let base_t = lower_expr(base, cx, env);
-                        let index_t = lower_expr(index, cx, env);
+                        if matches!(kind, IndexKind::Unknown) {
+                            ready_return!(TStmt::InvariantViolation {
+                                construct: "sema-to-TIR handoff violated: unresolved index kind"
+                                    .to_string(),
+                                span: *span,
+                            });
+                        }
+                        if matches!(kind, IndexKind::LayoutField(_)) {
+                            ready_return!(TStmt::InvariantViolation {
+                                construct: "layout field selector cannot be assigned".to_string(),
+                                span: *span,
+                            });
+                        }
                         let value_t = lower_expr(value, cx, env);
                         let target_ty = match &base_t.ty {
                             Type::List(elem) | Type::FixedList { elem, .. } => {
@@ -4697,14 +4718,11 @@ fn hardware_dma_channel(
     )
 }
 
-/// W4 (durability): proves the sema-to-TIR handoff `debug_assert`s in
+/// W4 (durability): prove the sema-to-TIR handoff `debug_assert`s in
 /// `lower_expr`'s `Expr::Index` arm and this file's `LValue::Index` arm
-/// actually trip on a leaked `IndexKind::Unknown` — the exact ice_regressions
-/// b5 bug class (sema left the index kind unresolved; the subset gate is
-/// supposed to exclude it, but a gate bug could let one through). These are
-/// `#[should_panic]` because the debug_assert is the thing under test, not a
-/// normal lowering path — the subset gate itself still excludes `Unknown` in
-/// every real compile.
+/// still trip when an unresolved `IndexKind::Unknown` has no type-derived
+/// recovery. A pre-sema fragment may carry `Unknown` only when the lowered
+/// operands identify a canonical index route.
 #[cfg(test)]
 mod handoff_assert_tests {
     use super::*;
