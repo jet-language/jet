@@ -2602,6 +2602,7 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::CLOSE
             | crate::Syntax::TRAIT_INDEX
             | crate::Syntax::TRAIT_INDEX_MUT
+            | crate::Syntax::TRAIT_ITERABLE
             | crate::Syntax::TRAIT_ITERATOR
             | crate::Generics::ADD
             | crate::Generics::SUB

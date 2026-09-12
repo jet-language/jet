@@ -471,7 +471,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     spread: false,
                     implicit_clone: false,
                     shared_auto_clone: false,
-                    owned_last_use: true,
+                    owned_last_use: false,
                     authority_boundary: false,
                     fn_coercion: None,
                     widen_fixed_to_list: false,
