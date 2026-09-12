@@ -19,10 +19,10 @@ use jet_foundation::MIR::{
 use std::collections::BTreeMap;
 use super::{
     ListSpreadPart, TCallArg, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
-    THostCall, THandleOp, TOptionProbe, TPattern, TPatternBinding, TPatternField,
+    THostCall, THandleOp, TMethodRef, TOptionProbe, TPattern, TPatternBinding, TPatternField,
     TPatternPosition, TPatternShape, TStrPart, TTryConvert, TPlace, TLocal, TNumericOp,
     TEnumArg, TEnumPayload, TTextPatternPart, TBinaryPatternPart, TBuiltinOp, TCoreClosureKind, TLambda,
-    TLambdaBody, TEffectFacts, TCaptureFacts, TGcEditKind, TPreludeRoute,
+    TLambdaBody, TEffectFacts, TGcEditKind, TPreludeRoute,
 };
 use jet_foundation::CanonicalPass;
 
@@ -3442,25 +3442,38 @@ fn panic_location(ctx: &mut LowerCtx, line: usize) -> MirPanicLoc {
 fn lower_index_hook(
     ctx: &mut LowerCtx,
     expr: &TExpr,
-    type_name: &str,
+    _type_name: &str,
     base: &TExpr,
     index: &TExpr,
     line: usize,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let function = ctx.function_id_for(&format!("{type_name}::get"))?;
-    let mut base_arg = ctx.lower_plain_arg(base)?;
-    base_arg.access = MirAccess::Read;
-    let index_arg = ctx.lower_plain_arg(index)?;
+    // Index reads are ordinary user trait calls. Build the same resolved
+    // MethodCall shape used by source-level dispatch so the concrete
+    // `Grid::Index::get` identity and receiver convention stay intact.
     let option_ty = crate::AST::Type::Option(Box::new(expr.ty.clone()));
-    let call = ctx.emit(
-        "index-hook-call",
-        Some(option_ty),
-        MirOperation::Call {
-            callee: MirCallee::User(function),
-            args: vec![base_arg, index_arg],
+    let call_expr = TExpr {
+        ty: option_ty.clone(),
+        kind: TExprKind::MethodCall {
+            recv: Box::new(base.clone()),
+            method: TMethodRef::trait_method(crate::Syntax::TRAIT_INDEX, "get"),
             type_args: Vec::new(),
+            args: vec![TCallArg {
+                value: index.clone(),
+                template_items: None,
+                borrow: !index.ty.is_scalar(),
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            }],
+            source_first_string_literal: None,
+            operator_line: None,
         },
-    )?;
+    };
+    let call = lower_expr(ctx, &call_expr)?;
     let success_block = ctx.new_block(ctx.span(), "index-hook-success")?;
     let failure_block = ctx.new_block(ctx.span(), "index-hook-failure")?;
     let join = ctx.new_block(ctx.span(), "index-hook-join")?;
@@ -3474,17 +3487,29 @@ fn lower_index_hook(
         then_target: success_block,
         else_target: failure_block,
     });
+    let mut incoming = Vec::with_capacity(1);
     ctx.switch_to(success_block);
     let value = ctx.emit(
         "index-hook-value",
         Some(expr.ty.clone()),
         MirOperation::OptionValue { subject: call },
     )?;
-    ctx.terminate(MirTerminator::Jump { target: join });
+    let source = ctx.current_block();
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Jump { target: join });
+        incoming.push((source, value));
+    }
     ctx.switch_to(failure_block);
     ctx.lower_index_hook_failure(line)?;
+    if incoming.is_empty() {
+        return unsupported_expr(ctx, "TExprKind::IndexHook (no reachable success branch)");
+    }
     ctx.switch_to(join);
-    Ok(value)
+    ctx.emit(
+        "index-hook-phi",
+        Some(expr.ty.clone()),
+        MirOperation::Phi { incoming },
+    )
 }
 
 

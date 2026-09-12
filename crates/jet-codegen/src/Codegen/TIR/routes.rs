@@ -1893,7 +1893,7 @@ fn reactive_method_route(
         match (receiver.without_user_tags().base_name(), method) {
             (Some("Signal"), "get") =>
                 ("Signal.get", "jet_std::JetSignal::get", &[true]),
-            (Some("Derived"), "get") =>
+            (Some("Derived" | "Computed"), "get") =>
                 ("Derived.get", "jet_std::JetDerived::get", &[true]),
             (Some("Signal"), "set") =>
                 ("Signal.set", "jet_std::JetSignal::set", &[true, false]),
