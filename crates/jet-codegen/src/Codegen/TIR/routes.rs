@@ -4021,7 +4021,7 @@ pub(super) fn math_builtin_route(
         );
     }
     let _ = result;
-    let symbol = format!("{type_name}::{func}");
+    let symbol = format!("jet_math_{type_name}_{func}");
     let borrow_mask = vec![false; arity];
     prelude_route_row(
         MirPreludeFamily::MathBuiltin,
