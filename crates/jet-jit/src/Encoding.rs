@@ -1976,6 +1976,66 @@ fn jet_jit_json_decode_typed(text: i64, type_key: i64) -> i64 {
         ))),
     }
 }
+/// Typed `core.data.json<T>` host. Unlike `core.encoding.json.decode<T>`, the
+/// data route's generic result is always a list, so each ordered JSON array
+/// element is decoded against the supplied element type key.
+fn jet_jit_data_json_decode_typed(text: i64, type_key: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return result_err_fields(json_rt::FieldError::one("typed JSON received an invalid type key"));
+    };
+    match json_rt::parse_datatree_typed_ordered(&text) {
+        Ok(json_rt::DataTree::Array(items)) => {
+            let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
+                return result_err_fields(json_rt::FieldError::one(format!(
+                    "typed JSON has no type `{type_key}`"
+                )));
+            };
+            let mut raw_values = Vec::with_capacity(items.len());
+            let mut errors = Vec::new();
+            for (index, item) in items.iter().enumerate() {
+                match decode_datatree_for_type(item, &type_key) {
+                    Ok(value) => raw_values.push(value),
+                    Err(error) => errors.extend(json_rt::FieldError::under_errors(
+                        &format!("[{index}]"),
+                        error,
+                    )),
+                }
+            }
+            if !errors.is_empty() {
+                return result_err_fields(errors);
+            }
+            let values = raw_values
+                .into_iter()
+                .map(|value| match descriptor.abi {
+                    runtime_host::RuntimeValueAbi::Float => {
+                        JetVal::Float(f64::from_bits(value as u64))
+                    }
+                    runtime_host::RuntimeValueAbi::Float32 => {
+                        JetVal::Float(f32::from_bits(value as u32) as f64)
+                    }
+                    runtime_host::RuntimeValueAbi::Bool => JetVal::Bool(value != 0),
+                    runtime_host::RuntimeValueAbi::Char => {
+                        JetVal::Char(char::from_u32(value as u32).unwrap_or('\0'))
+                    }
+                    _ => JetVal::Int(value),
+                })
+                .collect();
+            let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_list_values(values));
+            result_ok(list as u64)
+        }
+        Ok(tree) => result_err_fields(json_rt::FieldError::one(format!(
+            "expected a list, found {}",
+            json_rt::datatree_kind_for(&tree)
+        ))),
+        Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+            "invalid JSON (line {}): {}",
+            error.line.unwrap_or(0),
+            error.reason
+        ))),
+    }
+}
+
 /// Typed codec ABI for TIR's borrowed DataTree route. The checked target type
 /// travels as a heap string because the resident host has no monomorphized
 /// Rust type to receive at this boundary.
@@ -3633,7 +3693,7 @@ host_fns! {
     json_parse_ordered: "jet_jit_json_parse_ordered" => jet_jit_json_parse_ordered: sig_unary;
     json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
     json_decode_typed: "jet_jit_json_decode_typed" => jet_jit_json_decode_typed: sig_binary;
-    data_json_decode: "jet_data_json_decode" => jet_jit_json_decode_typed: sig_binary;
+    data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_binary;
     db_decode: "jet_jit_db_decode" => jet_jit_db_decode: sig_binary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
     json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
