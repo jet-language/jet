@@ -14125,6 +14125,7 @@ host_fns! {
     checked_string_from_bytes: "jet_string_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;
     checked_string_from_bytes_lossy: "jet_string_from_bytes_lossy" => jet_jit_str_from_bytes_lossy: sig_str_unary_i64;
     checked_slice_range: "jet_slice_range" => jet_jit_slice_range_value: sig_contract_fail;
+    checked_slice_vec_range: "jet_slice_vec_range" => jet_jit_slice_range_value: sig_contract_fail;
     parse_i64: "jet_std::jet_int_parse" => jet_jit_parse_i64: sig_str_unary_i64;
     parse_f64: "jet_jit_parse_f64" => jet_jit_parse_f64: sig_str_unary_i64;
     numeric_try_i64: "jet_numeric_try_from_fixed" => jet_jit_numeric_try_i64: sig_i64_i64_i64_i64;
