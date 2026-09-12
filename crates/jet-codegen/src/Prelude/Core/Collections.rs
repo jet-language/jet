@@ -601,6 +601,10 @@ fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
     bits.contains(&bit)
 }
 #[inline(always)]
+fn jet_bit_set_to_list(bits: &JetBitSet) -> Vec<i64> {
+    bits.to_list()
+}
+#[inline(always)]
 fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
     queue.len() as i64
 }
