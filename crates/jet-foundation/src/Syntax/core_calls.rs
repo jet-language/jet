@@ -1262,7 +1262,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b41ffd3e06db5002d03a76fa5a032974acdbfee8c80e3c36240056ed53907c3d
+// Source SHA-256: 899a77cc91eadc9185e289e89a0dec593cbb1ce6f0834dadf77fdac0ae061648
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.uuid", "v7"),
@@ -2935,6 +2935,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot() .with_jit_symbol("jet_jit_data_inner_join").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]).without_direct_jit(),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]).without_direct_jit(),
+    CoreCallRecord::new("core.archive", "zip_compress", "jet_foundation::CoreArchive::jet_archive_zip_compress", false, &[true, true]).with_jit_symbol("jet_jit_zip_compress"),
+    CoreCallRecord::new("core.auth", "verify_jwt", "jet_auth_verify_jwt_defaulted", true, &[true, true, true, true, true]).with_max_arity(5).with_jit_symbol("jet_jit_auth_verify_jwt"),
+    CoreCallRecord::new("core.crypto", "__x25519_generate", "jet_crypto_x25519_generate_impl", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_x25519_generate"),
+    CoreCallRecord::new("core.crypto", "__signing_generate", "jet_crypto_signing_generate_impl", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_signing_generate"),
+    CoreCallRecord::new("core.crypto", "__hasher_new", "jet_crypto_hasher_new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_new"),
+    CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true]).with_jit_symbol("jet_jit_toml_to_string"),
+    CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]).with_jit_symbol("jet_jit_yaml_to_string"),
+    CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]).with_jit_symbol("jet_jit_xml_to_bytes"),
+    CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
 ];
 // END GENERATED CORE CALLS
 

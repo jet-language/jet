@@ -24,7 +24,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b41ffd3e06db5002d03a76fa5a032974acdbfee8c80e3c36240056ed53907c3d
+// Source SHA-256: 899a77cc91eadc9185e289e89a0dec593cbb1ce6f0834dadf77fdac0ae061648
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -431,7 +431,7 @@ const CORE_MODULE_69_MEMBERS: &[&str] = &["callback"];
 const CORE_MODULE_69_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_69_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_70_MEMBERS: &[&str] = &["Delivery", "DeliveryEvent", "DeliveryReceipt", "DeliveryState", "ServiceDelivery", "ServiceEndpoint", "ServiceError", "ServiceRestart", "ServiceRuntime", "ServiceStateStore", "ServiceTree", "ServiceUpgradeReceipt", "ServiceWorkflow", "TaskOutcome", "TaskStatus", "delivery_at_most_once", "delivery_durable", "restart_one_for_all", "restart_one_for_one", "restart_rest_for_one", "runtime", "state_store", "tree", "tree_show"];
+const CORE_MODULE_70_MEMBERS: &[&str] = &["Delivery", "DeliveryEvent", "DeliveryReceipt", "DeliveryState", "ServiceDelivery", "ServiceEndpoint", "ServiceError", "ServiceRestart", "ServiceRuntime", "ServiceStateStore", "ServiceTree", "ServiceUpgradeReceipt", "ServiceWorkflow", "TaskOutcome", "TaskStatus", "delivery_at_most_once", "delivery_durable", "restart_one_for_all", "restart_one_for_one", "restart_rest_for_one", "runtime", "state_store", "tree", "tree_show", "workflow_start"];
 const CORE_MODULE_70_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_70_DEPENDENCIES: &[&str] = &["core.net", "core.tasks"];
 
