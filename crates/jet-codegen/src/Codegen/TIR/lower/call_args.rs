@@ -1178,7 +1178,14 @@ pub(crate) fn lower_one_call_arg(
     // conversions such as `[T#N]` to `[T]`.
     let value = match (&a.expr, value.kind) {
         (Expr::Ident(name, _), TExprKind::Local(local)) => {
-            let Some(ty) = env.ty_of(name) else {
+            let ty = env.ty_of(name).cloned().or_else(|| {
+                a.flags
+                    .binder_refs
+                    .iter()
+                    .find(|(binder, _, _)| binder == name)
+                    .map(|(_, _, ty)| ty.clone())
+            });
+            let Some(ty) = ty else {
                 return invariant_call_arg(a, "call argument local has no resolved type");
             };
             TExpr {
