@@ -9,6 +9,9 @@
 fn jet_std_math_sqrt(x: f64) -> f64 {
     x.sqrt()
 }
+fn jet_std_math_sin(x: f64) -> f64 {
+    x.sin()
+}
 fn jet_std_math_pow(a: f64, b: f64) -> f64 {
     a.powf(b)
 }
