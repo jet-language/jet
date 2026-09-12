@@ -4317,6 +4317,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         if matches!(
             ty.kind(),
             MirTypeKind::Apply { name, args }
+                if args.is_empty() && name.name == "EnvError"
+        ) {
+            // `core.sys` host failures use `Marshal::result_err_msg`, so the
+            // resident EnvError carrier is already the Prelude's canonical
+            // display text as a String handle.
+            return Ok(self.cast(builder, value, types::I64)?);
+        }
+        if matches!(
+            ty.kind(),
+            MirTypeKind::Apply { name, args }
                 if args.is_empty() && matches!(name.name.as_str(), "TextError" | "RangeError")
         ) {
             // These Prelude errors already contain their complete rendered text.
@@ -4502,6 +4512,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 _ => unreachable!("allocator view predicate must match a tagged MIR type"),
             };
             return self.display_value_of_type(builder, inner, value, packed_optional);
+        }
+        if matches!(
+            ty.kind(),
+            MirTypeKind::Apply { name, args }
+                if args.is_empty() && name.name == "EnvError"
+        ) {
+            // `core.sys` host failures use `Marshal::result_err_msg`, so the
+            // resident EnvError carrier is already the Prelude's canonical
+            // display text as a String handle.
+            return Ok(self.cast(builder, value, types::I64)?);
         }
         if matches!(
             ty.kind(),

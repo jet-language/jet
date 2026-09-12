@@ -143,7 +143,9 @@ pub(crate) mod process_prelude {
                 match self {
                     Self::InvalidName => "invalid environment variable name".to_string(),
                     Self::InvalidValue => "invalid environment variable value".to_string(),
-                    Self::NonUnicode => "environment contains non-unicode data".to_string(),
+                    Self::NonUnicode => {
+                        "environment contains a name or value that is not valid Unicode".to_string()
+                    }
                 }
             }
         }
