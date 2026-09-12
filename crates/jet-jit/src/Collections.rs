@@ -9337,6 +9337,9 @@ fn jet_jit_byte_buffer_replace(handle: i64, from: i64, to: i64) -> i64 {
 fn jet_jit_byte_buffer_write_u8(handle: i64, value: i64) {
     jet_jit_byte_buffer_write(handle, value, 0);
 }
+fn jet_jit_byte_buffer_write_byte(handle: i64, value: i64) {
+    jet_jit_byte_buffer_write(handle, value, 8);
+}
 
 fn jet_jit_byte_buffer_write_i8(handle: i64, value: i64) {
     jet_jit_byte_buffer_write(handle, value, 10);
@@ -10286,6 +10289,7 @@ host_fns! {
     checked_byte_buffer_write_to: "JetByteBuffer::write_to" => jet_jit_byte_buffer_write_to: sig_push;
     checked_byte_buffer_replace: "JetByteBuffer::replace" => jet_jit_byte_buffer_replace: sig_three_ret;
     checked_byte_buffer_write_u8: "JetByteBuffer::write_u8" => jet_jit_byte_buffer_write_u8: sig_push;
+    checked_byte_buffer_write_byte: "JetByteBuffer::write_byte" => jet_jit_byte_buffer_write_byte: sig_push;
     checked_byte_buffer_write_i8: "JetByteBuffer::write_i8" => jet_jit_byte_buffer_write_i8: sig_push;
     checked_byte_buffer_write_u16_le: "JetByteBuffer::write_u16_le" => jet_jit_byte_buffer_write_u16_le: sig_push;
     checked_byte_buffer_write_u16_be: "JetByteBuffer::write_u16_be" => jet_jit_byte_buffer_write_u16_be: sig_push;
