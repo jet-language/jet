@@ -9238,7 +9238,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 return Ok(value);
             }
         }
-        let typed_symbol = if model_open {
+        let measurement_sqrt = row.module == "core.math"
+            && row.member == "sqrt"
+            && result_type.is_some_and(|ty| {
+                matches!(
+                    ty.kind(),
+                    MirTypeKind::Apply { name, args }
+                        if name.name == "Measurement"
+                            && args.len() == 1
+                            && matches!(args[0].kind(), MirTypeKind::Float)
+                )
+            });
+        let typed_symbol = if measurement_sqrt {
+            Some("jet_std::JetMeasurement::sqrt")
+        } else if model_open {
             Some("jet_jit_model_open")
         } else if !type_args.is_empty() {
             match (row.module.as_str(), row.member.as_str()) {
