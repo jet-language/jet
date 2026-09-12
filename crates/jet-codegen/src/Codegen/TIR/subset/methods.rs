@@ -1191,7 +1191,9 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && method == "safe" && args.is_empty() {
         // D-APILABEL1=A: the bare spelling is what a synthesized Core default uses.
         if let Expr::Ident(type_name, _) = receiver {
-            if type_name == "EncodingLimits" && !cx.struct_fields.contains_key(type_name) {
+            if matches!(type_name.as_str(), "EncodingLimits" | "Limits")
+                && !cx.struct_fields.contains_key(type_name)
+            {
                 return true;
             }
         }
@@ -1288,6 +1290,29 @@ pub(crate) fn method_call_in_subset(
     let recv_type_leaf = recv_type
         .as_deref()
         .map(|name| name.rsplit('.').next().unwrap_or(name));
+    // D-CRYPTO-SUBSET1: Core crypto constructors carry a nominal receiver
+    // marker in some checked paths even though lowering uses the static helper
+    // route. Reuse the existing constructor admission table for that shape.
+    if let Some(type_name) = recv_type_leaf {
+        if matches!(
+            type_name,
+            "Secret"
+                | "SigningKey"
+                | "X25519SecretKey"
+                | "VerifyKey"
+                | "X25519PublicKey"
+                | "Signature"
+                | "Sealed"
+                | "WrappedKey"
+                | "WrappedVaultKey"
+                | "KeyUnlock"
+                | "PasswordHash"
+                | "Hasher"
+        ) && matches!(receiver, Expr::Ident(name, _) if name == type_name && !locals.contains(name))
+        {
+            return static_method_call_in_subset(type_name, method, args, cx, locals);
+        }
+    }
     if matches!(
         (recv_type_leaf, method, args.len()),
         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)

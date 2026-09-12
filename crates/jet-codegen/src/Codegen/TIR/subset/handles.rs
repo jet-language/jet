@@ -266,6 +266,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
         ("HistoryRng", "next_u64", 0) => THandleOp::HistoryRngNextU64,
         ("HistoryRng", "below", 1) => THandleOp::HistoryRngBelow,
+        ("Fake", "locale", 1) => THandleOp::FakeLocale,
         ("Fake", "name", 0) => THandleOp::FakeName,
         ("Fake", "email", 0) => THandleOp::FakeEmail,
         ("Fake", "host", 0) => THandleOp::FakeHost,
