@@ -168,6 +168,9 @@ pub(crate) mod text_rt {
     pub(crate) fn unicode_byte_count(s: &str) -> i64 {
         jet_text_unicode_byte_count(&s.to_string())
     }
+    pub(crate) fn rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
+        jet_text_rsplitn(&s.to_string(), &pat.to_string(), n)
+    }
     pub(crate) fn ascii_upper(s: &str) -> String {
         jet_text_ascii_upper(&s.to_string())
     }
@@ -363,6 +366,13 @@ fn jet_jit_text_unicode_scalar_count(s: i64) -> i64 {
 
 fn jet_jit_text_unicode_byte_count(s: i64) -> i64 {
     text_rt::unicode_byte_count(&clone_string(s))
+}
+fn jet_jit_text_rsplitn(s: i64, pat: i64, n: i64) -> i64 {
+    list_from_strings(text_rt::rsplitn(
+        &clone_string(s),
+        &clone_string(pat),
+        n,
+    ))
 }
 
 fn jet_jit_string_lines(s: i64) -> i64 {
@@ -1076,6 +1086,7 @@ host_fns! {
     casefold: "jet_text_casefold" => jet_jit_text_casefold: unary;
     unicode_scalar_count: "jet_text_unicode_scalar_count" => jet_jit_text_unicode_scalar_count: unary;
     unicode_byte_count: "jet_text_unicode_byte_count" => jet_jit_text_unicode_byte_count: unary;
+    rsplitn: "jet_text_rsplitn" => jet_jit_text_rsplitn: ternary;
     string_lines: "jet_string_lines" => jet_jit_string_lines: unary;
     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
