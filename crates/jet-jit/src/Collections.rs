@@ -3682,6 +3682,9 @@ fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
     }
     alloc_closure_ints(filtered)
 }
+fn jet_jit_list_para_filter(list: i64, callback: i64) -> i64 {
+    jet_jit_list_closure_filter(list, callback)
+}
 
 fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
@@ -5196,6 +5199,33 @@ fn jet_jit_map_fold(map: i64, init: i64, callback: i64) -> i64 {
     }
     folded
 }
+fn jet_jit_map_merge_with(left: i64, right: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut merged = std::collections::BTreeMap::new();
+    for (key, value) in clone_map_pairs(left) {
+        merged.insert(key, value);
+    }
+    for (key, right_value) in clone_map_pairs(right) {
+        if let Some(left_value) = merged.remove(&key) {
+            if closure_trapped() {
+                return 0;
+            }
+            let key_handle = map_callback_key(&key);
+            let resolved =
+                invoke_closure_i64_many(slot, &[key_handle, left_value, right_value]);
+            if closure_trapped() {
+                return 0;
+            }
+            merged.insert(key, resolved);
+        } else {
+            merged.insert(key, right_value);
+        }
+    }
+    let pairs = merged.into_iter().collect::<Vec<_>>();
+    alloc_map_pairs(&pairs)
+}
 
 fn jet_jit_map_pop_first(map: i64) -> i64 {
     let (key, value, _) = collection_semantics::map_pop_first_i64(clone_map_pairs(map));
@@ -5252,6 +5282,18 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
         }
         out
     })
+}
+fn jet_jit_ordering_then(first: i64, second: i64) -> i64 {
+    let equal = crate::types_meta::prelude_enum_variant_index(
+        jet_foundation::Syntax::TYPE_ORDERING,
+        "Equal",
+    )
+    .expect("Prelude Ordering variants must be registered");
+    if first == equal {
+        second
+    } else {
+        first
+    }
 }
 
 /// Exact checked MIR map-index setter route.  Map assignment has the same
@@ -10012,6 +10054,8 @@ host_fns! {
     list_closure_count_where: "jet_jit_list_closure_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;
     checked_list_count_where: "jet_list_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;
     list_closure_update_first: "jet_jit_list_closure_update_first" => jet_jit_list_closure_update_first: sig_closure_update_first;
+    checked_list_update_first: "jet_list_update_first" => jet_jit_list_closure_update_first: sig_closure_update_first;
+
     list_closure_map: "jet_jit_list_closure_map" => jet_jit_list_closure_map: sig_closure_value;
     list_closure_map_mut: "jet_jit_list_closure_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
     checked_list_map: "jet_list_map" => jet_jit_list_closure_map: sig_closure_value;
@@ -10056,6 +10100,9 @@ host_fns! {
     list_eq_date: "jet_jit_list_eq_date" => jet_jit_list_eq_date: sig_list_eq;
     list_closure_map_f64_mut: "jet_jit_list_closure_map_f64_mut" => jet_jit_list_closure_map_f64_mut: sig_closure_value;
     list_closure_filter: "jet_jit_list_closure_filter" => jet_jit_list_closure_filter: sig_closure_value;
+    list_para_filter: "jet_jit_list_para_filter" => jet_jit_list_para_filter: sig_closure_value;
+    checked_list_para_filter: "jet_list_para_filter" => jet_jit_list_para_filter: sig_closure_value;
+
     list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_predicate;
     list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;
     list_order_date: "jet_jit_list_order_date" => jet_jit_list_order_date: sig_list_eq;
@@ -10119,6 +10166,9 @@ host_fns! {
     map_new: "jet_jit_map_new" => jet_jit_map_new: sig_new;
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
+    map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
+    checked_map_merge_with: "jet_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
+
     map_clear: "jet_jit_map_clear" => jet_jit_map_clear: sig_sort;
 
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
@@ -10199,6 +10249,8 @@ host_fns! {
     checked_map_map_values: "jet_map_map_values" => jet_jit_map_map_values: sig_closure_value;
     map_fold: "jet_jit_map_fold" => jet_jit_map_fold: sig_closure_fold;
     checked_map_fold: "jet_map_fold" => jet_jit_map_fold: sig_closure_fold;
+    ordering_then: "jet_jit_ordering_then" => jet_jit_ordering_then: sig_scalar_debug;
+    checked_ordering_then: "jet_ordering_then" => jet_jit_ordering_then: sig_scalar_debug;
     map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
     iter_first: "jet_jit_iter_first" => jet_jit_iter_first: sig_len;
     iter_string_split: "jet_iter_string_split" => jet_jit_iter_string_split: sig_get_opt;
