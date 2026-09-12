@@ -7,7 +7,7 @@ use jet_foundation::MIR::{
     MirCallbackAdapter, MirCallbackId, MirCallee, MirCallArg, MirConstKey, MirConstReport,
     MirConstant, MirCoreCall, MirCoreClosureKind, MirDataPlan, MirDataPlanCallable,
     MirDataPlanColumn, MirDataPlanNode, MirDataPlanNodeId, MirDataPlanPhysicalNode, MirConversion,
-    MirEnumArg, MirForeignAbi, MirHardwareOp,
+    MirEnumArg, MirForeignAbi, MirHardwareOp, MirPlace, MirPlaceBase, MirPlaceId,
     MirGcEditSiteId, MirIndexKind, MirLayoutCompareOp, MirOperation, MirOwnership, MirParam,
     MirPattern, MirPatternBinding, MirPatternField, MirPatternPosition, MirPatternShape,
     MirPanicContext, MirPanicLoc, MirPreludeAbi, MirPreludeFamily, MirRequireKind, MirSemanticOp,
@@ -95,7 +95,7 @@ fn lower_unzip(
     };
     let source = if crate::Collections::is_iter_type(&recv.ty) {
         if let TExprKind::Local(local) = &recv.kind {
-            let place = ctx.place_for_local(local, MirAccess::Move)?;
+            let place = lower_local_place(ctx, local, MirAccess::Move)?;
             ctx.emit("unzip-source", Some(recv.ty.clone()), MirOperation::MovePlace { place })?
         } else {
             ctx.lower_child(recv)?
@@ -196,7 +196,7 @@ fn lower_unzip(
     let fields = columns
         .into_iter()
         .map(|(local, _, column_ty, _, _, field, _)| {
-            let place = ctx.place_for_local(&local, MirAccess::Move)?;
+            let place = lower_local_place(ctx, &local, MirAccess::Move)?;
             let value = ctx.emit(
                 "unzip-column-result",
                 Some(column_ty),
@@ -590,15 +590,79 @@ fn mir_constant(
     })
 }
 
+fn lower_persistent_place(
+    ctx: &mut LowerCtx,
+    local: &TLocal,
+    access: MirAccess,
+) -> Result<MirPlaceId, LowerError> {
+    let Some(key) = local.persist_key.as_ref() else {
+        return ctx.place_for_local(local, access);
+    };
+    if let Some(place) = ctx
+        .places
+        .iter_mut()
+        .find(|place| place.persist_key.as_ref() == Some(key))
+    {
+        place.access = match (place.access, access) {
+            (MirAccess::Move, _) | (_, MirAccess::Move) => MirAccess::Move,
+            (MirAccess::Write, _) | (_, MirAccess::Write) => MirAccess::Write,
+            _ => MirAccess::Read,
+        };
+        return Ok(place.id);
+    }
+    let ty = local.persist_ty.clone().ok_or_else(|| {
+        ctx.error(
+            ctx.span(),
+            format!("persistent local `{}` has no checked type", local.name),
+        )
+    })?;
+    let span = ctx.span();
+    let id = MirPlaceId(stable_id(
+        "mir-place",
+        &format!("{}|persistent|{key}", ctx.function.key),
+    ));
+    let mir_ty = ctx.mir_type(&ty)?;
+    ctx.places.push(MirPlace {
+        id,
+        span,
+        ty: mir_ty,
+        base: MirPlaceBase::Static(key.clone()),
+        projections: Vec::new(),
+        access,
+        persist_key: Some(key.clone()),
+    });
+    Ok(id)
+}
+
+fn lower_local_place(
+    ctx: &mut LowerCtx,
+    local: &TLocal,
+    access: MirAccess,
+) -> Result<MirPlaceId, LowerError> {
+    if local.is_persistent() {
+        lower_persistent_place(ctx, local, access)
+    } else {
+        ctx.place_for_local(local, access)
+    }
+}
+fn lower_local_value(
+    ctx: &mut LowerCtx,
+    local: &TLocal,
+    ty: &Type,
+) -> Result<MirValueId, LowerError> {
+    let place = lower_local_place(ctx, local, MirAccess::Read)?;
+    let value = ctx.emit("local.read", Some(ty.clone()), MirOperation::ReadPlace(place))?;
+    ctx.local_values.insert(local.name.clone(), value);
+    Ok(value)
+}
+
 pub(super) fn lower_receiver_place(
     ctx: &mut LowerCtx,
     expr: &TExpr,
     access: MirAccess,
 ) -> Result<Option<jet_foundation::MIR::MirPlaceId>, LowerError> {
     let place = match &expr.kind {
-        TExprKind::Local(local) => {
-            Some(ctx.lower_place(&TPlace::Local(local.clone()), access)?)
-        }
+        TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
         TExprKind::Index {
             base,
             index,
@@ -858,7 +922,7 @@ pub(super) fn lower_expr(
             }
             ctx.emit("string-literal", Some(expr.ty.clone()), MirOperation::BuildString { parts: lowered })
         }
-        TExprKind::Local(local) => Ok(ctx.lower_local(local, &expr.ty)?),
+        TExprKind::Local(local) => lower_local_value(ctx, local, &expr.ty),
         TExprKind::Unit => ctx.emit("unit-literal", 
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Unit),
@@ -1220,7 +1284,11 @@ pub(super) fn lower_expr(
             ctx.emit("resource-new", Some(expr.ty.clone()), MirOperation::Move { value })
         }
         TExprKind::ResourceTake(name) => {
-            let place = ctx.place_for_local(&super::TLocal::user(name.clone()), MirAccess::Move)?;
+            let place = lower_local_place(
+                ctx,
+                &super::TLocal::user(name.clone()),
+                MirAccess::Move,
+            )?;
             ctx.emit(
                 "resource-take",
                 Some(expr.ty.clone()),
@@ -2018,7 +2086,7 @@ pub(super) fn lower_expr(
                     let local = TLocal::generated(format!("method_receiver_{}", value.0)).as_mutable();
                     let target = ctx.bind_local(&local, recv.ty.clone(), true, false, false)?;
                     ctx.emit("method-receiver-temp", None, MirOperation::WritePlace { place: target, value })?;
-                    place = Some(ctx.place_for_local(&local, access)?);
+                    place = Some(lower_local_place(ctx, &local, access)?);
                 }
                 let value = match place {
                     Some(place) => ctx.emit(
@@ -2497,15 +2565,19 @@ pub(super) fn lower_expr(
             fn_name,
         } => {
             let input = ctx.lower_child(inner)?;
-            lower_try_value(
-                ctx,
-                input,
-                &expr.ty,
-                &inner.ty,
-                note.as_deref(),
-                convert,
-                Some((file, *line, fn_name)),
-            )
+            if try_child_already_propagated(inner) {
+                Ok(input)
+            } else {
+                lower_try_value(
+                    ctx,
+                    input,
+                    &expr.ty,
+                    &inner.ty,
+                    note.as_deref(),
+                    convert,
+                    Some((file, *line, fn_name)),
+                )
+            }
         }
         TExprKind::OrFallback { value, fallback } => {
             lower_or_fallback_expr(ctx, expr, value, fallback)
@@ -3616,6 +3688,37 @@ fn lower_if_expr(
         MirOperation::Phi { incoming },
     )
 }
+fn try_child_already_propagated(inner: &TExpr) -> bool {
+    match &inner.kind {
+        TExprKind::ModuleCall {
+            target_return: Some(target),
+            ..
+        } => {
+            matches!(target, Type::Result { .. } | Type::Option(_)) && target != &inner.ty
+        }
+        TExprKind::MethodCall { recv, .. } => {
+            matches!(
+                recv.ty.without_user_tags(),
+                Type::Named(name)
+                    if name.ends_with(".Client") || name.ends_with(".Server")
+            )
+        }
+        _ => false,
+    }
+}
+fn checked_failure_return_type(ctx: &LowerCtx, carrier: &TFailureCarrier) -> Option<Type> {
+    ctx.function.ret.clone().or_else(|| match carrier {
+        TFailureCarrier::Result { success, error } => Some(Type::Result {
+            ok: Box::new(success.clone()),
+            err: Box::new(error.clone()),
+        }),
+        TFailureCarrier::Optional { value } => Some(Type::Option(Box::new(value.clone()))),
+        TFailureCarrier::Diverges { value } => Some(value.clone()),
+        TFailureCarrier::Infallible => None,
+    })
+}
+
+
 
 fn lower_if_cond(
     ctx: &mut LowerCtx,
@@ -3798,11 +3901,9 @@ fn lower_try_value(
                         location,
                         &carrier,
                     )?;
-                    let return_ty = ctx
-                        .function
-                        .ret
-                        .clone()
-                        .ok_or_else(|| ctx.error(ctx.span(), "checked try has no result return type"))?;
+                    let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
+                        ctx.error(ctx.span(), "checked try has no result return type")
+                    })?;
                     let failure = ctx.emit(
                         "try-result-error",
                         Some(return_ty),
@@ -3834,11 +3935,9 @@ fn lower_try_value(
                         fn_name,
                     )?;
                 }
-                let return_ty = ctx
-                    .function
-                    .ret
-                    .clone()
-                    .ok_or_else(|| ctx.error(ctx.span(), "checked try has no optional return type"))?;
+                let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
+                    ctx.error(ctx.span(), "checked try has no optional return type")
+                })?;
                 let failure = ctx.emit("try-optional-absent", Some(return_ty), MirOperation::Absent)?;
                 ctx.terminate(MirTerminator::Return {
                     value: Some(failure),
@@ -5076,7 +5175,7 @@ fn lower_host_call(
                 "read_txn" | "edit_txn" | "capture_txn"
             ) {
                 lowered[1].access = MirAccess::Write;
-                lowered[1].place = Some(ctx.place_for_local(&TLocal::stm(), MirAccess::Write)?);
+                lowered[1].place = Some(lower_local_place(ctx, &TLocal::stm(), MirAccess::Write)?);
             }
             emit_host_route_call(ctx, expr, route, lowered)
         }
@@ -6952,7 +7051,7 @@ fn lower_container_encode(
             },
         })],
     })?;
-    let output_place = ctx.place_for_local(&output, MirAccess::Move)?;
+    let output_place = lower_local_place(ctx, &output, MirAccess::Move)?;
     let payload = ctx.emit("encode-container", Some(output_ty), MirOperation::MovePlace { place: output_place })?;
     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
     ctx.emit("encode-tree", Some(expr.ty.clone()), MirOperation::Enum {

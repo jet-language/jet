@@ -1512,9 +1512,11 @@ impl<'a> LowerBlock<'a> {
                 }
             }
             self.out.push(TStmt::SplitViews {
-                owner: view
-                    .initialize
-                    .then(|| lower_expr(&candidate.owner, self.cx, &mut self.env)),
+                // Every split carries its checked owner expression. The
+                // generated root name is metadata for the slice plan, not a
+                // lexical local; reusing it for later windows creates an
+                // unbound MIR place.
+                owner: Some(lower_expr(&candidate.owner, self.cx, &mut self.env)),
                 root: view.root,
                 len: view.len,
                 source: view.source,
@@ -1811,6 +1813,29 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
                     };
                 }
             }
+        }
+        let is_never = matches!(
+            &value.ty,
+            Type::Named(name) if name == crate::Syntax::TYPE_NEVER
+        );
+        if !matches!(&value.ty, Type::Result { .. } | Type::Option(_)) && !is_never {
+            let result = TLocal::generated("result");
+            let result_name = result.name.clone();
+            let result_value = TExpr {
+                ty: value.ty.clone(),
+                kind: TExprKind::Local(TLocal::user(&result_name)),
+            };
+            return TStmt::Inline(vec![
+                TStmt::Let {
+                    name: result_name,
+                    kw: "let",
+                    let_ty: TLetTy::Inferred,
+                    init: value,
+                    gc_promotion: None,
+                    gc_transferred: false,
+                },
+                TStmt::Return(Some(result_value)),
+            ]);
         }
         TStmt::Return(Some(value))
     })
@@ -2527,9 +2552,16 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     };
                 let saved = env.locals.get(name).cloned();
                 env.gc_locals.remove(name);
+                // The edit body still addresses the original root place. A
+                // generated alias is not a lexical MIR local and cannot carry
+                // the root's storage identity through the authority scope.
+                let replacement = saved
+                    .as_ref()
+                    .map(|(slot, _)| slot.clone())
+                    .unwrap_or_else(|| TLocal::user(name));
                 env.bind(
                     name,
-                    TLocal::generated("value").through_ref(),
+                    replacement,
                     saved.as_ref().and_then(|(_, ty)| ty.clone()),
                 );
                 let plan = lower_stmt_plan(&lowered_source, cx, env);
@@ -3371,11 +3403,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             value_t = force_thread_callback_value(value_t, cx);
                         }
                         env.update_integer_bounds(name, *op, &value_t);
+                        let place = if let Some(local) = cx.persistent_local(name) {
+                            TPlace::Expr(Box::new(TExpr {
+                                ty: local
+                                    .persist_ty
+                                    .clone()
+                                    .unwrap_or_else(|| env.ty_of(name).unwrap_or(Type::Int)),
+                                kind: TExprKind::Local(local),
+                            }))
+                        } else {
+                            TPlace::Local(env.local_of(name))
+                        };
                         TStmt::Assign {
-                            place: TPlace::Local(
-                                cx.persistent_local(name)
-                                    .unwrap_or_else(|| env.local_of(name)),
-                            ),
+                            place,
                             op: *op,
                             value: value_t,
                             clone_value,
