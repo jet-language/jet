@@ -2411,7 +2411,7 @@ fn lower_module_rows(
                                 })
                             })
                             .collect(),
-                    },
+                    }
                 },
             };
             MirImport {
