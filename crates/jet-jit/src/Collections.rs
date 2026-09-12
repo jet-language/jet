@@ -6844,6 +6844,16 @@ fn list_u64_value(rt: &crate::JitRuntime, value: i64) -> u64 {
 }
 
 fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
+    if kind >= 16 {
+        let child_kind = kind - 16;
+        let children = rt.heap.clone_int_list(list).unwrap_or_default();
+        let rendered = children
+            .into_iter()
+            .map(|child| list_text(rt, child, child_kind, debug))
+            .collect::<Vec<_>>();
+        return format!("[{}]", rendered.join(", "));
+    }
+
     match kind {
         1 => {
             let values = rt
