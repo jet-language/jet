@@ -15,6 +15,9 @@ fn jet_std_math_sin(x: f64) -> f64 {
 fn jet_std_math_cos(x: f64) -> f64 {
     x.cos()
 }
+fn jet_std_math_atan2(y: f64, x: f64) -> f64 {
+    y.atan2(x)
+}
 fn jet_std_math_pow(a: f64, b: f64) -> f64 {
     a.powf(b)
 }
