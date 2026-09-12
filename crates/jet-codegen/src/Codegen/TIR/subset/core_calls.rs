@@ -332,7 +332,7 @@ pub(super) fn core_call_args_in_subset(
             label_ok && expr_in_subset(&a.expr, cx, locals)
         });
     }
-    if module == "core.game" && method == "run" && args.len() == 4 {
+    if module == "core.game" && method == "run" && matches!(args.len(), 1 | 4) {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = match idx {
                 0 => a.label.is_none(),
