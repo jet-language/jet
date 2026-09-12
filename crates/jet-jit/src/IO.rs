@@ -1414,9 +1414,13 @@ host_fns! {
     stdout_flush_canonical: "jet_std_io_stdout_flush" => jet_jit_stdout_flush: unary;
     stdout_is_tty: "jet_jit_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
     stderr_write: "jet_jit_stderr_write" => jet_jit_stderr_write: binary;
+    stderr_write_canonical: "jet_std_io_stderr_write" => jet_jit_stderr_write: binary;
     stderr_write_line: "jet_jit_stderr_write_line" => jet_jit_stderr_write_line: binary;
+    stderr_write_line_canonical: "jet_std_io_stderr_write_line" => jet_jit_stderr_write_line: binary;
     stderr_write_bytes: "jet_jit_stderr_write_bytes" => jet_jit_stderr_write_bytes: binary;
+    stderr_write_bytes_canonical: "jet_std_io_stderr_write_bytes" => jet_jit_stderr_write_bytes: binary;
     stderr_flush: "jet_jit_stderr_flush" => jet_jit_stderr_flush: unary;
+    stderr_flush_canonical: "jet_std_io_stderr_flush" => jet_jit_stderr_flush: unary;
     stderr_is_tty: "jet_jit_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
     terminal_width: "jet_jit_terminal_width" => jet_jit_terminal_width: nullary;
     terminal_height: "jet_jit_terminal_height" => jet_jit_terminal_height: nullary;
