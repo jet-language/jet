@@ -320,6 +320,7 @@ fn list_format_kind(inner: &MirType) -> Result<i64, String> {
         MirTypeKind::Char => 6,
         MirTypeKind::InlineRange { .. } | MirTypeKind::Measure(_) => 2,
         MirTypeKind::Apply { name, args } if args.is_empty() && name.name == "Fraction" => 15,
+        MirTypeKind::List(inner) => 16 + list_format_kind(inner)?,
         _ => {
             return Err(format!(
                 "MIR list element type `{}` has no checked formatting carrier",
