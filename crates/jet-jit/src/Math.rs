@@ -1958,16 +1958,40 @@ typed_math_binary_handle_method!(jet_jit_math_mat4_transform, "Mat4", "transform
 typed_math_handle_method!(jet_jit_math_mat3_transpose, "Mat3", "transpose");
 typed_math_handle_method!(jet_jit_math_mat4_transpose, "Mat4", "transpose");
 
+fn jet_jit_math_vec3_scalar_op(
+    value: i64,
+    scalar: f64,
+    op: simd_lanes::JetSimdBinaryOp,
+) -> i64 {
+    let Some(value) = take_val(value) else {
+        trap("math scalar binary: bad receiver");
+        return 0;
+    };
+    let Some(value) = vec3_scalar_op(value, scalar, op) else {
+        trap("math scalar binary: expected Vec3");
+        return 0;
+    };
+    pack_handle(push_val(value))
+}
+
 fn jet_jit_math_vec3_mul_scalar(value: i64, scalar: f64) -> i64 {
-    typed_math_call("Vec3", "mul", &[value, pack_float(scalar)])
+    jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Mul)
 }
 
 fn jet_jit_math_vec3_div_scalar(value: i64, scalar: f64) -> i64 {
-    typed_math_call("Vec3", "div", &[value, pack_float(scalar)])
+    jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Div)
 }
 
 fn jet_jit_math_float_div_vec3(scalar: f64, value: i64) -> i64 {
-    typed_math_call("Float", "div_Vec3", &[pack_float(scalar), value])
+    let Some(value) = take_val(value) else {
+        trap("math scalar binary: bad receiver");
+        return 0;
+    };
+    let Some(value) = scalar_vec3_div(scalar, value) else {
+        trap("math scalar binary: expected Vec3");
+        return 0;
+    };
+    pack_handle(push_val(value))
 }
 
 fn jet_jit_math_result_is_float(packed: i64) -> i8 {
