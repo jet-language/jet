@@ -2515,6 +2515,18 @@ impl TBuiltinOp {
             DequeToList => b("deque_to_list", "jet_deque_to_list", 1, 1, &[true], None, carrier),
             DequeJoin => b("deque_join", "jet_deque_join", 2, 2, &[true, true], None, carrier),
             DequeFrom => b("deque_from", "jet_deque_from", 1, 1, &[false], None, carrier),
+            MapToList { .. } => prelude(
+                MirPreludeFamily::BuiltinMethod,
+                "core.map",
+                "to_list",
+                "jet_map_to_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Aggregate,
+            ),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
             | IndexOf | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
@@ -2523,7 +2535,7 @@ impl TBuiltinOp {
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
-            | MapCopy | MapToList { .. }
+            | MapCopy
             | MapNew | MapContainsValue
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort

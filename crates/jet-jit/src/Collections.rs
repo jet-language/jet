@@ -9798,6 +9798,7 @@ host_fns! {
     checked_map_first_key: "jet_map_first_key" => jet_jit_map_first: sig_len;
 
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
+    checked_map_to_list: "jet_map_to_list" => jet_jit_map_to_list: sig_len;
     map_top_n: "jet_map_top_n" => jet_jit_map_top_n: sig_get_opt;
     map_top_n_int: "jet_jit_map_top_n_int" => jet_jit_map_top_n_int: sig_get_opt;
     map_min: "jet_map_min_value_kernel" => jet_jit_map_min: sig_len;

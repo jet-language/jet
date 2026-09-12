@@ -18946,6 +18946,25 @@ impl<'a> RustEmitter<'a> {
             _ => panic!("MIR list aggregate result is not the checked min/max shape"),
         }
     }
+    fn map_aggregate_builder(
+        &self,
+        function: &MirFunction,
+        result: Option<MirValueId>,
+    ) -> String {
+        let result = result.unwrap_or_else(|| panic!("MIR map aggregate route has no result"));
+        let element = self
+            .value_type(function, result)
+            .list_element()
+            .unwrap_or_else(|| panic!("MIR map aggregate route has a non-list result"));
+        let MirTypeKind::Tuple(fields) = element.kind() else {
+            panic!("MIR map aggregate result is not a named tuple");
+        };
+        if fields.len() != 2 || fields[0].0 != "key" || fields[1].0 != "value" {
+            panic!("MIR map aggregate result is not the checked key/value shape");
+        }
+        "|key, value| (key, value)".to_string()
+    }
+
 
     fn prelude_values_with_receiver(
         &self,
@@ -19007,6 +19026,17 @@ impl<'a> RustEmitter<'a> {
                 "{}({receiver}, {})",
                 symbol,
                 self.list_aggregate_builder(function, receiver_value, result),
+            );
+        }
+        if row.abi == MirPreludeAbi::Aggregate
+            && row.module == "core.map"
+            && row.member == "to_list"
+        {
+            assert!(args.is_empty(), "MIR Map.to_list route has unexpected arguments");
+            return format!(
+                "{}({receiver}, {})",
+                self.prelude_symbol(call),
+                self.map_aggregate_builder(function, result),
             );
         }
         let mut values = vec![receiver];
