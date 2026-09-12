@@ -227,7 +227,7 @@ pub(crate) mod text_rt {
         jet_text_trim_start(&s.to_string())
     }
     pub(crate) fn trim(s: &str) -> String {
-        jet_unicode_trim(&s.to_string())
+        jet_text_trim(&s.to_string())
     }
 
     pub(crate) fn trim_end(s: &str) -> String {
@@ -1121,6 +1121,7 @@ host_fns! {
     is_ascii: "jet_jit_text_is_ascii" => jet_jit_text_is_ascii: unary_i8;
     trim_start: "jet_jit_text_trim_start" => jet_jit_text_trim_start: unary;
     trim: "jet_unicode_trim" => jet_jit_text_trim: unary;
+    checked_text_trim: "jet_text_trim" => jet_jit_text_trim: unary;
     trim_end: "jet_jit_text_trim_end" => jet_jit_text_trim_end: unary;
     pad_start: "jet_jit_text_pad_start" => jet_jit_text_pad_start: ternary;
     pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;
