@@ -13560,6 +13560,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .find(|row| row.id == *call)
                     .cloned()
                     .ok_or_else(|| format!("MIR Prelude call {:?} is missing", call))?;
+                if row.member == "path.home" {
+                    if !args.is_empty() {
+                        return Err(
+                            "MIR path.home handle method received unexpected arguments".to_string(),
+                        );
+                    }
+                    return self
+                        .call_prelude(builder, *call, Vec::new(), expected)
+                        .map(Some);
+                }
                 let operand_count = args.len() + 1;
                 if row.signature.borrow_mask.len() < operand_count {
                     return Err(format!(
