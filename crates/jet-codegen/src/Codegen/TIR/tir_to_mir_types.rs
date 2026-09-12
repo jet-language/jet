@@ -1856,6 +1856,10 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         crate::Syntax::ORDERING_VARIANTS,
     ),
     (
+        crate::Syntax::TYPE_REMOVE_BY,
+        &["Val", "Slot"],
+    ),
+    (
         crate::Syntax::TYPE_TASK_FAILURE,
         &[
             crate::Syntax::TASK_FAILURE_CANCELLED,
