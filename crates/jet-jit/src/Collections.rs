@@ -8838,6 +8838,87 @@ fn jet_jit_hyper_log_log_count(handle: i64) -> i64 {
         }
     })
 }
+fn jet_jit_tdigest_add(handle: i64, value: f64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        if let crate::Sketch::SketchSlot::TDigest(sketch) = slot {
+            sketch.add(value);
+        }
+    });
+}
+fn jet_jit_tdigest_quantile(handle: i64, quantile: f64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        match slot {
+            crate::Sketch::SketchSlot::TDigest(sketch) => sketch.quantile(quantile),
+            _ => 0.0,
+        }
+    })
+}
+fn jet_jit_count_min_sketch_add(handle: i64, value: i64) {
+    let item = crate::Marshal::clone_string(value);
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        if let crate::Sketch::SketchSlot::Cms(sketch) = slot {
+            sketch.add(&item);
+        }
+    });
+}
+fn jet_jit_count_min_sketch_count(handle: i64, value: i64) -> i64 {
+    let item = crate::Marshal::clone_string(value);
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        match slot {
+            crate::Sketch::SketchSlot::Cms(sketch) => sketch.count(&item),
+            _ => 0,
+        }
+    })
+}
+fn jet_jit_reservoir_add(handle: i64, value: i64) {
+    let item = crate::Marshal::clone_string(value);
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        if let crate::Sketch::SketchSlot::Reservoir(sketch) = slot {
+            sketch.add(item);
+        }
+    });
+}
+fn jet_jit_reservoir_sample(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let items = {
+            let slot = rt
+                .sketches
+                .get_mut(handle.saturating_sub(1) as usize)
+                .expect("jit sketch: bad handle");
+            match slot {
+                crate::Sketch::SketchSlot::Reservoir(sketch) => sketch.sample(),
+                _ => Vec::new(),
+            }
+        };
+        let list = rt.heap.alloc_empty_list();
+        for item in items {
+            let item_handle = rt.heap.alloc_string(item);
+            rt.heap.list_push_int(list, item_handle).expect("jit sketch list");
+        }
+        list
+    })
+}
+
 
 fn jet_jit_priority_queue_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -9905,6 +9986,9 @@ host_fns! {
         let mut sig_push_f64 = Signature::new(cc);
         sig_push_f64.params.push(AbiParam::new(types::I64));
         sig_push_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_sketch_quantile = sig_push_f64.clone();
+        sig_sketch_quantile.returns.push(AbiParam::new(types::F64));
+
         let mut sig_list_insert_f64 = Signature::new(cc);
         sig_list_insert_f64
             .params
@@ -10605,6 +10689,13 @@ host_fns! {
     sorted_set_is_disjoint: "jet_jit_sorted_set_is_disjoint" => jet_jit_sorted_set_is_disjoint: sig_list_eq;
     hll_add: "JetHyperLogLog::add" => jet_jit_hyper_log_log_add: sig_push;
     hll_count: "JetHyperLogLog::count" => jet_jit_hyper_log_log_count: sig_len;
+    tdigest_add: "JetTDigest::add" => jet_jit_tdigest_add: sig_push_f64;
+    tdigest_quantile: "JetTDigest::quantile" => jet_jit_tdigest_quantile: sig_sketch_quantile;
+    cms_add: "JetCountMinSketch::add" => jet_jit_count_min_sketch_add: sig_push;
+    cms_count: "JetCountMinSketch::count" => jet_jit_count_min_sketch_count: sig_get_opt;
+    reservoir_add: "JetReservoirSampler::add" => jet_jit_reservoir_add: sig_push;
+    reservoir_sample: "JetReservoirSampler::sample" => jet_jit_reservoir_sample: sig_len;
+
     priority_queue_new: "jet_jit_priority_queue_new" => jet_jit_priority_queue_new: sig_new;
     priority_queue_len: "jet_jit_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
     priority_queue_from: "jet_jit_priority_queue_from" => jet_jit_priority_queue_from: sig_len;
