@@ -4311,22 +4311,38 @@ fn lower_method_call_impl(
                 && args.len() == 1
             {
                 return in_own_frame(|| {
-                    let Some(set_ty) = resolved_ret.cloned() else {
-                        return invariant_method_expr(
-                            method_span,
-                            "set constructor without a resolved return type",
-                        );
-                    };
-                    if !matches!(
-                        &set_ty,
-                        Type::Apply { name, args } if name == type_name && args.len() == 1
-                    ) {
-                        return invariant_method_expr(
-                            method_span,
-                            "set constructor without its checked element type",
-                        );
-                    }
                     let lowered_list = lower_expr(&args[0].expr, cx, env);
+                    let set_ty = match resolved_ret {
+                        Some(set_ty) => {
+                            if !matches!(
+                                set_ty,
+                                Type::Apply { name, args } if name == type_name && args.len() == 1
+                            ) {
+                                return invariant_method_expr(
+                                    method_span,
+                                    "set constructor without its checked element type",
+                                );
+                            }
+                            set_ty.clone()
+                        }
+                        None => {
+                            let elem = match lowered_list.ty.without_user_tags() {
+                                Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                                    (**inner).clone()
+                                }
+                                _ => {
+                                    return invariant_method_expr(
+                                        method_span,
+                                        "set constructor without its checked element type",
+                                    );
+                                }
+                            };
+                            Type::Apply {
+                                name: type_name.clone(),
+                                args: vec![elem],
+                            }
+                        }
+                    };
                     TExpr {
                         ty: set_ty,
                         kind: TExprKind::BuiltinMethod {
