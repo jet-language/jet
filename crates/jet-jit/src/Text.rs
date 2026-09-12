@@ -713,6 +713,57 @@ fn list_strings(items: Vec<String>) -> i64 {
         list
     })
 }
+fn list_nested_strings(items: Vec<Vec<String>>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let outer = rt.heap.alloc_empty_list();
+        for pair in items {
+            let inner = rt.heap.alloc_empty_list();
+            for s in pair {
+                let sid = rt.heap.alloc_string(s);
+                let _ = rt.heap.list_push_int(inner, sid);
+            }
+            let _ = rt.heap.list_push_int(outer, inner);
+        }
+        outer
+    })
+}
+
+fn jet_jit_regex_string_property(
+    handle: i64,
+    property: impl FnOnce(&text_rt::jet_std::JetRegex) -> String,
+) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Regex(regex) => Some(property(regex)),
+        _ => None,
+    })
+    .map(alloc_string)
+    .unwrap_or_default()
+}
+
+fn jet_jit_regex_pattern(handle: i64) -> i64 {
+    jet_jit_regex_string_property(handle, |regex| regex.pattern())
+}
+
+fn jet_jit_regex_source(handle: i64) -> i64 {
+    jet_jit_regex_string_property(handle, |regex| regex.source())
+}
+
+fn jet_jit_regex_flags_property(handle: i64) -> i64 {
+    jet_jit_regex_string_property(handle, |regex| regex.flags())
+}
+
+fn jet_jit_regex_options(handle: i64) -> i64 {
+    jet_jit_regex_string_property(handle, |regex| regex.options())
+}
+
+fn jet_jit_regex_names(handle: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Regex(regex) => Some(regex.names()),
+        _ => None,
+    })
+    .map(list_strings)
+    .unwrap_or_default()
+}
 
 fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
     push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(
@@ -770,6 +821,81 @@ fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
     }
     list
 }
+fn jet_jit_regex_count(pat: i64, text: i64) -> i64 {
+    let text = clone_string(text);
+    clone_compiled_regex(pat)
+        .map(|regex| regex.count(&text))
+        .unwrap_or_default()
+}
+
+fn jet_jit_regex_replace_method(pat: i64, text: i64, repl: i64) -> i64 {
+    jet_jit_regex_replace(pat, repl, text)
+}
+
+fn jet_jit_regex_replace_first_method(pat: i64, text: i64, repl: i64) -> i64 {
+    jet_jit_regex_replace_first(pat, repl, text)
+}
+
+fn regex_replacement_callback(
+    callback: i64,
+) -> Option<crate::runtime_host::JitCallableSlot> {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = crate::runtime_host::jit_callable_parts(rt, callback) else {
+            rt.set_host_fault("JIT Regex replacement callback is invalid");
+            return None;
+        };
+        if slot.raw_unary.is_none() || slot.raw_pair.is_some() || slot.raw_many.is_some() {
+            rt.set_host_fault(
+                "JIT Regex replacement callback has no unary universal thunk",
+            );
+            return None;
+        }
+        Some(slot)
+    })
+}
+
+fn regex_replacement_callback_trapped() -> bool {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::runtime_stop_pending(rt))
+}
+
+fn jet_jit_regex_replace_all_with(pat: i64, text: i64, callback: i64) -> i64 {
+    let Some(callback) = regex_replacement_callback(callback) else {
+        return 0;
+    };
+    let text = clone_string(text);
+    let Some(regex) = clone_compiled_regex(pat) else {
+        return 0;
+    };
+    match regex.replace_all_with_result(&text, |matched| {
+        let match_handle = push_regex(RegexValue::Match(matched));
+        let Some(replacement) =
+            crate::runtime_host::invoke_universal_unary(callback, match_handle)
+        else {
+            return Err("JIT Regex replacement callback has no unary universal thunk".to_string());
+        };
+        if regex_replacement_callback_trapped() {
+            return Err(String::new());
+        }
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(replacement))
+            .ok_or_else(|| {
+                "JIT Regex replacement callback returned an invalid String carrier".to_string()
+            })
+    }) {
+        Ok(replaced) => alloc_string(replaced),
+        Err(message) => {
+            Concurrency::with_runtime_mut(|rt| {
+                if !crate::runtime_host::runtime_stop_pending(rt) {
+                    rt.set_host_fault(if message.is_empty() {
+                        "JIT Regex replacement callback stopped".to_string()
+                    } else {
+                        message
+                    });
+                }
+            });
+            0
+        }
+    }
+}
 
 fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
@@ -778,7 +904,65 @@ fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
         .map(|found| push_regex(RegexValue::Match(found)).wrapping_add(1))
         .unwrap_or_default()
 }
+fn jet_jit_regex_match_start(handle: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => matched.start(),
+        _ => 0,
+    })
+}
 
+fn jet_jit_regex_match_end(handle: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => matched.end(),
+        _ => 0,
+    })
+}
+
+fn jet_jit_regex_match_named_captures(handle: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => Some(matched.named_captures()),
+        _ => None,
+    })
+    .map(list_nested_strings)
+    .unwrap_or_default()
+}
+
+fn jet_jit_regex_match_group(handle: i64, group: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => Some(matched.clone()),
+        _ => None,
+    })
+    .map(|matched| option_string_bits(matched.group(group).ok()))
+    .unwrap_or_default()
+}
+
+fn jet_jit_regex_match_name(handle: i64, name: i64) -> i64 {
+    let name = clone_string(name);
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => Some(matched.clone()),
+        _ => None,
+    })
+    .map(|matched| option_string_bits(matched.name(&name).ok()))
+    .unwrap_or_default()
+}
+
+fn jet_jit_regex_match_group_start(handle: i64, group: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => Some(matched.clone()),
+        _ => None,
+    })
+    .map(|matched| option_int_bits(matched.group_start(group).ok()))
+    .unwrap_or_default()
+}
+
+fn jet_jit_regex_match_group_end(handle: i64, group: i64) -> i64 {
+    with_regex(handle, |value| match value {
+        RegexValue::Match(matched) => Some(matched.clone()),
+        _ => None,
+    })
+    .map(|matched| option_int_bits(matched.group_end(group).ok()))
+    .unwrap_or_default()
+}
 fn jet_jit_regex_replace_impl(pat: i64, repl: i64, text: i64, first: bool) -> i64 {
     let text = clone_string(text);
     let replacement = clone_string(repl);
@@ -839,69 +1023,6 @@ fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
     }
 }
 
-/// Regex/Match method. method is string handle.
-fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
-    let method = clone_string(method);
-    with_regex(recv, |v| match (v, method.as_str()) {
-        (RegexValue::Regex(rx), "is_match") => i64::from(rx.is_match(&clone_string(arg0))),
-        (RegexValue::Regex(rx), "full_match") => i64::from(rx.full_match(&clone_string(arg0))),
-        (RegexValue::Regex(rx), "match") => match rx.match_value(&clone_string(arg0)) {
-            Err(_) => 0,
-            Ok(m) => push_regex(RegexValue::Match(m)).wrapping_add(1),
-        },
-        (RegexValue::Regex(rx), "find") => option_string_bits(rx.find(&clone_string(arg0)).ok()),
-        (RegexValue::Regex(rx), "find_all") => list_strings(rx.find_all(&clone_string(arg0))),
-        (RegexValue::Regex(rx), "matches") => {
-            let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
-            for m in rx.matches(&clone_string(arg0)) {
-                let h = push_regex(RegexValue::Match(m));
-                Concurrency::with_runtime_mut(|rt| {
-                    let _ = rt.heap.list_push_int(list, h);
-                });
-            }
-            list
-        }
-        (RegexValue::Regex(rx), "split") => list_strings(rx.split(&clone_string(arg0))),
-        (RegexValue::Regex(rx), "split_limit") => {
-            list_strings(rx.split_limit(&clone_string(arg0), arg1))
-        }
-        (RegexValue::Regex(rx), "replace" | "replace_first") => {
-            let text = clone_string(arg0);
-            let replacement = clone_string(arg1);
-            let s = if method == "replace" {
-                rx.replace(&text, &replacement)
-            } else {
-                rx.replace_first(&text, &replacement)
-            };
-            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-        }
-        (RegexValue::Regex(rx), "pattern" | "source") => {
-            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rx.pattern()))
-        }
-        (RegexValue::Regex(rx), "flags" | "options") => {
-            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rx.flags()))
-        }
-        (RegexValue::Regex(rx), "names") => list_strings(rx.names()),
-        (RegexValue::Regex(rx), "count") => rx.count(&clone_string(arg0)),
-        (RegexValue::Match(m), "group") => option_string_bits(m.group(arg0).ok()),
-        (RegexValue::Match(m), "name") => option_string_bits(m.name(&clone_string(arg0)).ok()),
-        (RegexValue::Match(m), "start") => m.start(),
-        (RegexValue::Match(m), "end") => m.end(),
-        (RegexValue::Match(m), "group_start") => option_int_bits(m.group_start(arg0).ok()),
-        (RegexValue::Match(m), "group_end") => option_int_bits(m.group_end(arg0).ok()),
-        (RegexValue::Match(m), "named_captures") => {
-            let outer = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
-            for pair in m.named_captures() {
-                let inner = list_strings(pair);
-                Concurrency::with_runtime_mut(|rt| {
-                    let _ = rt.heap.list_push_int(outer, inner);
-                });
-            }
-            outer
-        }
-        _ => 0,
-    })
-}
 
 fn jet_jit_regex_escape(text: i64) -> i64 {
     let s = text_rt::jet_std::jet_regex_escape(&clone_string(text));
@@ -993,10 +1114,28 @@ host_fns! {
     regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;
     regex_compile: "jet_jit_regex_compile" => jet_jit_regex_compile: unary;
     regex_compile_with: "jet_jit_regex_compile_with" => jet_jit_regex_compile_with: binary;
-    regex_method: "jet_jit_regex_method" => jet_jit_regex_method: {
-            let mut q = Signature::new(cc);
-            for _ in 0..4 { q.params.push(AbiParam::new(types::I64)); }
-            q.returns.push(AbiParam::new(types::I64));
-            q
-        };
+    checked_regex_pattern: "jet_std::JetRegex::pattern" => jet_jit_regex_pattern: unary;
+    checked_regex_source: "jet_std::JetRegex::source" => jet_jit_regex_source: unary;
+    checked_regex_flags: "jet_std::JetRegex::flags" => jet_jit_regex_flags_property: unary;
+    checked_regex_options: "jet_std::JetRegex::options" => jet_jit_regex_options: unary;
+    checked_regex_names: "jet_std::JetRegex::names" => jet_jit_regex_names: unary;
+    checked_regex_count: "jet_std::JetRegex::count" => jet_jit_regex_count: binary;
+    checked_regex_is_match: "jet_std::JetRegex::is_match" => jet_jit_regex_is_match: binary_i8;
+    checked_regex_full_match: "jet_std::JetRegex::full_match" => jet_jit_regex_full_match: binary_i8;
+    checked_regex_match_value: "jet_std::JetRegex::match_value" => jet_jit_regex_match: binary;
+    checked_regex_find: "jet_std::JetRegex::find" => jet_jit_regex_find: binary;
+    checked_regex_find_all: "jet_std::JetRegex::find_all" => jet_jit_regex_find_all: binary;
+    checked_regex_matches: "jet_std::JetRegex::matches" => jet_jit_regex_matches: binary;
+    checked_regex_split: "jet_std::JetRegex::split" => jet_jit_regex_split: binary;
+    checked_regex_replace: "jet_std::JetRegex::replace" => jet_jit_regex_replace_method: ternary;
+    checked_regex_replace_first: "jet_std::JetRegex::replace_first" => jet_jit_regex_replace_first_method: ternary;
+    checked_regex_replace_all_with: "jet_std::JetRegex::replace_all_with" => jet_jit_regex_replace_all_with: ternary;
+    checked_regex_split_limit: "jet_std::JetRegex::split_limit" => jet_jit_regex_split_limit: ternary;
+    checked_regex_match_start: "jet_std::JetRegexMatch::start" => jet_jit_regex_match_start: unary;
+    checked_regex_match_end: "jet_std::JetRegexMatch::end" => jet_jit_regex_match_end: unary;
+    checked_regex_match_named_captures: "jet_std::JetRegexMatch::named_captures" => jet_jit_regex_match_named_captures: unary;
+    checked_regex_match_group: "jet_std::JetRegexMatch::group" => jet_jit_regex_match_group: binary;
+    checked_regex_match_name: "jet_std::JetRegexMatch::name" => jet_jit_regex_match_name: binary;
+    checked_regex_match_group_start: "jet_std::JetRegexMatch::group_start" => jet_jit_regex_match_group_start: binary;
+    checked_regex_match_group_end: "jet_std::JetRegexMatch::group_end" => jet_jit_regex_match_group_end: binary;
 }
