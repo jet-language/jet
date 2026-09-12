@@ -2264,6 +2264,93 @@ fn lower_module_item(
     }
 }
 
+/// Resolve the source-facing target of an unqualified import to the same
+/// canonical key used by its `TirModuleFact` row.
+///
+/// File-module imports carry only their checked alias when the import itself
+/// is unqualified, while inline modules are represented as children of the
+/// importing module. Prefer an exact canonical key, then the importing
+/// module's child path, and finally a unique module name. An ambiguous name
+/// remains unchanged rather than guessing a target.
+fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) -> String {
+    if target.is_empty() {
+        return target.to_string();
+    }
+    if modules.iter().any(|row| row.key == target) {
+        return target.to_string();
+    }
+
+    let qualified = target.split('.').fold(owner.to_string(), |mut key, segment| {
+        if !segment.is_empty() {
+            if !key.is_empty() {
+                key.push_str("::");
+            }
+            key.push_str(segment);
+        }
+        key
+    });
+    if modules.iter().any(|row| row.key == qualified) {
+        return qualified;
+    }
+
+    let mut matches = modules.iter().filter(|row| row.name == target);
+    match (matches.next(), matches.next()) {
+        (Some(row), None) => row.key.clone(),
+        _ => target.to_string(),
+    }
+}
+
+fn lower_import_item(
+    item: &TirImportItem,
+    target_alias: &str,
+    target_module: &str,
+    types: &[MirTypeDef],
+    traits: &[MirTraitDef],
+    impls: &[MirImplDef],
+    constants: &[MirConstantDef],
+    foreign: &[MirForeign],
+    functions: &[TFunc],
+    registry: &FunctionRegistry,
+) -> Option<jet_foundation::MIR::MirItemRef> {
+    let resolved = lower_module_item(
+        &item.item,
+        types,
+        traits,
+        impls,
+        constants,
+        foreign,
+        functions,
+        registry,
+        target_module,
+    );
+    if resolved.is_some() {
+        return resolved;
+    }
+
+    let TirItemRef::Unknown(raw) = &item.item else {
+        return None;
+    };
+    let suffix = raw
+        .strip_prefix(target_alias)
+        .and_then(|rest| rest.strip_prefix("::").or_else(|| rest.strip_prefix('.')))
+        .filter(|suffix| !suffix.is_empty())
+        .or_else(|| raw.rsplit_once('.').map(|(_, leaf)| leaf))
+        .or_else(|| raw.rsplit_once("::").map(|(_, leaf)| leaf))
+        .unwrap_or(item.original.as_str());
+    let canonical = format!("{target_module}::{suffix}");
+    lower_module_item(
+        &TirItemRef::Unknown(canonical),
+        types,
+        traits,
+        impls,
+        constants,
+        foreign,
+        functions,
+        registry,
+        target_module,
+    )
+}
+
 fn lower_module_rows(
     modules: &[TirModuleFact],
     import_rows: &[TirImportFact],
@@ -2292,21 +2379,35 @@ fn lower_module_rows(
             let kind = match &row.kind {
                 TirImportKind::File { path } => MirImportKind::File { path: path.clone() },
                 TirImportKind::Module { path } => MirImportKind::Module { path: path.clone() },
-                TirImportKind::Unqualified { module, items } => MirImportKind::Unqualified {
-                    module: jet_foundation::MIR::MirModuleId(stable_id("mir-module", module)),
-                    items: items
-                        .iter()
-                        .filter_map(|item| {
-                            Some(MirImportItem {
-                                original: item.original.clone(),
-                                local: item.local.clone(),
-                                item: lower_module_item(
-                                    &item.item, types, traits, impls, constants, foreign,
-                                    functions, registry, module,
-                                )?,
+                TirImportKind::Unqualified { module, items } => {
+                    let module_key = canonical_module_key(modules, &row.module, module);
+                    MirImportKind::Unqualified {
+                        module: jet_foundation::MIR::MirModuleId(stable_id(
+                            "mir-module",
+                            &module_key,
+                        )),
+                        items: items
+                            .iter()
+                            .filter_map(|item| {
+                                Some(MirImportItem {
+                                    original: item.original.clone(),
+                                    local: item.local.clone(),
+                                    item: lower_import_item(
+                                        item,
+                                        module,
+                                        &module_key,
+                                        types,
+                                        traits,
+                                        impls,
+                                        constants,
+                                        foreign,
+                                        functions,
+                                        registry,
+                                    )?,
+                                })
                             })
-                        })
-                        .collect(),
+                            .collect(),
+                    },
                 },
             };
             MirImport {
