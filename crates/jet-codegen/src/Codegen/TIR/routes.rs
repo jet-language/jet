@@ -2617,6 +2617,15 @@ impl TBuiltinOp {
                     None,
                     carrier,
                 ),
+                TBuiltinOp::EndsWith if is_string_receiver(receiver) => b(
+                    "string_ends_with",
+                    "jet_string_ends_with",
+                    2,
+                    2,
+                    &[true, true],
+                    None,
+                    carrier,
+                ),
                 TBuiltinOp::StartsWith | TBuiltinOp::EndsWith if !is_string_receiver(receiver) => b(
                     if matches!(self, TBuiltinOp::StartsWith) { "list_starts_with" } else { "list_ends_with" },
                     if matches!(self, TBuiltinOp::StartsWith) { "jet_list_starts_with" } else { "jet_list_ends_with" },
@@ -2834,6 +2843,7 @@ pub(super) fn string_method_route(
         ));
     }
     let (member, symbol, arity) = match method {
+        "copy" => ("copy", "jet_string_copy", 1),
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
         "last_index_of" => ("last_index_of", "jet_unicode_last_index_of", 2),
         "is_lower" => ("is_lower", "jet_text_is_lower", 1),

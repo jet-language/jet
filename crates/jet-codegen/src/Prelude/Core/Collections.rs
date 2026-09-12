@@ -645,6 +645,16 @@ fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
 }
 
 #[inline(always)]
+fn jet_string_copy(text: &String) -> String {
+    text.clone()
+}
+
+#[inline(always)]
+fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
+    text.ends_with(suffix)
+}
+
+#[inline(always)]
 fn jet_deque_get<T: Clone>(
     queue: &std::collections::VecDeque<T>,
     index: i64,

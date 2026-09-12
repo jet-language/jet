@@ -14299,6 +14299,8 @@ host_fns! {
     str_order: "jet_jit_str_order" => jet_jit_str_order: sig_str_binary_i64;
     pattern_text_match: "jet_text_pattern_match" => jet_jit_pattern_text_match: sig_i64_i64_i64;
     checked_string_starts_with: "jet_string_starts_with" => jet_jit_str_starts_with: sig_str_eq;
+    checked_string_copy: "jet_string_copy" => jet_jit_str_clone: sig_str_unary_i64;
+    checked_string_ends_with: "jet_string_ends_with" => jet_jit_str_ends_with: sig_str_eq;
     string_repeat: "jet_string_repeat" => jet_jit_str_repeat: sig_i64_i64_i64;
 
     pattern_binary_match: "jet_binary_pattern_match" => jet_jit_pattern_binary_match: sig_i64_i64_i64;
