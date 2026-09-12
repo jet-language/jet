@@ -3769,8 +3769,10 @@ host_fns! {
     object_entries_to_map: "jet_jit_object_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     data_entries_to_map: "jet_data_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     toml_parse: "jet_jit_toml_parse" => jet_jit_toml_parse: sig_unary;
+    toml_decode: "jet_enc_toml_decode" => jet_jit_toml_parse: sig_unary;
     toml_to_string: "jet_jit_toml_to_string" => jet_jit_toml_to_string: sig_unary;
     yaml_parse: "jet_jit_yaml_parse" => jet_jit_yaml_parse: sig_unary;
+    yaml_decode: "jet_enc_yaml_decode" => jet_jit_yaml_parse: sig_unary;
     yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
