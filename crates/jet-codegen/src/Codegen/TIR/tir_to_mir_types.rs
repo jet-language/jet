@@ -1868,6 +1868,18 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        crate::Syntax::TYPE_IO_ERROR,
+        crate::Syntax::IO_ERROR_VARIANTS,
+    ),
+    (
+        crate::Syntax::TYPE_IO_OPERATION,
+        crate::Syntax::IO_OPERATION_VARIANTS,
+    ),
+    (
+        crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT,
+        crate::Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS,
+    ),
+    (
         crate::Syntax::DURATION_UNIT_TYPE,
         crate::Syntax::DURATION_UNITS,
     ),
@@ -1895,6 +1907,10 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
 // Core oracle's vocabulary; field types are read below through
 // `core_struct_field_type`, never guessed from a folded value.
 const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
+    (
+        crate::Syntax::TYPE_IO_CONTEXT,
+        crate::Syntax::IO_CONTEXT_FIELDS,
+    ),
     ("DirEntry", &["name", "path", "is_dir"]),
     ("WalkEntry", &["path", "relative", "is_dir", "depth"]),
     (
@@ -2374,6 +2390,16 @@ fn compiler_owned_type_defs(
                                 TirVariantPayload::Single(Type::String)
                             } else {
                                 TirVariantPayload::Unit
+                            }
+                        } else if *name == crate::Syntax::TYPE_IO_ERROR {
+                            if *variant == "ResourceLimit" {
+                                TirVariantPayload::Single(Type::Named(
+                                    crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+                                ))
+                            } else {
+                                TirVariantPayload::Single(Type::Named(
+                                    crate::Syntax::TYPE_IO_CONTEXT.to_string(),
+                                ))
                             }
                         } else if *name == "DataTree" {
                             match *variant {
