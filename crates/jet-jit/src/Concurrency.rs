@@ -1945,7 +1945,12 @@ fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
         host_fault("jit select without active runtime");
         return JitWaitStatus::Panicked as i64;
     };
-    wait_status(|| jet_scheduler_select_int_channels_timed(&channels, timers))
+    let status = wait_status(|| jet_scheduler_select_int_channels_timed(&channels, timers));
+    if status == JitWaitStatus::Ready as i64 {
+        WAIT_VALUE.with(|slot| slot.get())
+    } else {
+        status
+    }
 }
 
 /// D-CONC-CHAN1: tagged readiness result for the JIT. Endpoint handles and
@@ -1969,7 +1974,7 @@ fn jet_jit_select_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
         host_fault("jit tagged select without active runtime");
         return JitWaitStatus::Panicked as i64;
     };
-    wait_status(|| {
+    let status = wait_status(|| {
         let (arm, value) = jet_scheduler_select_int_channels_tagged(&channels, after_ns);
         with_runtime_mut(|rt| {
             let result = rt.heap.alloc_record(2);
@@ -1977,7 +1982,12 @@ fn jet_jit_select_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
             let _ = rt.heap.record_set_int(result, 1, value.unwrap_or(0));
             result
         })
-    })
+    });
+    if status == JitWaitStatus::Ready as i64 {
+        WAIT_VALUE.with(|slot| slot.get())
+    } else {
+        status
+    }
 }
 
 /// D-CONC-CHAN2=D: JIT marshalling for a nonblocking readiness table. The
@@ -2001,7 +2011,7 @@ fn jet_jit_select_try_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
         host_fault("jit tagged try-select without active runtime");
         return JitWaitStatus::Panicked as i64;
     };
-    wait_status(|| {
+    let status = wait_status(|| {
         let (arm, value) = jet_scheduler_try_select_int_channels_tagged(&channels, after_ns);
         with_runtime_mut(|rt| {
             let result = rt.heap.alloc_record(2);
@@ -2009,7 +2019,12 @@ fn jet_jit_select_try_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
             let _ = rt.heap.record_set_int(result, 1, value.unwrap_or(0));
             result
         })
-    })
+    });
+    if status == JitWaitStatus::Ready as i64 {
+        WAIT_VALUE.with(|slot| slot.get())
+    } else {
+        status
+    }
 }
 
 /// `tasks.after(duration, value)` — one-shot timer channel that receives `value`.
