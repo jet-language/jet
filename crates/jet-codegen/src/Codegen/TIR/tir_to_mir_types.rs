@@ -1872,6 +1872,24 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         crate::Syntax::IO_ERROR_VARIANTS,
     ),
     (
+        crate::Syntax::TYPE_KEY,
+        &[
+            "Enter",
+            "Escape",
+            "Backspace",
+            "Tab",
+            "Delete",
+            "Up",
+            "Down",
+            "Left",
+            "Right",
+            "Unknown",
+            "Char",
+            "Ctrl",
+            "F",
+        ],
+    ),
+    (
         crate::Syntax::TYPE_IO_OPERATION,
         crate::Syntax::IO_OPERATION_VARIANTS,
     ),
@@ -1900,6 +1918,8 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Object",
         ],
     ),
+    ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
+
 ];
 // Compiler-owned Core records are checked values, not user declarations. Keep
 // their owner rows in the checked declaration table so a field projection can
@@ -2420,6 +2440,12 @@ fn compiler_owned_type_defs(
                                 TirVariantPayload::Single(Type::Named(
                                     crate::Syntax::TYPE_IO_CONTEXT.to_string(),
                                 ))
+                            }
+                        } else if *name == crate::Syntax::TYPE_KEY {
+                            match *variant {
+                                "Char" | "Ctrl" => TirVariantPayload::Single(Type::Char),
+                                "F" => TirVariantPayload::Single(Type::Int),
+                                _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "DataTree" {
                             match *variant {

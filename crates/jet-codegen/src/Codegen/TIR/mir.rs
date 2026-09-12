@@ -1442,6 +1442,26 @@ fn lower_impl_rows(
             });
         }
     }
+    // Separate inherent impl blocks share one canonical MIR identity. Merge their
+    // checked method edges before validation rather than emitting duplicate IDs.
+    let mut impl_indices = HashMap::<String, usize>::new();
+    let mut deduplicated = Vec::with_capacity(result.len());
+    for mut row in result {
+        if let Some(index) = impl_indices.get(&row.key).copied() {
+            let existing = &mut deduplicated[index];
+            for method in row.methods.drain(..) {
+                if !existing.methods.contains(&method) {
+                    existing.methods.push(method);
+                }
+            }
+        } else {
+            let index = deduplicated.len();
+            impl_indices.insert(row.key.clone(), index);
+            deduplicated.push(row);
+        }
+    }
+    let mut result = deduplicated;
+
     // Keep only checked method references; a method that did not enter the
     // executable TIR cannot be represented as a valid MIR edge.
     result.retain(|row| {
@@ -3649,6 +3669,32 @@ fn field_owner_mir_type(ty: &MirType) -> &MirType {
         _ => ty,
     }
 }
+fn tuple_field_name<'a, T>(fields: &'a [(String, T)], key: &str) -> Option<&'a str> {
+    if let Ok(index) = key.parse::<usize>() {
+        return fields.get(index).map(|(name, _)| name.as_str());
+    }
+    fields
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(name, _)| name.as_str())
+}
+
+fn math_field_name<'a>(ty: &'a MirTypeDef, key: &str) -> Option<&'a str> {
+    let index = key.parse::<usize>().ok()?;
+    if !matches!(
+        ty.name.as_str(),
+        "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4"
+    ) {
+        return None;
+    }
+    let MirTypeDefKind::Struct { fields, .. } = &ty.kind else {
+        return None;
+    };
+    fields.get(index).and_then(|field| {
+        matches!(field.name.as_str(), "x" | "y" | "z" | "w").then_some(field.name.as_str())
+    })
+}
+
 /// A place row can be referenced by several operations. Keep the strongest
 /// access ever required so a later read cannot invalidate an earlier borrow or
 /// move operation.
@@ -3852,20 +3898,13 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn type_id_for(&self, key: &str) -> Result<MirTypeId, LowerError> {
+        let canonical_key = canonical_nominal_name(self.type_defs, key, self.span())?;
         let exact = self
             .type_defs
             .iter()
-            .filter(|ty| ty.key == key)
+            .filter(|ty| ty.key == canonical_key)
             .collect::<Vec<_>>();
-        let matches = if exact.is_empty() {
-            self.type_defs
-                .iter()
-                .filter(|ty| ty.name == key)
-                .collect::<Vec<_>>()
-        } else {
-            exact
-        };
-        match matches.as_slice() {
+        match exact.as_slice() {
             [ty] => Ok(ty.id),
             [] => match self
                 .trait_defs
@@ -3873,8 +3912,11 @@ impl<'a> LowerCtx<'a> {
                 .filter(|trait_def| trait_def.key == key || trait_def.name == key)
                 .count()
             {
-                0 => Ok(MirTypeId(stable_id("mir-type", key))),
-                1 => Ok(MirTypeId(stable_id("mir-type", &format!("Trait({key})")))),
+                0 => Ok(MirTypeId(stable_id("mir-type", &canonical_key))),
+                1 => Ok(MirTypeId(stable_id(
+                    "mir-type",
+                    &format!("Trait({key})"),
+                ))),
                 _ => Err(self.error(
                     self.span(),
                     format!("ambiguous checked MIR trait key `{key}`"),
@@ -3969,12 +4011,15 @@ impl<'a> LowerCtx<'a> {
                 format!("missing checked MIR owner type {owner:?}"),
             ));
         };
+        let lookup_key = math_field_name(ty, key).unwrap_or(key);
         let field = match &ty.kind {
-            MirTypeDefKind::Struct { fields, .. } => fields.iter().find(|field| field.name == key),
+            MirTypeDefKind::Struct { fields, .. } => {
+                fields.iter().find(|field| field.name == lookup_key)
+            }
             MirTypeDefKind::Enum { variants, .. } => {
                 variants.iter().find_map(|variant| match &variant.payload {
                     jet_foundation::MIR::MirVariantPayload::Named(fields) => {
-                        fields.iter().find(|field| field.name == key)
+                        fields.iter().find(|field| field.name == lookup_key)
                     }
                     _ => None,
                 })
@@ -4054,12 +4099,12 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn field_id_for_type(&self, ty: &Type, key: &str) -> Result<MirFieldId, LowerError> {
         let ty = field_owner_type(ty);
         if let Type::Tuple(fields) = ty {
-            if fields.iter().any(|(name, _)| name == key) {
+            if let Some(field_name) = tuple_field_name(fields, key) {
                 let identity =
                     canonical_type_instance(self.type_defs, ty, self.span())?.identity_key();
                 return Ok(MirFieldId(stable_id(
                     "mir-field",
-                    &format!("{identity}::{key}"),
+                    &format!("{identity}::{field_name}"),
                 )));
             }
         }
@@ -4070,10 +4115,10 @@ impl<'a> LowerCtx<'a> {
     fn field_id_for_mir_type(&self, ty: &MirType, key: &str) -> Result<MirFieldId, LowerError> {
         let ty = field_owner_mir_type(ty);
         if let Some(fields) = ty.tuple_fields() {
-            if fields.iter().any(|(name, _)| name == key) {
+            if let Some(field_name) = tuple_field_name(fields, key) {
                 return Ok(MirFieldId(stable_id(
                     "mir-field",
-                    &format!("{}::{key}", ty.identity_key()),
+                    &format!("{}::{field_name}", ty.identity_key()),
                 )));
             }
         }
