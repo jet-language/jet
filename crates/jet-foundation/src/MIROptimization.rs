@@ -3054,8 +3054,8 @@ fn verify_semantic_operation(
                 "core.pattern",
                 "text_match",
                 "jet_text_pattern_match",
-                1,
-                &[true],
+                2,
+                &[true, false],
                 crate::MIR::MirPreludeAbi::Value,
             ) {
                 return invalid(format!("text pattern route {call:?} has the wrong metadata"));
@@ -3072,8 +3072,8 @@ fn verify_semantic_operation(
                 "core.pattern",
                 "binary_match",
                 "jet_binary_pattern_match",
-                1,
-                &[true],
+                2,
+                &[true, false],
                 crate::MIR::MirPreludeAbi::Value,
             ) {
                 return invalid(format!("binary pattern route {call:?} has the wrong metadata"));
