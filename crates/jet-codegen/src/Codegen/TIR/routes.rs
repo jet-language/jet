@@ -4980,6 +4980,24 @@ pub(super) fn distinct_conversion_route(
     }
 }
 
+fn is_measurement_type(ty: &Type) -> bool {
+    matches!(
+        ty.without_user_tags(),
+        Type::Apply { name, args }
+            if name == "Measurement"
+                && args.len() == 1
+                && matches!(args[0].without_user_tags(), Type::Float)
+    )
+}
+
+fn is_measured_conversion_result(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Option(inner) => is_measurement_type(inner),
+        Type::Result { ok, .. } => is_measurement_type(ok),
+        _ => false,
+    }
+}
+
 pub(super) fn unit_conversion_route(
     destination: &str,
     scale: &crate::AST::UnitRatio,
@@ -4989,9 +5007,10 @@ pub(super) fn unit_conversion_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = (destination, scale, offset, relative_uncertainty, result);
-    match rounding {
-        None => prelude_route_row(
+    let _ = (destination, scale, offset);
+    let measured = relative_uncertainty.is_some() && is_measured_conversion_result(result);
+    match (rounding, measured) {
+        (None, false) => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_exact",
@@ -5004,7 +5023,20 @@ pub(super) fn unit_conversion_route(
             MirPreludeAbi::Value,
             "exact unit conversion",
         ),
-        Some(_) => prelude_route_row(
+        (None, true) => prelude_route_row(
+            MirPreludeFamily::StaticPrelude,
+            "core.units",
+            "conversion_exact_measurement",
+            "jet_unit_conversion_exact_measurement",
+            6,
+            6,
+            &[false, true, true, true, true, false],
+            None,
+            carrier,
+            MirPreludeAbi::Value,
+            "exact measured unit conversion",
+        ),
+        (Some(_), false) => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_rounded",
@@ -5016,6 +5048,19 @@ pub(super) fn unit_conversion_route(
             carrier,
             MirPreludeAbi::Value,
             "rounded unit conversion",
+        ),
+        (Some(_), true) => prelude_route_row(
+            MirPreludeFamily::StaticPrelude,
+            "core.units",
+            "conversion_rounded_measurement",
+            "jet_unit_conversion_rounded_measurement",
+            8,
+            8,
+            &[false, true, true, true, true, false, false, false],
+            None,
+            carrier,
+            MirPreludeAbi::Value,
+            "rounded measured unit conversion",
         ),
     }
 }

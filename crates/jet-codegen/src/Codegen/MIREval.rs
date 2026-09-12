@@ -81,6 +81,10 @@ mod mir_human_output_semantics {
     include!("../Prelude/Core/HumanOutput.rs");
 }
 
+#[allow(dead_code)]
+mod mir_measurement_prelude {
+    include!("../Prelude/Core/Measurement.rs");
+}
 enum MirUiBackend {
     Null(mir_ui_kernel::JetNullBackend),
     Tui(mir_ui_kernel::JetTuiBackend),
@@ -12108,6 +12112,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             Err(_) => MirEvalValue::BigInt(value.to_string()),
         };
         let decimal = |value: f64| MirEvalValue::Float { value, f32: false };
+        let measurement = |value: f64, relative_uncertainty: f64| {
+            let (value, uncertainty) =
+                mir_measurement_prelude::jet_measurement_kernel_from_relative(
+                    value,
+                    relative_uncertainty,
+                );
+            MirEvalValue::Struct {
+                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                fields: vec![
+                    ("value".to_string(), decimal(value)),
+                    ("uncertainty".to_string(), decimal(uncertainty)),
+                ],
+            }
+        };
 
         match symbol.as_str() {
             "jet_inline_range_from_int" => Ok(outcome(
@@ -12219,6 +12237,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     },
                 }
             }
+            "jet_unit_conversion_exact_measurement" => {
+                match jet_unit_conversion_exact(float(0)?, text(1)?, text(2)?, text(3)?, text(4)?) {
+                    Some(value) => Ok(MirEvalValue::Present(Box::new(measurement(
+                        value,
+                        float(5)?,
+                    )))),
+                    None => match target.option_inner() {
+                        Some(element) => Ok(MirEvalValue::Absent {
+                            element: element.clone(),
+                        }),
+                        None => Err(mir_error_at(
+                            "exact measured unit conversion requires an Option target",
+                            span,
+                        )),
+                    },
+                }
+            }
             "jet_unit_conversion_rounded" => {
                 let mode = match integer(5)? {
                     0 => UnitRoundingMode::TowardZero,
@@ -12238,6 +12273,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         integer(6)?,
                     )
                     .map(decimal),
+                ))
+            }
+            "jet_unit_conversion_rounded_measurement" => {
+                let mode = match integer(5)? {
+                    0 => UnitRoundingMode::TowardZero,
+                    1 => UnitRoundingMode::Floor,
+                    2 => UnitRoundingMode::Ceiling,
+                    3 => UnitRoundingMode::NearestEven,
+                    _ => return Err(mir_error_at("invalid checked unit rounding tag", span)),
+                };
+                let relative_uncertainty = float(7)?;
+                Ok(outcome(
+                    jet_unit_conversion_rounded(
+                        float(0)?,
+                        text(1)?,
+                        text(2)?,
+                        text(3)?,
+                        text(4)?,
+                        mode,
+                        integer(6)?,
+                    )
+                    .map(|value| measurement(value, relative_uncertainty)),
                 ))
             }
             _ => self.eval_prelude(call, args, Some(target), span),

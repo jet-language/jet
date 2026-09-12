@@ -1064,6 +1064,15 @@ pub(super) fn lower_expr(
         } => {
             let value = ctx.lower_child(arg)?;
             let rounding_mode = rounding.as_ref().map(|(mode, _)| *mode);
+            let route = super::unit_conversion_route(
+                destination,
+                scale,
+                offset,
+                rounding_mode,
+                *relative_uncertainty,
+                &expr.ty,
+                &carrier,
+            )?;
             let mut parameters = vec![
                 lower_conversion_string(ctx, scale.num.to_string())?,
                 lower_conversion_string(ctx, scale.den.to_string())?,
@@ -1074,15 +1083,9 @@ pub(super) fn lower_expr(
                 parameters.push(lower_conversion_int(ctx, *mode as i64)?);
                 parameters.push(ctx.lower_child(digits)?);
             }
-            let route = super::unit_conversion_route(
-                destination,
-                scale,
-                offset,
-                rounding_mode,
-                *relative_uncertainty,
-                &expr.ty,
-                &carrier,
-            )?;
+            if let Some(relative_uncertainty) = *relative_uncertainty {
+                parameters.push(lower_conversion_float(ctx, relative_uncertainty)?);
+            }
             lower_prelude_conversion(
                 ctx,
                 value,
@@ -4379,6 +4382,20 @@ fn lower_conversion_int(
         MirOperation::Constant(MirConstant::Int {
             value,
             width: None,
+            spelling: None,
+        }),
+    )
+}
+fn lower_conversion_float(
+    ctx: &mut LowerCtx,
+    value: f64,
+) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+    ctx.emit(
+        "conversion-parameter-float",
+        Some(Type::Float),
+        MirOperation::Constant(MirConstant::Float {
+            value,
+            f32: false,
             spelling: None,
         }),
     )

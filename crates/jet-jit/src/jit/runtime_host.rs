@@ -10577,6 +10577,99 @@ fn jet_jit_unit_convert_rounded(
     })
 }
 
+fn jet_jit_unit_convert_exact_measurement(
+    value: f64,
+    scale_num: i64,
+    scale_den: i64,
+    offset_num: i64,
+    offset_den: i64,
+    relative_uncertainty: f64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] =
+            [scale_num, scale_den, offset_num, offset_den].map(|id| rt.heap.get_string(id))
+        else {
+            rt.set_host_fault("exact measured unit conversion has an invalid coefficient handle");
+            return 0;
+        };
+        match jet_foundation::jet_unit_conversion_exact(
+            value,
+            scale_num,
+            scale_den,
+            offset_num,
+            offset_den,
+        ) {
+            Some(value) => {
+                let measurement = alloc_measurement(
+                    rt,
+                    measurement_kernel::jet_measurement_kernel_from_relative(
+                        value,
+                        relative_uncertainty,
+                    ),
+                );
+                alloc_jit_result(rt, true, measurement as u64)
+            }
+            None => alloc_jit_result(rt, false, 0),
+        }
+    })
+}
+
+fn jet_jit_unit_convert_rounded_measurement(
+    value: f64,
+    scale_num: i64,
+    scale_den: i64,
+    offset_num: i64,
+    offset_den: i64,
+    mode: i64,
+    digits: i64,
+    relative_uncertainty: f64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mode = match mode {
+            0 => jet_foundation::UnitRoundingMode::TowardZero,
+            1 => jet_foundation::UnitRoundingMode::Floor,
+            2 => jet_foundation::UnitRoundingMode::Ceiling,
+            3 => jet_foundation::UnitRoundingMode::NearestEven,
+            _ => {
+                rt.set_host_fault("rounded measured unit conversion has an invalid mode tag");
+                return 0;
+            }
+        };
+        let [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] =
+            [scale_num, scale_den, offset_num, offset_den].map(|id| rt.heap.get_string(id))
+        else {
+            rt.set_host_fault(
+                "rounded measured unit conversion has an invalid coefficient handle",
+            );
+            return 0;
+        };
+        match jet_foundation::jet_unit_conversion_rounded(
+            value,
+            scale_num,
+            scale_den,
+            offset_num,
+            offset_den,
+            mode,
+            digits,
+        ) {
+            Ok(value) => {
+                let measurement = alloc_measurement(
+                    rt,
+                    measurement_kernel::jet_measurement_kernel_from_relative(
+                        value,
+                        relative_uncertainty,
+                    ),
+                );
+                alloc_jit_result(rt, true, measurement as u64)
+            }
+            Err(message) => {
+                let error = rt.heap.alloc_string(message);
+                alloc_jit_result(rt, false, error as u64)
+            }
+        }
+    })
+}
+
 fn jet_jit_unit_convert_implicit(
     value: f64,
     scale_num: i64,
@@ -13941,6 +14034,32 @@ host_fns! {
         sig_unit_convert_rounded.params.push(AbiParam::new(types::F64));
         sig_unit_convert_rounded.params.extend([AbiParam::new(types::I64); 6]);
         sig_unit_convert_rounded.returns.push(AbiParam::new(types::I64));
+        let mut sig_unit_convert_exact_measurement = Signature::new(cc);
+        sig_unit_convert_exact_measurement
+            .params
+            .push(AbiParam::new(types::F64));
+        sig_unit_convert_exact_measurement
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_unit_convert_exact_measurement
+            .params
+            .push(AbiParam::new(types::F64));
+        sig_unit_convert_exact_measurement
+            .returns
+            .push(AbiParam::new(types::I64));
+        let mut sig_unit_convert_rounded_measurement = Signature::new(cc);
+        sig_unit_convert_rounded_measurement
+            .params
+            .push(AbiParam::new(types::F64));
+        sig_unit_convert_rounded_measurement
+            .params
+            .extend([AbiParam::new(types::I64); 6]);
+        sig_unit_convert_rounded_measurement
+            .params
+            .push(AbiParam::new(types::F64));
+        sig_unit_convert_rounded_measurement
+            .returns
+            .push(AbiParam::new(types::I64));
         let mut sig_unit_convert_implicit = Signature::new(cc);
         sig_unit_convert_implicit.params.push(AbiParam::new(types::F64));
         sig_unit_convert_implicit.params.extend([AbiParam::new(types::I64); 4]);
@@ -14266,6 +14385,8 @@ host_fns! {
     callable_has_env: "jet_jit_callable_has_env" => jet_jit_callable_has_env: sig_callable_flag;
     unit_convert_exact: "jet_unit_conversion_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
     unit_convert_rounded: "jet_unit_conversion_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
+    unit_convert_exact_measurement: "jet_unit_conversion_exact_measurement" => jet_jit_unit_convert_exact_measurement: sig_unit_convert_exact_measurement;
+    unit_convert_rounded_measurement: "jet_unit_conversion_rounded_measurement" => jet_jit_unit_convert_rounded_measurement: sig_unit_convert_rounded_measurement;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
     result_is_ok: "jet_jit_result_is_ok" => jet_jit_result_is_ok: sig_result_query_i8;
     result_get_i64: "jet_jit_result_get_i64" => jet_jit_result_get_i64: sig_result_query_i64;

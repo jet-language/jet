@@ -3405,11 +3405,11 @@ fn push_corelib_prelude_body(
     let needs_mapped_file = forces.mapped_file || needs_fs_runtime;
     let needs_shared =
         forces.shared || core_usage_matches(used_core, &["core.mem::pool_shared", "core.mem.pool_shared"]);
-
+    let needs_unit_conversion = core_usage_matches(used_core, &["core.units"]);
 
     for part in CORELIB_KERNEL_PARTS {
         if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
-            || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
+            || (!needs_shared && !needs_unit_conversion && *part == SHARED_ROUTES_PRELUDE)
         {
             continue;
         }
