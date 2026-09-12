@@ -1242,13 +1242,21 @@ fn store_task(join: JetSchedulerJoin<i64>, control: Arc<JetTaskControl>) -> i64 
 }
 
 fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
-    match rt.heap.clone_int_list(list) {
-        Some(ids) => ids,
-        None => {
-            rt.set_host_fault("jit task combinator: bad list handle");
-            Vec::new()
-        }
+    if let Some(ids) = rt.heap.clone_int_list(list) {
+        return ids;
     }
+    let Some(length) = crate::runtime_host::sequence_len(rt, list) else {
+        rt.set_host_fault("jit task combinator: bad list handle");
+        return Vec::new();
+    };
+    let Some(ids) = (0..length)
+        .map(|index| crate::runtime_host::sequence_get_int(rt, list, index))
+        .collect::<Option<Vec<_>>>()
+    else {
+        rt.set_host_fault("jit task combinator: bad list element");
+        return Vec::new();
+    };
+    ids
 }
 
 fn store_i64_list(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {

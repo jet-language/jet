@@ -1148,6 +1148,27 @@ fn loop_items_from_list(
             })
             .collect();
     }
+    if let Some(length) = crate::runtime_host::sequence_len(rt, collection) {
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+        if crate::runtime_host::sequence_get_float(rt, collection, 0).is_some() {
+            return (0..length)
+                .map(|index| {
+                    crate::runtime_host::sequence_get_float(rt, collection, index)
+                        .map(|value| JetLoopItem::FloatBits(value.to_bits() as i64))
+                        .ok_or_else(|| "view float element is not present".to_string())
+                })
+                .collect();
+        }
+        return (0..length)
+            .map(|index| {
+                crate::runtime_host::sequence_get_int(rt, collection, index)
+                    .map(JetLoopItem::Int)
+                    .ok_or_else(|| "view integer element is not present".to_string())
+            })
+            .collect();
+    }
     Err("loop collection is not an iterable carrier".to_string())
 }
 
@@ -5332,6 +5353,52 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
         out
     })
 }
+
+/// Integer-key map merge route; map values keep the raw integer key carrier.
+fn jet_jit_map_merge_int(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let out = {
+            let len = rt
+                .heap
+                .map_len(left)
+                .expect("jit Int map merge: bad left handle");
+            let out = rt.heap.alloc_empty_map();
+            for i in 0..len {
+                let key = rt
+                    .heap
+                    .map_key_at(left, i)
+                    .expect("jit Int map merge: left key");
+                let value = rt
+                    .heap
+                    .map_value_at(left, i)
+                    .expect("jit Int map merge: left value");
+                rt.heap
+                    .map_insert_int(out, key, value)
+                    .expect("jit Int map merge: left insert");
+            }
+            out
+        };
+        let len = rt
+            .heap
+            .map_len(right)
+            .expect("jit Int map merge: bad right handle");
+        for i in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(right, i)
+                .expect("jit Int map merge: right key");
+            let value = rt
+                .heap
+                .map_value_at(right, i)
+                .expect("jit Int map merge: right value");
+            rt.heap
+                .map_insert_int(out, key, value)
+                .expect("jit Int map merge: right insert");
+        }
+        out
+    })
+}
+
 fn jet_jit_ordering_then(first: i64, second: i64) -> i64 {
     let equal = crate::types_meta::prelude_enum_variant_index(
         jet_foundation::Syntax::TYPE_ORDERING,
@@ -10220,6 +10287,7 @@ host_fns! {
 
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
+    map_merge_int: "jet_jit_map_merge_int" => jet_jit_map_merge_int: sig_get_opt;
     map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
     checked_map_merge_with: "jet_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
 

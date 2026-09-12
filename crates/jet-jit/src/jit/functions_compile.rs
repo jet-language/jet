@@ -10704,10 +10704,22 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 if args.len() != 1 {
                     return Err("MIR Map.merge expects one map argument".to_string());
                 }
-                (
-                    self.host.coll.map_merge,
-                    vec![receiver_value!()?, integer_value!(args[0])?],
-                )
+                let (key_ty, _) = comparison_map_parts(&receiver_ty).ok_or_else(|| {
+                    format!(
+                        "MIR Map.merge receiver `{}` has no map key type",
+                        receiver_ty.display_name()
+                    )
+                })?;
+                let host = match self.map_key_kind_for_type(key_ty)? {
+                    MapKeyKind::String => self.host.coll.map_merge,
+                    MapKeyKind::Int => self.host.coll.map_merge_int,
+                    MapKeyKind::Composite => {
+                        return Err(
+                            "MIR Map.merge has no composite-key JIT host route".to_string()
+                        );
+                    }
+                };
+                (host, vec![receiver_value!()?, integer_value!(args[0])?])
             }
             "join" => {
                 if args.len() != 1 {
