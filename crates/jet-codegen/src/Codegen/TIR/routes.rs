@@ -2107,6 +2107,15 @@ fn builtin_collection_route(
         {
             row("bit_set_has", "jet_bit_set_has", 2, &[true, false])
         }
+        (TBuiltinOp::ListUnion, Type::List(_) | Type::FixedList { .. }) => {
+            row("union", "jet_list_union", 2, &[true, true])
+        }
+        (TBuiltinOp::ListIntersection, Type::List(_) | Type::FixedList { .. }) => {
+            row("intersection", "jet_list_intersection", 2, &[true, true])
+        }
+        (TBuiltinOp::ListDifference, Type::List(_) | Type::FixedList { .. }) => {
+            row("difference", "jet_list_difference", 2, &[true, true])
+        }
         (TBuiltinOp::LenList, Type::List(_) | Type::FixedList { .. }) => {
             row("len", "jet_list_len", 1, &[true])
         }
@@ -2627,6 +2636,7 @@ impl TBuiltinOp {
                     None,
                     carrier,
                 ),
+                TBuiltinOp::Contains => builtin_collection_route(self, receiver, carrier)?,
                 TBuiltinOp::LenList
                 | TBuiltinOp::ContainsKey
                 | TBuiltinOp::IsEmpty
@@ -2634,7 +2644,10 @@ impl TBuiltinOp {
                 | TBuiltinOp::GetMap
                 | TBuiltinOp::GetList
                 | TBuiltinOp::First
-                | TBuiltinOp::Last => builtin_collection_route(self, receiver, carrier)?,
+                | TBuiltinOp::Last
+                | TBuiltinOp::ListUnion
+                | TBuiltinOp::ListIntersection
+                | TBuiltinOp::ListDifference => builtin_collection_route(self, receiver, carrier)?,
                 _ => self.route_plan(result, carrier)?,
             }
         };
