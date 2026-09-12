@@ -7965,12 +7965,46 @@ pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 
     rt.results.len() as i64
 }
 
-/// Read one checked `Err` payload from the shared one-based error arena.
+/// Read one checked `Err` payload from the shared carriers. Default `Err`
+/// values are heap records, while errors already crossing a report boundary
+/// live in the one-based resident error arena.
+fn jit_heap_error(
+    rt: &JitRuntime,
+    handle: i64,
+) -> Option<jet_foundation::Outcome::JetErr> {
+    let err_type_id = *rt
+        .type_descriptor_names
+        .get(jet_foundation::Syntax::TYPE_ERR)?;
+    let tagged = rt.trait_object_types.get(&handle)?;
+    if tagged.0 != err_type_id {
+        return None;
+    }
+    let message = rt.heap.record_clone_string(handle, 0)?;
+    let code = match jit_result_parts(rt, rt.heap.record_get_int(handle, 1)?)? {
+        (true, bits) => {
+            let handle = i64::try_from(bits).ok()?;
+            Ok(rt.heap.clone_string(handle)?)
+        }
+        (false, 0) => Err(jet_foundation::Outcome::JetAbsent),
+        _ => return None,
+    };
+    let cause = match jit_result_parts(rt, rt.heap.record_get_int(handle, 2)?)? {
+        (true, bits) => {
+            let handle = i64::try_from(bits).ok()?;
+            Ok(jit_error(rt, handle)?)
+        }
+        (false, 0) => Err(jet_foundation::Outcome::JetAbsent),
+        _ => return None,
+    };
+    Some(jet_foundation::Outcome::jet_err(message, code, cause))
+}
+
 pub(crate) fn jit_error(rt: &JitRuntime, handle: i64) -> Option<jet_foundation::Outcome::JetErr> {
     handle
         .checked_sub(1)
         .and_then(|index| usize::try_from(index).ok())
         .and_then(|index| rt.errors.get(index).cloned())
+        .or_else(|| jit_heap_error(rt, handle))
 }
 
     pub(crate) fn write_typed_record_field(
@@ -11239,6 +11273,17 @@ fn testing_compare_terminal(
         )
     })
 }
+fn read_result_datatree(
+    value: i64,
+) -> Option<(i64, crate::Encoding::json_rt::DataTree)> {
+    let payload = Concurrency::with_runtime_mut(|rt| {
+        let (ok, bits) = jit_result_parts(rt, value)?;
+        ok.then(|| i64::try_from(bits).ok()).flatten()
+    })?;
+    let tree = crate::Encoding::read_datatree(payload)?;
+    Some((payload, tree))
+}
+
 
 fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation: i64) -> i64 {
     let relation_name = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(relation))
@@ -11327,7 +11372,7 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
                     .filter(|_| jet_jit_is_trapped() == 0)
                     .map(|candidate_value| (reference_value, candidate_value))
             });
-        let Some((reference_value, candidate_value)) = observed else {
+        let Some((reference_raw, candidate_raw)) = observed else {
             // A stop raised inside a callback is already recorded on the
             // runtime; generated code leaves at its next trap check.
             return testing_compare_terminal(
@@ -11341,9 +11386,9 @@ fn jet_jit_testing_compare(cases: i64, reference: i64, candidate: i64, relation:
                 candidate_values,
             );
         };
-        let (Some(reference_tree), Some(candidate_tree)) = (
-            crate::Encoding::read_datatree(reference_value),
-            crate::Encoding::read_datatree(candidate_value),
+        let (Some((reference_value, reference_tree)), Some((candidate_value, candidate_tree))) = (
+            read_result_datatree(reference_raw),
+            read_result_datatree(candidate_raw),
         ) else {
             return testing_compare_terminal(
                 relation_name,
