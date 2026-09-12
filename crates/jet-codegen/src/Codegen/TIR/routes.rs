@@ -2460,6 +2460,8 @@ impl TBuiltinOp {
                 carrier,
             ),
             Sum { float: false, .. } => b("sum", "jet_list_sum", 1, 1, &[false], None, carrier),
+            Min { float: false, .. } => b("min", "jet_list_min", 1, 1, &[false], None, carrier),
+            Max { float: false, .. } => b("max", "jet_list_max", 1, 1, &[false], None, carrier),
             ListMinMax { .. } => prelude(
                 MirPreludeFamily::BuiltinMethod,
                 "core.list",
@@ -2498,8 +2500,11 @@ impl TBuiltinOp {
                 carrier,
             ),
             MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
+            MapFirst => b("map_first", "jet_map_first_key", 1, 1, &[true], None, carrier),
             BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
             DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
+            PriorityQueueFrom => b("priority_queue_from", "jet_priority_queue_from", 1, 1, &[false], None, carrier),
+            BagHas => b("bag_has", "jet_bag_has", 2, 2, &[true, true], None, carrier),
             DequePeekBack => b("deque_peek_back", "jet_deque_peek_back", 1, 1, &[true], None, carrier),
             DequeCapacity => b("deque_capacity", "jet_deque_capacity", 1, 1, &[true], None, carrier),
             DequeContains => b("deque_contains", "jet_deque_contains", 2, 2, &[true, true], None, carrier),
@@ -2508,21 +2513,21 @@ impl TBuiltinOp {
             DequeJoin => b("deque_join", "jet_deque_join", 2, 2, &[true, true], None, carrier),
             DequeFrom => b("deque_from", "jet_deque_from", 1, 1, &[false], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
-            | IndexOf | JoinSep | Product { .. } | Min { .. }
-            | Max { .. } | Unzip { .. } | Chars | EndsWith | Replace
+            | IndexOf | JoinSep | Product { .. }
+            | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
             | ContainsKey | ToString | Take | Skip | IterToList | IterCollect
             | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
-            | MapCopy | MapFirst | MapToList { .. } | MapIntersection | MapSliceKeys
+            | MapCopy | MapToList { .. } | MapIntersection | MapSliceKeys
             | MapNew | MapContainsValue
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
-            | SetShuffle | SortedSetFrom | SortedSetToList | PriorityQueueFrom
+            | SetShuffle | SortedSetFrom | SortedSetToList
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
-            | BagHas | BagLen => primitive(),
+            | BagLen => primitive(),
         };
         Ok(plan)
     }

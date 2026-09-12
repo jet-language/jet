@@ -493,6 +493,13 @@ fn jet_map_get_opt<K: Ord, V: Clone>(
 }
 
 #[inline(always)]
+fn jet_bag_has<T: Eq + std::hash::Hash>(
+    bag: &std::collections::HashMap<T, usize>,
+    value: &T,
+) -> bool {
+    bag.get(value).copied().unwrap_or(0) > 0
+}
+
 fn jet_bag_count<T: Eq + std::hash::Hash>(
     bag: &std::collections::HashMap<T, usize>,
     value: &T,
@@ -521,6 +528,10 @@ fn jet_sorted_set_is_empty<T>(set: &std::collections::BTreeSet<T>) -> bool {
 }
 
 #[inline(always)]
+fn jet_priority_queue_from<T: Ord>(values: Vec<T>) -> std::collections::BinaryHeap<T> {
+    values.into_iter().collect()
+}
+
 fn jet_priority_queue_len<T>(queue: &std::collections::BinaryHeap<T>) -> i64 {
     queue.len() as i64
 }

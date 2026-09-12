@@ -9724,6 +9724,7 @@ host_fns! {
 
     map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
     checked_map_first: "jet_map_first" => jet_jit_map_first: sig_len;
+    checked_map_first_key: "jet_map_first_key" => jet_jit_map_first: sig_len;
 
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
     map_top_n: "jet_map_top_n" => jet_jit_map_top_n: sig_get_opt;
@@ -9767,6 +9768,8 @@ host_fns! {
 
     list_min_i64: "jet_jit_list_min_i64" => jet_jit_list_min_i64: sig_len;
     list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
+    checked_list_min: "jet_list_min" => jet_jit_list_min_i64: sig_len;
+    checked_list_max: "jet_list_max" => jet_jit_list_max_i64: sig_len;
     list_flatten: "jet_list_flatten" => jet_jit_list_flatten: sig_len;
     iter_flatten: "jet_iter_flatten" => jet_jit_list_flatten: sig_len;
     iter_intersperse: "jet_iter_intersperse" => jet_jit_list_intersperse: sig_get_opt;
