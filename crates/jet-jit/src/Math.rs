@@ -566,6 +566,18 @@ fn math_binary_value(
             )?;
             from_int_lanes(name, &result)
         }
+        (MathVal::Mat3(left), MathVal::Mat3(right))
+            if op == simd_lanes::JetSimdBinaryOp::Mul =>
+        {
+            let out = mat_mul(3, &left.0, &right.0);
+            from_lanes("Mat3", &out)
+        }
+        (MathVal::Mat4(left), MathVal::Mat4(right))
+            if op == simd_lanes::JetSimdBinaryOp::Mul =>
+        {
+            let out = mat_mul(4, &left.0, &right.0);
+            from_lanes("Mat4", &out)
+        }
         (MathVal::Mat3(matrix), MathVal::Vec3(vector))
             if op == simd_lanes::JetSimdBinaryOp::Mul =>
         {
@@ -842,6 +854,44 @@ fn mat_vec(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
     }
     out
 }
+fn mat_transpose(n: usize, a: &[f64]) -> Vec<f64> {
+    let mut r = vec![0.0f64; n * n];
+    for c in 0..n {
+        for row in 0..n {
+            r[c * n + row] = a[row * n + c];
+        }
+    }
+    r
+}
+
+fn vec3_scalar_op(
+    value: MathVal,
+    scalar: f64,
+    op: simd_lanes::JetSimdBinaryOp,
+) -> Option<MathVal> {
+    let MathVal::Vec3(Vec3(mut lanes)) = value else {
+        return None;
+    };
+    for lane in &mut lanes {
+        *lane = match op {
+            simd_lanes::JetSimdBinaryOp::Mul => *lane * scalar,
+            simd_lanes::JetSimdBinaryOp::Div => *lane / scalar,
+            _ => return None,
+        };
+    }
+    Some(MathVal::Vec3(Vec3(lanes)))
+}
+
+fn scalar_vec3_div(scalar: f64, value: MathVal) -> Option<MathVal> {
+    let MathVal::Vec3(Vec3(lanes)) = value else {
+        return None;
+    };
+    Some(MathVal::Vec3(Vec3([
+        scalar / lanes[0],
+        scalar / lanes[1],
+        scalar / lanes[2],
+    ])))
+}
 
 fn reduce_op(lanes: &[f64], op: &str, f32_lanes: bool) -> Option<f64> {
     let op = simd_reduce_op(op)?;
@@ -949,6 +999,8 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                     "Vec2" => 2,
                     "Vec3" => 3,
                     "Vec4" => 4,
+                    "Mat3" => 9,
+                    "Mat4" => 16,
                     _ => 0,
                 },
                 |(_, n)| n,
@@ -982,6 +1034,35 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
             }
         }
+        ("Vec3", "mul" | "div") if argv.len() == 2 && is_float_pack(argv[1]) => {
+            let Some(value) = take_val(argv[0]) else {
+                trap("math scalar binary: bad receiver");
+                return 0;
+            };
+            let op = if func == "mul" {
+                simd_lanes::JetSimdBinaryOp::Mul
+            } else {
+                simd_lanes::JetSimdBinaryOp::Div
+            };
+            vec3_scalar_op(value, unpack_float(argv[1]), op)
+                .map(|value| pack_handle(push_val(value)))
+                .or_else(|| {
+                    trap("math scalar binary: expected Vec3");
+                    None
+                })
+        }
+        ("Float", "div_Vec3") if argv.len() == 2 && is_float_pack(argv[0]) => {
+            let Some(value) = take_val(argv[1]) else {
+                trap("math scalar binary: bad receiver");
+                return 0;
+            };
+            scalar_vec3_div(unpack_float(argv[0]), value)
+                .map(|value| pack_handle(push_val(value)))
+                .or_else(|| {
+                    trap("math scalar binary: expected Vec3");
+                    None
+                })
+        }
         (_, "add" | "sub" | "mul" | "div") if argv.len() == 2 => {
             let Some(a) = take_val(argv[0]) else {
                 trap("math binary: bad left");
@@ -1013,7 +1094,19 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 Some(pack_handle(alloc_f64_list(&lanes_of(v))))
             }
         }
-        (_, "sum" | "product" | "min" | "max" | "length") if argv.len() == 1 => {
+        (
+            _,
+            "sum"
+            | "product"
+            | "min"
+            | "max"
+            | "reduce_add"
+            | "reduce_mul"
+            | "reduce_min"
+            | "reduce_max"
+            | "reduce_avg"
+            | "length",
+        ) if argv.len() == 1 => {
             let Some(v) = take_val(argv[0]) else {
                 trap("math unary: bad recv");
                 return 0;
@@ -1027,18 +1120,29 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                         0
                     });
             }
+            let op = match func.as_str() {
+                "reduce_add" => "Add",
+                "reduce_mul" => "Mul",
+                "reduce_min" => "Min",
+                "reduce_max" => "Max",
+                "reduce_avg" => "Avg",
+                other => other,
+            };
             if let Some((signed, bits)) = int_layout {
                 let Some(lanes) = int_lanes_of(v) else {
                     trap("integer reduction failed");
                     return 0;
                 };
-                let Some(n) = reduce_int_op(&lanes, &func, signed, bits) else {
+                let Some(n) = reduce_int_op(&lanes, op, signed, bits) else {
                     trap("integer reduction failed");
                     return 0;
                 };
                 Some(pack_int(n))
             } else {
-                let n = reduce_op(&lanes_of(v), &func, f32_lanes).unwrap_or(0.0);
+                let Some(n) = reduce_op(&lanes_of(v), op, f32_lanes) else {
+                    trap("math reduction failed");
+                    return 0;
+                };
                 Some(pack_float(n))
             }
         }
@@ -1116,6 +1220,52 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
             };
             let out = mat_mul(n, &lanes_of(a), &lanes_of(b));
             from_lanes(name, &out).map(|v| pack_handle(push_val(v)))
+        }
+        (_, "transform") if argv.len() == 2 => {
+            let Some(a) = take_val(argv[0]) else {
+                trap("transform: bad recv");
+                return 0;
+            };
+            let Some(b) = take_val(argv[1]) else {
+                trap("transform: bad arg");
+                return 0;
+            };
+            let result = match (a, b) {
+                (MathVal::Mat3(matrix), MathVal::Vec3(vector)) => {
+                    from_lanes("Vec3", &mat_vec(3, &matrix.0, &vector.0))
+                }
+                (MathVal::Mat4(matrix), MathVal::Vec4(vector)) => {
+                    from_lanes("Vec4", &mat_vec(4, &matrix.0, &vector.0))
+                }
+                _ => None,
+            };
+            result
+                .map(|value| pack_handle(push_val(value)))
+                .or_else(|| {
+                    trap("transform expects a matching matrix and vector");
+                    None
+                })
+        }
+        (_, "transpose") if argv.len() == 1 => {
+            let Some(value) = take_val(argv[0]) else {
+                trap("transpose: bad recv");
+                return 0;
+            };
+            let result = match value {
+                MathVal::Mat3(matrix) => {
+                    from_lanes("Mat3", &mat_transpose(3, &matrix.0))
+                }
+                MathVal::Mat4(matrix) => {
+                    from_lanes("Mat4", &mat_transpose(4, &matrix.0))
+                }
+                _ => None,
+            };
+            result
+                .map(|value| pack_handle(push_val(value)))
+                .or_else(|| {
+                    trap("transpose expects a matrix");
+                    None
+                })
         }
         (_, "reduce") if argv.len() == 2 => {
             let Some(v) = take_val(argv[0]) else {
@@ -1267,6 +1417,557 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
         }
     };
     result.unwrap_or(0)
+}
+
+fn typed_math_call(type_name: &str, func: &str, args: &[i64]) -> i64 {
+    let type_name = alloc_string(type_name.to_owned());
+    let func = alloc_string(func.to_owned());
+    let args = alloc_i64_list(args);
+    jet_jit_math_call(type_name, func, args)
+}
+
+fn typed_math_float(type_name: &str, func: &str, args: &[i64]) -> f64 {
+    unpack_float(typed_math_call(type_name, func, args))
+}
+
+fn typed_math_f32(type_name: &str, func: &str, args: &[i64]) -> f32 {
+    typed_math_float(type_name, func, args) as f32
+}
+
+fn typed_math_int(type_name: &str, func: &str, args: &[i64]) -> i64 {
+    unpack_int(typed_math_call(type_name, func, args))
+}
+
+macro_rules! typed_math_new_f32 {
+    ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+        fn $name($( $arg: f32 ),+) -> i64 {
+            let args = [$( f64_bits(f64::from($arg)) ),+];
+            typed_math_call($type_name, "new", &args)
+        }
+    };
+}
+
+macro_rules! typed_math_new_f64 {
+    ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+        fn $name($( $arg: f64 ),+) -> i64 {
+            let args = [$( f64_bits($arg) ),+];
+            typed_math_call($type_name, "new", &args)
+        }
+    };
+}
+
+macro_rules! typed_math_new_int {
+    ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+        fn $name($( $arg: i64 ),+) -> i64 {
+            let args = [$( $arg ),+];
+            typed_math_call($type_name, "new", &args)
+        }
+    };
+}
+
+macro_rules! typed_math_splat_f32 {
+    ($name:ident, $type_name:literal) => {
+        fn $name(value: f32) -> i64 {
+            typed_math_call($type_name, "splat", &[f64_bits(f64::from(value))])
+        }
+    };
+}
+
+macro_rules! typed_math_splat_f64 {
+    ($name:ident, $type_name:literal) => {
+        fn $name(value: f64) -> i64 {
+            typed_math_call($type_name, "splat", &[f64_bits(value)])
+        }
+    };
+}
+
+macro_rules! typed_math_splat_int {
+    ($name:ident, $type_name:literal) => {
+        fn $name(value: i64) -> i64 {
+            typed_math_call($type_name, "splat", &[value])
+        }
+    };
+}
+
+macro_rules! typed_math_array {
+    ($name:ident, $type_name:literal, $func:literal) => {
+        fn $name(value: i64) -> i64 {
+            typed_math_call($type_name, $func, &[value])
+        }
+    };
+}
+
+typed_math_new_f32!(jet_jit_math_f32x4_new, "F32x4", a, b, c, d);
+typed_math_new_f32!(
+    jet_jit_math_f32x8_new,
+    "F32x8",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h
+);
+typed_math_new_f64!(jet_jit_math_f64x2_new, "F64x2", a, b);
+typed_math_new_f64!(jet_jit_math_f64x4_new, "F64x4", a, b, c, d);
+typed_math_new_int!(
+    jet_jit_math_i8x16_new,
+    "I8x16",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p
+);
+typed_math_new_int!(jet_jit_math_i16x8_new, "I16x8", a, b, c, d, e, f, g, h);
+typed_math_new_int!(jet_jit_math_i32x4_new, "I32x4", a, b, c, d);
+typed_math_new_int!(jet_jit_math_i64x2_new, "I64x2", a, b);
+typed_math_new_int!(
+    jet_jit_math_u8x16_new,
+    "U8x16",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p
+);
+typed_math_new_int!(jet_jit_math_u16x8_new, "U16x8", a, b, c, d, e, f, g, h);
+typed_math_new_int!(jet_jit_math_u32x4_new, "U32x4", a, b, c, d);
+typed_math_new_int!(jet_jit_math_u64x2_new, "U64x2", a, b);
+typed_math_new_int!(
+    jet_jit_math_i8x32_new,
+    "I8x32",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p,
+    q,
+    r,
+    s,
+    t,
+    u,
+    v,
+    w,
+    x,
+    y,
+    z,
+    aa,
+    ab,
+    ac,
+    ad,
+    ae,
+    af
+);
+typed_math_new_int!(
+    jet_jit_math_i16x16_new,
+    "I16x16",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p
+);
+typed_math_new_int!(
+    jet_jit_math_i32x8_new,
+    "I32x8",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h
+);
+typed_math_new_int!(jet_jit_math_i64x4_new, "I64x4", a, b, c, d);
+typed_math_new_int!(
+    jet_jit_math_u8x32_new,
+    "U8x32",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p,
+    q,
+    r,
+    s,
+    t,
+    u,
+    v,
+    w,
+    x,
+    y,
+    z,
+    aa,
+    ab,
+    ac,
+    ad,
+    ae,
+    af
+);
+typed_math_new_int!(
+    jet_jit_math_u16x16_new,
+    "U16x16",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p
+);
+typed_math_new_int!(
+    jet_jit_math_u32x8_new,
+    "U32x8",
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h
+);
+typed_math_new_int!(jet_jit_math_u64x4_new, "U64x4", a, b, c, d);
+typed_math_new_f64!(jet_jit_math_vec2_new, "Vec2", x, y);
+typed_math_new_f64!(jet_jit_math_vec3_new, "Vec3", x, y, z);
+typed_math_new_f64!(jet_jit_math_vec4_new, "Vec4", x, y, z, w);
+typed_math_new_f64!(
+    jet_jit_math_mat3_new,
+    "Mat3",
+    m0,
+    m1,
+    m2,
+    m3,
+    m4,
+    m5,
+    m6,
+    m7,
+    m8
+);
+typed_math_new_f64!(
+    jet_jit_math_mat4_new,
+    "Mat4",
+    m0,
+    m1,
+    m2,
+    m3,
+    m4,
+    m5,
+    m6,
+    m7,
+    m8,
+    m9,
+    m10,
+    m11,
+    m12,
+    m13,
+    m14,
+    m15
+);
+
+typed_math_splat_f32!(jet_jit_math_f32x4_splat, "F32x4");
+typed_math_splat_f32!(jet_jit_math_f32x8_splat, "F32x8");
+typed_math_splat_f64!(jet_jit_math_f64x2_splat, "F64x2");
+typed_math_splat_f64!(jet_jit_math_f64x4_splat, "F64x4");
+typed_math_splat_int!(jet_jit_math_i8x16_splat, "I8x16");
+typed_math_splat_int!(jet_jit_math_i16x8_splat, "I16x8");
+typed_math_splat_int!(jet_jit_math_i32x4_splat, "I32x4");
+typed_math_splat_int!(jet_jit_math_i64x2_splat, "I64x2");
+typed_math_splat_int!(jet_jit_math_u8x16_splat, "U8x16");
+typed_math_splat_int!(jet_jit_math_u16x8_splat, "U16x8");
+typed_math_splat_int!(jet_jit_math_u32x4_splat, "U32x4");
+typed_math_splat_int!(jet_jit_math_u64x2_splat, "U64x2");
+typed_math_splat_int!(jet_jit_math_i8x32_splat, "I8x32");
+typed_math_splat_int!(jet_jit_math_i16x16_splat, "I16x16");
+typed_math_splat_int!(jet_jit_math_i32x8_splat, "I32x8");
+typed_math_splat_int!(jet_jit_math_i64x4_splat, "I64x4");
+typed_math_splat_int!(jet_jit_math_u8x32_splat, "U8x32");
+typed_math_splat_int!(jet_jit_math_u16x16_splat, "U16x16");
+typed_math_splat_int!(jet_jit_math_u32x8_splat, "U32x8");
+typed_math_splat_int!(jet_jit_math_u64x4_splat, "U64x4");
+typed_math_splat_f64!(jet_jit_math_vec2_splat, "Vec2");
+typed_math_splat_f64!(jet_jit_math_vec3_splat, "Vec3");
+typed_math_splat_f64!(jet_jit_math_vec4_splat, "Vec4");
+typed_math_splat_f64!(jet_jit_math_mat3_splat, "Mat3");
+typed_math_splat_f64!(jet_jit_math_mat4_splat, "Mat4");
+
+typed_math_array!(jet_jit_math_f32x4_from_array, "F32x4", "from_array");
+typed_math_array!(jet_jit_math_f64x2_from_array, "F64x2", "from_array");
+typed_math_array!(jet_jit_math_f32x8_from_array, "F32x8", "from_array");
+typed_math_array!(jet_jit_math_f64x4_from_array, "F64x4", "from_array");
+typed_math_array!(jet_jit_math_i8x16_from_array, "I8x16", "from_array");
+typed_math_array!(jet_jit_math_i16x8_from_array, "I16x8", "from_array");
+typed_math_array!(jet_jit_math_i32x4_from_array, "I32x4", "from_array");
+typed_math_array!(jet_jit_math_i64x2_from_array, "I64x2", "from_array");
+typed_math_array!(jet_jit_math_u8x16_from_array, "U8x16", "from_array");
+typed_math_array!(jet_jit_math_u16x8_from_array, "U16x8", "from_array");
+typed_math_array!(jet_jit_math_u32x4_from_array, "U32x4", "from_array");
+typed_math_array!(jet_jit_math_u64x2_from_array, "U64x2", "from_array");
+typed_math_array!(jet_jit_math_i8x32_from_array, "I8x32", "from_array");
+typed_math_array!(jet_jit_math_i16x16_from_array, "I16x16", "from_array");
+typed_math_array!(jet_jit_math_i32x8_from_array, "I32x8", "from_array");
+typed_math_array!(jet_jit_math_i64x4_from_array, "I64x4", "from_array");
+typed_math_array!(jet_jit_math_u8x32_from_array, "U8x32", "from_array");
+typed_math_array!(jet_jit_math_u16x16_from_array, "U16x16", "from_array");
+typed_math_array!(jet_jit_math_u32x8_from_array, "U32x8", "from_array");
+typed_math_array!(jet_jit_math_u64x4_from_array, "U64x4", "from_array");
+typed_math_array!(jet_jit_math_vec2_from_array, "Vec2", "from_array");
+typed_math_array!(jet_jit_math_vec3_from_array, "Vec3", "from_array");
+typed_math_array!(jet_jit_math_vec4_from_array, "Vec4", "from_array");
+typed_math_array!(jet_jit_math_mat3_from_array, "Mat3", "from_array");
+typed_math_array!(jet_jit_math_mat4_from_array, "Mat4", "from_array");
+
+fn jet_jit_math_typed_to_array(value: i64) -> i64 {
+    let Some(value) = take_val(value) else {
+        trap("to_array: bad recv");
+        return 0;
+    };
+    if matches!(value, MathVal::Int(_)) {
+        pack_handle(alloc_i64_list(&int_lanes_of(value).unwrap()))
+    } else {
+        pack_handle(alloc_f64_list(&lanes_of(value)))
+    }
+}
+
+fn typed_reduce_f32(value: i64, op: i64) -> f32 {
+    unpack_float(jet_jit_math_reduce(value, op)) as f32
+}
+
+fn typed_reduce_f64(value: i64, op: i64) -> f64 {
+    unpack_float(jet_jit_math_reduce(value, op))
+}
+
+fn typed_reduce_int(value: i64, op: i64) -> i64 {
+    unpack_int(jet_jit_math_reduce(value, op))
+}
+
+macro_rules! typed_math_reduce_family {
+    (
+        $sum:ident,
+        $product:ident,
+        $min:ident,
+        $max:ident,
+        $reduce_add:ident,
+        $reduce_mul:ident,
+        $reduce_min:ident,
+        $reduce_max:ident,
+        $reduce_avg:ident,
+        $call:ident,
+        $return:ty
+    ) => {
+        fn $sum(value: i64) -> $return {
+            $call(value, 0)
+        }
+        fn $product(value: i64) -> $return {
+            $call(value, 1)
+        }
+        fn $min(value: i64) -> $return {
+            $call(value, 2)
+        }
+        fn $max(value: i64) -> $return {
+            $call(value, 3)
+        }
+        fn $reduce_add(value: i64) -> $return {
+            $call(value, 0)
+        }
+        fn $reduce_mul(value: i64) -> $return {
+            $call(value, 1)
+        }
+        fn $reduce_min(value: i64) -> $return {
+            $call(value, 2)
+        }
+        fn $reduce_max(value: i64) -> $return {
+            $call(value, 3)
+        }
+        fn $reduce_avg(value: i64) -> $return {
+            $call(value, 4)
+        }
+    };
+}
+
+typed_math_reduce_family!(
+    jet_jit_math_f32_sum,
+    jet_jit_math_f32_product,
+    jet_jit_math_f32_min,
+    jet_jit_math_f32_max,
+    jet_jit_math_f32_reduce_add,
+    jet_jit_math_f32_reduce_mul,
+    jet_jit_math_f32_reduce_min,
+    jet_jit_math_f32_reduce_max,
+    jet_jit_math_f32_reduce_avg,
+    typed_reduce_f32,
+    f32
+);
+typed_math_reduce_family!(
+    jet_jit_math_f64_sum,
+    jet_jit_math_f64_product,
+    jet_jit_math_f64_min,
+    jet_jit_math_f64_max,
+    jet_jit_math_f64_reduce_add,
+    jet_jit_math_f64_reduce_mul,
+    jet_jit_math_f64_reduce_min,
+    jet_jit_math_f64_reduce_max,
+    jet_jit_math_f64_reduce_avg,
+    typed_reduce_f64,
+    f64
+);
+typed_math_reduce_family!(
+    jet_jit_math_int_sum,
+    jet_jit_math_int_product,
+    jet_jit_math_int_min,
+    jet_jit_math_int_max,
+    jet_jit_math_int_reduce_add,
+    jet_jit_math_int_reduce_mul,
+    jet_jit_math_int_reduce_min,
+    jet_jit_math_int_reduce_max,
+    jet_jit_math_int_reduce_avg,
+    typed_reduce_int,
+    i64
+);
+
+fn jet_jit_math_typed_add(left: i64, right: i64) -> i64 {
+    jet_jit_math_binary(left, right, 0)
+}
+
+fn jet_jit_math_typed_sub(left: i64, right: i64) -> i64 {
+    jet_jit_math_binary(left, right, 1)
+}
+
+fn jet_jit_math_typed_mul(left: i64, right: i64) -> i64 {
+    jet_jit_math_binary(left, right, 2)
+}
+
+fn jet_jit_math_typed_div(left: i64, right: i64) -> i64 {
+    jet_jit_math_binary(left, right, 3)
+}
+
+macro_rules! typed_math_float_method {
+    ($name:ident, $type_name:literal, $func:literal) => {
+        fn $name(left: i64, right: i64) -> f64 {
+            typed_math_float($type_name, $func, &[left, right])
+        }
+    };
+}
+
+macro_rules! typed_math_unary_float_method {
+    ($name:ident, $type_name:literal, $func:literal) => {
+        fn $name(value: i64) -> f64 {
+            typed_math_float($type_name, $func, &[value])
+        }
+    };
+}
+
+macro_rules! typed_math_handle_method {
+    ($name:ident, $type_name:literal, $func:literal) => {
+        fn $name(value: i64) -> i64 {
+            typed_math_call($type_name, $func, &[value])
+        }
+    };
+}
+
+macro_rules! typed_math_binary_handle_method {
+    ($name:ident, $type_name:literal, $func:literal) => {
+        fn $name(left: i64, right: i64) -> i64 {
+            typed_math_call($type_name, $func, &[left, right])
+        }
+    };
+}
+
+typed_math_float_method!(jet_jit_math_vec2_dot, "Vec2", "dot");
+typed_math_float_method!(jet_jit_math_vec3_dot, "Vec3", "dot");
+typed_math_float_method!(jet_jit_math_vec4_dot, "Vec4", "dot");
+typed_math_unary_float_method!(jet_jit_math_vec2_length, "Vec2", "length");
+typed_math_unary_float_method!(jet_jit_math_vec3_length, "Vec3", "length");
+typed_math_unary_float_method!(jet_jit_math_vec4_length, "Vec4", "length");
+typed_math_handle_method!(jet_jit_math_vec2_normalize, "Vec2", "normalize");
+typed_math_handle_method!(jet_jit_math_vec3_normalize, "Vec3", "normalize");
+typed_math_handle_method!(jet_jit_math_vec4_normalize, "Vec4", "normalize");
+typed_math_binary_handle_method!(jet_jit_math_vec3_cross, "Vec3", "cross");
+typed_math_binary_handle_method!(jet_jit_math_mat3_matmul, "Mat3", "matmul");
+typed_math_binary_handle_method!(jet_jit_math_mat4_matmul, "Mat4", "matmul");
+typed_math_binary_handle_method!(jet_jit_math_mat3_transform, "Mat3", "transform");
+typed_math_binary_handle_method!(jet_jit_math_mat4_transform, "Mat4", "transform");
+typed_math_handle_method!(jet_jit_math_mat3_transpose, "Mat3", "transpose");
+typed_math_handle_method!(jet_jit_math_mat4_transpose, "Mat4", "transpose");
+
+fn jet_jit_math_vec3_mul_scalar(value: i64, scalar: f64) -> i64 {
+    typed_math_call("Vec3", "mul", &[value, pack_float(scalar)])
+}
+
+fn jet_jit_math_vec3_div_scalar(value: i64, scalar: f64) -> i64 {
+    typed_math_call("Vec3", "div", &[value, pack_float(scalar)])
+}
+
+fn jet_jit_math_float_div_vec3(scalar: f64, value: i64) -> i64 {
+    typed_math_call("Float", "div_Vec3", &[pack_float(scalar), value])
 }
 
 fn jet_jit_math_result_is_float(packed: i64) -> i8 {
@@ -1819,12 +2520,453 @@ host_fns! {
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_unary_f64 = Signature::new(cc);
+        sig_unary_f64.params.push(AbiParam::new(types::I64));
+        sig_unary_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_binary_f64 = Signature::new(cc);
+        sig_binary_f64.params.push(AbiParam::new(types::I64));
+        sig_binary_f64.params.push(AbiParam::new(types::I64));
+        sig_binary_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_ternary = sig_binary.clone();
         sig_ternary.params.push(AbiParam::new(types::I64));
+        let mut sig_i64_f32 = Signature::new(cc);
+        sig_i64_f32.params.push(AbiParam::new(types::I64));
+        sig_i64_f32.returns.push(AbiParam::new(types::F32));
+        let mut sig_f32_i64 = Signature::new(cc);
+        sig_f32_i64.params.push(AbiParam::new(types::F32));
+        sig_f32_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64_i64 = Signature::new(cc);
+        sig_f64_i64.params.push(AbiParam::new(types::F64));
+        sig_f64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_handle_float = Signature::new(cc);
+        sig_handle_float.params.push(AbiParam::new(types::I64));
+        sig_handle_float.params.push(AbiParam::new(types::F64));
+        sig_handle_float.returns.push(AbiParam::new(types::I64));
+        let mut sig_float_handle = Signature::new(cc);
+        sig_float_handle.params.push(AbiParam::new(types::F64));
+        sig_float_handle.params.push(AbiParam::new(types::I64));
+        sig_float_handle.returns.push(AbiParam::new(types::I64));
+        macro_rules! repeated_sig {
+            ($name:ident, $param:expr, $count:expr, $ret:expr) => {
+                let mut $name = Signature::new(cc);
+                for _ in 0..$count {
+                    $name.params.push(AbiParam::new($param));
+                }
+                $name.returns.push(AbiParam::new($ret));
+            };
+        }
+        repeated_sig!(sig_f32x4, types::F32, 4, types::I64);
+        repeated_sig!(sig_f32x8, types::F32, 8, types::I64);
+        repeated_sig!(sig_f64x2, types::F64, 2, types::I64);
+        repeated_sig!(sig_f64x3, types::F64, 3, types::I64);
+        repeated_sig!(sig_f64x4, types::F64, 4, types::I64);
+        repeated_sig!(sig_f64x9, types::F64, 9, types::I64);
+        repeated_sig!(sig_f64x16, types::F64, 16, types::I64);
+        repeated_sig!(sig_i64x2, types::I64, 2, types::I64);
+        repeated_sig!(sig_i64x4, types::I64, 4, types::I64);
+        repeated_sig!(sig_i64x8, types::I64, 8, types::I64);
+        repeated_sig!(sig_i64x16, types::I64, 16, types::I64);
+        repeated_sig!(sig_i64x32, types::I64, 32, types::I64);
     }
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
     binary: "jet_jit_math_binary" => jet_jit_math_binary: sig_call;
     splat: "jet_jit_math_splat" => jet_jit_math_splat: sig_call;
+    simd_f32x4_new: "jet_math_F32x4_new" => jet_jit_math_f32x4_new: sig_f32x4;
+    simd_f32x4_splat: "jet_math_F32x4_splat" => jet_jit_math_f32x4_splat: sig_f32_i64;
+    simd_f32x4_from_array: "jet_math_F32x4_from_array" => jet_jit_math_f32x4_from_array: sig_unary;
+    simd_f32x4_to_array: "jet_math_F32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_f32x4_sum: "jet_math_F32x4_sum" => jet_jit_math_f32_sum: sig_i64_f32;
+    simd_f32x4_product: "jet_math_F32x4_product" => jet_jit_math_f32_product: sig_i64_f32;
+    simd_f32x4_min: "jet_math_F32x4_min" => jet_jit_math_f32_min: sig_i64_f32;
+    simd_f32x4_max: "jet_math_F32x4_max" => jet_jit_math_f32_max: sig_i64_f32;
+    simd_f32x4_reduce_add: "jet_math_F32x4_reduce_add" => jet_jit_math_f32_reduce_add: sig_i64_f32;
+    simd_f32x4_reduce_mul: "jet_math_F32x4_reduce_mul" => jet_jit_math_f32_reduce_mul: sig_i64_f32;
+    simd_f32x4_reduce_min: "jet_math_F32x4_reduce_min" => jet_jit_math_f32_reduce_min: sig_i64_f32;
+    simd_f32x4_reduce_max: "jet_math_F32x4_reduce_max" => jet_jit_math_f32_reduce_max: sig_i64_f32;
+    simd_f32x4_reduce_avg: "jet_math_F32x4_reduce_avg" => jet_jit_math_f32_reduce_avg: sig_i64_f32;
+    simd_f32x4_add: "jet_math_F32x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_f32x4_sub: "jet_math_F32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_f32x4_mul: "jet_math_F32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_f32x4_div: "jet_math_F32x4_div" => jet_jit_math_typed_div: sig_binary;
+    simd_f64x2_new: "jet_math_F64x2_new" => jet_jit_math_f64x2_new: sig_f64x2;
+    simd_f64x2_splat: "jet_math_F64x2_splat" => jet_jit_math_f64x2_splat: sig_f64_i64;
+    simd_f64x2_from_array: "jet_math_F64x2_from_array" => jet_jit_math_f64x2_from_array: sig_unary;
+    simd_f64x2_to_array: "jet_math_F64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_f64x2_sum: "jet_math_F64x2_sum" => jet_jit_math_f64_sum: sig_i64_f64;
+    simd_f64x2_product: "jet_math_F64x2_product" => jet_jit_math_f64_product: sig_i64_f64;
+    simd_f64x2_min: "jet_math_F64x2_min" => jet_jit_math_f64_min: sig_i64_f64;
+    simd_f64x2_max: "jet_math_F64x2_max" => jet_jit_math_f64_max: sig_i64_f64;
+    simd_f64x2_reduce_add: "jet_math_F64x2_reduce_add" => jet_jit_math_f64_reduce_add: sig_i64_f64;
+    simd_f64x2_reduce_mul: "jet_math_F64x2_reduce_mul" => jet_jit_math_f64_reduce_mul: sig_i64_f64;
+    simd_f64x2_reduce_min: "jet_math_F64x2_reduce_min" => jet_jit_math_f64_reduce_min: sig_i64_f64;
+    simd_f64x2_reduce_max: "jet_math_F64x2_reduce_max" => jet_jit_math_f64_reduce_max: sig_i64_f64;
+    simd_f64x2_reduce_avg: "jet_math_F64x2_reduce_avg" => jet_jit_math_f64_reduce_avg: sig_i64_f64;
+    simd_f64x2_add: "jet_math_F64x2_add" => jet_jit_math_typed_add: sig_binary;
+    simd_f64x2_sub: "jet_math_F64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_f64x2_mul: "jet_math_F64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_f64x2_div: "jet_math_F64x2_div" => jet_jit_math_typed_div: sig_binary;
+    simd_f32x8_new: "jet_math_F32x8_new" => jet_jit_math_f32x8_new: sig_f32x8;
+    simd_f32x8_splat: "jet_math_F32x8_splat" => jet_jit_math_f32x8_splat: sig_f32_i64;
+    simd_f32x8_from_array: "jet_math_F32x8_from_array" => jet_jit_math_f32x8_from_array: sig_unary;
+    simd_f32x8_to_array: "jet_math_F32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_f32x8_sum: "jet_math_F32x8_sum" => jet_jit_math_f32_sum: sig_i64_f32;
+    simd_f32x8_product: "jet_math_F32x8_product" => jet_jit_math_f32_product: sig_i64_f32;
+    simd_f32x8_min: "jet_math_F32x8_min" => jet_jit_math_f32_min: sig_i64_f32;
+    simd_f32x8_max: "jet_math_F32x8_max" => jet_jit_math_f32_max: sig_i64_f32;
+    simd_f32x8_reduce_add: "jet_math_F32x8_reduce_add" => jet_jit_math_f32_reduce_add: sig_i64_f32;
+    simd_f32x8_reduce_mul: "jet_math_F32x8_reduce_mul" => jet_jit_math_f32_reduce_mul: sig_i64_f32;
+    simd_f32x8_reduce_min: "jet_math_F32x8_reduce_min" => jet_jit_math_f32_reduce_min: sig_i64_f32;
+    simd_f32x8_reduce_max: "jet_math_F32x8_reduce_max" => jet_jit_math_f32_reduce_max: sig_i64_f32;
+    simd_f32x8_reduce_avg: "jet_math_F32x8_reduce_avg" => jet_jit_math_f32_reduce_avg: sig_i64_f32;
+    simd_f32x8_add: "jet_math_F32x8_add" => jet_jit_math_typed_add: sig_binary;
+    simd_f32x8_sub: "jet_math_F32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_f32x8_mul: "jet_math_F32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_f32x8_div: "jet_math_F32x8_div" => jet_jit_math_typed_div: sig_binary;
+    simd_f64x4_new: "jet_math_F64x4_new" => jet_jit_math_f64x4_new: sig_f64x4;
+    simd_f64x4_splat: "jet_math_F64x4_splat" => jet_jit_math_f64x4_splat: sig_f64_i64;
+    simd_f64x4_from_array: "jet_math_F64x4_from_array" => jet_jit_math_f64x4_from_array: sig_unary;
+    simd_f64x4_to_array: "jet_math_F64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_f64x4_sum: "jet_math_F64x4_sum" => jet_jit_math_f64_sum: sig_i64_f64;
+    simd_f64x4_product: "jet_math_F64x4_product" => jet_jit_math_f64_product: sig_i64_f64;
+    simd_f64x4_min: "jet_math_F64x4_min" => jet_jit_math_f64_min: sig_i64_f64;
+    simd_f64x4_max: "jet_math_F64x4_max" => jet_jit_math_f64_max: sig_i64_f64;
+    simd_f64x4_reduce_add: "jet_math_F64x4_reduce_add" => jet_jit_math_f64_reduce_add: sig_i64_f64;
+    simd_f64x4_reduce_mul: "jet_math_F64x4_reduce_mul" => jet_jit_math_f64_reduce_mul: sig_i64_f64;
+    simd_f64x4_reduce_min: "jet_math_F64x4_reduce_min" => jet_jit_math_f64_reduce_min: sig_i64_f64;
+    simd_f64x4_reduce_max: "jet_math_F64x4_reduce_max" => jet_jit_math_f64_reduce_max: sig_i64_f64;
+    simd_f64x4_reduce_avg: "jet_math_F64x4_reduce_avg" => jet_jit_math_f64_reduce_avg: sig_i64_f64;
+    simd_f64x4_add: "jet_math_F64x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_f64x4_sub: "jet_math_F64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_f64x4_mul: "jet_math_F64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_f64x4_div: "jet_math_F64x4_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i8x16_new: "jet_math_I8x16_new" => jet_jit_math_i8x16_new: sig_i64x16;
+    simd_i8x16_splat: "jet_math_I8x16_splat" => jet_jit_math_i8x16_splat: sig_unary;
+    simd_i8x16_from_array: "jet_math_I8x16_from_array" => jet_jit_math_i8x16_from_array: sig_unary;
+    simd_i8x16_to_array: "jet_math_I8x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i8x16_sum: "jet_math_I8x16_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i8x16_product: "jet_math_I8x16_product" => jet_jit_math_int_product: sig_unary;
+    simd_i8x16_min: "jet_math_I8x16_min" => jet_jit_math_int_min: sig_unary;
+    simd_i8x16_max: "jet_math_I8x16_max" => jet_jit_math_int_max: sig_unary;
+    simd_i8x16_reduce_add: "jet_math_I8x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i8x16_reduce_mul: "jet_math_I8x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i8x16_reduce_min: "jet_math_I8x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i8x16_reduce_max: "jet_math_I8x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i8x16_reduce_avg: "jet_math_I8x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i8x16_add: "jet_math_I8x16_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i8x16_sub: "jet_math_I8x16_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i8x16_mul: "jet_math_I8x16_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i8x16_div: "jet_math_I8x16_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i16x8_new: "jet_math_I16x8_new" => jet_jit_math_i16x8_new: sig_i64x8;
+    simd_i16x8_splat: "jet_math_I16x8_splat" => jet_jit_math_i16x8_splat: sig_unary;
+    simd_i16x8_from_array: "jet_math_I16x8_from_array" => jet_jit_math_i16x8_from_array: sig_unary;
+    simd_i16x8_to_array: "jet_math_I16x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i16x8_sum: "jet_math_I16x8_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i16x8_product: "jet_math_I16x8_product" => jet_jit_math_int_product: sig_unary;
+    simd_i16x8_min: "jet_math_I16x8_min" => jet_jit_math_int_min: sig_unary;
+    simd_i16x8_max: "jet_math_I16x8_max" => jet_jit_math_int_max: sig_unary;
+    simd_i16x8_reduce_add: "jet_math_I16x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i16x8_reduce_mul: "jet_math_I16x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i16x8_reduce_min: "jet_math_I16x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i16x8_reduce_max: "jet_math_I16x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i16x8_reduce_avg: "jet_math_I16x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i16x8_add: "jet_math_I16x8_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i16x8_sub: "jet_math_I16x8_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i16x8_mul: "jet_math_I16x8_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i16x8_div: "jet_math_I16x8_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i32x4_new: "jet_math_I32x4_new" => jet_jit_math_i32x4_new: sig_i64x4;
+    simd_i32x4_splat: "jet_math_I32x4_splat" => jet_jit_math_i32x4_splat: sig_unary;
+    simd_i32x4_from_array: "jet_math_I32x4_from_array" => jet_jit_math_i32x4_from_array: sig_unary;
+    simd_i32x4_to_array: "jet_math_I32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i32x4_sum: "jet_math_I32x4_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i32x4_product: "jet_math_I32x4_product" => jet_jit_math_int_product: sig_unary;
+    simd_i32x4_min: "jet_math_I32x4_min" => jet_jit_math_int_min: sig_unary;
+    simd_i32x4_max: "jet_math_I32x4_max" => jet_jit_math_int_max: sig_unary;
+    simd_i32x4_reduce_add: "jet_math_I32x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i32x4_reduce_mul: "jet_math_I32x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i32x4_reduce_min: "jet_math_I32x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i32x4_reduce_max: "jet_math_I32x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i32x4_reduce_avg: "jet_math_I32x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i32x4_add: "jet_math_I32x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i32x4_sub: "jet_math_I32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i32x4_mul: "jet_math_I32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i32x4_div: "jet_math_I32x4_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i64x2_new: "jet_math_I64x2_new" => jet_jit_math_i64x2_new: sig_i64x2;
+    simd_i64x2_splat: "jet_math_I64x2_splat" => jet_jit_math_i64x2_splat: sig_unary;
+    simd_i64x2_from_array: "jet_math_I64x2_from_array" => jet_jit_math_i64x2_from_array: sig_unary;
+    simd_i64x2_to_array: "jet_math_I64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i64x2_sum: "jet_math_I64x2_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i64x2_product: "jet_math_I64x2_product" => jet_jit_math_int_product: sig_unary;
+    simd_i64x2_min: "jet_math_I64x2_min" => jet_jit_math_int_min: sig_unary;
+    simd_i64x2_max: "jet_math_I64x2_max" => jet_jit_math_int_max: sig_unary;
+    simd_i64x2_reduce_add: "jet_math_I64x2_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i64x2_reduce_mul: "jet_math_I64x2_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i64x2_reduce_min: "jet_math_I64x2_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i64x2_reduce_max: "jet_math_I64x2_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i64x2_reduce_avg: "jet_math_I64x2_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i64x2_add: "jet_math_I64x2_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i64x2_sub: "jet_math_I64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i64x2_mul: "jet_math_I64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i64x2_div: "jet_math_I64x2_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u8x16_new: "jet_math_U8x16_new" => jet_jit_math_u8x16_new: sig_i64x16;
+    simd_u8x16_splat: "jet_math_U8x16_splat" => jet_jit_math_u8x16_splat: sig_unary;
+    simd_u8x16_from_array: "jet_math_U8x16_from_array" => jet_jit_math_u8x16_from_array: sig_unary;
+    simd_u8x16_to_array: "jet_math_U8x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u8x16_sum: "jet_math_U8x16_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u8x16_product: "jet_math_U8x16_product" => jet_jit_math_int_product: sig_unary;
+    simd_u8x16_min: "jet_math_U8x16_min" => jet_jit_math_int_min: sig_unary;
+    simd_u8x16_max: "jet_math_U8x16_max" => jet_jit_math_int_max: sig_unary;
+    simd_u8x16_reduce_add: "jet_math_U8x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u8x16_reduce_mul: "jet_math_U8x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u8x16_reduce_min: "jet_math_U8x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u8x16_reduce_max: "jet_math_U8x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u8x16_reduce_avg: "jet_math_U8x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u8x16_add: "jet_math_U8x16_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u8x16_sub: "jet_math_U8x16_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u8x16_mul: "jet_math_U8x16_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u8x16_div: "jet_math_U8x16_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u16x8_new: "jet_math_U16x8_new" => jet_jit_math_u16x8_new: sig_i64x8;
+    simd_u16x8_splat: "jet_math_U16x8_splat" => jet_jit_math_u16x8_splat: sig_unary;
+    simd_u16x8_from_array: "jet_math_U16x8_from_array" => jet_jit_math_u16x8_from_array: sig_unary;
+    simd_u16x8_to_array: "jet_math_U16x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u16x8_sum: "jet_math_U16x8_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u16x8_product: "jet_math_U16x8_product" => jet_jit_math_int_product: sig_unary;
+    simd_u16x8_min: "jet_math_U16x8_min" => jet_jit_math_int_min: sig_unary;
+    simd_u16x8_max: "jet_math_U16x8_max" => jet_jit_math_int_max: sig_unary;
+    simd_u16x8_reduce_add: "jet_math_U16x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u16x8_reduce_mul: "jet_math_U16x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u16x8_reduce_min: "jet_math_U16x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u16x8_reduce_max: "jet_math_U16x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u16x8_reduce_avg: "jet_math_U16x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u16x8_add: "jet_math_U16x8_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u16x8_sub: "jet_math_U16x8_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u16x8_mul: "jet_math_U16x8_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u16x8_div: "jet_math_U16x8_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u32x4_new: "jet_math_U32x4_new" => jet_jit_math_u32x4_new: sig_i64x4;
+    simd_u32x4_splat: "jet_math_U32x4_splat" => jet_jit_math_u32x4_splat: sig_unary;
+    simd_u32x4_from_array: "jet_math_U32x4_from_array" => jet_jit_math_u32x4_from_array: sig_unary;
+    simd_u32x4_to_array: "jet_math_U32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u32x4_sum: "jet_math_U32x4_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u32x4_product: "jet_math_U32x4_product" => jet_jit_math_int_product: sig_unary;
+    simd_u32x4_min: "jet_math_U32x4_min" => jet_jit_math_int_min: sig_unary;
+    simd_u32x4_max: "jet_math_U32x4_max" => jet_jit_math_int_max: sig_unary;
+    simd_u32x4_reduce_add: "jet_math_U32x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u32x4_reduce_mul: "jet_math_U32x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u32x4_reduce_min: "jet_math_U32x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u32x4_reduce_max: "jet_math_U32x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u32x4_reduce_avg: "jet_math_U32x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u32x4_add: "jet_math_U32x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u32x4_sub: "jet_math_U32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u32x4_mul: "jet_math_U32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u32x4_div: "jet_math_U32x4_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u64x2_new: "jet_math_U64x2_new" => jet_jit_math_u64x2_new: sig_i64x2;
+    simd_u64x2_splat: "jet_math_U64x2_splat" => jet_jit_math_u64x2_splat: sig_unary;
+    simd_u64x2_from_array: "jet_math_U64x2_from_array" => jet_jit_math_u64x2_from_array: sig_unary;
+    simd_u64x2_to_array: "jet_math_U64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u64x2_sum: "jet_math_U64x2_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u64x2_product: "jet_math_U64x2_product" => jet_jit_math_int_product: sig_unary;
+    simd_u64x2_min: "jet_math_U64x2_min" => jet_jit_math_int_min: sig_unary;
+    simd_u64x2_max: "jet_math_U64x2_max" => jet_jit_math_int_max: sig_unary;
+    simd_u64x2_reduce_add: "jet_math_U64x2_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u64x2_reduce_mul: "jet_math_U64x2_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u64x2_reduce_min: "jet_math_U64x2_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u64x2_reduce_max: "jet_math_U64x2_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u64x2_reduce_avg: "jet_math_U64x2_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u64x2_add: "jet_math_U64x2_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u64x2_sub: "jet_math_U64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u64x2_mul: "jet_math_U64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u64x2_div: "jet_math_U64x2_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i8x32_new: "jet_math_I8x32_new" => jet_jit_math_i8x32_new: sig_i64x32;
+    simd_i8x32_splat: "jet_math_I8x32_splat" => jet_jit_math_i8x32_splat: sig_unary;
+    simd_i8x32_from_array: "jet_math_I8x32_from_array" => jet_jit_math_i8x32_from_array: sig_unary;
+    simd_i8x32_to_array: "jet_math_I8x32_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i8x32_sum: "jet_math_I8x32_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i8x32_product: "jet_math_I8x32_product" => jet_jit_math_int_product: sig_unary;
+    simd_i8x32_min: "jet_math_I8x32_min" => jet_jit_math_int_min: sig_unary;
+    simd_i8x32_max: "jet_math_I8x32_max" => jet_jit_math_int_max: sig_unary;
+    simd_i8x32_reduce_add: "jet_math_I8x32_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i8x32_reduce_mul: "jet_math_I8x32_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i8x32_reduce_min: "jet_math_I8x32_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i8x32_reduce_max: "jet_math_I8x32_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i8x32_reduce_avg: "jet_math_I8x32_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i8x32_add: "jet_math_I8x32_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i8x32_sub: "jet_math_I8x32_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i8x32_mul: "jet_math_I8x32_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i8x32_div: "jet_math_I8x32_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i16x16_new: "jet_math_I16x16_new" => jet_jit_math_i16x16_new: sig_i64x16;
+    simd_i16x16_splat: "jet_math_I16x16_splat" => jet_jit_math_i16x16_splat: sig_unary;
+    simd_i16x16_from_array: "jet_math_I16x16_from_array" => jet_jit_math_i16x16_from_array: sig_unary;
+    simd_i16x16_to_array: "jet_math_I16x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i16x16_sum: "jet_math_I16x16_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i16x16_product: "jet_math_I16x16_product" => jet_jit_math_int_product: sig_unary;
+    simd_i16x16_min: "jet_math_I16x16_min" => jet_jit_math_int_min: sig_unary;
+    simd_i16x16_max: "jet_math_I16x16_max" => jet_jit_math_int_max: sig_unary;
+    simd_i16x16_reduce_add: "jet_math_I16x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i16x16_reduce_mul: "jet_math_I16x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i16x16_reduce_min: "jet_math_I16x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i16x16_reduce_max: "jet_math_I16x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i16x16_reduce_avg: "jet_math_I16x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i16x16_add: "jet_math_I16x16_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i16x16_sub: "jet_math_I16x16_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i16x16_mul: "jet_math_I16x16_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i16x16_div: "jet_math_I16x16_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i32x8_new: "jet_math_I32x8_new" => jet_jit_math_i32x8_new: sig_i64x8;
+    simd_i32x8_splat: "jet_math_I32x8_splat" => jet_jit_math_i32x8_splat: sig_unary;
+    simd_i32x8_from_array: "jet_math_I32x8_from_array" => jet_jit_math_i32x8_from_array: sig_unary;
+    simd_i32x8_to_array: "jet_math_I32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i32x8_sum: "jet_math_I32x8_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i32x8_product: "jet_math_I32x8_product" => jet_jit_math_int_product: sig_unary;
+    simd_i32x8_min: "jet_math_I32x8_min" => jet_jit_math_int_min: sig_unary;
+    simd_i32x8_max: "jet_math_I32x8_max" => jet_jit_math_int_max: sig_unary;
+    simd_i32x8_reduce_add: "jet_math_I32x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i32x8_reduce_mul: "jet_math_I32x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i32x8_reduce_min: "jet_math_I32x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i32x8_reduce_max: "jet_math_I32x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i32x8_reduce_avg: "jet_math_I32x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i32x8_add: "jet_math_I32x8_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i32x8_sub: "jet_math_I32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i32x8_mul: "jet_math_I32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i32x8_div: "jet_math_I32x8_div" => jet_jit_math_typed_div: sig_binary;
+    simd_i64x4_new: "jet_math_I64x4_new" => jet_jit_math_i64x4_new: sig_i64x4;
+    simd_i64x4_splat: "jet_math_I64x4_splat" => jet_jit_math_i64x4_splat: sig_unary;
+    simd_i64x4_from_array: "jet_math_I64x4_from_array" => jet_jit_math_i64x4_from_array: sig_unary;
+    simd_i64x4_to_array: "jet_math_I64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_i64x4_sum: "jet_math_I64x4_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_i64x4_product: "jet_math_I64x4_product" => jet_jit_math_int_product: sig_unary;
+    simd_i64x4_min: "jet_math_I64x4_min" => jet_jit_math_int_min: sig_unary;
+    simd_i64x4_max: "jet_math_I64x4_max" => jet_jit_math_int_max: sig_unary;
+    simd_i64x4_reduce_add: "jet_math_I64x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_i64x4_reduce_mul: "jet_math_I64x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_i64x4_reduce_min: "jet_math_I64x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_i64x4_reduce_max: "jet_math_I64x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_i64x4_reduce_avg: "jet_math_I64x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_i64x4_add: "jet_math_I64x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_i64x4_sub: "jet_math_I64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_i64x4_mul: "jet_math_I64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_i64x4_div: "jet_math_I64x4_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u8x32_new: "jet_math_U8x32_new" => jet_jit_math_u8x32_new: sig_i64x32;
+    simd_u8x32_splat: "jet_math_U8x32_splat" => jet_jit_math_u8x32_splat: sig_unary;
+    simd_u8x32_from_array: "jet_math_U8x32_from_array" => jet_jit_math_u8x32_from_array: sig_unary;
+    simd_u8x32_to_array: "jet_math_U8x32_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u8x32_sum: "jet_math_U8x32_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u8x32_product: "jet_math_U8x32_product" => jet_jit_math_int_product: sig_unary;
+    simd_u8x32_min: "jet_math_U8x32_min" => jet_jit_math_int_min: sig_unary;
+    simd_u8x32_max: "jet_math_U8x32_max" => jet_jit_math_int_max: sig_unary;
+    simd_u8x32_reduce_add: "jet_math_U8x32_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u8x32_reduce_mul: "jet_math_U8x32_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u8x32_reduce_min: "jet_math_U8x32_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u8x32_reduce_max: "jet_math_U8x32_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u8x32_reduce_avg: "jet_math_U8x32_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u8x32_add: "jet_math_U8x32_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u8x32_sub: "jet_math_U8x32_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u8x32_mul: "jet_math_U8x32_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u8x32_div: "jet_math_U8x32_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u16x16_new: "jet_math_U16x16_new" => jet_jit_math_u16x16_new: sig_i64x16;
+    simd_u16x16_splat: "jet_math_U16x16_splat" => jet_jit_math_u16x16_splat: sig_unary;
+    simd_u16x16_from_array: "jet_math_U16x16_from_array" => jet_jit_math_u16x16_from_array: sig_unary;
+    simd_u16x16_to_array: "jet_math_U16x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u16x16_sum: "jet_math_U16x16_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u16x16_product: "jet_math_U16x16_product" => jet_jit_math_int_product: sig_unary;
+    simd_u16x16_min: "jet_math_U16x16_min" => jet_jit_math_int_min: sig_unary;
+    simd_u16x16_max: "jet_math_U16x16_max" => jet_jit_math_int_max: sig_unary;
+    simd_u16x16_reduce_add: "jet_math_U16x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u16x16_reduce_mul: "jet_math_U16x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u16x16_reduce_min: "jet_math_U16x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u16x16_reduce_max: "jet_math_U16x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u16x16_reduce_avg: "jet_math_U16x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u16x16_add: "jet_math_U16x16_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u16x16_sub: "jet_math_U16x16_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u16x16_mul: "jet_math_U16x16_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u16x16_div: "jet_math_U16x16_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u32x8_new: "jet_math_U32x8_new" => jet_jit_math_u32x8_new: sig_i64x8;
+    simd_u32x8_splat: "jet_math_U32x8_splat" => jet_jit_math_u32x8_splat: sig_unary;
+    simd_u32x8_from_array: "jet_math_U32x8_from_array" => jet_jit_math_u32x8_from_array: sig_unary;
+    simd_u32x8_to_array: "jet_math_U32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u32x8_sum: "jet_math_U32x8_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u32x8_product: "jet_math_U32x8_product" => jet_jit_math_int_product: sig_unary;
+    simd_u32x8_min: "jet_math_U32x8_min" => jet_jit_math_int_min: sig_unary;
+    simd_u32x8_max: "jet_math_U32x8_max" => jet_jit_math_int_max: sig_unary;
+    simd_u32x8_reduce_add: "jet_math_U32x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u32x8_reduce_mul: "jet_math_U32x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u32x8_reduce_min: "jet_math_U32x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u32x8_reduce_max: "jet_math_U32x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u32x8_reduce_avg: "jet_math_U32x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u32x8_add: "jet_math_U32x8_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u32x8_sub: "jet_math_U32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u32x8_mul: "jet_math_U32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u32x8_div: "jet_math_U32x8_div" => jet_jit_math_typed_div: sig_binary;
+    simd_u64x4_new: "jet_math_U64x4_new" => jet_jit_math_u64x4_new: sig_i64x4;
+    simd_u64x4_splat: "jet_math_U64x4_splat" => jet_jit_math_u64x4_splat: sig_unary;
+    simd_u64x4_from_array: "jet_math_U64x4_from_array" => jet_jit_math_u64x4_from_array: sig_unary;
+    simd_u64x4_to_array: "jet_math_U64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    simd_u64x4_sum: "jet_math_U64x4_sum" => jet_jit_math_int_sum: sig_unary;
+    simd_u64x4_product: "jet_math_U64x4_product" => jet_jit_math_int_product: sig_unary;
+    simd_u64x4_min: "jet_math_U64x4_min" => jet_jit_math_int_min: sig_unary;
+    simd_u64x4_max: "jet_math_U64x4_max" => jet_jit_math_int_max: sig_unary;
+    simd_u64x4_reduce_add: "jet_math_U64x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+    simd_u64x4_reduce_mul: "jet_math_U64x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+    simd_u64x4_reduce_min: "jet_math_U64x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+    simd_u64x4_reduce_max: "jet_math_U64x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+    simd_u64x4_reduce_avg: "jet_math_U64x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+    simd_u64x4_add: "jet_math_U64x4_add" => jet_jit_math_typed_add: sig_binary;
+    simd_u64x4_sub: "jet_math_U64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+    simd_u64x4_mul: "jet_math_U64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+    simd_u64x4_div: "jet_math_U64x4_div" => jet_jit_math_typed_div: sig_binary;
+    vec2_new: "jet_math_Vec2_new" => jet_jit_math_vec2_new: sig_f64x2;
+    vec2_splat: "jet_math_Vec2_splat" => jet_jit_math_vec2_splat: sig_f64_i64;
+    vec2_from_array: "jet_math_Vec2_from_array" => jet_jit_math_vec2_from_array: sig_unary;
+    vec2_to_array: "jet_math_Vec2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    vec2_dot: "jet_math_Vec2_dot" => jet_jit_math_vec2_dot: sig_binary_f64;
+    vec2_length: "jet_math_Vec2_length" => jet_jit_math_vec2_length: sig_unary_f64;
+    vec2_normalize: "jet_math_Vec2_normalize" => jet_jit_math_vec2_normalize: sig_unary;
+    vec2_add: "jet_math_Vec2_add" => jet_jit_math_typed_add: sig_binary;
+    vec2_sub: "jet_math_Vec2_sub" => jet_jit_math_typed_sub: sig_binary;
+    vec2_mul: "jet_math_Vec2_mul" => jet_jit_math_typed_mul: sig_binary;
+    vec2_div: "jet_math_Vec2_div" => jet_jit_math_typed_div: sig_binary;
+    vec3_new: "jet_math_Vec3_new" => jet_jit_math_vec3_new: sig_f64x3;
+    vec3_splat: "jet_math_Vec3_splat" => jet_jit_math_vec3_splat: sig_f64_i64;
+    vec3_from_array: "jet_math_Vec3_from_array" => jet_jit_math_vec3_from_array: sig_unary;
+    vec3_to_array: "jet_math_Vec3_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    vec3_dot: "jet_math_Vec3_dot" => jet_jit_math_vec3_dot: sig_binary_f64;
+    vec3_length: "jet_math_Vec3_length" => jet_jit_math_vec3_length: sig_unary_f64;
+    vec3_normalize: "jet_math_Vec3_normalize" => jet_jit_math_vec3_normalize: sig_unary;
+    vec3_cross: "jet_math_Vec3_cross" => jet_jit_math_vec3_cross: sig_binary;
+    vec3_add: "jet_math_Vec3_add" => jet_jit_math_typed_add: sig_binary;
+    vec3_sub: "jet_math_Vec3_sub" => jet_jit_math_typed_sub: sig_binary;
+    vec3_hadamard_mul: "jet_math_Vec3_hadamard_mul" => jet_jit_math_typed_mul: sig_binary;
+    vec3_mul_scalar: "jet_math_Vec3_mul" => jet_jit_math_vec3_mul_scalar: sig_handle_float;
+    vec3_div_scalar: "jet_math_Vec3_div" => jet_jit_math_vec3_div_scalar: sig_handle_float;
+    float_div_vec3: "jet_math_Float_div_Vec3" => jet_jit_math_float_div_vec3: sig_float_handle;
+    vec4_new: "jet_math_Vec4_new" => jet_jit_math_vec4_new: sig_f64x4;
+    vec4_splat: "jet_math_Vec4_splat" => jet_jit_math_vec4_splat: sig_f64_i64;
+    vec4_from_array: "jet_math_Vec4_from_array" => jet_jit_math_vec4_from_array: sig_unary;
+    vec4_to_array: "jet_math_Vec4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    vec4_dot: "jet_math_Vec4_dot" => jet_jit_math_vec4_dot: sig_binary_f64;
+    vec4_length: "jet_math_Vec4_length" => jet_jit_math_vec4_length: sig_unary_f64;
+    vec4_normalize: "jet_math_Vec4_normalize" => jet_jit_math_vec4_normalize: sig_unary;
+    vec4_add: "jet_math_Vec4_add" => jet_jit_math_typed_add: sig_binary;
+    vec4_sub: "jet_math_Vec4_sub" => jet_jit_math_typed_sub: sig_binary;
+    vec4_mul: "jet_math_Vec4_mul" => jet_jit_math_typed_mul: sig_binary;
+    vec4_div: "jet_math_Vec4_div" => jet_jit_math_typed_div: sig_binary;
+    mat3_new: "jet_math_Mat3_new" => jet_jit_math_mat3_new: sig_f64x9;
+    mat3_splat: "jet_math_Mat3_splat" => jet_jit_math_mat3_splat: sig_f64_i64;
+    mat3_from_array: "jet_math_Mat3_from_array" => jet_jit_math_mat3_from_array: sig_unary;
+    mat3_to_array: "jet_math_Mat3_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    mat3_matmul: "jet_math_Mat3_matmul" => jet_jit_math_mat3_matmul: sig_binary;
+    mat3_transform: "jet_math_Mat3_transform" => jet_jit_math_mat3_transform: sig_binary;
+    mat3_transpose: "jet_math_Mat3_transpose" => jet_jit_math_mat3_transpose: sig_unary;
+    mat3_add: "jet_math_Mat3_add" => jet_jit_math_typed_add: sig_binary;
+    mat3_sub: "jet_math_Mat3_sub" => jet_jit_math_typed_sub: sig_binary;
+    mat3_mul: "jet_math_Mat3_mul" => jet_jit_math_typed_mul: sig_binary;
+    mat4_new: "jet_math_Mat4_new" => jet_jit_math_mat4_new: sig_f64x16;
+    mat4_splat: "jet_math_Mat4_splat" => jet_jit_math_mat4_splat: sig_f64_i64;
+    mat4_from_array: "jet_math_Mat4_from_array" => jet_jit_math_mat4_from_array: sig_unary;
+    mat4_to_array: "jet_math_Mat4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+    mat4_matmul: "jet_math_Mat4_matmul" => jet_jit_math_mat4_matmul: sig_binary;
+    mat4_transform: "jet_math_Mat4_transform" => jet_jit_math_mat4_transform: sig_binary;
+    mat4_transpose: "jet_math_Mat4_transpose" => jet_jit_math_mat4_transpose: sig_unary;
+    mat4_add: "jet_math_Mat4_add" => jet_jit_math_typed_add: sig_binary;
+    mat4_sub: "jet_math_Mat4_sub" => jet_jit_math_typed_sub: sig_binary;
+    mat4_mul: "jet_math_Mat4_mul" => jet_jit_math_typed_mul: sig_binary;
     lane_f32x4: "jet_math_F32x4_lane" => jet_jit_math_lane_f32: sig_lane_f32;
     lane_f64x2: "jet_math_F64x2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
     lane_f32x8: "jet_math_F32x8_lane" => jet_jit_math_lane_f32: sig_lane_f32;
