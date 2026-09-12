@@ -642,6 +642,13 @@ fn lower_local_place(
     if local.is_persistent() {
         lower_persistent_place(ctx, local, access)
     } else {
+        let mangled_name = crate::Codegen::mangle(&local.name);
+        if !local.generated
+            && mangled_name != local.name
+            && ctx.local_places.contains_key(&mangled_name)
+        {
+            return ctx.place_for_local(&TLocal::user(mangled_name), access);
+        }
         ctx.place_for_local(local, access)
     }
 }
@@ -3043,6 +3050,10 @@ pub(super) fn lower_expr(
                         | THandleOp::ClockTick
                         | THandleOp::ClockAdvance
                         | THandleOp::ClockWait
+                        | THandleOp::FakeName
+                        | THandleOp::FakeEmail
+                        | THandleOp::FakeHost
+                        | THandleOp::FakeAddress
                 ),
             )?;
             let mut args = lower_handle_method_args(ctx, args)?;
@@ -3352,8 +3363,8 @@ fn lower_optional_field(
     };
     let field = ctx.field_id_for_type(inner_ty, member)?;
     let field_ty = ctx
-        .field_type(inner_ty, member)
-        .ok_or_else(|| ctx.error(ctx.span(), format!("missing checked optional field `{member}`")))?;
+        .checked_field_type(inner_ty, member)
+        .map_err(|_| ctx.error(ctx.span(), format!("missing checked optional field `{member}`")))?;
     let subject = ctx.lower_child(base)?;
     let condition = ctx.emit(
         "optional-field-condition",
@@ -7067,10 +7078,21 @@ fn lower_serde_encode(
     recv: &TExpr,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let ty = recv.ty.without_user_tags();
-    let function_name = format!("{}::encode", ty.name());
+    let function_name = match &ty {
+        Type::Union(members) => {
+            format!("{}::encode", crate::AST::union_enum_name(members))
+        }
+        _ => format!("{}::encode", ty.name()),
+    };
     match ctx.function_id_for(&function_name) {
         Ok(function) => {
-            let owner = ctx.mir_type(&recv.ty)?;
+            let owner_ty = match &ty {
+                Type::Union(members) => {
+                    Type::Named(crate::AST::union_enum_name(members))
+                }
+                _ => recv.ty.clone(),
+            };
+            let owner = ctx.mir_type(&owner_ty)?;
             let args = vec![ctx.lower_plain_arg(recv)?];
             return ctx.emit(
                 "serde-encode-call",
@@ -7135,10 +7157,22 @@ fn lower_datatree_decode(
     recv: &TExpr,
     target: &Type,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let function_name = format!("{}::decode", target.name());
+    let target_ty = target.without_user_tags();
+    let function_name = match &target_ty {
+        Type::Union(members) => {
+            format!("{}::decode", crate::AST::union_enum_name(members))
+        }
+        _ => format!("{}::decode", target.name()),
+    };
     match ctx.function_id_for(&function_name) {
         Ok(function) => {
-            let owner = ctx.mir_type(target)?;
+            let owner_ty = match &target_ty {
+                Type::Union(members) => {
+                    Type::Named(crate::AST::union_enum_name(members))
+                }
+                _ => target.clone(),
+            };
+            let owner = ctx.mir_type(&owner_ty)?;
             let args = vec![ctx.lower_plain_arg(recv)?];
             return ctx.emit(
                 "datatree-decode-call",
@@ -7212,11 +7246,15 @@ pub(super) fn lower_pattern(
     ctx: &mut LowerCtx,
     pattern: &TPattern,
 ) -> Result<MirPattern, LowerError> {
-    let owner = pattern
-        .enum_type
-        .as_deref()
-        .map(|key| ctx.type_id_for(key))
-        .transpose()?;
+    let owner_name = pattern.enum_type.as_deref().or_else(|| {
+        matches!(
+            &pattern.shape,
+            TPatternShape::Variant { variant, .. }
+                if crate::Codegen::is_key_variant(variant)
+        )
+        .then_some(crate::Syntax::TYPE_KEY)
+    });
+    let owner = owner_name.map(|key| ctx.type_id_for(key)).transpose()?;
     let position = match &pattern.position {
         TPatternPosition::Binding => MirPatternPosition::Binding,
         TPatternPosition::OptionBinding => MirPatternPosition::OptionBinding,
