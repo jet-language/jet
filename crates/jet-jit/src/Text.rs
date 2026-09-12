@@ -1127,6 +1127,7 @@ host_fns! {
     pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;
     index_of: "jet_jit_text_index_of" => jet_jit_text_index_of: binary;
     checked_unicode_index_of: "jet_unicode_index_of" => jet_jit_text_index_of: binary;
+    checked_unicode_count: "jet_unicode_count" => jet_jit_text_count: binary;
     count: "jet_jit_text_count" => jet_jit_text_count: binary;
     title: "jet_jit_text_title" => jet_jit_text_title: unary;
     split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
