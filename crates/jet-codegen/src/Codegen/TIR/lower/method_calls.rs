@@ -48,6 +48,14 @@ use crate::Syntax::{CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallR
 
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new(
+        "core.archive",
+        "zip_decompress",
+        "jet_foundation::CoreArchive::jet_archive_zip_decompress",
+        false,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_zip_decompress"),
+    CoreCallRecord::new(
         "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true, true],
     ).with_jit_symbol("jet_jit_json_canonical_checked"),
     CoreCallRecord::new(
