@@ -9676,6 +9676,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 ("core.args", "merge") => Some("jet_jit_args_merge"),
                 ("core.sys", "decode") => Some("jet_jit_env_decode"),
                 ("core.encoding.json", "decode") => Some("jet_jit_json_decode_typed"),
+                ("core.data", "json") => Some("jet_jit_json_decode_typed"),
                 ("core.data", "csv") | ("core.encoding.csv", "decode") => {
                     Some("jet_jit_enc_csv_decode")
                 }
@@ -9751,6 +9752,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         | ("core.args", "merge")
                         | ("core.sys", "decode")
                         | ("core.encoding.json", "decode")
+                        | ("core.data", "json")
                         | ("core.encoding.csv", "to_string")
                         | ("core.db", "decode")
                         | ("", "query")
