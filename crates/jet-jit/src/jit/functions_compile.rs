@@ -4358,6 +4358,33 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .copied()
                 .ok_or_else(|| "MIR error text getter returned no value".to_string());
         }
+        if let MirTypeKind::Apply { name, args } = ty.kind() {
+            if args.is_empty() {
+                let host = match name.name.as_str() {
+                    "Duration" => Some(self.host.time.duration_display),
+                    "Date"
+                    | "LocalDate"
+                    | "LocalTime"
+                    | "DateTime"
+                    | "Period"
+                    | "Instant"
+                    | "Zone"
+                    | "ZonedDateTime" => Some(self.host.time.display),
+                    "Path" => Some(self.host.core.path_to_string),
+                    "Complex" => Some(self.host.num.complex_to_string),
+                    "ServiceRuntime" => Some(self.host.service_show),
+                    _ => None,
+                };
+                if let Some(host) = host {
+                    let value = self.cast(builder, value, types::I64)?;
+                    return self
+                        .call_host(builder, host, &[value])?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR Apply debug host returned no value".to_string());
+                }
+            }
+        }
         if let Some(identity) = ty.nominal_id() {
             if let Some(definition) = self
                 .program
@@ -4623,6 +4650,32 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "MIR time display host returned no value".to_string());
+            }
+            if args.is_empty() && name.name == "Path" {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.core.path_to_string, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR Path display host returned no value".to_string());
+            }
+            if args.is_empty() && name.name == "Complex" {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.num.complex_to_string, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR Complex display host returned no value".to_string());
+            }
+            if args.is_empty() && name.name == "ServiceRuntime" {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.service_show, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| {
+                        "MIR ServiceRuntime display host returned no value".to_string()
+                    });
             }
         }
         let (host, value) = match ty.kind() {
