@@ -48,8 +48,9 @@ use jet_foundation::MIR::{
     MirOutputCheck, MirOutputCheckId, MirOwnership, MirPackageFacts, MirPanicContext, MirPanicLoc,
     MirParam, MirPattern, MirPatternBinding, MirPatternField, MirPatternPosition, MirPatternShape,
     MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi, MirPreludeCall, MirPreludeCallId,
-    MirPreludeFamily, MirProgram, MirProjection, MirRuntimePartId, MirScope, MirScopeId,
-    MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId, MirSourceFile, MirSourceFileId,
+    MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirRuntimePartId, MirScope,
+    MirScopeId,
+    MirSemanticOp, MirSerdeCodec, MirSiteId, MirSourceFile, MirSourceFileId,
     MirSymbol, MirTargetApplicability, MirTerminator, MirTestCase, MirTestId, MirTestKind,
     MirTextPatternPart, MirTraitDef, MirTraitId, MirTraitMethod, MirTraitMethodId, MirTraitRef,
     MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind, MirUnsafeGate, MirValueId,
@@ -3590,6 +3591,14 @@ fn call_fallibility(
     })
 }
 
+#[derive(Clone)]
+struct ContractScopeState {
+    result: TContractResult,
+    carrier_place: MirPlaceId,
+    binding_place: MirPlaceId,
+    post: Vec<TContract>,
+}
+
 pub(super) struct LowerCtx<'a> {
     pub(super) function: &'a TFunc,
     pub(super) type_defs: &'a [MirTypeDef],
@@ -3613,6 +3622,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) loops: Vec<(Option<String>, MirBlockId, MirBlockId)>,
     loop_defer_depths: Vec<usize>,
     defer_stack: Vec<Vec<MirValueId>>,
+    contract_scopes: Vec<ContractScopeState>,
     pub(super) local_places: HashMap<String, MirPlaceId>,
     pub(super) local_types: HashMap<String, Type>,
     pub(super) local_values: HashMap<String, MirValueId>,
@@ -3751,6 +3761,7 @@ impl<'a> LowerCtx<'a> {
             loops: Vec::new(),
             loop_defer_depths: Vec::new(),
             defer_stack: vec![Vec::new()],
+            contract_scopes: Vec::new(),
             local_places: HashMap::new(),
             local_types: HashMap::new(),
             local_values: HashMap::new(),
@@ -6312,26 +6323,345 @@ impl<'a> LowerCtx<'a> {
         LowerError::new(span, message)
     }
 
+    fn activate_contract_result(&mut self, state: &ContractScopeState) {
+        self.local_places
+            .insert(state.result.carrier_local.name.clone(), state.carrier_place);
+        self.local_types.insert(
+            state.result.carrier_local.name.clone(),
+            state.result.carrier_ty.clone(),
+        );
+        self.local_places
+            .insert(state.result.binding_local.name.clone(), state.binding_place);
+        self.local_types.insert(
+            state.result.binding_local.name.clone(),
+            state.result.binding_ty.clone(),
+        );
+    }
+
+    fn bind_contract_result(
+        &mut self,
+        result: &TContractResult,
+        post: &[TContract],
+    ) -> Result<ContractScopeState, LowerError> {
+        let carrier_place = self.bind_local(
+            &result.carrier_local,
+            result.carrier_ty.clone(),
+            false,
+            false,
+            false,
+        )?;
+        self.place_for_local(&result.carrier_local, MirAccess::Move)?;
+        let binding_place = if result.carrier_local.name == result.binding_local.name {
+            carrier_place
+        } else {
+            let place = self.bind_local(
+                &result.binding_local,
+                result.binding_ty.clone(),
+                false,
+                false,
+                false,
+            )?;
+            self.place_for_local(&result.binding_local, MirAccess::Move)?;
+            place
+        };
+        Ok(ContractScopeState {
+            result: result.clone(),
+            carrier_place,
+            binding_place,
+            post: post.to_vec(),
+        })
+    }
+
+    fn lower_contract_posts(&mut self, state: &ContractScopeState) -> Result<(), LowerError> {
+        self.activate_contract_result(state);
+        for contract in &state.post {
+            self.lower_contract(contract)?;
+        }
+        Ok(())
+    }
+
+    fn contract_is_unit_type(ty: &Type) -> bool {
+        match ty {
+            Type::Named(name) => name == crate::Syntax::INTERNAL_UNIT_TYPE,
+            Type::Tagged { inner, .. } => Self::contract_is_unit_type(inner),
+            _ => false,
+        }
+    }
+
+    fn lower_implicit_contract_return(
+        &mut self,
+        state: &ContractScopeState,
+    ) -> Result<(), LowerError> {
+        if !Self::contract_is_unit_type(&state.result.binding_ty) {
+            return Err(self.error(
+                self.span(),
+                "checked contract return is missing its value",
+            ));
+        }
+        let binding_value = self.emit(
+            "contract.return.unit",
+            Some(state.result.binding_ty.clone()),
+            MirOperation::Constant(MirConstant::Unit),
+        )?;
+        self.emit(
+            "contract.return.binding.write",
+            None,
+            MirOperation::WritePlace {
+                place: state.binding_place,
+                value: binding_value,
+            },
+        )?;
+        if matches!(
+            state.result.mode,
+            super::TContractResultMode::ResultPayload
+                | super::TContractResultMode::OptionPayload
+        ) {
+            let carrier_payload = self.emit(
+                "contract.return.carrier.unit",
+                Some(state.result.binding_ty.clone()),
+                MirOperation::Constant(MirConstant::Unit),
+            )?;
+            let carrier_value = self.emit(
+                "contract.return.carrier",
+                Some(state.result.carrier_ty.clone()),
+                match state.result.mode {
+                    super::TContractResultMode::ResultPayload => {
+                        MirOperation::ResultOk {
+                            value: carrier_payload,
+                        }
+                    }
+                    super::TContractResultMode::OptionPayload => {
+                        MirOperation::Present {
+                            value: carrier_payload,
+                        }
+                    }
+                    super::TContractResultMode::Direct => unreachable!(),
+                },
+            )?;
+            self.emit(
+                "contract.return.carrier.write",
+                None,
+                MirOperation::WritePlace {
+                    place: state.carrier_place,
+                    value: carrier_value,
+                },
+            )?;
+        }
+        self.lower_contract_posts(state)?;
+        let returned = self.emit(
+            "contract.return.move",
+            Some(state.result.carrier_ty.clone()),
+            MirOperation::MovePlace {
+                place: state.carrier_place,
+            },
+        )?;
+        self.terminate_with_cleanup(
+            MirTerminator::Return {
+                value: Some(returned),
+            },
+            0,
+        )
+    }
+
+    fn lower_contract_return(&mut self, value: Option<MirValueId>) -> Result<(), LowerError> {
+        let Some(state) = self.contract_scopes.last().cloned() else {
+            return Err(self.error(
+                self.span(),
+                "contract return lowered without an active scope",
+            ));
+        };
+        if self.is_terminated() {
+            return Ok(());
+        }
+        self.activate_contract_result(&state);
+        let Some(value) = value else {
+            return self.lower_implicit_contract_return(&state);
+        };
+        match state.result.mode {
+            super::TContractResultMode::Direct => {
+                self.emit(
+                    "contract.return.binding.write",
+                    None,
+                    MirOperation::WritePlace {
+                        place: state.binding_place,
+                        value,
+                    },
+                )?;
+                self.lower_contract_posts(&state)?;
+                let returned = self.emit(
+                    "contract.return.move",
+                    Some(state.result.carrier_ty.clone()),
+                    MirOperation::MovePlace {
+                        place: state.carrier_place,
+                    },
+                )?;
+                self.terminate_with_cleanup(
+                    MirTerminator::Return {
+                        value: Some(returned),
+                    },
+                    0,
+                )
+            }
+            super::TContractResultMode::ResultPayload
+            | super::TContractResultMode::OptionPayload => {
+                let condition = self.emit(
+                    "contract.return.carrier.test",
+                    Some(Type::Bool),
+                    match state.result.mode {
+                        super::TContractResultMode::ResultPayload => {
+                            MirOperation::ResultIsOk { subject: value }
+                        }
+                        super::TContractResultMode::OptionPayload => {
+                            MirOperation::OptionIsSome { subject: value }
+                        }
+                        super::TContractResultMode::Direct => unreachable!(),
+                    },
+                )?;
+                let success = self.new_block(self.span(), "contract.return.success")?;
+                let failure = self.new_block(self.span(), "contract.return.failure")?;
+                self.terminate(MirTerminator::Branch {
+                    condition,
+                    then_target: success,
+                    else_target: failure,
+                });
+
+                self.switch_to(success);
+                self.emit(
+                    "contract.return.carrier.write",
+                    None,
+                    MirOperation::WritePlace {
+                        place: state.carrier_place,
+                        value,
+                    },
+                )?;
+                let carrier_copy = self.emit(
+                    "contract.return.carrier.read",
+                    Some(state.result.carrier_ty.clone()),
+                    MirOperation::ReadPlace(state.carrier_place),
+                )?;
+                let binding = self.emit(
+                    "contract.return.binding.extract",
+                    Some(state.result.binding_ty.clone()),
+                    match state.result.mode {
+                        super::TContractResultMode::ResultPayload => {
+                            MirOperation::ResultValue {
+                                subject: carrier_copy,
+                                ok: true,
+                            }
+                        }
+                        super::TContractResultMode::OptionPayload => {
+                            MirOperation::OptionValue {
+                                subject: carrier_copy,
+                            }
+                        }
+                        super::TContractResultMode::Direct => unreachable!(),
+                    },
+                )?;
+                self.emit(
+                    "contract.return.binding.write",
+                    None,
+                    MirOperation::WritePlace {
+                        place: state.binding_place,
+                        value: binding,
+                    },
+                )?;
+                self.lower_contract_posts(&state)?;
+                let returned = self.emit(
+                    "contract.return.move",
+                    Some(state.result.carrier_ty.clone()),
+                    MirOperation::MovePlace {
+                        place: state.carrier_place,
+                    },
+                )?;
+                self.terminate_with_cleanup(
+                    MirTerminator::Return {
+                        value: Some(returned),
+                    },
+                    0,
+                )?;
+
+                self.switch_to(failure);
+                self.emit(
+                    "contract.return.carrier.write",
+                    None,
+                    MirOperation::WritePlace {
+                        place: state.carrier_place,
+                        value,
+                    },
+                )?;
+                let returned = self.emit(
+                    "contract.return.move",
+                    Some(state.result.carrier_ty.clone()),
+                    MirOperation::MovePlace {
+                        place: state.carrier_place,
+                    },
+                )?;
+                self.terminate_with_cleanup(
+                    MirTerminator::Return {
+                        value: Some(returned),
+                    },
+                    0,
+                )
+            }
+        }
+    }
+
     pub(super) fn lower_return(&mut self, value: Option<&TExpr>) -> Result<(), LowerError> {
         let value = match value {
             Some(expr) => Some(self.lower_child(expr)?),
             None => None,
         };
-        if !self.is_terminated() {
-            self.terminate_with_cleanup(MirTerminator::Return { value }, 0)?;
+        if self.contract_scopes.is_empty() {
+            if !self.is_terminated() {
+                self.terminate_with_cleanup(MirTerminator::Return { value }, 0)?;
+            }
+            return Ok(());
         }
-        Ok(())
+        self.lower_contract_return(value)
     }
 
     pub(super) fn lower_contract(&mut self, contract: &TContract) -> Result<(), LowerError> {
-        match contract.disposition {
-            TContractDisposition::Check => {
-                let _ = self.lower_child(&contract.condition)?;
-                let _ = self.lower_child(&contract.message)?;
-                Ok(())
+        let previous_span = self.span();
+        self.set_span(contract.span);
+        let lowered = (|| {
+            match contract.disposition {
+                TContractDisposition::Check => {
+                    let condition = self.lower_child(&contract.condition)?;
+                    let message = self.lower_child(&contract.message)?;
+                    let unit = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+                    let carrier = TFailureCarrier::Infallible;
+                    let call = self.intern_prelude_route(super::require_stop_route(
+                        "require",
+                        1,
+                        &unit,
+                        &carrier,
+                    )?)?;
+                    let location = MirPanicLoc {
+                        file: self.source_file_id_for(&contract.file),
+                        line: contract.line,
+                        column: 0,
+                    };
+                    let context = self.panic_context_at(contract.line, None);
+                    self.emit(
+                        "contract.require",
+                        Some(unit),
+                        MirOperation::Semantic(MirSemanticOp::RequireStop {
+                            call,
+                            kind: MirRequireKind::Require,
+                            condition: Some(condition),
+                            location,
+                            context,
+                            values: vec![message],
+                            always_stops: false,
+                        }),
+                    )?;
+                    Ok(())
+                }
+                TContractDisposition::Proven | TContractDisposition::Stripped => Ok(()),
             }
-            TContractDisposition::Proven | TContractDisposition::Stripped => Ok(()),
-        }
+        })();
+        self.set_span(previous_span);
+        lowered
     }
 
     pub(super) fn lower_contract_scope(
@@ -6339,16 +6669,24 @@ impl<'a> LowerCtx<'a> {
         pre: &[TContract],
         body: &[TStmt],
         post: &[TContract],
-        _result: &TContractResult,
+        result: &TContractResult,
     ) -> Result<(), LowerError> {
         for contract in pre {
             self.lower_contract(contract)?;
         }
-        lower_stmts(self, body)?;
-        for contract in post {
-            self.lower_contract(contract)?;
+        let state = self.bind_contract_result(result, post)?;
+        self.contract_scopes.push(state);
+        let lowered = lower_stmts(self, body).and_then(|()| {
+            if !self.is_terminated() {
+                self.lower_return(None)?;
+            }
+            Ok(())
+        });
+        self.contract_scopes.pop();
+        if let Some(parent) = self.contract_scopes.last().cloned() {
+            self.activate_contract_result(&parent);
         }
-        Ok(())
+        lowered
     }
 
     pub(super) fn record_erasure(
