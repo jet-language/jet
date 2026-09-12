@@ -1423,6 +1423,7 @@ host_fns! {
     stderr_flush: "jet_jit_stderr_flush" => jet_jit_stderr_flush: unary;
     stderr_flush_canonical: "jet_std_io_stderr_flush" => jet_jit_stderr_flush: unary;
     stderr_is_tty: "jet_jit_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
+    stderr_is_tty_canonical: "jet_std_io_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
     terminal_width: "jet_jit_terminal_width" => jet_jit_terminal_width: nullary;
     terminal_height: "jet_jit_terminal_height" => jet_jit_terminal_height: nullary;
     style: "jet_jit_io_style" => jet_jit_io_style: binary;
