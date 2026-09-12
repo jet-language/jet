@@ -318,6 +318,42 @@ fn type_name_of(v: MathVal) -> &'static str {
         MathVal::Mat4(_) => "Mat4",
     }
 }
+#[derive(Clone, Copy)]
+enum MathLaneValue {
+    F32(f32),
+    F64(f64),
+    Int(i64),
+}
+
+fn lane_count(v: MathVal) -> usize {
+    match v {
+        MathVal::F32(x) => x.len as usize,
+        MathVal::F64(x) => x.len as usize,
+        MathVal::Int(x) => x.len as usize,
+        MathVal::Vec2(_) => 2,
+        MathVal::Vec3(_) => 3,
+        MathVal::Vec4(_) => 4,
+        MathVal::Mat3(_) => 9,
+        MathVal::Mat4(_) => 16,
+    }
+}
+
+fn math_lane_value(value: i64, index: i64) -> Result<MathLaneValue, String> {
+    let value = take_val(value).ok_or_else(|| "lane: bad recv".to_string())?;
+    let index =
+        simd_lanes::jet_simd_lane_index(index, type_name_of(value), lane_count(value))?;
+    Ok(match value {
+        MathVal::F32(x) => MathLaneValue::F32(x.lanes[index]),
+        MathVal::F64(x) => MathLaneValue::F64(x.lanes[index]),
+        MathVal::Int(x) => MathLaneValue::Int(x.lanes[index]),
+        MathVal::Vec2(x) => MathLaneValue::F64(x.0[index]),
+        MathVal::Vec3(x) => MathLaneValue::F64(x.0[index]),
+        MathVal::Vec4(x) => MathLaneValue::F64(x.0[index]),
+        MathVal::Mat3(x) => MathLaneValue::F64(x.0[index]),
+        MathVal::Mat4(x) => MathLaneValue::F64(x.0[index]),
+    })
+}
+
 
 /// Pack a scalar float with a negative tag; math handles remain non-negative.
 fn pack_float(x: f64) -> i64 {
@@ -826,6 +862,57 @@ fn trap(msg: &str) {
     });
 }
 
+fn trap_at(file: i64, line: i64, message: &str) {
+    let file = clone_string(file);
+    let line = u32::try_from(line.max(0)).unwrap_or(u32::MAX);
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_runtime_stop_at("E3001", &file, line, message);
+    });
+}
+
+fn jet_jit_math_lane_f32(value: i64, index: i64, file: i64, line: i64) -> f32 {
+    match math_lane_value(value, index) {
+        Ok(MathLaneValue::F32(value)) => value,
+        Ok(_) => {
+            trap("lane: F32 carrier mismatch");
+            0.0
+        }
+        Err(message) => {
+            trap_at(file, line, &message);
+            0.0
+        }
+    }
+}
+
+fn jet_jit_math_lane_f64(value: i64, index: i64, file: i64, line: i64) -> f64 {
+    match math_lane_value(value, index) {
+        Ok(MathLaneValue::F64(value)) => value,
+        Ok(_) => {
+            trap("lane: F64 carrier mismatch");
+            0.0
+        }
+        Err(message) => {
+            trap_at(file, line, &message);
+            0.0
+        }
+    }
+}
+
+fn jet_jit_math_lane_i64(value: i64, index: i64, file: i64, line: i64) -> i64 {
+    match math_lane_value(value, index) {
+        Ok(MathLaneValue::Int(value)) => value,
+        Ok(_) => {
+            trap("lane: integer carrier mismatch");
+            0
+        }
+        Err(message) => {
+            trap_at(file, line, &message);
+            0
+        }
+    }
+}
+
+
 /// `type_name`/`func` are string handles. `args` is a list of i64:
 /// - for scalar float args: f64 bits
 /// - for math-value args: math handles
@@ -1051,23 +1138,20 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
             }
         }
         (_, "lane") if argv.len() == 2 => {
-            let Some(v) = take_val(argv[0]) else {
-                trap("lane: bad recv");
-                return 0;
-            };
-            let idx = argv[1];
-            let lanes = lanes_of(v);
-            let idx = match simd_lanes::jet_simd_lane_index(idx, type_name_of(v), lanes.len()) {
-                Ok(index) => index,
+            match math_lane_value(argv[0], argv[1]) {
+                Ok(MathLaneValue::Int(value)) if int_layout.is_some() => Some(pack_int(value)),
+                Ok(MathLaneValue::F32(value)) if int_layout.is_none() => {
+                    Some(pack_float(f64::from(value)))
+                }
+                Ok(MathLaneValue::F64(value)) if int_layout.is_none() => Some(pack_float(value)),
+                Ok(_) => {
+                    trap("lane: scalar carrier mismatch");
+                    None
+                }
                 Err(message) => {
                     trap(&message);
-                    return 0;
+                    None
                 }
-            };
-            if int_layout.is_some() {
-                Some(pack_int(int_lanes_of(v).unwrap()[idx]))
-            } else {
-                Some(pack_float(lanes[idx]))
             }
         }
         (_, "swizzle_read") => {
@@ -1692,6 +1776,15 @@ host_fns! {
         sig_call.params.push(AbiParam::new(types::I64));
         sig_call.params.push(AbiParam::new(types::I64));
         sig_call.returns.push(AbiParam::new(types::I64));
+        let mut sig_lane_f32 = Signature::new(cc);
+        for _ in 0..4 {
+            sig_lane_f32.params.push(AbiParam::new(types::I64));
+        }
+        sig_lane_f32.returns.push(AbiParam::new(types::F32));
+        let mut sig_lane_f64 = sig_lane_f32.clone();
+        sig_lane_f64.returns[0] = AbiParam::new(types::F64);
+        let mut sig_lane_i64 = sig_lane_f32.clone();
+        sig_lane_i64.returns[0] = AbiParam::new(types::I64);
         let mut sig_i64_i8 = Signature::new(cc);
         sig_i64_i8.params.push(AbiParam::new(types::I64));
         sig_i64_i8.returns.push(AbiParam::new(types::I8));
@@ -1732,6 +1825,26 @@ host_fns! {
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
     binary: "jet_jit_math_binary" => jet_jit_math_binary: sig_call;
     splat: "jet_jit_math_splat" => jet_jit_math_splat: sig_call;
+    lane_f32x4: "jet_math_F32x4_lane" => jet_jit_math_lane_f32: sig_lane_f32;
+    lane_f64x2: "jet_math_F64x2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+    lane_f32x8: "jet_math_F32x8_lane" => jet_jit_math_lane_f32: sig_lane_f32;
+    lane_f64x4: "jet_math_F64x4_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+    lane_i8x16: "jet_math_I8x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i16x8: "jet_math_I16x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i32x4: "jet_math_I32x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i64x2: "jet_math_I64x2_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u8x16: "jet_math_U8x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u16x8: "jet_math_U16x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u32x4: "jet_math_U32x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u64x2: "jet_math_U64x2_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i8x32: "jet_math_I8x32_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i16x16: "jet_math_I16x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i32x8: "jet_math_I32x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_i64x4: "jet_math_I64x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u8x32: "jet_math_U8x32_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u16x16: "jet_math_U16x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u32x8: "jet_math_U32x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_u64x4: "jet_math_U64x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
     reduce: "jet_jit_math_reduce" => jet_jit_math_reduce: sig_binary;
     dot: "jet_jit_math_dot" => jet_jit_math_dot: sig_binary;
     length: "jet_jit_math_length" => jet_jit_math_length: sig_unary;

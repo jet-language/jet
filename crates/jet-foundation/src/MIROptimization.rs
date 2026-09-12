@@ -1515,7 +1515,7 @@ fn index_route_arity(kind: MirIndexKind) -> Option<usize> {
         MirIndexKind::List | MirIndexKind::FixedListProof => Some(4),
         MirIndexKind::Map => Some(8),
         MirIndexKind::Pool => Some(6),
-        MirIndexKind::Lane => None,
+        MirIndexKind::Lane => Some(4),
     }
 }
 

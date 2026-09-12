@@ -5031,10 +5031,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let metadata = self.index_location(builder, call, location, context, source_line, span)?;
         let base = self.cast(builder, base, types::I64)?;
         let index_value = self.index_operand(builder, index, kind)?;
-        let line = *metadata
+        let source_line = *metadata
             .get(1)
             .ok_or_else(|| "MIR index route omitted its source-line argument".to_string())?;
-        let line = self.cast(builder, line, types::I32)?;
+        let line = self.cast(builder, source_line, types::I32)?;
         let value = match kind {
             jet_foundation::MIR::MirIndexKind::List
             | jet_foundation::MIR::MirIndexKind::FixedListProof => {
@@ -5095,7 +5095,22 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .copied()
                 .ok_or_else(|| "MIR pool index getter returned no value".to_string())?,
             jet_foundation::MIR::MirIndexKind::Lane => {
-                return Err("MIR lane index has no checked Cranelift carrier".to_string())
+                let route = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == call)
+                    .cloned()
+                    .ok_or_else(|| format!("MIR references missing Prelude call {:?}", call))?;
+                let host = self.lookup_prelude_host(&route)?;
+                self.call_host(
+                    builder,
+                    host,
+                    &[base, index_value, metadata[0], source_line],
+                )?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR lane index getter returned no value".to_string())?
             }
         };
         expected.map_or(Ok(value), |target| self.cast(builder, value, target))
