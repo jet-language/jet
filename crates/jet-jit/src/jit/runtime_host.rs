@@ -14239,6 +14239,7 @@ host_fns! {
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
     err_cause: "jet_jit_err_cause" => jet_jit_err_cause: sig_str_unary_i64;
     measurement_new: "jet_jit_measurement_new" => jet_jit_measurement_new: sig_measurement_new;
+    measurement_new_aot: "jet_std::JetMeasurement::new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
     measurement_get: "jet_jit_measurement_get" => jet_jit_measurement_get: sig_measurement_get;
     measurement_value: "jet_std::JetMeasurement::value" => jet_jit_measurement_value: sig_measurement_value;
