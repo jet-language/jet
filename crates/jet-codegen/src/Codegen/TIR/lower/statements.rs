@@ -2818,9 +2818,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
                     if b.arena_view {
                         return in_own_frame(|| {
-                            let init = lower_expr(&b.init, cx, env);
+                            let mut init = lower_expr(&b.init, cx, env);
+                            // The source spelling is `T`, but the checked allocator
+                            // method returns an exclusive view. Preserve that
+                            // compiler-only carrier through MIR so resident tiers
+                            // can materialize the slot instead of printing the
+                            // opaque view handle.
+                            if !init.ty.is_allocator_view() {
+                                init.ty = Type::allocator_view(init.ty.clone());
+                            }
+                            let binding_ty = init.ty.clone();
                             let slot = TLocal::user(&b.name).through_ref();
-                            env.bind(&b.name, slot, b.ty.clone());
+                            env.bind(&b.name, slot, Some(binding_ty));
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
                                 kw: "let",

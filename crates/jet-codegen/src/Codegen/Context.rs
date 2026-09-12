@@ -489,6 +489,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
+        "AllocError" => Some("AllocError"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
         "Point" => Some("JetPoint"),

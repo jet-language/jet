@@ -7,6 +7,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 
 fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
@@ -209,6 +211,7 @@ fn write_program_allocator_project(label: &str, allocator: Option<&str>) -> std:
 fn compile_jet(src: &str) -> Result<jet::CompileOutput, Vec<String>> {
     let dir = temp_dir("jet");
     std::fs::create_dir_all(&dir).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join("main.jet");
     std::fs::write(&path, src).unwrap();
     jet::compile_with_path(src, &path.to_string_lossy())

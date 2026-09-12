@@ -4456,9 +4456,12 @@ pub enum MirSemanticOp {
         condition: MirValueId,
         all: bool,
     },
+    /// A checked allocator constructor. `inline_size` is present only for
+    /// `Fixed.new` after sema proved a positive comptime capacity.
     AllocNew {
         call: MirPreludeCallId,
         kind: MirAllocatorKind,
+        inline_size: Option<usize>,
         args: Vec<MirCallArg>,
     },
     ColumnarRead {

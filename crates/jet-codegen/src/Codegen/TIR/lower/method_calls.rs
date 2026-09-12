@@ -4843,13 +4843,28 @@ fn lower_method_call_impl(
                     ("Arena", "new") => TAllocCtor::Arena,
                     ("Bump", "new") => TAllocCtor::Bump,
                     ("Pool", "new") => TAllocCtor::Pool,
-                    ("Fixed", "new") => TAllocCtor::Fixed,
+                    ("Fixed", "new") => {
+                        let Some(size) = args
+                            .first()
+                            .and_then(|arg| route_status(&arg.expr, cx))
+                            .and_then(|value| usize::try_from(value).ok())
+                            .filter(|value| *value > 0)
+                        else {
+                            // Sema owns the user diagnostic. Reaching this
+                            // path means checked metadata was lost before TIR.
+                            return invariant_method_expr(
+                                method_span,
+                                "validated Fixed.new is missing its positive comptime size",
+                            );
+                        };
+                        TAllocCtor::Fixed { size }
+                    }
                     ("Fixed", "over") => TAllocCtor::FixedOver,
                     _ => {
                         return invariant_method_expr(
                             method_span,
-                            "allocator constructor has an impossible checked kind",
-                        );
+                            "allocator constructor route was not recognized after sema",
+                        )
                     }
                 };
                 let mut ctor_args = args

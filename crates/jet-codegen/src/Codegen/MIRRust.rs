@@ -46,6 +46,13 @@ fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
     }
 }
 
+fn is_allocator_result_type(ty: &MirType) -> bool {
+    matches!(
+        ty.kind(),
+        MirTypeKind::Result { err, .. } if err.name().starts_with("AllocError")
+    )
+}
+
 
 
 #[derive(Debug)]
@@ -2084,6 +2091,18 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn rust_local_type(&self, ty: &MirType) -> String {
+        if let MirTypeKind::Result { ok, err } = ty.kind() {
+            if let Some(inner) = allocator_view_inner(ok) {
+                if err.name().starts_with("AllocError") {
+                    return format!(
+                        "{}JetOutcome<{}, {}>",
+                        self.config.root_prefix,
+                        self.rust_type(inner),
+                        self.rust_type(err)
+                    );
+                }
+            }
+        }
         let previous = self.history_callback_lifetime.replace("'_");
         let rendered = self.rust_type(ty);
         self.history_callback_lifetime.set(previous);
@@ -11673,6 +11692,26 @@ impl<'a> RustEmitter<'a> {
                 }
                 found
             }
+            MirOperation::Semantic(MirSemanticOp::AllocNew { call, args, .. }) => {
+                let row = self.prelude_row(*call);
+                let mut found = false;
+                for (index, argument) in args.iter().enumerate() {
+                    if argument.value == value {
+                        found = true;
+                        if !self.direct_borrow_call_arg(
+                            argument,
+                            row.signature
+                                .borrow_mask
+                                .get(index)
+                                .copied()
+                                .unwrap_or(false),
+                        ) {
+                            return false;
+                        }
+                    }
+                }
+                found
+            }
             MirOperation::Index { base, index, .. } => *base == value && *index != value,
             MirOperation::Semantic(MirSemanticOp::HandleMethod {
                 call,
@@ -11868,6 +11907,33 @@ impl<'a> RustEmitter<'a> {
         })
     }
 
+    fn emit_fixed_inline_backings(&self, function: &MirFunction, out: &mut String) {
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                let MirOperation::Semantic(MirSemanticOp::AllocNew {
+                    call,
+                    kind: MirAllocatorKind::Fixed,
+                    inline_size: Some(size),
+                    ..
+                }) = &instruction.operation
+                else {
+                    continue;
+                };
+                if self.prelude_row(*call).member != "fixed.new" {
+                    continue;
+                }
+                let result = instruction
+                    .result
+                    .unwrap_or_else(|| panic!("MIR Fixed.new has no result slot"));
+                let _ = writeln!(
+                    out,
+                    "    let mut {}: [std::mem::MaybeUninit<u8>; {size}] = [std::mem::MaybeUninit::<u8>::uninit(); {size}];",
+                    fixed_inline_backing_name(result),
+                );
+            }
+        }
+    }
+
     fn initialize_uninit_expression(&self, function: &MirFunction, place_id: MirPlaceId) -> String {
         let place = function
             .places
@@ -11890,7 +11956,9 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+
     fn emit_slots(&self, function: &MirFunction, out: &mut String) {
+        self.emit_fixed_inline_backings(function, out);
         // Referents are declared before callable SSA slots so native borrows
         // are dropped before the storage they retain.
         for local in &function.locals {
@@ -12495,7 +12563,10 @@ impl<'a> RustEmitter<'a> {
             MirOperation::WritePlace { .. } => "()".to_string(),
             MirOperation::InitializeUninit { .. } => "()".to_string(),
             MirOperation::Copy { value } => {
-                if matches!(self.value_type(function, *value).kind(), MirTypeKind::Int) {
+                let value_ty = self.value_type(function, *value);
+                if is_allocator_result_type(value_ty) {
+                    self.value_move(*value)
+                } else if matches!(value_ty.kind(), MirTypeKind::Int) {
                     self.value_read(*value)
                 } else {
                     self.value_copy(*value)
@@ -12517,9 +12588,17 @@ impl<'a> RustEmitter<'a> {
             MirOperation::ResultIsOk { subject } => format!("matches!({}, Ok(_))", self.value_slot_reference(*subject, false)),
             MirOperation::ResultValue { subject, ok } => {
                 if *ok {
-                    format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}", self.value_move(*subject))
+                    if is_allocator_result_type(self.value_type(function, *subject)) {
+                        format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}", self.value_move(*subject))
+                    } else {
+                        format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR result success payload missing\") }}", self.value_move(*subject))
+                    }
                 } else {
-                    format!("match {} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}", self.value_move(*subject))
+                    if is_allocator_result_type(self.value_type(function, *subject)) {
+                        format!("match {} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}", self.value_move(*subject))
+                    } else {
+                        format!("match {} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error }}", self.value_move(*subject))
+                    }
                 }
             }
             MirOperation::PatternCapture { matched, index } => self.pattern_capture(function, *matched, *index, result),
@@ -17740,6 +17819,11 @@ impl<'a> RustEmitter<'a> {
                 .native_int_result(&value, &MirType::from_kind(MirTypeKind::Int))
                 .expect("data count has a checked Int result");
         }
+        if ty.nominal_name() == Some("AllocError") && field_name == "requested_bytes" {
+            return self
+                .native_int_result(&value, &MirType::from_kind(MirTypeKind::Int))
+                .expect("AllocError requested_bytes has a checked Int result");
+        }
         // Prelude VJP continuations use native Rc<Fn> carriers. Projecting
         // one into a checked Jet function value must cross the callable ABI.
         if ty.nominal_name() == Some("VjpRun") {
@@ -17971,21 +18055,17 @@ impl<'a> RustEmitter<'a> {
                 condition,
                 all,
             } => self.prelude_call_args(*call, &[self.value_move(*condition), all.to_string()]),
-            MirSemanticOp::AllocNew { call, kind, args } => {
+            MirSemanticOp::AllocNew {
+                call,
+                kind,
+                inline_size,
+                args,
+            } => {
                 let row = self.prelude_row(*call);
                 let expected = match kind {
-                    MirAllocatorKind::Arena => matches!(
-                        row.member.as_str(),
-                        "arena.new"
-                    ),
-                    MirAllocatorKind::Bump => matches!(
-                        row.member.as_str(),
-                        "bump.new"
-                    ),
-                    MirAllocatorKind::Pool => matches!(
-                        row.member.as_str(),
-                        "pool.new"
-                    ),
+                    MirAllocatorKind::Arena => row.member == "arena.new",
+                    MirAllocatorKind::Bump => row.member == "bump.new",
+                    MirAllocatorKind::Pool => row.member == "pool.new",
                     MirAllocatorKind::Fixed => {
                         matches!(row.member.as_str(), "fixed.new" | "fixed.over")
                     }
@@ -17994,19 +18074,69 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR allocator constructor route does not match its kind");
                 }
                 self.validate_prelude_count(row, args.len());
+                if row.member == "fixed.new" {
+                    let size = inline_size
+                        .unwrap_or_else(|| panic!("MIR Fixed.new has no checked inline size"));
+                    let result = result
+                        .unwrap_or_else(|| panic!("MIR Fixed.new has no result slot"));
+                    let backing = fixed_inline_backing_name(result);
+                    return format!(
+                        "{}jet_mem::JetFixed::over_uninit(&mut {backing}) /* allocator=Fixed, inline_size={size} */",
+                        self.config.root_prefix,
+                    );
+                }
+                if row.member == "fixed.over" {
+                    let over_local = args.first().and_then(|arg| {
+                        let place_id = arg.place?;
+                        let place = function
+                            .places
+                            .iter()
+                            .find(|place| place.id == place_id)?;
+                        if !place.projections.is_empty() {
+                            return None;
+                        }
+                        match place.base {
+                            MirPlaceBase::Local(local)
+                                if self.local_uninit_fixed_type(function, local).is_some() =>
+                            {
+                                Some(local)
+                            }
+                            _ => None,
+                        }
+                    });
+                    if let Some(local) = over_local {
+                        let slot = self.local_storage(function, local);
+                        return format!(
+                            "{{ let mut __jet_bytes = {slot}.as_mut().expect(\"MIR local\"); {}jet_mem::JetFixed::over_uninit_fixed(&mut __jet_bytes) /* allocator=Fixed */ }}",
+                            self.config.root_prefix,
+                        );
+                    }
+                }
                 let values = args
                     .iter()
                     .enumerate()
                     .map(|(index, arg)| {
-                        self.call_arg_for_function(
-                            function,
-                            arg,
-                            row.signature.borrow_mask.get(index).copied().unwrap_or(false),
-                        )
+                        let borrowed = row.signature.borrow_mask.get(index).copied().unwrap_or(false);
+                        let value = self.call_arg_for_function(function, arg, borrowed);
+                        let native_count = !borrowed
+                            && matches!(
+                                row.member.as_str(),
+                                "arena.new" | "bump.new" | "pool.new"
+                            )
+                            && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Int);
+                        if native_count {
+                            format!(
+                                "usize::try_from({}).unwrap_or_else(|_| {}jet_arithmetic_stop(\"<mir>\", 0, \"allocator size is negative or exceeds usize range\"))",
+                                self.native_int_argument(value, location.as_ref()),
+                                self.config.root_prefix,
+                            )
+                        } else {
+                            value
+                        }
                     })
                     .collect::<Vec<_>>();
                 let emitted = self.prelude_call_args(*call, &values);
-                format!("{emitted} /* allocator={kind:?} */")
+                format!("{emitted} /* allocator={kind:?}, inline_size={inline_size:?} */")
             }
             MirSemanticOp::ColumnarRead {
                 base,
@@ -18082,6 +18212,11 @@ impl<'a> RustEmitter<'a> {
                     frame_schedule_derivation.as_ref(),
                     location.as_ref(),
                 );
+                if result.is_some_and(|value| is_allocator_result_type(self.value_type(function, value))) {
+                    return format!(
+                        "{emitted}.map(|value| std::clone::Clone::clone(&*value))"
+                    );
+                }
                 result
                     .and_then(|value| {
                         self.native_int_result(&emitted, self.value_type(function, value))
@@ -19103,6 +19238,17 @@ impl<'a> RustEmitter<'a> {
                             self.local_storage(function, *local)
                         );
                     }
+                    let local_row = function
+                        .locals
+                        .iter()
+                        .find(|candidate| candidate.id == *local)
+                        .unwrap_or_else(|| panic!("MIR local ID {:?} has no row", local));
+                    if is_allocator_result_type(&local_row.ty) {
+                        return format!(
+                            "{}.as_ref().expect(\"MIR local\").clone()",
+                            self.local_storage(function, *local)
+                        );
+                    }
                     if self.local_direct_move_storage(function, *local) {
                         return format!("{}.clone()", self.local_storage(function, *local));
                     }
@@ -20116,4 +20262,8 @@ fn value_slot(value: MirValueId) -> String {
 
 fn local_slot(local: jet_foundation::MIR::MirLocalId) -> String {
     format!("__jet_l_{}", local.0)
+}
+
+fn fixed_inline_backing_name(value: MirValueId) -> String {
+    format!("__jet_fixed_backing_v{}", value.0)
 }

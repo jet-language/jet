@@ -12913,7 +12913,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .map_or(Ok(unit), |ty| self.cast(builder, unit, ty))
                     .map(Some)
             }
-            MirSemanticOp::AllocNew { call, kind, args } => {
+            MirSemanticOp::AllocNew {
+                call,
+                kind,
+                args,
+                ..
+            } => {
                 let row = self
                     .program
                     .prelude_calls

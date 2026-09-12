@@ -3095,40 +3095,42 @@ pub(super) fn alloc_new_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let (member, symbol, arity, max_arity, borrow_mask) = match ctor {
+        super::TAllocCtor::Arena if arg_count == 0 => (
+            "arena.new",
+            "jet_mem::JetArena::new",
+            0,
+            0,
+            &[][..],
+        ),
         super::TAllocCtor::Arena => (
             "arena.new",
-            if arg_count == 0 {
-                "jet_mem::JetArena::new"
-            } else {
-                "jet_mem::JetArena::with_capacity"
-            },
-            0,
+            "jet_mem::JetArena::with_capacity",
+            1,
             1,
             &[false][..],
         ),
+        super::TAllocCtor::Bump if arg_count == 0 => (
+            "bump.new",
+            "jet_mem::JetBump::new",
+            0,
+            0,
+            &[][..],
+        ),
         super::TAllocCtor::Bump => (
             "bump.new",
-            if arg_count == 0 {
-                "jet_mem::JetBump::new"
-            } else {
-                "jet_mem::JetBump::with_capacity"
-            },
-            0,
+            "jet_mem::JetBump::with_capacity",
+            1,
             1,
             &[false][..],
         ),
         super::TAllocCtor::Pool => (
             "pool.new",
-            if arg_count == 0 {
-                "jet_mem::JetPool::new"
-            } else {
-                "jet_mem::JetPool::with_slots"
-            },
-            0,
+            "jet_mem::JetPool::with_slots",
+            1,
             1,
             &[false][..],
         ),
-        super::TAllocCtor::Fixed => (
+        super::TAllocCtor::Fixed { .. } => (
             "fixed.new",
             "jet_mem::JetFixed::new",
             1,

@@ -2110,6 +2110,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 | "DataPivotCell"
                 | "DataSummary"
                 | "FieldError"
+                | "AllocError"
                 | crate::Syntax::TYPE_RANGE
         )
 }
@@ -2465,6 +2466,17 @@ fn compiler_owned_type_defs(
                     name,
                     crate::Sema::core_struct_field_type("DataPivotCell", name, &[])
                         .expect("canonical DataPivotCell field"),
+                )
+            }),
+        )))
+        .chain(std::iter::once(compiler_owned_record(
+            module,
+            "AllocError",
+            ["requested_bytes", "allocator"].map(|name| {
+                (
+                    name,
+                    crate::Sema::core_struct_field_type("AllocError", name, &[])
+                        .expect("canonical AllocError field"),
                 )
             }),
         )))

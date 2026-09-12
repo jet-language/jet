@@ -9122,7 +9122,8 @@ pub enum TAllocCtor {
     Arena,
     Bump,
     Pool,
-    Fixed,
+    /// `Fixed.new(size: N)` carries sema's positive comptime capacity.
+    Fixed { size: usize },
     /// `Fixed.over` borrows an existing mutable fixed byte buffer.
     FixedOver,
 }

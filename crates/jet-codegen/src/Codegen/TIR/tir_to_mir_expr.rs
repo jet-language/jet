@@ -18,7 +18,7 @@ use jet_foundation::MIR::{
 
 use std::collections::BTreeMap;
 use super::{
-    ListSpreadPart, TAllocCtor, TCallArg, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
+    ListSpreadPart, TCallArg, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
     THostCall, THandleOp, TOptionProbe, TPattern, TPatternBinding, TPatternField,
     TPatternPosition, TPatternShape, TStrPart, TTryConvert, TPlace, TLocal, TNumericOp,
     TEnumArg, TEnumPayload, TTextPatternPart, TBinaryPatternPart, TBuiltinOp, TCoreClosureKind, TLambda,
@@ -1527,10 +1527,16 @@ pub(super) fn lower_expr(
         }
         TExprKind::AllocNew { ctor, args } => {
             let kind = match ctor {
-                TAllocCtor::Arena => MirAllocatorKind::Arena,
-                TAllocCtor::Bump => MirAllocatorKind::Bump,
-                TAllocCtor::Pool => MirAllocatorKind::Pool,
-                TAllocCtor::Fixed | TAllocCtor::FixedOver => MirAllocatorKind::Fixed,
+                super::TAllocCtor::Arena => MirAllocatorKind::Arena,
+                super::TAllocCtor::Bump => MirAllocatorKind::Bump,
+                super::TAllocCtor::Pool => MirAllocatorKind::Pool,
+                super::TAllocCtor::Fixed { .. } | super::TAllocCtor::FixedOver => {
+                    MirAllocatorKind::Fixed
+                }
+            };
+            let inline_size = match ctor {
+                super::TAllocCtor::Fixed { size } => Some(*size),
+                _ => None,
             };
             let route = super::alloc_new_route(ctor, &expr.ty, args.len(), &carrier)?;
             let mut lowered_args = lower_call_args(ctx, args)?;
@@ -1542,6 +1548,7 @@ pub(super) fn lower_expr(
                 MirOperation::Semantic(MirSemanticOp::AllocNew {
                     call,
                     kind,
+                    inline_size,
                     args: lowered_args,
                 }),
             )

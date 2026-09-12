@@ -3699,7 +3699,12 @@ fn js_semantic_expression(
         MirSemanticOp::ConditionNotify { call, condition, all } => {
             prelude(*call, vec![value(*condition), all.to_string()])?
         }
-        MirSemanticOp::AllocNew { call, kind: _, args } => {
+            MirSemanticOp::AllocNew {
+                call,
+                kind: _,
+                args,
+                ..
+            } => {
             prelude(*call, js_call_values(program, function, args, false)?)?
         }
         MirSemanticOp::ColumnarRead { base, index, column, column_index, accessor } => {

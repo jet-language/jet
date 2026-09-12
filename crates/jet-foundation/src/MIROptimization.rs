@@ -6057,9 +6057,15 @@ fn inline_semantic(
                 all: *all,
             }
         }
-        MirSemanticOp::AllocNew { call, kind, args } => MirSemanticOp::AllocNew {
+        MirSemanticOp::AllocNew {
+            call,
+            kind,
+            inline_size,
+            args,
+        } => MirSemanticOp::AllocNew {
             call: *call,
             kind: *kind,
+            inline_size: *inline_size,
             args: args
                 .iter()
                 .map(|argument| inline_call_arg(argument, ids, substitutions))
@@ -13081,10 +13087,16 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             writer.u64(condition.0);
             writer.bool(*all);
         }
-        MirSemanticOp::AllocNew { call, kind, args } => {
+        MirSemanticOp::AllocNew {
+            call,
+            kind,
+            inline_size,
+            args,
+        } => {
             writer.tag("alloc-new");
             writer.u64(call.0);
             encode_allocator_kind(writer, *kind);
+            writer.option_u64(inline_size.map(|size| size as u64));
             encode_call_args(writer, args);
         }
         MirSemanticOp::ColumnarRead {

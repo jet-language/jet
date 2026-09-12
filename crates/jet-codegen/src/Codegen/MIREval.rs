@@ -8159,7 +8159,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )
                 .map(RuntimeValue::Data)
             }
-            MirSemanticOp::AllocNew { call, kind, args } => {
+            MirSemanticOp::AllocNew {
+                call,
+                kind,
+                inline_size,
+                args,
+            } => {
                 let row = self.prelude_row(*call, span)?;
                 if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
                     return Err(mir_error_at(
@@ -8191,7 +8196,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     let _ = self.value(frame_index, arg.value, span)?;
                 }
                 Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
-                    MirAllocatorOwner::new(*kind),
+                    MirAllocatorOwner::new(*kind, *inline_size),
                 )))
             }
             MirSemanticOp::ColumnarRead {
@@ -12594,22 +12599,33 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     ));
                 };
                 let value = runtime_to_data(value.clone(), span)?;
-                let view = RuntimeValue::Ambient(mir_runtime_owner_value(MirAllocatorView {
-                    state: owner.state.clone(),
-                    generation: state.generation,
-                    value,
-                }));
+                if let Some(error) = mir_allocator_try_charge(&mut state, allocator, &value) {
+                    if operation == "try_alloc" {
+                        return Ok(mir_alloc_error_result(error));
+                    }
+                    return Err(mir_error_at("MIR allocator is exhausted", span));
+                }
                 if operation == "try_alloc" {
+                    // AOT clones the placed value out of the fallible Result; keep
+                    // the same owned payload so `{value}` shows the Int, not the
+                    // opaque owner handle.
                     Ok(RuntimeValue::Result {
                         ok: true,
-                        value: Box::new(view),
+                        value: Box::new(RuntimeValue::Data(value)),
                     })
                 } else {
-                    Ok(view)
+                    Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
+                        MirAllocatorView {
+                            state: owner.state.clone(),
+                            generation: state.generation,
+                            value,
+                        },
+                    )))
                 }
             }
             "reset" if values.is_empty() => {
                 state.generation = state.generation.wrapping_add(1);
+                state.used = 0;
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
             "reset" => Err(mir_error_at(
@@ -20579,6 +20595,8 @@ struct MirAllocatorState {
     kind: jet_foundation::MIR::MirAllocatorKind,
     closed: bool,
     generation: u64,
+    used: usize,
+    capacity: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -20587,14 +20605,89 @@ struct MirAllocatorOwner {
 }
 
 impl MirAllocatorOwner {
-    fn new(kind: jet_foundation::MIR::MirAllocatorKind) -> Self {
+    fn new(kind: jet_foundation::MIR::MirAllocatorKind, inline_size: Option<usize>) -> Self {
         Self {
             state: Arc::new(std::sync::Mutex::new(MirAllocatorState {
                 kind,
                 closed: false,
                 generation: 0,
+                used: 0,
+                capacity: match kind {
+                    jet_foundation::MIR::MirAllocatorKind::Fixed => inline_size,
+                    _ => None,
+                },
             })),
         }
+    }
+}
+
+/// Layout twin of `Prelude/Core/FixedAllocator.rs` `FixedHeader`, used only for
+/// the interpreter's metadata overhead fact. Fit testing itself is
+/// `jet_try_alloc_value`.
+struct MirFixedHeaderLayout {
+    _previous: usize,
+    _value_offset: usize,
+    _drop_fn: Option<unsafe fn(*mut u8)>,
+    _bytes: usize,
+}
+
+fn mir_allocator_payload_bytes(value: &MirEvalValue) -> usize {
+    match value {
+        MirEvalValue::Int(_) | MirEvalValue::Float { .. } | MirEvalValue::BigInt(_) => {
+            std::mem::size_of::<jet_foundation::Numeric::JetInt>()
+        }
+        MirEvalValue::Bool(_) | MirEvalValue::Char(_) | MirEvalValue::Unit => 1,
+        _ => std::mem::size_of::<usize>(),
+    }
+}
+
+fn mir_allocator_try_charge(
+    state: &mut MirAllocatorState,
+    allocator: &str,
+    value: &MirEvalValue,
+) -> Option<jet_foundation::Outcome::AllocError> {
+    let Some(capacity) = state.capacity else {
+        return None;
+    };
+    let requested = mir_allocator_payload_bytes(value);
+    let overhead = match state.kind {
+        jet_foundation::MIR::MirAllocatorKind::Fixed => {
+            std::mem::size_of::<MirFixedHeaderLayout>()
+        }
+        _ => 0,
+    };
+    match jet_foundation::Outcome::jet_try_alloc_value(
+        (),
+        state.used,
+        capacity,
+        requested,
+        allocator,
+        overhead,
+    ) {
+        Ok((_, used)) => {
+            state.used = used;
+            None
+        }
+        Err(error) => Some(error),
+    }
+}
+
+fn mir_alloc_error_result(error: jet_foundation::Outcome::AllocError) -> RuntimeValue {
+    RuntimeValue::Result {
+        ok: false,
+        value: Box::new(RuntimeValue::Data(MirEvalValue::Struct {
+            type_name: crate::Syntax::TYPE_ALLOC_ERROR.to_string(),
+            fields: vec![
+                (
+                    "requested_bytes".to_string(),
+                    MirEvalValue::Int(error.requested_bytes),
+                ),
+                (
+                    "allocator".to_string(),
+                    MirEvalValue::String(error.allocator),
+                ),
+            ],
+        })),
     }
 }
 
