@@ -1407,6 +1407,7 @@ host_fns! {
     stdout_write_canonical: "jet_std_io_stdout_write" => jet_jit_stdout_write: binary;
     stdout_write: "jet_jit_stdout_write" => jet_jit_stdout_write: binary;
     stdout_write_line: "jet_jit_stdout_write_line" => jet_jit_stdout_write_line: binary;
+    stdout_write_line_canonical: "jet_std_io_stdout_write_line" => jet_jit_stdout_write_line: binary;
     stdout_write_bytes: "jet_jit_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;
     stdout_flush: "jet_jit_stdout_flush" => jet_jit_stdout_flush: unary;
     stdout_flush_canonical: "jet_std_io_stdout_flush" => jet_jit_stdout_flush: unary;
