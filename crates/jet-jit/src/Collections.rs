@@ -188,6 +188,13 @@ pub(crate) mod collection_semantics {
     {
         jet_iter_dedup_by(jet_iter_from_vec(xs), f).to_list()
     }
+    pub(super) fn iter_chunk_while_i64<F>(xs: Vec<i64>, f: F) -> Vec<Vec<i64>>
+    where
+        F: 'static + FnMut(&i64, &i64) -> bool,
+    {
+        jet_iter_chunk_while(jet_iter_from_vec(xs), f).to_list()
+    }
+
 
     pub(super) fn list_sort_by_compare<T, F>(xs: &mut Vec<T>, f: F)
     where
@@ -6567,6 +6574,27 @@ fn jet_jit_iter_dedup_by(list: i64, callback: i64) -> i64 {
     }
     alloc_from_ints(&values)
 }
+fn jet_jit_iter_chunk_while(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let chunks =
+        collection_semantics::iter_chunk_while_i64(clone_list_ints(list), move |left, right| {
+            if closure_trapped() {
+                return false;
+            }
+            let keep = invoke_closure_i64_pair(slot, *left, *right);
+            if closure_trapped() {
+                return false;
+            }
+            keep != 0
+        });
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_nested_from_ints(&chunks)
+}
+
 
 
 
@@ -10012,4 +10040,5 @@ host_fns! {
     canonical_iter_filter_map: "jet_iter_filter_map" => checked_iter_filter_map_typed: sig_closure_value;
     canonical_iter_dedup_by: "jet_iter_dedup_by" => jet_jit_iter_dedup_by: sig_closure_value;
     canonical_iter_split_at: "jet_iter_split_at" => jet_jit_iter_split_at: sig_closure_split;
+    canonical_iter_chunk_while: "jet_iter_chunk_while" => jet_jit_iter_chunk_while: sig_closure_value;
 }
