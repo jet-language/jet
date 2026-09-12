@@ -10406,6 +10406,7 @@ host_fns! {
     list_order_str: "jet_jit_list_order_str" => jet_jit_list_order_str: sig_list_eq;
     list_order_f64: "jet_jit_list_order_f64" => jet_jit_list_order_f64: sig_list_eq;
     list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
+    list_indexes_aot_alias: "jet_jit_iter_indexes" => jet_jit_list_indexes: sig_len;
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
     list_sort_desc: "jet_jit_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
     list_sort_f64: "jet_jit_list_sort_f64" => jet_jit_list_sort_f64: sig_sort;
