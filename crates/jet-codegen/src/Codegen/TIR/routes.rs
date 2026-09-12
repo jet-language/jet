@@ -2694,13 +2694,95 @@ fn fixed_trap_binary_route(
     .map(TRoutePlan::Prelude)
 }
 
+fn math_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) if crate::Sema::is_math_type(name) => Some(name),
+        Type::Tagged { inner, .. } => math_type_name(inner),
+        _ => None,
+    }
+}
+
+fn math_binary_route(
+    op: BinOp,
+    input: &Type,
+    rhs: &Type,
+    result: &Type,
+    carrier: &TFailureCarrier,
+) -> Result<Option<TRoutePlan>, LowerError> {
+    let Some(left_name) = math_type_name(input) else {
+        return Ok(None);
+    };
+    let Some(right_name) = math_type_name(rhs) else {
+        return Ok(None);
+    };
+    let Some(result_name) = math_type_name(result) else {
+        return Ok(None);
+    };
+    let Some(op_name) = (match op {
+        BinOp::Add => Some("add"),
+        BinOp::Sub => Some("sub"),
+        BinOp::Mul => Some("mul"),
+        BinOp::Div => Some("div"),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    let symbol = match op {
+        BinOp::Add | BinOp::Sub
+            if left_name == right_name && result_name == left_name =>
+        {
+            format!("jet_math_{left_name}_{op_name}")
+        }
+        BinOp::Div
+            if left_name == right_name
+                && result_name == left_name
+                && crate::Sema::is_simd_lane_type(left_name) =>
+        {
+            format!("jet_math_{left_name}_{op_name}")
+        }
+        BinOp::Mul if left_name == right_name && result_name == left_name => {
+            if left_name == "Vec3" {
+                "jet_math_Vec3_hadamard_mul".to_string()
+            } else {
+                format!("jet_math_{left_name}_{op_name}")
+            }
+        }
+        BinOp::Mul if left_name == "Mat3" && right_name == "Vec3" && result_name == "Vec3" => {
+            "jet_math_Mat3_transform".to_string()
+        }
+        BinOp::Mul if left_name == "Mat4" && right_name == "Vec4" && result_name == "Vec4" => {
+            "jet_math_Mat4_transform".to_string()
+        }
+        _ => return Ok(None),
+    };
+    let member = format!("binary.{left_name}.{op_name}");
+    let route = prelude_route_row(
+        MirPreludeFamily::MathBuiltin,
+        "core.math",
+        &member,
+        &symbol,
+        2,
+        2,
+        &[true, false],
+        None,
+        carrier,
+        MirPreludeAbi::Value,
+        "math binary",
+    )?;
+    Ok(Some(TRoutePlan::Prelude(route)))
+}
+
 pub(super) fn binary_route(
     op: BinOp,
     overflow: bool,
     input: &Type,
+    rhs: &Type,
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
+    if let Some(route) = math_binary_route(op, input, rhs, result, carrier)? {
+        return Ok(route);
+    }
     if input == &Type::Int {
         if numeric_binary(op) && result != &Type::Int {
             return Err(route_error(

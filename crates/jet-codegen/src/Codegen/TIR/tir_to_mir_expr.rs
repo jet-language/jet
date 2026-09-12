@@ -1257,6 +1257,7 @@ pub(super) fn lower_expr(
                 *op,
                 *overflow,
                 &lhs.ty,
+                &rhs.ty,
                 &expr.ty,
                 &carrier,
             )? {

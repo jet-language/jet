@@ -216,6 +216,47 @@ jet_simd_lane_fns!(U8x32, jet_math_U8x32_new, jet_math_U8x32_splat, jet_math_U8x
 jet_simd_lane_fns!(U16x16, jet_math_U16x16_new, jet_math_U16x16_splat, jet_math_U16x16_from_array, jet_math_U16x16_to_array, jet_math_U16x16_lane, jet_math_U16x16_sum, jet_math_U16x16_product, jet_math_U16x16_min, jet_math_U16x16_max, jet_math_U16x16_reduce_add, jet_math_U16x16_reduce_mul, jet_math_U16x16_reduce_min, jet_math_U16x16_reduce_max, jet_math_U16x16_reduce_avg, u16, 16, a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p);
 jet_simd_lane_fns!(U32x8, jet_math_U32x8_new, jet_math_U32x8_splat, jet_math_U32x8_from_array, jet_math_U32x8_to_array, jet_math_U32x8_lane, jet_math_U32x8_sum, jet_math_U32x8_product, jet_math_U32x8_min, jet_math_U32x8_max, jet_math_U32x8_reduce_add, jet_math_U32x8_reduce_mul, jet_math_U32x8_reduce_min, jet_math_U32x8_reduce_max, jet_math_U32x8_reduce_avg, u32, 8, a,b,c,d,e,f,g,h);
 jet_simd_lane_fns!(U64x4, jet_math_U64x4_new, jet_math_U64x4_splat, jet_math_U64x4_from_array, jet_math_U64x4_to_array, jet_math_U64x4_lane, jet_math_U64x4_sum, jet_math_U64x4_product, jet_math_U64x4_min, jet_math_U64x4_max, jet_math_U64x4_reduce_add, jet_math_U64x4_reduce_mul, jet_math_U64x4_reduce_min, jet_math_U64x4_reduce_max, jet_math_U64x4_reduce_avg, u64, 4, a,b,c,d);
+macro_rules! jet_simd_binary_fns {
+    ($T:ident, $add:ident, $sub:ident, $mul:ident, $div:ident) => {
+        #[inline(always)]
+        fn $add(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
+            *left + right
+        }
+        #[inline(always)]
+        fn $sub(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
+            *left - right
+        }
+        #[inline(always)]
+        fn $mul(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
+            *left * right
+        }
+        #[inline(always)]
+        fn $div(left: &jet_std::$T, right: jet_std::$T) -> jet_std::$T {
+            *left / right
+        }
+    };
+}
+
+jet_simd_binary_fns!(F32x4, jet_math_F32x4_add, jet_math_F32x4_sub, jet_math_F32x4_mul, jet_math_F32x4_div);
+jet_simd_binary_fns!(F64x2, jet_math_F64x2_add, jet_math_F64x2_sub, jet_math_F64x2_mul, jet_math_F64x2_div);
+jet_simd_binary_fns!(F32x8, jet_math_F32x8_add, jet_math_F32x8_sub, jet_math_F32x8_mul, jet_math_F32x8_div);
+jet_simd_binary_fns!(F64x4, jet_math_F64x4_add, jet_math_F64x4_sub, jet_math_F64x4_mul, jet_math_F64x4_div);
+jet_simd_binary_fns!(I8x16, jet_math_I8x16_add, jet_math_I8x16_sub, jet_math_I8x16_mul, jet_math_I8x16_div);
+jet_simd_binary_fns!(I16x8, jet_math_I16x8_add, jet_math_I16x8_sub, jet_math_I16x8_mul, jet_math_I16x8_div);
+jet_simd_binary_fns!(I32x4, jet_math_I32x4_add, jet_math_I32x4_sub, jet_math_I32x4_mul, jet_math_I32x4_div);
+jet_simd_binary_fns!(I64x2, jet_math_I64x2_add, jet_math_I64x2_sub, jet_math_I64x2_mul, jet_math_I64x2_div);
+jet_simd_binary_fns!(U8x16, jet_math_U8x16_add, jet_math_U8x16_sub, jet_math_U8x16_mul, jet_math_U8x16_div);
+jet_simd_binary_fns!(U16x8, jet_math_U16x8_add, jet_math_U16x8_sub, jet_math_U16x8_mul, jet_math_U16x8_div);
+jet_simd_binary_fns!(U32x4, jet_math_U32x4_add, jet_math_U32x4_sub, jet_math_U32x4_mul, jet_math_U32x4_div);
+jet_simd_binary_fns!(U64x2, jet_math_U64x2_add, jet_math_U64x2_sub, jet_math_U64x2_mul, jet_math_U64x2_div);
+jet_simd_binary_fns!(I8x32, jet_math_I8x32_add, jet_math_I8x32_sub, jet_math_I8x32_mul, jet_math_I8x32_div);
+jet_simd_binary_fns!(I16x16, jet_math_I16x16_add, jet_math_I16x16_sub, jet_math_I16x16_mul, jet_math_I16x16_div);
+jet_simd_binary_fns!(I32x8, jet_math_I32x8_add, jet_math_I32x8_sub, jet_math_I32x8_mul, jet_math_I32x8_div);
+jet_simd_binary_fns!(I64x4, jet_math_I64x4_add, jet_math_I64x4_sub, jet_math_I64x4_mul, jet_math_I64x4_div);
+jet_simd_binary_fns!(U8x32, jet_math_U8x32_add, jet_math_U8x32_sub, jet_math_U8x32_mul, jet_math_U8x32_div);
+jet_simd_binary_fns!(U16x16, jet_math_U16x16_add, jet_math_U16x16_sub, jet_math_U16x16_mul, jet_math_U16x16_div);
+jet_simd_binary_fns!(U32x8, jet_math_U32x8_add, jet_math_U32x8_sub, jet_math_U32x8_mul, jet_math_U32x8_div);
+jet_simd_binary_fns!(U64x4, jet_math_U64x4_add, jet_math_U64x4_sub, jet_math_U64x4_mul, jet_math_U64x4_div);
 
 // Vectors.
 fn jet_math_Vec2_new(x: f64, y: f64) -> jet_std::Vec2 {
@@ -253,6 +294,45 @@ fn jet_math_Vec3_to_array(v: &jet_std::Vec3) -> [f64; 3] {
 }
 fn jet_math_Vec4_to_array(v: &jet_std::Vec4) -> [f64; 4] {
     v.0
+}
+#[inline(always)]
+fn jet_math_Vec2_add(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
+    *left + right
+}
+#[inline(always)]
+fn jet_math_Vec2_sub(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
+    *left - right
+}
+#[inline(always)]
+fn jet_math_Vec2_mul(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
+    *left * right
+}
+#[inline(always)]
+fn jet_math_Vec3_add(left: &jet_std::Vec3, right: jet_std::Vec3) -> jet_std::Vec3 {
+    *left + right
+}
+#[inline(always)]
+fn jet_math_Vec3_sub(left: &jet_std::Vec3, right: jet_std::Vec3) -> jet_std::Vec3 {
+    *left - right
+}
+#[inline(always)]
+fn jet_math_Vec3_hadamard_mul(
+    left: &jet_std::Vec3,
+    right: jet_std::Vec3,
+) -> jet_std::Vec3 {
+    *left * right
+}
+#[inline(always)]
+fn jet_math_Vec4_add(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
+    *left + right
+}
+#[inline(always)]
+fn jet_math_Vec4_sub(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
+    *left - right
+}
+#[inline(always)]
+fn jet_math_Vec4_mul(left: &jet_std::Vec4, right: jet_std::Vec4) -> jet_std::Vec4 {
+    *left * right
 }
 #[inline(always)]
 fn jet_math_Vec3_mul(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
@@ -369,6 +449,30 @@ fn jet_math_Mat3_to_array(m: &jet_std::Mat3) -> [f64; 9] {
 }
 fn jet_math_Mat4_to_array(m: &jet_std::Mat4) -> [f64; 16] {
     m.0
+}
+#[inline(always)]
+fn jet_math_Mat3_add(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
+    *left + right
+}
+#[inline(always)]
+fn jet_math_Mat3_sub(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
+    *left - right
+}
+#[inline(always)]
+fn jet_math_Mat3_mul(left: &jet_std::Mat3, right: jet_std::Mat3) -> jet_std::Mat3 {
+    *left * right
+}
+#[inline(always)]
+fn jet_math_Mat4_add(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
+    *left + right
+}
+#[inline(always)]
+fn jet_math_Mat4_sub(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
+    *left - right
+}
+#[inline(always)]
+fn jet_math_Mat4_mul(left: &jet_std::Mat4, right: jet_std::Mat4) -> jet_std::Mat4 {
+    *left * right
 }
 fn jet_math_Mat3_matmul(m: &jet_std::Mat3, o: jet_std::Mat3) -> jet_std::Mat3 {
     *m * o
