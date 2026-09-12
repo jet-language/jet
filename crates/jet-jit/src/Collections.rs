@@ -1073,6 +1073,16 @@ pub(crate) enum JetLoopItem {
     FloatBits(i64),
 }
 
+fn loop_item_from_value(rt: &mut crate::JitRuntime, value: jet_rt::JetVal) -> JetLoopItem {
+    match value {
+        jet_rt::JetVal::Int(value) => JetLoopItem::Int(value),
+        jet_rt::JetVal::Float(value) => JetLoopItem::FloatBits(value.to_bits() as i64),
+        jet_rt::JetVal::Bool(value) => JetLoopItem::Int(i64::from(value)),
+        jet_rt::JetVal::Char(value) => JetLoopItem::Int(i64::from(u32::from(value))),
+        value => JetLoopItem::Int(rt.heap.alloc_value(value)),
+    }
+}
+
 fn loop_source_kind(
     rt: &crate::JitRuntime,
     source_handle: i64,
@@ -1121,32 +1131,15 @@ fn loop_items_from_list(
     rt: &mut crate::JitRuntime,
     collection: i64,
 ) -> Result<Vec<JetLoopItem>, String> {
-    if let Some(length) = rt.heap.list_len(collection) {
-        let length = usize::try_from(length).map_err(|_| "invalid list length".to_string())?;
-        if length == 0 {
-            return Ok(Vec::new());
-        }
-        if rt.heap.list_get_float(collection, 0).is_some() {
-            return (0..length)
-                .map(|index| {
-                    let index =
-                        i64::try_from(index).map_err(|_| "list index overflow".to_string())?;
-                    rt.heap
-                        .list_get_float(collection, index)
-                        .map(|value| JetLoopItem::FloatBits(value.to_bits() as i64))
-                        .ok_or_else(|| "list float element is not present".to_string())
-                })
-                .collect();
-        }
-        return (0..length)
-            .map(|index| {
-                let index = i64::try_from(index).map_err(|_| "list index overflow".to_string())?;
-                rt.heap
-                    .list_get_int(collection, index)
-                    .map(JetLoopItem::Int)
-                    .ok_or_else(|| "list integer element is not present".to_string())
-            })
-            .collect();
+    if rt.heap.list_len(collection).is_some() {
+        let values = rt
+            .heap
+            .clone_list_values(collection)
+            .ok_or_else(|| "list integer element is not present".to_string())?;
+        return Ok(values
+            .into_iter()
+            .map(|value| loop_item_from_value(rt, value))
+            .collect());
     }
     if let Some(length) = crate::runtime_host::sequence_len(rt, collection) {
         if length == 0 {
@@ -1171,6 +1164,7 @@ fn loop_items_from_list(
     }
     Err("loop collection is not an iterable carrier".to_string())
 }
+
 
 fn loop_items_from_chars(
     rt: &mut crate::JitRuntime,
@@ -2079,19 +2073,42 @@ fn jet_jit_io_process_args() -> i64 {
     })
 }
 
+fn list_push_int_resident(rt: &mut crate::JitRuntime, list: i64, value: i64) -> bool {
+    if rt.heap.list_push_int(list, value).is_some() {
+        return true;
+    }
+    // Fixed-list literals use the resident UninitList carrier. They have a
+    // fixed length, so the push ABI fills the next uninitialized slot rather
+    // than growing the carrier.
+    let Some(length) = rt.heap.list_len(list) else {
+        return false;
+    };
+    (0..length).any(|index| rt.heap.list_set_int(list, index, value).is_some())
+}
+
+fn list_push_float_resident(rt: &mut crate::JitRuntime, list: i64, value: f64) -> bool {
+    if rt.heap.list_push_float(list, value).is_some() {
+        return true;
+    }
+    let Some(length) = rt.heap.list_len(list) else {
+        return false;
+    };
+    (0..length).any(|index| rt.heap.list_set_float(list, index, value).is_some())
+}
+
 fn jet_jit_list_push(list: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .list_push_int(list, v)
-            .expect("jit list push: bad handle");
+        if !list_push_int_resident(rt, list, v) {
+            jet_foundation::ice!(None, "jit list push: bad handle");
+        }
     });
 }
 
 fn jet_jit_list_push_f64(list: i64, v: f64) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .list_push_float(list, v)
-            .expect("jit list push f64: bad handle");
+        if !list_push_float_resident(rt, list, v) {
+            jet_foundation::ice!(None, "jit list push f64: bad handle");
+        }
     });
 }
 fn jet_jit_list_extend(list: i64, other: i64) {
