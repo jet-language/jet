@@ -6552,7 +6552,7 @@ fn jet_jit_iter_dedup_by(list: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
-    let values = collection_semantics::iter_dedup_by_i64(clone_list_ints(list), |value| {
+    let values = collection_semantics::iter_dedup_by_i64(clone_list_ints(list), move |value| {
         if closure_trapped() {
             return 0;
         }
