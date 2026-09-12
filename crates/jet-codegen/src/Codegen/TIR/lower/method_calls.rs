@@ -138,6 +138,26 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "core.crypto", "unwrap", "jet_crypto_unwrap_typed_impl", false, &[true, false],
     ).with_jit_symbol("jet_jit_crypto_unwrap")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "sign", "jet_crypto_sign_typed_impl", false, &[true, true],
+    ).with_jit_symbol("jet_jit_crypto_sign")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "seal", "jet_crypto_seal_typed_impl", false, &[false, true, true],
+    ).with_jit_symbol("jet_jit_crypto_seal")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.service", "workflow_activity", "jet_services_workflow_activity", true,
+        &[true, false, false, false, false],
+    ).without_direct_aot().without_direct_jit()
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.sync", "counter_new", "jet_sync_counter_new", true, &[false, false],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.web.storage.local", "set", "jet_web_storage_set", true, &[true, true],
+    ).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot().without_direct_jit(),
 ];
 
 pub(crate) fn tir_core_call_records() -> &'static [CoreCallRecord] {
