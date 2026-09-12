@@ -25,6 +25,7 @@ use crate::Codegen::TIR::lower::lower_incdec_place;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::lower_method_call_with_sig;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_panic_stop;
@@ -467,6 +468,71 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
         _ => lower_expr(e, cx, env),
     }
 }
+/// Canonicalize an operator's sema identity against the lowered receiver.
+///
+/// Sema records operator identities from source type names (`Vec2`, `FileErr`,
+/// ...), while a local struct literal carries the module-qualified TIR type.
+/// The MIR lookup already prefixes a bare operator key with the lowered owner,
+/// so leaving the source owner in place would produce `Owner::Owner::Trait::op`.
+/// Keep the trait/RHS suffix (which is part of the checked dispatch contract)
+/// and replace only that source owner with the canonical lowered owner.
+fn canonicalize_operator_method_identity(expr: &mut TExpr) {
+    let TExprKind::MethodCall { recv, method, .. } = &mut expr.kind else {
+        return;
+    };
+    let Some(identity) = method.operator_identity.clone() else {
+        return;
+    };
+    let Some(trait_name) = method.trait_owner.as_deref() else {
+        return;
+    };
+    let owner = match recv.ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+        _ => return,
+    };
+    let marker = format!("::{trait_name}::");
+    let Some(marker_start) = identity.find(&marker) else {
+        return;
+    };
+    let Some(suffix) = identity.get(marker_start + 2..) else {
+        return;
+    };
+    if identity.starts_with(&format!("{owner}::")) {
+        return;
+    }
+    method.operator_identity = Some(format!("{owner}::{suffix}"));
+}
+/// Recover checked return facts that sema normally attaches to special method
+/// calls. These routes deliberately remain total: an absent AST annotation must
+/// not turn a known checked root/handle operation into an unresolved MIR call.
+fn fallback_checked_method_return(
+    receiver: &Expr,
+    method: &str,
+    recv_type: Option<&str>,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Option<Type> {
+    let is_root = matches!(
+        recv_type,
+        Some(
+            name if name == Syntax::INTERNAL_ROOT_CALL_LOCAL
+                || name.starts_with(Syntax::INTERNAL_ROOT_CALL_IMPORT_PREFIX)
+                || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
+        )
+    );
+    if is_root {
+        if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
+            return Some(cx.expand_type_aliases(ret));
+        }
+    }
+    if method == Syntax::MEM_ALLOC_NEW || method == "new" {
+        let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
+        if solve_new_type(receiver, method, cx, &locals).is_some() {
+            return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
+        }
+    }
+    None
+}
 
 /// Lower a fluent method receiver from the innermost call outward.
 ///
@@ -498,6 +564,15 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
+        let resolved_ret = resolved_ret.clone().or_else(|| {
+            fallback_checked_method_return(
+                receiver,
+                method,
+                recv_type.as_deref(),
+                cx,
+                env,
+            )
+        });
         // A field receiver does not persist `recv_type` on the AST method
         // node. Pre-lower precise/string conversion receivers so the
         // receiver's checked TIR type can still select the canonical builtin
@@ -573,7 +648,6 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     err: Box::new(Type::Named("ParseError".to_string())),
                 }),
                 kind: TExprKind::BuiltinMethod {
-                    recv: Box::new(recv),
                     op: TBuiltinOp::ParseFloat,
                     args: Vec::new(),
                 },
@@ -596,6 +670,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 method_sig.as_deref(),
             )
         };
+        canonicalize_operator_method_identity(&mut lowered);
         // D-MAPTYPE1: `shared [K:V]{}` is elaborated to an untyped empty
         // `MapLit` before TIR lowering. Its `Shared<T>` return still carries
         // the exact payload, so restore that context before Rust infers `V`.
