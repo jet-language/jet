@@ -4415,8 +4415,14 @@ impl<'a> LowerCtx<'a> {
 
     fn index_element_type(&self, base: &Type, kind: MirIndexKind) -> Result<Type, LowerError> {
         match kind {
-            MirIndexKind::List | MirIndexKind::FixedListProof => match base {
+            MirIndexKind::List | MirIndexKind::FixedListProof => match base.without_user_tags() {
                 Type::List(inner) | Type::FixedList { elem: inner, .. } => Ok((**inner).clone()),
+                Type::Apply { name, args }
+                    if args.len() == 1
+                        && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
+                {
+                    Ok(args[0].clone())
+                }
                 _ => Err(self.error(self.span(), "checked list index has a non-list base")),
             },
             MirIndexKind::Map => match base {
