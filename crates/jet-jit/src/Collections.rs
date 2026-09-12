@@ -10337,6 +10337,7 @@ host_fns! {
     checked_priority_queue_peek: "jet_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
     priority_queue_pop: "jet_jit_priority_queue_pop" => jet_jit_priority_queue_pop: sig_len;
     priority_queue_to_sorted_list: "jet_jit_priority_queue_to_sorted_list" => jet_jit_priority_queue_to_sorted_list: sig_len;
+    checked_priority_queue_to_sorted_list: "jet_priority_queue_to_sorted_list" => jet_jit_priority_queue_to_sorted_list: sig_len;
     priority_queue_remove_value: "jet_jit_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
     priority_queue_remove_slot: "jet_jit_priority_queue_remove_slot" => jet_jit_priority_queue_remove_slot: sig_priority_queue_slot;
     lru_new: "jet_jit_lru_new" => jet_jit_lru_new: sig_len;

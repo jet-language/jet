@@ -2517,6 +2517,7 @@ impl TBuiltinOp {
             BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
             DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
             PriorityQueuePeek => b("priority_queue_peek", "jet_priority_queue_peek", 1, 1, &[true], None, carrier),
+            PriorityQueueToSortedList => b("priority_queue_to_sorted_list", "jet_priority_queue_to_sorted_list", 1, 1, &[true], None, carrier),
             PriorityQueueFrom => b("priority_queue_from", "jet_priority_queue_from", 1, 1, &[false], None, carrier),
             BagHas => b("bag_has", "jet_bag_has", 2, 2, &[true, true], None, carrier),
             DequePeekBack => b("deque_peek_back", "jet_deque_peek_back", 1, 1, &[true], None, carrier),
@@ -2552,7 +2553,7 @@ impl TBuiltinOp {
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
             | SetShuffle
-            | PriorityQueueToSortedList | LruCapacity | LruKeys
+            | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew
             | BagLen => primitive(),
         };

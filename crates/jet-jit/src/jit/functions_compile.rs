@@ -2507,7 +2507,12 @@ fn lower_view_callback_thunk(
                 let offset = builder
                     .ins()
                     .iconst(types::I64, (index.saturating_mul(8)) as i64);
-                builder.ins().iadd(payload, offset)
+                let address = builder.ins().iadd(payload, offset);
+                if conventions.and_then(|access| access.get(index)) == Some(&MirAccess::Write) {
+                    address
+                } else {
+                    builder.ins().load(types::I64, MemFlags::new(), address, 0)
+                }
             })
             .collect()
     };

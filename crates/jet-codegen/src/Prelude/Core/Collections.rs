@@ -546,6 +546,14 @@ fn jet_priority_queue_peek<T: Ord + Clone>(
 ) -> JetOutcome<T, JetAbsent> {
     jet_outcome_of(queue.peek().cloned())
 }
+#[inline(always)]
+fn jet_priority_queue_to_sorted_list<T: Ord + Clone>(
+    queue: &std::collections::BinaryHeap<T>,
+) -> Vec<T> {
+    let mut values = queue.clone().into_sorted_vec();
+    values.reverse();
+    values
+}
 
 #[inline(always)]
 fn jet_lru_len<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> i64 {
