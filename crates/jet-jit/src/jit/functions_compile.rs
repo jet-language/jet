@@ -4549,6 +4549,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .copied()
                     .ok_or_else(|| "MIR Duration display host returned no value".to_string());
             }
+            if name.name == "Measurement"
+                && args.len() == 1
+                && matches!(args[0].kind(), MirTypeKind::Float)
+            {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.measurement_show, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR Measurement display host returned no value".to_string());
+            }
             if args.is_empty()
                 && matches!(
                     name.name.as_str(),

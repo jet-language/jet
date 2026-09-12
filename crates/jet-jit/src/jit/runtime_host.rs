@@ -14242,6 +14242,7 @@ host_fns! {
     measurement_new_aot: "jet_std::JetMeasurement::new" => jet_jit_measurement_new: sig_measurement_new;
     measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
     measurement_get: "jet_jit_measurement_get" => jet_jit_measurement_get: sig_measurement_get;
+    measurement_show: "jet_jit_measurement_show" => jet_jit_measurement_show: sig_str_unary_i64;
     measurement_value: "jet_std::JetMeasurement::value" => jet_jit_measurement_value: sig_measurement_value;
     measurement_uncertainty: "jet_std::JetMeasurement::uncertainty" => jet_jit_measurement_uncertainty: sig_measurement_value;
     measurement_add: "jet_std::JetMeasurement::add" => jet_jit_measurement_add: sig_measurement_binary;
