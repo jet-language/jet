@@ -14520,6 +14520,7 @@ host_fns! {
     testing_fixture: "jet_jit_testing_fixture" => jet_jit_testing_fixture: sig_str_unary_i64;
     testing_corpus: "jet_jit_testing_corpus" => jet_jit_testing_corpus: sig_str_unary_i64;
     testing_test_suite_new: "jet_jit_testing_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
+    testing_test_suite_new_aot: "jet_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
     testing_test_suite_run: "jet_jit_testing_test_suite_run" => jet_jit_testing_test_suite_run: sig_str_unary_i64;
     testing_compare: "jet_jit_testing_compare" => jet_jit_testing_compare: sig_testing_compare;
     testing_assert_equal: "jet_jit_testing_assert_equal" => jet_jit_testing_assert_equal: sig_testing_assert_equal;
