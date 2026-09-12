@@ -658,6 +658,10 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
     }
     ensure_referenced_traits(&mut traits, &impls, &functions, &types);
     let constants = lower_constant_rows(&program.declarations.constants);
+    for row in &program.declarations.constants {
+        let instance = canonical_type_instance(&types, &row.ty, row.span)?;
+        merge_type_instance(&mut type_instances, instance, row.span)?;
+    }
     let jobs = lower_job_rows(
         &program.artifact_facts.jobs,
         &program.funcs,
