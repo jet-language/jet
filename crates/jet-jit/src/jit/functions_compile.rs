@@ -12693,7 +12693,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     expected,
                 )
                 .map(Some),
-            MirSemanticOp::LayoutLiteral { inner } => Ok(Some(self.value(*inner)?)),
+            MirSemanticOp::LayoutLiteral { inner } => {
+                let value = self.cast(builder, self.value(*inner)?, types::F64)?;
+                let handle = self
+                    .call_host(builder, self.host.layout.from_const, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR layout literal host returned no handle".to_string())?;
+                Ok(Some(handle))
+            }
             MirSemanticOp::StructLiteral {
                 type_id, fields, ..
             } => Ok(Some(self.aggregate(builder, *type_id, fields)?)),
