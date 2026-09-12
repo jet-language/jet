@@ -4077,9 +4077,16 @@ impl<'a> LowerCtx<'a> {
                 )));
             }
         }
-        let owner = ty.nominal_id().ok_or_else(|| {
-            self.error(self.span(), format!("missing MIR field owner for `{key}`"))
-        })?;
+        // Applied values carry an instance identity (`Pair<Int>`, `Sender<String>`, ...),
+        // but field rows belong to the nominal declaration. Resolve the owner through
+        // the checked nominal reference instead of treating the applied instance as a
+        // declaration row.
+        let owner = match ty.kind() {
+            MirTypeKind::Apply { name, .. } => self.type_id_for(&name.name)?,
+            _ => ty.nominal_id().ok_or_else(|| {
+                self.error(self.span(), format!("missing MIR field owner for `{key}`"))
+            })?,
+        };
         self.field_id_for(owner, key)
     }
 
