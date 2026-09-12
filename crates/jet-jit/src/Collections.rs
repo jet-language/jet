@@ -10441,6 +10441,7 @@ host_fns! {
     lru_keys: "jet_jit_lru_keys" => jet_jit_lru_keys: sig_len;
     checked_lru_keys: "jet_lru_keys" => jet_jit_lru_keys: sig_len;
     bit_set_new: "jet_jit_bit_set_new" => jet_jit_bit_set_new: sig_new;
+    checked_bit_set_new: "JetBitSet::new" => jet_jit_bit_set_new: sig_new;
     bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
     bit_set_has: "jet_jit_bit_set_has" => jet_jit_bit_set_has: sig_list_eq;
     checked_bit_set_has: "jet_bit_set_has" => jet_jit_bit_set_has: sig_list_eq;
