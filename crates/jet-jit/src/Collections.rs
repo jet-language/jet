@@ -2073,17 +2073,34 @@ fn jet_jit_io_process_args() -> i64 {
     })
 }
 
+fn priority_queue_index(handle: i64) -> Option<usize> {
+    handle
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+}
+
 fn list_push_int_resident(rt: &mut crate::JitRuntime, list: i64, value: i64) -> bool {
     if rt.heap.list_push_int(list, value).is_some() {
         return true;
     }
+    // PriorityQueue::push currently shares the erased list-push route.  A
+    // queue has no heap carrier, so use its one-based resident handle only
+    // after proving that this is not a list handle.
+    let Some(length) = rt.heap.list_len(list) else {
+        let Some(queue) = priority_queue_index(list).and_then(|index| rt.priority_queues.get_mut(index))
+        else {
+            return false;
+        };
+        queue.push(value);
+        return true;
+    };
     // Fixed-list literals use the resident UninitList carrier. They have a
     // fixed length, so the push ABI fills the next uninitialized slot rather
     // than growing the carrier.
-    let Some(length) = rt.heap.list_len(list) else {
-        return false;
-    };
-    (0..length).any(|index| rt.heap.list_set_int(list, index, value).is_some())
+    (0..length).any(|index| {
+        rt.heap.list_get_int(list, index).is_none()
+            && rt.heap.list_set_int(list, index, value).is_some()
+    })
 }
 
 fn list_push_float_resident(rt: &mut crate::JitRuntime, list: i64, value: f64) -> bool {
@@ -2093,7 +2110,10 @@ fn list_push_float_resident(rt: &mut crate::JitRuntime, list: i64, value: f64) -
     let Some(length) = rt.heap.list_len(list) else {
         return false;
     };
-    (0..length).any(|index| rt.heap.list_set_float(list, index, value).is_some())
+    (0..length).any(|index| {
+        rt.heap.list_get_float(list, index).is_none()
+            && rt.heap.list_set_float(list, index, value).is_some()
+    })
 }
 
 fn jet_jit_list_push(list: i64, v: i64) {
@@ -8794,6 +8814,19 @@ fn jet_jit_sorted_set_is_disjoint(a: i64, b: i64) -> i8 {
     })
 }
 
+fn jet_jit_hyper_log_log_add(handle: i64, value: i64) {
+    let item = crate::Marshal::clone_string(value);
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = rt
+            .sketches
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit sketch: bad handle");
+        if let crate::Sketch::SketchSlot::Hll(sketch) = slot {
+            sketch.add(&item);
+        }
+    });
+}
+
 fn jet_jit_priority_queue_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.priority_queues.push(BinaryHeap::new());
@@ -10556,6 +10589,7 @@ host_fns! {
     sorted_set_is_subset: "jet_jit_sorted_set_is_subset" => jet_jit_sorted_set_is_subset: sig_list_eq;
     sorted_set_is_superset: "jet_jit_sorted_set_is_superset" => jet_jit_sorted_set_is_superset: sig_list_eq;
     sorted_set_is_disjoint: "jet_jit_sorted_set_is_disjoint" => jet_jit_sorted_set_is_disjoint: sig_list_eq;
+    hll_add: "JetHyperLogLog::add" => jet_jit_hyper_log_log_add: sig_push;
     priority_queue_new: "jet_jit_priority_queue_new" => jet_jit_priority_queue_new: sig_new;
     priority_queue_len: "jet_jit_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
     priority_queue_from: "jet_jit_priority_queue_from" => jet_jit_priority_queue_from: sig_len;

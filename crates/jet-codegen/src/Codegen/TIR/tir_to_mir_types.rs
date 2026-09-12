@@ -1911,6 +1911,14 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,
     ),
+    ("CSVRow", &["fields", "line"]),
+    ("TestSuite", &["iteration", "result"]),
+    ("Envelope", &["from", "recipients"]),
+    (
+        "XMLCanonical",
+        &["mode", "comments", "inclusive_prefixes"],
+    ),
+    ("Size", &["width", "height"]),
     ("DirEntry", &["name", "path", "is_dir"]),
     ("WalkEntry", &["path", "relative", "is_dir", "depth"]),
     (
@@ -2115,10 +2123,21 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("TypeParamInfo", &["name", "bounds", "span"]),
     ("SourceSpan", &["start", "end"]),
 ];
+const COMPILER_OWNED_MATH_RECORDS: &[(&str, &[&str])] = &[
+    ("F32x4", &["x", "y", "z", "w"]),
+    ("F64x2", &["x", "y"]),
+    ("Vec2", &["x", "y"]),
+    ("Vec3", &["x", "y", "z"]),
+    ("Vec4", &["x", "y", "z", "w"]),
+];
+
 
 pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
         || COMPILER_OWNED_CORE_RECORDS
+            .iter()
+            .any(|(owned, _)| *owned == name)
+        || COMPILER_OWNED_MATH_RECORDS
             .iter()
             .any(|(owned, _)| *owned == name)
         || name == crate::Syntax::TYPE_ERR
@@ -2134,6 +2153,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 | crate::Syntax::TYPE_RANGE
         )
 }
+
 
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
     COMPILER_OWNED_ENUMS
@@ -2530,6 +2550,17 @@ fn compiler_owned_type_defs(
                 .iter()
                 .map(move |(name, fields)| compiler_owned_core_record(module, *name, *fields)),
         )
+.chain(COMPILER_OWNED_MATH_RECORDS.iter().map(move |(name, fields)| {
+    let scalar = crate::Sema::CheckerCoreLib::math_scalar_ty(name);
+    compiler_owned_record(
+        module,
+        name,
+        fields
+            .iter()
+            .copied()
+            .map(move |field| (field, scalar.clone())),
+    )
+}))
         .chain(seed_parse_error.then(|| compiler_owned_parse_error(module)))
 }
 
