@@ -366,6 +366,37 @@ pub(crate) fn method_call_in_subset(
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
+    // D-RECEIPT1: `receipt.attach(value)` is an ambient compiler-owned handle
+    // operation. The lowerer intentionally does not lower the receiver (it
+    // materializes the current receipt as the destination), so do not require
+    // the ambient identifier to be a local here; only the payload crosses the
+    // TIR boundary.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_RECEIPT_HANDLE)
+        && method == Syntax::METHOD_RECEIPT_ATTACH
+    {
+        return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
+    }
+    // D-SHARED-REVISION1: snapshot capture and compare-and-replace are lowered
+    // by the canonical JetShared methods. `capture` optionally takes one
+    // projection lambda; `try_replace` takes the observed snapshot and the
+    // replacement value.
+    if recv_type.as_deref() == Some("Shared") {
+        if method == "capture" {
+            return match args {
+                [] => true,
+                [arg] => {
+                    matches!(&arg.expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+                }
+                _ => false,
+            };
+        }
+        if method == "try_replace" {
+            return args.len() == 2
+                && args
+                    .iter()
+                    .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        }
+    }
     // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids` and
     // `Shared<T>.read/edit`. Sema sets `recv_type` to `"Pool"`/`"Shared"`
     // explicitly for these (see `CheckerInfer/calls.rs`'s comment on why — the
