@@ -1490,6 +1490,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             receiver,
             method,
             args,
+            recv_type,
             resolved_ret,
             ..
         } => {
@@ -1534,6 +1535,29 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                 if let Some(Some(ret)) =
                     crate::Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
+                    return Some(builtin_dispatch_ty(ret));
+                }
+            }
+            // Path and sketch method calls may carry their checked owner/return
+            // facts without a persisted `resolved_ret` (the owner is still the
+            // canonical dispatch key). Recover the carrier here so an outer
+            // builtin, such as `Path.to_string().ends_with(...)`, selects the
+            // same target as the lowered inner call.
+            if let Some(handle) = recv_type {
+                let receiver_ty = Type::Named(handle.clone());
+                if let Some(Some(ret)) =
+                    crate::Sema::sketch_method_return(&receiver_ty, method, args)
+                {
+                    return Some(builtin_dispatch_ty(ret));
+                }
+                if crate::Codegen::TIR::handle_method_op(handle, method, args.len()).is_some() {
+                    let ret = crate::Codegen::TIR::handle_method_return_ty(
+                        handle,
+                        method,
+                        args.len(),
+                        &receiver_ty,
+                        None,
+                    );
                     return Some(builtin_dispatch_ty(ret));
                 }
             }

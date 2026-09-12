@@ -11280,6 +11280,32 @@ fn lower_method_call_impl(
                 };
             });
         }
+        let distinct_numeric_operator = cx
+            .distinct_types
+            .get(&lookup_ty_name)
+            .is_some_and(|(_, numeric)| *numeric)
+            && !cx.distinct_ranges.contains_key(&lookup_ty_name)
+            && !cx
+                .method_sigs
+                .contains_key(&(lookup_ty_name.clone(), method.to_string()))
+            && operator_method.is_none()
+            && matches!(method, "add" | "sub" | "mul" | "div")
+            && args.len() == 1;
+        if distinct_numeric_operator {
+            let rhs = lower_expr(&args[0].expr, cx, env);
+            let ret_ty = resolved_ret
+                .cloned()
+                .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
+                .unwrap_or_else(unit_type);
+            return lower_builtin_binary_method(
+                method,
+                recv,
+                rhs,
+                ret_ty,
+                method_span,
+                cx,
+            );
+        }
         let mut targs = lower_method_args(args, &sig, env, cx);
         retag_empty_collection_args(&mut targs, &sig);
         let resolved_type_args = if operator_rhs.is_some() {
@@ -11312,17 +11338,6 @@ fn lower_method_call_impl(
                 ),
             );
         }
-        let distinct_numeric_operator = cx
-            .distinct_types
-            .get(&lookup_ty_name)
-            .is_some_and(|(_, numeric)| *numeric)
-            && !cx.distinct_ranges.contains_key(&lookup_ty_name)
-            && !cx
-                .method_sigs
-                .contains_key(&(lookup_ty_name.clone(), method.to_string()))
-            && operator_method.is_none()
-            && matches!(method, "add" | "sub" | "mul" | "div")
-            && args.len() == 1;
         let method_ref = if let Some(rhs) = operator_rhs {
             let trait_name = operator_method
                 .as_ref()
@@ -11364,16 +11379,6 @@ fn lower_method_call_impl(
             )
         }
         .unwrap_or_else(unit_type);
-        if distinct_numeric_operator {
-            return lower_builtin_binary_method(
-                method,
-                recv,
-                targs.remove(0).value,
-                ret_ty,
-                method_span,
-                cx,
-            );
-        }
         TExpr {
             ty: ret_ty,
             kind: TExprKind::MethodCall {
