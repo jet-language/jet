@@ -182,6 +182,12 @@ pub(crate) mod collection_semantics {
     {
         jet_iter_is_sorted_by(jet_iter_from_vec(xs), f)
     }
+    pub(super) fn iter_dedup_by_i64<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+    where
+        F: 'static + FnMut(&i64) -> i64,
+    {
+        jet_iter_dedup_by(jet_iter_from_vec(xs), f).to_list()
+    }
 
     pub(super) fn list_sort_by_compare<T, F>(xs: &mut Vec<T>, f: F)
     where
@@ -6542,6 +6548,28 @@ fn jet_jit_iter_is_sorted_by(list: i64, callback: i64) -> i8 {
     }
     sorted as i8
 }
+fn jet_jit_iter_dedup_by(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = collection_semantics::iter_dedup_by_i64(clone_list_ints(list), |value| {
+        if closure_trapped() {
+            return 0;
+        }
+        let key = invoke_closure_i64(slot, *value);
+        if closure_trapped() {
+            return 0;
+        }
+        key
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_from_ints(&values)
+}
+
+
+
 
 
 fn jet_jit_iter_last_index_of(list: i64, needle: i64) -> i64 {
@@ -9876,4 +9904,72 @@ host_fns! {
     checked_byte_buffer_to_bytes: "JetByteBuffer::to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
     checked_byte_buffer_capacity: "JetByteBuffer::capacity" => jet_jit_byte_buffer_capacity: sig_len;
+    canonical_list_try_new: "jet_list_try_new" => jet_jit_list_try_new: sig_try_new;
+    canonical_list_try_with_capacity: "jet_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
+    canonical_list_try_push: "jet_list_try_push" => jet_jit_list_try_push: sig_try_push;
+    canonical_list_try_reserve: "jet_list_try_reserve" => jet_jit_list_try_reserve: sig_try_reserve;
+    canonical_map_try_insert: "jet_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
+    canonical_list_pop_kernel: "jet_list_pop_kernel" => jet_jit_list_pop: sig_len;
+    canonical_priority_queue_pop_kernel: "jet_priority_queue_pop_kernel" => jet_jit_priority_queue_pop: sig_len;
+    canonical_map_merge: "jet_map_merge" => jet_jit_map_merge: sig_get_opt;
+    canonical_map_from_keys_kernel: "jet_map_from_keys_kernel" => jet_jit_map_from_keys: sig_get_opt;
+    canonical_list_replace: "jet_list_replace" => jet_jit_list_replace: sig_three_ret;
+    canonical_list_equal: "jet_list_equal" => jet_jit_list_equal: sig_list_eq;
+    canonical_byte_buffer_with_capacity: "JetByteBuffer::with_capacity" => jet_jit_byte_buffer_with_capacity: sig_len;
+    canonical_list_insert: "jet_list_insert" => jet_jit_list_insert: sig_map_insert;
+    canonical_map_pop_kernel: "jet_map_pop_kernel" => jet_jit_map_remove: sig_get_opt;
+    canonical_list_remove_value: "jet_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;
+    canonical_list_remove_slot: "jet_list_remove_slot" => jet_jit_list_remove_slot_generic: sig_get_opt;
+    canonical_list_push: "jet_list_push" => jet_jit_list_push: sig_push;
+    canonical_map_insert: "jet_map_insert" => jet_jit_map_insert: sig_map_insert;
+    canonical_map_add_new: "jet_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
+    canonical_list_extend: "jet_list_extend" => jet_jit_list_extend: sig_push;
+    canonical_list_reverse: "jet_list_reverse" => jet_jit_list_reverse: sig_sort;
+    canonical_list_sort: "jet_list_sort" => jet_jit_list_sort: sig_sort;
+    canonical_list_clear: "jet_list_clear" => jet_jit_list_clear: sig_sort;
+    canonical_map_pop_first: "jet_map_pop_first" => jet_jit_map_pop_first: sig_len;
+    canonical_list_count: "jet_list_count" => jet_jit_list_count: sig_get_opt;
+    canonical_list_counts: "jet_list_counts" => jet_jit_list_counts: sig_len;
+    canonical_list_concat: "jet_list_concat" => jet_jit_list_concat: sig_get_opt;
+    canonical_list_sort_desc: "jet_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
+    canonical_map_keys: "jet_map_keys" => jet_jit_map_keys: sig_len;
+    canonical_map_values: "jet_map_values" => jet_jit_map_values: sig_len;
+    canonical_set_union: "jet_set_union" => jet_jit_set_union: sig_get_opt;
+    canonical_set_intersection: "jet_set_intersection" => jet_jit_set_intersection: sig_get_opt;
+    canonical_set_difference: "jet_set_difference" => jet_jit_set_difference: sig_get_opt;
+    canonical_set_symmetric_difference: "jet_set_symmetric_difference" => jet_jit_set_symmetric_difference: sig_get_opt;
+    canonical_set_is_subset: "jet_set_is_subset" => jet_jit_set_is_subset: sig_list_eq;
+    canonical_set_is_superset: "jet_set_is_superset" => jet_jit_set_is_superset: sig_list_eq;
+    canonical_set_is_disjoint: "jet_set_is_disjoint" => jet_jit_set_is_disjoint: sig_list_eq;
+    canonical_set_pop_kernel: "jet_set_pop_kernel" => jet_jit_set_pop: sig_get_opt;
+    canonical_set_insert: "jet_set_insert" => jet_jit_set_insert: sig_list_eq;
+    canonical_set_remove: "jet_set_remove" => jet_jit_set_remove: sig_push;
+    canonical_sorted_set_insert: "jet_sorted_set_insert" => jet_jit_sorted_set_insert: sig_list_eq;
+    canonical_sorted_set_remove: "jet_sorted_set_remove" => jet_jit_sorted_set_remove: sig_push;
+    canonical_bitset_add: "jet_bitset_add" => jet_jit_bit_set_add: sig_list_eq;
+    canonical_bitset_remove: "jet_bitset_remove" => jet_jit_bit_set_remove: sig_push;
+    canonical_bag_add: "jet_bag_add" => jet_jit_bag_add: sig_list_eq;
+    canonical_bag_remove: "jet_bag_remove" => jet_jit_bag_remove: sig_push;
+    canonical_priority_queue_remove_value: "jet_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
+    canonical_lru_put: "jet_lru_put" => jet_jit_lru_put: sig_three_ret;
+    canonical_lru_get: "jet_lru_get" => jet_jit_lru_get: sig_get_opt;
+    canonical_deque_push_front: "jet_deque_push_front" => jet_jit_deque_push_front: sig_push;
+    canonical_deque_push_back: "jet_deque_push_back" => jet_jit_deque_push_back: sig_push;
+    canonical_deque_pop_front_kernel: "jet_deque_pop_front_kernel" => jet_jit_deque_pop_front: sig_len;
+    canonical_deque_pop_back_kernel: "jet_deque_pop_back_kernel" => jet_jit_deque_pop_back: sig_len;
+    canonical_deque_delete: "jet_deque_delete" => jet_jit_deque_delete: sig_push;
+    canonical_deque_reverse: "jet_deque_reverse" => jet_jit_deque_reverse: sig_len;
+    canonical_deque_split: "jet_deque_split" => jet_jit_deque_split: sig_get_opt;
+    canonical_split_write: "jet_split_write" => jet_jit_split_write: sig_disjoint;
+    canonical_sorted_set_union: "jet_sorted_set_union" => jet_jit_sorted_set_union: sig_get_opt;
+    canonical_sorted_set_intersection: "jet_sorted_set_intersection" => jet_jit_sorted_set_intersection: sig_get_opt;
+    canonical_sorted_set_difference: "jet_sorted_set_difference" => jet_jit_sorted_set_difference: sig_get_opt;
+    canonical_sorted_set_symmetric_difference: "jet_sorted_set_symmetric_difference" => jet_jit_sorted_set_symmetric_difference: sig_get_opt;
+    canonical_sorted_set_is_subset: "jet_sorted_set_is_subset" => jet_jit_sorted_set_is_subset: sig_list_eq;
+    canonical_sorted_set_is_superset: "jet_sorted_set_is_superset" => jet_jit_sorted_set_is_superset: sig_list_eq;
+    canonical_sorted_set_is_disjoint: "jet_sorted_set_is_disjoint" => jet_jit_sorted_set_is_disjoint: sig_list_eq;
+    canonical_get_disjoint_write: "jet_get_disjoint_write" => jet_jit_get_disjoint_write: sig_disjoint;
+    canonical_list_min_max: "jet_list_min_max" => jet_jit_list_min_max: sig_len;
+    canonical_iter_filter_map: "jet_iter_filter_map" => checked_iter_filter_map_typed: sig_closure_value;
+    canonical_iter_dedup_by: "jet_iter_dedup_by" => jet_jit_iter_dedup_by: sig_closure_value;
 }
