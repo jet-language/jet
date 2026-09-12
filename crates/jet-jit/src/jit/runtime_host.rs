@@ -9804,7 +9804,7 @@ mod service_adapter {
             variant: variant.to_string(),
             args: Vec::new(),
         };
-        let Some(rendered) = service_prelude::service_show_value_runtime(&value) else {
+        let Some(rendered) = service_prelude::service_display_runtime(&value) else {
             rt.set_trap("the JIT received an unsupported service enum display value");
             return 0;
         };
