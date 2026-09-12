@@ -3399,7 +3399,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirOperation::Never { .. } => Some(self.trap(builder)?),
             MirOperation::Semantic(operation) => {
-                self.semantic(builder, operation, instruction, expected)?
+                self.semantic(builder, operation, instruction, instruction.source_line, expected)?
             }
             MirOperation::LoopRangeInit {
                 call,
