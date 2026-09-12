@@ -218,6 +218,7 @@ host_fns! {
 
     }
     reader_over: "jet_jit_reader_over" => jet_jit_reader_over: sig_unary;
+    reader_over_owned: "jet_reader_over_owned" => jet_jit_reader_over: sig_unary;
     reader_read_u8: "jet_jit_reader_read_u8" => jet_jit_reader_read_u8: sig_unary;
     reader_read_i8: "jet_jit_reader_read_i8" => jet_jit_reader_read_i8: sig_unary;
     reader_read_u16_le: "jet_jit_reader_read_u16_le" => jet_jit_reader_read_u16_le: sig_unary;

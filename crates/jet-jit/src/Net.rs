@@ -698,6 +698,33 @@ fn jet_jit_mime_essence(recv: i64) -> i64 {
     };
     alloc_string(text)
 }
+fn jet_jit_mime_media_type(recv: i64) -> i64 {
+    require_net(recv, |v| match v {
+        NetValue::Mime(m) => Some(m.media_type()),
+        _ => None,
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
+}
+
+fn jet_jit_mime_subtype(recv: i64) -> i64 {
+    require_net(recv, |v| match v {
+        NetValue::Mime(m) => Some(m.subtype()),
+        _ => None,
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
+}
+
+fn jet_jit_mime_params(recv: i64) -> i64 {
+    require_net(recv, |v| match v {
+        NetValue::Mime(m) => Some(m.params()),
+        _ => None,
+    })
+    .map(list_of_string_pairs)
+    .unwrap_or(0)
+}
+
 fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
     let key = clone_string(key);
     let value = clone_string(value);
@@ -1688,6 +1715,30 @@ host_fns! {
     url_add_query: "jet_jit_url_add_query" => jet_jit_url_add_query: sig3;
     mime_essence: "jet_jit_mime_essence" => jet_jit_mime_essence: sig1;
     mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
+    checked_url_to_string: "jet_std::JetURL::to_string_value" => jet_jit_url_to_string: sig1;
+    checked_url_scheme: "jet_std::JetURL::scheme" => jet_jit_url_scheme: sig1;
+    checked_url_host: "jet_std::JetURL::host" => jet_jit_url_host: sig1;
+    checked_url_path: "jet_std::JetURL::path" => jet_jit_url_path: sig1;
+    checked_url_query: "jet_std::JetURL::query" => jet_jit_url_query: sig1;
+    checked_url_query_pairs: "jet_std::JetURL::query_pairs" => jet_jit_url_query_pairs: sig1;
+    checked_url_path_segments: "jet_std::JetURL::path_segments" => jet_jit_url_path_segments: sig1;
+    checked_url_fragment: "jet_std::JetURL::fragment" => jet_jit_url_fragment: sig1;
+    checked_url_username: "jet_std::JetURL::username" => jet_jit_url_username: sig1;
+    checked_url_password: "jet_std::JetURL::password" => jet_jit_url_password: sig1;
+    checked_url_userinfo: "jet_std::JetURL::userinfo" => jet_jit_url_userinfo: sig1;
+    checked_url_authority: "jet_std::JetURL::authority" => jet_jit_url_authority: sig1;
+    checked_url_port: "jet_std::JetURL::port" => jet_jit_url_port: sig1;
+    checked_url_default_port: "jet_std::JetURL::default_port" => jet_jit_url_default_port: sig1;
+    checked_url_normalize: "jet_std::JetURL::normalize" => jet_jit_url_normalize: sig1;
+    checked_url_join: "jet_std::JetURL::join" => jet_jit_url_join: sig2;
+    checked_url_set_query: "jet_std::JetURL::set_query" => jet_jit_url_set_query: sig3;
+    checked_url_add_query: "jet_std::JetURL::add_query" => jet_jit_url_add_query: sig3;
+    checked_mime_media_type: "jet_std::JetMIME::media_type" => jet_jit_mime_media_type: sig1;
+    checked_mime_subtype: "jet_std::JetMIME::subtype" => jet_jit_mime_subtype: sig1;
+    checked_mime_essence: "jet_std::JetMIME::essence" => jet_jit_mime_essence: sig1;
+    checked_mime_param: "jet_std::JetMIME::param" => jet_jit_mime_param: sig2;
+    checked_mime_params: "jet_std::JetMIME::params" => jet_jit_mime_params: sig1;
+    checked_mime_to_string: "jet_std::JetMIME::to_string_value" => jet_jit_url_to_string: sig1;
     browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
     browser_timeout: "jet_jit_browser_timeout" => jet_jit_browser_timeout: sig1;
     browser_connect: "jet_jit_browser_connect" => jet_jit_browser_connect: sig1;

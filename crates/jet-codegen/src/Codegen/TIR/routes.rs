@@ -1246,8 +1246,9 @@ impl THandleOp {
                 "shutdown" => h("http_server.shutdown", "jet_http_server_shutdown", 2, 2, &[true, true], Some(Effect::Net), carrier),
                 _ => primitive(),
             },
-            HTTPServerMethod { .. } | HTTPClientMethod { .. } | EmailMethod { .. }
-            | RegexMethod { .. } | UrlMimeMethod { .. } => primitive(),
+            HTTPServerMethod { .. } | HTTPClientMethod { .. } | EmailMethod { .. } => primitive(),
+            RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
+            UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
             SketchMethod { sketch, method } => {
                 let (arity, borrow_mask): (usize, &[bool]) = match (sketch.as_str(), method.as_str()) {
                     ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => (2, &[true, true]),
@@ -1302,7 +1303,19 @@ impl THandleOp {
             PathWalk => h("path.walk", "jet_path_walk", 1, 1, &[true], Some(Effect::FS), carrier),
             PluginInvoke { .. } => plugin_call_route("plugin.invoke", "jet_plugin_call", carrier),
             ReaderOver { owned } => {
-                if *owned { h("reader.over", "jet_reader_over", 1, 1, &[true], None, carrier) } else { primitive() }
+                if *owned {
+                    h(
+                        "reader.over",
+                        "jet_reader_over_owned",
+                        1,
+                        1,
+                        &[false],
+                        None,
+                        carrier,
+                    )
+                } else {
+                    h("reader.over", "jet_reader_over", 1, 1, &[true], None, carrier)
+                }
             }
             ReaderReadU8 => h("reader.read_u8", "jet_reader_read_u8", 1, 1, &[true], None, carrier),
             ReaderReadI8 => h("reader.read_i8", "jet_reader_read_i8", 1, 1, &[true], None, carrier),
@@ -1433,8 +1446,7 @@ impl THandleOp {
             TaskResume => h("task.resume", "jet_std::JetTask::resume", 1, 1, &[true], None, carrier),
             TaskCancel => h("task.cancel", "jet_std::JetTask::cancel", 1, 1, &[true], None, carrier),
             HTTPReqField(_) | HTTPRespField(_) | HTTPRespHeader
-            | ArgsSpecHelp
-            | WatchMethod { .. } | MeasurementMethod { .. }
+            | ArgsSpecHelp | WatchMethod { .. }
             | ReflectValueTypeName
             | ReflectValuePath | ReflectValueDisplay | ReflectValueFields | ReflectFieldName
             | ReflectFieldValue | DataTreeField | DataTreeAt | DataTreeInt | DataTreeText
@@ -1444,6 +1456,7 @@ impl THandleOp {
             | DBWithPolicy | DBBegin | DBCommit | DBRollback | DBClose | DBValueInt
             | DBValueFloat | DBValueText | DBValueBool | DBValueBlob | DBValueIsNull
             | ModOnTick => primitive(),
+            MeasurementMethod { method } => measurement_route(method, carrier)?,
             WebVirtualWindowFacts => prelude(
                 MirPreludeFamily::HandleMethod,
                 "core.web.virtual",
@@ -1735,6 +1748,141 @@ fn h(
         MirPreludeAbi::Value,
     )
 }
+fn regex_route(
+    kind: &str,
+    method: &str,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
+        ("Regex", "pattern") => ("jet_std::JetRegex::pattern", &[true][..]),
+        ("Regex", "source") => ("jet_std::JetRegex::source", &[true][..]),
+        ("Regex", "flags") => ("jet_std::JetRegex::flags", &[true][..]),
+        ("Regex", "options") => ("jet_std::JetRegex::options", &[true][..]),
+        ("Regex", "names") => ("jet_std::JetRegex::names", &[true][..]),
+        ("Regex", "count") => ("jet_std::JetRegex::count", &[true, true][..]),
+        ("Regex", "is_match") => ("jet_std::JetRegex::is_match", &[true, true][..]),
+        ("Regex", "full_match") => ("jet_std::JetRegex::full_match", &[true, true][..]),
+        ("Regex", "match") => ("jet_std::JetRegex::match_value", &[true, true][..]),
+        ("Regex", "find") => ("jet_std::JetRegex::find", &[true, true][..]),
+        ("Regex", "find_all") => ("jet_std::JetRegex::find_all", &[true, true][..]),
+        ("Regex", "matches") => ("jet_std::JetRegex::matches", &[true, true][..]),
+        ("Regex", "split") => ("jet_std::JetRegex::split", &[true, true][..]),
+        ("Regex", "replace") => ("jet_std::JetRegex::replace", &[true, true, true][..]),
+        ("Regex", "replace_first") => (
+            "jet_std::JetRegex::replace_first",
+            &[true, true, true][..],
+        ),
+        ("Regex", "replace_all_with") => (
+            "jet_std::JetRegex::replace_all_with",
+            &[true, true, false][..],
+        ),
+        ("Regex", "split_limit") => (
+            "jet_std::JetRegex::split_limit",
+            &[true, true, false][..],
+        ),
+        ("Match", "start") => ("jet_std::JetRegexMatch::start", &[true][..]),
+        ("Match", "end") => ("jet_std::JetRegexMatch::end", &[true][..]),
+        ("Match", "named_captures") => {
+            ("jet_std::JetRegexMatch::named_captures", &[true][..])
+        }
+        ("Match", "group") => ("jet_std::JetRegexMatch::group", &[true, false][..]),
+        ("Match", "name") => ("jet_std::JetRegexMatch::name", &[true, true][..]),
+        ("Match", "group_start") => {
+            ("jet_std::JetRegexMatch::group_start", &[true, false][..])
+        }
+        ("Match", "group_end") => ("jet_std::JetRegexMatch::group_end", &[true, false][..]),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked regex method `{kind}.{method}`"
+            )))
+        }
+    };
+    let member = format!("{kind}.{method}");
+    Ok(h(
+        &member,
+        symbol,
+        borrow_mask.len(),
+        borrow_mask.len(),
+        borrow_mask,
+        None,
+        carrier,
+    ))
+}
+
+fn url_mime_route(
+    kind: &str,
+    method: &str,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
+        ("Url", "scheme") => ("jet_std::JetURL::scheme", &[true][..]),
+        ("Url", "host") => ("jet_std::JetURL::host", &[true][..]),
+        ("Url", "port") => ("jet_std::JetURL::port", &[true][..]),
+        ("Url", "path") => ("jet_std::JetURL::path", &[true][..]),
+        ("Url", "path_segments") => ("jet_std::JetURL::path_segments", &[true][..]),
+        ("Url", "query") => ("jet_std::JetURL::query", &[true][..]),
+        ("Url", "query_pairs") => ("jet_std::JetURL::query_pairs", &[true][..]),
+        ("Url", "fragment") => ("jet_std::JetURL::fragment", &[true][..]),
+        ("Url", "normalize") => ("jet_std::JetURL::normalize", &[true][..]),
+        ("Url", "to_string") => ("jet_std::JetURL::to_string_value", &[true][..]),
+        ("Url", "username") => ("jet_std::JetURL::username", &[true][..]),
+        ("Url", "password") => ("jet_std::JetURL::password", &[true][..]),
+        ("Url", "userinfo") => ("jet_std::JetURL::userinfo", &[true][..]),
+        ("Url", "authority") => ("jet_std::JetURL::authority", &[true][..]),
+        ("Url", "default_port") => ("jet_std::JetURL::default_port", &[true][..]),
+        ("Url", "join") => ("jet_std::JetURL::join", &[true, true][..]),
+        ("Url", "set_query") => ("jet_std::JetURL::set_query", &[true, true, true][..]),
+        ("Url", "add_query") => ("jet_std::JetURL::add_query", &[true, true, true][..]),
+        ("Mime", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
+        ("Mime", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
+        ("Mime", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
+        ("Mime", "params") => ("jet_std::JetMIME::params", &[true][..]),
+        ("Mime", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
+        ("Mime", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked URL/MIME method `{kind}.{method}`"
+            )))
+        }
+    };
+    let member = format!("{kind}.{method}");
+    Ok(h(
+        &member,
+        symbol,
+        borrow_mask.len(),
+        borrow_mask.len(),
+        borrow_mask,
+        None,
+        carrier,
+    ))
+}
+
+fn measurement_route(
+    method: &str,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let (symbol, borrow_mask): (&str, &[bool]) = match method {
+        "value" => ("jet_std::JetMeasurement::value", &[true][..]),
+        "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
+        "add" => ("jet_std::JetMeasurement::add", &[true, false][..]),
+        "sub" => ("jet_std::JetMeasurement::sub", &[true, false][..]),
+        "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
+        "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
+        "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
+        _ => return Err(route_error(format!("unknown checked measurement method `{method}`"))),
+    };
+    let member = format!("Measurement.{method}");
+    Ok(h(
+        &member,
+        symbol,
+        borrow_mask.len(),
+        borrow_mask.len(),
+        borrow_mask,
+        None,
+        carrier,
+    ))
+}
+
 
 fn reactive_method_route(
     receiver: &Type,
