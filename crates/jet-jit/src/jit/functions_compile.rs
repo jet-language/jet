@@ -161,19 +161,24 @@ fn is_ordering_type(ty: &MirType) -> bool {
 fn is_comparison_scalar(ty: &MirType) -> bool {
     ty.is_scalar() || is_ordering_type(ty)
 }
-fn is_duration_type(ty: &MirType) -> bool {
+fn is_named_type(ty: &MirType, expected: &str) -> bool {
     match ty.kind() {
         MirTypeKind::Apply { name, args }
-            if args.is_empty() && name.name == "Duration" =>
+            if args.is_empty() && name.name == expected =>
         {
             true
         }
         MirTypeKind::InlineRange { base: inner, .. }
         | MirTypeKind::Tagged { inner, .. }
-        | MirTypeKind::Quantity { base: inner, .. } => is_duration_type(inner),
+        | MirTypeKind::Quantity { base: inner, .. } => is_named_type(inner, expected),
         _ => false,
     }
 }
+
+fn is_duration_type(ty: &MirType) -> bool {
+    is_named_type(ty, "Duration")
+}
+
 
 
 fn comparison_element_kind(ty: &MirType) -> Option<ComparisonElementKind> {
@@ -6749,6 +6754,90 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok(builder.ins().iconst(types::I8, if value { 1 } else { 0 }))
     }
 
+    fn comparison_from_order(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        op: MirBinaryOp,
+        order: Value,
+    ) -> Result<Value, String> {
+        if matches!(op, MirBinaryOp::Compare) {
+            return Ok(self.ordering_value(builder, order));
+        }
+        let cc = match op {
+            MirBinaryOp::Eq => IntCC::Equal,
+            MirBinaryOp::Ne => IntCC::NotEqual,
+            MirBinaryOp::Lt => IntCC::SignedLessThan,
+            MirBinaryOp::Gt => IntCC::SignedGreaterThan,
+            MirBinaryOp::Le => IntCC::SignedLessThanOrEqual,
+            MirBinaryOp::Ge => IntCC::SignedGreaterThanOrEqual,
+            _ => {
+                return Err(format!(
+                    "MIR temporal comparison cannot implement `{}`",
+                    op.spell()
+                ))
+            }
+        };
+        Ok(builder.ins().icmp_imm(cc, order, 0))
+    }
+
+    fn zoned_comparison(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        op: MirBinaryOp,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let method_name = if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne) {
+            "equal"
+        } else {
+            "compare"
+        };
+        let method = builder
+            .ins()
+            .iconst(types::I64, self.runtime.heap.alloc_string(method_name));
+        let zero = builder.ins().iconst(types::I64, 0);
+        let result = self
+            .call_host(
+                builder,
+                self.host.time.civil_method,
+                &[
+                    left, method, right, zero, zero, zero, zero, zero, zero,
+                ],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR ZonedDateTime comparison host returned no value".to_string())?;
+        if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne) {
+            let equal = self.bool_value(builder, result)?;
+            if matches!(op, MirBinaryOp::Ne) {
+                let one = builder.ins().iconst(types::I8, 1);
+                return Ok(builder.ins().bxor(equal, one));
+            }
+            return Ok(equal);
+        }
+
+        let less_tag = prelude_enum_variant_index(
+            jet_foundation::Syntax::TYPE_ORDERING,
+            "Less",
+        )
+        .ok_or_else(|| "MIR Ordering enum has no Less variant".to_string())?;
+        let greater_tag = prelude_enum_variant_index(
+            jet_foundation::Syntax::TYPE_ORDERING,
+            "Greater",
+        )
+        .ok_or_else(|| "MIR Ordering enum has no Greater variant".to_string())?;
+        let less = builder.ins().icmp_imm(IntCC::Equal, result, less_tag);
+        let greater = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, result, greater_tag);
+        let one = builder.ins().iconst(types::I64, 1);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let nonless = builder.ins().select(greater, one, zero);
+        let negative_one = builder.ins().iconst(types::I64, -1);
+        let order = builder.ins().select(less, negative_one, nonless);
+        self.comparison_from_order(builder, op, order)
+    }
+
     fn typed_comparison(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -6766,6 +6855,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         };
         if is_duration_type(left_ty) {
             return self.exact_int_comparison(builder, op, left, right);
+        }
+        if is_named_type(left_ty, "Instant") {
+            let order = self
+                .call_host(builder, self.host.time.instant_compare, &[left, right])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR Instant comparison host returned no value".to_string())?;
+            return self.comparison_from_order(builder, op, order);
+        }
+        if is_named_type(left_ty, "ZonedDateTime") {
+            return self.zoned_comparison(builder, op, left, right);
         }
         if matches!(left_ty.kind(), MirTypeKind::Option(_)) {
             return self.option_comparison(builder, op, left_ty, left, right, location);
