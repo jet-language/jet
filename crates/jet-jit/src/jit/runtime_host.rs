@@ -6707,7 +6707,7 @@ fn jet_jit_list_join(list: i64, sep_id: i64, kind: i64) -> i64 {
     })
 }
 
-fn jet_jit_slice_range_value(id: i64, range: i64, _file: i64, line: i64) -> i64 {
+fn jet_jit_slice_range_value(id: i64, range: i64, _file: i64, line: i32) -> i64 {
     let (start, end, exclusive) = Concurrency::with_runtime_mut(|rt| {
         let start = rt.heap.record_get_int(range, 0).unwrap_or(0);
         let end = rt.heap.record_get_int(range, 1).unwrap_or(0);
@@ -6719,6 +6719,10 @@ fn jet_jit_slice_range_value(id: i64, range: i64, _file: i64, line: i64) -> i64 
         (start, end, exclusive)
     });
     jet_jit_str_slice_value(id, start, end, exclusive, line.max(0) as u32)
+}
+
+fn jet_jit_str_slice_direct(id: i64, start: i64, end: i64, _file: i64, line: i32) -> i64 {
+    jet_jit_str_slice_value(id, start, end, false, line.max(0) as u32)
 }
 
 fn jet_jit_str_after(id: i64, sep_id: i64) -> i64 {
@@ -13603,6 +13607,18 @@ host_fns! {
             sig_contract_fail.params.push(AbiParam::new(types::I64));
         }
         sig_contract_fail.returns.push(AbiParam::new(types::I64));
+        let mut sig_slice_range = Signature::new(cc);
+        sig_slice_range
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_slice_range.params.push(AbiParam::new(types::I32));
+        sig_slice_range.returns.push(AbiParam::new(types::I64));
+        let mut sig_slice_vec = Signature::new(cc);
+        sig_slice_vec
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_slice_vec.params.push(AbiParam::new(types::I32));
+        sig_slice_vec.returns.push(AbiParam::new(types::I64));
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::F64));
         let mut sig_i8 = Signature::new(cc);
@@ -14116,7 +14132,7 @@ host_fns! {
     str_slice_range: "jet_jit_str_slice_range" => jet_jit_str_slice_range: sig_str_slice_range;
     checked_list_join: "jet_list_join" => jet_jit_list_join: sig_i64_i64_i64_i64;
     checked_unicode_trim_view: "jet_unicode_trim_view" => jet_jit_str_trim_view: sig_str_unary_i64;
-    checked_string_slice: "jet_string_slice" => jet_jit_str_slice: sig_str_replace;
+    checked_string_slice: "jet_string_slice" => jet_jit_str_slice_direct: sig_slice_vec;
     checked_string_after: "jet_string_after" => jet_jit_str_after: sig_str_binary_i64;
     checked_string_before: "jet_string_before" => jet_jit_str_before: sig_str_binary_i64;
     parse_float: "jet_std::jet_float_parse" => jet_jit_parse_f64: sig_str_unary_i64;
@@ -14124,8 +14140,9 @@ host_fns! {
     checked_string_before_view: "jet_string_before_view" => jet_jit_str_before_view: sig_str_binary_i64;
     checked_string_from_bytes: "jet_string_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;
     checked_string_from_bytes_lossy: "jet_string_from_bytes_lossy" => jet_jit_str_from_bytes_lossy: sig_str_unary_i64;
-    checked_slice_range: "jet_slice_range" => jet_jit_slice_range_value: sig_contract_fail;
-    checked_slice_vec_range: "jet_slice_vec_range" => jet_jit_slice_range_value: sig_contract_fail;
+    checked_slice_range: "jet_slice_range" => jet_jit_slice_range_value: sig_slice_range;
+    checked_slice_vec_range: "jet_slice_vec_range" => crate::Collections::jet_jit_slice_vec_range: sig_slice_range;
+    checked_slice_vec: "jet_slice_vec" => crate::Collections::jet_jit_slice_vec: sig_slice_vec;
     parse_i64: "jet_std::jet_int_parse" => jet_jit_parse_i64: sig_str_unary_i64;
     parse_f64: "jet_jit_parse_f64" => jet_jit_parse_f64: sig_str_unary_i64;
     numeric_try_i64: "jet_numeric_try_from_fixed" => jet_jit_numeric_try_i64: sig_i64_i64_i64_i64;

@@ -176,6 +176,13 @@ pub(crate) mod collection_semantics {
     {
         jet_list_sort_by_desc(xs, f);
     }
+    pub(super) fn iter_is_sorted_by_i64<F>(xs: Vec<i64>, f: F) -> bool
+    where
+        F: FnMut(&i64) -> i64,
+    {
+        jet_iter_is_sorted_by(jet_iter_from_vec(xs), f)
+    }
+
     pub(super) fn list_sort_by_compare<T, F>(xs: &mut Vec<T>, f: F)
     where
         F: FnMut(&T, &T) -> std::cmp::Ordering,
@@ -4721,6 +4728,104 @@ fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
         out
     })
 }
+fn list_slice_values(
+    rt: &mut crate::runtime_host::JitRuntime,
+    list: i64,
+    start: i64,
+    end_exclusive: i64,
+) -> Option<i64> {
+    if let Some(window) = rt.heap.list_slice(list, start, end_exclusive) {
+        return Some(window);
+    }
+    let values = rt.heap.clone_list_values(list)?;
+    let start = usize::try_from(start).ok()?;
+    let end = usize::try_from(end_exclusive).ok()?;
+    Some(rt.heap.alloc_list_values(values.get(start..end)?.to_vec()))
+}
+
+fn report_list_slice_error(
+    rt: &mut crate::runtime_host::JitRuntime,
+    file: i64,
+    line: i32,
+    message: &str,
+) {
+    let Some(file) = rt.heap.clone_string(file) else {
+        rt.set_host_fault("jit list slice: bad source file handle");
+        return;
+    };
+    rt.set_runtime_stop_at("E3001", &file, line.max(0) as u32, message);
+}
+
+pub(crate) fn jet_jit_slice_vec(
+    list: i64,
+    start: i64,
+    end: i64,
+    file: i64,
+    line: i32,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            rt.set_host_fault("jit list slice: bad list handle");
+            return 0;
+        };
+        if start < 0 || end < 0 || start > end || end >= len {
+            let message = format!("can't slice {len} items from {start} to {end} (inclusive)");
+            report_list_slice_error(rt, file, line, &message);
+            return 0;
+        }
+        let Some(end_exclusive) = end.checked_add(1) else {
+            let message = format!("can't slice {len} items from {start} to {end} (inclusive)");
+            report_list_slice_error(rt, file, line, &message);
+            return 0;
+        };
+        let Some(result) = list_slice_values(rt, list, start, end_exclusive) else {
+            rt.set_host_fault("jit list slice: list carrier cannot be materialized");
+            return 0;
+        };
+        result
+    })
+}
+
+pub(crate) fn jet_jit_slice_vec_range(list: i64, range: i64, file: i64, line: i32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(start) = rt.heap.record_get_int(range, 0) else {
+            rt.set_host_fault("jit list range slice: bad range handle");
+            return 0;
+        };
+        let Some(end) = rt.heap.record_get_int(range, 1) else {
+            rt.set_host_fault("jit list range slice: bad range end");
+            return 0;
+        };
+        let Some(exclusive) = rt
+            .heap
+            .record_get_bool(range, 2)
+            .or_else(|| rt.heap.record_get_int(range, 2).map(|value| value != 0))
+        else {
+            rt.set_host_fault("jit list range slice: bad range mode");
+            return 0;
+        };
+        let Some(len) = rt.heap.list_len(list) else {
+            rt.set_host_fault("jit list range slice: bad list handle");
+            return 0;
+        };
+        let Some((start, end_exclusive)) =
+            range_semantics::jet_range_bounds(start, end, exclusive, len)
+        else {
+            let message = format!(
+                "can't slice {len} items from {start} to {end} ({})",
+                if exclusive { "exclusive" } else { "inclusive" }
+            );
+            report_list_slice_error(rt, file, line, &message);
+            return 0;
+        };
+        let Some(result) = list_slice_values(rt, list, start, end_exclusive) else {
+            rt.set_host_fault("jit list range slice: list carrier cannot be materialized");
+            return 0;
+        };
+        result
+    })
+}
+
 fn jet_jit_list_slice_direct(list: i64, start: i64, end: i64) -> i64 {
     jet_jit_list_slice(list, start, end, 0)
 }
@@ -6418,6 +6523,26 @@ fn jet_jit_iter_shuffle(list: i64) -> i64 {
 fn jet_jit_iter_is_sorted(list: i64) -> i8 {
     collection_semantics::iter_is_sorted(clone_list_ints(list)) as i8
 }
+fn jet_jit_iter_is_sorted_by(list: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let sorted = collection_semantics::iter_is_sorted_by_i64(clone_list_ints(list), |value| {
+        if closure_trapped() {
+            return 0;
+        }
+        let key = invoke_closure_i64(slot, *value);
+        if closure_trapped() {
+            return 0;
+        }
+        key
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    sorted as i8
+}
+
 
 fn jet_jit_iter_last_index_of(list: i64, needle: i64) -> i64 {
     let value = collection_semantics::iter_last_index_of(clone_list_ints(list), needle).ok();
@@ -9498,6 +9623,8 @@ host_fns! {
     list_ends_with: "jet_jit_list_ends_with" => jet_jit_list_ends_with: sig_list_eq;
     list_equal: "jet_jit_list_equal" => jet_jit_list_equal: sig_list_eq;
     list_binary_search: "jet_jit_list_binary_search" => jet_jit_list_binary_search: sig_get_opt;
+    checked_list_binary_search: "jet_list_binary_search" => jet_jit_list_binary_search: sig_get_opt;
+
     list_union: "jet_jit_list_union" => jet_jit_list_union: sig_get_opt;
     list_intersection: "jet_jit_list_intersection" => jet_jit_list_intersection: sig_get_opt;
     list_difference: "jet_jit_list_difference" => jet_jit_list_difference: sig_get_opt;
@@ -9568,6 +9695,8 @@ host_fns! {
     checked_map_equal: "jet_map_equal" => jet_jit_map_equal: sig_list_eq;
 
     map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
+    checked_map_first: "jet_map_first" => jet_jit_map_first: sig_len;
+
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
     map_top_n: "jet_map_top_n" => jet_jit_map_top_n: sig_get_opt;
     map_top_n_int: "jet_jit_map_top_n_int" => jet_jit_map_top_n_int: sig_get_opt;
@@ -9595,6 +9724,8 @@ host_fns! {
     iter_drop_last: "jet_iter_drop_last" => jet_jit_iter_drop_last: sig_get_opt;
     iter_shuffle: "jet_iter_shuffle" => jet_jit_iter_shuffle: sig_len;
     iter_is_sorted: "jet_iter_is_sorted" => jet_jit_iter_is_sorted: sig_bool;
+    checked_iter_is_sorted_by: "jet_iter_is_sorted_by" => jet_jit_iter_is_sorted_by: sig_closure_predicate;
+
     iter_last_index_of: "jet_iter_last_index_of" => jet_jit_iter_last_index_of: sig_get_opt;
     iter_average_int: "jet_iter_average_int" => jet_jit_iter_average_int: sig_f64;
     iter_average_float: "jet_iter_average_float" => jet_jit_iter_average_float: sig_f64;
@@ -9654,6 +9785,8 @@ host_fns! {
     set_is_superset: "jet_jit_set_is_superset" => jet_jit_set_is_superset: sig_list_eq;
     set_is_disjoint: "jet_jit_set_is_disjoint" => jet_jit_set_is_disjoint: sig_list_eq;
     deque_new: "jet_jit_deque_new" => jet_jit_deque_new: sig_new;
+    checked_deque_new: "std::collections::VecDeque::new" => jet_jit_deque_new: sig_new;
+
     deque_push_front: "jet_jit_deque_push_front" => jet_jit_deque_push_front: sig_push;
     deque_push_back: "jet_jit_deque_push_back" => jet_jit_deque_push_back: sig_push;
     deque_pop_front: "jet_jit_deque_pop_front" => jet_jit_deque_pop_front: sig_len;
@@ -9685,6 +9818,8 @@ host_fns! {
     bag_add: "jet_jit_bag_add" => jet_jit_bag_add: sig_list_eq;
     bag_remove: "jet_jit_bag_remove" => jet_jit_bag_remove: sig_push;
     bag_has: "jet_jit_bag_has" => jet_jit_bag_has: sig_list_eq;
+    checked_bag_has: "jet_bag_has" => jet_jit_bag_has: sig_list_eq;
+
     bag_count: "jet_jit_bag_count" => jet_jit_bag_count: sig_get_opt;
     checked_bag_count: "jet_bag_count" => jet_jit_bag_count: sig_get_opt;
 
@@ -9712,6 +9847,8 @@ host_fns! {
     priority_queue_new: "jet_jit_priority_queue_new" => jet_jit_priority_queue_new: sig_new;
     priority_queue_len: "jet_jit_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
     priority_queue_from: "jet_jit_priority_queue_from" => jet_jit_priority_queue_from: sig_len;
+    checked_priority_queue_from: "jet_priority_queue_from" => jet_jit_priority_queue_from: sig_len;
+
     priority_queue_push: "jet_jit_priority_queue_push" => jet_jit_priority_queue_push: sig_push;
     priority_queue_peek: "jet_jit_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
     priority_queue_pop: "jet_jit_priority_queue_pop" => jet_jit_priority_queue_pop: sig_len;
@@ -9736,6 +9873,7 @@ host_fns! {
     byte_buffer_from: "jet_jit_byte_buffer_from" => jet_jit_byte_buffer_from: sig_len;
     byte_buffer_write: "jet_jit_byte_buffer_write" => jet_jit_byte_buffer_write: sig_map_insert;
     byte_buffer_to_bytes: "jet_jit_byte_buffer_to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
+    checked_byte_buffer_to_bytes: "JetByteBuffer::to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
     byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
     checked_byte_buffer_capacity: "JetByteBuffer::capacity" => jet_jit_byte_buffer_capacity: sig_len;
 }

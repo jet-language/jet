@@ -217,6 +217,10 @@ pub(crate) mod text_rt {
     pub(crate) fn trim_start(s: &str) -> String {
         jet_text_trim_start(&s.to_string())
     }
+    pub(crate) fn trim(s: &str) -> String {
+        jet_unicode_trim(&s.to_string())
+    }
+
     pub(crate) fn trim_end(s: &str) -> String {
         jet_text_trim_end(&s.to_string())
     }
@@ -521,6 +525,10 @@ fn jet_jit_text_is_ascii(s: i64) -> i8 {
 
 fn jet_jit_text_trim_start(s: i64) -> i64 {
     alloc_string(text_rt::trim_start(&clone_string(s)))
+}
+
+fn jet_jit_text_trim(s: i64) -> i64 {
+    alloc_string(text_rt::trim(&clone_string(s)))
 }
 
 fn jet_jit_text_trim_end(s: i64) -> i64 {
@@ -953,6 +961,7 @@ host_fns! {
     is_whitespace: "jet_jit_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
     is_ascii: "jet_jit_text_is_ascii" => jet_jit_text_is_ascii: unary_i8;
     trim_start: "jet_jit_text_trim_start" => jet_jit_text_trim_start: unary;
+    trim: "jet_unicode_trim" => jet_jit_text_trim: unary;
     trim_end: "jet_jit_text_trim_end" => jet_jit_text_trim_end: unary;
     pad_start: "jet_jit_text_pad_start" => jet_jit_text_pad_start: ternary;
     pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;

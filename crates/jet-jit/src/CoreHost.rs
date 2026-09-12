@@ -2268,6 +2268,7 @@ host_fns! {
 
     }
     keep_i64: "jet_jit_keep_i64" => jet_jit_keep_i64: sig_keep_i64;
+    checked_keep: "jet_keep" => jet_jit_keep_i64: sig_keep_i64;
     keep_f64: "jet_jit_keep_f64" => jet_jit_keep_f64: sig_keep_f64;
     keep_i8: "jet_jit_keep_i8" => jet_jit_keep_i8: sig_keep_i8;
     keep_i32: "jet_jit_keep_i32" => jet_jit_keep_i32: sig_keep_i32;
