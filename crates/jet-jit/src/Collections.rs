@@ -8134,6 +8134,10 @@ fn jet_jit_sorted_set_from(list: i64, string_kind: i64) -> i64 {
         sorted_set_handle(rt, set, string_kind)
     })
 }
+fn jet_jit_sorted_set_from_int(list: i64) -> i64 {
+    jet_jit_sorted_set_from(list, 0)
+}
+
 
 fn jet_jit_sorted_set_insert(handle: i64, value: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
@@ -9763,6 +9767,7 @@ host_fns! {
     map_max: "jet_map_max_value_kernel" => jet_jit_map_max: sig_len;
     map_max_int: "jet_jit_map_max_int" => jet_jit_map_max_int: sig_len;
     map_intersection: "jet_jit_map_intersection" => jet_jit_map_intersection: sig_get_opt;
+    checked_map_intersection: "jet_map_intersection" => jet_jit_map_intersection: sig_get_opt;
     map_slice: "jet_jit_map_slice" => jet_jit_map_slice: sig_get_opt;
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
@@ -9892,6 +9897,7 @@ host_fns! {
     sorted_set_len: "jet_jit_sorted_set_len" => jet_jit_sorted_set_len: sig_len;
     sorted_set_has: "jet_jit_sorted_set_has" => jet_jit_sorted_set_has: sig_list_eq;
     sorted_set_from: "jet_jit_sorted_set_from" => jet_jit_sorted_set_from: sig_set_from;
+    checked_sorted_set_from: "jet_sorted_set_from" => jet_jit_sorted_set_from_int: sig_len;
     sorted_set_insert: "jet_jit_sorted_set_insert" => jet_jit_sorted_set_insert: sig_list_eq;
     sorted_set_remove: "jet_jit_sorted_set_remove" => jet_jit_sorted_set_remove: sig_push;
     sorted_set_to_list: "jet_jit_sorted_set_to_list" => jet_jit_sorted_set_to_list: sig_len;

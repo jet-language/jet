@@ -2538,6 +2538,10 @@ fn jet_iter_to_set<T: Eq + std::hash::Hash>(it: JetIter<T>) -> std::collections:
 fn jet_set_from<T: Eq + std::hash::Hash>(values: Vec<T>) -> std::collections::HashSet<T> {
     values.into_iter().collect()
 }
+fn jet_sorted_set_from<T: Ord>(values: Vec<T>) -> std::collections::BTreeSet<T> {
+    values.into_iter().collect()
+}
+
 
 
 // #1477 List ledger surface

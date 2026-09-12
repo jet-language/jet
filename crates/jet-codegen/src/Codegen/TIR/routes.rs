@@ -2332,6 +2332,7 @@ impl TBuiltinOp {
             InsertList => b("list_insert", "jet_list_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
+            SortedSetFrom => b("sorted_set_from", "jet_sorted_set_from", 1, 1, &[false], None, carrier),
             RemoveList { mode, .. } => match mode {
                 ListRemoveMode::Value => b("list_remove_value", "jet_list_remove_value", 2, 2, &[true, false], Some(Effect::Mem), carrier),
                 ListRemoveMode::Slot => b("list_remove_slot", "jet_list_remove_slot", 2, 2, &[true, false], Some(Effect::Mem), carrier),
@@ -2501,6 +2502,7 @@ impl TBuiltinOp {
             ),
             MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
             MapFirst => b("map_first", "jet_map_first_key", 1, 1, &[true], None, carrier),
+            MapIntersection => b("map_intersection", "jet_map_intersection", 2, 2, &[true, true], None, carrier),
             BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
             DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
             PriorityQueueFrom => b("priority_queue_from", "jet_priority_queue_from", 1, 1, &[false], None, carrier),
@@ -2520,11 +2522,11 @@ impl TBuiltinOp {
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
-            | MapCopy | MapToList { .. } | MapIntersection | MapSliceKeys
+            | MapCopy | MapToList { .. } | MapSliceKeys
             | MapNew | MapContainsValue
             | Indexes | Zip { .. } | OptionZip { .. }
             | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
-            | SetShuffle | SortedSetFrom | SortedSetToList
+            | SetShuffle | SortedSetToList
             | PriorityQueuePeek | PriorityQueueToSortedList | LruCapacity | LruKeys
             | BitSetCount | BitSetToList | BitSetNew | ByteBufferNew | ByteBufferFrom
             | BagLen => primitive(),
