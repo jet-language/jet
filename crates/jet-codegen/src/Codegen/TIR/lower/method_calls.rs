@@ -56,6 +56,14 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_jit_symbol("jet_jit_zip_decompress"),
     CoreCallRecord::new(
+        "core.archive",
+        "crc32",
+        "jet_foundation::CoreArchive::jet_archive_crc32",
+        false,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_archive_crc32"),
+    CoreCallRecord::new(
         "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true, true],
     ).with_jit_symbol("jet_jit_json_canonical_checked"),
     CoreCallRecord::new(
@@ -123,6 +131,12 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     ).with_jit_symbol("jet_jit_crypto_x25519_public_from_bytes")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.crypto", "__x25519_public", "jet_crypto_x25519_public_typed_impl", false,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_crypto_x25519_public")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.crypto", "x25519_shared", "jet_crypto_x25519_shared_impl", false, &[true, true],
     ).with_jit_symbol("jet_jit_crypto_x25519_shared")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -143,6 +157,11 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     ).with_jit_symbol("jet_jit_crypto_sign")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.crypto", "verify", "jet_crypto_verify_typed_impl", false, &[true, true, true],
+    )
+    .with_jit_symbol("jet_jit_crypto_verify")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.crypto", "seal", "jet_crypto_seal_typed_impl", false, &[false, true, true],
     ).with_jit_symbol("jet_jit_crypto_seal")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -152,8 +171,19 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     ).without_direct_aot().without_direct_jit()
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.service", "workflow_activity_retry", "jet_services_workflow_activity_retry", true,
+        &[true, false, false, false],
+    )
+    .without_direct_aot()
+    .without_direct_jit()
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.sync", "counter_new", "jet_sync_counter_new", true, &[false, false],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.sync", "counter_inc", "jet_sync_counter_inc", true, &[true, false, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.web.storage.local", "set", "jet_web_storage_set", true, &[true, true],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
