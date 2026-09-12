@@ -540,6 +540,12 @@ fn jet_priority_queue_len<T>(queue: &std::collections::BinaryHeap<T>) -> i64 {
 fn jet_priority_queue_is_empty<T>(queue: &std::collections::BinaryHeap<T>) -> bool {
     queue.is_empty()
 }
+#[inline(always)]
+fn jet_priority_queue_peek<T: Ord + Clone>(
+    queue: &std::collections::BinaryHeap<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(queue.peek().cloned())
+}
 
 #[inline(always)]
 fn jet_lru_len<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> i64 {

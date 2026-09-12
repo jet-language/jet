@@ -2670,6 +2670,14 @@ fn invoke_closure_i64_pair(slot: JitCallableSlot, left: i64, right: i64) -> i64 
         jet_foundation::ice!(None, "collection callback lacks a binary raw thunk")
     })
 }
+fn invoke_closure_bool_pair(slot: JitCallableSlot, left: i64, right: i64) -> bool {
+    invoke_closure_i64_pair(slot, left, right) != 0
+}
+fn invoke_closure_i64_many(slot: JitCallableSlot, values: &[i64]) -> i64 {
+    crate::runtime_host::invoke_universal_many(slot, values).unwrap_or_else(|| {
+        jet_foundation::ice!(None, "collection callback lacks a many-argument raw thunk")
+    })
+}
 
 fn invoke_closure_i8(slot: JitCallableSlot, value: i64) -> i8 {
     invoke_closure_i64(slot, value) as i8
@@ -5083,6 +5091,100 @@ fn jet_jit_map_contains_value(map: i64, needle: i64) -> i8 {
         clone_map_pairs(map),
         needle,
     ))
+}
+fn map_callback_key(key: &str) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(key.to_owned()))
+}
+
+fn jet_jit_map_any(map: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    for (key, value) in clone_map_pairs(map) {
+        if closure_trapped() {
+            return 1;
+        }
+        if invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+            return 1;
+        }
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    0
+}
+
+fn jet_jit_map_all(map: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    for (key, value) in clone_map_pairs(map) {
+        if closure_trapped() {
+            return 0;
+        }
+        if !invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+            return 0;
+        }
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    1
+}
+
+fn jet_jit_map_filter(map: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut filtered = Vec::new();
+    for (key, value) in clone_map_pairs(map) {
+        if closure_trapped() {
+            return 0;
+        }
+        if invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+            filtered.push((key, value));
+        }
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    alloc_map_pairs(&filtered)
+}
+
+fn jet_jit_map_map_values(map: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut mapped = Vec::new();
+    for (key, value) in clone_map_pairs(map) {
+        if closure_trapped() {
+            return 0;
+        }
+        let value = invoke_closure_i64_pair(slot, map_callback_key(&key), value);
+        if closure_trapped() {
+            return 0;
+        }
+        mapped.push((key, value));
+    }
+    alloc_map_pairs(&mapped)
+}
+
+fn jet_jit_map_fold(map: i64, init: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut folded = init;
+    for (key, value) in clone_map_pairs(map) {
+        if closure_trapped() {
+            return 0;
+        }
+        let key = map_callback_key(&key);
+        folded = invoke_closure_i64_many(slot, &[folded, key, value]);
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    folded
 }
 
 fn jet_jit_map_pop_first(map: i64) -> i64 {
@@ -10071,6 +10173,16 @@ host_fns! {
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     checked_map_contains_value: "jet_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
+    map_any: "jet_jit_map_any" => jet_jit_map_any: sig_closure_predicate;
+    checked_map_any: "jet_map_any" => jet_jit_map_any: sig_closure_predicate;
+    map_all: "jet_jit_map_all" => jet_jit_map_all: sig_closure_predicate;
+    checked_map_all: "jet_map_all" => jet_jit_map_all: sig_closure_predicate;
+    map_filter: "jet_jit_map_filter" => jet_jit_map_filter: sig_closure_value;
+    checked_map_filter: "jet_map_filter" => jet_jit_map_filter: sig_closure_value;
+    map_map_values: "jet_jit_map_map_values" => jet_jit_map_map_values: sig_closure_value;
+    checked_map_map_values: "jet_map_map_values" => jet_jit_map_map_values: sig_closure_value;
+    map_fold: "jet_jit_map_fold" => jet_jit_map_fold: sig_closure_fold;
+    checked_map_fold: "jet_map_fold" => jet_jit_map_fold: sig_closure_fold;
     map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
     iter_first: "jet_jit_iter_first" => jet_jit_iter_first: sig_len;
     iter_string_split: "jet_iter_string_split" => jet_jit_iter_string_split: sig_get_opt;
@@ -10218,6 +10330,7 @@ host_fns! {
 
     priority_queue_push: "jet_jit_priority_queue_push" => jet_jit_priority_queue_push: sig_push;
     priority_queue_peek: "jet_jit_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
+    checked_priority_queue_peek: "jet_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
     priority_queue_pop: "jet_jit_priority_queue_pop" => jet_jit_priority_queue_pop: sig_len;
     priority_queue_to_sorted_list: "jet_jit_priority_queue_to_sorted_list" => jet_jit_priority_queue_to_sorted_list: sig_len;
     priority_queue_remove_value: "jet_jit_priority_queue_remove_value" => jet_jit_priority_queue_remove_value: sig_get_opt;
