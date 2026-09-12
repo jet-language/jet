@@ -4560,7 +4560,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let equal = self
             .call_host(
                 builder,
-                self.host.coll.list_eq,
+                self.host.coll.list_equal,
                 &[left_value, right_value],
             )?
             .first()
@@ -4843,6 +4843,37 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         ) {
             return self.debug_value_of_type(builder, ty, value);
         }
+        if matches!(
+            ty.kind(),
+            MirTypeKind::Apply { name, args }
+                if args.is_empty() && name.name == "EventResult"
+        ) {
+            let value = self.cast(builder, value, types::I64)?;
+            let buffer = self
+                .call_host(builder, self.host.str_begin, &[])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR EventResult display host returned no buffer".to_string())?;
+            let handled = builder.ins().icmp_imm(IntCC::Equal, value, 0);
+            let handled_block = builder.create_block();
+            let ignored_block = builder.create_block();
+            let merge_block = builder.create_block();
+            builder
+                .ins()
+                .brif(handled, handled_block, &[], ignored_block, &[]);
+
+            builder.switch_to_block(handled_block);
+            self.display_push_literal(builder, buffer, "Handled")?;
+            builder.ins().jump(merge_block, &[]);
+
+            builder.switch_to_block(ignored_block);
+            self.display_push_literal(builder, buffer, "Ignored")?;
+            builder.ins().jump(merge_block, &[]);
+
+            builder.switch_to_block(merge_block);
+            return Ok(buffer);
+        }
+
         if let Some(identity) = ty.nominal_id() {
             if let Some(definition) = self
                 .program
@@ -9908,6 +9939,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 ("core.args", "merge") => Some("jet_jit_args_merge"),
                 ("core.sys", "decode") => Some("jet_jit_env_decode"),
                 ("core.encoding.json", "decode") => Some("jet_jit_json_decode_typed"),
+                ("core.encoding.toml", "decode") => Some("jet_jit_toml_decode_typed"),
+                ("core.encoding.yaml", "decode") => Some("jet_jit_yaml_decode_typed"),
                 ("core.data", "json") => Some("jet_jit_data_json_decode_typed"),
                 ("core.data", "csv") | ("core.encoding.csv", "decode") => {
                     Some("jet_jit_enc_csv_decode")
@@ -9984,6 +10017,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         | ("core.args", "merge")
                         | ("core.sys", "decode")
                         | ("core.encoding.json", "decode")
+                        | ("core.encoding.toml", "decode")
+                        | ("core.encoding.yaml", "decode")
                         | ("core.data", "json")
                         | ("core.encoding.csv", "to_string")
                         | ("core.db", "decode")

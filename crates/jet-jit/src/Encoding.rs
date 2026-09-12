@@ -2474,6 +2474,161 @@ fn jet_jit_xml_parse(text: i64) -> i64 {
     }
 }
 
+fn xml_parse_options_from_heap(
+    handle: i64,
+) -> Result<jet_foundation::XmlPull::ParseOptions, String> {
+    Concurrency::with_runtime_mut(|rt| {
+        Some((|| {
+            let entities = rt
+                .heap
+                .record_get_record(handle, 0)
+                .ok_or_else(|| "invalid XML parse options entity policy".to_string())?;
+            let limits = rt
+                .heap
+                .record_get_record(handle, 1)
+                .ok_or_else(|| "invalid XML parse options limits".to_string())?;
+            let entity_kind = rt
+                .heap
+                .record_get_int(entities, 0)
+                .ok_or_else(|| "invalid XML entity policy discriminant".to_string())?;
+            let entities = match entity_kind {
+                0 => jet_foundation::XmlPull::EntityPolicy::Preserve,
+                1 => jet_foundation::XmlPull::EntityPolicy::Reject,
+                2 => {
+                    let map = rt
+                        .heap
+                        .record_get_int(entities, 1)
+                        .ok_or_else(|| "invalid XML entity resolution map".to_string())?;
+                    let length = rt
+                        .heap
+                        .map_len(map)
+                        .ok_or_else(|| "invalid XML entity resolution map".to_string())?;
+                    let mut resolved = std::collections::BTreeMap::new();
+                    for index in 0..length {
+                        let key = rt
+                            .heap
+                            .map_key_at(map, index)
+                            .and_then(|key| rt.heap.clone_string(key))
+                            .ok_or_else(|| {
+                                "XML entity resolution map keys must be strings".to_string()
+                            })?;
+                        let value = rt
+                            .heap
+                            .map_value_at(map, index)
+                            .and_then(|value| rt.heap.clone_string(value))
+                            .ok_or_else(|| {
+                                "XML entity resolution map values must be strings".to_string()
+                            })?;
+                        resolved.insert(key, value);
+                    }
+                    jet_foundation::XmlPull::EntityPolicy::Resolve(resolved)
+                }
+                _ => {
+                    return Err(format!(
+                        "invalid XML entity policy discriminant {entity_kind}"
+                    ))
+                }
+            };
+            let number = |index: i64, name: &str| {
+                rt.heap
+                    .record_get_int(limits, index)
+                    .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                    .ok_or_else(|| format!("invalid XML parse option `{name}`"))
+            };
+            Ok(jet_foundation::XmlPull::ParseOptions {
+                entities,
+                limits: jet_foundation::XmlPull::Limits {
+                    max_depth: number(0, "max_depth")?,
+                    max_nodes: number(1, "max_nodes")?,
+                    max_attributes_per_element: number(2, "max_attributes_per_element")?,
+                    max_name_bytes: number(3, "max_name_bytes")?,
+                    max_text_bytes: number(4, "max_text_bytes")?,
+                    max_entity_declarations: number(5, "max_entity_declarations")?,
+                    max_entity_depth: number(6, "max_entity_depth")?,
+                    max_entity_replacement_bytes: number(7, "max_entity_replacement_bytes")?,
+                },
+            })
+        })())
+    })
+    .unwrap_or_else(|| Err("XML parse options require an active runtime".to_string()))
+}
+
+fn jet_jit_xml_parse_with(text: i64, options: i64) -> i64 {
+    let options = match xml_parse_options_from_heap(options) {
+        Ok(options) => options,
+        Err(reason) => return result_err_encoding(xml_shape_error(reason)),
+    };
+    match jet_foundation::XmlKernel::parse_document_with(&clone_string(text), &options) {
+        Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
+        Err(error) => result_err_encoding(xml_error_encoding(error)),
+    }
+}
+
+fn jet_jit_xml_parse_options_safe() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let entities = rt.heap.alloc_record(1);
+        let _ = rt.heap.record_set_int(entities, 0, 0);
+        let limits = rt.heap.alloc_record(8);
+        for (index, value) in [
+            256,
+            1_000_000,
+            1024,
+            4096,
+            16_777_216,
+            1024,
+            32,
+            8_388_608,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let _ = rt.heap.record_set_int(limits, index as i64, value);
+        }
+        let options = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_record(options, 0, entities);
+        let _ = rt.heap.record_set_record(options, 1, limits);
+        options
+    })
+}
+
+fn jet_jit_toml_decode_typed(text: i64, type_key: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return result_err_fields(json_rt::FieldError::one(
+            "typed TOML received an invalid type key",
+        ));
+    };
+    match json_rt::toml::parse_to_tree(&text) {
+        Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+            Ok(value) => result_ok(value as u64),
+            Err(errors) => result_err_fields(errors),
+        },
+        Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+            "invalid TOML (line {}): {}",
+            error.line, error.message
+        ))),
+    }
+}
+
+fn jet_jit_yaml_decode_typed(text: i64, type_key: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return result_err_fields(json_rt::FieldError::one(
+            "typed YAML received an invalid type key",
+        ));
+    };
+    match yaml_rt::yaml::parse_to_tree(&text) {
+        Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
+            Ok(value) => result_ok(value as u64),
+            Err(errors) => result_err_fields(errors),
+        },
+        Err(error) => result_err_fields(json_rt::FieldError::one(format!(
+            "invalid YAML (line {}): {}",
+            error.line, error.message
+        ))),
+    }
+}
+
 fn jet_jit_xml_to_string(tree: i64) -> i64 {
     let rendered = read_datatree(tree)
         .and_then(|t| datatree_to_xml_value(&t).ok())
@@ -3770,10 +3925,15 @@ host_fns! {
     data_entries_to_map: "jet_data_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     toml_parse: "jet_jit_toml_parse" => jet_jit_toml_parse: sig_unary;
     toml_decode: "jet_enc_toml_decode" => jet_jit_toml_parse: sig_unary;
+    toml_decode_typed: "jet_jit_toml_decode_typed" => jet_jit_toml_decode_typed: sig_binary;
     toml_to_string: "jet_jit_toml_to_string" => jet_jit_toml_to_string: sig_unary;
     yaml_parse: "jet_jit_yaml_parse" => jet_jit_yaml_parse: sig_unary;
     yaml_decode: "jet_enc_yaml_decode" => jet_jit_yaml_parse: sig_unary;
+    yaml_decode_typed: "jet_jit_yaml_decode_typed" => jet_jit_yaml_decode_typed: sig_binary;
     yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
+    xml_parse_with: "jet_jit_xml_parse_with" => jet_jit_xml_parse_with: sig_binary;
+    xml_parse_with_canonical: "jet_std_xml_parse_with" => jet_jit_xml_parse_with: sig_binary;
+    xml_parse_options_safe: "jet_std::XMLParseOptions::safe" => jet_jit_xml_parse_options_safe: sig_nullary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
     env_decode: "jet_jit_env_decode" => jet_jit_env_decode: sig_quaternary;
