@@ -996,7 +996,20 @@ fn lower_if_cond_atom(
             pattern,
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
-            let subj = lower_if_let_subject(subject, cx, env, cached);
+            let subj = if matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. }) {
+                // Result patterns inspect the carrier itself. Normal value
+                // lowering consumes a plain helper's carrier through `Try`;
+                // isolate the worklist cache and lower this subject under the
+                // carrier-preserving context instead.
+                let _cache_scope = cached.then(|| super::expressions::ExprCacheScope::enter());
+                let fallback_subject = env.fallback_subject;
+                env.fallback_subject = true;
+                let subj = lower_if_let_subject(subject, cx, env, false);
+                env.fallback_subject = fallback_subject;
+                subj
+            } else {
+                lower_if_let_subject(subject, cx, env, cached)
+            };
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
             let binding = match pattern {
