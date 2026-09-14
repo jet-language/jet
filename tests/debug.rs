@@ -23,20 +23,59 @@ mod tir_support;
 
 use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
+use std::ffi::OsStr;
+use std::fmt;
 use std::io::{Read, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// An owned fixture keeps its package boundary and scratch tree alive for the
+/// whole test, then removes both deterministically on drop.
+struct Fixture {
+    path: String,
+    _scratch: common::Scratch,
+}
+
+impl Deref for Fixture {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for Fixture {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.path)
+    }
+}
+
+impl AsRef<OsStr> for Fixture {
+    fn as_ref(&self) -> &OsStr {
+        OsStr::new(&self.path)
+    }
+}
+
+impl fmt::Display for Fixture {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.path.fmt(formatter)
+    }
+}
+
 /// Write `src` to an owned `.jet` project and return its path.
-fn fixture(tag: &str, src: &str) -> String {
-    let dir = common::unique_tmp(&format!("jet_debug_{tag}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+fn fixture(tag: &str, src: &str) -> Fixture {
+    let scratch = common::Scratch::new(&format!("jet_debug_{tag}"));
+    let dir = &scratch.path;
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let p = dir.join(format!("jet_debug_{tag}.jet"));
     let mut f = std::fs::File::create(&p).unwrap();
     f.write_all(src.as_bytes()).unwrap();
-    p.to_string_lossy().into_owned()
+    Fixture {
+        path: p.to_string_lossy().into_owned(),
+        _scratch: scratch,
+    }
 }
 
 fn canvas_source_id(path: &Path) -> &str {
@@ -627,18 +666,21 @@ fn have(tool: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn native_fixture(tag: &str, src: &str) -> String {
-    let dir = common::unique_tmp(&format!("jet_debug_native_{tag}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+fn native_fixture(tag: &str, src: &str) -> Fixture {
+    let scratch = common::Scratch::new(&format!("jet_debug_native_{tag}"));
+    let dir = &scratch.path;
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let p = dir.join(format!("jet_debug_native_{tag}.jet"));
     std::fs::write(&p, src).unwrap();
-    p.to_string_lossy().into_owned()
+    Fixture {
+        path: p.to_string_lossy().into_owned(),
+        _scratch: scratch,
+    }
 }
 
-fn native_binary(tag: &str, rust: &str) -> (PathBuf, PathBuf) {
-    let dir = common::unique_tmp(&format!("jet_debug_native_map_{tag}"));
-    std::fs::create_dir_all(&dir).unwrap();
+fn native_binary(tag: &str, rust: &str) -> (common::Scratch, PathBuf) {
+    let scratch = common::Scratch::new(&format!("jet_debug_native_map_{tag}"));
+    let dir = &scratch.path;
     let rust_file = dir.join("prog.rs");
     let binary = dir.join("prog");
     std::fs::write(&rust_file, rust).unwrap();
@@ -659,7 +701,7 @@ fn native_binary(tag: &str, rust: &str) -> (PathBuf, PathBuf) {
         "rustc rejected the {tag} debug fixture:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    (dir, binary)
+    (scratch, binary)
 }
 
 fn dap_frame(body: &str) -> String {
@@ -1674,8 +1716,8 @@ fn native_session_steps_and_shows_locals() {
     }
     let file = native_fixture("native_session", LOOPS);
     let out = jet::compile_for_debug(&file).expect("compiles for debug");
-    let dir = common::unique_tmp("jet_debug_native_build");
-    std::fs::create_dir_all(&dir).unwrap();
+    let scratch = common::Scratch::new("jet_debug_native_build");
+    let dir = &scratch.path;
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog");
     std::fs::write(&rs, &out.rust).unwrap();
@@ -1759,8 +1801,7 @@ fn native_session_steps_and_shows_locals() {
         "raw expert mode must mark generated frames and scopes:\n{}",
         raw
     );
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_file(&file);
+
 }
 
 #[test]

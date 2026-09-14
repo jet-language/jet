@@ -874,6 +874,11 @@ impl Scratch {
         self.path.join(p)
     }
 }
+impl AsRef<Path> for Scratch {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
 
 /// One deterministic prebuilt used by a local native-catalog fixture.
 ///
@@ -1347,8 +1352,8 @@ fn build_and_run_with_cwd(
     src: &str,
     run_in_scratch: bool,
 ) -> (i32, String, String) {
-    let dir = unique_tmp(prefix);
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = Scratch::new(prefix);
+    let dir = &scratch.path;
     // A manifest makes this directory the loader's authority boundary.
     // Without it, a path-only fixture can inherit an ambient ancestor
     // project and scan unrelated files in the shared temp tree.

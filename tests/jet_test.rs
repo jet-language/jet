@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use std::ops::Deref;
 use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::parse_json;
 
@@ -1122,10 +1123,10 @@ fn jet_test_dir_recurses_into_subdirectories() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let dir = common::unique_tmp("jet_test_recurse");
-    let _ = fs::remove_dir_all(&dir);
+    let scratch = common::Scratch::new("jet_test_recurse");
+    let dir = &scratch.path;
     fs::create_dir_all(dir.join("nested/deeper")).unwrap();
-    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     fs::write(dir.join("a.jet"), "#Test(\"top level\") { assert(true) }\n").unwrap();
     fs::write(
         dir.join("nested/b.jet"),
@@ -1139,7 +1140,8 @@ fn jet_test_dir_recurses_into_subdirectories() {
     .unwrap();
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
-        .arg(&dir)
+        .arg(dir)
+        .current_dir(dir)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1156,17 +1158,37 @@ fn jet_test_dir_recurses_into_subdirectories() {
     ] {
         assert!(stdout.contains(needle), "missing `{}`:\n{}", needle, stdout);
     }
-    let _ = fs::remove_dir_all(&dir);
+
 }
 
 /// #2066: a real `jet new` project in a temp directory — the out-of-the-box
 /// shape (`package.jet`, `run.jet` with no tests) each bare-`jet test` case
 /// below adds its own member files to.
-fn bare_package_project(label: &str, jet: &Path) -> PathBuf {
-    let dir = common::unique_tmp(&format!("jet_test_{label}"));
-    let parent = dir.parent().expect("scratch project parent").to_path_buf();
-    let _ = fs::remove_dir_all(&dir);
-    let name = dir.file_name().unwrap().to_string_lossy().to_string();
+struct BarePackage {
+    path: PathBuf,
+    _parent: common::Scratch,
+}
+
+impl Deref for BarePackage {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for BarePackage {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn bare_package_project(label: &str, jet: &Path) -> BarePackage {
+    let parent_scratch = common::Scratch::new(&format!("jet_test_{label}_parent"));
+    let parent = &parent_scratch.path;
+    tir_support::write_test_package(parent, tir_support::TIR_TEST_PACKAGE);
+    let name = format!("jet_test_{label}");
+    let dir = parent.join(&name);
     let created = Command::new(jet)
         .arg("new")
         .arg(&name)
@@ -1180,7 +1202,10 @@ fn bare_package_project(label: &str, jet: &Path) -> PathBuf {
         String::from_utf8_lossy(&created.stderr)
     );
     fs::write(dir.join("run.jet"), "fn run() {}\n").unwrap();
-    dir
+    BarePackage {
+        path: dir,
+        _parent: parent_scratch,
+    }
 }
 
 #[test]
@@ -1655,10 +1680,10 @@ fn jet_test_harness_keeps_helper_functions_on_their_own_error_family() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let dir = common::unique_tmp("jet_test_helper_family");
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+    let scratch = common::Scratch::new("jet_test_helper_family");
+    let dir = &scratch.path;
+    fs::create_dir_all(dir).unwrap();
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let source = dir.join("helpers.jet");
     fs::write(
         &source,
@@ -1710,10 +1735,10 @@ fn same_argv(expected: Recorded, oracle_argv: [String]) Bool -> {
 "#,
     )
     .unwrap();
-
     let out = Command::new(&jet)
         .args(["test", "--show-default", "--serial"])
         .arg(&source)
+        .current_dir(dir)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1738,5 +1763,4 @@ fn same_argv(expected: Recorded, oracle_argv: [String]) Bool -> {
         stdout,
         stderr
     );
-    let _ = fs::remove_dir_all(&dir);
 }

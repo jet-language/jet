@@ -10,9 +10,6 @@ use std::process::Command;
 // tests into per-test allowlists.
 pub(crate) const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
 
-fn unique_tmp(prefix: &str) -> PathBuf {
-    crate::common::unique_tmp(prefix)
-}
 
 pub(crate) fn write_test_package(dir: &Path, source: &str) {
     let temp = std::env::temp_dir();
@@ -43,8 +40,8 @@ pub fn build_and_run(name: &str, src: &str) -> (i32, String) {
 }
 
 pub fn compile(name: &str, src: &str) -> String {
-    let dir = unique_tmp("jet_tir_compile");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_tir_compile");
+    let dir = &scratch.path;
     write_test_package(&dir, TIR_TEST_PACKAGE);
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
@@ -65,8 +62,8 @@ pub fn compile_source(
     name: &str,
     src: &str,
 ) -> Result<jet::CompileOutput, Vec<jet::Diagnostics::Diagnostic>> {
-    let dir = unique_tmp("jet_tir_compile_source");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_tir_compile_source");
+    let dir = &scratch.path;
     write_test_package(&dir, TIR_TEST_PACKAGE);
     let filename = if name.ends_with(".jet") {
         name.to_string()
@@ -101,8 +98,8 @@ fn jit_run_with_package(
     vars: &[(&str, &str)],
     package_source: Option<&str>,
 ) -> (i32, String, String) {
-    let dir = unique_tmp("jet_jit_run");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_jit_run");
+    let dir = &scratch.path;
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
@@ -131,8 +128,8 @@ fn jit_run_with_package(
 }
 
 pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
-    let dir = unique_tmp("jet_jit_run_traced");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_jit_run_traced");
+    let dir = &scratch.path;
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
     write_test_package(&dir, TIR_TEST_PACKAGE);
@@ -168,8 +165,8 @@ pub fn jit_run_with_env_args(
     vars: &[(&str, &str)],
     program_args: &[&str],
 ) -> (i32, String, String) {
-    let dir = unique_tmp("jet_jit_run");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_jit_run");
+    let dir = &scratch.path;
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
@@ -210,8 +207,8 @@ fn interpreter_run_with_package(
     src: &str,
     package_source: Option<&str>,
 ) -> (i32, String, String) {
-    let dir = unique_tmp("jet_interpreter_run");
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new("jet_interpreter_run");
+    let dir = &scratch.path;
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
     write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
@@ -348,16 +345,22 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         "missing executable allocator example: {}",
         source.display()
     );
-    let (scratch, run_source) = if let Some(package_source) = package_source {
-        let scratch = unique_tmp("jet_example_policy");
-        fs::create_dir_all(&scratch).unwrap();
-        let run_source = scratch.join(source.file_name().expect("example source has a filename"));
+    let (_scratch, run_source) = if let Some(package_source) = package_source {
+        let scratch = crate::common::Scratch::new("jet_example_policy");
+        let run_source = scratch.join(
+            source
+                .file_name()
+                .expect("example source has a filename")
+                .to_str()
+                .expect("example source filename is UTF-8"),
+        );
         fs::copy(&source, &run_source).unwrap();
-        write_test_package(&scratch, package_source);
+        write_test_package(&scratch.path, package_source);
         (Some(scratch), run_source)
     } else {
         (None, source.clone())
     };
+    let run_cwd = run_source.parent().unwrap_or(root.as_path());
 
     let modes = [
         ("release", true, false),
@@ -366,8 +369,8 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
     ];
     let mut baseline = None;
     for (mode, release, interpret) in modes {
-        let cache = unique_tmp(&format!("jet_example_{mode}"));
-        fs::create_dir_all(&cache).unwrap();
+        let cache_scratch = crate::common::Scratch::new(&format!("jet_example_{mode}"));
+        let cache = &cache_scratch.path;
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
@@ -378,7 +381,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         }
         command
             .arg(&run_source)
-            .current_dir(&root)
+            .current_dir(run_cwd)
             .env("JET_STORE_DIR", cache.join("cache"))
             .env("JETPACK_ROOT", cache.join("jetpack"))
             .env("NO_COLOR", "1")
@@ -392,7 +395,6 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
             String::from_utf8_lossy(&output.stdout).into_owned(),
             String::from_utf8_lossy(&output.stderr).into_owned(),
         );
-        let _ = fs::remove_dir_all(&cache);
         assert_eq!(result.0, 0, "{mode} run failed for {stem}:\n{}", result.2);
         check_stdout(&result.1);
         if let Some((baseline_mode, baseline_code, baseline_stdout)) = &baseline {
@@ -407,9 +409,6 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         } else {
             baseline = Some((mode, result.0, result.1));
         }
-    }
-    if let Some(scratch) = scratch {
-        let _ = fs::remove_dir_all(scratch);
     }
 }
 
@@ -469,8 +468,9 @@ pub fn assert_example_cli_error_tiers_agree(
     ];
     let mut baseline = None;
     for (mode, profile, interpret) in modes {
-        let cache = unique_tmp(&format!("jet_example_error_{mode}"));
-        fs::create_dir_all(&cache).unwrap();
+        let cache_scratch =
+            crate::common::Scratch::new(&format!("jet_example_error_{mode}"));
+        let cache = &cache_scratch.path;
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if let Some(profile) = profile {
@@ -492,7 +492,6 @@ pub fn assert_example_cli_error_tiers_agree(
             String::from_utf8_lossy(&output.stdout).into_owned(),
             normalize_workspace_root_paths(&stderr, &root),
         );
-        let _ = fs::remove_dir_all(&cache);
         assert_eq!(result.0, expected_exit_code, "{mode} exit code for {stem}");
         assert!(
             result.1.is_empty(),
@@ -529,8 +528,8 @@ fn build_and_run_full_inner(
     src: &str,
     rustc_cfg: Option<&str>,
 ) -> (i32, String, String) {
-    let dir = unique_tmp(prefix);
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(prefix);
+    let dir = &scratch.path;
     write_test_package(&dir, TIR_TEST_PACKAGE);
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
@@ -588,8 +587,8 @@ fn build_and_run_full_inner(
 /// Build and run a multi-file program from a fresh temporary directory.
 #[allow(dead_code)]
 pub fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String) {
-    let dir = unique_tmp(&format!("jet_tir_multi_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_tir_multi_{name}"));
+    let dir = &scratch.path;
     write_test_package(&dir, TIR_TEST_PACKAGE);
     for (rel, src) in files {
         let path = dir.join(rel);
@@ -639,8 +638,8 @@ pub fn build_release_and_run_multi(
     entry: &str,
     files: &[(&str, &str)],
 ) -> (i32, String, String) {
-    let dir = unique_tmp(&format!("jet_release_multi_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_release_multi_{name}"));
+    let dir = &scratch.path;
     write_test_package(&dir, TIR_TEST_PACKAGE);
     for (rel, src) in files {
         let path = dir.join(rel);
@@ -700,8 +699,8 @@ pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) 
 /// forced interpreter. The source is passed by path; a minimal local package
 /// keeps authority discovery inside this fixture.
 pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
-    let dir = unique_tmp(&format!("jet_bare_tiers_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_bare_tiers_{name}"));
+    let dir = &scratch.path;
     write_test_package(&dir, "name: \"tir_bare_tiers\"\nversion: \"0.1.0\"\n");
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
@@ -752,8 +751,8 @@ pub fn assert_release_tier_error_with_application_policy(
     package_source: &str,
     expected_code: &str,
 ) {
-    let dir = unique_tmp(&format!("jet_policy_tiers_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_policy_tiers_{name}"));
+    let dir = &scratch.path;
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     write_test_package(&dir, package_source);
@@ -836,8 +835,8 @@ pub fn assert_release_error_tiers_agree(name: &str, src: &str, expected_message:
 
 /// Run a multi-file program through the default `jet run` lens.
 pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String, String) {
-    let dir = unique_tmp(&format!("jet_jit_multi_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_jit_multi_{name}"));
+    let dir = &scratch.path;
     for (rel, src) in files {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {
@@ -873,8 +872,8 @@ pub fn run_interpret_multi(
     entry: &str,
     files: &[(&str, &str)],
 ) -> (i32, String, String) {
-    let dir = unique_tmp(&format!("jet_interp_multi_{name}"));
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = crate::common::Scratch::new(&format!("jet_interp_multi_{name}"));
+    let dir = &scratch.path;
     for (rel, src) in files {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {

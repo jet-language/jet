@@ -83,9 +83,9 @@ fn fixed_uninit_index_fill_runs_through_default_tier() {
 
 #[test]
 fn fixed_uninit_index_fill_is_resident_jit_safe() {
-    let root = common::unique_tmp("jet_uninit_fixed_jit");
-    fs::create_dir_all(&root).unwrap();
-    write_test_package(&root, TIR_TEST_PACKAGE);
+    let scratch = common::Scratch::new("jet_uninit_fixed_jit");
+    let root = &scratch.path;
+    write_test_package(root, TIR_TEST_PACKAGE);
     let entry = root.join("main.jet");
     fs::write(&entry, SOURCE).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
@@ -152,13 +152,18 @@ fn scalar_uninit_storage_runs_through_aot() {
 #[test]
 fn fixed_uninit_web_artifact_is_accepted_by_rustc() {
     let source = "use core.mem\nfn run() {\n    bytes := [U8#2]{ uninit }\n    bytes[0] = 1\n    bytes[1] = 2\n}\n";
-    let web = jet::compile_web_with_path(source, "tests/fixtures/web_uninit_fixed.jet")
+    let fixture = common::Scratch::new("jet_uninit_fixed_web_fixture");
+    let entry = fixture.join("web_uninit_fixed.jet");
+    write_test_package(&fixture.path, TIR_TEST_PACKAGE);
+    fs::write(&entry, source).unwrap();
+    let shown = entry.to_string_lossy().into_owned();
+    let web = jet::compile_web_with_path(source, &shown)
         .expect("fixed uninit should compile for the web target")
         .web
         .expect("web output");
     if have_rustc() {
-        let root = common::unique_tmp("jet_uninit_fixed_web");
-        fs::create_dir_all(&root).unwrap();
+        let rust_scratch = common::Scratch::new("jet_uninit_fixed_web_rustc");
+        let root = &rust_scratch.path;
         let source = root.join("app_wasm.rs");
         fs::write(&source, &web.wasm_rust).unwrap();
         let output = Command::new("rustc")
