@@ -532,6 +532,12 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 if needs_http_bridge {
                     let _ = writeln!(out, "jet_http_client_bridge!({});", link.crate_name);
                 }
+                let needs_plugin_bridge = program.prelude_calls.iter().any(|call| {
+                    matches!(&call.symbol, MirSymbol::Prelude(symbol) if symbol == "jet_plugin_load")
+                });
+                if needs_plugin_bridge {
+                    let _ = writeln!(out, "jet_plugin_bridge!({});", link.crate_name);
+                }
             }
             out.push('\n');
         }
@@ -1099,6 +1105,25 @@ impl<'a> RustEmitter<'a> {
         states: &BTreeMap<MirBlockId, Vec<MirScopeId>>,
     ) -> BTreeMap<MirScopeId, MirBlockId> {
         let mut exits = BTreeMap::new();
+        // A scope member can have early-return exits in addition to its
+        // canonical join block. Runtime-stop recovery must resume at the
+        // join, not at an early error return whose values are unavailable.
+        for block in &function.blocks {
+            if !matches!(&block.terminator, MirTerminator::Jump { .. }) {
+                continue;
+            }
+            for instruction in &block.instructions {
+                let MirOperation::ScopeExit { scope } = &instruction.operation else {
+                    continue;
+                };
+                if matches!(
+                    function.test_scope_member(*scope),
+                    Some(MirTestScopeMember::ExpectFail { .. })
+                ) {
+                    exits.entry(*scope).or_insert(block.id);
+                }
+            }
+        }
         for block in &function.blocks {
             for instruction in &block.instructions {
                 let MirOperation::ScopeExit { scope } = &instruction.operation else {
@@ -1188,6 +1213,14 @@ impl<'a> RustEmitter<'a> {
         exits
     }
 
+    fn is_sentry_scope(&self, function: &MirFunction, scope_id: MirScopeId) -> bool {
+        function
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .is_some_and(|scope| matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy))
+    }
+
     fn scope_operation_expression(
         &self,
         function: &MirFunction,
@@ -1195,6 +1228,60 @@ impl<'a> RustEmitter<'a> {
         enter: bool,
     ) -> String {
         let root = &self.config.root_prefix;
+        let scope = function.scopes.iter().find(|scope| scope.id == scope_id);
+        if let Some(scope) = scope {
+            match scope.kind {
+                MirScopeKind::Unsafe if enter => {
+                    let gate = function.unsafe_gate.as_ref();
+                    let file = scope
+                        .facts
+                        .get("sentry_file")
+                        .or_else(|| gate.map(|gate| &gate.file))
+                        .map(String::as_str)
+                        .unwrap_or("");
+                    let line = scope
+                        .facts
+                        .get("sentry_line")
+                        .and_then(|line| line.parse::<u32>().ok())
+                        .or_else(|| gate.map(|gate| gate.line))
+                        .unwrap_or(0);
+                    let enabled = scope
+                        .facts
+                        .get("sentry_enabled")
+                        .and_then(|value| value.parse::<bool>().ok())
+                        .or_else(|| gate.map(|gate| gate.enabled))
+                        .unwrap_or(true);
+                    let fenced = scope
+                        .facts
+                        .get("sentry_fenced")
+                        .and_then(|value| value.parse::<bool>().ok())
+                        .or_else(|| gate.map(|gate| gate.fenced))
+                        .unwrap_or(false);
+                    let reason = scope
+                        .name
+                        .as_deref()
+                        .or_else(|| gate.map(|gate| gate.reason.as_str()))
+                        .unwrap_or("");
+                    let constructor = if fenced {
+                        "jet_sentry_fenced_scope"
+                    } else {
+                        "jet_sentry_scope"
+                    };
+                    return format!(
+                        "jet_mem::{constructor}({enabled}, {file:?}, {line}, {reason:?})"
+                    );
+                }
+                MirScopeKind::Policy if enter => {
+                    let enabled = scope
+                        .facts
+                        .get("sentry_enabled")
+                        .and_then(|value| value.parse::<bool>().ok())
+                        .unwrap_or(false);
+                    return format!("jet_mem::jet_sentry_policy_scope({enabled})");
+                }
+                _ => {}
+            }
+        }
         let member = function.test_scope_member(scope_id);
         if enter {
             return match member {
@@ -1955,7 +2042,14 @@ impl<'a> RustEmitter<'a> {
 
     fn prelude_symbol(&self, id: MirPreludeCallId) -> String {
         match &self.prelude_row(id).symbol {
-            MirSymbol::Prelude(symbol) => format!("{}{}", self.config.root_prefix, symbol),
+            MirSymbol::Prelude(symbol) => {
+                if symbol == "jet_plugin_call" {
+                    if let Some(link) = self.config.execution.ffi {
+                        return format!("{}::{}", link.crate_name, symbol);
+                    }
+                }
+                format!("{}{}", self.config.root_prefix, symbol)
+            }
             MirSymbol::Runtime(symbol) => symbol.clone(),
         }
     }
@@ -2404,6 +2498,9 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(root_name) = crate::Codegen::file_handle_rust_type(&name.name) {
             return format!("{}{}", self.config.root_prefix, root_name);
+        }
+        if let Some(root_name) = crate::Codegen::reflect_handle_rust_type(&name.name) {
+            return self.rust_root_prelude_type(root_name, args);
         }
         // ScopeGuard is an inference-only carrier. The checked Core call
         // supplies its closure initializer, so no nominal declaration row is
@@ -2973,6 +3070,27 @@ impl<'a> RustEmitter<'a> {
             .find(|source| source.id == module.source_file)
             .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
         jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start).0
+    }
+    fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
+        let module = self.module_row(function.module_id);
+        let source = self
+            .program
+            .source_files
+            .iter()
+            .find(|source| source.id == module.source_file)
+            .unwrap_or_else(|| panic!("MIR source file {:?} has no row", module.source_file));
+        let (line, _) =
+            jet_foundation::Diagnostics::span_line_col(&source.source, function.span.start);
+        let source_line = source
+            .source
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string();
+        let line = u32::try_from(line)
+            .unwrap_or_else(|_| panic!("MIR function source line {line} exceeds u32"));
+        (source.path.clone(), line, source_line)
     }
     fn instruction_location(
         &self,
@@ -7352,10 +7470,18 @@ impl<'a> RustEmitter<'a> {
         }
         lines
     }
+    fn cli_record_fields(&self, ty: &MirType) -> Option<&[MirField]> {
+        let identity = ty.identity?;
+        match &self.type_def(identity).kind {
+            MirTypeDefKind::Struct { fields, .. } => Some(fields.as_slice()),
+            _ => None,
+        }
+    }
     fn cli_decode_and_invoke(
         &self,
         function: &MirFunction,
         inputs: &[MirCliInput],
+        record_inputs: bool,
         output: MirEntryOutput,
         serves_until_stopped: bool,
         service: bool,
@@ -7376,38 +7502,116 @@ impl<'a> RustEmitter<'a> {
                 panic!("MIR CLI input parameter {} is duplicated", input.parameter);
             }
         }
-        for input in inputs {
-            let parameter = function
-                .params
-                .iter()
-                .find(|parameter| parameter.index == input.parameter)
+        if record_inputs {
+            if function.params.len() != 1 {
+                panic!(
+                    "MIR CLI record entry function {:?} must have one parameter",
+                    function.id
+                );
+            }
+            let fields = self
+                .cli_record_fields(&function.params[0].ty)
                 .unwrap_or_else(|| {
                     panic!(
-                        "MIR CLI input parameter {} is absent from function {:?}",
-                        input.parameter, function.id
+                        "MIR CLI record entry function {:?} parameter is not a record",
+                        function.id
                     )
                 });
-            if !parameter.ty.same_checked_type(&input.ty) {
+            if fields.iter().filter(|field| !field.computed).count() != inputs.len() {
                 panic!(
-                    "MIR CLI input parameter {} type disagrees with function {:?}",
-                    input.parameter, function.id
+                    "MIR CLI record input count disagrees with function {:?}",
+                    function.id
                 );
             }
-        }
-        for parameter in &function.params {
-            if !seen_parameters.contains(&parameter.index) {
-                panic!(
-                    "MIR CLI entry function {:?} has no input row for parameter {}",
-                    function.id, parameter.index
-                );
+            for input in inputs {
+                let field = fields
+                    .iter()
+                    .find(|field| {
+                        !field.computed
+                            && (field.name == input.name
+                                || field.shape_names.args == input.name)
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "MIR CLI record input `{}` is absent from function {:?}",
+                            input.name, function.id
+                        )
+                    });
+                if !field.ty.same_checked_type(&input.ty) {
+                    panic!(
+                        "MIR CLI record input `{}` type disagrees with function {:?}",
+                        input.name, function.id
+                    );
+                }
+            }
+        } else {
+            for input in inputs {
+                let parameter = function
+                    .params
+                    .iter()
+                    .find(|parameter| parameter.index == input.parameter)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "MIR CLI input parameter {} is absent from function {:?}",
+                            input.parameter, function.id
+                        )
+                    });
+                if !parameter.ty.same_checked_type(&input.ty) {
+                    panic!(
+                        "MIR CLI input parameter {} type disagrees with function {:?}",
+                        input.parameter, function.id
+                    );
+                }
+            }
+            for parameter in &function.params {
+                if !seen_parameters.contains(&parameter.index) {
+                    panic!(
+                        "MIR CLI entry function {:?} has no input row for parameter {}",
+                        function.id, parameter.index
+                    );
+                }
             }
         }
-        let args = function
-            .params
-            .iter()
-            .map(|parameter| self.cli_argument(parameter))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let args = if record_inputs {
+            let fields = self
+                .cli_record_fields(&function.params[0].ty)
+                .expect("MIR CLI record fields validated above");
+            let values = fields
+                .iter()
+                .filter(|field| !field.computed)
+                .map(|field| {
+                    let input = inputs
+                        .iter()
+                        .find(|input| {
+                            field.name == input.name || field.shape_names.args == input.name
+                        })
+                        .expect("MIR CLI record input validated above");
+                    format!(
+                        "{}: __jet_cli_{}",
+                        self.field_name(field.id),
+                        input.parameter
+                    )
+                })
+                .collect::<Vec<_>>();
+            let record = format!(
+                "{} {{ {} }}",
+                self.rust_type(&function.params[0].ty),
+                values.join(", ")
+            );
+            match function.params[0].access {
+                MirAccess::Write => format!("&mut {record}"),
+                MirAccess::Read if self.is_scalar(&function.params[0].ty) => record,
+                MirAccess::Read => format!("&{record}"),
+                MirAccess::Move => record,
+            }
+        } else {
+            function
+                .params
+                .iter()
+                .map(|parameter| self.cli_argument(parameter))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         let call = format!("{}({args})", self.function_name(function.id));
         let pad = " ".repeat(indent.len() + 4);
         let decode = self.cli_decode_lines(inputs, indent.len() + 4);
@@ -8218,6 +8422,7 @@ impl<'a> RustEmitter<'a> {
                 generated.push_str(&self.cli_decode_and_invoke(
                     function,
                     &cli.inputs,
+                    cli.record_inputs,
                     entry.output,
                     entry.serves_until_stopped,
                     service,
@@ -8235,6 +8440,7 @@ impl<'a> RustEmitter<'a> {
                     generated.push_str(&self.cli_decode_and_invoke(
                         function,
                         &command.inputs,
+                        false,
                         entry.output,
                         entry.serves_until_stopped,
                         service,
@@ -8248,6 +8454,7 @@ impl<'a> RustEmitter<'a> {
                     generated.push_str(&self.cli_decode_and_invoke(
                         function,
                         &cli.inputs,
+                        cli.record_inputs,
                         entry.output,
                         entry.serves_until_stopped,
                         service,
@@ -8368,6 +8575,7 @@ impl<'a> RustEmitter<'a> {
                 out.push_str(&self.cli_decode_and_invoke(
                     function,
                     &job.inputs,
+                    false,
                     MirEntryOutput::None,
                     false,
                     false,
@@ -8688,6 +8896,12 @@ impl<'a> RustEmitter<'a> {
                     );
                     continue;
                 }
+                let types = function
+                    .params
+                    .iter()
+                    .map(|param| self.rust_type(&param.ty))
+                    .collect::<Vec<_>>();
+                
                 let arg_names = (0..function.params.len())
                     .map(|index| format!("__jet_arg{index}"))
                     .collect::<Vec<_>>();
@@ -8704,19 +8918,86 @@ impl<'a> RustEmitter<'a> {
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                let input = function
+                let input_parts = function
                     .params
                     .iter()
                     .zip(&arg_names)
                     .map(|(param, name)| {
+                        format!("<{} as JetGen>::render(&{name})", self.rust_type(&param.ty))
+                    })
+                    .collect::<Vec<_>>();
+                let input = if input_parts.len() == 1 {
+                    input_parts[0].clone()
+                } else {
+                    let format_string = function
+                        .params
+                        .iter()
+                        .map(|param| format!("{}={{}}", param.name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "format!({format_string:?}, {})",
+                        input_parts.join(", ")
+                    )
+                };
+                let failure_input = if input_parts.len() == 1 {
+                    format!(
+                        "format!({:?}, {})",
+                        format!("{} = {{}}", function.params[0].name),
+                        input_parts[0]
+                    )
+                } else {
+                    input.clone()
+                };
+                let mut minimized_input = failure_input;
+                for (index, arg_name) in arg_names.iter().enumerate().rev() {
+                    minimized_input =
+                        minimized_input.replace(arg_name, &format!("__jet_minimized.{index}"));
+                }
+                let tuple_type = format!("({},)", types.join(", "));
+                let input_tuple = format!(
+                    "({},)",
+                    arg_names
+                        .iter()
+                        .map(|name| format!("{name}.clone()"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let runner_declarations = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        let mutability =
+                            matches!(param.access, MirAccess::Write).then_some("mut ");
                         format!(
-                            "{}={}",
-                            param.name,
-                            format!("<{} as JetGen>::render(&{name})", self.rust_type(&param.ty))
+                            "        let {}__jet_arg{index}: {} = __jet_input.{index}.clone();",
+                            mutability.unwrap_or(""),
+                            types[index]
                         )
                     })
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join("\n");
+                let shrink_blocks = types
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ty)| {
+                        format!(
+                            "                                let __jet_candidates_{index} = <{ty} as JetGen>::shrink(&__jet_minimized.{index});\n\
+                                for __jet_candidate in __jet_candidates_{index} {{\n\
+                                    let mut __jet_try = __jet_minimized.clone();\n\
+                                    __jet_try.{index} = __jet_candidate;\n\
+                                    let (__jet_try_result, _) = __jet_run(&__jet_try);\n\
+                                    if __jet_try_result.is_err() {{\n\
+                                        __jet_minimized = __jet_try;\n\
+                                        __jet_changed = true;\n\
+                                        break;\n\
+                                    }}\n\
+                                }}"
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let call_args = function
                     .params
                     .iter()
@@ -8786,13 +9067,52 @@ impl<'a> RustEmitter<'a> {
                         "{{ let __jet_eligible = jet_test_contract_eligibility(|| {}({predicate_args})); \
                          match __jet_eligible {{ \
                          Ok(false) => Ok(JetPropertyCaseResult::Rejected), \
-                         Ok(true) => jet_test_run_property(|| {{ {body} }}), \
+                         Ok(true) => jet_test_run_property({expected_failure}, || {{ {body} }}), \
                          Err(__jet_pre_error) => Err(__jet_pre_error) }} }}",
                         self.function_name(predicate.id)
                     )
                 } else {
-                    format!("jet_test_run_property(|| {{ {body} }})")
+                    format!("jet_test_run_property({expected_failure}, || {{ {body} }})")
                 };
+                let ordinary_runner = format!(
+                    "    let __jet_run = |__jet_input: &{tuple_type}| -> (Result<JetPropertyCaseResult, String>, String) {{\n\
+{runner_declarations}\n\
+                        let __jet_result = {test_runner};\n\
+                        let __jet_case_stdout = jet_test_take_output();\n\
+                        (__jet_result, __jet_case_stdout)\n\
+                    }};"
+                );
+                if matches!(harness.kind, MirHarnessKind::Fuzz) {
+                    let params = function
+                        .params
+                        .iter()
+                        .zip(&arg_names)
+                        .map(|(param, name)| {
+                            let mutability =
+                                matches!(param.access, MirAccess::Write).then_some("mut ");
+                            format!(
+                                "{}{}: {}",
+                                mutability.unwrap_or(""),
+                                name,
+                                self.rust_type(&param.ty)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let _ = writeln!(
+                        out,
+                        "fn __jet_fuzz_case_{}({params}) -> Result<(), String> {{",
+                        test.id.0
+                    );
+                    let _ = writeln!(out, "    let __jet_result = {test_runner};");
+                    let _ = writeln!(out, "    let _ = jet_test_take_output();");
+                    let _ = writeln!(
+                        out,
+                        "    match __jet_result {{ Ok(JetPropertyCaseResult::Accepted) | Ok(JetPropertyCaseResult::Rejected) => Ok(()), Err(__jet_error) => Err(__jet_error) }}"
+                    );
+                    let _ = writeln!(out, "}}");
+                    continue;
+                }
                 let property_ok = if test.contract_generated {
                     format!("{} && __jet_accepted_cases > 0", !test.expected_failure)
                 } else {
@@ -8811,16 +9131,18 @@ impl<'a> RustEmitter<'a> {
                          let __jet_replay_case = jet_prop_replay_case();\n\
                          let mut __jet_stdout = String::new();\n\
                          let mut __jet_accepted_cases: u64 = 0;\n\
+{ordinary_runner}\n\
                          if let (Some(__jet_replay_seed), Some(__jet_replay_case)) = (__jet_replay_seed, __jet_replay_case) {{\n\
                          if __jet_replay_seed == __jet_seed && __jet_replay_case < jet_prop_cases() {{\n\
-                         let mut __jet_replay_rng = JetRng::new(__jet_replay_seed);\n\
+                         let mut __jet_replay_driver_rng = JetRng::new(__jet_replay_seed);\n\
                          for __jet_replay_index in 0..=__jet_replay_case {{\n\
+                         let __jet_case_seed = __jet_replay_driver_rng.next_u64();\n\
+                         let mut __jet_replay_rng = JetRng::new(__jet_case_seed);\n\
                          {replay_declarations}\n\
                          if __jet_replay_index != __jet_replay_case {{ continue; }}\n\
-                         let __jet_input = {input:?}.to_string();\n\
-                         jet_prop_trace_sample(\"aot\", __jet_replay_index, __jet_replay_seed, &__jet_input);\n\
-                         let __jet_result = {test_runner};\n\
-                         let __jet_case_stdout = jet_test_take_output();\n\
+                         let __jet_input = {input_tuple};\n\
+                         jet_prop_trace_sample(\"jet_test\", __jet_replay_index, __jet_case_seed, &{input});\n\
+                         let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);\n\
                          __jet_stdout.push_str(&__jet_case_stdout);\n\
                          match __jet_result {{\n\
                          Ok(JetPropertyCaseResult::Accepted) => {{\n\
@@ -8829,27 +9151,42 @@ impl<'a> RustEmitter<'a> {
                          Ok(JetPropertyCaseResult::Rejected) => {{}},\n\
                          Err(__jet_error) => {{\n\
                          __jet_accepted_cases += 1;\n\
-                         return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_replay_seed, __jet_replay_case, __jet_error, __jet_input), property_cases: Some(__jet_accepted_cases) }};\n\
+                         let mut __jet_minimized = __jet_input.clone();\n\
+                         for _ in 0..2000 {{\n\
+                         let mut __jet_changed = false;\n\
+{shrink_blocks}\n\
+                         if !__jet_changed {{ break; }}\n\
+                         }}\n\
+                         let __jet_minimized_display = {minimized_input};\n\
+                         return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_replay_seed, __jet_replay_case, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};\n\
                          }}\n\
                          }}\n\
                          }}\n\
                          }}\n\
                          }}\n\
-                         let mut __jet_rng = JetRng::new(__jet_seed);\n\
+                         let mut __jet_driver_rng = JetRng::new(__jet_seed);\n\
                          for __jet_case_index in 0..jet_prop_cases() {{\n\
+                         let __jet_case_seed = __jet_driver_rng.next_u64();\n\
+                         let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
                          if __jet_replay_seed == Some(__jet_seed) && __jet_replay_case == Some(__jet_case_index) {{ continue; }}\n\
                          {declarations}\n\
-                         let __jet_input = {input:?}.to_string();\n\
-                         jet_prop_trace_sample(\"aot\", __jet_case_index, __jet_seed, &__jet_input);\n\
-                         let __jet_result = {test_runner};\n\
-                         let __jet_case_stdout = jet_test_take_output();\n\
+                         let __jet_input = {input_tuple};\n\
+                         jet_prop_trace_sample(\"jet_test\", __jet_case_index, __jet_case_seed, &{input});\n\
+                         let (__jet_result, __jet_case_stdout) = __jet_run(&__jet_input);\n\
                          __jet_stdout.push_str(&__jet_case_stdout);\n\
                          match __jet_result {{\n\
                          Ok(JetPropertyCaseResult::Accepted) => {{ __jet_accepted_cases += 1; }}\n\
                          Ok(JetPropertyCaseResult::Rejected) => {{}},\n\
                          Err(__jet_error) => {{\n\
                          __jet_accepted_cases += 1;\n\
-                         return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_seed, __jet_case_index, __jet_error, __jet_input), property_cases: Some(__jet_accepted_cases) }};\n\
+                         let mut __jet_minimized = __jet_input.clone();\n\
+                         for _ in 0..2000 {{\n\
+                         let mut __jet_changed = false;\n\
+{shrink_blocks}\n\
+                         if !__jet_changed {{ break; }}\n\
+                         }}\n\
+                         let __jet_minimized_display = {minimized_input};\n\
+                         return JetTestOutcome {{ name: {name_literal}.to_string(), ok: {}, expected_failure: {expected_failure}, skipped: false, stdout: __jet_stdout, stderr: format!(\"seed {{}} case {{}}: {{}} (input {{}})\", __jet_seed, __jet_case_index, __jet_error, __jet_minimized_display), property_cases: Some(__jet_accepted_cases) }};\n\
                          }}\n\
                          }}\n\
                          }}\n\
@@ -8872,7 +9209,7 @@ impl<'a> RustEmitter<'a> {
                 };
                 let source = format!(
                     "fn {wrapper}() -> JetTestOutcome {{\n\
-                         let __jet_result = jet_test_run(|| {{ {body} }});\n\
+                         let __jet_result = jet_test_run({expected_failure}, || {{ {body} }});\n\
                          let __jet_stdout = jet_test_take_output();\n\
                          let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};\n\
                          let __jet_skipped = jet_test_take_whole_skip();\n\
@@ -8882,6 +9219,16 @@ impl<'a> RustEmitter<'a> {
                 );
                 out.push_str(&source);
             }
+        }
+        if matches!(harness.kind, MirHarnessKind::Fuzz) {
+            self.emit_fuzz_harness(out, selected_tests.first().copied());
+            return;
+        }
+        if selected_tests.is_empty() && harness.output_checks.is_empty() {
+            if !self.artifact.jobs.is_empty() {
+                self.emit_jobs(out);
+            }
+            return;
         }
         for check in &harness.output_checks {
             let function = self.function_row(check.function);
@@ -9047,6 +9394,232 @@ impl<'a> RustEmitter<'a> {
             self.emit_jobs(out);
         }
     }
+    fn emit_fuzz_harness(&self, out: &mut String, selected_test: Option<MirTestId>) {
+        let root = &self.config.root_prefix;
+        let test_id = selected_test
+            .unwrap_or_else(|| panic!("MIR fuzz harness has no selected property test"));
+        let test = self
+            .program
+            .tests
+            .iter()
+            .find(|test| test.id == test_id)
+            .unwrap_or_else(|| panic!("MIR fuzz test ID {:?} has no row", test_id));
+        if !matches!(test.kind, MirTestKind::Property) {
+            panic!("MIR fuzz test {:?} is not a property test", test.name);
+        }
+        let function = self.function_row(test.function);
+        if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
+            panic!("MIR fuzz test {:?} targets an unselected function", test.name);
+        }
+        if let Some(reason) = test.generation_unavailable_reason.as_deref() {
+            let _ = writeln!(
+                out,
+                "fn __jet_fuzz_run() {{ eprintln!(\"E0613: {}\"); std::process::exit(1); }}",
+                reason.replace('"', "\\\"")
+            );
+        } else if let Some(reason) = self.property_generation_unavailable_reason(function) {
+            let _ = writeln!(
+                out,
+                "fn __jet_fuzz_run() {{ eprintln!(\"{}\"); std::process::exit(1); }}",
+                reason.replace('"', "\\\"")
+            );
+        } else {
+            let name_literal = format!("{:?}", test.name);
+            let types = function
+                .params
+                .iter()
+                .map(|param| self.rust_type(&param.ty))
+                .collect::<Vec<_>>();
+            let tuple_type = format!("({},)", types.join(", "));
+            let generated_fields = types
+                .iter()
+                .map(|ty| format!("<{ty} as JetGen>::generate(&mut __jet_rng)"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let run_args = (0..types.len())
+                .map(|index| format!("__jet_input.{index}.clone()"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rendered_input = if types.len() == 1 {
+                format!(
+                    "format!({:?}, <{} as JetGen>::render(&__jet_input.0))",
+                    format!("{} = {{}}", function.params[0].name),
+                    types[0]
+                )
+            } else {
+                let format_string = function
+                    .params
+                    .iter()
+                    .map(|param| format!("{}={{}}", param.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let rendered_fields = types
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ty)| {
+                        format!("<{ty} as JetGen>::render(&__jet_input.{index})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("format!({format_string:?}, {rendered_fields})")
+            };
+            let trace_input = if types.len() == 1 {
+                format!("<{} as JetGen>::render(&__jet_input.0)", types[0])
+            } else {
+                rendered_input.clone()
+            };
+            let minimized_input = rendered_input.replace("__jet_input", "__jet_minimized");
+            let shrink_blocks = types
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| {
+                    format!(
+                        "        let __jet_candidates_{index} = <{ty} as JetGen>::shrink(&__jet_minimized.{index});\n\
+                                for __jet_candidate in __jet_candidates_{index} {{\n\
+                                    let mut __jet_try = __jet_minimized.clone();\n\
+                                    __jet_try.{index} = __jet_candidate;\n\
+                                    if __jet_run(&__jet_try).is_err() {{\n\
+                                        __jet_minimized = __jet_try;\n\
+                                        __jet_changed = true;\n\
+                                        break;\n\
+                                    }}\n\
+                                }}"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            out.push_str(
+                "fn __jet_fuzz_sanitize_name(name: &str) -> String {\n\
+                    let mut safe = String::new();\n\
+                    for ch in name.chars() {\n\
+                        safe.push(if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' });\n\
+                    }\n\
+                    if safe.is_empty() { \"case\".to_string() } else { safe }\n\
+                }\n",
+            );
+            let _ = writeln!(out, "fn __jet_fuzz_run() {{");
+            let _ = writeln!(out, "    jet_test_install_panic_hook();");
+            let _ = writeln!(out, "    jet_test_trace_tier();");
+            let _ = writeln!(
+                out,
+                "    let __jet_name = {name_literal};\n\
+                    let __jet_corpus = std::env::var(\"JET_FUZZ_CORPUS\")\n\
+                        .unwrap_or_else(|_| format!(\".jet/fuzz/{{}}\", __jet_fuzz_sanitize_name(__jet_name)));\n\
+                    let _ = std::fs::create_dir_all(&__jet_corpus);\n\
+                    let __jet_iterations = std::env::var(\"JET_FUZZ_ITERATIONS\")\n\
+                        .ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(1000);\n\
+                    let __jet_time_ms = std::env::var(\"JET_FUZZ_TIME_MS\")\n\
+                        .ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);\n\
+                    let __jet_seed = std::env::var(\"JET_FUZZ_SEED\")\n\
+                        .ok().and_then(|value| value.parse::<u64>().ok())\n\
+                        .unwrap_or(0x5EED_1234_ABCD_0001u64);"
+            );
+            let _ = writeln!(
+                out,
+                "    let __jet_generate = |__jet_base_seed: u64, __jet_case_index: u64| -> (u64, {tuple_type}) {{"
+            );
+            let _ = writeln!(
+                out,
+                "        let mut __jet_driver_rng = JetRng::new(__jet_base_seed);\n\
+                        let mut __jet_case_seed = 0u64;\n\
+                        for _ in 0..=__jet_case_index {{ __jet_case_seed = __jet_driver_rng.next_u64(); }}\n\
+                        let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
+                        let __jet_input = ({generated_fields},);\n\
+                        (__jet_case_seed, __jet_input)\n\
+                    }};"
+            );
+            let _ = writeln!(
+                out,
+                "    let __jet_run = |__jet_input: &{tuple_type}| -> Result<(), String> {{\n\
+                        __jet_fuzz_case_{}({run_args})\n\
+                    }};",
+                test.id.0
+            );
+            let _ = writeln!(out, "    let mut __jet_corpus_cases: Vec<(u64, u64)> = Vec::new();");
+            let _ = writeln!(
+                out,
+                "    if let Ok(__jet_entries) = std::fs::read_dir(&__jet_corpus) {{\n\
+                        let mut __jet_paths = __jet_entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect::<Vec<_>>();\n\
+                        __jet_paths.sort();\n\
+                        for __jet_path in __jet_paths {{\n\
+                            if !__jet_path.is_file() {{ continue; }}\n\
+                            let Ok(__jet_text) = std::fs::read_to_string(&__jet_path) else {{ continue; }};\n\
+                            let __jet_values = __jet_text.split_whitespace().filter_map(|value| value.parse::<u64>().ok()).collect::<Vec<_>>();\n\
+                            let Some(__jet_base_seed) = __jet_values.first().copied() else {{ continue; }};\n\
+                            __jet_corpus_cases.push((__jet_base_seed, __jet_values.get(1).copied().unwrap_or(0)));\n\
+                        }}\n\
+                    }}"
+            );
+            let _ = writeln!(out, "    let __jet_corpus_count = __jet_corpus_cases.len();");
+            let _ = writeln!(
+                out,
+                "    for (__jet_base_seed, __jet_case_index) in __jet_corpus_cases.iter().copied() {{\n\
+                        let (__jet_case_seed, __jet_input) = __jet_generate(__jet_base_seed, __jet_case_index);\n\
+                        let __jet_display = {rendered_input};\n\
+                        let __jet_trace_input = {trace_input};\n\
+                        jet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\n\
+                        if let Err(__jet_error) = __jet_run(&__jet_input) {{\n\
+                            println!(\"{{}}: FAIL (corpus replay, seed={{}})\", __jet_name, __jet_case_seed);\n\
+                            eprintln!(\"  input: {{}}\", __jet_display);\n\
+                            eprintln!(\"  error: {{}}\", __jet_error);\n\
+                            std::process::exit(1);\n\
+                        }}\n\
+                    }}\n\
+                    println!(\"corpus: {{}} case(s) replayed clean\", __jet_corpus_count);"
+            );
+            let _ = writeln!(
+                out,
+                "    let __jet_started = std::time::Instant::now();\n\
+                    let mut __jet_driver_rng = JetRng::new(__jet_seed);\n\
+                    for __jet_case_index in 0..__jet_iterations {{\n\
+                        if __jet_time_ms > 0 && __jet_started.elapsed() >= std::time::Duration::from_millis(__jet_time_ms) {{ break; }}\n\
+                        let __jet_case_seed = __jet_driver_rng.next_u64();\n\
+                        let mut __jet_rng = JetRng::new(__jet_case_seed);\n\
+                        let __jet_input = ({generated_fields},);\n\
+                        let __jet_display = {rendered_input};\n\
+                        let __jet_trace_input = {trace_input};\n\
+                        jet_prop_trace_sample(\"jet_fuzz\", __jet_case_index, __jet_case_seed, &__jet_trace_input);\n\
+                        if let Err(__jet_error) = __jet_run(&__jet_input) {{\n\
+                            let mut __jet_minimized = __jet_input.clone();\n\
+                            for _ in 0..2000 {{\n\
+                                let mut __jet_changed = false;\n\
+{shrink_blocks}\n\
+                                if !__jet_changed {{ break; }}\n\
+                            }}\n\
+                            let __jet_minimized_display = {minimized_input};\n\
+                            let __jet_saved = std::path::Path::new(&__jet_corpus).join(format!(\"seed_{{}}.txt\", __jet_case_seed));\n\
+                            let _ = std::fs::write(&__jet_saved, format!(\"{{}} {{}}\\n\", __jet_seed, __jet_case_index));\n\
+                            println!(\"{{}}: FAIL (after {{}} iteration(s))\", __jet_name, __jet_case_index + 1);\n\
+                            println!(\"  minimized input: {{}}\", __jet_minimized_display);\n\
+                            println!(\"  seed: {{}}\", __jet_case_seed);\n\
+                            println!(\"  saved: {{}}\", __jet_saved.display());\n\
+                            eprintln!(\"  error: {{}}\", __jet_error);\n\
+                            println!(\"repro: JET_PROP_SEED={{}} JET_PROP_REPLAY_CASE={{}} jet test --grade=generated\", __jet_seed, __jet_case_index);\n\
+                            std::process::exit(1);\n\
+                        }}\n\
+                    }}\n\
+                    println!(\"{{}}: {{}} iteration(s), no failure found\", __jet_name, __jet_iterations);"
+            );
+            let _ = writeln!(out, "}}\n");
+        }
+        if self.artifact.entry.is_none()
+            && self.artifact.kind != MirArtifactKind::NativeLibrary
+            && self.artifact.kind != MirArtifactKind::SandboxPlugin
+        {
+            let _ = writeln!(out, "fn main() {{");
+            let _ = writeln!(out, "    {root}jet_std_env_init();");
+            let _ = writeln!(
+                out,
+                "    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());"
+            );
+            let _ = writeln!(
+                out,
+                "    {root}jet_runtime_boundary(|| {{ __jet_fuzz_run(); }});"
+            );
+            let _ = writeln!(out, "}}\n");
+        }
+    }
+
 
     fn emit_function(&self, function: &MirFunction, out: &mut String) {
         self.emit_callable(function, out, None);
@@ -9236,6 +9809,40 @@ impl<'a> RustEmitter<'a> {
             );
         }
         let body_indent = if generator { 8 } else { 4 };
+        let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
+        let _ = writeln!(
+            out,
+            "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
+            "",
+            stack_file,
+            stack_line,
+            function.name,
+            stack_source,
+            indent = body_indent
+        );
+        let has_sentry_frame = function
+            .scopes
+            .iter()
+            .any(|scope| scope.kind == MirScopeKind::Unsafe);
+        let has_sentry_scope = function.scopes.iter().any(|scope| {
+            matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy)
+        });
+        if has_sentry_frame {
+            let _ = writeln!(
+                out,
+                "{:indent$}let __jet_sentry_frame = jet_mem::jet_sentry_frame();",
+                "",
+                indent = body_indent
+            );
+        }
+        if has_sentry_scope {
+            let _ = writeln!(
+                out,
+                "{:indent$}let mut __jet_sentry_scopes: Vec<jet_mem::JetSentryGuard> = Vec::new();",
+                "",
+                indent = body_indent
+            );
+        }
         if self.coverage_for(function) {
             let line = self.coverage_function_line(function);
             let _ = writeln!(
@@ -12221,18 +12828,23 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             MirOperation::ScopeEnter { scope, .. } => {
-                let _ = writeln!(
-                    out,
-                    "{pad}{};",
-                    self.scope_operation_expression(function, *scope, true)
-                );
+                let expression = self.scope_operation_expression(function, *scope, true);
+                if self.is_sentry_scope(function, *scope) {
+                    let _ = writeln!(out, "{pad}__jet_sentry_scopes.push({expression});");
+                } else {
+                    let _ = writeln!(out, "{pad}{expression};");
+                }
             }
             MirOperation::ScopeExit { scope } => {
-                let _ = writeln!(
-                    out,
-                    "{pad}{};",
-                    self.scope_operation_expression(function, *scope, false)
-                );
+                if self.is_sentry_scope(function, *scope) {
+                    let _ = writeln!(out, "{pad}drop(__jet_sentry_scopes.pop());");
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "{pad}{};",
+                        self.scope_operation_expression(function, *scope, false)
+                    );
+                }
             }
             operation => {
                 let location = match &instruction.operation {
@@ -12664,14 +13276,26 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Closure { function: target, captures, facts } => {
                 self.closure(function, *target, captures, facts, result)
             }
-            MirOperation::PtrFromAddr { addr, element } => format!("({} as usize as *const {})", self.value_read(*addr), self.rust_type(element)),
-            MirOperation::Deref { value } => format!("unsafe {{ (*({})).clone() }}", self.value_read(*value)),
-            MirOperation::RawAddressOf { place } => self.raw_address_of(function, *place),
-            MirOperation::AddressOf { place, access: MirAccess::Read } => {
-                // Borrow-only users were emitted directly from the place.
-                // An ordinary SSA slot holds an owned value, not its address.
-                self.place_read(function, *place)
+            MirOperation::PtrFromAddr { addr, element } => {
+                let address = self.value_read(*addr);
+                let address = if matches!(self.value_type(function, *addr).kind(), MirTypeKind::Int) {
+                    self.native_int_argument(address, location.as_ref())
+                } else {
+                    address
+                };
+                format!("({address} as usize as *mut {})", self.rust_type(element))
             }
+            MirOperation::Deref { value } => {
+                format!(
+                    "jet_mem::jet_sentry_read(({}), \"valid_ptr\")",
+                    self.value_read(*value)
+                )
+            }
+            MirOperation::RawAddressOf { place } => self.raw_address_of(
+                function,
+                *place,
+                result.is_some_and(|value| matches!(self.value_type(function, value).kind(), MirTypeKind::Int)),
+            ),
             MirOperation::AddressOf { place, access } => self.address_of(function, *place, *access),
             MirOperation::AttachTag { value, .. } => self.value_move(*value),
             MirOperation::Todo { call, location, expected_type } => {
@@ -14197,8 +14821,10 @@ impl<'a> RustEmitter<'a> {
             } => {
                 if !declared_owner.same_checked_type(owner) {
                     panic!(
-                        "MIR method call {:?} owner does not match its function declaration",
-                        function
+                        "MIR method call {:?} owner does not match its function declaration: declared={:?}, actual={:?}",
+                        function,
+                        declared_owner,
+                        owner,
                     );
                 }
                 *self_access
@@ -14214,8 +14840,10 @@ impl<'a> RustEmitter<'a> {
             } => {
                 if !declared_owner.same_checked_type(owner) {
                     panic!(
-                        "MIR method call {:?} owner does not match its function declaration",
-                        function
+                        "MIR method call {:?} owner does not match its function declaration: declared={:?}, actual={:?}",
+                        function,
+                        declared_owner,
+                        owner,
                     );
                 }
                 panic!(
@@ -14883,6 +15511,44 @@ impl<'a> RustEmitter<'a> {
                 self.prelude_symbol(route),
                 values.join(", ")
             );
+        }
+        if row.module == "core.mem"
+            && matches!(row.member.as_str(), "volatile_read" | "volatile_write")
+        {
+            let values = args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    self.call_arg_for_function(
+                        function,
+                        arg,
+                        route_row
+                            .signature
+                            .borrow_mask
+                            .get(index)
+                            .copied()
+                            .unwrap_or(false),
+                    )
+                })
+                .collect::<Vec<_>>();
+            return match row.member.as_str() {
+                "volatile_read" => format!(
+                    "jet_mem::jet_sentry_volatile_read(({}), \"valid_ptr\")",
+                    values.first().unwrap_or_else(|| {
+                        panic!("MIR core.mem.volatile_read has no pointer argument")
+                    })
+                ),
+                "volatile_write" => format!(
+                    "jet_mem::jet_sentry_volatile_write(({}), {}, \"valid_ptr\")",
+                    values.first().unwrap_or_else(|| {
+                        panic!("MIR core.mem.volatile_write has no pointer argument")
+                    }),
+                    values.get(1).unwrap_or_else(|| {
+                        panic!("MIR core.mem.volatile_write has no value argument")
+                    }),
+                ),
+                _ => unreachable!(),
+            };
         }
         let emitted = self.core_call_symbol_for_function(
             function,
@@ -17017,8 +17683,17 @@ impl<'a> RustEmitter<'a> {
         self.place_reference(function, place, access)
     }
 
-    fn raw_address_of(&self, function: &MirFunction, place: MirPlaceId) -> String {
-        format!("({} as *const _ as *mut _)", self.place_reference(function, place, MirAccess::Read))
+    fn raw_address_of(&self, function: &MirFunction, place: MirPlaceId, as_int: bool) -> String {
+        let pointer = format!(
+            "({} as *const _ as *mut _)",
+            self.place_reference(function, place, MirAccess::Read)
+        );
+        let address = format!("jet_mem::jet_sentry_address_of({pointer})");
+        if as_int {
+            address
+        } else {
+            format!("({address} as usize as *mut _)")
+        }
     }
 
     fn drop_expression(
@@ -17384,9 +18059,10 @@ impl<'a> RustEmitter<'a> {
         let wire = self.plugin_wire_path("PluginValue");
         let ty = self.plugin_unwrap_type(ty);
         match descriptor {
-            ComponentTypeDescriptor::Int => {
-                format!("{wire}::Int(({value}) as i64)")
-            }
+            ComponentTypeDescriptor::Int => format!(
+                "{wire}::Int({}jet_std::jet_int_owned_to_i64(&({value})).expect(\"plugin Int exceeds i64 wire range\"))",
+                self.config.root_prefix,
+            ),
             ComponentTypeDescriptor::Float => {
                 format!("{wire}::Float(({value}) as f64)")
             }
@@ -17478,7 +18154,6 @@ impl<'a> RustEmitter<'a> {
             }
         }
     }
-
     fn plugin_decode_value_expr(
         &self,
         descriptor: &ComponentTypeDescriptor,
@@ -17491,9 +18166,10 @@ impl<'a> RustEmitter<'a> {
         match descriptor {
             ComponentTypeDescriptor::Int => format!(
                 "match ({value}) {{ \
-                 {wire}::Int(value) => Ok(value), \
+                 {wire}::Int(value) => Ok({}jet_std::jet_int_owned_from_i64(value)), \
                  _ => Err(\"plugin returned a value with the wrong Int shape\".to_string()) \
-                 }}"
+                 }}",
+                self.config.root_prefix,
             ),
             ComponentTypeDescriptor::Float => format!(
                 "match ({value}) {{ \
@@ -17972,6 +18648,33 @@ impl<'a> RustEmitter<'a> {
                     None => value,
                 }
             }
+            MirSemanticOp::ReflectOf {
+                type_name,
+                path,
+                display,
+                fields,
+            } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "jet_reflect_field_new({:?}.to_string(), jet_reflect_value_from_field(&({}), {:?}, {:?}))",
+                            field.name,
+                            self.value_read(field.value),
+                            field.type_name,
+                            field.path,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "jet_reflect_value_finish({:?}.to_string(), {:?}.to_string(), {}, vec![{}])",
+                    type_name,
+                    path,
+                    self.value_read(*display),
+                    fields,
+                )
+            }
             MirSemanticOp::HardwareCall {
                 call,
                 op,
@@ -18169,8 +18872,8 @@ impl<'a> RustEmitter<'a> {
             }
             MirSemanticOp::ClosureMethod {
                 receiver,
-                args,
                 call,
+                args,
             } => {
                 let emitted = self.prelude_receiver_call(function, *call, *receiver, args, result);
                 result
@@ -18203,6 +18906,26 @@ impl<'a> RustEmitter<'a> {
                 frame_schedule,
                 frame_schedule_derivation,
             } => {
+                let route = self.prelude_row(*call);
+                if route.module == "core.reflect" {
+                    if !args.is_empty() {
+                        panic!("MIR reflection handle method received arguments");
+                    }
+                    let receiver = self.value_read(*receiver);
+                    return match route.member.as_str() {
+                        "value.type_name" => {
+                            format!("jet_reflect_value_type_name(&({receiver}))")
+                        }
+                        "value.path" => format!("jet_reflect_value_path(&({receiver}))"),
+                        "value.display" => {
+                            format!("jet_reflect_value_display(&({receiver}))")
+                        }
+                        "value.fields" => format!("jet_reflect_value_fields(&({receiver}))"),
+                        "field.name" => format!("jet_reflect_field_name(&({receiver}))"),
+                        "field.value" => format!("jet_reflect_field_value(&({receiver}))"),
+                        member => panic!("unknown MIR reflection handle method `{member}`"),
+                    };
+                }
                 let emitted = self.prelude_handle_method(
                     function,
                     *call,
