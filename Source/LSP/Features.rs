@@ -708,26 +708,6 @@ pub(crate) fn semantic_symbol_metadata_json(
     ))
 }
 
-fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<String> {
-    let fact = tokens.iter().find(|token| {
-        matches!(&token.kind, TokKind::Ident(name) if Syntax::fact_read_kind(name).is_some())
-            && token.span.start <= offset
-            && offset <= token.span.end
-    })?;
-    let before = &src[..fact.span.start];
-    let dot = before.len().checked_sub(1)?;
-    if before.as_bytes().get(dot) != Some(&b'.') {
-        return None;
-    }
-    let mut start = dot;
-    while start > 0
-        && (before.as_bytes()[start - 1].is_ascii_alphanumeric()
-            || before.as_bytes()[start - 1] == b'_')
-    {
-        start -= 1;
-    }
-    (start < dot).then(|| before[start..dot].to_string())
-}
 
 fn compiler_fact_receiver_span(tokens: &[Token], offset: usize) -> Option<Span> {
     let fact_index = tokens.iter().position(|token| {
@@ -740,34 +720,251 @@ fn compiler_fact_receiver_span(tokens: &[Token], offset: usize) -> Option<Span> 
         .then_some(receiver)
         .and_then(|token| matches!(&token.kind, TokKind::Ident(_)).then_some(token.span))
 }
+fn checked_anchor_identity(
+    db: &SymbolDB,
+    anchor: &jet_semindex::DefinitionAnchor,
+) -> Option<String> {
+    if let Some(identity) = anchor
+        .semantic_identity
+        .as_deref()
+        .filter(|identity| !identity.is_empty())
+    {
+        return Some(identity.to_string());
+    }
+    let mut identity = None;
+    for definition in db.defs.iter().filter(|definition| {
+        definition.module_path == anchor.module_path
+            && definition.def_span == anchor.def_span.into()
+    }) {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &String| existing != &definition.identity)
+        {
+            return None;
+        }
+        identity = Some(definition.identity.clone());
+    }
+    identity
+}
 
-/// Resolve a call into source owned by the canonical build graph. Generated
-/// modules are not a second symbol database: their source and path come from
-/// BuildPlan, and the lexer identifies the exact declaration span.
+fn checked_reference_in_span<'a>(
+    db: &'a SymbolDB,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<Option<&'a jet_semindex::SymRef>, ()> {
+    let mut candidates = db
+        .refs
+        .iter()
+        .filter(|reference| {
+            reference.module_path == path
+                && reference.span.start <= start
+                && end <= reference.span.end
+        })
+        .collect::<Vec<_>>();
+    let Some(min_len) = candidates
+        .iter()
+        .map(|reference| reference.span.end.saturating_sub(reference.span.start))
+        .min()
+    else {
+        return Ok(None);
+    };
+    candidates.retain(|reference| {
+        reference.span.end.saturating_sub(reference.span.start) == min_len
+    });
+    let mut selected = None;
+    let mut identity = None;
+    for reference in candidates {
+        let Some(target) = reference.target.as_ref() else {
+            return Err(());
+        };
+        let Some(candidate) = checked_anchor_identity(db, target) else {
+            return Err(());
+        };
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &String| existing != &candidate)
+        {
+            return Err(());
+        }
+        identity = Some(candidate);
+        selected.get_or_insert(reference);
+    }
+    Ok(selected)
+}
+
+fn checked_definition_in_span<'a>(
+    db: &'a SymbolDB,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<Option<&'a jet_semindex::SymDef>, ()> {
+    let mut candidates = db
+        .defs
+        .iter()
+        .filter(|definition| {
+            definition.module_path == path
+                && definition.def_span.start <= start
+                && end <= definition.def_span.end
+        })
+        .collect::<Vec<_>>();
+    let Some(min_len) = candidates
+        .iter()
+        .map(|definition| definition.def_span.end.saturating_sub(definition.def_span.start))
+        .min()
+    else {
+        return Ok(None);
+    };
+    candidates.retain(|definition| {
+        definition.def_span.end.saturating_sub(definition.def_span.start) == min_len
+    });
+    let mut selected = None;
+    let mut identity = None;
+    for definition in candidates {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &String| existing != &definition.identity)
+        {
+            return Err(());
+        }
+        identity = Some(definition.identity.clone());
+        selected.get_or_insert(definition);
+    }
+    Ok(selected)
+}
+
+fn checked_instance_identity(
+    db: &SymbolDB,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<Option<String>, ()> {
+    let mut candidates = db
+        .index
+        .instances()
+        .iter()
+        .flat_map(|instance| &instance.applications)
+        .filter(|application| {
+            application.module_path == path
+                && application.span.start <= start
+                && end <= application.span.end
+        })
+        .collect::<Vec<_>>();
+    let Some(min_len) = candidates
+        .iter()
+        .map(|application| application.span.end.saturating_sub(application.span.start))
+        .min()
+    else {
+        return Ok(None);
+    };
+    candidates.retain(|application| {
+        application.span.end.saturating_sub(application.span.start) == min_len
+    });
+    let mut identity = None;
+    for application in candidates {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &String| existing != &application.semantic_identity)
+        {
+            return Err(());
+        }
+        identity = Some(application.semantic_identity.clone());
+    }
+    Ok(identity)
+}
+
+fn checked_identity_in_span(
+    db: &SymbolDB,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<Option<String>, ()> {
+    if let Some(reference) = checked_reference_in_span(db, path, start, end)? {
+        return Ok(reference
+            .target
+            .as_ref()
+            .and_then(|target| checked_anchor_identity(db, target)));
+    }
+    if let Some(definition) = checked_definition_in_span(db, path, start, end)? {
+        return Ok(Some(definition.identity.clone()));
+    }
+    checked_instance_identity(db, path, start, end)
+}
+
+/// Resolve only the checked target under the cursor. Unlike completion and
+/// hover, semantic refactors never recover from an unresolved target by name.
+pub(crate) fn checked_semantic_identity_at(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    offset: usize,
+) -> Option<String> {
+    if let Ok(Some(identity)) = checked_identity_in_span(db, path, offset, offset) {
+        return Some(identity);
+    }
+    let receiver = compiler_fact_receiver_span(tokens, offset)?;
+    checked_identity_in_span(db, path, receiver.start, receiver.end)
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn checked_rename_span_at(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    offset: usize,
+) -> Option<(String, Span)> {
+    let identity = checked_semantic_identity_at(db, tokens, path, offset)?;
+    let span = match checked_reference_in_span(db, path, offset, offset).ok()? {
+        Some(reference) if reference.target.as_ref().is_some_and(|target| target.kind == "state") => {
+            state_leaf_span(reference)?
+        }
+        _ => token_span_at(tokens, offset)?,
+    };
+    Some((identity, span))
+}
+
+fn token_span_at(tokens: &[Token], offset: usize) -> Option<Span> {
+    tokens.iter().find_map(|token| {
+        (token.span.start <= offset && offset <= token.span.end).then_some(token.span)
+    })
+}
+
+
+/// Resolve a call into one declaration owned by the canonical build graph.
+/// Generated modules are not a second symbol database: their source and path
+/// come from the selected BuildPlan, and the lexer identifies the declaration
+/// span. Multiple selected modules with the same leaf are ambiguous.
 pub(crate) fn compute_generated_definition(
     plan: &crate::Comptime::Build::BuildPlan,
     tokens: &[Token],
     offset: usize,
 ) -> Option<(String, String, Span)> {
     let name = find_ident_at(tokens, offset)?;
-    for module in plan.generated_modules() {
+    let modules = plan.selected_generated_modules().ok()?;
+    let mut candidate = None;
+    for module in modules {
         let (generated_tokens, errors) = crate::Lexer::lex(&module.source);
         if !errors.is_empty() {
             continue;
         }
         for pair in generated_tokens.windows(2) {
-            if matches!(pair[0].kind, TokKind::KwFn)
-                && matches!(&pair[1].kind, TokKind::Ident(candidate) if candidate == name)
+            if !matches!(pair[0].kind, TokKind::KwFn)
+                || !matches!(&pair[1].kind, TokKind::Ident(candidate) if candidate == name)
             {
-                return Some((
-                    module.path.as_str().to_string(),
-                    module.source.clone(),
-                    pair[1].span,
-                ));
+                continue;
             }
+            if candidate.is_some() {
+                return None;
+            }
+            candidate = Some((
+                module.path.as_str().to_string(),
+                module.source.clone(),
+                pair[1].span,
+            ));
         }
     }
-    None
+    candidate
 }
 
 // ── Go-to-definition ──────────────────────────────────────────────────────────
@@ -775,169 +972,58 @@ pub(crate) fn compute_generated_definition(
 pub(crate) fn compute_definition(
     db: &SymbolDB,
     tokens: &[Token],
-    src: &str,
+    _src: &str,
     path: &str,
     offset: usize,
 ) -> Option<(String, Span)> {
-    if let Some(receiver) = compiler_fact_receiver(tokens, src, offset) {
-        if let Some(def) = db.defs.iter().find(|def| def.name == receiver) {
-            return Some((def.module_path.clone(), def.def_span));
+    let identity = checked_semantic_identity_at(db, tokens, path, offset)?;
+    if let Ok(Some(reference)) = checked_reference_in_span(db, path, offset, offset) {
+        if let Some(target) = reference.target.as_ref() {
+            if checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()) {
+                return Some((target.module_path.clone(), target.def_span.into()));
+            }
         }
     }
-    // The sema-owned anchor covers the complete `Type.State.Name` marker
-    // expression. Resolve from that anchor before spelling lookup so a state
-    // with the same leaf name in another type still lands on its owner.
-    if let Some(reference) = db.refs.iter().find(|reference| {
-        reference.module_path == path
-            && reference.span.start <= offset
-            && offset <= reference.span.end
-    }) {
-        if let Some(target) = &reference.target {
-            return Some((target.module_path.clone(), target.def_span.into()));
+    let mut definition = None;
+    for candidate in db.defs.iter().filter(|candidate| candidate.identity == identity) {
+        if definition.is_some_and(|existing: &jet_semindex::SymDef| {
+            existing.module_path != candidate.module_path || existing.def_span != candidate.def_span
+        }) {
+            return None;
         }
+        definition = Some(candidate);
     }
-    // State labels may repeat across distinct owning structs. A declaration
-    // cursor already carries the exact nested-section anchor, so do not fall
-    // back to the first matching leaf spelling in the module.
-    if let Some(definition) = db.defs.iter().find(|definition| {
-        definition.module_path == path
-            && definition.def_span.start <= offset
-            && offset <= definition.def_span.end
-            && matches!(
-                &definition.kind,
-                SymKind::EnumVariant { parent } if parent.ends_with(".State")
-            )
-    }) {
-        return Some((definition.module_path.clone(), definition.def_span));
-    }
-    let name = find_ident_at(tokens, offset)?;
-    // Look for a top-level or local def with this name
-    // Prefer defs in same module, then other modules
-    if let Some(def) = db
-        .defs
-        .iter()
-        .find(|d| d.name == name && d.module_path == path)
-    {
-        return Some((def.module_path.clone(), def.def_span));
-    }
-    if let Some(def) = db.defs.iter().find(|d| d.name == name) {
-        return Some((def.module_path.clone(), def.def_span));
-    }
-    None
+    definition.map(|definition| (definition.module_path.clone(), definition.def_span))
 }
 
 // ── References ────────────────────────────────────────────────────────────────
 
 pub(crate) fn compute_references(
     db: &SymbolDB,
-    _tokens: &[Token],
+    tokens: &[Token],
     path: &str,
     offset: usize,
     include_declaration: bool,
 ) -> Vec<(String, Span)> {
-    let anchor_identity = |anchor: &jet_semindex::DefinitionAnchor| {
-        anchor.semantic_identity.clone().or_else(|| {
-            db.defs
-                .iter()
-                .find(|definition| {
-                    definition.module_path == anchor.module_path
-                        && definition.def_span.start == anchor.def_span.start
-                        && definition.def_span.end == anchor.def_span.end
-                })
-                .map(|definition| definition.identity.clone())
-        })
-    };
-    let identity = db
-        .index
-        .instances()
-        .iter()
-        .flat_map(|instance| &instance.applications)
-        .find(|application| {
-            application.module_path == path
-                && application.span.start <= offset
-                && offset <= application.span.end
-        })
-        .map(|application| application.semantic_identity.clone())
-        .or_else(|| {
-            db.defs
-                .iter()
-                .find(|definition| {
-                    definition.module_path == path
-                        && definition.def_span.start <= offset
-                        && offset <= definition.def_span.end
-                })
-                .map(|definition| definition.identity.clone())
-        })
-        .or_else(|| {
-            db.refs
-                .iter()
-                .find(|reference| {
-                    reference.module_path == path
-                        && reference.span.start <= offset
-                        && offset <= reference.span.end
-                })
-                .and_then(|reference| reference.target.as_ref())
-                .and_then(anchor_identity)
-        })
-        .or_else(|| {
-            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
-            db.index
-                .instances()
-                .iter()
-                .flat_map(|instance| &instance.applications)
-                .find(|application| {
-                    application.module_path == path
-                        && application.span.start <= receiver.start
-                        && receiver.end <= application.span.end
-                })
-                .map(|application| application.semantic_identity.clone())
-        })
-        .or_else(|| {
-            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
-            db.defs
-                .iter()
-                .find(|definition| {
-                    definition.module_path == path
-                        && definition.def_span.start <= receiver.start
-                        && receiver.end <= definition.def_span.end
-                })
-                .map(|definition| definition.identity.clone())
-        })
-        .or_else(|| {
-            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
-            db.refs
-                .iter()
-                .find(|reference| {
-                    reference.module_path == path
-                        && reference.span.start <= receiver.start
-                        && receiver.end <= reference.span.end
-                })
-                .and_then(|reference| reference.target.as_ref())
-                .and_then(anchor_identity)
-        });
-    let Some(identity) = identity else {
+    let Some(identity) = checked_semantic_identity_at(db, tokens, path, offset) else {
         return Vec::new();
     };
     let mut result: Vec<(String, Span)> = db
         .refs
         .iter()
-        .filter(|reference| {
-            reference
-                .target
-                .as_ref()
-                .and_then(anchor_identity)
-                .is_some_and(|candidate| candidate == identity)
+        .filter_map(|reference| {
+            let target = reference.target.as_ref()?;
+            (checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()))
+                .then_some((reference.module_path.clone(), reference.span))
         })
-        .map(|r| (r.module_path.clone(), r.span))
         .collect();
     if include_declaration {
-        for def in db
-            .defs
-            .iter()
-            .filter(|definition| definition.identity == identity)
-        {
-            result.push((def.module_path.clone(), def.def_span));
-        }
+        result.extend(
+            db.defs
+                .iter()
+                .filter(|definition| definition.identity == identity)
+                .map(|definition| (definition.module_path.clone(), definition.def_span)),
+        );
     }
     result.sort_by(|a, b| {
         a.0.cmp(&b.0)
@@ -1191,47 +1277,38 @@ fn state_anchor_at(
     path: &str,
     offset: usize,
 ) -> Option<jet_semindex::DefinitionAnchor> {
-    if let Some(target) = db
-        .refs
-        .iter()
-        .find(|reference| {
-            reference.module_path == path
-                && reference.span.start <= offset
-                && offset <= reference.span.end
-        })
-        .and_then(|reference| reference.target.clone())
-        .filter(|target| target.kind == "state")
-    {
+    let reference = match checked_reference_in_span(db, path, offset, offset) {
+        Err(()) => return None,
+        Ok(Some(reference)) => Some(reference),
+        Ok(None) => None,
+    };
+    if let Some(target) = reference.and_then(|reference| {
+        reference
+            .target
+            .as_ref()
+            .filter(|target| target.kind == "state")
+    }) {
+        let mut target = target.clone();
+        target.semantic_identity = Some(checked_anchor_identity(db, &target)?);
         return Some(target);
     }
-    db.defs
-        .iter()
-        .find(|definition| {
-            definition.module_path == path
-                && definition.def_span.start <= offset
-                && offset <= definition.def_span.end
-                && matches!(
-                    &definition.kind,
-                    SymKind::EnumVariant { parent } if parent.ends_with(".State")
-                )
-        })
-        .map(|definition| jet_semindex::DefinitionAnchor {
-            module_path: definition.module_path.clone(),
-            kind: "state".to_string(),
-            def_span: definition.def_span.into(),
-            semantic_identity: Some(definition.identity.clone()),
-        })
+    let definition = checked_definition_in_span(db, path, offset, offset)
+        .ok()
+        .flatten()
+        .filter(|definition| {
+            matches!(
+                &definition.kind,
+                SymKind::EnumVariant { parent } if parent.ends_with(".State")
+            )
+        })?;
+    Some(jet_semindex::DefinitionAnchor {
+        module_path: definition.module_path.clone(),
+        kind: "state".to_string(),
+        def_span: definition.def_span.into(),
+        semantic_identity: Some(definition.identity.clone()),
+    })
 }
 
-fn state_anchor_matches(
-    left: &jet_semindex::DefinitionAnchor,
-    right: &jet_semindex::DefinitionAnchor,
-) -> bool {
-    match (&left.semantic_identity, &right.semantic_identity) {
-        (Some(left), Some(right)) => left == right,
-        _ => left.module_path == right.module_path && left.def_span == right.def_span,
-    }
-}
 
 fn state_leaf_span(reference: &jet_semindex::SymRef) -> Option<Span> {
     let target = reference
@@ -1239,10 +1316,8 @@ fn state_leaf_span(reference: &jet_semindex::SymRef) -> Option<Span> {
         .as_ref()
         .filter(|target| target.kind == "state")?;
     let leaf_len = target.def_span.end.saturating_sub(target.def_span.start);
-    Some(Span::new(
-        reference.span.end.saturating_sub(leaf_len),
-        reference.span.end,
-    ))
+    let start = reference.span.end.checked_sub(leaf_len)?;
+    (reference.span.start <= start).then_some(Span::new(start, reference.span.end))
 }
 
 /// Compute a workspace edit for renaming the symbol at `offset` to `new_name`.
@@ -1281,41 +1356,34 @@ pub(crate) fn compute_rename(
     if is_keyword(name) {
         return Err(format!("`{}` is a keyword and cannot be renamed", name));
     }
-    let alias_target = db
-        .refs
-        .iter()
-        .find(|reference| {
-            reference.module_path == path
-                && reference.span.start <= offset
-                && offset <= reference.span.end
-        })
-        .and_then(|reference| {
-            reference
-                .target
-                .as_ref()
-                .filter(|target| target.kind == "import_alias")
-                .cloned()
-        })
-        .or_else(|| {
-            db.defs
-                .iter()
-                .find(|definition| {
-                    definition.module_path == path
-                        && definition.def_span.start <= offset
-                        && offset <= definition.def_span.end
-                        && definition.identity.starts_with("import:")
-                })
-                .map(|definition| jet_semindex::DefinitionAnchor {
-                    module_path: definition.module_path.clone(),
-                    kind: "import_alias".to_string(),
-                    def_span: definition.def_span.into(),
-                    semantic_identity: Some(definition.identity.clone()),
-                })
-        });
+    let identity = checked_semantic_identity_at(db, tokens, path, offset)
+        .ok_or_else(|| "identifier has no checked semantic target".to_string())?;
+    let alias_target = match checked_reference_in_span(db, path, offset, offset) {
+        Ok(Some(reference)) => reference
+            .target
+            .as_ref()
+            .filter(|target| target.kind == "import_alias")
+            .and_then(|target| {
+                let mut target = target.clone();
+                target.semantic_identity = Some(checked_anchor_identity(db, &target)?);
+                Some(target)
+            }),
+        Ok(None) => checked_definition_in_span(db, path, offset, offset)
+            .ok()
+            .flatten()
+            .filter(|definition| definition.identity.starts_with("import:"))
+            .map(|definition| jet_semindex::DefinitionAnchor {
+                module_path: definition.module_path.clone(),
+                kind: "import_alias".to_string(),
+                def_span: definition.def_span.into(),
+                semantic_identity: Some(definition.identity.clone()),
+            }),
+        Err(()) => None,
+    };
     let indexed_case = db
         .defs
         .iter()
-        .find(|d| d.name == name)
+        .find(|def| def.identity == identity)
         .map(|def| match &def.kind {
             SymKind::Struct { .. }
             | SymKind::Enum { .. }
@@ -1357,9 +1425,7 @@ pub(crate) fn compute_rename(
         spans.extend(db.refs.iter().filter_map(|reference| {
             let candidate = reference.target.as_ref()?;
             (candidate.kind == "import_alias"
-                && candidate.module_path == target.module_path
-                && candidate.def_span.start == target.def_span.start
-                && candidate.def_span.end == target.def_span.end)
+                && checked_anchor_identity(db, candidate).as_deref() == Some(identity.as_str()))
                 .then_some((reference.module_path.clone(), reference.span))
         }));
         spans.sort_by(|left, right| {
@@ -1377,10 +1443,11 @@ pub(crate) fn compute_rename(
             let Some(reference) = db.refs.iter().find(|reference| {
                 reference.module_path == *reference_path
                     && reference.span == *span
-                    && reference
-                        .target
-                        .as_ref()
-                        .is_some_and(|candidate| state_anchor_matches(candidate, &target))
+                    && reference.target.as_ref().is_some_and(|candidate| {
+                        candidate.kind == "state"
+                            && checked_anchor_identity(db, candidate).as_deref()
+                                == target.semantic_identity.as_deref()
+                    })
             }) else {
                 continue;
             };
@@ -1399,24 +1466,31 @@ pub(crate) fn compute_rename(
             return Ok(spans);
         }
     }
-    let mut spans: Vec<(String, Span)> = Vec::new();
-    // Include definition spans
-    for def in db.defs.iter().filter(|d| d.name == name) {
-        spans.push((def.module_path.clone(), def.def_span));
-    }
-    // Include all reference spans
-    for r in db.refs.iter().filter(|r| r.name == name) {
-        spans.push((r.module_path.clone(), r.span));
-    }
+    let mut spans: Vec<(String, Span)> = db
+        .refs
+        .iter()
+        .filter_map(|reference| {
+            let target = reference.target.as_ref()?;
+            (checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()))
+                .then_some((reference.module_path.clone(), reference.span))
+        })
+        .collect();
+    spans.extend(
+        db.defs
+            .iter()
+            .filter(|definition| definition.identity == identity)
+            .map(|definition| (definition.module_path.clone(), definition.def_span)),
+    );
     if spans.is_empty() {
-        spans.extend(tokens.iter().filter_map(|token| match &token.kind {
-            TokKind::Ident(candidate) if candidate == name => Some((path.to_string(), token.span)),
-            _ => None,
-        }));
+        return Err(format!("no checked occurrences of `{}` found", name));
     }
-    if spans.is_empty() {
-        return Err(format!("no occurrences of `{}` found", name));
-    }
+    spans.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.start.cmp(&right.1.start))
+            .then(left.1.end.cmp(&right.1.end))
+    });
+    spans.dedup();
     Ok(spans)
 }
 

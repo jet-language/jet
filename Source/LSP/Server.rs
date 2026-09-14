@@ -6,7 +6,7 @@ use crate::AST::ProgramBundle;
 use jet_driver::QueryService::CompilerQueries;
 #[cfg(test)]
 use jet_queries::{FileKey, QueryKey};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 
@@ -15,11 +15,12 @@ use super::Check::{collect_fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
-    compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
-    compute_refactor_actions, compute_references, compute_rename,
-    encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
-    format_inlay_hints, reasoning_inlay_hints, reasoning_view_json, semantic_symbol_at,
-    semantic_symbol_at_span, semantic_symbol_metadata_json, RefactorAction,
+    checked_rename_span_at, checked_semantic_identity_at, compute_definition,
+    compute_discovery_hover, compute_generated_definition, compute_hover, compute_refactor_actions,
+    compute_references, compute_rename, encode_semantic_tokens_in_span_with_arithmetic,
+    encode_semantic_tokens_with_arithmetic, format_inlay_hints, reasoning_inlay_hints,
+    reasoning_view_json, semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json,
+    RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -2083,20 +2084,36 @@ fn definition_response(
 
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
-    let db = match checked.bundle {
-        Some(b) => build_symbol_db(&b, &checked.facts),
-        None => SymbolDB::new(),
-    };
+    let db = checked
+        .bundle
+        .as_ref()
+        .map(|bundle| build_symbol_db(bundle, &checked.facts))
+        .unwrap_or_else(SymbolDB::new);
 
     match compute_definition(&db, &tokens, &doc.text, &doc.path, offset) {
         Some((def_path, def_span)) => {
-            let def_uri = path_to_uri(&def_path);
-            let src = if def_path == doc.path {
-                doc.text.clone()
-            } else {
-                std::fs::read_to_string(&def_path).unwrap_or_default()
+            let Some(bundle) = checked.bundle.as_ref() else {
+                return Some(error_response(
+                    id,
+                    -32603,
+                    "definition source is not in a checked snapshot",
+                ));
             };
-            let range = byte_span_to_range(&src, def_span);
+            let Some((src, _version)) = checked_source_snapshot(server, bundle, &def_path) else {
+                return Some(error_response(
+                    id,
+                    -32603,
+                    "definition source is not in a checked snapshot",
+                ));
+            };
+            let Some(range) = checked_byte_span_to_range(src, def_span) else {
+                return Some(error_response(
+                    id,
+                    -32603,
+                    "definition range is outside the checked snapshot",
+                ));
+            };
+            let def_uri = path_to_uri(&def_path);
             let data = semantic_symbol_at_span(&db, &def_path, def_span)
                 .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
                 .map(|data| format!(",\"data\":{data}"))
@@ -2121,10 +2138,17 @@ fn definition_response(
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
             let def_path = root.join(relative_path).to_string_lossy().into_owned();
+            let Some(range) = checked_byte_span_to_range(&source, span) else {
+                return Some(error_response(
+                    id,
+                    -32603,
+                    "generated definition range is outside its checked source",
+                ));
+            };
             let result = format!(
                 r#"{{"uri":"{}","range":{}}}"#,
                 json_escape(&path_to_uri(&def_path)),
-                range_json(byte_span_to_range(&source, span))
+                range_json(range)
             );
             Some(response(id, &result))
         }
@@ -2328,10 +2352,10 @@ fn references_response(
 
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
-    let db = match checked.bundle {
-        Some(b) => build_symbol_db(&b, &checked.facts),
-        None => SymbolDB::new(),
+    let Some(bundle) = checked.bundle.as_ref() else {
+        return Some(response(id, "[]"));
     };
+    let db = build_symbol_db(bundle, &checked.facts);
 
     let refs = compute_references(&db, &tokens, &doc.path, offset, include_decl);
     let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
@@ -2340,16 +2364,24 @@ fn references_response(
         .unwrap_or_default();
     let mut items = String::new();
     for (i, (ref_path, span)) in refs.iter().enumerate() {
+        let Some((src, _version)) = checked_source_snapshot(server, bundle, ref_path) else {
+            return Some(error_response(
+                id,
+                -32603,
+                "reference source is not in a checked snapshot",
+            ));
+        };
+        let Some(range) = checked_byte_span_to_range(src, *span) else {
+            return Some(error_response(
+                id,
+                -32603,
+                "reference range is outside the checked snapshot",
+            ));
+        };
         if i > 0 {
             items.push(',');
         }
         let ref_uri = path_to_uri(ref_path);
-        let src = if ref_path == &doc.path {
-            doc.text.clone()
-        } else {
-            std::fs::read_to_string(ref_path).unwrap_or_default()
-        };
-        let range = byte_span_to_range(&src, *span);
         items.push_str(&format!(
             r#"{{"uri":"{}","range":{}{}}}"#,
             json_escape(&ref_uri),
@@ -2379,25 +2411,45 @@ fn prepare_rename_response(
         None => return Some(response(id, "null")),
     };
     let text = token_text(&doc.text, tok);
-    match &tok.kind {
-        TokKind::Ident(name) => {
-            let range = range_json(byte_span_to_range(&doc.text, tok.span));
-            Some(response(
+    if !matches!(&tok.kind, TokKind::Ident(_)) {
+        return if is_keyword_token(tok, text) {
+            Some(error_response(
                 id,
-                &format!(
-                    r#"{{"range":{},"placeholder":"{}"}}"#,
-                    range,
-                    json_escape(name)
-                ),
+                -32600,
+                &format!("`{}` is Jet syntax, not a name you can rename", text),
             ))
-        }
-        _ if is_keyword_token(tok, text) => Some(error_response(
-            id,
-            -32600,
-            &format!("`{}` is Jet syntax, not a name you can rename", text),
-        )),
-        _ => Some(response(id, "null")),
+        } else {
+            Some(response(id, "null"))
+        };
     }
+    let checked = server.check_with_bundle(doc);
+    let Some(bundle) = checked.bundle.as_ref() else {
+        return Some(response(id, "null"));
+    };
+    let db = build_symbol_db(bundle, &checked.facts);
+    let Some((_identity, span)) =
+        checked_rename_span_at(&db, &tokens, &doc.path, offset)
+    else {
+        return Some(response(id, "null"));
+    };
+    let Some(range) = checked_byte_span_to_range(&doc.text, span) else {
+        return Some(error_response(
+            id,
+            -32603,
+            "rename range is outside the checked snapshot",
+        ));
+    };
+    let TokKind::Ident(name) = &tok.kind else {
+        unreachable!("identifier checked above");
+    };
+    Some(response(
+        id,
+        &format!(
+            r#"{{"range":{},"placeholder":"{}"}}"#,
+            range_json(range),
+            json_escape(name)
+        ),
+    ))
 }
 
 fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> Option<String> {
@@ -2414,49 +2466,58 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
 
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
-    let db = match checked.bundle {
-        Some(b) => build_symbol_db(&b, &checked.facts),
-        None => SymbolDB::new(),
+    let Some(bundle) = checked.bundle.as_ref() else {
+        return Some(error_response(
+            id,
+            -32603,
+            "document did not check cleanly",
+        ));
     };
+    let db = build_symbol_db(bundle, &checked.facts);
 
     match compute_rename(&db, &tokens, &doc.path, offset, new_name) {
         Ok(spans) => {
-            // Group edits by file
-            let mut by_file: HashMap<String, Vec<Span>> = HashMap::new();
+            let mut by_file: BTreeMap<String, Vec<Span>> = BTreeMap::new();
             for (path, span) in spans {
                 by_file.entry(path).or_default().push(span);
             }
             let mut changes = String::new();
-            let mut first = true;
-            for (path, file_spans) in &by_file {
-                if !first {
+            for (index, (path, file_spans)) in by_file.iter().enumerate() {
+                if index > 0 {
                     changes.push(',');
                 }
-                first = false;
-                let file_uri = path_to_uri(path);
-                let src = if path == &doc.path {
-                    doc.text.clone()
-                } else {
-                    std::fs::read_to_string(path).unwrap_or_default()
+                let Some((src, _version)) = checked_source_snapshot(server, bundle, path) else {
+                    return Some(error_response(
+                        id,
+                        -32603,
+                        "rename source is not in a checked snapshot",
+                    ));
                 };
                 let mut edits = String::new();
-                for (j, &span) in file_spans.iter().enumerate() {
+                for (j, span) in file_spans.iter().enumerate() {
+                    let Some(range) = checked_byte_span_to_range(src, *span) else {
+                        return Some(error_response(
+                            id,
+                            -32603,
+                            "rename range is outside the checked snapshot",
+                        ));
+                    };
                     if j > 0 {
                         edits.push(',');
                     }
-                    let range = byte_span_to_range(&src, span);
                     edits.push_str(&format!(
                         r#"{{"range":{},"newText":"{}"}}"#,
                         range_json(range),
                         json_escape(new_name)
                     ));
                 }
+                let file_uri = path_to_uri(path);
                 changes.push_str(&format!(r#""{}": [{}]"#, json_escape(&file_uri), edits));
             }
-            // The semantic op records the rename as from -> to, so it needs the
-            // identifier under the cursor, not the new name.
             let old_name = ident_at(&tokens, offset).unwrap_or("");
-            let semantic_op = lsp_rename_semantic_op(&db.index, old_name, new_name);
+            let identity = checked_semantic_identity_at(&db, &tokens, &doc.path, offset)
+                .unwrap_or_default();
+            let semantic_op = lsp_rename_semantic_op(&db.index, &identity, old_name, new_name);
             let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
                 .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
                 .map(|data| format!(",\"data\":{data}"))
@@ -2473,14 +2534,18 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
     }
 }
 
-/// LSP clients apply the workspace edit, so the semantic receipt travels in
-/// the same response until the client persists the edit. It is metadata, not a
-/// second rename engine: targets come from the checked definition facts.
-fn lsp_rename_semantic_op(index: &jet_semindex::SemIndex, from: &str, to: &str) -> String {
+/// LSP clients apply the workspace edit; semantic targets come only from the
+/// checked declaration identity, not a second rename engine.
+fn lsp_rename_semantic_op(
+    index: &jet_semindex::SemIndex,
+    identity: &str,
+    from: &str,
+    to: &str,
+) -> String {
     let targets = index
         .definition_facts()
         .iter()
-        .filter(|fact| fact.name == from)
+        .filter(|fact| fact.human_identity == identity)
         .map(|fact| {
             let before = json_escape(&fact.human_identity);
             let after_identity = fact
@@ -4143,6 +4208,45 @@ mod project_part_tests {
         let sources = workspace_sources(&server, Some(&entry));
         assert!(sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
     }
+}
+
+fn source_paths_equal(left: &str, right: &str) -> bool {
+    left == right
+        || std::path::Path::new(left) == std::path::Path::new(right)
+        || left.trim_start_matches("./") == right.trim_start_matches("./")
+}
+
+/// Return only the source snapshot used by the checked bundle or an open
+/// document overlay. Cross-file LSP ranges must never be reconstructed from
+/// the current filesystem after checking.
+fn checked_source_snapshot<'a>(
+    server: &'a Server,
+    bundle: &'a ProgramBundle,
+    path: &str,
+) -> Option<(&'a str, Option<i32>)> {
+    if let Some(document) = server
+        .docs
+        .values()
+        .find(|document| source_paths_equal(&document.path, path))
+    {
+        return Some((&document.text, Some(document.version)));
+    }
+    bundle
+        .modules
+        .iter()
+        .find(|module| {
+            source_paths_equal(&module.display, path)
+                || source_paths_equal(&module.path.to_string_lossy(), path)
+        })
+        .map(|module| (module.source.as_str(), None))
+}
+
+fn checked_byte_span_to_range(src: &str, span: Span) -> Option<LspRange> {
+    (span.start <= span.end
+        && span.end <= src.len()
+        && src.is_char_boundary(span.start)
+        && src.is_char_boundary(span.end))
+        .then(|| byte_span_to_range(src, span))
 }
 
 fn module_source<'a>(bundle: &'a ProgramBundle, path: &str) -> Option<&'a str> {
