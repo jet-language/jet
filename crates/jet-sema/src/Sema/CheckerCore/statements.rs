@@ -2832,115 +2832,21 @@ impl<'a> Checker<'a> {
             Stmt::Switched { marker, body, .. }
                 if crate::AST::switched_off(marker)
                     || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {
-                let flow = self.flow.clone();
-                let fx_direct = self.fx_direct.clone();
-                let fx_direct_spans = self.fx_direct_spans.clone();
-                let lambda_effect_stack = self.lambda_effect_stack.clone();
-                let fx_edges = self.fx_edges.clone();
-                let fx_maximal = self.fx_maximal;
-                let fx_maximal_span = self.fx_maximal_span;
-                let region_stack = self.region_stack.clone();
-                let fx_regions = self.fx_regions.clone();
-                let fx_authority_delegations = self.fx_authority_delegations.clone();
-                let fx_callback_obligations = self.fx_callback_obligations.clone();
-                let fx_memory_events = self.fx_memory_events.clone();
-                let fx_memory_open = self.fx_memory_open.clone();
-                let memory_policy_stack = self.memory_policy_stack.clone();
-                let fx_memory_regions = self.fx_memory_regions.clone();
-                let fx_memory_unbounded_control = self.fx_memory_unbounded_control.clone();
-                let fx_memory_calls = self.fx_memory_calls.clone();
-                let memory_control_multiplier = self.memory_control_multiplier;
-                let frame_schedule_systems = self.frame_schedule_systems.clone();
-                let unused_bindings = self.unused_bindings.clone();
-                let unused_binding_refs = self.unused_binding_refs.clone();
-                let name_ledger = self.name_ledger.clone();
-                let fx_autodiff_obligations = self.fx_autodiff_obligations.clone();
-                let fx_compute_calls = self.fx_compute_calls.clone();
-                let fx_autodiff_safe_panic = self.fx_autodiff_safe_panic;
-                let fx_autodiff_unsafe_panic = self.fx_autodiff_unsafe_panic;
-                let autodiff_safe_panic_context = self.autodiff_safe_panic_context;
-                let binder_ref_types = self.binder_ref_types.clone();
-                let uses_exact_int = self.uses_exact_int;
-                let iter_borrowed = self.iter_borrowed.clone();
-                let lending_view_loop_vars = self.lending_view_loop_vars.clone();
-                let return_view_provenance = self.return_view_provenance.clone();
-                let inferred_lambda_mut_captures = self.inferred_lambda_mut_captures.clone();
-                let ret = self.ret.clone();
-                let expected_type = self.expected_type.clone();
-                let failure_carrier_inference = self.failure_carrier_inference;
-                let failure_carrier = self.failure_carrier.clone();
-                let task_body_propagates = self.task_body_propagates;
-                let view_capture_tasks = self.view_capture_tasks.clone();
-                let reactive_upgrades = self.reactive_upgrades.clone();
-                let reactive_upgrade_names = self.reactive_upgrade_names.clone();
-                let view_borrow_escape_tasks = self.view_borrow_escape_tasks.clone();
-                let inline_addr_taken = self.inline_addr_taken.clone();
-                let ct_impure_depth = self.ct_impure_depth;
-                let ct_embed_inputs = self.ct_embed_inputs.clone();
-                let in_dropped_comptime_arm = self.in_dropped_comptime_arm;
-                let in_taskgroup_spawn = self.in_taskgroup_spawn;
-                let taskgroup_stack = self.taskgroup_stack.clone();
-                let prev_suppress = self.suppress_must_use;
-                self.suppress_must_use = true;
-                self.push_scope();
-                for stmt in body {
-                    self.check_stmt(stmt);
-                    stmt.for_each_expr_mut(|expr| {
-                        if let Expr::Lambda(lambda) = expr {
-                            lambda.meta.runtime_erased = true;
-                        }
-                    });
-                }
-                self.drop_scope_no_obligation_checks();
-                self.suppress_must_use = prev_suppress;
-                self.flow = flow;
-                self.fx_direct = fx_direct;
-                self.lambda_effect_stack = lambda_effect_stack;
-                self.fx_direct_spans = fx_direct_spans;
-                self.fx_edges = fx_edges;
-                self.fx_maximal = fx_maximal;
-                self.fx_maximal_span = fx_maximal_span;
-                self.region_stack = region_stack;
-                self.fx_regions = fx_regions;
-                self.fx_authority_delegations = fx_authority_delegations;
-                self.fx_callback_obligations = fx_callback_obligations;
-                self.fx_memory_events = fx_memory_events;
-                self.fx_memory_open = fx_memory_open;
-                self.memory_policy_stack = memory_policy_stack;
-                self.fx_memory_regions = fx_memory_regions;
-                self.fx_memory_unbounded_control = fx_memory_unbounded_control;
-                self.fx_memory_calls = fx_memory_calls;
-                self.memory_control_multiplier = memory_control_multiplier;
-                self.frame_schedule_systems = frame_schedule_systems;
-                self.unused_bindings = unused_bindings;
-                self.unused_binding_refs = unused_binding_refs;
-                *self.name_ledger = name_ledger;
-                self.fx_autodiff_obligations = fx_autodiff_obligations;
-                self.fx_compute_calls = fx_compute_calls;
-                self.fx_autodiff_safe_panic = fx_autodiff_safe_panic;
-                self.fx_autodiff_unsafe_panic = fx_autodiff_unsafe_panic;
-                self.autodiff_safe_panic_context = autodiff_safe_panic_context;
-                self.binder_ref_types = binder_ref_types;
-                self.uses_exact_int = uses_exact_int;
-                self.iter_borrowed = iter_borrowed;
-                self.lending_view_loop_vars = lending_view_loop_vars;
-                self.return_view_provenance = return_view_provenance;
-                self.inferred_lambda_mut_captures = inferred_lambda_mut_captures;
-                self.ret = ret;
-                self.expected_type = expected_type;
-                self.failure_carrier_inference = failure_carrier_inference;
-                self.failure_carrier = failure_carrier;
-                self.task_body_propagates = task_body_propagates;
-                self.view_capture_tasks = view_capture_tasks;
-                self.reactive_upgrades = reactive_upgrades;
-                self.reactive_upgrade_names = reactive_upgrade_names;
-                self.view_borrow_escape_tasks = view_borrow_escape_tasks;
-                self.inline_addr_taken = inline_addr_taken;
-                self.ct_impure_depth = ct_impure_depth;
-                self.ct_embed_inputs = ct_embed_inputs;
-                self.in_dropped_comptime_arm = in_dropped_comptime_arm;
-                self.in_taskgroup_spawn = in_taskgroup_spawn;
-                self.taskgroup_stack = taskgroup_stack;
+                // D-ERASED-SCOPE1: erased source is checked for diagnostics, but
+                // no semantic fact, effect edge, or optimizer evidence may escape.
+                self.with_erased_scope(|checker| {
+                    checker.suppress_must_use = true;
+                    checker.push_scope();
+                    for stmt in body {
+                        checker.check_stmt(stmt);
+                        stmt.for_each_expr_mut(|expr| {
+                            if let Expr::Lambda(lambda) = expr {
+                                lambda.meta.runtime_erased = true;
+                            }
+                        });
+                    }
+                    checker.drop_scope_no_obligation_checks();
+                });
             }
             Stmt::Switched { body, .. } => {
                 self.check_block(body, true);

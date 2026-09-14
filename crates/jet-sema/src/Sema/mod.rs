@@ -1116,6 +1116,7 @@ enum LoopValueKind {
     Result,
 }
 
+#[derive(Clone)]
 struct LoopValueFrame {
     label: Option<String>,
     kind: LoopValueKind,
@@ -1166,7 +1167,7 @@ pub(crate) struct CallPlaceAccess {
     reserved: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct CallAccessFrame {
     accesses: Vec<CallPlaceAccess>,
 }
@@ -2143,6 +2144,402 @@ pub(crate) struct Checker<'a> {
     /// `global_addr_taken` parameter) so `#Inline(Always)` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
+}
+
+/// Mutable checker state that must not cross an erased `#Off`/`#DebugOnly`
+/// body boundary. Diagnostics are deliberately not included: erased source is
+/// still type-checked and its real diagnostics remain visible.
+struct ErasedScopeSnapshot {
+    nominal_owner_cache: HashMap<String, Option<usize>>,
+    inline_module: Option<String>,
+    rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+    frame_schedule_systems: Vec<jet_foundation::ResourceSchedule::JetFrameOperation>,
+    current_function_span: Span,
+    name_ledger: jet_foundation::Names::NameLedger,
+    statement_lint_allows: Vec<String>,
+    stdlib_lint_candidates: HashMap<usize, (Span, crate::Diagnostics::TextEdit)>,
+    unused_bindings: Vec<UnusedBinding>,
+    unused_binding_refs: HashSet<Span>,
+    flow: FlowFacts::FlowFacts,
+    concrete_unit_values: Vec<HashMap<String, f64>>,
+    suppress_partial_move_root_read: bool,
+    loop_depth: usize,
+    implicit_loop_subject_depth: usize,
+    subject_shorthand_depth: usize,
+    source_nesting: usize,
+    loop_labels: Vec<String>,
+    collect_item_types: Vec<Option<Type>>,
+    loop_value_frames: Vec<LoopValueFrame>,
+    loop_break_flows: Vec<Vec<FlowFacts::FlowFacts>>,
+    pending_loop_value: Option<(LoopValueKind, Option<String>)>,
+    arrow_loop_body: bool,
+    last_loop_result_type: Option<Type>,
+    fx_direct: EffectSet,
+    fx_direct_spans: HashMap<String, Span>,
+    lambda_effect_stack: Vec<Effects::LambdaEffectAccum>,
+    fx_edges: BTreeSet<String>,
+    fx_maximal: bool,
+    fx_maximal_span: Option<Span>,
+    region_stack: Vec<RegionAccum>,
+    fx_regions: Vec<RegionSummary>,
+    fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
+    fx_callback_obligations: Vec<CallbackObligation>,
+    fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    fx_compute_calls: Vec<Effects::ComputeCallFact>,
+    fx_autodiff_safe_panic: bool,
+    fx_autodiff_unsafe_panic: bool,
+    autodiff_safe_panic_context: bool,
+    fx_pending_diagnostics: Vec<Diagnostic>,
+    fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
+    fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
+    memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
+    arithmetic_policy_stack: Vec<crate::AST::ArithmeticPolicyFact>,
+    fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
+    fx_memory_unbounded_control: Vec<Span>,
+    fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
+    memory_control_multiplier: Option<u64>,
+    txn_depth: usize,
+    txn_wall_depth: usize,
+    deterministic_world_depth: usize,
+    det_suppress: usize,
+    context_depth: usize,
+    context_allocator_active: bool,
+    in_unsafe: bool,
+    suppress_must_use: bool,
+    in_pure: bool,
+    no_prelude: bool,
+    in_pre_clause: bool,
+    fallback_has_err: Option<bool>,
+    failure_auto_root_suppression: usize,
+    failure_auto_depth: usize,
+    fallback_is_shape_miss: bool,
+    in_comptime: bool,
+    compiler_api_allowed: bool,
+    ret: Option<Type>,
+    fn_name: String,
+    compiler_generated: bool,
+    raw_protocol_return: bool,
+    declared_return_type: Option<Type>,
+    current_return_type_span: Option<Span>,
+    current_param_names: Vec<String>,
+    binder_ref_types: HashMap<String, Type>,
+    expected_type: Option<Type>,
+    uses_exact_int: bool,
+    knowledge_gate: Option<KnowledgeGate>,
+    iter_borrowed: HashSet<String>,
+    noelse_chains_checked: HashSet<usize>,
+    result_handler_subject_types: HashMap<usize, (Type, Expr)>,
+    lending_view_loop_vars: HashSet<String>,
+    return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
+    views_used_in_stmt: HashSet<String>,
+    scoped_loan_read_reported: bool,
+    call_access_frames: Vec<CallAccessFrame>,
+    borrow_ctx: bool,
+    owning_if_value_depth: usize,
+    allow_fixed_constructor: bool,
+    allow_string_view_read: bool,
+    lambda_escapes: bool,
+    in_lambda_body: bool,
+    inferred_lambda_mut_captures: HashSet<String>,
+    lambda_params_are_lending_views: bool,
+    is_task_spawn: bool,
+    task_body_propagates: bool,
+    failure_carrier_inference: bool,
+    failure_carrier: Option<Type>,
+    ordinary_binding_root_depth: Option<usize>,
+    statement_expr_inference: bool,
+    statement_expr_root_depth: Option<usize>,
+    http_handler_depth: usize,
+    interrupt_callback_depth: usize,
+    lambda_param_mutable: bool,
+    lambda_param_is_secret_loan: bool,
+    view_capture_tasks: HashSet<String>,
+    reactive_upgrades: Vec<String>,
+    reactive_upgrade_names: HashSet<String>,
+    view_borrow_escape_tasks: HashSet<String>,
+    current_binding_name: Option<String>,
+    task_spawn_binding_name: Option<String>,
+    lambda_binding: Option<String>,
+    lambda_mut_borrow_stack: Vec<HashSet<String>>,
+    ct_scopes: Vec<HashMap<String, crate::Comptime::CtValue>>,
+    defer_ct_evaluation: bool,
+    type_param_scope: Vec<crate::AST::TypeParam>,
+    ct_impure_depth: usize,
+    ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
+    in_dropped_comptime_arm: bool,
+    stmt_tail_ptr: *const crate::AST::Stmt,
+    stmt_tail_len: usize,
+    liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
+    taskgroup_stack: Vec<TaskGroupCtx>,
+    in_taskgroup_spawn: bool,
+    inline_addr_taken: HashSet<String>,
+}
+
+impl<'a> Checker<'a> {
+    fn snapshot_erased_scope(&self) -> ErasedScopeSnapshot {
+        ErasedScopeSnapshot {
+            nominal_owner_cache: self.nominal_owner_cache.borrow().clone(),
+            inline_module: self.inline_module.clone(),
+            rule_facts: self.rule_facts.clone(),
+            frame_schedule_systems: self.frame_schedule_systems.clone(),
+            current_function_span: self.current_function_span,
+            name_ledger: self.name_ledger.clone(),
+            statement_lint_allows: self.statement_lint_allows.clone(),
+            stdlib_lint_candidates: self.stdlib_lint_candidates.clone(),
+            unused_bindings: self.unused_bindings.clone(),
+            unused_binding_refs: self.unused_binding_refs.clone(),
+            flow: self.flow.clone(),
+            concrete_unit_values: self.concrete_unit_values.clone(),
+            suppress_partial_move_root_read: self.suppress_partial_move_root_read,
+            loop_depth: self.loop_depth,
+            implicit_loop_subject_depth: self.implicit_loop_subject_depth,
+            subject_shorthand_depth: self.subject_shorthand_depth,
+            source_nesting: self.source_nesting,
+            loop_labels: self.loop_labels.clone(),
+            collect_item_types: self.collect_item_types.clone(),
+            loop_value_frames: self.loop_value_frames.clone(),
+            loop_break_flows: self.loop_break_flows.clone(),
+            pending_loop_value: self.pending_loop_value.clone(),
+            arrow_loop_body: self.arrow_loop_body,
+            last_loop_result_type: self.last_loop_result_type.clone(),
+            fx_direct: self.fx_direct.clone(),
+            fx_direct_spans: self.fx_direct_spans.clone(),
+            lambda_effect_stack: self.lambda_effect_stack.clone(),
+            fx_edges: self.fx_edges.clone(),
+            fx_maximal: self.fx_maximal,
+            fx_maximal_span: self.fx_maximal_span,
+            region_stack: self.region_stack.clone(),
+            fx_regions: self.fx_regions.clone(),
+            fx_authority_delegations: self.fx_authority_delegations.clone(),
+            fx_callback_obligations: self.fx_callback_obligations.clone(),
+            fx_autodiff_obligations: self.fx_autodiff_obligations.clone(),
+            fx_compute_calls: self.fx_compute_calls.clone(),
+            fx_autodiff_safe_panic: self.fx_autodiff_safe_panic,
+            fx_autodiff_unsafe_panic: self.fx_autodiff_unsafe_panic,
+            autodiff_safe_panic_context: self.autodiff_safe_panic_context,
+            fx_pending_diagnostics: self.fx_pending_diagnostics.clone(),
+            fx_memory_events: self.fx_memory_events.clone(),
+            fx_memory_open: self.fx_memory_open.clone(),
+            memory_policy_stack: self.memory_policy_stack.clone(),
+            arithmetic_policy_stack: self.arithmetic_policy_stack.clone(),
+            fx_memory_regions: self.fx_memory_regions.clone(),
+            fx_memory_unbounded_control: self.fx_memory_unbounded_control.clone(),
+            fx_memory_calls: self.fx_memory_calls.clone(),
+            memory_control_multiplier: self.memory_control_multiplier,
+            txn_depth: self.txn_depth,
+            txn_wall_depth: self.txn_wall_depth,
+            deterministic_world_depth: self.deterministic_world_depth,
+            det_suppress: self.det_suppress,
+            context_depth: self.context_depth,
+            context_allocator_active: self.context_allocator_active,
+            in_unsafe: self.in_unsafe,
+            suppress_must_use: self.suppress_must_use,
+            in_pure: self.in_pure,
+            no_prelude: self.no_prelude,
+            in_pre_clause: self.in_pre_clause,
+            fallback_has_err: self.fallback_has_err,
+            failure_auto_root_suppression: self.failure_auto_root_suppression,
+            failure_auto_depth: self.failure_auto_depth,
+            fallback_is_shape_miss: self.fallback_is_shape_miss,
+            in_comptime: self.in_comptime,
+            compiler_api_allowed: self.compiler_api_allowed,
+            ret: self.ret.clone(),
+            fn_name: self.fn_name.clone(),
+            compiler_generated: self.compiler_generated,
+            raw_protocol_return: self.raw_protocol_return,
+            declared_return_type: self.declared_return_type.clone(),
+            current_return_type_span: self.current_return_type_span,
+            current_param_names: self.current_param_names.clone(),
+            binder_ref_types: self.binder_ref_types.clone(),
+            expected_type: self.expected_type.clone(),
+            uses_exact_int: self.uses_exact_int,
+            knowledge_gate: self.knowledge_gate,
+            iter_borrowed: self.iter_borrowed.clone(),
+            noelse_chains_checked: self.noelse_chains_checked.clone(),
+            result_handler_subject_types: self.result_handler_subject_types.clone(),
+            lending_view_loop_vars: self.lending_view_loop_vars.clone(),
+            return_view_provenance: self.return_view_provenance.clone(),
+            views_used_in_stmt: self.views_used_in_stmt.clone(),
+            scoped_loan_read_reported: self.scoped_loan_read_reported,
+            call_access_frames: self.call_access_frames.clone(),
+            borrow_ctx: self.borrow_ctx,
+            owning_if_value_depth: self.owning_if_value_depth,
+            allow_fixed_constructor: self.allow_fixed_constructor,
+            allow_string_view_read: self.allow_string_view_read,
+            lambda_escapes: self.lambda_escapes,
+            in_lambda_body: self.in_lambda_body,
+            inferred_lambda_mut_captures: self.inferred_lambda_mut_captures.clone(),
+            lambda_params_are_lending_views: self.lambda_params_are_lending_views,
+            is_task_spawn: self.is_task_spawn,
+            task_body_propagates: self.task_body_propagates,
+            failure_carrier_inference: self.failure_carrier_inference,
+            failure_carrier: self.failure_carrier.clone(),
+            ordinary_binding_root_depth: self.ordinary_binding_root_depth,
+            statement_expr_inference: self.statement_expr_inference,
+            statement_expr_root_depth: self.statement_expr_root_depth,
+            http_handler_depth: self.http_handler_depth,
+            interrupt_callback_depth: self.interrupt_callback_depth,
+            lambda_param_mutable: self.lambda_param_mutable,
+            lambda_param_is_secret_loan: self.lambda_param_is_secret_loan,
+            view_capture_tasks: self.view_capture_tasks.clone(),
+            reactive_upgrades: self.reactive_upgrades.clone(),
+            reactive_upgrade_names: self.reactive_upgrade_names.clone(),
+            view_borrow_escape_tasks: self.view_borrow_escape_tasks.clone(),
+            current_binding_name: self.current_binding_name.clone(),
+            task_spawn_binding_name: self.task_spawn_binding_name.clone(),
+            lambda_binding: self.lambda_binding.clone(),
+            lambda_mut_borrow_stack: self.lambda_mut_borrow_stack.clone(),
+            ct_scopes: self.ct_scopes.clone(),
+            defer_ct_evaluation: self.defer_ct_evaluation,
+            type_param_scope: self.type_param_scope.clone(),
+            ct_impure_depth: self.ct_impure_depth,
+            ct_embed_inputs: self.ct_embed_inputs.clone(),
+            in_dropped_comptime_arm: self.in_dropped_comptime_arm,
+            stmt_tail_ptr: self.stmt_tail_ptr,
+            stmt_tail_len: self.stmt_tail_len,
+            liveness_frames: self.liveness_frames.clone(),
+            taskgroup_stack: self.taskgroup_stack.clone(),
+            in_taskgroup_spawn: self.in_taskgroup_spawn,
+            inline_addr_taken: self.inline_addr_taken.clone(),
+        }
+    }
+
+    fn restore_erased_scope(&mut self, snapshot: ErasedScopeSnapshot) {
+        *self.nominal_owner_cache.borrow_mut() = snapshot.nominal_owner_cache;
+        self.inline_module = snapshot.inline_module;
+        self.rule_facts = snapshot.rule_facts;
+        self.frame_schedule_systems = snapshot.frame_schedule_systems;
+        self.current_function_span = snapshot.current_function_span;
+        *self.name_ledger = snapshot.name_ledger;
+        self.statement_lint_allows = snapshot.statement_lint_allows;
+        self.stdlib_lint_candidates = snapshot.stdlib_lint_candidates;
+        self.unused_bindings = snapshot.unused_bindings;
+        self.unused_binding_refs = snapshot.unused_binding_refs;
+        self.flow = snapshot.flow;
+        self.concrete_unit_values = snapshot.concrete_unit_values;
+        self.suppress_partial_move_root_read = snapshot.suppress_partial_move_root_read;
+        self.loop_depth = snapshot.loop_depth;
+        self.implicit_loop_subject_depth = snapshot.implicit_loop_subject_depth;
+        self.subject_shorthand_depth = snapshot.subject_shorthand_depth;
+        self.source_nesting = snapshot.source_nesting;
+        self.loop_labels = snapshot.loop_labels;
+        self.collect_item_types = snapshot.collect_item_types;
+        self.loop_value_frames = snapshot.loop_value_frames;
+        self.loop_break_flows = snapshot.loop_break_flows;
+        self.pending_loop_value = snapshot.pending_loop_value;
+        self.arrow_loop_body = snapshot.arrow_loop_body;
+        self.last_loop_result_type = snapshot.last_loop_result_type;
+        self.fx_direct = snapshot.fx_direct;
+        self.fx_direct_spans = snapshot.fx_direct_spans;
+        self.lambda_effect_stack = snapshot.lambda_effect_stack;
+        self.fx_edges = snapshot.fx_edges;
+        self.fx_maximal = snapshot.fx_maximal;
+        self.fx_maximal_span = snapshot.fx_maximal_span;
+        self.region_stack = snapshot.region_stack;
+        self.fx_regions = snapshot.fx_regions;
+        self.fx_authority_delegations = snapshot.fx_authority_delegations;
+        self.fx_callback_obligations = snapshot.fx_callback_obligations;
+        self.fx_autodiff_obligations = snapshot.fx_autodiff_obligations;
+        self.fx_compute_calls = snapshot.fx_compute_calls;
+        self.fx_autodiff_safe_panic = snapshot.fx_autodiff_safe_panic;
+        self.fx_autodiff_unsafe_panic = snapshot.fx_autodiff_unsafe_panic;
+        self.autodiff_safe_panic_context = snapshot.autodiff_safe_panic_context;
+        self.fx_pending_diagnostics = snapshot.fx_pending_diagnostics;
+        self.fx_memory_events = snapshot.fx_memory_events;
+        self.fx_memory_open = snapshot.fx_memory_open;
+        self.memory_policy_stack = snapshot.memory_policy_stack;
+        self.arithmetic_policy_stack = snapshot.arithmetic_policy_stack;
+        self.fx_memory_regions = snapshot.fx_memory_regions;
+        self.fx_memory_unbounded_control = snapshot.fx_memory_unbounded_control;
+        self.fx_memory_calls = snapshot.fx_memory_calls;
+        self.memory_control_multiplier = snapshot.memory_control_multiplier;
+        self.txn_depth = snapshot.txn_depth;
+        self.txn_wall_depth = snapshot.txn_wall_depth;
+        self.deterministic_world_depth = snapshot.deterministic_world_depth;
+        self.det_suppress = snapshot.det_suppress;
+        self.context_depth = snapshot.context_depth;
+        self.context_allocator_active = snapshot.context_allocator_active;
+        self.in_unsafe = snapshot.in_unsafe;
+        self.suppress_must_use = snapshot.suppress_must_use;
+        self.in_pure = snapshot.in_pure;
+        self.no_prelude = snapshot.no_prelude;
+        self.in_pre_clause = snapshot.in_pre_clause;
+        self.fallback_has_err = snapshot.fallback_has_err;
+        self.failure_auto_root_suppression = snapshot.failure_auto_root_suppression;
+        self.failure_auto_depth = snapshot.failure_auto_depth;
+        self.fallback_is_shape_miss = snapshot.fallback_is_shape_miss;
+        self.in_comptime = snapshot.in_comptime;
+        self.compiler_api_allowed = snapshot.compiler_api_allowed;
+        self.ret = snapshot.ret;
+        self.fn_name = snapshot.fn_name;
+        self.compiler_generated = snapshot.compiler_generated;
+        self.raw_protocol_return = snapshot.raw_protocol_return;
+        self.declared_return_type = snapshot.declared_return_type;
+        self.current_return_type_span = snapshot.current_return_type_span;
+        self.current_param_names = snapshot.current_param_names;
+        self.binder_ref_types = snapshot.binder_ref_types;
+        self.expected_type = snapshot.expected_type;
+        self.uses_exact_int = snapshot.uses_exact_int;
+        self.knowledge_gate = snapshot.knowledge_gate;
+        self.iter_borrowed = snapshot.iter_borrowed;
+        self.noelse_chains_checked = snapshot.noelse_chains_checked;
+        self.result_handler_subject_types = snapshot.result_handler_subject_types;
+        self.lending_view_loop_vars = snapshot.lending_view_loop_vars;
+        self.return_view_provenance = snapshot.return_view_provenance;
+        self.views_used_in_stmt = snapshot.views_used_in_stmt;
+        self.scoped_loan_read_reported = snapshot.scoped_loan_read_reported;
+        self.call_access_frames = snapshot.call_access_frames;
+        self.borrow_ctx = snapshot.borrow_ctx;
+        self.owning_if_value_depth = snapshot.owning_if_value_depth;
+        self.allow_fixed_constructor = snapshot.allow_fixed_constructor;
+        self.allow_string_view_read = snapshot.allow_string_view_read;
+        self.lambda_escapes = snapshot.lambda_escapes;
+        self.in_lambda_body = snapshot.in_lambda_body;
+        self.inferred_lambda_mut_captures = snapshot.inferred_lambda_mut_captures;
+        self.lambda_params_are_lending_views = snapshot.lambda_params_are_lending_views;
+        self.is_task_spawn = snapshot.is_task_spawn;
+        self.task_body_propagates = snapshot.task_body_propagates;
+        self.failure_carrier_inference = snapshot.failure_carrier_inference;
+        self.failure_carrier = snapshot.failure_carrier;
+        self.ordinary_binding_root_depth = snapshot.ordinary_binding_root_depth;
+        self.statement_expr_inference = snapshot.statement_expr_inference;
+        self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
+        self.http_handler_depth = snapshot.http_handler_depth;
+        self.interrupt_callback_depth = snapshot.interrupt_callback_depth;
+        self.lambda_param_mutable = snapshot.lambda_param_mutable;
+        self.lambda_param_is_secret_loan = snapshot.lambda_param_is_secret_loan;
+        self.view_capture_tasks = snapshot.view_capture_tasks;
+        self.reactive_upgrades = snapshot.reactive_upgrades;
+        self.reactive_upgrade_names = snapshot.reactive_upgrade_names;
+        self.view_borrow_escape_tasks = snapshot.view_borrow_escape_tasks;
+        self.current_binding_name = snapshot.current_binding_name;
+        self.task_spawn_binding_name = snapshot.task_spawn_binding_name;
+        self.lambda_binding = snapshot.lambda_binding;
+        self.lambda_mut_borrow_stack = snapshot.lambda_mut_borrow_stack;
+        self.ct_scopes = snapshot.ct_scopes;
+        self.defer_ct_evaluation = snapshot.defer_ct_evaluation;
+        self.type_param_scope = snapshot.type_param_scope;
+        self.ct_impure_depth = snapshot.ct_impure_depth;
+        self.ct_embed_inputs = snapshot.ct_embed_inputs;
+        self.in_dropped_comptime_arm = snapshot.in_dropped_comptime_arm;
+        self.stmt_tail_ptr = snapshot.stmt_tail_ptr;
+        self.stmt_tail_len = snapshot.stmt_tail_len;
+        self.liveness_frames = snapshot.liveness_frames;
+        self.taskgroup_stack = snapshot.taskgroup_stack;
+        self.in_taskgroup_spawn = snapshot.in_taskgroup_spawn;
+        self.inline_addr_taken = snapshot.inline_addr_taken;
+    }
+
+    pub(crate) fn with_erased_scope<T>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let snapshot = self.snapshot_erased_scope();
+        let result = check(self);
+        self.restore_erased_scope(snapshot);
+        result
+    }
+
 }
 
 impl<'a> Checker<'a> {
