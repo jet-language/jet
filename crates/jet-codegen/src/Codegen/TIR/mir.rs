@@ -1482,14 +1482,23 @@ fn lower_impl_rows(
 }
 
 fn canonical_impl_key(module: &str, owner: &MirType, trait_name: Option<&str>) -> String {
-    let owner = canonical_target_type(module, &owner.display_name());
-    let owner = if module.is_empty() {
-        owner
+    let qualified_display = canonical_target_type(module, &owner.display_name());
+    let owner_display = if module.is_empty() {
+        qualified_display.clone()
     } else {
-        owner
+        qualified_display
             .strip_prefix(&format!("{module}::"))
-            .unwrap_or(&owner)
+            .unwrap_or(&qualified_display)
             .to_string()
+    };
+    // Keep historical keys for plain nominal/scalar owners. Structured
+    // instances (in particular `Owner<Args>`) retain their canonical MIR kind
+    // identity as part of the key, so distinct generic owners cannot allocate
+    // one impl ID merely because their display spellings agree.
+    let owner = if owner.canonical_key() == qualified_display {
+        owner_display
+    } else {
+        format!("{owner_display}__instance__{}", owner.canonical_key())
     };
     match trait_name {
         Some(trait_name) if !module.is_empty() => format!("{module}::{owner}::{trait_name}"),
