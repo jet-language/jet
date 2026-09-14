@@ -15,6 +15,12 @@ use common::have_rustc;
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
+fn isolated_test_package(label: &str) -> common::Scratch {
+    let scratch = common::Scratch::new(label);
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    scratch
+}
+
 
 #[test]
 fn jet_test_example_output() {
@@ -28,9 +34,11 @@ fn jet_test_example_output() {
     }
 
     let example = root.join("examples/features/tooling/tests.jet");
+    let cwd = isolated_test_package("jet_test_example");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -56,10 +64,12 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
     let expected =
         fs::read_to_string(root.join("examples/features/expected/tooling/expected_fail.test.out"))
             .expect("expected_fail.test.out");
+    let cwd = isolated_test_package("jet_test_expected_fail");
 
     let green = Command::new(&jet)
         .args(["test", "--show-default", "--capture=all", "--serial", "--filter=known"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -75,6 +85,7 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
     let out = Command::new(&jet)
         .args(["test", "--show-default", "--capture=all", "--serial"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "unexpected pass must fail the run");
@@ -83,6 +94,7 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
     let json = Command::new(&jet)
         .args(["test", "--json", "--serial"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert_eq!(
@@ -112,6 +124,7 @@ fn jet_test_package_collects_imported_module_tests() {
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&package)
+        .current_dir(&package)
         .output()
         .unwrap();
     assert!(
@@ -135,12 +148,16 @@ fn concurrent_jet_test_same_file_is_process_isolated() {
         return;
     }
     let example = root.join("examples/features/tooling/tests.jet");
+    let sandboxes: Vec<_> = (0..4)
+        .map(|index| isolated_test_package(&format!("jet_test_concurrent_{index}")))
+        .collect();
     let mut children = Vec::new();
-    for _ in 0..4 {
+    for sandbox in &sandboxes {
         children.push(
             Command::new(&jet)
                 .arg("test").arg("--show-default").arg("--capture=all")
                 .arg(&example)
+                .current_dir(&sandbox.path)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -173,9 +190,11 @@ fn jet_test_members_example_output() {
         return;
     }
     let example = root.join("examples/features/tooling/test_members.jet");
+    let cwd = isolated_test_package("jet_test_members");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -200,9 +219,11 @@ fn jet_scope_expect_fail_passing_region_fails() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_expect_fail_passes.jet");
+    let cwd = isolated_test_package("jet_scope_expect_fail_passes");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -223,12 +244,11 @@ fn jet_scope_expect_fail_asserts_runtime_code() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_expect_fail_code.jet");
+    let cwd = isolated_test_package("jet_scope_expect_fail_code");
     let out = Command::new(&jet)
-        .args([
-            "test",
-            "--show-default",
-            fixture.to_str().expect("fixture path"),
-        ])
+        .args(["test", "--show-default", "--capture=all"])
+        .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -254,9 +274,11 @@ fn jet_scope_setup_failure_fails_test() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_setup_fail.jet");
+    let cwd = isolated_test_package("jet_scope_setup_fail");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success(), "a failing setup must fail the test");
@@ -281,9 +303,11 @@ fn jet_scope_timeout_exceeded_fails() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_timeout_exceeded.jet");
+    let cwd = isolated_test_package("jet_scope_timeout");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success(), "an over-budget timeout must fail");
@@ -304,10 +328,12 @@ fn jet_test_fail_then_fixed() {
 
     let fail = root.join("tests/fixtures/test_fail.jet");
     let fixed = root.join("tests/fixtures/test_fail.fixed.jet");
+    let cwd = isolated_test_package("jet_test_fail_fixed");
 
     let bad = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fail)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert_eq!(bad.status.code(), Some(1), "a test failure is not a compiler ICE");
@@ -323,6 +349,7 @@ fn jet_test_fail_then_fixed() {
     let good = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixed)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(good.status.success());
@@ -342,9 +369,18 @@ fn criterion_1_2_3_4_6_testing_file_failures_are_typed_and_path_bearing() {
 
     let failing = root.join("tests/fixtures/testing_failure_reports.jet");
     let fixed = root.join("tests/fixtures/testing_failure_reports.fixed.jet");
+    let cwd = isolated_test_package("jet_test_typed_failures");
+    let fixture_dir = cwd.path.join("tests/fixtures");
+    fs::create_dir_all(&fixture_dir).unwrap();
+    fs::copy(
+        root.join("tests/fixtures/testing_failure_reports.golden"),
+        fixture_dir.join("testing_failure_reports.golden"),
+    )
+    .unwrap();
     let bad = Command::new(&jet)
-        .arg("test")
+        .args(["test", "--show-default", "--capture=all"])
         .arg(&failing)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&bad.stdout);
@@ -384,7 +420,12 @@ fn criterion_1_2_3_4_6_testing_file_failures_are_typed_and_path_bearing() {
         "typed testing report snapshot drifted"
     );
 
-    let good = Command::new(&jet).arg("test").arg(&fixed).output().unwrap();
+    let good = Command::new(&jet)
+        .args(["test", "--show-default", "--capture=all"])
+        .arg(&fixed)
+        .current_dir(&cwd.path)
+        .output()
+        .unwrap();
     assert!(
         good.status.success(),
         "fixed testing helpers failed:\nstdout: {}\nstderr: {}",
@@ -401,9 +442,11 @@ fn release_test_uses_aot_tier_marker() {
         return;
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
+    let cwd = isolated_test_package("jet_release_property");
     let out = Command::new(&jet)
-        .args(["test", "--release", "--trace-tiers"])
+        .args(["test", "--release", "--trace-tiers", "--show-default", "--capture=all"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -668,13 +711,15 @@ fn property_generator_distribution_report_is_reproducible() {
 
     let fixture = root.join("tests/fixtures/property-generator-distribution.jet");
     let seed_arg = seed.to_string();
+    let cwd = isolated_test_package("jet_property_distribution");
     let test_out = Command::new(&jet)
-        .args(["test", "--serial"])
+        .args(["test", "--serial", "--show-default", "--capture=all"])
         .arg(&fixture)
         .env("JET_PROP_SEED", &seed_arg)
         .env("JET_PROP_TRACE", "1")
+        .current_dir(&cwd.path)
         .output()
-        .expect("run jet test property generator fixture");
+        .expect("run jet test property distribution");
     assert!(
         test_out.status.success(),
         "jet test property distribution failed:\nstdout: {}\nstderr: {}",
@@ -695,8 +740,9 @@ fn property_generator_distribution_report_is_reproducible() {
         .arg(&fixture)
         .arg("generator_contract")
         .env("JET_PROP_TRACE", "1")
+        .current_dir(&cwd.path)
         .output()
-        .expect("run generated property test fixture");
+        .expect("run generated property distribution");
     let _ = fs::remove_dir_all(&corpus);
     assert!(
         fuzz_out.status.success(),
@@ -777,9 +823,11 @@ fn jet_property_test_passes() {
         return;
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
+    let cwd = isolated_test_package("jet_property_pass");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -810,9 +858,11 @@ fn jet_property_test_shrinks_failure() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
+    let cwd = isolated_test_package("jet_property_shrink");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -842,9 +892,11 @@ fn jet_property_test_rejects_ungeneratable_param() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_bad_type.jet");
+    let cwd = isolated_test_package("jet_property_bad_type");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -870,22 +922,23 @@ fn jet_doctest_passes() {
         return;
     }
     let example = root.join("examples/features/comptime/doctests.jet");
+    let cwd = isolated_test_package("jet_doctests");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let combined = format!("{stdout}{stderr}");
     assert!(
         out.status.success(),
-        "doctest example failed:\nstdout: {}\nstderr: {}",
-        stdout,
-        String::from_utf8_lossy(&out.stderr)
+        "doctest example failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(
-        stdout.contains("doctest at") && stdout.contains("pass"),
-        "no doctest pass line:\n{}",
-        stdout
+        combined.contains("doctest at") && combined.contains("pass"),
+        "no doctest pass line:\n{combined}"
     );
 }
 
@@ -900,9 +953,11 @@ fn jet_doctest_mismatch_fires_e2901() {
         return;
     }
     let fixture = root.join("tests/fixtures/doctest_fail.jet");
+    let cwd = isolated_test_package("jet_doctest_failure");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success(), "a wrong doctest must exit nonzero");
@@ -922,10 +977,12 @@ fn jet_test_coverage_reports_hit_and_miss() {
         return;
     }
     let fixture = root.join("tests/fixtures/coverage.jet");
+    let cwd = isolated_test_package("jet_coverage_hit_miss");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--coverage")
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -957,13 +1014,15 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
         return;
     }
     let fixture = root.join("tests/fixtures/coverage.jet");
+    let cwd = isolated_test_package("jet_coverage_branch");
     let run = |json: bool| {
         let mut command = Command::new(&jet);
         command.arg("test").arg("--coverage");
         if json {
             command.arg("--json");
         }
-        command.arg(&fixture).output().unwrap()
+        command.arg(&fixture).current_dir(&cwd.path);
+        command.output().unwrap()
     };
     let text_output = run(false);
     assert!(
@@ -1033,8 +1092,10 @@ fn test_target_does_not_reintroduce_retired_command() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     let example = root.join("examples/features/tooling/test_target/run.jet");
+    let cwd = isolated_test_package("jet_test_target");
     let out = Command::new(&jet)
         .args(["bench", example.to_str().unwrap()])
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -1140,6 +1201,7 @@ fn jet_test_dir_recurses_into_subdirectories() {
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&dir)
+        .current_dir(&dir)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1199,7 +1261,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     )
     .unwrap();
     let out = Command::new(&jet)
-        .arg("test")
+        .args(["test", "--show-default", "--capture=all"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1232,8 +1294,14 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
     )
     .unwrap();
     let out = Command::new(&jet)
-        .args(["test", dir.to_str().unwrap()])
+        .args([
+            "test",
+            "--show-default",
+            "--capture=all",
+            dir.to_str().unwrap(),
+        ])
         .env("NO_COLOR", "1")
+        .current_dir(&dir)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1333,11 +1401,13 @@ fn jet_test_filter_keeps_only_matching_names() {
     if !have_rustc || !jet.exists() {
         return;
     }
+    let cwd = isolated_test_package("jet_test_filter");
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--filter=consistent")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1370,10 +1440,12 @@ fn jet_test_shuffle_prints_the_seed_used() {
         return;
     }
     let example = root.join("examples/features/tooling/tests.jet");
+    let cwd = isolated_test_package("jet_test_shuffle");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--shuffle=42")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1401,10 +1473,12 @@ fn jet_test_serial_flag_still_passes() {
         return;
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
+    let cwd = isolated_test_package("jet_test_serial");
     let out = Command::new(&jet)
         .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--serial")
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1434,6 +1508,7 @@ fn jet_fuzz_example_clean_run_output() {
         return;
     }
     let example = root.join("examples/features/tooling/fuzz_demo.jet");
+    let cwd = isolated_test_package("jet_fuzz_example");
     let corpus = fuzz_corpus_dir("example_demo");
     let out = Command::new(&jet)
         .args(["test", "--grade=generated"])
@@ -1442,6 +1517,7 @@ fn jet_fuzz_example_clean_run_output() {
         .arg(format!("--corpus={}", corpus.display()))
         .arg(&example)
         .arg("reverse_twice_is_identity")
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(
@@ -1469,15 +1545,18 @@ fn jet_fuzz_ambiguous_target_names_candidates() {
         return;
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
+    let cwd = isolated_test_package("jet_fuzz_ambiguous");
     let out = Command::new(&jet)
         .args(["test", "--grade=generated"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success(), "ambiguous target must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
+    let normalized = stderr.to_ascii_lowercase();
     assert!(
-        stderr.contains("multiple property tests")
+        normalized.contains("multiple property tests")
             && stderr.contains("jet test --grade=generated <file> <name>"),
         "expected the ambiguous-target message:\n{}",
         stderr
@@ -1494,15 +1573,18 @@ fn jet_fuzz_no_property_test_errors() {
         return;
     }
     let example = root.join("examples/features/tooling/tests.jet");
+    let cwd = isolated_test_package("jet_fuzz_no_property");
     let out = Command::new(&jet)
         .args(["test", "--grade=generated"])
         .arg(&example)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!out.status.success(), "no property test must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
+    let normalized = stderr.to_ascii_lowercase();
     assert!(
-        stderr.contains("no property `#Test fn`"),
+        normalized.contains("no property `#test fn`"),
         "expected the no-property-test message:\n{}",
         stderr
     );
@@ -1519,20 +1601,24 @@ fn jet_fuzz_deterministic_same_seed_same_corpus() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
+    let cwd_a = isolated_test_package("jet_fuzz_deterministic_a");
 
     let corpus_a = fuzz_corpus_dir("det_a");
     let out_a = Command::new(&jet)
         .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus_a.display()))
         .arg(&fixture)
+        .current_dir(&cwd_a.path)
         .output()
         .unwrap();
 
     let corpus_b = fuzz_corpus_dir("det_b");
+    let cwd_b = isolated_test_package("jet_fuzz_deterministic_b");
     let out_b = Command::new(&jet)
         .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus_b.display()))
         .arg(&fixture)
+        .current_dir(&cwd_b.path)
         .output()
         .unwrap();
 
@@ -1604,12 +1690,14 @@ fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
         return;
     }
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
+    let cwd = isolated_test_package("jet_fuzz_replay");
     let corpus = fuzz_corpus_dir("replay");
 
     let first = Command::new(&jet)
         .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus.display()))
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!first.status.success());
@@ -1626,6 +1714,7 @@ fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
         .arg("--seed=999")
         .arg(format!("--corpus={}", corpus.display()))
         .arg(&fixture)
+        .current_dir(&cwd.path)
         .output()
         .unwrap();
     assert!(!second.status.success());
@@ -1714,6 +1803,7 @@ fn same_argv(expected: Recorded, oracle_argv: [String]) Bool -> {
     let out = Command::new(&jet)
         .args(["test", "--show-default", "--serial"])
         .arg(&source)
+        .current_dir(&dir)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
