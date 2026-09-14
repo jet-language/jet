@@ -2904,7 +2904,7 @@ fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
     };
     match jet_http_mux_serve_once_listener(&listener, &mux) {
         Ok(()) => result_ok_unit(),
-        Err(e) => result_err(e),
+        Err(e) => http_err(e),
     }
 }
 fn jet_jit_http_serve_once(addr: i64, mux: i64) -> i64 {
@@ -2914,7 +2914,7 @@ fn jet_jit_http_serve_once(addr: i64, mux: i64) -> i64 {
     let addr = clone_string(addr);
     match jet_http_mux_serve_once(&addr, (*mux).clone()) {
         Ok(()) => result_ok_unit(),
-        Err(error) => result_err(error),
+        Err(error) => http_err(error),
     }
 }
 
@@ -3574,6 +3574,7 @@ host_fns! {
     unix_close: "jet_jit_net_unix_close" => jet_jit_net_unix_close: sig1;
     tcp_accept: "jet_jit_tcp_listener_accept" => jet_jit_tcp_listener_accept: sig1;
     tcp_local_addr: "jet_jit_tcp_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
+    tcp_local_addr_prelude: "jet_net_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
     tcp_read_text: "jet_jit_tcp_stream_read_text" => jet_jit_tcp_stream_read_text: sig2;
     tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
     tcp_shutdown: "jet_jit_tcp_stream_shutdown" => jet_jit_tcp_stream_shutdown: sig2;
@@ -3614,9 +3615,13 @@ host_fns! {
     http_router_register: "jet_jit_http_router_register" => jet_jit_http_router_register: sig7;
     http_router_register_prelude: "jet_http_router_register" => jet_jit_http_router_register: sig7;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
+    http_response_prelude: "jet_http_srv_response" => jet_jit_http_response: sig2;
     http_server_response_header: "jet_jit_http_server_response_header" => jet_jit_http_server_response_header: sig3;
     http_server_access_log: "jet_jit_http_server_access_log" => jet_jit_http_server_access_log: sig2;
     http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
+    http_req_body_prelude: "jet_http_srv_req_body" => jet_jit_http_req_body: sig1;
+    http_req_method_prelude: "jet_http_srv_req_method" => jet_jit_http_req_method: sig1;
+    http_req_path_prelude: "jet_http_srv_req_path" => jet_jit_http_req_path: sig1;
     http_req_method: "jet_jit_http_req_method" => jet_jit_http_req_method: sig1;
     http_req_path: "jet_jit_http_req_path" => jet_jit_http_req_path: sig1;
     http_req_param: "jet_jit_http_req_param" => jet_jit_http_req_param: sig2;
@@ -3642,6 +3647,9 @@ host_fns! {
     http_project_json_decode_error: "jet_jit_http_project_json_decode_error" => jet_jit_http_project_json_decode_error: sig1;
     http_project_json_decode_error_prelude: "jet_http_project_json_decode_error" => jet_jit_http_project_json_decode_error: sig1;
     http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
+    http_resp_status_prelude: "jet_http_client_response_status" => jet_jit_http_resp_status: sig1;
+    http_resp_status_value_prelude: "jet_http_client_response_status_value" => jet_jit_http_resp_status: sig1;
+    http_client_resp_body_prelude: "jet_http_client_response_body" => jet_jit_http_client_resp_body: sig1;
     http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
     core_http_serve: "jet_http_serve" => jet_jit_core_http_serve: sig2;
     http_client_resp_body: "jet_jit_http_client_resp_body" => jet_jit_http_client_resp_body: sig1;

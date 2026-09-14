@@ -1200,11 +1200,25 @@ fn jet_http_mux_register(
     mux.add_handler_with_contract(&method, &pattern, handler, contract_json);
 }
 
-
-fn jet_http_srv_response(status: i64, body: &String) -> JetHTTPResponse {
-    jet_http_srv_response_owned(status, body.clone())
+trait JetHTTPStatusCode {
+    fn jet_http_status_code(self) -> i64;
 }
 
+impl JetHTTPStatusCode for i64 {
+    fn jet_http_status_code(self) -> i64 {
+        self
+    }
+}
+
+impl JetHTTPStatusCode for jet_foundation::Numeric::JetInt {
+    fn jet_http_status_code(self) -> i64 {
+        self.to_i64().unwrap_or(500)
+    }
+}
+
+fn jet_http_srv_response<S: JetHTTPStatusCode>(status: S, body: &String) -> JetHTTPResponse {
+    jet_http_srv_response_owned(status.jet_http_status_code(), body.clone())
+}
 fn jet_http_srv_response_owned(status: i64, body: String) -> JetHTTPResponse {
     let (status, body) = if !(100..=599).contains(&status) {
         (500, "500 Internal Server Error".to_string())
@@ -4036,14 +4050,18 @@ fn jet_http_srv_read_streaming(
     )))
 }
 
-fn jet_http_mux_serve_once(addr: &String, mux: JetHTTPMux) -> Result<(), String> {
+fn jet_http_mux_serve_once_raw(addr: &String, mux: JetHTTPMux) -> Result<(), String> {
     jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
-    jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux)
+    jet_http_mux_serve_once_listener_raw(&JetTCPListener { inner: listener }, &mux)
 }
 
-fn jet_http_mux_serve_once_listener(
+fn jet_http_mux_serve_once(addr: &String, mux: JetHTTPMux) -> Result<(), JetHTTPError> {
+    jet_http_mux_serve_once_raw(addr, mux).map_err(|operation| JetHTTPError::IO { operation })
+}
+
+fn jet_http_mux_serve_once_listener_raw(
     listener: &JetTCPListener,
     mux: &JetHTTPMux,
 ) -> Result<(), String> {
@@ -4073,6 +4091,15 @@ fn jet_http_mux_serve_once_listener(
     jet_http_srv_write_response(&mut stream, &resp, &version, true)
         .map_err(|error| error.to_string())
 }
+
+fn jet_http_mux_serve_once_listener(
+    listener: &JetTCPListener,
+    mux: &JetHTTPMux,
+) -> Result<(), JetHTTPError> {
+    jet_http_mux_serve_once_listener_raw(listener, mux)
+        .map_err(|operation| JetHTTPError::IO { operation })
+}
+
 
 fn jet_http_accept_once(
     listener: &JetTCPListener,
@@ -6698,7 +6725,7 @@ pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
         });
 }
 
-fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {
+fn jet_http_srv_json_text<S: JetHTTPStatusCode>(status: S, body: &String) -> JetHTTPResponse {
     let mut response = jet_http_srv_response(status, body);
     let _ = response
         .headers
@@ -6707,7 +6734,7 @@ fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {
 }
 
 /// D-HTTP-JSON1=A: one JSON response. The content type is set for the caller.
-fn jet_http_srv_json<T: __jet_Encode>(status: i64, value: &T) -> JetHTTPResponse {
+fn jet_http_srv_json<S: JetHTTPStatusCode, T: __jet_Encode>(status: S, value: &T) -> JetHTTPResponse {
     jet_http_srv_json_text(status, &jet_enc_json_to_string(value))
 }
 
