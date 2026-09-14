@@ -11,6 +11,7 @@
 //! lines up even when the source line holds wide characters or emoji.
 
 use std::cell::Cell;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -23,6 +24,38 @@ pub struct Span {
 impl Span {
     pub fn new(start: usize, end: usize) -> Self {
         Span { start, end }
+    }
+}
+
+/// The source snapshot that owns a diagnostic.
+///
+/// A bundle checker keeps this identity attached to the report instead of
+/// asking a later renderer to infer an origin from a local byte span. `display`
+/// is the repository-relative path shown to people; `path` is the process path
+/// used by machine/editor consumers; `source` is the exact checked snapshot;
+/// `revision` identifies those source bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticOrigin {
+    pub display: String,
+    pub path: String,
+    pub source: String,
+    pub revision: String,
+}
+
+impl DiagnosticOrigin {
+    pub fn new(
+        display: impl Into<String>,
+        path: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
+        let source = source.into();
+        let revision = crate::SHA256::sha256_hex(source.as_bytes());
+        Self {
+            display: display.into(),
+            path: path.into(),
+            source,
+            revision,
+        }
     }
 }
 
@@ -170,17 +203,23 @@ pub enum StructuredDiagnostic {
 }
 
 /// Stable identity for one report named in a dependent's cause chain. The
-/// public report wire stays code-only; source projections use the span to
-/// distinguish repeated diagnostics with the same code.
+/// public report wire stays code-only; source projections use the span and
+/// originating snapshot to distinguish repeated diagnostics with the same code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticCause {
     pub code: String,
     pub span: Option<Span>,
+    pub origin: Option<Arc<DiagnosticOrigin>>,
 }
 
 impl DiagnosticCause {
     pub fn matches(&self, diagnostic: &Diagnostic) -> bool {
-        self.code == diagnostic.code && self.span.is_none_or(|span| diagnostic.span == Some(span))
+        self.code == diagnostic.code
+            && self.span.is_none_or(|span| diagnostic.span == Some(span))
+            && self
+                .origin
+                .as_ref()
+                .is_none_or(|origin| diagnostic.origin.as_ref() == Some(origin))
     }
 }
 #[derive(Debug, Clone)]
@@ -192,6 +231,10 @@ pub struct Diagnostic {
     pub why: String,
     pub fix: String,
     pub span: Option<Span>,
+    /// Exact source identity for a diagnostic raised in an imported module.
+    /// `None` keeps the caller-provided file/source context for diagnostics
+    /// that already belong to the active entry document.
+    pub origin: Option<Arc<DiagnosticOrigin>>,
     /// Ordered report identities that caused this report. Root reports carry none.
     pub cause: Vec<DiagnosticCause>,
     /// Mechanical fix projected from row metadata or authored from a
@@ -270,6 +313,7 @@ impl Diagnostic {
             why: crate::Outcome::jet_sentence_case_line(&rendered.why),
             fix: crate::Outcome::jet_sentence_case_line(&rendered.fix),
             span,
+            origin: None,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -338,6 +382,7 @@ impl Diagnostic {
             why: crate::Outcome::jet_sentence_case_line(&why),
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
+            origin: None,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -461,6 +506,40 @@ impl Diagnostic {
         self.edit = Some(edit);
         self
     }
+
+    /// Promote a source-derived suggestion for an otherwise explanatory row.
+    ///
+    /// Some registered rows intentionally publish a no-fix reason because the
+    /// general case is ambiguous. A producer may replace that reason when it
+    /// has proved one concrete edit from the source operands; the edit remains
+    /// advisory and requires review.
+    pub fn with_source_derived_suggestion(
+        mut self,
+        span: Span,
+        new_text: impl Into<String>,
+    ) -> Self {
+        assert!(
+            self.edit.is_none(),
+            "diagnostic `{}` already carries an edit",
+            self.code
+        );
+        let row = crate::Registry::diagnostic(&self.code)
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
+        assert!(
+            row.no_fix_reason.is_some(),
+            "diagnostic `{}` has no explanatory row reason to replace",
+            self.code
+        );
+        self.no_fix_reason = None;
+        self.applicability = Some(FixApplicability::Suggested);
+        self.safety = Some(FixSafety::NeedsReview);
+        self.edit = Some(TextEdit {
+            span,
+            new_text: new_text.into(),
+        });
+        self
+    }
+
     /// Attach a reviewable source edit without claiming that applying it is
     /// behavior-preserving.
     pub fn with_suggested_edit(self, span: Span, new_text: impl Into<String>) -> Self {
@@ -506,6 +585,7 @@ impl Diagnostic {
             why: crate::Outcome::jet_sentence_case_line(&why),
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
+            origin: None,
             cause: Vec::new(),
             applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
             safety: row.and_then(|row| row_safety(row, edit.as_ref())),
@@ -546,6 +626,7 @@ impl Diagnostic {
             why,
             fix: String::new(),
             span,
+            origin: None,
             cause: Vec::new(),
             edit: None,
             applicability: None,
@@ -629,6 +710,7 @@ impl Diagnostic {
             why: crate::Outcome::jet_sentence_case_line(&why),
             fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
+            origin: None,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
@@ -693,12 +775,30 @@ impl Diagnostic {
         Ok(self)
     }
 
+    /// Attach the source snapshot that owns this diagnostic.
+    pub fn set_origin(&mut self, origin: Arc<DiagnosticOrigin>) {
+        self.origin = Some(origin);
+    }
+
+    pub fn with_origin(mut self, origin: Arc<DiagnosticOrigin>) -> Self {
+        self.set_origin(origin);
+        self
+    }
+
+    pub fn origin(&self) -> Option<&DiagnosticOrigin> {
+        self.origin.as_deref()
+    }
+
     /// Attach a legacy code-only cause chain. New compiler-produced chains
     /// should use [`Diagnostic::caused_by`] so repeated codes retain identity.
     pub fn with_causes(mut self, cause: Vec<String>) -> Self {
         self.cause = cause
             .into_iter()
-            .map(|code| DiagnosticCause { code, span: None })
+            .map(|code| DiagnosticCause {
+                code,
+                span: None,
+                origin: None,
+            })
             .collect();
         self
     }
@@ -709,6 +809,7 @@ impl Diagnostic {
         self.cause.push(DiagnosticCause {
             code: cause.code.clone(),
             span: cause.span,
+            origin: cause.origin.clone(),
         });
         self.cause.extend(cause.cause.iter().cloned());
         self
@@ -800,6 +901,10 @@ impl Diagnostic {
         let theme = Theme::new(color);
         // Diagnostic fields are sentence-cased at construction. The terminal
         // projection only escapes them, so JSON/LSP and terminal text agree.
+        let (file, src) = self.origin.as_deref().map_or(
+            (file, src),
+            |origin| (origin.display.as_str(), origin.source.as_str()),
+        );
         let file = escape_terminal_text(file);
         let what = escape_terminal_text(&self.what);
         let why = escape_terminal_text(&self.why);
@@ -925,6 +1030,13 @@ impl Diagnostic {
         src: &str,
         clears: usize,
     ) -> ReportEnvelope {
+        let (file, src) = match self.origin.as_deref() {
+            Some(origin) => (
+                ReportPath::from_process(&origin.path),
+                origin.source.as_str(),
+            ),
+            None => (file.clone(), src),
+        };
         let sev = match self.severity {
             Severity::Error => "error",
             Severity::Lint => "warning",

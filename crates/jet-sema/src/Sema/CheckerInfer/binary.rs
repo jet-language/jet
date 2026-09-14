@@ -30,6 +30,14 @@ fn is_written_negative_int(expr: &Expr) -> bool {
     }
 }
 
+fn simple_text_operand(expr: &Expr) -> Option<&str> {
+    match expr.without_parens() {
+        Expr::Ident(name, _) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+
 fn known_comptime_value(expr: &Expr) -> Option<CtValue> {
     match expr {
         Expr::ComptimeName {
@@ -2440,13 +2448,35 @@ impl<'a> Checker<'a> {
                         None
                     }
                 } else if lt == Type::String && op == BinOp::Add {
-                    self.diags.push(Diagnostic::error(
+                    let operands = (simple_text_operand(lhs), simple_text_operand(rhs));
+                    let what = match operands {
+                        (Some(left), Some(right)) => {
+                            format!("text values `{left}` and `{right}` aren't joined with `+`")
+                        }
+                        _ => "text isn't joined with `+`".to_string(),
+                    };
+                    let fix = match operands {
+                        (Some(left), Some(right)) => {
+                            format!(
+                                "write the pieces inside one string: \"{{{left}}}{{{right}}}\""
+                            )
+                        }
+                        _ => "write the pieces inside one string: \"{a}{b}\"".to_string(),
+                    };
+                    let mut diagnostic = Diagnostic::error(
                         "E0109",
-                        "text isn't joined with `+`".to_string(),
+                        what,
                         "there's one way to build text: interpolation (S8)".to_string(),
-                        "write the pieces inside one string: \"{a}{b}\"".to_string(),
+                        fix,
                         Some(span),
-                    ));
+                    );
+                    if let (Some(left), Some(right)) = operands {
+                        diagnostic = diagnostic.with_source_derived_suggestion(
+                            span,
+                            format!("\"{{{left}}}{{{right}}}\""),
+                        );
+                    }
+                    self.diags.push(diagnostic);
                     None
                 } else {
                     self.op_mismatch(op, &lt, &rt, span);

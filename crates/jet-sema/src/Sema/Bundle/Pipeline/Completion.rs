@@ -253,6 +253,13 @@ pub(super) fn complete_bundle_check(
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        let origin = std::sync::Arc::new(
+            jet_foundation::Diagnostics::DiagnosticOrigin::new(
+                module.display.clone(),
+                module.path.to_string_lossy().into_owned(),
+                module.source.clone(),
+            ),
+        );
         let mut local_summaries = HashMap::new();
         let mut local_pending_diagnostics = Vec::new();
         let mut module_diags = check_module_bodies(
@@ -275,6 +282,12 @@ pub(super) fn complete_bundle_check(
         dedupe_unknown_names(&mut module_diags);
         super::super::prune_conversion_cascades(&mut module_diags);
         dedupe_soft_public_lints(&mut module_diags);
+        for diagnostic in &mut module_diags {
+            diagnostic.set_origin(origin.clone());
+        }
+        for pending in &mut local_pending_diagnostics {
+            pending.diagnostic.set_origin(origin.clone());
+        }
         // Spans are local to a module. Attach same-span causes before this
         // batch joins the other modules, so an identical byte range in a
         // separate source file can never become a false dependency.

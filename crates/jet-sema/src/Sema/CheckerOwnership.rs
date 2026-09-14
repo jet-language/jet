@@ -2331,10 +2331,11 @@ impl<'a> Checker<'a> {
             self.clear_origin(root);
         }
         if self.iter_borrowed.contains(&root) {
-            self.diags
-                .push(crate::Sema::Diagnostics::collection_changed_in_loop(
-                    &root, span,
-                ));
+            self.diags.push(
+                crate::Sema::Diagnostics::collection_changed_by_method_in_loop(
+                    &root, method, span,
+                ),
+            );
         }
         if let Some(info) = self.lookup(&root) {
             if !info.mutable && self.frozen_for(&root).is_none() {

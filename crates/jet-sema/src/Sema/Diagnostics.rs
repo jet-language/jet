@@ -1999,16 +1999,33 @@ pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<S
 }
 
 pub(crate) fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
+    collection_changed_in_loop_with_operation(name, None, span)
+}
+
+pub(crate) fn collection_changed_by_method_in_loop(
+    name: &str,
+    method: &str,
+    span: Span,
+) -> Diagnostic {
+    collection_changed_in_loop_with_operation(name, Some(method), span)
+}
+
+fn collection_changed_in_loop_with_operation(
+    name: &str,
+    operation: Option<&str>,
+    span: Span,
+) -> Diagnostic {
+    let operation = operation
+        .map(|method| format!("`{name}.{method}()`"))
+        .unwrap_or_else(|| format!("a mutation of `{name}`"));
     Diagnostic::error(
         "E0507",
+        format!("while the loop is reading `{name}`, nothing may change it"),
         format!(
-            "while the loop is reading `{}`, nothing may change it",
-            name
+            "the loop reads `{name}` across its body, so {operation} changes the collection being visited"
         ),
-        "a `loop` borrows the whole collection until the body finishes".to_string(),
         format!(
-            "collect changes into a second list, or loop over indices: `loop i in 0..{}.len()-1 {{ }}`",
-            name
+            "choose the collection intent explicitly instead of changing `{name}` with {operation}: collect a separate result when the original traversal should stay unchanged; snapshot `{name}` before the loop when only original values belong in the traversal; or use an explicit work queue when newly added values should be visited"
         ),
         Some(span),
     )

@@ -3,6 +3,6 @@ Error [E0507]: While the loop is reading `nums`, nothing may change it
     |
   3 |     loop x in nums -> nums.push(3)
     |                       ^^^^
- Why: A `loop` borrows the whole collection until the body finishes
- Fix: Collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+ Why: The loop reads `nums` across its body, so `nums.push()` changes the collection being visited
+ Fix: Choose the collection intent explicitly instead of changing `nums` with `nums.push()`: collect a separate result when the original traversal should stay unchanged; snapshot `nums` before the loop when only original values belong in the traversal; or use an explicit work queue when newly added values should be visited
 More: jet-lang.dev/e/E0507
