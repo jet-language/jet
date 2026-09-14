@@ -3664,6 +3664,7 @@ host_fns! {
     http_server_shutdown_prelude: "jet_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
     http_shutdown_report_field: "jet_jit_http_shutdown_report_field" => jet_jit_http_shutdown_report_field: sig2;
     http_serve_once_listener: "jet_jit_http_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
+    http_mux_serve_once_listener_prelude: "jet_http_mux_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
     http_client_get: "jet_jit_http_client_get" => jet_jit_http_client_get: sig1;
     http_client_post: "jet_jit_http_client_post" => jet_jit_http_client_post: sig2;
     http_handler_bind: "jet_jit_http_handler_bind" => jet_jit_http_handler_bind: sig2;
