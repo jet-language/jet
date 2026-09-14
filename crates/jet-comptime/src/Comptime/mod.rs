@@ -2241,8 +2241,17 @@ fn expand_derive_items(
                 let mut stmts = vec![stmt.clone()];
                 expand_template_stmts(&mut stmts, interp, scope)?;
                 if !bind_template_reified_statement(&stmts[0], interp, scope)? {
-                    sync_template_binding_types(interp, scope);
-                    let _ = interp.exec_block(&stmts, scope)?;
+                    if let crate::AST::Stmt::Val(binding) = &stmts[0] {
+                        let value = interp.eval(&binding.init, scope)?;
+                        if let Some(pattern) = &binding.pattern {
+                            interp.bind_pattern(pattern, value, scope)?;
+                        } else {
+                            scope.insert(binding.name.clone(), value);
+                        }
+                    } else {
+                        sync_template_binding_types(interp, scope);
+                        let _ = interp.exec_block(&stmts, scope)?;
+                    }
                     sync_template_binding_types(interp, scope);
                 }
             }
