@@ -84,6 +84,26 @@ impl<'a> Checker<'a> {
         Cow::Owned(globals)
     }
 
+    /// Types for names visible to the compile-time evaluator. CtValue erases
+    /// nominal text facts, so folding must carry the checker-owned declaration
+    /// type alongside the value. Only names with values are exposed: the MIR
+    /// fragment receives each typed name as an argument.
+    pub(crate) fn current_ct_binding_types(
+        &self,
+        values: &HashMap<String, crate::Comptime::CtValue>,
+    ) -> HashMap<String, Type> {
+        values
+            .keys()
+            .filter_map(|name| {
+                self.flow
+                    .bindings
+                    .get(name)
+                    .map(|info| (name.clone(), info.ty.clone()))
+                    .or_else(|| self.consts.get(name).map(|ty| (name.clone(), ty.clone())))
+            })
+            .collect()
+    }
+
     /// Record what a folded initializer changed about earlier bindings.
     /// `r :: Reader.over(bytes)` followed by `magic :: r.read_u32_le()?`
     /// advances `r`; without writing that back, every later fold reads a

@@ -39,7 +39,7 @@ use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::TFailureCarrier;
 use crate::Codegen::TIR::THardwareCall;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::{alloc_new_type, TAllocCtor};
+use crate::Codegen::TIR::{allocator_constructor_owner, TAllocCtor};
 use crate::AST::{
     AccessConvention, BinOp, EnumLitArg, Expr, Lambda, LambdaBody, LambdaMeta, LambdaParam, Stmt,
     StrPart, Type,
@@ -47,6 +47,18 @@ use crate::AST::{
 use crate::Syntax::{CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord};
 
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
+    CoreCallRecord::new("core.reflect", "of", "jet_reflect_of", true, &[true]),
+    CoreCallRecord::new(
+        "core.http.server",
+        "cors_policy",
+        "jet_http_cors_policy",
+        false,
+        &[true, true, true, true, true, true, true],
+    )
+    .with_max_arity(7)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .with_jit_symbol("jet_jit_http_cors_policy")
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.archive",
         "zip_decompress",
@@ -86,6 +98,24 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "core.encoding.xml", "expanded_name", "jet_std_xml_expanded_name", true, &[true],
     ).with_jit_symbol("jet_jit_xml_expanded_name"),
     CoreCallRecord::new(
+        "core.email",
+        "smtp",
+        "jet_email::smtp",
+        true,
+        &[true],
+    )
+    .with_jit_symbol("jet_jit_email_smtp")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.email",
+        "smtp_from_env",
+        "jet_email::smtp_from_env",
+        true,
+        &[],
+    )
+    .with_jit_symbol("jet_jit_email_smtp_from_env")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.encoding.toml", "decode", "jet_enc_toml_decode", true, &[true],
     ).without_direct_jit(),
     CoreCallRecord::new(
@@ -97,11 +127,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new(
         "core.data", "mean", "jet_data_mean_checked", true, &[true],
     ).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service", "set_state_event_log", "jet_services_set_state_event_log", true,
-        &[true, false, false, false, false],
-    ).without_direct_aot().without_direct_jit()
-        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.sync", "text_new", "jet_sync_text_new", true, &[false, false],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -199,38 +224,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "core.crypto", "open", "jet_crypto_open_typed_impl", false, &[true, false, true],
     )
     .with_jit_symbol("jet_jit_crypto_open")
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service", "workflow_activity", "jet_services_workflow_activity", true,
-        &[true, false, false, false, false],
-    ).without_direct_aot().without_direct_jit()
-        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service", "workflow_activity_retry", "jet_services_workflow_activity_retry", true,
-        &[true, false, false, false],
-    )
-    .without_direct_aot()
-    .without_direct_jit()
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service",
-        "workflow_activity_complete",
-        "jet_services_workflow_activity_complete",
-        true,
-        &[true, false, false, false],
-    )
-    .without_direct_aot()
-    .without_direct_jit()
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service",
-        "workflow_outcome",
-        "jet_services_workflow_outcome",
-        true,
-        &[true, false],
-    )
-    .without_direct_aot()
-    .without_direct_jit()
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.sync", "counter_new", "jet_sync_counter_new", true, &[false, false],
@@ -532,6 +525,7 @@ use crate::Codegen::TIR::jit_spawn_site_with;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
 use crate::Codegen::TIR::lower::core_module_path_from_receiver;
 use crate::Codegen::TIR::lower::in_own_frame;
+use crate::Codegen::TIR::lower::consume_plain_helper_route;
 use crate::Codegen::TIR::lower::lower_cursor_take_pattern;
 use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
@@ -681,24 +675,77 @@ fn invariant_method_expr(span: Span, construct: impl Into<String>) -> TExpr {
         },
     }
 }
+
+/// One projection for both TIR admission and lowering of checked web receivers.
+pub(crate) fn web_receiver_projection<'a>(
+    receiver: Option<&str>,
+    method: &'a str,
+    arity: usize,
+) -> Option<(&'static str, &'a str)> {
+    match (receiver, method, arity) {
+        (Some("WebTable"), "with_column", 1) => Some(("core.web.table", "with_column")),
+        (Some("WebTable"), "paginate", 2) => Some(("core.web.table", "paginate")),
+        (Some("WebTable"), "page", 0) => Some(("core.web.table", "page_state")),
+        (Some("WebStore"), "set", 1) => Some(("core.web.store", "set")),
+        (Some("WebStore"), "signal", 0) => Some(("core.web.store", "signal")),
+        (Some("WebStore"), "state_signal", 0) => Some(("core.web.store", "state_signal")),
+        (Some("WebStore"), "facts_json", 0) => Some(("core.web.store", "facts_json")),
+        (
+            Some("WebQuery"),
+            "state" | "state_signal" | "mutation_state" | "mutation_signal" | "invalidate" | "get"
+            | "show" | "facts" | "cancel" | "refresh",
+            0,
+        ) => Some(("core.web.query", method)),
+        (Some("WebFormTyped"), "set_async_validator", 4) => {
+            Some(("core.web.forms", "typed_set_async_validator"))
+        }
+        (Some("WebFormTyped"), "set_action", 1) => Some(("core.web.forms", "typed_set_action")),
+        (Some("WebFormTyped"), "set", 2) => Some(("core.web.forms", "typed_set")),
+        (Some("WebFormTyped"), "blur", 1) => Some(("core.web.forms", "typed_blur")),
+        (Some("WebFormTyped"), "focus", 1) => Some(("core.web.forms", "typed_focus")),
+        (Some("WebFormTyped"), "post", 1) => Some(("core.web.forms", "typed_post")),
+        (Some("WebFormTyped"), "validate", 0) => Some(("core.web.forms", "typed_validate")),
+        (Some("WebFormTyped"), "validate", 3) => Some(("core.web.forms", "typed_validate_field")),
+        (Some("WebFormValidationChain"), "render", 0) => {
+            Some(("core.web.forms", "typed_validation_render"))
+        }
+        (Some("WebFormTyped"), "cancel", 0) => Some(("core.web.forms", "typed_cancel")),
+        (Some("WebFormTyped"), "submit", 0) => Some(("core.web.forms", "typed_submit")),
+        (Some("WebFormTyped"), "no_script", 0) => Some(("core.web.forms", "typed_no_script")),
+        (Some("WebFormTyped"), "state", 0) => Some(("core.web.forms", "typed_state")),
+        (Some("WebFormTyped"), "lifecycle", 0) => Some(("core.web.forms", "typed_lifecycle")),
+        (Some("WebFormTyped"), "errors", 0) => Some(("core.web.forms", "typed_errors")),
+        (Some("WebFormTyped"), "render", 0) => Some(("core.web.forms", "typed_html")),
+        _ => None,
+    }
+}
+
 fn checked_core_record(
     module: &str,
     method: &str,
     arity: usize,
     span: Span,
 ) -> Result<&'static crate::Syntax::CoreCallRecord, TExpr> {
-
+    // `process.run(argv, authority)` is the checked authority-boundary form
+    // of the one public call. Its binary ABI has a distinct registry row so
+    // AOT/JIT never call the unary symbol with an extra argument.
+    let (lookup_module, lookup_method) =
+        if module == "core.process" && method == "run" && arity == 2 {
+            ("core.process", "run_with_authority")
+        } else {
+            (module, method)
+        };
     crate::Syntax::core_call_projection(
-        module,
-        method,
+        lookup_module,
+        lookup_method,
         crate::Syntax::CoreCallCoverage::TIR_SUBSET,
         arity,
     )
     .or_else(|error| match error {
         CoreCallProjectionError::Unknown => crate::Syntax::core_call_projection_in(
             TIR_CORE_CALL_RECORDS,
-            module,
-            method,
+            lookup_module,
+            lookup_method,
             crate::Syntax::CoreCallCoverage::TIR_SUBSET,
             arity,
         ),
@@ -761,6 +808,73 @@ fn lower_core_math_abs(
             type_name: type_name.to_string(),
             func: "abs".to_string(),
             args: vec![arg],
+        },
+    }
+}
+/// Lower sema-resolved polymorphic `core.math` numeric predicates through the
+/// typed numeric predicate family used by receiver methods. These calls do not
+/// share the fixed CoreCall ABI because sema resolves their argument type.
+fn lower_core_math_predicate(
+    method: &str,
+    args: &[crate::AST::CallArg],
+    resolved_ret: Option<&Type>,
+    span: Span,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let predicate = match method {
+        "is_nan" => "is_nan",
+        "is_inf" => "is_infinite",
+        "is_finite" => "is_finite",
+        _ => {
+            return invariant_method_expr(
+                span,
+                format!("checked Core call `core.math.{method}` has no predicate route"),
+            );
+        }
+    };
+    if args.len() != 1 {
+        return invariant_method_expr(
+            span,
+            format!(
+                "checked Core call `core.math.{method}` has wrong arity {}",
+                args.len()
+            ),
+        );
+    }
+    let Some(ret) = resolved_ret.cloned() else {
+        return invariant_method_expr(
+            span,
+            format!("checked Core call `core.math.{method}` has no resolved return type"),
+        );
+    };
+    let arg = lower_expr(&args[0].expr, cx, env);
+    if !matches!(
+        (&arg.ty, &ret),
+        (Type::Float | Type::Float32, Type::Bool)
+    ) {
+        return invariant_method_expr(
+            span,
+            format!(
+                "checked Core call `core.math.{method}` has unsupported type pair {} -> {}",
+                arg.ty.name(),
+                ret.name()
+            ),
+        );
+    }
+    let source_name = arg.ty.name();
+    let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+    let Some(op) = resolve_numeric_op(predicate, &source_name, line) else {
+        return invariant_method_expr(
+            span,
+            format!("checked Core call `core.math.{method}` has no numeric predicate route"),
+        );
+    };
+    TExpr {
+        ty: ret,
+        kind: TExprKind::NumericMethod {
+            recv: Box::new(arg),
+            op,
         },
     }
 }
@@ -1012,6 +1126,7 @@ fn db_static_sql_text(expr: &TExpr) -> Option<String> {
                 kind: crate::Codegen::TIR::TTypedTextInterpKind::SQL,
                 literals,
                 holes,
+                trusted_html: _,
             } => {
                 let mut sql = String::new();
                 for (index, literal) in literals.iter().enumerate() {
@@ -1609,6 +1724,70 @@ fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
         })
         .collect()
 }
+fn normalize_http_cors_policy_args(args: &mut Vec<TExpr>) {
+    if args.first().is_none() {
+        return;
+    }
+    let list_ty = Type::List(Box::new(Type::String));
+    let empty_list = || TExpr {
+        ty: list_ty.clone(),
+        kind: TExprKind::ListLit(Vec::new()),
+    };
+    let origins = args[0].clone();
+    let (origins_mode, origins_value) = match &origins.kind {
+        TExprKind::EnumLit {
+            variant,
+            payload: TEnumPayload::Unit,
+            ..
+        } if variant == "Any" => (
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::IntLit(0, None),
+            },
+            empty_list(),
+        ),
+        TExprKind::EnumLit {
+            variant,
+            payload: TEnumPayload::Positional(values),
+            ..
+        } if variant == "List" && values.len() == 1 => (
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::IntLit(1, None),
+            },
+            values[0].value.clone(),
+        ),
+        _ => (
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::IntLit(1, None),
+            },
+            origins,
+        ),
+    };
+    let methods = args.get(1).cloned().unwrap_or_else(|| empty_list());
+    let headers = args.get(2).cloned().unwrap_or_else(|| empty_list());
+    let credentials = args.get(3).cloned().unwrap_or(TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::BoolLit(false),
+    });
+    let max_age = args.get(4).cloned().unwrap_or(TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(86_400, None),
+    });
+    *args = vec![
+        origins_mode,
+        origins_value,
+        methods,
+        headers,
+        credentials,
+        TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(1, None),
+        },
+        max_age,
+    ];
+}
 
 fn crypto_instance_helper(kind: &str, method: &str) -> Option<&'static str> {
     match (kind, method) {
@@ -2184,11 +2363,9 @@ pub(crate) fn lower_method_call_with_sig(
         if let Expr::Ident(name, _) = receiver {
             return TExpr {
                 ty: Type::Named(Syntax::TYPE_MEMO_STATS.to_string()),
-                kind: TExprKind::Call {
-                    name: Syntax::memo_stats_call(name),
-                    type_args: Vec::new(),
-                    args: Vec::new(),
-                },
+                kind: TExprKind::HostCall(Box::new(THostCall::MemoStats {
+                    name: name.clone(),
+                })),
             };
         }
     }
@@ -3191,6 +3368,35 @@ fn app_route_binding(method: &str, handler: Option<&Expr>, cx: &Cx) -> String {
         .join(";")
 }
 
+fn lower_game_handle_receiver(
+    receiver: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    let Expr::Field(base, field, _) = receiver else {
+        return None;
+    };
+    let owner = tir_recv_jet_ty(base, env)?;
+    let Type::Named(owner) = owner else {
+        return None;
+    };
+    let target = match (owner.as_str(), field.as_str()) {
+        ("GameScene", "assets") => "GameAssets",
+        ("GameScene", "input") => "GameInputMap",
+        ("GameFrame", "input") => "GameInputSnapshot",
+        _ => return None,
+    };
+    let base = crate::Codegen::TIR::lower_expr(base, cx, env);
+    Some(TExpr {
+        ty: Type::Named(target.to_string()),
+        kind: TExprKind::Field {
+            recv: Box::new(base),
+            field: field.clone(),
+            boxed: false,
+        },
+    })
+}
+
 fn lower_method_call_impl(
     receiver: &Expr,
     method: &str,
@@ -3530,8 +3736,10 @@ fn lower_method_call_impl(
                     };
                 });
             }
-            return TExpr {
-                ty: ret,
+            let call_ty =
+                call_return_type_with_args(cx, &root_name, type_args, &lowered_args);
+            let lowered = TExpr {
+                ty: call_ty,
                 kind: TExprKind::Call {
                     name: cx.jit_local_call_prefix.as_ref().map_or_else(
                         || root_name.clone(),
@@ -3541,6 +3749,16 @@ fn lower_method_call_impl(
                     args: lowered_args,
                 },
             };
+            let lowered = match source_arg_order(args) {
+                Some(order) => preserve_source_arg_order(
+                    lowered,
+                    &order,
+                    args.len(),
+                    method_span.start as u32,
+                ),
+                None => lowered,
+            };
+            return consume_plain_helper_route(resolved_ret, method_span, lowered, cx, env);
         });
     }
     // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a failure.
@@ -3560,17 +3778,28 @@ fn lower_method_call_impl(
             };
             let recv = lower_expr(receiver, cx, env);
             let why = lower_one_call_arg(&args[0], None, env, cx);
-            return TExpr {
+            let receiver = TCallArg {
+                value: recv,
+                template_items: None,
+                borrow: false,
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            };
+            TExpr {
                 ty,
-                kind: TExprKind::MethodCall {
-                    recv: Box::new(recv),
+                kind: TExprKind::StaticCall {
+                    owner: rooted_owner("JetOptionalView"),
+                    owner_type: None,
                     method: TMethodRef::bare(method),
                     type_args: Vec::new(),
-                    args: vec![why],
-                    source_first_string_literal: first_string_literal_arg(args),
-                    operator_line: None,
+                    args: vec![receiver, why],
                 },
-            };
+            }
         });
     }
     // D-FAIL-CARRIER1=A: the carrier's middle states. `.partial` reads the
@@ -4985,8 +5214,7 @@ fn lower_method_call_impl(
     // target-neutral fact. Runtime allocation is lowered from this node by the
     // shared MIR adapter; no Rust constructor text is produced here.
     {
-        let locals: HashSet<String> = env.locals.keys().cloned().collect();
-        if let Some(alloc_type) = alloc_new_type(receiver, method, cx, &locals) {
+        if let Some(alloc_type) = allocator_constructor_owner(recv_type.as_deref(), method) {
             return in_own_frame(|| {
                 let Some(ty) = resolved_ret.cloned() else {
                     return invariant_method_expr(
@@ -5084,7 +5312,13 @@ fn lower_method_call_impl(
                         );
                     }
                 };
-                let Some(ty) = resolved_ret.cloned() else {
+                let ty = resolved_ret.cloned().or_else(|| match (static_type, method) {
+                    ("Scene", "new") => Some(Type::Named("GameScene".to_string())),
+                    ("Replay", "record") => Some(Type::Named("GameReplay".to_string())),
+                    ("Backend", "headless") => Some(Type::Named("GameBackend".to_string())),
+                    _ => None,
+                });
+                let Some(ty) = ty else {
                     return invariant_method_expr(
                         method_span,
                         "game static constructor without a resolved return type",
@@ -5233,8 +5467,19 @@ fn lower_method_call_impl(
                                     .collect();
                                 TEnumPayload::Positional(pos)
                             };
+                            let ty = match env.ret_ty.as_ref() {
+                                Some(Type::Apply { name, args })
+                                    if name == type_name || name == &enum_owner =>
+                                {
+                                    Type::Apply {
+                                        name: name.clone(),
+                                        args: args.clone(),
+                                    }
+                                }
+                                _ => Type::Named(type_name.clone()),
+                            };
                             return TExpr {
-                                ty: Type::Named(type_name.clone()),
+                                ty,
                                 kind: TExprKind::EnumLit {
                                     enum_type: type_name.clone(),
                                     variant: method.to_string(),
@@ -5418,6 +5663,18 @@ fn lower_method_call_impl(
                     ) {
                         return transform;
                     }
+                    if module == "core.math"
+                        && matches!(method, "is_nan" | "is_inf" | "is_finite")
+                    {
+                        return lower_core_math_predicate(
+                            method,
+                            args,
+                            resolved_ret,
+                            method_span,
+                            cx,
+                            env,
+                        );
+                    }
                     if module == "core.math" && method == "abs" {
                         return lower_core_math_abs(args, resolved_ret, method_span, cx, env);
                     }
@@ -5482,6 +5739,25 @@ fn lower_method_call_impl(
                     {
                         return t;
                     }
+                    if module == "core.mem" && method == "address_of" {
+                        if args.len() != 1 {
+                            return invariant_method_expr(
+                                method_span,
+                                "checked Core call `core.mem.address_of` has the wrong arity",
+                            );
+                        }
+                        let value = lower_expr(&args[0].expr, cx, env);
+                        if matches!(
+                            crate::Codegen::TIR::tir_address_lifetime(&value),
+                            crate::Codegen::TIR::TAddressLifetime::Stack
+                        ) {
+                            env.note_stack_address();
+                        }
+                        return TExpr {
+                            ty: resolved_ret.cloned().unwrap_or(Type::Int),
+                            kind: TExprKind::RawOf(Box::new(value)),
+                        };
+                    }
                     let mut targs: Vec<TExpr> = args
                         .iter()
                         .enumerate()
@@ -5489,6 +5765,9 @@ fn lower_method_call_impl(
                             lower_core_arg(&module, method, index, &arg.expr, cx, env)
                         })
                         .collect();
+                    if module == "core.http.server" && method == "cors_policy" {
+                        normalize_http_cors_policy_args(&mut targs);
+                    }
                     if module == "core.mem"
                         && method == "address_of"
                         && targs.first().is_some_and(|arg| {
@@ -5557,6 +5836,37 @@ fn lower_method_call_impl(
                             return source_call;
                         }
                     }
+                    if submodule == "core.mem" && method == "address_of" {
+                        if args.len() != 1 {
+                            return invariant_method_expr(
+                                method_span,
+                                "checked Core call `core.mem.address_of` has the wrong arity",
+                            );
+                        }
+                        let value = lower_expr(&args[0].expr, cx, env);
+                        if matches!(
+                            crate::Codegen::TIR::tir_address_lifetime(&value),
+                            crate::Codegen::TIR::TAddressLifetime::Stack
+                        ) {
+                            env.note_stack_address();
+                        }
+                        return TExpr {
+                            ty: resolved_ret.cloned().unwrap_or(Type::Int),
+                            kind: TExprKind::RawOf(Box::new(value)),
+                        };
+                    }
+                    if submodule == "core.math"
+                        && matches!(method, "is_nan" | "is_inf" | "is_finite")
+                    {
+                        return lower_core_math_predicate(
+                            method,
+                            args,
+                            resolved_ret,
+                            method_span,
+                            cx,
+                            env,
+                        );
+                    }
                     if submodule == "core.math" && method == "abs" {
                         return lower_core_math_abs(args, resolved_ret, method_span, cx, env);
                     }
@@ -5578,6 +5888,9 @@ fn lower_method_call_impl(
                             lower_core_arg(&submodule, method, index, &arg.expr, cx, env)
                         })
                         .collect();
+                    if submodule == "core.http.server" && method == "cors_policy" {
+                        normalize_http_cors_policy_args(&mut targs);
+                    }
                     if submodule == "core.mem"
                         && method == "address_of"
                         && targs.first().is_some_and(|arg| {
@@ -6029,6 +6342,10 @@ fn lower_method_call_impl(
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
+                        // Inline-module signatures carry the instance's lifted
+                        // nominal identity in `target_return`, but the expression
+                        // keeps sema's source-facing return so MIR can consume the
+                        // hidden Result carrier exactly once.
                         let ret = match module_call_source_return_type(
                             cx,
                             &mangled_key,
@@ -6109,7 +6426,7 @@ fn lower_method_call_impl(
         // name. They are still the same builtin String surface; keep `.len()`
         // and its siblings on the shared Prelude path instead of Rust's byte
         // length method.
-        || matches!(recv_type.as_deref(), Some("String"))
+        || matches!(recv_type.as_deref(), Some("String" | "Option" | "SQL"))
         || matches!(
             recv_type.as_deref(),
             Some("Set") | Some(crate::Syntax::TYPE_RANK)
@@ -6159,10 +6476,10 @@ fn lower_method_call_impl(
                     let recv_t = lowered_receiver.borrow_mut().take();
                     recv_t.unwrap_or_else(|| lower_expr(receiver, cx, env))
                 };
-                // #1478: `Set.min()`/`Set.max()` reuse the generic List reducer —
-                // route through the same `.to_list()` a user would write so AOT
-                // and JIT never see a raw `HashSet` where they expect a `Vec`.
-                let recv_t = if matches!(op, TBuiltinOp::Min { .. } | TBuiltinOp::Max { .. }) {
+                // #1478: Set.min() reuses the generic List reducer — route
+                // through the same `.to_list()` a user would write so AOT and
+                // JIT never see a raw `HashSet` where they expect a `Vec`.
+                let recv_t = if matches!(op, TBuiltinOp::Min { .. }) {
                     crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t, method_span)
                 } else {
                     recv_t
@@ -6474,15 +6791,38 @@ fn lower_method_call_impl(
                                     jit_lambda
                                 },
                             );
-                            let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
+                            let tl = expected_hook_result.as_ref().map_or_else(
+                                || lower_lambda_expecting_value(lam, cx, env, params.as_slice()),
+                                |expected| {
+                                    let mut lowered =
+                                        lower_lambda_expecting_value_with_return(
+                                            lam,
+                                            cx,
+                                            env,
+                                            params.as_slice(),
+                                            expected,
+                                        );
+                                    // The helper preserves the callback's carrier
+                                    // body, while this slot's concrete generic
+                                    // return is the ABI fact used by MIR emit.
+                                    lowered.ret = Some(expected.clone());
+                                    lowered
+                                },
+                            );
+                            let callback_arity = params.len();
                             return TExpr {
                                 ty: Type::Fn {
                                     params,
                                     ret: expected_hook_result.clone().map(Box::new),
                                     effect_bound: None,
-                                    return_view_provenance: None,
                                     param_contract: None,
-                                    call_metadata: None,
+                                    // Event-family host helpers invoke handlers as `Fn(T)`,
+                                    // not the ordinary Jet read callback `Fn(&T)`.
+                                    call_metadata: Some(crate::AST::FunctionCallMetadata {
+                                        conventions: vec![AccessConvention::Move; callback_arity],
+                                        ..Default::default()
+                                    }),
+                                    return_view_provenance: None,
                                 },
                                 kind: TExprKind::Lambda(Box::new(tl)),
                             };
@@ -6621,6 +6961,7 @@ fn lower_method_call_impl(
             let op = if recv_type.as_deref() == Some("ProcessSpec") {
                 THandleOp::ProcessSpecMethod {
                     method: method.to_string(),
+                    args_len: args.len(),
                 }
             } else if recv_type.as_deref() == Some("ProcessChild") {
                 THandleOp::ProcessChildMethod {
@@ -6914,42 +7255,7 @@ fn lower_method_call_impl(
             }
         });
     }
-    let web_projection = match (recv_type.as_deref(), method, args.len()) {
-        (Some("WebTable"), "with_column", 1) => Some(("core.web.table", "with_column")),
-        (Some("WebTable"), "paginate", 2) => Some(("core.web.table", "paginate")),
-        (Some("WebTable"), "page", 0) => Some(("core.web.table", "page_state")),
-        (Some("WebStore"), "set", 1) => Some(("core.web.store", "set")),
-        (Some("WebStore"), "signal", 0) => Some(("core.web.store", "signal")),
-        (Some("WebStore"), "state_signal", 0) => Some(("core.web.store", "state_signal")),
-        (Some("WebStore"), "facts_json", 0) => Some(("core.web.store", "facts_json")),
-        (
-            Some("WebQuery"),
-            "state" | "state_signal" | "mutation_state" | "mutation_signal" | "invalidate" | "get"
-            | "show" | "facts" | "cancel" | "refresh",
-            0,
-        ) => Some(("core.web.query", method)),
-        (Some("WebFormTyped"), "set_async_validator", 4) => {
-            Some(("core.web.forms", "typed_set_async_validator"))
-        }
-        (Some("WebFormTyped"), "set_action", 1) => Some(("core.web.forms", "typed_set_action")),
-        (Some("WebFormTyped"), "set", 2) => Some(("core.web.forms", "typed_set")),
-        (Some("WebFormTyped"), "blur", 1) => Some(("core.web.forms", "typed_blur")),
-        (Some("WebFormTyped"), "focus", 1) => Some(("core.web.forms", "typed_focus")),
-        (Some("WebFormTyped"), "post", 1) => Some(("core.web.forms", "typed_post")),
-        (Some("WebFormTyped"), "validate", 0) => Some(("core.web.forms", "typed_validate")),
-        (Some("WebFormTyped"), "validate", 3) => Some(("core.web.forms", "typed_validate_field")),
-        (Some("WebFormValidationChain"), "render", 0) => {
-            Some(("core.web.forms", "typed_validation_render"))
-        }
-        (Some("WebFormTyped"), "cancel", 0) => Some(("core.web.forms", "typed_cancel")),
-        (Some("WebFormTyped"), "submit", 0) => Some(("core.web.forms", "typed_submit")),
-        (Some("WebFormTyped"), "no_script", 0) => Some(("core.web.forms", "typed_no_script")),
-        (Some("WebFormTyped"), "state", 0) => Some(("core.web.forms", "typed_state")),
-        (Some("WebFormTyped"), "lifecycle", 0) => Some(("core.web.forms", "typed_lifecycle")),
-        (Some("WebFormTyped"), "errors", 0) => Some(("core.web.forms", "typed_errors")),
-        (Some("WebFormTyped"), "render", 0) => Some(("core.web.forms", "typed_html")),
-        _ => None,
-    };
+    let web_projection = web_receiver_projection(recv_type.as_deref(), method, args.len());
     if let Some((module, core_method)) = web_projection {
         return in_own_frame(|| {
             let receiver = lower_expr(receiver, cx, env);
@@ -7406,6 +7712,7 @@ fn lower_method_call_impl(
                 ("HTTPRequest", "param", 1) => THandleOp::HTTPReqParam,
                 ("HTTPRequest", "trailers", 0) => THandleOp::HTTPReqTrailers,
                 ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
+                ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
                 _ if server_message_method
                     || kind.starts_with("HTTPServer")
                     || kind == "HTTPMux"
@@ -7652,7 +7959,42 @@ fn lower_method_call_impl(
                 ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
                 _ => unit_type(),
             };
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            let targs: Vec<TExpr> = args
+                .iter()
+                .map(|a| {
+                    let value = lower_expr(&a.expr, cx, env);
+                    if sketch == "TDigest" && matches!(method, "add" | "quantile") {
+                        let source_name = value.ty.without_user_tags().name();
+                        if let Some((type_name, func)) =
+                            crate::Numeric::precise_conversion_route("Float", &source_name)
+                        {
+                            return TExpr {
+                                ty: Type::Float,
+                                kind: TExprKind::PreciseBuiltin {
+                                    type_name: type_name.to_string(),
+                                    func: func.to_string(),
+                                    args: vec![value],
+                                },
+                            };
+                        }
+                        if source_name != "Float"
+                            && crate::AST::numeric_type_from_name(&source_name).is_some()
+                        {
+                            if let Some(op) = resolve_numeric_conversion_op("Float", &source_name)
+                            {
+                                return TExpr {
+                                    ty: Type::Float,
+                                    kind: TExprKind::NumericMethod {
+                                        recv: Box::new(value),
+                                        op,
+                                    },
+                                };
+                            }
+                        }
+                    }
+                    value
+                })
+                .collect();
             return TExpr {
                 ty: result_ty,
                 kind: TExprKind::HandleMethod {
@@ -8200,7 +8542,8 @@ fn lower_method_call_impl(
     // SIMD/linalg `.reduce(.Op)` is MathMethod (below), not a collection fold —
     // skip when the lowered receiver is a math value type.
     if recv_type.is_none() && crate::Collections::is_closure_method(method) {
-        let recv_t = lower_expr(receiver, cx, env);
+        let recv_t = lowered_receiver.borrow_mut().take();
+        let recv_t = recv_t.unwrap_or_else(|| lower_expr(receiver, cx, env));
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
         let fixed_float_add_receiver = !matches!(
@@ -8549,23 +8892,27 @@ fn lower_method_call_impl(
                         }
                     }
                 }
-                let result_ty = if env.fallback_subject
-                    && !matches!(&source_result_ty, Type::Result { .. })
-                    && matches!(
-                        &op,
-                        TClosureOp::TryMap
-                            | TClosureOp::TryFilter
-                            | TClosureOp::TrySortBy
-                            | TClosureOp::TrySortByDesc
-                            | TClosureOp::EachRef
-                    ) {
-                    let callback_error = targs.first().and_then(|callback| match &callback.ty {
-                        Type::Fn { ret: Some(ret), .. } => match ret.as_ref() {
-                            Type::Result { err, .. } => Some((**err).clone()),
-                            _ => None,
-                        },
+                let callback_error = targs.first().and_then(|callback| match &callback.ty {
+                    Type::Fn { ret: Some(ret), .. } => match ret.as_ref() {
+                        Type::Result { err, .. } => Some((**err).clone()),
                         _ => None,
-                    });
+                    },
+                    _ => None,
+                });
+                // A fallible callback selects a `Try*` collection operation.
+                // Its host returns the enclosing Result carrier even when sema
+                // keeps the source-visible success type on the method call.
+                // Preserve that ABI in TIR; otherwise a generic `map` binds
+                // the Result handle as if it were the returned list.
+                let result_ty = if matches!(
+                    &op,
+                    TClosureOp::TryMap
+                        | TClosureOp::TryFilter
+                        | TClosureOp::TrySortBy
+                        | TClosureOp::TrySortByDesc
+                        | TClosureOp::EachRef
+                ) && !matches!(&source_result_ty, Type::Result { .. })
+                {
                     callback_error
                         .map(|err| Type::Result {
                             ok: Box::new(source_result_ty.clone()),
@@ -8680,7 +9027,7 @@ fn lower_method_call_impl(
     // on the AST side, where `recv_type` is always `Some` for these).
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
-            if matches!(&recv_ty, Type::IntN { .. }) {
+            if matches!(&recv_ty, Type::Int | Type::IntN { .. }) {
                 if let Some((prefix, op, _)) =
                     crate::Collections::numeric_overflow_method(method, args.len())
                 {
@@ -8713,7 +9060,10 @@ fn lower_method_call_impl(
             let resolved_op = resolve_numeric_op(method, numeric_name, line);
             if let Some(op) = resolved_op {
                 return in_own_frame(|| {
-                    let mut recv_t = lower_expr(receiver, cx, env);
+                    let recv_t = lowered_receiver
+                        .borrow_mut()
+                        .take();
+                    let mut recv_t = recv_t.unwrap_or_else(|| lower_expr(receiver, cx, env));
                     // Sema's width is authoritative — Call/OrFallback lowering can
                     // fall back to Unit/Int and would silently widen bit queries.
                     recv_t.ty = recv_ty.clone();
@@ -8987,7 +9337,13 @@ fn lower_method_call_impl(
         if handle == "Cursor" && method == "take_pattern" {
             if let Some(arg) = args.first() {
                 if let Expr::StrMatchLit(parts, _) = &arg.expr {
-                    return lower_cursor_take_pattern(receiver, parts, cx, env);
+                    return lower_cursor_take_pattern(
+                        receiver,
+                        parts,
+                        cx,
+                        env,
+                        lowered_receiver.borrow_mut().take(),
+                    );
                 }
             }
         }
@@ -8999,7 +9355,13 @@ fn lower_method_call_impl(
         if handle == "Reader" && method == "take_pattern" {
             if let Some(arg) = args.first() {
                 if let Expr::BinMatchLit(parts, _) = &arg.expr {
-                    return lower_reader_take_pattern(receiver, parts, cx, env);
+                    return lower_reader_take_pattern(
+                        receiver,
+                        parts,
+                        cx,
+                        env,
+                        lowered_receiver.borrow_mut().take(),
+                    );
                 }
             }
         }
@@ -9269,7 +9631,9 @@ fn lower_method_call_impl(
                         _ => None,
                     });
                 }
-                let recv_t = if matches!(
+                let recv_t = if let Some(game) = lower_game_handle_receiver(receiver, cx, env) {
+                    game
+                } else if matches!(
                     op,
                     THandleOp::FileReaderReadLine
                         | THandleOp::FileWriterWriteLine
@@ -9523,6 +9887,29 @@ fn lower_method_call_impl(
                 });
             }
         }
+        if let Expr::Ident(type_name, _) = receiver {
+            if type_name == "Limits"
+                && cx
+                    .core_imports
+                    .values()
+                    .any(|module| module == "core.email")
+            {
+                return in_own_frame(|| TExpr {
+                    ty: Type::Named("Limits".to_string()),
+                    kind: TExprKind::StaticCall {
+                        owner: TStaticOwner::Prelude {
+                            rooted: false,
+                            path: "core.email".to_string(),
+                            generics: Vec::new(),
+                        },
+                        owner_type: None,
+                        method: TMethodRef::bare("limits_safe"),
+                        type_args: Vec::new(),
+                        args: vec![],
+                    },
+                });
+            }
+        }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
                 && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding")
@@ -9615,9 +10002,13 @@ fn lower_method_call_impl(
                     return TExpr {
                         ty: Type::Named("Limits".to_string()),
                         kind: TExprKind::StaticCall {
-                            owner: rooted_owner("jet_email::Limits"),
+                            owner: TStaticOwner::Prelude {
+                                rooted: false,
+                                path: "core.email".to_string(),
+                                generics: Vec::new(),
+                            },
                             owner_type: None,
-                            method: TMethodRef::bare("safe"),
+                            method: TMethodRef::bare("limits_safe"),
                             type_args: Vec::new(),
                             args: vec![],
                         },
@@ -9627,8 +10018,8 @@ fn lower_method_call_impl(
         }
     }
     // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: keep the two authority
-    // operations as a receiver call whose implementation is supplied by the
-    // shared Prelude. This is ordinary data, not a type/dispatch input.
+    // operations on the shared Prelude route. This is ordinary data, not a
+    // user method: the implementation has no `Authority::with` MIR function.
     // Comptime constants have no local slot, so recover the same fact from
     // their evaluated carrier before the static-call fallback mistakes a
     // value name for a type name.
@@ -9671,21 +10062,39 @@ fn lower_method_call_impl(
             } else {
                 lower_expr(receiver, cx, env)
             };
-            let targs = args
+            let mut targs = args
                 .iter()
                 .map(|arg| lower_one_call_arg(arg, None, env, cx))
-                .collect();
+                .collect::<Vec<_>>();
+            let receiver = TCallArg {
+                value: recv,
+                template_items: None,
+                borrow: true,
+                mut_borrow: false,
+                clone: false,
+                arc_clone: false,
+                fn_coerce: None,
+                widen_to_vec: false,
+                widen_to_union: None,
+                box_as_trait: None,
+            };
+            for arg in &mut targs {
+                arg.borrow = true;
+                arg.mut_borrow = false;
+            }
+            let mut call_args = Vec::with_capacity(targs.len() + 1);
+            call_args.push(receiver);
+            call_args.extend(targs);
             TExpr {
                 ty: resolved_ret
                     .cloned()
                     .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-                kind: TExprKind::MethodCall {
-                    recv: Box::new(recv),
+                kind: TExprKind::StaticCall {
+                    owner: rooted_owner("JetAuthority"),
+                    owner_type: None,
                     method: TMethodRef::bare(method),
                     type_args: type_args.to_vec(),
-                    args: targs,
-                    source_first_string_literal: first_string_literal_arg(args),
-                    operator_line: None,
+                    args: call_args,
                 },
             }
         });
@@ -9696,6 +10105,24 @@ fn lower_method_call_impl(
     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
     if recv_type.is_none() {
         if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+                if type_name == "Limits" && method == "safe" && args.is_empty() {
+                    return TExpr {
+                        ty: resolved_ret
+                            .cloned()
+                            .unwrap_or_else(|| Type::Named("Limits".to_string())),
+                        kind: TExprKind::StaticCall {
+                            owner: TStaticOwner::Prelude {
+                                rooted: false,
+                                path: "core.email".to_string(),
+                                generics: Vec::new(),
+                            },
+                            owner_type: None,
+                            method: TMethodRef::bare("limits_safe"),
+                            type_args: Vec::new(),
+                            args: Vec::new(),
+                        },
+                    };
+                }
             return in_own_frame(|| {
                 if type_name == Syntax::TYPE_ATOMIC
                     && owner_type_args.len() == 1
@@ -9833,6 +10260,29 @@ fn lower_method_call_impl(
                             method: TMethodRef::bare(method_name),
                             type_args: resolved_type_args,
                             args: lowered_args,
+                        },
+                    };
+                }
+                // D-AUTHORITY-NAME1=A: the source-facing constructor is an
+                // inherent facade over the one rooted Prelude carrier. There
+                // is no user `Authority::from_rights` MIR function.
+                if type_name == Syntax::TYPE_AUTHORITY
+                    && method == "from_rights"
+                    && args.len() == 1
+                {
+                    return TExpr {
+                        ty: resolved_ret
+                            .cloned()
+                            .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
+                        kind: TExprKind::StaticCall {
+                            owner: rooted_owner("JetAuthority"),
+                            owner_type: None,
+                            method: TMethodRef::bare("from_rights"),
+                            type_args: Vec::new(),
+                            args: args
+                                .iter()
+                                .map(|arg| lower_one_call_arg(arg, None, env, cx))
+                                .collect(),
                         },
                     };
                 }
@@ -11196,33 +11646,80 @@ fn lower_method_call_impl(
                     Type::Apply { name, .. } => Some(name.clone()),
                     _ => None,
                 };
-                let operator_method = operator_rhs.and_then(|rhs| {
+                let derived_operator_rhs = if operator_rhs.is_none() {
+                    let trait_name = operator_trait_for_method(method);
+                    let rhs = match recv.ty.without_user_tags() {
+                        Type::Named(_) | Type::Apply { .. } => Some(recv.ty.clone()),
+                        _ => None,
+                    };
+                    trait_name.and(rhs)
+                } else {
+                    None
+                };
+                let effective_operator_rhs = operator_rhs.or(derived_operator_rhs.as_ref());
+                let operator_method = effective_operator_rhs.and_then(|rhs| {
                     let owner = concrete_owner.as_deref()?;
                     let trait_name = operator_trait_for_method(method)?;
-                    let key =
-                        crate::Traits::operator_method_identity(owner, trait_name, method, rhs);
-                    cx.operator_methods.get(&key).cloned()
+                    let owner_leaf = owner.rsplit("::").next().unwrap_or(owner);
+                    let lookup_owner = cx
+                        .local_type_identities
+                        .get(owner)
+                        .map(String::as_str)
+                        .unwrap_or(owner);
+                    let rhs_name = rhs.name();
+                    let rhs_leaf = rhs_name.rsplit("::").next().unwrap_or(rhs_name.as_str());
+                    let rhs_source = Type::Named(rhs_leaf.to_string());
+                    [owner, lookup_owner, owner_leaf]
+                        .into_iter()
+                        .find_map(|candidate| {
+                            [&rhs, &rhs_source].into_iter().find_map(|candidate_rhs| {
+                                let key = crate::Traits::operator_method_identity(
+                                    candidate,
+                                    trait_name,
+                                    method,
+                                    candidate_rhs,
+                                );
+                                cx.operator_methods.get(&key).cloned()
+                            })
+                        })
                 });
                 let key = (ty.clone(), method.to_string());
-                let sig = if operator_rhs.is_some() {
+                let sig = if effective_operator_rhs.is_some() {
                     operator_method
                         .as_ref()
                         .map(|facts| facts.sig.clone())
-                        .unwrap_or_default()
+                        .unwrap_or_else(|| {
+                            vec![(
+                                crate::AST::AccessConvention::Read,
+                                    (*effective_operator_rhs
+                                        .as_ref()
+                                        .expect("effective operator RHS"))
+                                        .clone(),
+                            )]
+                        })
                 } else {
                     cx.method_sigs.get(&key).cloned().unwrap_or_default()
                 };
-                let sig = if operator_rhs.is_some() {
+                let sig = if effective_operator_rhs.is_some() {
                     sig
                 } else {
                     instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
                         instantiate_method_sig(cx, ty, method, &sig, &[], type_args)
                     })
                 };
-                let ret_ty = if operator_rhs.is_some() {
-                    resolved_ret
-                        .cloned()
-                        .or_else(|| operator_method.as_ref().and_then(|facts| facts.ret.clone()))
+                let ret_ty = if effective_operator_rhs.is_some() {
+                    resolved_ret.cloned().or_else(|| {
+                        operator_method
+                            .as_ref()
+                            .and_then(|facts| facts.ret.clone())
+                            .or_else(|| match operator_trait_for_method(method) {
+                                Some(Syntax::TRAIT_EQUATABLE) => Some(Type::Bool),
+                                Some(Syntax::TRAIT_COMPARABLE) => {
+                                    Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
+                                }
+                                _ => None,
+                            })
+                    })
                 } else {
                     resolved_ret
                         .cloned()
@@ -11281,7 +11778,7 @@ fn lower_method_call_impl(
                     Type::TraitObject(_) => false,
                     _ => true,
                 };
-                let method_ref = if let Some(rhs) = operator_rhs {
+                let method_ref = if let Some(rhs) = effective_operator_rhs {
                     let owner = concrete_owner
                         .as_deref()
                         .expect("checked operator call has a concrete receiver");
@@ -11325,10 +11822,19 @@ fn lower_method_call_impl(
         }
     }
     return in_own_frame(|| {
-        // A user instance method on a covered type. `recv_type` is total (gate proved
-        // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
-        // name (trait-impl methods keep their bare name; others get the `__jet_` mangle).
-        let Some(ty_name) = recv_type.clone() else {
+        // BuildContext's programmable-build methods are evaluated by the
+        // comptime bridge.  Sema leaves their receiver fact unset because the
+        // typed template call is not a user method, but the fragment lowering
+        // environment still carries the canonical nominal receiver type.
+        let build_context_receiver = recv_type.is_none()
+            && matches!(method, "generate" | "add_executable" | "plan")
+            && matches!(
+                tir_recv_jet_ty(receiver, env),
+                Some(Type::Named(name)) if name == Syntax::TYPE_BUILD_CONTEXT
+            );
+        let Some(ty_name) = recv_type.clone().or_else(|| {
+            build_context_receiver.then(|| Syntax::TYPE_BUILD_CONTEXT.to_string())
+        }) else {
             return invariant_method_expr(method_span, format!("method `{method}` receiver type"));
         };
         // Imported method metadata is keyed by the declaration's canonical nominal

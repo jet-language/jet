@@ -185,7 +185,7 @@ pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Ty
 /// through the same two steps. Sibling of `pool_field_ty_hint` above and for the
 /// same reason: `tir_recv_jet_ty` has no `cx` with which to read a field's
 /// declared type.
-fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
+pub(crate) fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
     match e {
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => declared_field_ty(inner, cx, env),
         Expr::Index { base, .. } => {
@@ -471,9 +471,11 @@ pub(crate) fn resolve_builtin_op(
         }
         return Some(op);
     }
+    let is_option = matches!(rty, Some(Type::Option(_)));
     if rty.as_ref().is_some_and(|ty| {
         crate::Collections::builtin_method_return(ty, method, args.len(), false).is_none()
-    }) {
+    }) && !(is_option && method == "zip" && args.len() == 1)
+    {
         return None;
     }
     if crate::Collections::is_closure_method(method) {
@@ -511,7 +513,6 @@ pub(crate) fn resolve_builtin_op(
         Some(Type::Option(elem)) if matches!(elem.as_ref(), Type::Float | Type::Float32)
     );
     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
-    let is_option = matches!(rty, Some(Type::Option(_)));
     let receiver_borrow = rty
         .as_ref()
         .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
@@ -704,7 +705,9 @@ pub(crate) fn resolve_builtin_op(
         ("lines", 0) => TBuiltinOp::Lines,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
-        ("replace", 2) if is_string => TBuiltinOp::Replace,
+        ("replace", 2) if is_string => TBuiltinOp::StringMethod {
+            method: "replace".to_string(),
+        },
         ("replace", 2) if is_list || rty.is_none() => TBuiltinOp::ListReplace,
         ("replace", 2) => TBuiltinOp::Replace,
         ("pad_start", 2) => TBuiltinOp::PadStart,

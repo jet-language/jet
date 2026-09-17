@@ -739,6 +739,16 @@ impl TypeRegistry {
     ) -> Vec<jet_foundation::AST::DevtoolsFactPublication> {
         self.devtools_publications.borrow().clone()
     }
+    /// Restore the publication facts that preceded an erased scope. The body
+    /// checker shares this per-module registry through interior mutability, so
+    /// the erased-scope boundary must roll back writes made by nested calls too.
+    pub(crate) fn restore_devtools_publications(
+        &self,
+        publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+    ) {
+        *self.devtools_publications.borrow_mut() = publications;
+    }
+
 }
 
 fn marker_argument<'a>(marker: &'a Marker, name: &str, positional: usize) -> Option<&'a Expr> {
@@ -2273,6 +2283,11 @@ struct ErasedScopeSnapshot {
     taskgroup_stack: Vec<TaskGroupCtx>,
     in_taskgroup_spawn: bool,
     inline_addr_taken: HashSet<String>,
+    /// D-DX-PLUGIN1=D: publication facts live in the shared per-module
+    /// TypeRegistry, so erased scopes snapshot and restore them alongside the
+    /// checker-local fact planes.
+    devtools_publications: Vec<jet_foundation::AST::DevtoolsFactPublication>,
+
 }
 
 impl<'a> Checker<'a> {
@@ -2401,6 +2416,8 @@ impl<'a> Checker<'a> {
             taskgroup_stack: self.taskgroup_stack.clone(),
             in_taskgroup_spawn: self.in_taskgroup_spawn,
             inline_addr_taken: self.inline_addr_taken.clone(),
+            devtools_publications: self.registry.devtools_publications(),
+
         }
     }
 
@@ -2528,6 +2545,8 @@ impl<'a> Checker<'a> {
         self.taskgroup_stack = snapshot.taskgroup_stack;
         self.in_taskgroup_spawn = snapshot.in_taskgroup_spawn;
         self.inline_addr_taken = snapshot.inline_addr_taken;
+        self.registry
+            .restore_devtools_publications(snapshot.devtools_publications);
     }
 
     pub(crate) fn with_erased_scope<T>(

@@ -767,6 +767,18 @@ mod jet_layout {
         Constraint { handle, idx }
     }
 
+    /// D-LAYOUT1: add two layout expressions while preserving their slot
+    /// identity in the resident JIT representation.
+    pub fn add(lhs: LinExpr, rhs: LinExpr) -> LinExpr {
+        lhs + rhs
+    }
+
+    /// D-LAYOUT1: subtract two layout expressions while preserving their slot
+    /// identity in the resident JIT representation.
+    pub fn sub(lhs: LinExpr, rhs: LinExpr) -> LinExpr {
+        lhs - rhs
+    }
+
     /// D-LAYOUT1 (GATE 1): `lhs >= rhs` between layout values.
     pub fn ge(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
         make_constraint(lhs.into(), rhs.into(), RelOp::Ge)

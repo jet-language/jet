@@ -1,0 +1,9 @@
+fn send_generic(tx: Sender<String>) { tx.send("generic") }
+fn receive_generic(rx: ^Receiver<String>) Receiver<String> -> { return rx }
+fn run() {
+    (sender, receiver) :: channel<String>()
+    send_generic(sender)
+    rx :: receive_generic(^receiver)
+    print(rx.receive() ?? panic("closed"))
+    print("ok")
+}

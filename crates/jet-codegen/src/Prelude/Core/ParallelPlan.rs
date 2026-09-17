@@ -611,7 +611,11 @@ where
     let start = range.start;
     let end = range.end;
     let items = end.saturating_sub(start);
+    // A caller with one worker has no parallel plan to justify a timing probe.
+    // Keep the whole operation serial and let the gate record a deferred
+    // decision rather than timing a kernel that cannot accelerate the work.
     if items <= JET_ACCEL_STATIC_FLOOR_ITEMS
+        || worker_limit <= 1
         || !release_build
         || !cross_mode_parity_proven
         || !proof_proven
@@ -1894,6 +1898,7 @@ mod parallel_plan_tests {
         JetParallelProof::new(
             JetParallelIterationDomain::from_len(len),
             vec![JetParallelAccessFact::read("input")],
+            vec![JetParallelEffectFact::pure()],
             vec![JetParallelDependencyFact::independent("input")],
             None,
         )
@@ -1911,6 +1916,7 @@ mod parallel_plan_tests {
                     ordinal: 0,
                     start: 0,
                     end: 64,
+                    worker: 0,
                 },
                 JetParallelChunk {
                     ordinal: 1,
@@ -1969,6 +1975,54 @@ mod parallel_plan_tests {
             reason: JetParallelSequentialReason::SingleChunk,
         });
         assert_eq!(plan.chunks[0].range(), 0..4);
+    }
+
+    #[test]
+    fn measured_range_does_not_probe_when_worker_limit_is_one() {
+        let (values, decision) = jet_list_accel_range_map(
+            0..(JET_ACCEL_STATIC_FLOOR_ITEMS + 1),
+            1,
+            true,
+            true,
+            true,
+            None,
+            |index| index,
+        );
+        assert_eq!(values.len(), JET_ACCEL_STATIC_FLOOR_ITEMS + 1);
+        assert_eq!(
+            decision.status,
+            JetAccelerationGateStatus::SampleNotTimed
+        );
+    }
+
+    #[test]
+    fn measured_gate_uses_two_times_the_retained_chunk_projection() {
+        let costs = JetAccelerationRuntimeCosts {
+            spawn_nanos: 100,
+            bandwidth_floor_nanos: 100,
+            spawn_cost_once_per_process: true,
+            bandwidth_floor_measured: true,
+        };
+        let selected = JetAccelerationGate::d_accel1().evaluate(
+            JetAccelerationTransform::PooledParallelChunks,
+            JetAccelerationGateInput::measured(
+                2048, 64, 100, costs, true, true, true, false, false, None,
+            ),
+        );
+        assert_eq!(selected.status, JetAccelerationGateStatus::Selected);
+        assert_eq!(selected.measurement.projected_serial_nanos, Some(3200));
+        assert_eq!(selected.measurement.required_serial_nanos, Some(200));
+
+        let rejected = JetAccelerationGate::d_accel1().evaluate(
+            JetAccelerationTransform::PooledParallelChunks,
+            JetAccelerationGateInput::measured(
+                2048, 64, 6, costs, true, true, true, false, false, None,
+            ),
+        );
+        assert_eq!(
+            rejected.status,
+            JetAccelerationGateStatus::ProjectedGainBelowThreshold
+        );
     }
 
     #[test]

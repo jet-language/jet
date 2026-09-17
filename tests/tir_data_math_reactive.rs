@@ -34,13 +34,21 @@ struct P {
     x: Float
     mass: Float
 }
-fn total(ps: [P]) Float {
-    s := 0.0
+fn total(ps: [P]) Float -> {
+    s := Float{0.0}
     loop p in ps {
         s = s + p.mass
     }
     return s
 }
+fn particle_energy(ps: [P]) Float -> {
+    total := Float{0.0}
+    loop i in 0..<ps.len() {
+        total += ps[i].x * ps[i].mass
+    }
+    return total
+}
+
 fn run() {
     ps := [P]{ P{ x: 0.0, mass: 1.0 }, P{ x: 1.0, mass: 2.0 } }
     ps.push(P{ x: 2.0, mass: 3.0 })
@@ -48,6 +56,7 @@ fn run() {
     print(ps[2].x)
     print(ps[1].mass)
     print(total(ps))
+    print(particle_energy(ps))
 }
 ";
 
@@ -60,7 +69,7 @@ fn columnar_list_core_surface_runs() {
     }
     let (code, stdout) = build_and_run("tir_columnar_core", COLUMNAR_PROG);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "3\n2.0\n2.0\n6.0\n");
+    assert_eq!(stdout, "3\n2.0\n2.0\n6.0\n8.0\n");
 }
 
 /// Codegen emits the struct-of-arrays storage type and routes the list ops

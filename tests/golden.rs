@@ -130,6 +130,131 @@ fn statement_attributes_codegen_shape() {
     );
 }
 
+fn feature_stem(path: &Path, ex_dir: &Path) -> String {
+    path.strip_prefix(ex_dir)
+        .expect("feature path must be below examples/features")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn push_feature_source(entries: &mut Vec<GoldenEntry>, path: PathBuf, ex_dir: &Path, ext: &str) {
+    let stem = feature_stem(&path, ex_dir)
+        .strip_suffix(&format!(".{ext}"))
+        .unwrap_or_else(|| panic!("feature source has unexpected extension: {}", path.display()))
+        .to_owned();
+    entries.push(GoldenEntry {
+        shown: format!("examples/features/{stem}.{ext}"),
+        path,
+        stem,
+    });
+}
+
+fn push_feature_project(entries: &mut Vec<GoldenEntry>, run: PathBuf, ex_dir: &Path, ext: &str) {
+    let stem = feature_stem(
+        run.parent().expect("run entry must have a project directory"),
+        ex_dir,
+    );
+    entries.push(GoldenEntry {
+        shown: format!("examples/features/{stem}/run.{ext}"),
+        path: run,
+        stem,
+    });
+}
+
+fn collect_feature_project_entries(
+    dir: &Path,
+    ex_dir: &Path,
+    ext: &str,
+    entries: &mut Vec<GoldenEntry>,
+) {
+    let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    if name.starts_with('.') || name == "expected" {
+        return;
+    }
+
+    let run = dir.join(format!("run.{ext}"));
+    if run.is_file() {
+        push_feature_project(entries, run, ex_dir, ext);
+        return;
+    }
+
+    // A package/workspace without a canonical run entry owns its descendants;
+    // those files are modules, build scripts, or member-package fixtures.
+    if dir.join("package.jet").is_file() || dir.join("workspace.jet").is_file() {
+        return;
+    }
+
+    let Ok(children) = fs::read_dir(dir) else {
+        return;
+    };
+    for child in children.flatten() {
+        let path = child.path();
+        if path.is_dir() {
+            collect_feature_project_entries(&path, ex_dir, ext, entries);
+        }
+    }
+}
+
+fn collect_feature_golden_entries(ex_dir: &Path, ext: &str) -> Vec<GoldenEntry> {
+    let mut entries = Vec::new();
+    let Ok(topics) = fs::read_dir(ex_dir) else {
+        return entries;
+    };
+    for topic in topics.flatten() {
+        let topic_path = topic.path();
+        let Some(topic_name) = topic_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !topic_path.is_dir() || topic_name.starts_with('.') || topic_name == "expected" {
+            continue;
+        }
+        let Ok(children) = fs::read_dir(&topic_path) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_file()
+                && path.extension().and_then(|extension| extension.to_str()) == Some(ext)
+                && path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+                && path.file_name().and_then(|name| name.to_str()) != Some("workspace.jet")
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+            {
+                push_feature_source(&mut entries, path, ex_dir, ext);
+            } else if path.is_dir() {
+                collect_feature_project_entries(&path, ex_dir, ext, &mut entries);
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.stem.cmp(&b.stem));
+    entries
+}
+
+#[test]
+fn feature_entry_discovery_stops_at_project_roots() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entries = collect_feature_golden_entries(&root.join("examples/features"), "jet");
+
+    assert!(
+        entries.iter().any(|entry| entry.stem == "basics/onboarding"),
+        "nested run.jet project was not discovered"
+    );
+    for module in [
+        "foundations/storage/cache",
+        "foundations/tooling/load",
+        "packages/sandbox_mathkit/sandbox_src",
+    ] {
+        assert!(
+            !entries.iter().any(|entry| entry.stem == module),
+            "module/member fixture was incorrectly treated as an executable: {module}"
+        );
+    }
+}
+
 #[test]
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -168,55 +293,13 @@ fn examples_compile_and_run() {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
 
-    // Recursive discovery: examples/features/<topic>/<name>.jet or
-    // examples/features/<topic>/<name>/run.jet. Test id (`stem`) is the
-    // relative path without extension, e.g. "net/http_server". `expected/`
-    // mirrors the same <topic>/<name> tree.
-    let mut entries: Vec<GoldenEntry> = Vec::new();
-    for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
-        let topic_path = topic_entry.path();
-        if !topic_path.is_dir() {
-            continue;
-        }
-        let topic_name = topic_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        if topic_name == "expected" {
-            continue;
-        }
-        for e in fs::read_dir(&topic_path).unwrap().flatten() {
-            let path = e.path();
-            // A package manifest is Jet-shaped data, not an executable
-            // example. Keep the manifest beside module examples without
-            // turning it into a golden entry.
-            if path.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
-                continue;
-            }
-            if path.extension().and_then(|x| x.to_str()) == Some(ext) {
-                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-                let stem = format!("{}/{}", topic_name, name);
-                entries.push(GoldenEntry {
-                    path: path.clone(),
-                    stem: stem.clone(),
-                    shown: format!("examples/features/{}.{}", stem, ext),
-                });
-            } else if path.is_dir() {
-                let run = path.join(format!("run.{}", ext));
-                if run.is_file() {
-                    let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                    let stem = format!("{}/{}", topic_name, name);
-                    entries.push(GoldenEntry {
-                        path: run.clone(),
-                        stem: stem.clone(),
-                        shown: format!("examples/features/{}/run.{}", stem, ext),
-                    });
-                }
-            }
-        }
-    }
-    entries.sort_by(|a, b| a.stem.cmp(&b.stem));
+    // A feature source is executable when it is a standalone `.jet` file
+    // directly under a topic, or the `run.jet` entry of a project directory.
+    // Once a package/workspace root is found, its descendants are modules,
+    // fixtures, or member packages; do not run them as independent programs.
+    // This keeps the corpus census complete without turning implementation
+    // files into false golden entries.
+    let mut entries = collect_feature_golden_entries(&ex_dir, ext);
     let filter = fixture_filter("JET_GOLDEN_FILTER");
     entries.retain(|entry| fixture_matches(filter.as_deref(), &entry.shown));
     assert!(

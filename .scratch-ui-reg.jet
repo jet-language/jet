@@ -1,0 +1,19 @@
+package {
+    name: "ui-result-alias-regression"
+    version: "0.1.0"
+    edition: "2026"
+    authority: { needs: [UI.FileDialog, UI.Ime] }
+}
+use core.ui.host as host
+use core.ui.host.ime as ime
+fn run() {
+    if host.fs_grant(".", host.fs_rights_read_write()) == {
+        .Ok(grant) -> {
+            print(grant.root)
+        }
+        .Err(_) -> {
+            print("err")
+        }
+    }
+    _event :: ime.poll() ?? panic("no ime event")
+}

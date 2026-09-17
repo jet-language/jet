@@ -38,7 +38,7 @@ Coverage is at the **method-family level**, not a claim to have read every gener
 
 The requested Astra study produced the initial inventory and proposals. Integration and independent review separated three additional method boundaries below. Those corrections do not represent new workload, accessibility, or hardening runs.
 
-Existing-skill comparison used the current main-checkout [router](../../.agents/skills/JetSkillsRouter.md), repository skills, and Tower plugin skills. It included the newly present [status](../../.agents/skills/status/SKILL.md) skill. The router's retirement and managed-source dispositions were retained. A historical report title is not permission to restore a retired route.
+Existing-skill comparison used the current main-checkout [router](../../.agents/skills/JetSkillsRouter.md), repository skills, and Tower plugin skills. It included the newly present [pulse](../../.agents/skills/pulse/SKILL.md) skill. The router's retirement and managed-source dispositions were retained. A historical report title is not permission to restore a retired route.
 
 The study ran no compiler, audit generator, skill pilot, test, or benchmark. Its conclusions come from source inspection and attributed historical evidence. Integration checked report links and Tower ballot readiness; those checks do not establish the proposed skills' behavior.
 
@@ -130,7 +130,7 @@ Keep this procedure within the owning method and existing evidence formats. Shar
 6. **Search beyond the old witness.** Probe changed entry points and adjacent combinations suggested by the mechanism: receiver/plain calls, empty and boundary inputs, state transitions, failure order, default versus expert control, and newly applicable targets. The request bounds this search; it is not permission for a new whole-project campaign.
 7. **Stop honestly.** Finish when the declared scope has an evidence disposition and the planned controls have a result, including explicit unavailable or blocked results. A clean scan establishes scoped evidence of convergence at a named revision, not permanent bug freedom. Report completion never closes implementation work by itself.
 
-Progress belongs in these dated comparisons. Current work status belongs in Tower; an on-request progress summary belongs to the existing status skill. Do not create another dashboard or audit-maintenance queue.
+Progress belongs in these dated comparisons. Current work status belongs in Tower; an on-request progress summary belongs to the existing pulse skill. Do not create another dashboard or audit-maintenance queue.
 
 ## Conversions to reject
 

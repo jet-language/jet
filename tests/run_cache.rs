@@ -359,6 +359,11 @@ fn tty_run_does_not_promote_to_dev() {
         .join(format!("tty_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"tty_run\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] } }\n",
+    )
+    .unwrap();
     let file = root.join("tty.jet");
     std::fs::write(
         &file,

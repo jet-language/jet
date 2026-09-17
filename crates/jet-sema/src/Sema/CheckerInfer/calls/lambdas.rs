@@ -797,10 +797,16 @@ impl<'a> Checker<'a> {
                     });
                     let diagnostics_start = self.diags.len();
                     self.check_conditional_block(stmts, false);
-                    if infer_failure_carrier {
+                    if effective_ret.is_none() || infer_failure_carrier {
                         let checked = self.diags.split_off(diagnostics_start);
                         self.diags.extend(checked.into_iter().filter(|diagnostic| {
-                            !(diagnostic.code == "E0402" && diagnostic.span == tail_span)
+                            let discarded_value_tail = effective_ret.is_none()
+                                && diagnostic.code == "L0527"
+                                && diagnostic.span == tail_span;
+                            let ignored_failure_tail = infer_failure_carrier
+                                && diagnostic.code == "E0402"
+                                && diagnostic.span == tail_span;
+                            !discarded_value_tail && !ignored_failure_tail
                         }));
                     }
                     let mut last_ret = None;

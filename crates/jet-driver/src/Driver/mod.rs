@@ -3198,7 +3198,9 @@ impl PreparedBuildFrontEnd {
 pub fn prepare_build_front_end(
     inputs: FrontEndInputs,
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-    crate::run_compiler_work(move || prepare_build_front_end_on_compiler_stack(inputs, None, &[]))
+    crate::run_compiler_work(move || {
+        prepare_build_front_end_on_compiler_stack(inputs, None, &[])
+    })
 }
 
 /// Run the build front end against the complete authority-selected source
@@ -3223,7 +3225,11 @@ pub fn prepare_build_front_end_with_overlay(
     source: &str,
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
-        prepare_build_front_end_on_compiler_stack(inputs, Some((source_path, source)), &[])
+        prepare_build_front_end_on_compiler_stack(
+            inputs,
+            Some((source_path, source)),
+            &[],
+        )
     })
 }
 
@@ -3468,7 +3474,11 @@ fn compile_bundle_path_build_on_compiler_stack(
     let prepared = match prepared {
         Some(prepared) if overlay.is_none() && prepared.inputs == inputs => prepared,
         Some(_) => return Err(vec![prepared_front_end_mismatch(file)]),
-        None => prepare_build_front_end_on_compiler_stack(inputs, overlay, source_closure)?,
+        None => prepare_build_front_end_on_compiler_stack(
+            inputs,
+            overlay,
+            source_closure,
+        )?,
     };
     compile_build_from_front_end(
         file,
@@ -3698,12 +3708,6 @@ fn prepare_build_front_end_on_compiler_stack(
     } else {
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode)
     };
-    if std::env::var_os("JET_DEBUG_BUILD_SEMA").is_some() {
-        eprintln!(
-            "build-sema mode={compile_mode:?} build_index={build_index:?} diags={:?}",
-            diags.iter().map(|d| (&d.code, &d.what)).collect::<Vec<_>>()
-        );
-    }
     let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
@@ -6521,14 +6525,29 @@ fn lower_checked_mir_program_for(
     jet_foundation::MIR::MirProgram,
     jet_foundation::MIR::MirArtifactId,
 ) {
-    let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    lower_checked_mir_program_for_with_debug(bundle, request, false)
+}
+
+fn lower_checked_mir_program_for_with_debug(
+    bundle: &crate::AST::ProgramBundle,
+    request: jet_foundation::MIR::MirArtifactRequest,
+    debug_linemap: bool,
+) -> (
+    jet_foundation::MIR::MirProgram,
+    jet_foundation::MIR::MirArtifactId,
+) {
+    let (mir, artifact) =
+        crate::Codegen::TIR::lower_checked_mir_program_for_with_debug(
+            bundle,
+            request,
+            debug_linemap,
+        )
         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
     mir.validate().unwrap_or_else(|error| {
         jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
     });
     (mir, artifact)
 }
-
 fn mir_web_target(
     bundle: &crate::AST::ProgramBundle,
     mir: &jet_foundation::MIR::MirProgram,
@@ -6726,7 +6745,8 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     } else {
         request
     };
-    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let (mir, artifact) =
+        lower_checked_mir_program_for_with_debug(&bundle, request, debug_linemap);
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.ffi = ffi.as_ref();
     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
@@ -8011,6 +8031,53 @@ pub enum FuzzCompileError {
     Target(String),
 }
 
+fn select_fuzz_test_name(
+    bundle: &crate::AST::ProgramBundle,
+    wanted: Option<&str>,
+) -> Result<String, String> {
+    let mut all_tests = Vec::new();
+    let mut properties = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            let crate::AST::Item::Test(test) = item else {
+                continue;
+            };
+            let name = test
+                .name
+                .clone()
+                .unwrap_or_else(|| "anonymous".to_string());
+            let is_property = !test.params.is_empty();
+            all_tests.push((name.clone(), is_property));
+            if is_property {
+                properties.push(name);
+            }
+        }
+    }
+    if let Some(wanted) = wanted {
+        if let Some((name, true)) = all_tests
+            .iter()
+            .find(|(name, _)| name == wanted)
+        {
+            return Ok(name.clone());
+        }
+        if all_tests
+            .iter()
+            .any(|(name, is_property)| name == wanted && !is_property)
+        {
+            return Err(format!("`{wanted}` is not a property test"));
+        }
+        return Err(format!("can't find property test `{wanted}`"));
+    }
+    match properties.as_slice() {
+        [] => Err("no property `#Test fn` found in the target".to_string()),
+        [name] => Ok(name.clone()),
+        names => Err(format!(
+            "multiple property tests found: {}; fix: `jet test --grade=generated <file> <name>`",
+            names.join(", ")
+        )),
+    }
+}
+
 /// `jet fuzz <file> [<name>]` pipeline: same front end as `compile_tests`
 /// (sema runs in `Test` mode — a property test's body is checked exactly as
 /// `jet test` checks it), but codegen emits the fuzz driver harness instead.
@@ -8035,16 +8102,18 @@ fn compile_fuzz_on_compiler_stack(
         false,
     )
     .map_err(FuzzCompileError::Diagnostics)?;
+    let selected_name =
+        select_fuzz_test_name(&bundle, test_name).map_err(FuzzCompileError::Target)?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(FuzzCompileError::Diagnostics(ffi_diags)),
     };
-    let _ = test_name;
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::FuzzExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
-    );
+    )
+    .with_name(selected_name);
     let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
     mir.validate().unwrap_or_else(|error| {

@@ -132,6 +132,7 @@ pub(crate) fn register_comptime_declarations(
                 &st.consts,
             ),
             Item::UnitFamily(family) => {
+                let dimension = family.resolved_dimension.clone();
                 for definition in family.distinct_defs() {
                     register_distinct(
                         &definition,
@@ -141,6 +142,20 @@ pub(crate) fn register_comptime_declarations(
                         &st.consts,
                     );
                     st.registry.unit_types.insert(definition.name.clone());
+                    if let Some(owner) = family
+                        .resolved_owner
+                        .as_deref()
+                        .filter(|_| family.base.is_some() || dimension.is_some())
+                    {
+                        if let Some(fact) = unit_fact(
+                            family,
+                            &definition.name,
+                            dimension.clone(),
+                            std::path::PathBuf::from(owner),
+                        ) {
+                            st.registry.unit_facts.insert(definition.name.clone(), fact);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -302,6 +317,15 @@ fn is_fallible_void_return(ty: &Type) -> bool {
     )
 }
 
+fn asm_first_operand(line: &str) -> Option<&str> {
+    let (_, operands) = line.split_once(|character: char| character.is_ascii_whitespace())?;
+    operands
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|operand| !operand.is_empty())
+}
+
 impl<'a> Checker<'a> {
     /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
     /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
@@ -393,6 +417,9 @@ impl<'a> Checker<'a> {
             return;
         }
         let params: HashSet<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+        let target = self.layout_target().triple;
+        let target_is_x86_64 =
+            target.is_empty() || target.split('-').next() == Some("x86_64");
         let mut used = HashSet::new();
         let mut return_anchors = 0usize;
         let mut bad = None;
@@ -403,7 +430,7 @@ impl<'a> Checker<'a> {
                     .split(|c: char| c == ',' || c.is_whitespace())
                     .filter(|s| !s.is_empty())
                 {
-                    if !asm_register_known(reg) {
+                    if !target_is_x86_64 || !asm_register_known(reg) {
                         bad = Some(format!("`{reg}` isn't an audited register on this target"));
                     }
                 }
@@ -411,6 +438,27 @@ impl<'a> Checker<'a> {
             }
             if line.contains("; -> return") {
                 return_anchors += 1;
+                let destination = line
+                    .split_once("; -> return")
+                    .map(|(body, _)| body.trim())
+                    .and_then(asm_first_operand);
+                let valid_destination = destination.is_some_and(|operand| {
+                    if let Some(name) = operand
+                        .strip_prefix('{')
+                        .and_then(|name| name.strip_suffix('}'))
+                    {
+                        params.contains(name)
+                    } else {
+                        let register = operand.strip_prefix('%').unwrap_or(operand);
+                        target_is_x86_64 && asm_register_known(register)
+                    }
+                });
+                if !valid_destination {
+                    bad = Some(
+                        "a value-returning assembly body needs a named output operand or an explicit audited target register"
+                            .to_string(),
+                    );
+                }
             }
             let mut rest = line;
             while let Some(open) = rest.find('{') {
@@ -432,15 +480,21 @@ impl<'a> Checker<'a> {
                 "parameter `{name}` has no named `{{{name}}}` operand"
             ));
         }
-        let returns_value = f.return_type.as_ref().is_some_and(
-            |ty| !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE),
-        );
+        let returns_value = f
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| !is_void_like_return(ty));
         if return_anchors != usize::from(returns_value) {
             bad = Some(if returns_value {
                 "a value-returning assembly body needs exactly one `; -> return` anchor".to_string()
             } else {
                 "a void assembly body can't declare a `; -> return` anchor".to_string()
             });
+        }
+        if !target_is_x86_64 {
+            bad = Some(format!(
+                "inline assembly selects x86-64 registers, but target `{target}` does not"
+            ));
         }
         if let Some(problem) = bad {
             self.diags.push(Diagnostic::error(
@@ -452,6 +506,7 @@ impl<'a> Checker<'a> {
             ));
         }
     }
+
 
     /// D-BOUND-UNDO1=A: prove the inverse named by `#Undo` is callable before
     /// codegen can lower it into a rollback closure.

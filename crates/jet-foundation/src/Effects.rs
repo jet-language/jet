@@ -172,7 +172,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     core_effect_legacy(module, method)
 }
 
-/// The precise leaf for a Core call that may wait on external work.
+/// The precise leaf for a Core call with a canonical effect refinement.
 ///
 /// Plain calls read the leaf from the canonical Syntax row. Special calls that
 /// have no row yet stay in this small fallback until they can join that table.
@@ -189,7 +189,6 @@ fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
         || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
         || (module == "core.http.server"
             && matches!(method, "serve" | "serve_once" | "serve_once_listener"))
-        || (module == "core.files")
         || (module == "core.web.browser"
             && !matches!(method, "profile" | "timeout" | "locked"))
         || (module == "core.net.tls"

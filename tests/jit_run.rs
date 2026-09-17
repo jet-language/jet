@@ -560,6 +560,11 @@ fn terminal_capabilities_match_aot_resident_jit_and_interpreter() {
     }
     let dir = common::unique_tmp("jit_process_terminal_capabilities_tiers");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_process_terminal_capabilities_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("terminal_capabilities.jet");
     fs::write(
         &file,
@@ -635,6 +640,11 @@ fn process_run_checked_matches_default_and_aot_lenses() {
     }
     let dir = common::unique_tmp("jit_process_run_checked");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_process_run_checked\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }\n",
+    )
+    .unwrap();
     let file = dir.join("run_checked.jet");
     fs::write(
         &file,
@@ -764,6 +774,11 @@ fn process_pipeline_output_limit_matches_aot_resident_jit_and_interpreter() {
     }
     let dir = common::unique_tmp("jit_process_pipeline_output_limit");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_process_pipeline_output_limit\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }\n",
+    )
+    .unwrap();
     let file = dir.join("pipeline_output_limit.jet");
     let test_binary = std::env::current_exe().unwrap();
     fs::write(
@@ -852,13 +867,18 @@ fn prompt_helpers_preserve_behavior_through_named_deopt() {
     }
     let dir = common::unique_tmp("jit_prompt_named_deopt");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_prompt_named_deopt\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n",
+    )
+    .unwrap();
     let file = dir.join("prompts.jet");
     fs::write(
         &file,
         r##"use core.term as io
 use core.text as text
 
-fn prompt_gap() String -[IO]> {
+fn prompt_gap() String -[IO, Time.Wait]> {
     confirmed :: io.confirm("Continue?")
     choice :: io.choose("Choose:", ["staging", "production"]) ?? panic("choose failed")
     secret_kind := "unexpected"
@@ -948,6 +968,11 @@ fn args_parse_or_exit_runs_resident_for_return_help_and_usage_error() {
     }
     let dir = common::unique_tmp("jit_args_parse_or_exit");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_args_parse_or_exit\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("args.jet");
     fs::write(
         &file,
@@ -1227,6 +1252,11 @@ fn iter_adapter_latches_emit_dominating_clif() {
     }
     let dir = common::unique_tmp("jit_iter_adapter_dominance");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_iter_adapter_dominance\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("adapters.jet");
     fs::write(
         &file,
@@ -1348,6 +1378,11 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
     }
     let dir = common::unique_tmp("jit_option_carrier");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("option_carrier.jet");
     fs::write(
         &file,
@@ -1450,6 +1485,11 @@ fn map_has_key_runs_resident_for_supported_key_shapes() {
     }
     let dir = common::unique_tmp("jit_map_has_key");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_map_has_key\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("map_has_key.jet");
     fs::write(
         &file,
@@ -1534,6 +1574,11 @@ fn string_is_empty_runs_resident() {
     }
     let dir = common::unique_tmp("jit_string_is_empty");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_string_is_empty\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("string_is_empty.jet");
     fs::write(
         &file,
@@ -1602,6 +1647,11 @@ fn core_math_float_predicates_run_resident() {
     }
     let dir = common::unique_tmp("jit_core_math_float_predicates");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_core_math_float_predicates\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("core_math_float_predicates.jet");
     fs::write(
         &file,
@@ -1696,6 +1746,11 @@ fn data_tree_list_extend_runs_resident_and_snapshots_self_extension() {
     }
     let dir = common::unique_tmp("jit_data_tree_extend");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_data_tree_extend\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("data_tree_extend.jet");
     fs::write(
         &file,
@@ -1780,6 +1835,11 @@ fn data_tree_for_in_nested_conditions_run_resident() {
     }
     let dir = common::unique_tmp("jit_data_tree_for_in");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_data_tree_for_in\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("data_tree_for_in.jet");
     fs::write(
         &file,
@@ -1950,7 +2010,7 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
     );
     let plan = common::cranelift_tier_plan(&bundle);
     assert!(
-        plan.native.contains("run") && !plan.whole_interp,
+        plan.native.iter().any(|name| name.ends_with("::run")) && !plan.whole_interp,
         "Result<Int, Err> fixture must select resident `run`: {plan:?}"
     );
     assert!(
@@ -2156,7 +2216,7 @@ fn run() {
     );
     let plan = common::cranelift_tier_plan(&bundle);
     assert!(
-        plan.native.contains("run") && !plan.whole_interp,
+        plan.native.iter().any(|name| name.ends_with("::run")) && !plan.whole_interp,
         "HTTP response fixture must select resident run: {plan:?}"
     );
     common::compile_cranelift_bundle(&bundle, &common::development_policy())
@@ -2256,7 +2316,7 @@ fn tower_data_tree_helpers_select_resident_tier() {
         assert!(
             plan.rows
                 .iter()
-                .find(|row| row.function_name == name)
+                .find(|row| row.function_name.ends_with(&format!("::{name}")))
                 .is_some_and(|row| matches!(row.tier, jet_jit::Tier::Native)),
             "Tower helper `{name}` must run in resident JIT: rows={:?}",
             plan.rows
@@ -2278,7 +2338,9 @@ fn tower_data_tree_helpers_select_resident_tier() {
         "burndown30",
     ] {
         assert!(
-            plan.native.contains(name),
+            plan.native
+                .iter()
+                .any(|candidate| candidate.ends_with(&format!("::{name}"))),
             "Tower DataTree helper `{name}` must select resident JIT: deopt={:?}, whole_interp={:?}",
             plan.deopt,
             plan.whole_interp
@@ -2290,7 +2352,7 @@ fn tower_data_tree_helpers_select_resident_tier() {
         plan.deopt
     );
     assert!(
-        plan.native.contains("run"),
+        plan.native.iter().any(|name| name.ends_with("::run")),
         "Tower entry must remain resident JIT: deopt={:?}, whole_interp={:?}",
         plan.deopt,
         plan.whole_interp
@@ -2326,6 +2388,11 @@ fn jit_list_mutations_preserve_dense_arena_values() {
     }
     let dir = common::unique_tmp("jit_dense_list_mutations");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_dense_list_mutations\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let file = dir.join("dense_list_mutations.jet");
     fs::write(
         &file,
@@ -2551,10 +2618,29 @@ fn run() {
 /// observable: a semantic result that only works after boxing, a lowering
 /// failure, or a silent deopt cannot pass as native coverage.
 fn assert_typed_fast_path_fixture(name: &str, source: &str, expected: &str) {
+    assert_typed_fast_path_fixture_with_manifest(
+        name,
+        source,
+        expected,
+        Some(
+            "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+        ),
+    );
+}
+
+fn assert_typed_fast_path_fixture_with_manifest(
+    name: &str,
+    source: &str,
+    expected: &str,
+    manifest: Option<&str>,
+) {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
     let dir = common::unique_tmp(name);
+    if let Some(manifest) = manifest {
+        fs::write(dir.join("package.jet"), manifest).unwrap();
+    }
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join(format!("{name}.jet"));
     fs::write(&file, source).unwrap();
@@ -2674,6 +2760,30 @@ fn run() {
     );
 }
 
+/// Card #3323 criterion 2: Int list reducers keep their identities, ordinary
+/// values, and arbitrary-precision spill results identical across all tiers.
+#[test]
+fn jit_int_list_reducers_preserve_arbitrary_precision() {
+    let source = r#"fn run() {
+    empty :: [Int]{}
+    print(empty.sum())
+    print(empty.product())
+    print([9].sum())
+    print([24].product())
+    print([Int.MAX, 1].sum())
+    print([Int.MAX, 2].product())
+}
+"#;
+    assert_typed_fast_path_fixture_with_manifest(
+        "jit_int_list_reducers",
+        source,
+        "0\n1\n9\n24\n9223372036854775808\n18446744073709551614\n",
+        Some(
+            "name: \"jit_int_list_reducers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+        ),
+    );
+}
+
 /// Card #2863: Float arithmetic and comparisons use their native f64 values,
 /// while sqrt remains the shared Core math operation.
 #[test]
@@ -2718,7 +2828,7 @@ fn jit_loop_carried_scalars_preserve_exact_values() {
     print(weight)
 }
 "#;
-    assert_typed_fast_path_fixture("jit_loop_carried_scalars", source, "59\n1.5\n");
+    assert_typed_fast_path_fixture("jit_loop_carried_scalars", source, "59\n1.50\n");
 }
 
 /// Card #2863: typed byte and integer lists use indexed read/write semantics
@@ -2747,6 +2857,95 @@ fn jit_typed_list_indexing_and_byte_iteration_preserve_values() {
         source,
         "1\n9\n17\n40\n80\n",
     );
+}
+
+/// A JSON-decoded list of records must keep each record handle when checked
+/// `List.map` and `List.find` invoke their universal callbacks.
+#[test]
+fn jit_json_decoded_record_list_map_and_find_preserve_handles() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let scratch = common::Scratch::new("jit_json_decoded_record_list_handles");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"jit_json_decoded_record_list_handles\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
+    let file = scratch.join("run.jet");
+    fs::write(
+        &file,
+        r###"use core.encoding.json as json
+
+struct Item {
+    id: Int
+    qty: Int
+}
+
+struct Listing {
+    items: [Item]
+}
+
+fn run() {
+    raw :: "{{\"items\":[{{\"id\":2,\"qty\":7}},{{\"id\":5,\"qty\":4}}]}}"
+    listing :: json.decode<Listing>(raw) ?? panic("decode failed")
+    print("len {listing.items.len()}")
+    print("total {listing.items.map(item -> item.qty).sum()}")
+    if listing.items.find(item -> item.id == 5) == {
+        .Val(item) -> print("found {item.qty}")
+        .None -> print("missing")
+    }
+}
+"###,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("structured list fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "structured list fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        common::cranelift_resident_safe(&bundle),
+        "structured list fixture must stay resident-safe: {}",
+        common::cranelift_resident_safe_detail(&bundle)
+    );
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| panic!("structured list fixture must compile in resident JIT: {error}"));
+
+    let expected = "len 2\ntotal 11\nfound 4\n";
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "structured list AOT fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("structured list resident JIT rejected fixture: {diags:?}")
+        }
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "structured list resident JIT must not deopt or fall back"
+    );
+
+    let expected = (expected.to_owned(), String::new(), 0);
+    assert_eq!(resident, expected, "structured list resident JIT drifted");
 }
 
 /// Card #2863: fixed-width Reader.take_pattern keeps the shared bit-field

@@ -153,6 +153,17 @@ pub enum ProcessReader {
     Terminal(std::fs::File),
     Shared(std::sync::Arc<ProcessOutputState>),
 }
+/// Native storage types for the process stream markers exposed by Core.
+/// The language-level markers are projected from these fields, so generated
+/// Rust must retain the concrete shared handles when a marker is used as a
+/// method receiver.
+pub type ProcessStdinHandle =
+    std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>;
+pub type ProcessStdoutStreamHandle =
+    std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>;
+pub type ProcessStderrStreamHandle =
+    std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>;
+
 
 #[derive(Debug)]
 pub(crate) struct ProcessOutputState {
@@ -201,6 +212,68 @@ impl super::JetDisplay for EncodingError {
     }
 }
 impl super::JetDebug for EncodingError {
+    fn jet_debug(&self) -> String {
+        self.display_text()
+    }
+}
+// D-ENC-XML-SURFACE1=A: XML carries its own stable typed parse/render
+// diagnostics.  Keep optional source locations on the shared outcome
+// carrier so the host, resident evaluator, and generated Rust agree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XMLReason {
+    InvalidEncoding,
+    Malformed,
+    MismatchedTag,
+    InvalidName,
+    Namespace,
+    DuplicateAttribute,
+    Entity,
+    EntityCycle,
+    Limit,
+    Canonicalization,
+    Shape,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XMLError {
+    pub kind: XMLReason,
+    pub byte_offset: JetOutcome<i64, JetAbsent>,
+    pub line: JetOutcome<i64, JetAbsent>,
+    pub column: JetOutcome<i64, JetAbsent>,
+    pub path: String,
+    pub reason: String,
+}
+
+impl XMLError {
+    fn display_text(&self) -> String {
+        super::jet_encoding_error_kernel_show(
+            "XML",
+            &format!("{:?}", self.kind),
+            self.byte_offset.as_ref().ok().copied().unwrap_or(0),
+            self.line.as_ref().ok().copied(),
+            self.column.as_ref().ok().copied(),
+            &self.path,
+            &self.reason,
+        )
+    }
+}
+impl std::fmt::Display for XMLError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.display_text())
+    }
+}
+impl super::JetShow for XMLError {
+    fn jet_show(&self) -> String {
+        self.display_text()
+    }
+}
+impl super::JetDisplay for XMLError {
+    fn jet_display(&self) -> String {
+        self.display_text()
+    }
+}
+impl super::JetDebug for XMLError {
     fn jet_debug(&self) -> String {
         self.display_text()
     }
@@ -4006,7 +4079,11 @@ fn jet_int_big_value(value: i64) -> Option<JetBigInt> {
     if owner.is_inline() {
         None
     } else {
-        JetBigInt::from_str(&owner.to_string_rep()).ok()
+        let value = owner.to_big();
+        Some(JetBigInt {
+            negative: value.negative,
+            limbs: value.limbs,
+        })
     }
 }
 
@@ -4015,8 +4092,10 @@ fn jet_int_value(value: i64) -> JetBigInt {
 }
 
 fn jet_int_pack(value: JetBigInt) -> i64 {
-    let exact = jet_foundation::Numeric::CtBigInt::from_str(&value.to_string_rep())
-        .unwrap_or_else(|_| jet_foundation::Numeric::CtBigInt::from_int(0));
+    let exact = jet_foundation::Numeric::CtBigInt {
+        negative: value.negative,
+        limbs: value.limbs,
+    };
     jet_foundation::Numeric::JetInt::from_big(exact).into_raw()
 }
 
@@ -4454,6 +4533,10 @@ fn jet_int_neg_slow(value: i64) -> i64 {
 pub fn jet_int_abs(value: i64) -> i64 {
     if jet_int_is_negative(value) {
         jet_int_neg(value)
+    } else if jet_int_is_tagged(value) {
+        // A positive spilled carrier is borrowed at this boundary. Return a
+        // retained raw owner instead of adopting the caller's word.
+        jet_int_owned_from_raw(value).into_raw()
     } else {
         value
     }
@@ -4529,24 +4612,29 @@ pub fn jet_int_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
     jet_int_div_rem(value, divisor, file, line).0
 }
 
-pub fn jet_int_div_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+fn jet_int_div_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
     if jet_int_is_zero(divisor) {
         crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
     }
-    let (quotient, _) = jet_int_value(value)
+    if jet_int_is_small(value) && jet_int_is_small(divisor) {
+        if let (Some(quotient), Some(remainder)) =
+            (value.checked_div_euclid(divisor), value.checked_rem_euclid(divisor))
+        {
+            return (quotient, remainder);
+        }
+    }
+    let (quotient, remainder) = jet_int_value(value)
         .div_rem_euclid(&jet_int_value(divisor))
         .expect("checked Euclidean division by zero");
-    jet_int_pack(quotient)
+    (jet_int_pack(quotient), jet_int_pack(remainder))
+}
+
+pub fn jet_int_div_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    jet_int_div_rem_euclid(value, divisor, file, line).0
 }
 
 pub fn jet_int_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    if jet_int_is_zero(divisor) {
-        crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
-    }
-    let (_, remainder) = jet_int_value(value)
-        .div_rem_euclid(&jet_int_value(divisor))
-        .expect("checked Euclidean remainder by zero");
-    jet_int_pack(remainder)
+    jet_int_div_rem_euclid(value, divisor, file, line).1
 }
 
 pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
@@ -5264,6 +5352,9 @@ fn jet_decimal_magnitude_from_digits(digits: &[u8]) -> JetDecimalMagnitude {
 }
 
 fn jet_decimal_parse(s: &str) -> Result<(bool, JetDecimalMagnitude, u32), String> {
+    if let Some((negative, value, scale)) = crate::jet_json_number::json_decimal_small(s)? {
+        return Ok((negative, JetDecimalMagnitude::Small(value), scale));
+    }
     let (negative, digits, scale) = crate::jet_json_number::json_decimal_lexeme(s)?;
     Ok((
         negative,
@@ -5670,19 +5761,81 @@ impl JetDecimal {
         }
     }
 
+    fn write_u128_magnitude(out: &mut String, mut value: u128) {
+        if value == 0 {
+            out.push('0');
+            return;
+        }
+        let mut digits = [0u8; 39];
+        let mut len = 0usize;
+        while value != 0 {
+            digits[len] = (value % 10) as u8;
+            value /= 10;
+            len += 1;
+        }
+        for digit in digits[..len].iter().rev() {
+            out.push(char::from(b'0' + *digit));
+        }
+    }
+
+    fn write_u32_padded9(out: &mut String, mut value: u32) {
+        let mut divisor = 100_000_000u32;
+        loop {
+            out.push(char::from(b'0' + (value / divisor) as u8));
+            value %= divisor;
+            if divisor == 1 {
+                break;
+            }
+            divisor /= 10;
+        }
+    }
+
     fn write_magnitude(&self, out: &mut String) {
-        use std::fmt::Write as _;
         match &self.magnitude {
             JetDecimalMagnitude::Small(value) => {
-                let _ = write!(out, "{value}");
+                Self::write_u128_magnitude(out, *value as u128);
             }
             JetDecimalMagnitude::Big(value) => {
                 let top = *value.limbs.last().unwrap_or(&0);
-                let _ = write!(out, "{top}");
+                Self::write_u128_magnitude(out, u128::from(top));
                 for &limb in value.limbs.iter().rev().skip(1) {
-                    let _ = write!(out, "{limb:09}");
+                    Self::write_u32_padded9(out, limb);
                 }
             }
+        }
+    }
+
+
+    fn write_small_scaled(value: i128, fraction_len: usize, out: &mut String) {
+        let mut value = value as u128;
+        let mut digits = [0u8; 39];
+        let mut digit_len = 0usize;
+        while value != 0 {
+            digits[digit_len] = (value % 10) as u8;
+            value /= 10;
+            digit_len += 1;
+        }
+        if fraction_len == 0 {
+            for digit in digits[..digit_len].iter().rev() {
+                out.push(char::from(b'0' + *digit));
+            }
+            return;
+        }
+        if digit_len <= fraction_len {
+            out.push('0');
+            out.push('.');
+            out.extend(std::iter::repeat('0').take(fraction_len - digit_len));
+            for digit in digits[..digit_len].iter().rev() {
+                out.push(char::from(b'0' + *digit));
+            }
+            return;
+        }
+        for digit in digits[..digit_len].iter().rev().take(digit_len - fraction_len) {
+            out.push(char::from(b'0' + *digit));
+        }
+        out.push('.');
+        for digit in digits[..fraction_len].iter().rev() {
+            out.push(char::from(b'0' + *digit));
         }
     }
 
@@ -5706,6 +5859,10 @@ impl JetDecimal {
         let mut out = String::with_capacity(capacity);
         if self.negative {
             out.push('-');
+        }
+        if let JetDecimalMagnitude::Small(value) = &self.magnitude {
+            Self::write_small_scaled(*value, fraction_len, &mut out);
+            return out;
         }
         if fraction_len == 0 {
             self.write_magnitude(&mut out);

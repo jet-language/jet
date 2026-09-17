@@ -198,6 +198,15 @@ fn jet_jit_math_cosh(x: f64) -> f64 {
 fn jet_jit_math_tanh(x: f64) -> f64 {
     x.tanh()
 }
+fn jet_jit_math_ln(x: f64) -> f64 {
+    x.ln()
+}
+fn jet_jit_math_trunc(x: f64) -> f64 {
+    x.trunc()
+}
+fn jet_jit_math_fract(x: f64) -> f64 {
+    x.fract()
+}
 fn jet_jit_math_cbrt(x: f64) -> f64 {
     x.cbrt()
 }
@@ -269,6 +278,15 @@ fn jet_jit_math_next_up(x: f64) -> f64 {
 }
 fn jet_jit_math_next_down(x: f64) -> f64 {
     x.next_down()
+}
+fn jet_jit_math_radix(_x: f64) -> i64 {
+    2
+}
+fn jet_jit_math_zero() -> f64 {
+    0.0
+}
+fn jet_jit_math_copy(x: f64) -> f64 {
+    x
 }
 fn jet_jit_math_cot(x: f64) -> f64 {
     1.0 / x.tan()
@@ -403,6 +421,9 @@ host_fns! {
     leading_ones: "jet_jit_math_leading_ones" => jet_jit_math_leading_ones: i64_i64;
     trailing_ones: "jet_jit_math_trailing_ones" => jet_jit_math_trailing_ones: i64_i64;
     asinh: "jet_jit_math_asinh" => jet_jit_math_asinh: f64_f64;
+    ln: "jet_jit_math_ln" => jet_jit_math_ln: f64_f64;
+    trunc: "jet_jit_math_trunc" => jet_jit_math_trunc: f64_f64;
+    fract: "jet_jit_math_fract" => jet_jit_math_fract: f64_f64;
     acosh: "jet_jit_math_acosh" => jet_jit_math_acosh: f64_f64;
     atanh: "jet_jit_math_atanh" => jet_jit_math_atanh: f64_f64;
     atan: "jet_jit_math_atan" => jet_jit_math_atan: f64_f64;
@@ -430,6 +451,9 @@ host_fns! {
     checked_rem: "jet_jit_math_checked_rem" => jet_jit_math_checked_rem: i64_i64_i64;
     is_nan: "jet_std_math_is_nan" => jet_jit_math_is_nan: f64_i8;
     is_infinite: "jet_std_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
+    radix: "jet_jit_math_radix" => jet_jit_math_radix: f64_i64;
+    zero: "jet_jit_math_zero" => jet_jit_math_zero: zero_f64;
+    copy: "jet_jit_math_copy" => jet_jit_math_copy: f64_f64;
     is_finite: "jet_std_math_is_finite" => jet_jit_math_is_finite: f64_i8;
     is_normal: "jet_jit_math_is_normal" => jet_jit_math_is_normal: f64_i8;
     is_subnormal: "jet_jit_math_is_subnormal" => jet_jit_math_is_subnormal: f64_i8;

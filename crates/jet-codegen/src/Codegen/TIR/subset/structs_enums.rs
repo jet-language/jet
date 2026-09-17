@@ -38,6 +38,22 @@ pub(crate) fn is_covered_enum_ty(ty: &Type, cx: &Cx) -> bool {
 pub(crate) fn enum_is_covered(name: &str, cx: &Cx) -> bool {
     enum_is_covered_inner(name, cx, &mut HashSet::new())
 }
+/// Match coverage for a discriminant-only enum pattern.
+///
+/// Unlike `enum_is_covered`, this does not inspect payload types: a wildcard
+/// or tag-only arm never lowers or binds the payload. The enum still needs a
+/// registered layout and a cloneable Rust representation because a borrowed
+/// scrutinee may be cloned before matching.
+pub(crate) fn enum_tag_is_covered(name: &str, cx: &Cx) -> bool {
+    let canonical_name = cx
+        .foreign_type_identity("", name)
+        .unwrap_or_else(|| name.to_string());
+    let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
+    cx.enum_variants.contains_key(&canonical_name)
+        && (is_foreign
+            || cx.cloneable.contains(name)
+            || cx.cloneable.contains(&canonical_name))
+}
 
 /// Core enum values with a concrete `PartialEq` representation in the shared
 /// Prelude. Sema resolves `==` on these values to the ordinary `Equatable`

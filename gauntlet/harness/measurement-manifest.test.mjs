@@ -49,6 +49,35 @@ test("HTTP behavior probes retain and validate response headers", async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+test("live-reload HTTP probes keep the default cap and accept the Jet app cap", async () => {
+  const appBody = Buffer.alloc(4_900_082, "a");
+  const server = http.createServer((_request, response) => response.end(appBody));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = server.address().port;
+  try {
+    const rejected = await liveReloadInternals.httpProbe(port, { path: "/app.js" });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.fatal, true);
+    assert.equal(rejected.error, "HTTP probe body exceeded 4194304 bytes");
+
+    const jetAppLimit = liveReloadInternals.axisOutputBodyLimit({ id: "jet-dev" }, { path: "/app.js" });
+    assert.equal(jetAppLimit, 5 * 1024 * 1024);
+    const accepted = await liveReloadInternals.httpProbe(port, { path: "/app.js" }, 5_000, jetAppLimit);
+    assert.equal(accepted.ok, true);
+    assert.equal(Buffer.byteLength(accepted.body), appBody.length);
+    assert.equal(accepted.body, appBody.toString("utf8"));
+    assert.equal(
+      liveReloadInternals.axisOutputBodyLimit({ id: "vite" }, { path: "/app.js" }),
+      4 * 1024 * 1024,
+    );
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 
 test("process-tree RSS sampling includes service descendants", async () => {
   if (!(await exists("/proc"))) return;

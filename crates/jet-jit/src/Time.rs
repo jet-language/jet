@@ -1358,6 +1358,7 @@ host_fns! {
     display: "jet_jit_time_display" => jet_jit_time_display: unary;
     duration_display: "jet_jit_duration_display" => jet_jit_duration_display: unary;
     start: "jet_jit_time_start" => jet_jit_time_start: nullary;
+    start_canonical: "jet_std_time_start" => jet_jit_time_start: nullary;
     stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
     sleep_duration: "jet_std_time_sleep_duration" => jet_jit_time_sleep_duration_ns: unary_void;
     sleep_until: "jet_time_sleep_until" => jet_jit_time_sleep_until: unary_void;
@@ -1369,6 +1370,7 @@ host_fns! {
     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
     datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
+    datetime_now_canonical: "jet_time_now_utc" => jet_jit_datetime_now: nullary;
     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
     from_unix_seconds: "jet_jit_time_from_unix_seconds" => jet_jit_time_from_unix_seconds: unary;
@@ -1386,6 +1388,7 @@ host_fns! {
     zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: quaternary;
     parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
+    instant_canonical: "jet_time_instant_now" => jet_jit_time_instant: nullary;
     instant_add_duration: "jet_jit_instant_add_duration" => jet_jit_instant_add_duration: binary;
     instant_sub_duration: "jet_jit_instant_sub_duration" => jet_jit_instant_sub_duration: binary;
     instant_difference: "jet_jit_instant_difference" => jet_jit_instant_difference: binary;

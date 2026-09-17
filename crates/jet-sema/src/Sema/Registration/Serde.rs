@@ -55,7 +55,7 @@ pub(crate) fn inject_anonymous_union_items(items: &mut Vec<Item>) {
             methods: Vec::new(),
             trait_impls: Vec::new(),
             derives,
-            auto_derive_default: false,
+            auto_derive_default: true,
             is_single_use: false,
             single_use_span: None,
             is_must_use: false,

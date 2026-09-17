@@ -664,6 +664,28 @@ pub(crate) fn jet_jit_file_reader_close(handle: i64) {
     let _ = take_file_reader(handle);
 }
 
+/// Build the checked resident carrier for `EncodingLimits.safe()`.
+pub(crate) fn jet_jit_encoding_limits_safe() -> i64 {
+    let limits = runtime::jet_std::EncodingLimits::safe();
+    Concurrency::with_runtime_mut(|rt| {
+        let handle = rt.heap.alloc_record(6);
+        let fields = [
+            limits.buffer_bytes,
+            limits.max_depth,
+            limits.max_item_bytes,
+            limits.max_total_bytes
+                .map(|value| value.wrapping_add(1))
+                .unwrap_or(0),
+            limits.max_expansion_depth,
+            limits.max_expansion_bytes,
+        ];
+        for (index, value) in fields.into_iter().enumerate() {
+            let _ = rt.heap.record_set_int(handle, index as i64, value);
+        }
+        handle
+    })
+}
+
 fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
     let mut lim = runtime::jet_std::EncodingLimits::safe();
     Concurrency::with_runtime_mut(|rt| {
@@ -1460,6 +1482,8 @@ host_fns! {
     register: register_stream_symbols;
     declare: declare_stream_host_fns(module) {
         let cc = module.target_config().default_call_conv;
+        let mut sig_nullary = Signature::new(cc);
+        sig_nullary.returns.push(AbiParam::new(types::I64));
         let mut sig_unary = Signature::new(cc);
         sig_unary.params.push(AbiParam::new(types::I64));
         sig_unary.returns.push(AbiParam::new(types::I64));
@@ -1479,6 +1503,7 @@ host_fns! {
         }
         sig_quinary.returns.push(AbiParam::new(types::I64));
     }
+    encoding_limits_safe: "jet_std::EncodingLimits::safe" => jet_jit_encoding_limits_safe: sig_nullary;
     fs_create: "jet_jit_fs_create" => jet_jit_fs_create: sig_unary;
     fs_open: "jet_jit_fs_open" => jet_jit_fs_open: sig_unary;
     json_writer: "jet_jit_json_writer" => jet_jit_json_writer: sig_ternary;

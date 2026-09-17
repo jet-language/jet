@@ -6,16 +6,12 @@ struct Args {
     needle: String
 }
 
-fn scan(path: String, needle: String) Int -> {
-    text :: files.read(path) ?? panic("read failed")
-    text.lines().map(line -> line.count(needle)).sum()
-}
-
 fn run(args: Args) {
     root :: args.root
     needle :: ~args.needle
     paths := (files.walk_files(root) ?? panic("walk failed")).filter(entry -> entry.path.ends_with(".txt")).map(entry -> entry.path)
-    counts := paths.para_map(path -> scan(path, needle))
+    line_groups :: paths.map(path -> (files.read(path) ?? panic("read failed")).lines())
+    counts :: line_groups.para_map((rows: [String]) -> rows.map(line -> line.count(needle)).sum())
     matched := 0
     total := 0
     loop pair in paths.zip(counts) {

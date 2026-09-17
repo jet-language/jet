@@ -1,0 +1,14 @@
+use core.web as web
+
+struct Input {
+    name: String
+}
+
+fn save(input: Input) String -> "saved {input.name}"
+
+fn run() {
+    form :: web.form(Input, action: save)
+    form.set("name", "Ada") ?? panic("name set")
+    print(form.no_script() ?? panic("no-script form"))
+    print(form.render())
+}

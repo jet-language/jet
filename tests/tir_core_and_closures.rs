@@ -1428,16 +1428,14 @@ fn run() {
 /// twice. Every witness must agree across AOT, default run, and interpretation.
 #[test]
 fn card_2860_fallible_carrier_projection_tier_parity() {
-    let handled_map = "\
+    let handled_map = r#"
 fn run() {
-    pattern :: Regex{\"^IMG_([0-9]+)\\\\.jpeg$\"}
-    values := [\"IMG_1.jpeg\", \"IMG_2.jpeg\"].map(line -> {
-        found :: pattern.match(line) ?? panic(\"bad\")
-        Int.parse(found.group(1) ?? panic(\"bad\")) ?? panic(\"bad\")
+    values :: ["1", "2"].map(line -> {
+        Int.parse(line) ?? panic("bad")
     })
     print(values)
 }
-";
+"#;
     assert_tiers_agree("tir_card_2860_handled_map", handled_map, "[1, 2]\n");
 
     let fallible_map = "\
@@ -1446,7 +1444,7 @@ fn parse(n: Int) Int !Err -> {
     return n
 }
 fn run() {
-    values := [1, 0].map((n: Int) -> parse(n)) ?? {
+    values :: [1, 0].map((n: Int) -> parse(n)) ?? {
         print(err.message)
         []
     }
@@ -1454,6 +1452,15 @@ fn run() {
 }
 ";
     assert_tiers_agree("tir_card_2860_fallible_map", fallible_map, "bad\n[]\n");
+
+    let default_helper_map = "\
+fn parse_default(n: Int) Int -> n
+fn run() {
+    values :: [1, 2].map((n: Int) -> parse_default(n))
+    print(values)
+}
+";
+    assert_tiers_agree("tir_card_2860_default_helper_map", default_helper_map, "[1, 2]\n");
 
     let explicit_ok_arms = "\
 fn choose(first: Bool) Int !Err -> if first -> Ok(1) else -> Ok(2)

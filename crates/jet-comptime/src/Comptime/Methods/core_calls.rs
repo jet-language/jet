@@ -363,6 +363,13 @@ mod log_kernel {
         jet_ring_log_setup(format);
     }
 }
+/// Set the shared Prelude log trace context for the MIR evaluator.
+///
+/// Keep the state mutation behind `log_kernel`, so default/impure dispatch
+/// and direct MIR handling all use the same thread-local carrier.
+pub fn set_trace_id(id: &str) {
+    log_kernel::set_trace_id(id);
+}
 
 mod term_semantics {
     include!("../../../../jet-codegen/src/Prelude/Term.rs");

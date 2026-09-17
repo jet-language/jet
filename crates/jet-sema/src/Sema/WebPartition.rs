@@ -504,47 +504,6 @@ fn check_target_browser(
     }
 }
 
-/// The browser artifact has no argv-to-Jet adapter for a parameterized
-/// `run`. Reject that checked CLI shape in sema before codegen instead of
-/// allowing a CLI-only entry to reach Web emission.
-fn check_web_entry_adapter(bundle: &ProgramBundle, diags: &mut Vec<Diagnostic>) {
-    if !bundle.web_partition_enforced {
-        return;
-    }
-    let Some(entry) = bundle.modules.get(bundle.entry) else {
-        return;
-    };
-    let has_selected_executable = entry.items.iter().any(|item| {
-        matches!(
-            item,
-            Item::Const(value)
-                if value.resolved_output.as_ref().is_some_and(|output| {
-                    output.selected
-                        && output.kind == crate::AST::OutputKind::Executable
-                })
-        )
-    });
-    if has_selected_executable {
-        return;
-    }
-    if jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_none() {
-        return;
-    }
-    let Some(run) = entry.items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == "run" => Some(function),
-        _ => None,
-    }) else {
-        return;
-    };
-    if run.params.is_empty() {
-        return;
-    }
-    diags.push(Diagnostic::from_row(
-        "E-WEB-TIR-UNSUPPORTED",
-        &[("fn", "run (typed CLI entry adapter)")],
-        Some(run.name_span),
-    ));
-}
 
 /// Walk the bundle, assign buckets, and emit partition / ABI diagnostics.
 pub fn check_web_partition(
@@ -641,7 +600,6 @@ pub fn check_web_partition(
 
     let abi_idx = ABITypeIndex::from_bundle(bundle);
     let mut diags = Vec::new();
-    check_web_entry_adapter(bundle, &mut diags);
     for f in &metas {
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);

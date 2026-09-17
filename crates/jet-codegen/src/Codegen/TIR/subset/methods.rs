@@ -5,7 +5,7 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::alloc_new_type;
+use crate::Codegen::TIR::allocator_constructor_owner;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
 use crate::Codegen::TIR::core_enum_equal_type;
@@ -63,6 +63,12 @@ pub(crate) fn method_call_in_subset(
     // D-CALLVALUE1=B: the sema marker is the method-shaped spelling of the
     // same function-value call represented by `Expr::CallValue`.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
+    if crate::Codegen::TIR::web_receiver_projection(recv_type.as_deref(), method, args.len())
+        .is_some()
+    {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
@@ -634,22 +640,19 @@ pub(crate) fn method_call_in_subset(
             }
         }
     }
-    // Shape (k) [c109 Phase 19]: the arena allocator constructor `mem.Arena.new(…)`
-    // (D-ALLOC1). The receiver is `Field(Ident(mem-alias), <AllocType>)`, method `new`.
-    // Sema sets `recv_type == Some(<AllocType>)` (the receiver `mem.Arena` is typed
-    // `Named(Arena)` via `infer_core_field`, then `.new()` dispatches through
-    // `alloc_method_return`). The AST `emit_method_call` claims it via its FIRST branch
-    // (the `mem.<Alloc>.new()` constructor, Expression.rs ~L1515) BEFORE any `rty`-keyed
-    // arm — so we mirror that and try it FIRST, before the handle shape. The optional
-    // `capacity:`/`slots:`/`size:` arg is admitted (a label is allowed HERE — the AST reads
-    // `arg(0)` ignoring the label, choosing the ctor by allocator type, not label).
-    if let Some(alloc_type) = alloc_new_type(receiver, method, cx, locals) {
+    // Shape (k) [c109 Phase 19]: allocator constructors are admitted from the
+    // checked dispatch owner and return fact. Sema rewrites `mem.Arena` (and
+    // siblings) to a nominal sentinel before TIR, so source-shape inspection
+    // would be both stale and unsound here.
+    if let Some(alloc_type) = allocator_constructor_owner(recv_type.as_deref(), method) {
+        let return_ok =
+            matches!(resolved_ret, Some(Type::Named(name)) if name == alloc_type);
         let arity_ok = if alloc_type == "Fixed" {
             args.len() == 1
         } else {
             args.len() <= 1
         };
-        return arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+        return return_ok && arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
     // receiver is a module-field sentinel, not a runtime value.
@@ -1194,8 +1197,13 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && method == "safe" && args.is_empty() {
         // D-APILABEL1=A: the bare spelling is what a synthesized Core default uses.
         if let Expr::Ident(type_name, _) = receiver {
+            let is_core_email_limits = type_name == "Limits"
+                && cx
+                    .core_imports
+                    .values()
+                    .any(|module| module == "core.email");
             if matches!(type_name.as_str(), "EncodingLimits" | "Limits")
-                && !cx.struct_fields.contains_key(type_name)
+                && (!cx.struct_fields.contains_key(type_name) || is_core_email_limits)
             {
                 return true;
             }

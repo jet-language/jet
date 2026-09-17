@@ -8,6 +8,196 @@ const JET_TEXT_WASM_DECODER = new TextDecoder("utf-8", { fatal: true });
 function jet_string_contains(text, needle) {
   return text.includes(needle);
 }
+function jet_string_replace(text, from, to) {
+  return String(text).replaceAll(String(from), String(to));
+}
+
+function jet_cursor_over(text) {
+  return { buf: String(text), pos: 0 };
+}
+
+function jet_cursor_take_until(cursor, delimiter) {
+  const tail = cursor.buf.slice(cursor.pos);
+  const needle = String(delimiter);
+  const offset = tail.indexOf(needle);
+  if (offset < 0) {
+    return jet_outcome_err(
+      `Cursor.take_until: ${JSON.stringify(needle)} not found in the remaining text`,
+    );
+  }
+  cursor.pos += offset;
+  return jet_outcome_ok(tail.slice(0, offset));
+}
+
+function jet_cursor_skip_ws(cursor) {
+  const tail = cursor.buf.slice(cursor.pos);
+  cursor.pos += tail.length - tail.trimStart().length;
+}
+
+function jet_text_match_capture(kind, raw) {
+  switch (kind.kind) {
+    case "text":
+      return raw;
+    case "int": {
+      if (!/^[+-]?[0-9]+$/.test(raw)) return undefined;
+      try {
+        const value = BigInt(raw);
+        const min = -(1n << 63n);
+        const max = (1n << 63n) - 1n;
+        return value >= min && value <= max ? value : undefined;
+      } catch (_) {
+        return undefined;
+      }
+    }
+    case "float": {
+      if (raw.length === 0 || raw.trim() !== raw) return undefined;
+      const value = Number(raw);
+      return Number.isNaN(value) ? undefined : value;
+    }
+    case "bool":
+      if (raw === "true" || raw === "True" || raw === "1") return true;
+      if (raw === "false" || raw === "False" || raw === "0") return false;
+      return undefined;
+    case "inline_range": {
+      if (!/^[+-]?[0-9]+$/.test(raw)) return undefined;
+      try {
+        const value = BigInt(raw);
+        return value >= BigInt(kind.lo) && value <= BigInt(kind.hi) ? value : undefined;
+      } catch (_) {
+        return undefined;
+      }
+    }
+    default:
+      return undefined;
+  }
+}
+
+function jet_text_match_scan(subject, parts, consumePrefix) {
+  let cursor = 0;
+  const captures = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (part.kind === "literal") {
+      if (!subject.slice(cursor).startsWith(part.value)) return undefined;
+      cursor += part.value.length;
+      continue;
+    }
+    const next = parts[index + 1];
+    const offset = next?.kind === "literal"
+      ? subject.slice(cursor).indexOf(next.value)
+      : subject.length - cursor;
+    if (offset < 0) return undefined;
+    const end = cursor + offset;
+    const capture = jet_text_match_capture(part.hole_kind, subject.slice(cursor, end));
+    if (capture === undefined) return undefined;
+    captures.push(capture);
+    cursor = end;
+  }
+  if (!consumePrefix && cursor !== subject.length) return undefined;
+  return { consumed: cursor, captures };
+}
+
+function jet_cursor_pattern_miss(cursor) {
+  return `pattern did not match at cursor position ${cursor.pos}`;
+}
+
+function jet_text_pattern_match(subject, parts) {
+  const scan = jet_text_match_scan(String(subject), parts, false);
+  return scan === undefined ? undefined : scan.captures;
+}
+
+function jet_cursor_take_pattern(cursor, parts, fields) {
+  const scan = jet_text_match_scan(cursor.buf.slice(cursor.pos), parts, true);
+  if (scan === undefined) return jet_outcome_err(jet_cursor_pattern_miss(cursor));
+  cursor.pos += scan.consumed;
+  const value = {};
+  for (let index = 0; index < fields.length; index += 1) {
+    value[fields[index]] = scan.captures[index];
+  }
+  return jet_outcome_ok(fields.length === 0 ? undefined : value);
+}
+// D-BINPAT1 / I9: mirror the Foundation bit scanner for Web byte-pattern
+// matches. The checked MIR route supplies only literal, bit-field, and rest
+// descriptors, so captures stay in source order and misses leave no carrier.
+function jet_binary_pattern_match(subject, parts) {
+  let bytes;
+  if (subject instanceof Uint8Array) {
+    bytes = subject;
+  } else {
+    if (!Array.isArray(subject)) {
+      throw new TypeError("binary pattern subject is not a byte buffer");
+    }
+    bytes = new Uint8Array(subject.length);
+    for (let index = 0; index < subject.length; index += 1) {
+      const value = subject[index];
+      if (typeof value === "bigint") {
+        if (value < 0n || value > 255n) {
+          throw new TypeError("binary pattern subject contains a non-byte value");
+        }
+        bytes[index] = Number(value);
+        continue;
+      }
+      const integer = Number(value);
+      if (!Number.isInteger(integer) || integer < 0 || integer > 255) {
+        throw new TypeError("binary pattern subject contains a non-byte value");
+      }
+      bytes[index] = integer;
+    }
+  }
+  const total = bytes.length * 8;
+  let bitPosition = 0;
+  const captures = [];
+  for (const part of parts) {
+    if (part.kind === "literal") {
+      if (bitPosition % 8 !== 0) return jet_option_none();
+      const start = bitPosition / 8;
+      if (start + part.value.length > bytes.length) return jet_option_none();
+      for (let index = 0; index < part.value.length; index += 1) {
+        if (bytes[start + index] !== part.value[index]) return jet_option_none();
+      }
+      bitPosition += part.value.length * 8;
+      continue;
+    }
+    if (part.kind === "bits") {
+      const width = part.width;
+      const end = bitPosition + width;
+      if (!Number.isInteger(width) || width < 1 || width > 64 || end > total) {
+        return jet_option_none();
+      }
+      let value = 0n;
+      for (let offset = 0; offset < width; offset += 1) {
+        const position = bitPosition + offset;
+        const byte = bytes[Math.floor(position / 8)];
+        const bit = 7 - (position % 8);
+        value = (value << 1n) | BigInt((byte >> bit) & 1);
+      }
+      if (part.little && width % 8 === 0) {
+        const byteCount = width / 8;
+        let swapped = 0n;
+        for (let index = 0; index < byteCount; index += 1) {
+          swapped |= ((value >> BigInt(index * 8)) & 0xffn)
+            << BigInt((byteCount - index - 1) * 8);
+        }
+        value = swapped;
+      }
+      captures.push(value);
+      bitPosition = end;
+      continue;
+    }
+    if (part.kind === "rest") {
+      if (bitPosition % 8 !== 0) return jet_option_none();
+      captures.push(Array.from(bytes.slice(bitPosition / 8), (value) => BigInt(value)));
+      bitPosition = total;
+      continue;
+    }
+    throw new TypeError("binary pattern has an unknown part kind");
+  }
+  if (bitPosition !== total && !parts.some((part) => part.kind === "rest")) {
+    return jet_option_none();
+  }
+  if (bitPosition % 8 !== 0) return jet_option_none();
+  return jet_option_some(captures);
+}
 
 function jet_text_wasm_exports() {
   let wasm;

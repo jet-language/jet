@@ -51,11 +51,16 @@ fn jet_text_capture(kind: JetTextHoleKind, raw: &str) -> Option<JetPatternCaptur
     }
 }
 
-/// Match a complete UTF-8 subject against the canonical typed descriptor.
-pub fn jet_text_pattern_match(
+/// Match a text subject against the canonical typed descriptor.
+///
+/// `consume_prefix` permits trailing text and returns the byte length reached
+/// by the match. The returned offset is safe for advancing a UTF-8 cursor
+/// because every literal and hole boundary is discovered on `&str` slices.
+pub fn jet_text_match_scan(
     subject: &str,
     parts: &[JetTextMatchPart<'_>],
-) -> Option<Vec<JetPatternCapture>> {
+    consume_prefix: bool,
+) -> Option<(usize, Vec<JetPatternCapture>)> {
     let mut cursor = 0usize;
     let mut captures = Vec::new();
     for (index, part) in parts.iter().enumerate() {
@@ -80,7 +85,18 @@ pub fn jet_text_pattern_match(
             }
         }
     }
-    (cursor == subject.len()).then_some(captures)
+    if !consume_prefix && cursor != subject.len() {
+        return None;
+    }
+    Some((cursor, captures))
+}
+
+/// Match a complete UTF-8 subject against the canonical typed descriptor.
+pub fn jet_text_pattern_match(
+    subject: &str,
+    parts: &[JetTextMatchPart<'_>],
+) -> Option<Vec<JetPatternCapture>> {
+    jet_text_match_scan(subject, parts, false).map(|(_, captures)| captures)
 }
 
 /// Match a complete byte subject using the Foundation bit scanner and return

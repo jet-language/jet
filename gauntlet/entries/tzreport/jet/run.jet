@@ -18,12 +18,10 @@ fn run(args: Args) {
         .map(line -> parse_meeting(line))
     meetings.sort_by(.when)
     loop (position, meeting) in meetings {
-        gap :: if position == 0 -> "-"
-            else -> "{meeting.when.difference(meetings[position - 1].when).in(.Minutes) ?? panic("gap")}"
+        gap :: if position == 0 -> "-" else -> "{meeting.when.difference(meetings[position - 1].when).in(.Minutes) ?? panic("gap")}"
         print("{meeting.name} utc={meeting.when.format_rfc3339()} day={meeting.when.format("%a")} gap={gap}")
     }
     count :: meetings.len()
-    span :: if count == 0 -> 0
-        else -> meetings[count - 1].when.difference(meetings[0].when).in(.Minutes) ?? panic("span")
+    span :: if count == 0 -> 0 else -> meetings[count - 1].when.difference(meetings[0].when).in(.Minutes) ?? panic("span")
     print("span {span} minutes {count}")
 }

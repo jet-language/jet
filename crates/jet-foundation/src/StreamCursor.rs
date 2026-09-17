@@ -519,8 +519,23 @@ pub fn jet_cursor_take_pattern(c: &mut JetCursor, consumed: usize) {
     c.pos += consumed;
 }
 
-pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) {
-    r.pos += consumed;
+/// Consume a matched prefix after checking the byte count against the tail.
+///
+/// Reader pattern execution is fallible: a malformed/partial scan must never
+/// move the cursor past the resident buffer.
+pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) -> Result<(), String> {
+    let end = r
+        .pos
+        .checked_add(consumed)
+        .ok_or_else(|| "Reader.take_pattern: position overflow".to_string())?;
+    if end > r.buf.len() {
+        return Err(format!(
+            "Reader.take_pattern: {} bytes exceeds remaining input",
+            consumed
+        ));
+    }
+    r.pos = end;
+    Ok(())
 }
 
 /// A miss leaves the position untouched and names it, so a caller can see
@@ -599,7 +614,7 @@ mod stream_cursor_tests {
         );
 
         let mut r = jet_reader_over(&vec![1, 2, 3, 4]);
-        jet_reader_take_pattern(&mut r, 2);
+        jet_reader_take_pattern(&mut r, 2).unwrap();
         assert_eq!(jet_reader_tail(&r), &[3, 4]);
         assert_eq!(
             jet_reader_pattern_miss(&r),

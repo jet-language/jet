@@ -1549,11 +1549,12 @@ is an `IOError`, not a silently ignored limit.
 `process.workspace()` returns the ordinary `Authority` value for the safe
 workspace default. It grants repository reads and private build-directory
 writes. It denies network, home, secrets, devices, and inherited handles. Bind
-that value to the existing process object with `under(authority)`:
+that value to the existing process object with `under(authority)`. A
+path-scoped authority also requires a host-supplied absolute working directory:
 
 ```jet
 authority :: process.workspace()
-spec :: process.cmd(["cargo", "test"]).under(authority)
+spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(authority)
 plan :: spec.plan()
 ```
 
@@ -1566,7 +1567,7 @@ policy :: Authority.from_rights([
     "FS.Write:.jet/build",
     "Exec:/usr/bin/cargo",
 ])
-spec :: process.cmd(["cargo", "test"]).under(policy)
+spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
 ```
 
 `plan()` resolves the executable identity without spawning. It records the

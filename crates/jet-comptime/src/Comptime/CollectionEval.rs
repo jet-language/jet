@@ -76,6 +76,42 @@ pub(crate) mod collection_semantics {
     fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
         panic!("{}", message);
     }
+    // Collections.rs is also embedded in this generic comptime host. Use the
+    // shared registry-backed renderer so rich stops retain their code, policy,
+    // and source context instead of falling back to a generic E3001 panic.
+    #[allow(dead_code)]
+    fn jet_panic_rich_code(
+        code: &'static str,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        src_line: &str,
+        col: u32,
+        caret_len: u32,
+        message: &str,
+        locals: &str,
+    ) -> ! {
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            code, file, line, fn_name, src_line, col, caret_len, message, locals,
+        );
+        panic!("{}", report.rendered);
+    }
+
+    #[allow(dead_code)]
+    fn jet_panic_rich(
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        src_line: &str,
+        col: u32,
+        caret_len: u32,
+        message: &str,
+        locals: &str,
+    ) -> ! {
+        jet_panic_rich_code(
+            "E3001", file, line, fn_name, src_line, col, caret_len, message, locals,
+        )
+    }
 
     // Comptime evaluates collection expressions outside the runtime #Test
     // harness. The runtime Prelude owns the active fault scheduler.
@@ -259,8 +295,7 @@ pub(crate) mod collection_semantics {
 
 pub use collection_semantics::LoopListCursor;
 pub use collection_semantics::{
-    jet_zip_length_mismatch_message, jet_zip_pad_step, jet_zip_short_step, jet_zip_strict_step,
-    try_collect,
+    jet_zip_pad_step, jet_zip_short_step, jet_zip_strict_step, try_collect,
 };
 
 #[derive(Debug)]
@@ -306,6 +341,26 @@ pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
 
 pub fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
     collection_semantics::sequence_argument_message(method, value)
+}
+
+/// Cross-crate MIR bridge for the shared fallible predicate-count kernel.
+pub fn list_count_where_result<T, E, F>(values: &[T], predicate: F) -> Result<i64, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    collection_semantics::jet_list_count_where_result_kernel(values, predicate)
+}
+
+/// Cross-crate MIR bridge for the shared fallible first-match update kernel.
+pub fn list_update_first_result<T, E, F>(
+    values: &mut Vec<T>,
+    predicate: F,
+    replacement: T,
+) -> Result<bool, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    collection_semantics::jet_list_update_first_result_kernel(values, predicate, replacement)
 }
 
 pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
@@ -910,6 +965,12 @@ fn set_method(
             });
             Ok(CtValue::List(sorted))
         }
+        "max" => super::Builtins::apply_method(
+            &CtValue::List(items),
+            "max",
+            args.to_vec(),
+            span,
+        ),
         // Same Fisher-Yates + fixed-seed PCG stream `List.shuffle()` runs
         // (`(CtValue::List(xs), "shuffle")` in Builtins.rs) — deterministic
         // and uniform regardless of the Set's internal walk order.

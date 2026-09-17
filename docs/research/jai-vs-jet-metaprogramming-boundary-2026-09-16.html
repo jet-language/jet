@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build-time functions vs b — 2026-09-16</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --paper: #fffcf7; --ink: #1c1915; --muted: #5c564c;
+    --line: #ddd6c8; --accent: #6b3f12; --settled: #215c3a; --settled-bg: #e7f4eb;
+    --parked: #8a4b12; --parked-bg: #fbeeda; --fact: #1d4d78; --fact-bg: #e7f0f8;
+    --rec: #3d4a1f; --rec-bg: #eef3dc; --code: #f1ebe1;
+    --now: #e7f0f8; --col-a: #eef3dc; --danger: #7a1f1f; --danger-bg: #f8e7e7;
+    --codefont: "IBM Plex Mono", "Source Code Pro", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Source Sans 3", "IBM Plex Sans", "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161410; --paper: #1e1b16; --ink: #f3eee4; --muted: #b7afa2;
+      --line: #3a342b; --accent: #e0b27a; --settled: #9dd4b0; --settled-bg: #1c3326;
+      --parked: #f0c08a; --parked-bg: #3a2a16; --fact: #9ec4e8; --fact-bg: #1b2c3c;
+      --rec: #d5e08a; --rec-bg: #2a3018; --code: #2a261f;
+      --now: #1b2c3c; --col-a: #2a3018; --danger: #f0a0a0; --danger-bg: #3a1a1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.5 var(--sans); }
+  .wrap { display: grid; grid-template-columns: 210px minmax(0, 52rem); gap: 1.6rem; max-width: 74rem; margin: 0 auto; padding: 1.6rem 1.1rem 5rem; }
+  nav { position: sticky; top: 1rem; align-self: start; font-size: 13.5px; line-height: 1.35; border-right: 1px solid var(--line); padding-right: .9rem; }
+  nav a { color: var(--muted); text-decoration: none; display: block; padding: .18rem 0; }
+  nav a:hover { color: var(--accent); }
+  nav strong { display: block; margin: .7rem 0 .2rem; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: 1.8rem; line-height: 1.15; margin: 0 0 .4rem; }
+  h2 { margin: 2rem 0 .5rem; font-size: 1.3rem; padding-top: .4rem; border-top: 1px solid var(--line); }
+  h3 { margin: 1.2rem 0 .35rem; font-size: 1.05rem; }
+  p, li { max-width: 46rem; }
+  .lede { font-size: 1.05rem; color: var(--muted); max-width: 46rem; }
+  .meta { color: var(--muted); font-size: 13.5px; }
+  a { color: var(--accent); }
+  code, pre { font-family: var(--codefont); }
+  code { font-size: .88em; background: var(--code); padding: .04em .28em; border-radius: 4px; }
+  pre { background: var(--code); padding: .8rem .9rem; overflow: auto; font-size: 13px; line-height: 1.42; border-radius: 8px; border: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; margin: .7rem 0 1rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .55rem; vertical-align: top; text-align: left; }
+  th { background: var(--code); }
+  .chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .7rem 0 1rem; }
+  .chip { font-size: 12.5px; padding: .18rem .5rem; border-radius: 999px; font-weight: 650; }
+  .chip.settled { background: var(--settled-bg); color: var(--settled); }
+  .chip.fact { background: var(--fact-bg); color: var(--fact); }
+  .chip.rec { background: var(--rec-bg); color: var(--rec); }
+  .chip.danger { background: var(--danger-bg); color: var(--danger); }
+  .box { border-radius: 10px; padding: .75rem .9rem; margin: .7rem 0 1rem; }
+  .box.settled { background: var(--settled-bg); }
+  .box.danger { background: var(--danger-bg); }
+  .box.rec { background: var(--rec-bg); }
+  .box.fact { background: var(--fact-bg); }
+  .box h4 { margin: 0 0 .3rem; font-size: 13px; letter-spacing: .05em; text-transform: uppercase; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin: .5rem 0 1rem; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: .7rem .8rem; background: var(--paper); }
+  .card h4 { margin: 0 0 .3rem; }
+  .wrong { background: var(--danger-bg); }
+  .right { background: var(--settled-bg); }
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: 1fr; }
+    nav { position: static; border: 0; }
+    .duo { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <strong>The split</strong>
+  <a href="#point">The point</a>
+  <a href="#three">Three jobs</a>
+  <a href="#b">What b is</a>
+  <a href="#plan">What a plan is</a>
+  <a href="#action">Why b.action exists</a>
+  <a href="#effects">Effects vs b</a>
+  <a href="#hooks">Package as a hook</a>
+  <strong>Write it this way</strong>
+  <a href="#atlas">Sprite atlas</a>
+  <a href="#sql">SQL client</a>
+  <a href="#table">Sin table</a>
+  <a href="#still">What still cannot ship</a>
+</nav>
+<main>
+<p class="meta">16 Sep 2026 · interview notes, not a Tower ballot · proposed signature spelling in the examples: type after the one arrow</p>
+<h1>Most build-time work is a normal function</h1>
+<p class="lede">Packing sprites, parsing SQL, baking a table — those are functions you write and call. Reading the disk and the network should be the same effect system as runtime. <code>b</code> is only the order form you hand the compiler.</p>
+
+<div class="chips">
+  <span class="chip settled">IO = functions + effects + lock</span>
+  <span class="chip settled"><code>b</code> is the plan</span>
+  <span class="chip settled">Call their helper, or include their sandboxed build</span>
+</div>
+
+<h2 id="point">The point</h2>
+<p>You already have compile-time function calls. This is a real example in the repo:</p>
+<pre>fn make_table() -> [Int] {
+    t := [Int]{}
+    loop i in 0..9 -> t.push(i * i % 7)
+    t
+}
+
+@table :: make_table()   // runs while compiling
+                         // the finished program just has the numbers</pre>
+<p>No <code>BuildContext</code>. No <code>b.action</code>. A function returns a value. The <code>@</code> means “run this while compiling, store the result.”</p>
+<p>That is the default. Use it whenever the answer is <em>data</em> (a table, bytes, a string of source text you computed).</p>
+
+<h2 id="three">Three different jobs</h2>
+<p>The last pages mixed these together, so everything looked like it needed <code>b</code>.</p>
+<table>
+  <tr><th>Job</th><th>What you want</th><th>Tool</th></tr>
+  <tr>
+    <td><strong>1. Compute</strong></td>
+    <td>Turn inputs into a value: an atlas, a table, Jet source as text</td>
+    <td>A normal function. Call it. Do not put this logic in <code>fn build</code>.</td>
+  </tr>
+  <tr>
+    <td><strong>2. Borrow the machine</strong></td>
+    <td>Read the project’s PNG folder, fetch a pinned URL, run an outside program</td>
+    <td>The <strong>effect row</strong> says this function may do FS/Net/Exec. Package policy can still say no. The lockfile records the exact files and hashes. Pass the bytes into job 1.</td>
+  </tr>
+  <tr>
+    <td><strong>3. Tell the compiler what to compile</strong></td>
+    <td>“The game binary is <code>src/game.jet</code> plus this generated file”</td>
+    <td>Write that on a <strong>plan</strong> and return the plan. <code>fn build</code> exists for this.</td>
+  </tr>
+</table>
+<p><code>fn build</code> is the compile-time <code>main</code>. Same idea as runtime <code>fn run</code>: one entry the tool looks for. It should be a short script — get inputs, call helpers, fill in the plan, return.</p>
+
+<h2 id="b">What <code>b</code> (<code>BuildContext</code>) is</h2>
+<p>Today’s law treats <code>b</code> as two jobs glued together: a key to the machine, and an order pad. That glue is the duplicate you spotted. Keep the pad. Drop the key.</p>
+<ol>
+  <li><strong>Order pad — keep.</strong> <code>b.add_executable</code>, <code>b.generate</code>, <code>b.plan</code> do not “do the compile.” They write a line on the pad. After <code>fn build</code> returns, a separate driver follows the list. A string in memory vanishes unless the plan says “this is source, compile it.”</li>
+  <li><strong>Key — this is the effect system.</strong> <code>b.find</code> / <code>b.fetch</code> / <code>b.embed</code> are a second spelling of FS and Net. See <a href="#effects">Effects vs b</a>.</li>
+</ol>
+<div class="box fact">
+  <h4>Kitchen picture — and where it stops</h4>
+  <p>A helper is a recipe. Effects are the health-and-safety rules: this cook may use the oven, this one may not. The lockfile is the receipt: these exact ingredients, this hash. <code>b</code> is only the ticket you hand the pass: “serve this binary, include this generated file.”</p>
+  <p>The picture stops here: the compiler is not a waiter. It reads the ticket after <code>fn build</code> returns. That is why a plan exists at all.</p>
+</div>
+
+<h2 id="plan">What a <code>BuildPlan</code> is</h2>
+<p>A <strong>plan</strong> is the filled-in ticket: the list of programs to build, the source files each one uses, the generated files to include, the outside steps that must finish first.</p>
+<p><code>fn build</code> does not compile your game. It <em>returns the list</em>. The compiler then follows the list. That is why the function is typed as “takes a context, returns a plan.”</p>
+<p>If you only need a baked table in one file, you never write <code>fn build</code>. The default pipeline already knows how to compile a package. <code>fn build</code> is what you add when the default list is not enough: extra generated modules, extra binaries, extra tools.</p>
+
+<h2 id="action">Why <code>b.action</code> exists — and when it should not</h2>
+<p>A function call runs <em>now</em>, in Jet, and gives you a value. Then it is done.</p>
+<p><code>b.action</code> is for a different sentence: “there is a <em>program that is not Jet</em> (bindgen, an atlas packer you already ship, clang). Run it only when these files changed. Here are its inputs, its outputs, and the permission it needs.” That is a cacheable graph node, the same idea as Make. The driver, not your function, decides whether it is stale.</p>
+<div class="duo">
+  <div class="card wrong">
+    <h4>Wrong picture (last page)</h4>
+<pre>fn build(b: BuildContext) -[FS, Exec]&gt; BuildPlan {
+    atlas :: b.action("pack-sprites",
+        inputs: b.find("assets/sprites/*.png"),
+        outputs: ["build/sprites.atlas"],
+        run: ["atlas-pack", "…"])
+    b.generate("sprite_ids") { /* logic here */ }
+    …
+}</pre>
+    <p>This made packing look like a special build verb. It isn’t, if packing is Jet code.</p>
+  </div>
+  <div class="card right">
+    <h4>The picture you asked for</h4>
+<pre>fn pack_sprites(pngs: [Bytes]) -&gt; Atlas {
+    // ordinary Jet. Call this at build
+    // time or, later, at runtime.
+}
+
+fn sprite_ids_source(atlas: Atlas) -&gt; String {
+    // ordinary Jet. Returns text that
+    // happens to be Jet source.
+}
+
+fn build(b: BuildContext) -[FS]&gt; BuildPlan {
+    pngs :: find("assets/sprites/*.png")
+    atlas :: pack_sprites(pngs)
+    b.generate("sprite_ids", sprite_ids_source(atlas))
+    game :: b.add_executable("game",
+        sources: ["src/game.jet"],
+        generated: ["sprite_ids"])
+    return b.plan(game)
+}</pre>
+  </div>
+</div>
+<p>Use <code>b.action</code> only when the worker is another executable. If the worker is Jet, it is a function.</p>
+<p>Today’s shipped spelling of generate is a block of typed items, not <code>generate(name, string)</code>. The idea is the same: compute the contents in a helper, then register them. The register step needs <code>b</code> because a string sitting in memory vanishes when <code>fn build</code> returns, unless the plan says “this is source, compile it.”</p>
+
+<h2 id="effects">Effects vs <code>b.find</code> — you are right, it is a duplicate</h2>
+<p>Jet already has one rule for “may this function touch the world?”:</p>
+<pre>fn build(b: BuildContext) -[FS, Net]&gt; BuildPlan { ... }
+
+fn secret() -[!Net]&gt; { ... }     // cannot fetch, even if a caller could
+# package policy can also deny Net for the whole project</pre>
+<p>Then today’s build API asks you to say it again: <code>b.fetch(...)</code>, and sometimes a third time as caps on <code>b.action(..., ["FS", "Net"])</code>, and a fourth as <code>#Impure("reason")</code>.</p>
+<p>That is the same door with extra locks that do not add a new fact. <code>-[Net]&gt;</code> already means a network call is legal. <code>-[!Net]&gt;</code> or a package deny already means it is not.</p>
+<p>What effects <em>cannot</em> do, and must not be lost:</p>
+<table>
+  <tr><th>Job</th><th>Who does it</th><th>Why it is not an effect</th></tr>
+  <tr>
+    <td>May this function use the network at all?</td>
+    <td>Effect row + package policy</td>
+    <td>This is the effect system. Do not copy it onto <code>b</code>.</td>
+  </tr>
+  <tr>
+    <td>Which bytes went into this binary, so CI can replay it?</td>
+    <td>Lockfile: path or URL + hash</td>
+    <td>Effects say “Net happened.” They do not say “these 214 lines of <code>gl.jet</code>.”</td>
+  </tr>
+  <tr>
+    <td>Which programs to compile?</td>
+    <td>The plan on <code>b</code></td>
+    <td>Not IO. Not an effect.</td>
+  </tr>
+</table>
+<p>So: <code>find</code>, <code>embed_file</code>, and <code>fetch(url, sha256:)</code> should be ordinary functions. While compiling, the interpreter already has to intercept IO. Let it check the effect row, then write the hash into the lock. You do not need <code>b.fetch</code> for that.</p>
+<pre>fn build(b: BuildContext) -[FS, Net]&gt; BuildPlan {
+    sql  :: find("schema/*.sql")                 // FS. lock records the files
+    spec :: fetch("https://…/gl.xml", sha256: "…")  // Net. lock records the hash
+    b.generate("db_client", sqlx.client_source(sql))
+    return b.plan(b.add_executable("api",
+        sources: ["src/run.jet"],
+        generated: ["db_client"]))
+}</pre>
+<p>If someone writes <code>fn build(...) -[!Net]&gt;</code>, <code>fetch</code> is a type error. Same as runtime. Unpinned <code>http.get</code> at compile time stays behind <code>#Impure</code> — that gate is for “the bytes can change,” not for hashed fetch.</p>
+<div class="box rec">
+  <h4>Recommended split</h4>
+  <p>One IO system: functions + effects + lock. <code>b</code> shrinks to the plan: <code>add_executable</code>, <code>generate</code>, merge a package fragment, and <code>action</code> only for outside programs.</p>
+</div>
+
+<h2 id="hooks">Calling a package’s build from yours</h2>
+<p>Today a dependency’s <code>fn build</code> is <em>checked and never run</em>. That is why an SQL crate cannot type your queries unless you copy its generator. Your idea — an explicit call in <em>your</em> <code>fn build</code> — is the right audit shape. Import must not start work. A line you wrote must.</p>
+<p>Do not pass <em>your</em> <code>b</code> into the crate. That is the Cargo <code>build.rs</code> hole with a function call on top: one extra line to read, and they still inherit your disk and your network.</p>
+<p>Two kinds of package, two calls:</p>
+<div class="duo">
+  <div class="card right">
+    <h4>1. They transform <em>your</em> files</h4>
+    <p>SQL, SOA, id enums. They never need a key. They are a function. You read, you call, you put the result on the plan.</p>
+<pre>fn build(b: BuildContext) -[FS]&gt; BuildPlan {
+    sql :: find("schema/*.sql")
+    b.generate("db_client",
+        sqlx.client_source(sql))
+    return b.plan(...)
+}</pre>
+  </div>
+  <div class="card right">
+    <h4>2. They ship <em>their</em> artifacts</h4>
+    <p>OpenGL bindings from <em>their</em> pinned spec. A native lib they compile. You opt in with a call. Their code runs with <em>their</em> rights: their files, their hashed URLs, not your <code>$HOME</code>.</p>
+<pre>fn build(b: BuildContext) -[FS]&gt; BuildPlan {
+    gl :: b.use(opengl)   // their sandboxed build
+                          // merged into your plan
+    game :: b.add_executable("game",
+        sources: ["src/game.jet"],
+        generated: gl)
+    return b.plan(game)
+}</pre>
+  </div>
+</div>
+<p>You still audit one file. The crate still defines the steps you would have copied. The effect row on <em>your</em> <code>fn build</code> only needs the IO <em>you</em> do. Their fetch is on their fragment, under their lock entries.</p>
+<p>Worse shapes, for the same product:</p>
+<table>
+  <tr><th>Shape</th><th>What goes wrong</th></tr>
+  <tr><td>Import runs their build</td><td>Jai. No line to grep. A crate you typed in a use-list phones home.</td></tr>
+  <tr><td><code>pkg.build(b)</code> with your context</td><td>You can see the call. They can see your machine.</td></tr>
+  <tr><td>A manifest <code>enable:</code> list and no call</td><td>Auditable, but now you have two places that mean “this build uses sqlx,” and helpers still need a call for <em>your</em> paths.</td></tr>
+</table>
+
+<h2 id="atlas">Sprite atlas — written as functions</h2>
+<p>You want a game whose PNG folder becomes one atlas, plus names like <code>HeroIdle</code> you can use in code.</p>
+<pre>fn pack_sprites(pngs: [NamedBytes]) -&gt; Atlas {
+    // walk rectangles, blit, return { image, names }
+}
+
+fn ids_module(atlas: Atlas) -&gt; String {
+    // "enum Sprite { HeroIdle, … }"
+}
+
+fn build(b: BuildContext) -[FS]&gt; BuildPlan {
+    pngs  :: find("assets/sprites/*.png")
+    atlas :: pack_sprites(pngs)
+    b.generate("sprite_ids", ids_module(atlas))
+    @atlas_png :: atlas.image              // bytes into the binary
+    return b.plan(b.add_executable("game",
+        sources: ["src/game.jet"],
+        generated: ["sprite_ids"]))
+}</pre>
+<p>What actually needed <code>b</code>: saving generated source onto the plan, and naming the executable. Listing the folder is <code>find</code> (an effect). Packing is a function.</p>
+<p>If packing is an old C++ tool you still run: that one line is <code>b.action</code>, because the worker is not a Jet function. Then a Jet function can still read the tool’s output and build the id module.</p>
+
+<h2 id="sql">Typed SQL client — written as functions</h2>
+<p>You want <code>get_user(id)</code> to exist, with a <code>UserRow</code> that matches the SQL, and a compile error if a column is renamed.</p>
+<pre>fn client_source(sql_files: [String]) -&gt; String {
+    // parse CREATE TABLE / SELECT, return Jet source
+}
+
+fn build(b: BuildContext) -[FS]&gt; BuildPlan {
+    sql :: find("schema/*.sql")
+    b.generate("db_client", sqlx.client_source(sql))
+    return b.plan(b.add_executable("api",
+        sources: ["src/run.jet"],
+        generated: ["db_client"]))
+}
+
+fn handler(id: Int) -[IO]&gt; UserRow {
+    db_client.get_user(id)
+}</pre>
+<p>The parser is a function in the sqlx package. You can unit-test it. Importing sqlx does nothing. The call is the hook.</p>
+
+<h2 id="table">Sin table — no <code>fn build</code> at all</h2>
+<pre>fn sin_table() -&gt; [Float] { … }
+
+@sins :: sin_table()
+
+fn run() {
+    print(@sins[3])
+}</pre>
+<p>If the result is a value in the binary, stop here. No plan. No <code>b</code>.</p>
+
+<h2 id="still">What you still cannot ship, even with this picture</h2>
+<table>
+  <tr><th>Product</th><th>With this model</th><th>Still missing</th></tr>
+  <tr>
+    <td>Atlas, SQL client, C bindings, org “every Entity has archive”</td>
+    <td>Yes, in your app, as functions plus a short <code>fn build</code></td>
+    <td>Some of this is law ahead of the compiler.</td>
+  </tr>
+  <tr>
+    <td>Install a crate and get its generator without copy-paste</td>
+    <td>Not on import. Yes if your <code>fn build</code> calls their helper or includes their sandboxed build.</td>
+    <td>Auto-run on import is refused.</td>
+  </tr>
+  <tr>
+    <td><code>Packet[N]</code></td>
+    <td>No. A known constant can size an array. A number as a type parameter cannot yet.</td>
+    <td>Const generics later. Not types-as-values.</td>
+  </tr>
+  <tr>
+    <td>A type that exists only inside one call, no file</td>
+    <td>No</td>
+    <td>Do not add splice.</td>
+  </tr>
+</table>
+
+<div class="box settled">
+  <h4>Settled this round</h4>
+  <p>Compile-time <code>find</code> / <code>embed_file</code> / <code>fetch(url, sha256:)</code> are ordinary functions. Effects and package policy allow or deny them. The lockfile records hashes. <code>b</code> is the compile plan.</p>
+  <p>A package participates when you call it. Helpers get data you pass. Their own <code>fn build</code> runs in their sandbox when you include it. They do not get your <code>b</code>. Import does nothing.</p>
+</div>
+<p class="meta">Does not reopen syntax law, create a Tower card, or implement anything. Examples use one arrow, type after it, body in braces.</p>
+</main>
+</div>
+</body>
+</html>

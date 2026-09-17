@@ -9,10 +9,12 @@ use crate::AST::{BinOp, Type};
 use crate::Codegen::TIR::{
     ScopeMemberKind, TCoreClosureKind, TExpr, TExprKind, TForInMethod, TIfCond, TIndexFieldAssign, TLocal, TMatchArm,
     TCallArg, TMethodRef, TNumericOp, TPattern, TPlace, TStaticOwner, TStmt, TLetTy, TBuiltinOp,
+    TFailureCarrier, TPreludeRoute,
 };
 use jet_foundation::MIR::{
-    MirAccess, MirBinaryDispatch, MirBlockId, MirCallArg, MirCallee, MirConstant, MirIndexKind,
-    MirLoopSourceKind, MirOperation, MirScopeId, MirScopeKind, MirTerminator,
+    MirAccess, MirBinaryDispatch, MirBlockId, MirConstant, MirIndexKind,
+    MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirCallSignature,
+    MirScopeId, MirScopeKind, MirSymbol, MirSemanticOp, MirTerminator, MirValueId,
     MirTestScopeMember,
 };
 use jet_foundation::CanonicalPass;
@@ -75,15 +77,33 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             gc_promotion: _,
             gc_transferred: _,
         } => {
+            let scope_guard_binding = matches!(
+                &init.kind,
+                TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::Guard { .. },
+                }
+            );
+            let alias_place = match &init.kind {
+                TExprKind::Borrow {
+                    place,
+                    mutable: true,
+                } => Some(ctx.lower_place(
+                    &TPlace::Expr(Box::new((**place).clone())),
+                    MirAccess::Write,
+                )?),
+                _ => None,
+            };
             let is_uninit = matches!(&init.kind, TExprKind::Uninit);
-            let value = if is_uninit {
+            let value = if is_uninit || alias_place.is_some() {
                 None
             } else {
                 Some(lower_expr(ctx, init)?)
             };
             let ty = let_binding_type(let_ty, &init.ty);
             let local = local_for_binding(name, kw);
-            let place = if matches!(let_ty, TLetTy::SendFn(_)) {
+            let place = if let Some(alias_place) = alias_place {
+                ctx.bind_local_alias(&local, ty, alias_place, true)?
+            } else if matches!(let_ty, TLetTy::SendFn(_)) {
                 ctx.bind_local_send_fn(
                     &local,
                     ty,
@@ -112,6 +132,9 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     None,
                     MirOperation::WritePlace { place, value },
                 )?;
+            }
+            if scope_guard_binding {
+                ctx.register_scope_guard(place)?;
             }
             Ok(())
         }
@@ -166,20 +189,20 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         } => lower_split_view(ctx, owner.as_ref(), root, name, *start, *end, *single, *write, elem_ty.as_ref()),
 
         TStmt::TupleDestructure {
-            tmp: _,
+            tmp,
             init,
             kw,
             move_fields,
             binds,
-        } => lower_tuple_destructure(ctx, init, kw, *move_fields, binds),
+        } => lower_tuple_destructure(ctx, init, tmp, kw, *move_fields, binds),
 
         TStmt::StructDestructure {
-            tmp: _,
+            tmp,
             init,
             kw,
             move_fields,
             binds,
-        } => lower_struct_destructure(ctx, init, kw, *move_fields, binds),
+        } => lower_struct_destructure(ctx, init, tmp, kw, *move_fields, binds),
 
         TStmt::ListDestructure {
             tmp: _,
@@ -333,9 +356,17 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             init,
             cond,
             step,
+            auto_vectorization,
             body,
-            ..
-        } => lower_counted_loop(ctx, label.as_deref(), init, cond, step.as_deref(), body),
+        } => lower_counted_loop(
+            ctx,
+            label.as_deref(),
+            init,
+            cond,
+            step.as_deref(),
+            auto_vectorization.as_ref(),
+            body,
+        ),
         TStmt::Range {
             label,
             var,
@@ -344,7 +375,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             end,
             step,
             exclusive,
-            auto_vectorization: _,
+            auto_vectorization,
             body,
         } => lower_range_loop(
             ctx,
@@ -355,6 +386,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             end,
             step.as_ref(),
             *exclusive,
+            auto_vectorization.as_ref(),
             body,
         ),
         TStmt::Break(label) => {
@@ -436,94 +468,51 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         TStmt::IndexFieldAssign(assign) => lower_index_field_assign(ctx, assign),
 
         TStmt::IndexHookAssign {
-            type_name,
+            type_name: _,
             base,
             index,
             value,
         } => {
-            let value = lower_expr(ctx, value)?;
-            let base_place = match &base.kind {
-                TExprKind::Local(local) => {
-                    ctx.lower_place(&TPlace::Local(local.clone()), MirAccess::Write)?
-                }
-                _ => ctx.lower_place(
-                    &TPlace::Expr(Box::new(base.clone())),
-                    MirAccess::Write,
-                )?,
-            };
-            let base = ctx.emit(
-                "index-hook-place",
-                Some(base.ty.clone()),
-                MirOperation::ReadPlace(base_place),
-            )?;
-            let index = lower_expr(ctx, index)?;
-            let span = ctx.span();
-            let callee = ctx.function_id_for(&format!("{type_name}::IndexMut::set"))?;
-            let args = vec![
-                MirCallArg {
-                    value: base,
-                    place: Some(base_place),
-                    access: MirAccess::Write,
-                    span,
-                    label: None,
-                    source_index: Some(0),
-                    binder_slot: None,
-                    spread: false,
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    owned_last_use: false,
-                    authority_boundary: false,
-                    fn_coercion: None,
-                    widen_fixed_to_list: false,
-                    widen_to_union: None,
-                    box_as_trait: None,
+            let call = TExpr {
+                ty: Type::Result {
+                    ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                    err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
                 },
-                MirCallArg {
-                    value: index,
-                    place: None,
-                    access: MirAccess::Read,
-                    span,
-                    label: None,
-                    source_index: Some(1),
-                    binder_slot: None,
-                    spread: false,
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    owned_last_use: false,
-                    authority_boundary: false,
-                    fn_coercion: None,
-                    widen_fixed_to_list: false,
-                    widen_to_union: None,
-                    box_as_trait: None,
-                },
-                MirCallArg {
-                    value,
-                    place: None,
-                    access: MirAccess::Read,
-                    span,
-                    label: None,
-                    source_index: Some(2),
-                    binder_slot: None,
-                    spread: false,
-                    implicit_clone: false,
-                    shared_auto_clone: false,
-                    owned_last_use: false,
-                    authority_boundary: false,
-                    fn_coercion: None,
-                    widen_fixed_to_list: false,
-                    widen_to_union: None,
-                    box_as_trait: None,
-                },
-            ];
-            ctx.emit(
-                "stmt.index-hook.set",
-                None,
-                MirOperation::Call {
-                    callee: MirCallee::User(callee),
-                    args,
+                kind: TExprKind::MethodCall {
+                    recv: Box::new(base.clone()),
+                    method: TMethodRef::trait_method(crate::Syntax::TRAIT_INDEX_MUT, "set"),
                     type_args: Vec::new(),
+                    args: vec![
+                        TCallArg {
+                            value: index.clone(),
+                            template_items: None,
+                            borrow: !index.ty.is_scalar(),
+                            mut_borrow: false,
+                            clone: false,
+                            arc_clone: false,
+                            fn_coerce: None,
+                            widen_to_vec: false,
+                            widen_to_union: None,
+                            box_as_trait: None,
+                        },
+                        TCallArg {
+                            value: value.clone(),
+                            template_items: None,
+                            borrow: !value.ty.is_scalar(),
+                            mut_borrow: false,
+                            clone: false,
+                            arc_clone: false,
+                            fn_coerce: None,
+                            widen_to_vec: false,
+                            widen_to_union: None,
+                            box_as_trait: None,
+                        },
+                    ],
+                    source_first_string_literal: None,
+                    operator_line: None,
                 },
-            )?;
+            };
+            let _ = lower_expr(ctx, &call)?;
             Ok(())
         }
 
@@ -570,14 +559,28 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         } => lower_mixed_switch(ctx, subject, arms, else_body.as_deref()),
 
         TStmt::Unsafe { gate, body } => {
-            lower_scoped(ctx, MirScopeKind::Unsafe, Some(gate.reason.clone()), body)
+            let scope = ctx.enter_scope(
+                MirScopeKind::Unsafe,
+                ctx.span(),
+                Some(gate.reason.clone()),
+            )?;
+            ctx.set_scope_fact(scope, "sentry_file", gate.file.clone())?;
+            ctx.set_scope_fact(scope, "sentry_enabled", gate.enabled.to_string())?;
+            ctx.set_scope_fact(scope, "sentry_fenced", gate.fenced.to_string())?;
+            ctx.set_scope_fact(scope, "sentry_line", gate.line.to_string())?;
+            lower_stmts(ctx, body)?;
+            ctx.exit_scope(scope)
         }
-        TStmt::SentryPolicy { enabled, body } => lower_scoped(
-            ctx,
-            MirScopeKind::Policy,
-            Some(if *enabled { "enabled" } else { "disabled" }.to_string()),
-            body,
-        ),
+        TStmt::SentryPolicy { enabled, body } => {
+            let scope = ctx.enter_scope(
+                MirScopeKind::Policy,
+                ctx.span(),
+                Some(if *enabled { "enabled" } else { "disabled" }.to_string()),
+            )?;
+            ctx.set_scope_fact(scope, "sentry_enabled", enabled.to_string())?;
+            lower_stmts(ctx, body)?;
+            ctx.exit_scope(scope)
+        },
         TStmt::Impure(body) => lower_scoped(ctx, MirScopeKind::Impure, None, body),
 
         TStmt::Reactive { executable } => {
@@ -599,7 +602,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
 
         TStmt::Layout { handle, label, body } => {
             let scope = ctx.enter_scope(MirScopeKind::Layout, ctx.span(), Some(label.clone()))?;
-            let handle_ty = Type::Named("LayoutHandle".to_string());
+            let handle_ty = Type::Named(crate::Syntax::LAYOUT_TYPE.to_string());
             let place = ctx.bind_local(
                 handle,
                 handle_ty.clone(),
@@ -625,9 +628,16 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         }
 
         TStmt::ContextBlock { guards, body } => {
+            let mut deadline = None;
+            for (name, value) in guards {
+                let value = lower_expr(ctx, value)?;
+                if name == crate::Syntax::CTX_FIELD_DEADLINE {
+                    deadline = Some(value);
+                }
+            }
             let scope = ctx.enter_scope(MirScopeKind::Context, ctx.span(), None)?;
-            for (_, value) in guards {
-                let _ = lower_expr(ctx, value)?;
+            if let Some(deadline) = deadline {
+                ctx.set_scope_deadline(scope, deadline)?;
             }
             lower_stmts(ctx, body)?;
             ctx.exit_scope(scope)?;
@@ -796,6 +806,17 @@ fn lower_split_view(
         ty: Type::Int,
         kind: TExprKind::IntLit(end, None),
     };
+    if single && write {
+        let place = ctx.lower_index_place(
+            base_expr,
+            &start_expr,
+            MirIndexKind::FixedListProof,
+            MirAccess::Write,
+        )?;
+        let local = TLocal::user(name).as_mutable();
+        ctx.bind_local_alias(&local, element, place, true)?;
+        return Ok(());
+    }
     let ty = if single {
         element.clone()
     } else {
@@ -829,25 +850,79 @@ fn lower_split_view(
 fn lower_tuple_destructure(
     ctx: &mut LowerCtx,
     init: &TExpr,
+    tmp: &str,
     kw: &str,
     move_fields: bool,
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
-    let subject = lower_expr(ctx, init)?;
+    let subject = if move_fields {
+        if let Some(place) = super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)? {
+            ctx.emit(
+                "stmt.tuple.move-source",
+                Some(init.ty.clone()),
+                MirOperation::MovePlace { place },
+            )?
+        } else {
+            lower_expr(ctx, init)?
+        }
+    } else {
+        lower_expr(ctx, init)?
+    };
     let mutable = kw.contains("mut");
+    if !move_fields {
+        for (index, (local_name, _)) in binds.iter().enumerate() {
+            let field_name = ctx.field_name_for_type(&init.ty, index)?;
+            let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
+            let field_id = ctx.field_id_for_type(&init.ty, &field_name)?;
+            let projected = ctx.emit(
+                "stmt.tuple.field",
+                Some(field_ty.clone()),
+                MirOperation::Field {
+                    base: subject,
+                    field: field_id,
+                },
+            )?;
+            let value = maybe_copy(ctx, projected, &field_ty, true)?;
+            let local = if mutable {
+                TLocal::user(local_name).as_mutable()
+            } else {
+                TLocal::user(local_name)
+            };
+            let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
+            ctx.emit(
+                "stmt.tuple.write",
+                None,
+                MirOperation::WritePlace { place, value },
+            )?;
+        }
+        return Ok(());
+    }
+
+    let temp = TLocal::generated(tmp);
+    ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
+    let temp_place = ctx.place_for_local(&temp, MirAccess::Move)?;
+    ctx.emit(
+        "stmt.tuple.move-temp.write",
+        None,
+        MirOperation::WritePlace {
+            place: temp_place,
+            value: subject,
+        },
+    )?;
     for (index, (local_name, _)) in binds.iter().enumerate() {
         let field_name = ctx.field_name_for_type(&init.ty, index)?;
         let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
-        let field_id = ctx.field_id_for_type(&init.ty, &field_name)?;
-        let projected = ctx.emit(
-            "stmt.tuple.field",
-            Some(field_ty.clone()),
-            MirOperation::Field {
-                base: subject,
-                field: field_id,
-            },
+        let field_place = ctx.project_field_place(
+            temp_place,
+            &field_name,
+            field_ty.clone(),
+            ctx.span(),
         )?;
-        let value = maybe_copy(ctx, projected, &field_ty, !move_fields)?;
+        let value = ctx.emit(
+            "stmt.tuple.move-field",
+            Some(field_ty.clone()),
+            MirOperation::MovePlace { place: field_place },
+        )?;
         let local = if mutable {
             TLocal::user(local_name).as_mutable()
         } else {
@@ -866,24 +941,77 @@ fn lower_tuple_destructure(
 fn lower_struct_destructure(
     ctx: &mut LowerCtx,
     init: &TExpr,
+    tmp: &str,
     kw: &str,
     move_fields: bool,
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
-    let subject = lower_expr(ctx, init)?;
+    let subject = if move_fields {
+        if let Some(place) = super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)? {
+            ctx.emit(
+                "stmt.struct.move-source",
+                Some(init.ty.clone()),
+                MirOperation::MovePlace { place },
+            )?
+        } else {
+            lower_expr(ctx, init)?
+        }
+    } else {
+        lower_expr(ctx, init)?
+    };
     let mutable = kw.contains("mut");
+    if !move_fields {
+        for (local_name, field_name) in binds {
+            let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
+            let field_id = ctx.field_id_for_type(&init.ty, field_name)?;
+            let projected = ctx.emit(
+                "stmt.struct.field",
+                Some(field_ty.clone()),
+                MirOperation::Field {
+                    base: subject,
+                    field: field_id,
+                },
+            )?;
+            let value = maybe_copy(ctx, projected, &field_ty, true)?;
+            let local = if mutable {
+                TLocal::user(local_name).as_mutable()
+            } else {
+                TLocal::user(local_name)
+            };
+            let place = ctx.bind_local(&local, field_ty, mutable, false, false)?;
+            ctx.emit(
+                "stmt.struct.write",
+                None,
+                MirOperation::WritePlace { place, value },
+            )?;
+        }
+        return Ok(());
+    }
+
+    let temp = TLocal::generated(tmp);
+    ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
+    let temp_place = ctx.place_for_local(&temp, MirAccess::Move)?;
+    ctx.emit(
+        "stmt.struct.move-temp.write",
+        None,
+        MirOperation::WritePlace {
+            place: temp_place,
+            value: subject,
+        },
+    )?;
     for (local_name, field_name) in binds {
         let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
-        let field_id = ctx.field_id_for_type(&init.ty, field_name)?;
-        let projected = ctx.emit(
-            "stmt.struct.field",
-            Some(field_ty.clone()),
-            MirOperation::Field {
-                base: subject,
-                field: field_id,
-            },
+        let field_place = ctx.project_field_place(
+            temp_place,
+            field_name,
+            field_ty.clone(),
+            ctx.span(),
         )?;
-        let value = maybe_copy(ctx, projected, &field_ty, !move_fields)?;
+        let value = ctx.emit(
+            "stmt.struct.move-field",
+            Some(field_ty.clone()),
+            MirOperation::MovePlace { place: field_place },
+        )?;
         let local = if mutable {
             TLocal::user(local_name).as_mutable()
         } else {
@@ -898,6 +1026,7 @@ fn lower_struct_destructure(
     }
     Ok(())
 }
+
 
 fn lower_list_destructure(
     ctx: &mut LowerCtx,
@@ -1150,6 +1279,49 @@ fn lower_cond(
 }
 
 fn lower_loop(ctx: &mut LowerCtx, label: Option<&str>, body: &[TStmt]) -> Result<(), LowerError> {
+    lower_loop_with_exit(ctx, label, body).map(|_| ())
+}
+
+pub(super) fn lower_loop_value(
+    ctx: &mut LowerCtx,
+    label: Option<&str>,
+    body: &[TStmt],
+    result_ty: &Type,
+) -> Result<MirValueId, LowerError> {
+    let exit = lower_loop_with_exit(ctx, label, body)?;
+    let mut incoming = Vec::new();
+    let mut value_less_break = false;
+    for block in &ctx.blocks {
+        let MirTerminator::Break { target, value } = &block.terminator else {
+            continue;
+        };
+        if *target != exit {
+            continue;
+        }
+        match value {
+            Some(value) => incoming.push((block.id, *value)),
+            None => value_less_break = true,
+        }
+    }
+    if value_less_break || incoming.is_empty() {
+        return Err(ctx.error(
+            ctx.span(),
+            "TExprKind::InlineBlock result loop has a break exit without a value",
+        ));
+    }
+    ctx.switch_to(exit);
+    ctx.emit(
+        "loop-value-phi",
+        Some(result_ty.clone()),
+        MirOperation::Phi { incoming },
+    )
+}
+
+fn lower_loop_with_exit(
+    ctx: &mut LowerCtx,
+    label: Option<&str>,
+    body: &[TStmt],
+) -> Result<MirBlockId, LowerError> {
     let header = ctx.new_block(ctx.span(), "loop.header")?;
     let body_block = ctx.new_block(ctx.span(), "loop.body")?;
     let exit = ctx.new_block(ctx.span(), "loop.exit")?;
@@ -1166,7 +1338,7 @@ fn lower_loop(ctx: &mut LowerCtx, label: Option<&str>, body: &[TStmt]) -> Result
         ctx.terminate(MirTerminator::Jump { target: header });
     }
     ctx.switch_to(exit);
-    Ok(())
+    Ok(exit)
 }
 
 fn lower_while(
@@ -1205,8 +1377,10 @@ fn lower_counted_loop(
     init: &TStmt,
     cond: &TExpr,
     step: Option<&TStmt>,
+    auto_vectorization: Option<&crate::AST::AutoVectorizationFacts>,
     body: &[TStmt],
 ) -> Result<(), LowerError> {
+    let loop_span = ctx.span();
     lower_stmt(ctx, init)?;
     if ctx.is_terminated() {
         return Ok(());
@@ -1240,6 +1414,9 @@ fn lower_counted_loop(
         ctx.terminate(MirTerminator::Jump { target: header });
     }
     ctx.switch_to(exit);
+    if let Some(facts) = auto_vectorization {
+        ctx.record_checked_vector_fact(header, facts, loop_span)?;
+    }
     Ok(())
 }
 
@@ -1252,8 +1429,10 @@ fn lower_range_loop(
     end: &TExpr,
     step: Option<&TExpr>,
     exclusive: bool,
+    auto_vectorization: Option<&crate::AST::AutoVectorizationFacts>,
     body: &[TStmt],
 ) -> Result<(), LowerError> {
+    let loop_span = ctx.span();
     let routes = super::loop_route_bundle();
     let range_init_call = ctx.intern_prelude_route(routes.range_init)?;
     let range_has_next_call = ctx.intern_prelude_route(routes.range_has_next)?;
@@ -1378,6 +1557,9 @@ fn lower_range_loop(
     }
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(exit);
+    if let Some(facts) = auto_vectorization {
+        ctx.record_checked_vector_fact(header, facts, loop_span)?;
+    }
     Ok(())
 }
 fn lower_for_in(
@@ -1450,6 +1632,14 @@ fn lower_for_in(
         &loop_collection
     };
     let source_value = match (&source.kind, owns_source) {
+        // Receivers have a checked shared-handle read convention. The native
+        // channel adapter clones a read source before consuming it, so retain
+        // `by_value` for the iterator ABI without moving a borrowed parameter.
+        (TExprKind::Local(_), true)
+            if matches!(source_kind, MirLoopSourceKind::ChannelReceiver) =>
+        {
+            lower_expr(ctx, source)?
+        }
         (TExprKind::Local(local), true) => {
             let place = ctx.place_for_local(local, MirAccess::Move)?;
             ctx.emit(
@@ -1595,6 +1785,14 @@ fn for_item_type(
     collection: &TExpr,
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
 ) -> Type {
+    if matches!(method_kind, Some(crate::Codegen::TIR::TForInMethod::ChannelReceiver)) {
+        if let Type::Apply { name, args } = &collection.ty {
+            if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 {
+                return args[0].clone();
+            }
+        }
+    }
+
     if let Some(elem) = crate::Collections::iter_elem(&collection.ty) {
         return elem.clone();
     }
@@ -1604,6 +1802,14 @@ fn for_item_type(
             crate::Codegen::TIR::TForInMethod::LinesFile
             | crate::Codegen::TIR::TForInMethod::LinesStdin
             | crate::Codegen::TIR::TForInMethod::LinesProcessStream => Type::String,
+            crate::Codegen::TIR::TForInMethod::ChannelReceiver => match &collection.ty {
+                Type::Apply { name, args }
+                    if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 =>
+                {
+                    args[0].clone()
+                }
+                _ => collection.ty.clone(),
+            },
             _ => match &collection.ty {
                 Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
                 _ => collection.ty.clone(),
@@ -1616,6 +1822,12 @@ fn for_item_type(
             ("key".to_string(), key.clone()),
             ("value".to_string(), value.clone()),
         ]),
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
+        {
+            args[0].clone()
+        }
         _ => collection.ty.clone(),
     }
 }
@@ -1817,6 +2029,7 @@ fn lower_mixed_switch(
             then_target: bodies[index],
             else_target: next,
         });
+        ctx.switch_to(bodies[index]);
         ctx.with_switch_subject(subject_value, |ctx| {
             ctx.push_lexical_frame();
             lower_stmts(ctx, body)?;
@@ -2016,6 +2229,7 @@ fn emit_scope_exits_on_early_paths(
     let current = ctx.current_block();
     for block in early_exits {
         ctx.switch_to(block);
+        ctx.emit_scope_cleanups(scope)?;
         ctx.emit(
             &format!("scope-member.exit.early.{}", block.0),
             None,
@@ -2109,6 +2323,47 @@ fn lower_transaction(
         )?;
     }
     lower_stmts(ctx, body)?;
+    if let Some(handle) = handle {
+        if ctx.is_terminated() {
+            ctx.exit_scope(scope)?;
+            return Ok(());
+        }
+        let handle_ty = Type::Named("Transaction".to_string());
+        let receiver = lower_expr(
+            ctx,
+            &TExpr {
+                ty: handle_ty,
+                kind: TExprKind::Local(handle.clone()),
+            },
+        )?;
+        let call = ctx.intern_prelude_route(TPreludeRoute {
+            family: MirPreludeFamily::HandleMethod,
+            module: "core.transaction".to_string(),
+            member: "commit".to_string(),
+            symbol: MirSymbol::Prelude("jet_transaction_commit".to_string()),
+            signature: MirCallSignature {
+                arity: 1,
+                max_arity: 1,
+                borrow_mask: vec![true],
+            },
+            effect: None,
+            fallibility: TFailureCarrier::Infallible,
+            abi: MirPreludeAbi::Value,
+            authority: None,
+            db_metadata: None,
+        })?;
+        ctx.emit(
+            "transaction.commit",
+            Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            MirOperation::Semantic(MirSemanticOp::HandleMethod {
+                call,
+                receiver,
+                args: Vec::new(),
+                frame_schedule: None,
+                frame_schedule_derivation: None,
+            }),
+        )?;
+    }
     ctx.exit_scope(scope)?;
     Ok(())
 }

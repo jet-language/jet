@@ -781,7 +781,7 @@ pub struct JetDeterministicWorld {
 }
 
 impl JetDeterministicWorld {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(JetWorldState {
                 monotonic_ns: 0,
@@ -811,7 +811,7 @@ impl JetDeterministicWorld {
             .monotonic_ns
     }
 
-    fn advance_ns(&self, duration_ns: i64) -> i64 {
+    pub fn advance_ns(&self, duration_ns: i64) -> i64 {
         if duration_ns < 0 {
             jet_scheduler_fatal(
                 "deterministic world cannot move time backwards; advance requires a non-negative duration",
@@ -855,7 +855,7 @@ impl JetDeterministicWorld {
         self.now()
     }
 
-    fn wait_idle(&self) {
+    pub fn wait_idle(&self) {
         let budget = self
             .state
             .lock()
@@ -878,7 +878,7 @@ impl JetDeterministicWorld {
         );
     }
 
-    fn ensure_closed(&self) {
+    pub fn ensure_closed(&self) {
         let live = self
             .state
             .lock()
@@ -970,7 +970,7 @@ impl JetDeterministicWorld {
         state.history.push(format!("rng:seed:{}", seed as u64));
     }
 
-    fn history(&self) -> String {
+    pub fn history(&self) -> String {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -1038,7 +1038,7 @@ pub fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
     true
 }
 
-struct JetWorldScope {
+pub struct JetWorldScope {
     previous: Option<JetDeterministicWorld>,
     previous_provider: Option<JetMonotonicProvider>,
 }
@@ -1053,7 +1053,7 @@ impl Drop for JetWorldScope {
 }
 
 impl JetDeterministicWorld {
-    fn enter(&self) -> JetWorldScope {
+    pub fn enter(&self) -> JetWorldScope {
         let previous = JET_ACTIVE_WORLD.with(|world| {
             let mut world = world.borrow_mut();
             if world.is_some() {

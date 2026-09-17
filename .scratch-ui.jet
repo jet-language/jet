@@ -1,0 +1,16 @@
+package {
+    name: "ui-result-probe"
+    version: "0.1.0"
+    edition: "2026"
+    authority: { needs: [UI.FileDialog] }
+}
+use core.ui.host as host
+fn run() {
+    grant_result :: host.fs_grant(".", host.fs_rights_read_write())
+    if grant_result == .Ok(_) {
+        print("ok")
+    }
+    if grant_result != .Err(_) {
+        print("not err")
+    }
+}

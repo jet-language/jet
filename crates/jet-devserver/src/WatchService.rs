@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{mpsc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::file_mtime;
@@ -47,7 +47,8 @@ impl RootKind {
     }
 }
 
-/// Fingerprint of a watched path (mtime + length + existence + content digest).
+/// Fingerprint of a watched path (content digest for files; mtime + length
+/// for directories, plus existence).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathStamp {
     pub exists: bool,
@@ -78,6 +79,354 @@ impl PathStamp {
                 len: None,
                 digest: None,
             },
+        }
+    }
+
+    /// Compare filesystem state without treating a file's timestamp or size
+    /// as content. Editors commonly rewrite identical bytes with a new mtime;
+    /// those saves must not trigger a rebuild.
+    fn changed_since(&self, newer: &Self) -> bool {
+        if self.exists != newer.exists {
+            return true;
+        }
+        match (&self.digest, &newer.digest) {
+            (Some(previous), Some(current)) => previous != current,
+            (Some(_), None) | (None, Some(_)) => true,
+            (None, None) => self.mtime != newer.mtime || self.len != newer.len,
+        }
+    }
+}
+
+/// Wake token shared with other dev-loop inputs. Filesystem events and
+/// terminal commands use the same wait queue, so the hot path blocks instead
+/// of polling while still reacting immediately to either source.
+#[derive(Clone)]
+pub struct WatchWake {
+    sender: mpsc::Sender<()>,
+}
+
+impl WatchWake {
+    pub fn wake(&self) {
+        let _ = self.sender.send(());
+    }
+}
+
+struct EventWaiter {
+    receiver: mpsc::Receiver<()>,
+    wake: WatchWake,
+    #[cfg(target_os = "linux")]
+    native: Option<native_events::Watcher>,
+}
+
+impl EventWaiter {
+    fn new(paths: Vec<PathBuf>) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        #[cfg(target_os = "linux")]
+        let native = native_events::Watcher::new(paths, sender.clone());
+        #[cfg(not(target_os = "linux"))]
+        let _ = paths;
+        Self {
+            receiver,
+            wake: WatchWake { sender },
+            #[cfg(target_os = "linux")]
+            native,
+        }
+    }
+
+    fn refresh(&self, paths: Vec<PathBuf>) {
+        #[cfg(target_os = "linux")]
+        if let Some(native) = &self.native {
+            native.refresh(paths);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = paths;
+    }
+
+    fn wait(&self, timeout: Option<Duration>) -> bool {
+        #[cfg(target_os = "linux")]
+        if self.native.is_some() {
+            return match timeout {
+                Some(timeout) => self.receiver.recv_timeout(timeout).is_ok(),
+                None => self.receiver.recv().is_ok(),
+            };
+        }
+        // Other targets retain a bounded compatibility path until their
+        // native filesystem event source is available. Linux, the supported
+        // dev latency target, never reaches this branch.
+        let timeout = timeout.unwrap_or(Duration::from_millis(WATCH_POLL_INTERVAL_MS));
+        let _ = self.receiver.recv_timeout(timeout);
+        true
+    }
+
+    fn coalesce(&self, timeout: Duration) {
+        #[cfg(target_os = "linux")]
+        if self.native.is_some() {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() || self.receiver.recv_timeout(remaining).is_err() {
+                    break;
+                }
+            }
+            while self.receiver.try_recv().is_ok() {}
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = timeout;
+    }
+
+    fn wake_handle(&self) -> WatchWake {
+        self.wake.clone()
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod native_events {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int, c_short};
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc::Sender};
+    use std::thread::{self, JoinHandle};
+
+    const IN_NONBLOCK: c_int = 0x800;
+    const IN_CLOEXEC: c_int = 0x80000;
+    const IN_MASK: u32 = 0x0000_0002
+        | 0x0000_0004
+        | 0x0000_0008
+        | 0x0000_0040
+        | 0x0000_0080
+        | 0x0000_0100
+        | 0x0000_0200
+        | 0x0000_0400
+        | 0x0000_0800
+        | 0x0000_4000;
+    const POLLIN: c_short = 0x001;
+    const POLLERR: c_short = 0x008;
+    const POLLHUP: c_short = 0x010;
+    const POLLNVAL: c_short = 0x020;
+
+    #[repr(C)]
+    struct PollFd {
+        fd: c_int,
+        events: c_short,
+        revents: c_short,
+    }
+
+    unsafe extern "C" {
+        fn close(fd: c_int) -> c_int;
+        fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
+        fn inotify_init1(flags: c_int) -> c_int;
+        fn pipe(fds: *mut c_int) -> c_int;
+        fn poll(fds: *mut PollFd, nfds: usize, timeout: c_int) -> c_int;
+        fn read(fd: c_int, buffer: *mut u8, count: usize) -> isize;
+        fn write(fd: c_int, buffer: *const u8, count: usize) -> isize;
+    }
+
+    pub(super) struct Watcher {
+        paths: Arc<Mutex<Vec<PathBuf>>>,
+        control_write: c_int,
+        stop: Arc<AtomicBool>,
+        join: Option<JoinHandle<()>>,
+    }
+
+    impl Watcher {
+        pub(super) fn new(paths: Vec<PathBuf>, sender: Sender<()>) -> Option<Self> {
+            let mut pipes = [0; 2];
+            if unsafe { pipe(pipes.as_mut_ptr()) } != 0 {
+                return None;
+            }
+            let paths = normalize_paths(paths);
+            let probe = build_notify_fd(&paths);
+            if probe < 0 {
+                unsafe {
+                    close(pipes[0]);
+                    close(pipes[1]);
+                }
+                return None;
+            }
+            unsafe {
+                close(probe);
+            }
+            let paths = Arc::new(Mutex::new(paths));
+            let stop = Arc::new(AtomicBool::new(false));
+            let thread_paths = Arc::clone(&paths);
+            let thread_stop = Arc::clone(&stop);
+            let join = thread::Builder::new()
+                .name("jet-watch-events".to_string())
+                .spawn(move || run(
+                    pipes[0],
+                    thread_paths,
+                    thread_stop,
+                    sender,
+                ))
+                .ok()?;
+            Some(Self {
+                paths,
+                control_write: pipes[1],
+                stop,
+                join: Some(join),
+            })
+        }
+
+        pub(super) fn refresh(&self, paths: Vec<PathBuf>) {
+            let paths = normalize_paths(paths);
+            let mut current = self.paths.lock().unwrap_or_else(|e| e.into_inner());
+            if *current == paths {
+                return;
+            }
+            *current = paths;
+            drop(current);
+            self.signal();
+        }
+
+        fn signal(&self) {
+            let byte = [1u8; 1];
+            let _ = unsafe { write(self.control_write, byte.as_ptr(), byte.len()) };
+        }
+    }
+
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            self.signal();
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
+            }
+            unsafe {
+                close(self.control_write);
+            }
+        }
+    }
+
+    fn normalize_paths(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    fn existing_directory(path: &Path) -> Option<PathBuf> {
+        let mut candidate = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        };
+        loop {
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+            let parent = candidate.parent()?;
+            if parent == candidate {
+                return None;
+            }
+            candidate = parent.to_path_buf();
+        }
+    }
+
+    fn build_notify_fd(paths: &[PathBuf]) -> c_int {
+        let fd = unsafe { inotify_init1(IN_NONBLOCK | IN_CLOEXEC) };
+        if fd < 0 {
+            return -1;
+        }
+        let directories = paths
+            .iter()
+            .filter_map(|path| existing_directory(path))
+            .collect::<BTreeSet<_>>();
+        let mut watched = 0;
+        for directory in directories {
+            let bytes = directory.as_os_str().as_bytes();
+            let Ok(path) = CString::new(bytes) else {
+                continue;
+            };
+            if unsafe { inotify_add_watch(fd, path.as_ptr(), IN_MASK) } >= 0 {
+                watched += 1;
+            }
+        }
+        if watched == 0 {
+            unsafe {
+                close(fd);
+            }
+            -1
+        } else {
+            fd
+        }
+    }
+
+    fn run(
+        control_read: c_int,
+        paths: Arc<Mutex<Vec<PathBuf>>>,
+        stop: Arc<AtomicBool>,
+        sender: Sender<()>,
+    ) {
+        let mut notify_fd = {
+            let paths = paths.lock().unwrap_or_else(|e| e.into_inner());
+            build_notify_fd(&paths)
+        };
+        loop {
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            let mut fds = [
+                PollFd {
+                    fd: control_read,
+                    events: POLLIN,
+                    revents: 0,
+                },
+                PollFd {
+                    fd: notify_fd,
+                    events: POLLIN,
+                    revents: 0,
+                },
+            ];
+            let count = if notify_fd >= 0 { 2 } else { 1 };
+            let result = unsafe { poll(fds.as_mut_ptr(), count, -1) };
+            if result < 0 {
+                if std::io::Error::last_os_error().raw_os_error() == Some(4) {
+                    continue;
+                }
+                break;
+            }
+            if fds[0].revents != 0 {
+                let mut bytes = [0u8; 64];
+                let _ = unsafe { read(control_read, bytes.as_mut_ptr(), bytes.len()) };
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                if notify_fd >= 0 {
+                    unsafe {
+                        close(notify_fd);
+                    }
+                }
+                let paths = paths.lock().unwrap_or_else(|e| e.into_inner());
+                notify_fd = build_notify_fd(&paths);
+            }
+            if notify_fd >= 0
+                && fds[1].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL) != 0
+            {
+                let mut buffer = [0u8; 8192];
+                let mut changed = false;
+                loop {
+                    let read = unsafe { read(notify_fd, buffer.as_mut_ptr(), buffer.len()) };
+                    if read <= 0 {
+                        break;
+                    }
+                    changed = true;
+                }
+                if changed {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        if notify_fd >= 0 {
+            unsafe {
+                close(notify_fd);
+            }
+        }
+        unsafe {
+            close(control_read);
         }
     }
 }
@@ -1086,43 +1435,65 @@ fn extract_values_after(
     }
 }
 
-/// Live poll session over a `WatchGraph`.
+/// Live event-backed session over a `WatchGraph`; `poll` remains the
+/// correctness snapshot after a native event wakes the caller.
 pub struct WatchSession {
     graph: WatchGraph,
     generation: u64,
     applied_generation: u64,
     coalesce: Duration,
     edit_started: Option<Instant>,
+    events: EventWaiter,
 }
 
 impl WatchSession {
     pub fn open(entry: &Path) -> Result<Self, Diagnostic> {
         let mut graph = WatchGraph::discover(entry)?;
         graph.refresh_stamps();
+        let events = EventWaiter::new(graph.watched_paths());
         Ok(Self {
             graph,
             generation: 0,
             applied_generation: 0,
             coalesce: Duration::from_millis(WATCH_COALESCE_MS),
             edit_started: None,
+            events,
         })
     }
 
     pub fn from_graph(graph: WatchGraph) -> Self {
+        let events = EventWaiter::new(graph.watched_paths());
         Self {
             graph,
             generation: 0,
             applied_generation: 0,
             coalesce: Duration::from_millis(WATCH_COALESCE_MS),
             edit_started: None,
+            events,
         }
+    }
+
+    /// Rebuild this session's graph while retaining its event/wake queue.
+    /// Interactive callers can replace a resident session without orphaning
+    /// terminal-input wakeups.
+    pub fn reopen(&mut self, entry: &Path) -> Result<(), Diagnostic> {
+        let mut graph = WatchGraph::discover(entry)?;
+        graph.refresh_stamps();
+        self.events.refresh(graph.watched_paths());
+        self.graph = graph;
+        self.generation = 0;
+        self.applied_generation = 0;
+        self.edit_started = None;
+        Ok(())
     }
     pub fn register_asset_root(&mut self, path: PathBuf) {
         self.graph.register_asset_root(path);
+        self.events.refresh(self.graph.watched_paths());
     }
 
     pub fn register_game_path(&mut self, path: PathBuf, kind: JetGameChangeKind) {
         self.graph.register_game_path(path, kind);
+        self.events.refresh(self.graph.watched_paths());
     }
 
     pub fn register_game_path_with_schema_ids(
@@ -1134,6 +1505,7 @@ impl WatchSession {
     ) {
         self.graph
             .register_game_path_with_schema_ids(path, kind, old_schema_id, new_schema_id);
+        self.events.refresh(self.graph.watched_paths());
     }
 
     pub fn graph(&self) -> &WatchGraph {
@@ -1152,6 +1524,17 @@ impl WatchSession {
         self.edit_started = Some(Instant::now());
     }
 
+    /// Block on a native filesystem event or the next scheduled-loop wake.
+    /// A `false` result means the supplied timeout elapsed without an event.
+    pub fn wait_for_change_for(&mut self, timeout: Option<Duration>) -> bool {
+        self.events.refresh(self.graph.watched_paths());
+        self.events.wait(timeout)
+    }
+
+    pub fn wake_handle(&self) -> WatchWake {
+        self.events.wake_handle()
+    }
+
     /// Poll once. `None` = quiet. Handles rename/delete/create/modify and
     /// drops stale events whose generation was already superseded.
     pub fn poll(&mut self) -> Option<InvalidationReceipt> {
@@ -1160,12 +1543,13 @@ impl WatchSession {
         // become observable on this poll.
         self.graph.discover_asset_tree();
         self.graph.discover_runtime_input_trees();
+        self.events.refresh(self.graph.watched_paths());
 
         let mut changed = Vec::new();
         let mut change_kinds = Vec::new();
         for node in self.graph.nodes.values() {
             let now = PathStamp::capture(&node.path);
-            if now == node.stamp {
+            if !node.stamp.changed_since(&now) {
                 continue;
             }
             let change_kind = match (node.stamp.exists, now.exists) {
@@ -1194,10 +1578,10 @@ impl WatchSession {
         if self.edit_started.is_none() {
             self.edit_started = Some(Instant::now());
         }
-        // Coalesce one editor save burst without making every quiet poll pay a
-        // fixed delay. Callers use WATCH_POLL_INTERVAL_MS while idle; this is
-        // the only bounded wait added after a change is observed.
-        std::thread::sleep(self.coalesce);
+        // Coalesce one editor save burst without making every quiet wait pay a
+        // fixed delay. The native event queue waits once for the bounded save
+        // burst, then the settled filesystem state is sampled.
+        self.events.coalesce(self.coalesce);
 
         // Re-sample after coalescing (atomic save / editor write settle).
         let mut settled = Vec::new();
@@ -1224,7 +1608,7 @@ impl WatchSession {
                     len: None,
                     digest: None,
                 });
-            if now == previous && change_kind != ChangeKind::Renamed {
+            if !previous.changed_since(&now) && change_kind != ChangeKind::Renamed {
                 continue;
             }
             if root_kind == RootKind::Asset && is_dir {
@@ -1701,12 +2085,13 @@ impl HotReplaceTxn {
     }
 }
 
-/// Idle watch cadence for the std-only watcher. A sleeping poll avoids a busy
-/// loop while keeping the save-to-reload path below the live-reload budget.
+/// Compatibility wait cadence for targets without a native filesystem event
+/// backend. Linux `jet dev` blocks on inotify; this value remains for other
+/// std-only watch loops and the latency fixture's configuration contract.
 pub const WATCH_POLL_INTERVAL_MS: u64 = 5;
 
 /// Bounded save coalescing window. Keep this below the old fixed 30 ms delay;
-/// the outer loops provide the idle cadence above.
+/// native event waits absorb the editor save burst without an idle sleep.
 pub const WATCH_COALESCE_MS: u64 = 4;
 
 /// Shared edit-to-visible budget used by browser and native matrices (ms).
@@ -1720,12 +2105,12 @@ pub fn within_budget(receipt: &InvalidationReceipt) -> bool {
     }
 }
 
-/// Convenience: one-shot mtime check used by thin callers that only need to
+/// Convenience: one-shot state check used by thin callers that only need to
 /// know whether *any* watched path drifted (without building a receipt).
 pub fn any_stamp_changed(graph: &WatchGraph) -> bool {
     graph.nodes.values().any(|node| {
         let now = PathStamp::capture(&node.path);
-        now != node.stamp
+        node.stamp.changed_since(&now)
     })
 }
 

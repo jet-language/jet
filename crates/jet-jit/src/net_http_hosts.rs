@@ -370,6 +370,16 @@ fn option_string(s: Option<String>) -> i64 {
         Some(v) => alloc_string(v).wrapping_add(1),
     }
 }
+fn option_string_result(s: Option<String>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match s {
+        Some(value) => {
+            let handle = rt.heap.alloc_string(value);
+            crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
+        }
+        None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+    })
+}
+
 fn option_int(value: Option<i64>) -> i64 {
     value.map(|value| value.wrapping_add(1)).unwrap_or(0)
 }
@@ -2760,13 +2770,13 @@ fn jet_jit_http_server_tls(cert: i64, key: i64) -> i64 {
     })
 }
 
-fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, String> {
+fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, JetHTTPError> {
     if raw == 0 {
         return Ok(None);
     }
-    let record = raw
-        .checked_sub(1)
-        .ok_or_else(|| "invalid HTTPServerTls option".to_string())?;
+    let record = raw.checked_sub(1).ok_or_else(|| JetHTTPError::IO {
+        operation: "invalid HTTPServerTls option".to_string(),
+    })?;
     let fields = Concurrency::with_runtime_mut(|rt| {
         Some((
             rt.heap
@@ -2777,7 +2787,9 @@ fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, String> 
                 .and_then(|id| rt.heap.clone_string(id))?,
         ))
     })
-    .ok_or_else(|| "invalid HTTPServerTls option".to_string())?;
+    .ok_or_else(|| JetHTTPError::IO {
+        operation: "invalid HTTPServerTls option".to_string(),
+    })?;
     Ok(Some(jet_http_srv_tls(&fields.0, &fields.1)))
 }
 
@@ -2801,22 +2813,26 @@ fn jet_jit_http_server_default(mux: i64, deadline_ns: i64) -> i64 {
 
 fn jet_jit_http_server_wait(server: i64) -> i64 {
     let Some(server) = http_server(server) else {
-        return result_err("invalid HTTPServer".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPServer".into(),
+        });
     };
     match jet_http_server_wait(&server) {
         Ok(report) => result_ok_handle(push_handle(NetHttpHandle::HTTPShutdownReport(report))),
-        Err(e) => result_err(e),
+        Err(error) => http_err(error),
     }
 }
 
 fn jet_jit_http_server_bind(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64 {
     let addr = clone_string(addr);
     let Some(mux) = http_mux(mux) else {
-        return result_err("invalid HTTPMux".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPMux".into(),
+        });
     };
     let tls = match decode_http_server_tls(tls) {
         Ok(tls) => tls,
-        Err(error) => return result_err(error),
+        Err(error) => return http_err(error),
     };
     match jet_http_server_bind(
         &addr,
@@ -2824,28 +2840,32 @@ fn jet_jit_http_server_bind(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64
         tls,
         decode_http_server_deadline(deadline),
     ) {
-        Ok(s) => result_ok_handle(push_handle(NetHttpHandle::HTTPServer(Arc::new(s)))),
-        Err(e) => result_err(e),
+        Ok(server) => result_ok_handle(push_handle(NetHttpHandle::HTTPServer(Arc::new(server)))),
+        Err(error) => http_err(error),
     }
 }
 
 fn jet_jit_http_server_local_addr(server: i64) -> i64 {
     let Some(server) = http_server(server) else {
-        return result_err("invalid HTTPServer".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPServer".into(),
+        });
     };
     match jet_http_server_local_addr(&server) {
-        Ok(a) => result_ok_handle(alloc_string(a)),
-        Err(e) => result_err(e),
+        Ok(address) => result_ok_handle(alloc_string(address)),
+        Err(error) => http_err(error),
     }
 }
 
 fn jet_jit_http_server_serve(server: i64) -> i64 {
     let Some(server) = http_server(server) else {
-        return result_err("invalid HTTPServer".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPServer".into(),
+        });
     };
     match jet_http_server_serve(&server) {
         Ok(report) => result_ok_handle(push_handle(NetHttpHandle::HTTPShutdownReport(report))),
-        Err(e) => result_err(e),
+        Err(error) => http_err(error),
     }
 }
 
@@ -2854,13 +2874,16 @@ fn jet_jit_http_server_shutdown(server: i64, grace_ms: i64) -> i64 {
         ns: grace_ms.saturating_mul(1_000_000),
     };
     let Some(server) = http_server(server) else {
-        return result_err("invalid HTTPServer".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPServer".into(),
+        });
     };
     match jet_http_server_shutdown(&server, &grace) {
         Ok(report) => result_ok_handle(push_handle(NetHttpHandle::HTTPShutdownReport(report))),
-        Err(e) => result_err(e),
+        Err(error) => http_err(error),
     }
 }
+
 
 fn jet_jit_http_shutdown_report_field(report: i64, field: i64) -> i64 {
     with_handle(report, |h| match h {
@@ -2920,11 +2943,13 @@ fn jet_jit_http_serve_once(addr: i64, mux: i64) -> i64 {
 
 fn jet_jit_http_mux_serve(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64 {
     let Some(mux) = http_mux(mux) else {
-        return result_err("invalid HTTPMux".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPMux".into(),
+        });
     };
     let tls = match decode_http_server_tls(tls) {
         Ok(tls) => tls,
-        Err(error) => return result_err(error),
+        Err(error) => return http_err(error),
     };
     let addr = clone_string(addr);
     match jet_http_mux_serve(
@@ -2934,20 +2959,23 @@ fn jet_jit_http_mux_serve(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64 {
         decode_http_server_deadline(deadline),
     ) {
         Ok(()) => result_ok_unit(),
-        Err(error) => result_err(error),
+        Err(error) => http_err(error),
     }
 }
 
 fn jet_jit_http_serve(addr: i64, mux: i64) -> i64 {
     let Some(mux) = http_mux(mux) else {
-        return result_err("invalid HTTPMux".into());
+        return http_err(JetHTTPError::IO {
+            operation: "invalid HTTPMux".into(),
+        });
     };
     let addr = clone_string(addr);
     match jet_http_mux_serve(&addr, (*mux).clone(), None, None) {
         Ok(()) => result_ok_unit(),
-        Err(error) => result_err(error),
+        Err(error) => http_err(error),
     }
 }
+
 
 fn jet_jit_core_http_serve(addr: i64, callable: i64) -> i64 {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
@@ -3446,7 +3474,7 @@ fn jet_jit_http_client_request_send(req: i64) -> i64 {
 
 fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
     let name = clone_string(name);
-    option_string(
+    option_string_result(
         with_handle(resp, |h| match h {
             NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
             _ => None,
@@ -3519,12 +3547,12 @@ host_fns! {
     socket_to_string: "jet_jit_net_socket_to_string" => jet_jit_net_socket_to_string: sig1;
     socket_host: "jet_jit_net_socket_host" => jet_jit_net_socket_host: sig1;
     socket_port_typed: "jet_jit_net_socket_port_typed" => jet_jit_net_socket_port_typed: sig1;
-    tcp_listen_str: "jet_jit_net_tcp_listen_str" => jet_jit_net_tcp_listen_str: sig1;
-    tcp_listen_addr: "jet_jit_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
+    tcp_listen_str: "jet_net_tcp_listen" => jet_jit_net_tcp_listen_str: sig1;
+    tcp_listen_addr: "jet_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
     tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
     tcp_connect_timeout: "jet_jit_net_tcp_connect_timeout" => jet_jit_net_tcp_connect_timeout: sig2;
-    tcp_stream_local_addr: "jet_jit_net_tcp_stream_local_addr" => jet_jit_net_tcp_stream_local_addr: sig1;
-    tcp_stream_peer_addr: "jet_jit_net_tcp_stream_peer_addr" => jet_jit_net_tcp_stream_peer_addr: sig1;
+    tcp_stream_local_addr: "jet_net_tcp_local_addr" => jet_jit_net_tcp_stream_local_addr: sig1;
+    tcp_stream_peer_addr: "jet_net_tcp_peer_addr" => jet_jit_net_tcp_stream_peer_addr: sig1;
     tcp_stream_local_socket_addr: "jet_jit_net_tcp_stream_local_socket_addr" => jet_jit_net_tcp_stream_local_socket_addr: sig1;
     tcp_stream_peer_socket_addr: "jet_jit_net_tcp_stream_peer_socket_addr" => jet_jit_net_tcp_stream_peer_socket_addr: sig1;
     set_read_timeout: "jet_jit_net_set_read_timeout" => jet_jit_net_set_read_timeout: sig2;
@@ -3572,14 +3600,19 @@ host_fns! {
     unix_write: "jet_jit_net_unix_write" => jet_jit_net_unix_write: sig2;
     unix_write_all_bytes: "jet_jit_net_unix_write_all_bytes" => jet_jit_net_unix_write_all_bytes: sig2;
     unix_close: "jet_jit_net_unix_close" => jet_jit_net_unix_close: sig1;
-    tcp_accept: "jet_jit_tcp_listener_accept" => jet_jit_tcp_listener_accept: sig1;
+    tcp_read: "jet_net_tcp_read" => jet_jit_net_tcp_read: sig1;
+    tcp_write: "jet_net_tcp_write" => jet_jit_net_tcp_write: sig2;
+    tcp_read_bytes: "jet_net_tcp_read_bytes" => jet_jit_net_tcp_read_bytes: sig2;
+    tcp_write_bytes: "jet_net_tcp_write_bytes" => jet_jit_net_tcp_write_bytes: sig2;
+    tcp_write_text: "jet_net_tcp_write_text" => jet_jit_net_tcp_write_text: sig2;
+    tcp_accept: "jet_net_tcp_accept" => jet_jit_tcp_listener_accept: sig1;
     tcp_local_addr: "jet_jit_tcp_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
     tcp_local_addr_prelude: "jet_net_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
-    tcp_read_text: "jet_jit_tcp_stream_read_text" => jet_jit_tcp_stream_read_text: sig2;
-    tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
-    tcp_shutdown: "jet_jit_tcp_stream_shutdown" => jet_jit_tcp_stream_shutdown: sig2;
-    tcp_close: "jet_jit_tcp_stream_close" => jet_jit_tcp_stream_close: sig1;
-    tcp_ready: "jet_jit_tcp_stream_ready" => jet_jit_tcp_stream_ready: sig3;
+    tcp_read_text: "jet_net_tcp_read_text" => jet_jit_tcp_stream_read_text: sig2;
+    tcp_write_all_bytes: "jet_net_tcp_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
+    tcp_shutdown: "jet_net_tcp_shutdown" => jet_jit_tcp_stream_shutdown: sig2;
+    tcp_close: "jet_net_tcp_close" => jet_jit_tcp_stream_close: sig1;
+    tcp_ready: "jet_net_tcp_ready_deadline" => jet_jit_tcp_stream_ready: sig3;
     tls_client_config_default: "jet_jit_tls_client_config_default" => jet_jit_tls_client_config_default: sig0;
     tls_root_certificates_from_pem: "jet_jit_tls_root_certificates_from_pem" => jet_jit_tls_root_certificates_from_pem: sig1;
     tls_client_identity_from_pem: "jet_jit_tls_client_identity_from_pem" => jet_jit_tls_client_identity_from_pem: sig2;
@@ -3616,6 +3649,7 @@ host_fns! {
     http_router_register_prelude: "jet_http_router_register" => jet_jit_http_router_register: sig7;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
     http_response_prelude: "jet_http_srv_response" => jet_jit_http_response: sig2;
+    http_server_response_header_prelude: "jet_http_srv_response_header" => jet_jit_http_server_response_header: sig3;
     http_server_response_header: "jet_jit_http_server_response_header" => jet_jit_http_server_response_header: sig3;
     http_server_access_log: "jet_jit_http_server_access_log" => jet_jit_http_server_access_log: sig2;
     http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
@@ -3626,6 +3660,7 @@ host_fns! {
     http_req_path: "jet_jit_http_req_path" => jet_jit_http_req_path: sig1;
     http_req_param: "jet_jit_http_req_param" => jet_jit_http_req_param: sig2;
     http_req_header: "jet_jit_http_req_header" => jet_jit_http_req_header: sig2;
+    http_req_header_prelude: "jet_http_srv_req_header" => jet_jit_http_req_header: sig2;
     http_req_text: "jet_jit_http_req_text" => jet_jit_http_req_text: sig1;
     http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_req_text_prelude: "jet_http_request_text" => jet_jit_http_req_text: sig1;
@@ -3641,6 +3676,7 @@ host_fns! {
     http_nominal_show: "jet_jit_http_nominal_show" => jet_jit_http_nominal_show: sig1;
     http_error_show: "jet_jit_http_error_show" => jet_jit_http_error_show: sig1;
     http_json_response: "jet_jit_http_json_response" => jet_jit_http_json_response: sig2;
+    http_json_response_prelude: "jet_http_srv_json" => jet_jit_http_json_response: sig2;
     http_static_files: "jet_jit_http_static_files" => jet_jit_http_static_files: sig6;
     http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;
     http_cors: "jet_jit_http_cors" => jet_jit_http_cors: sig2;
@@ -3649,6 +3685,7 @@ host_fns! {
     http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
     http_resp_status_prelude: "jet_http_client_response_status" => jet_jit_http_resp_status: sig1;
     http_resp_status_value_prelude: "jet_http_client_response_status_value" => jet_jit_http_resp_status: sig1;
+    http_resp_header_prelude: "jet_http_client_response_header" => jet_jit_http_resp_header: sig2;
     http_client_resp_body_prelude: "jet_http_client_response_body" => jet_jit_http_client_resp_body: sig1;
     http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
     core_http_serve: "jet_http_serve" => jet_jit_core_http_serve: sig2;
@@ -3671,6 +3708,7 @@ host_fns! {
     http_server_shutdown: "jet_jit_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
     http_server_shutdown_prelude: "jet_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
     http_shutdown_report_field: "jet_jit_http_shutdown_report_field" => jet_jit_http_shutdown_report_field: sig2;
+    http_shutdown_report_field_prelude: "jet_http_shutdown_report_field" => jet_jit_http_shutdown_report_field: sig2;
     http_serve_once_listener: "jet_jit_http_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
     http_mux_serve_once_listener_prelude: "jet_http_mux_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
     http_client_get: "jet_jit_http_client_get" => jet_jit_http_client_get: sig1;
@@ -3686,6 +3724,7 @@ host_fns! {
     http_req_under_limit: "jet_jit_http_req_under_limit" => jet_jit_http_req_under_limit: sig2;
     http_sse: "jet_jit_http_sse" => jet_jit_http_sse: sig1;
     http_static_file: "jet_jit_http_static_file" => jet_jit_http_static_file: sig2;
+    http_static_file_prelude: "jet_http_srv_static_file" => jet_jit_http_static_file: sig2;
     http_static_file_range: "jet_jit_http_static_file_range" => jet_jit_http_static_file_range: sig3;
     http_client_request_new: "jet_jit_http_client_request_new" => jet_jit_http_client_request_new: sig2;
     http_client_request_body: "jet_jit_http_client_request_body" => jet_jit_http_client_request_body: sig2;
@@ -3728,18 +3767,21 @@ pub(crate) fn test_http_mux_add_handler(
 
 pub(crate) fn test_http_server_bind(addr: String, mux: i64) -> Result<i64, String> {
     let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    let server = jet_http_server_bind(&addr, (*mux).clone(), None, None)?;
+    let server = jet_http_server_bind(&addr, (*mux).clone(), None, None)
+        .map_err(|error| error.to_string())?;
     Ok(push_handle(NetHttpHandle::HTTPServer(Arc::new(server))))
 }
 
 pub(crate) fn test_http_server_local_addr(server: i64) -> Result<String, String> {
     let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
-    jet_http_server_local_addr(&server)
+    jet_http_server_local_addr(&server).map_err(|error| error.to_string())
 }
 
 pub(crate) fn test_http_server_serve(server: i64) -> Result<(), String> {
     let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
-    jet_http_server_serve(&server).map(|_| ())
+    jet_http_server_serve(&server)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

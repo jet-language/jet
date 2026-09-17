@@ -2082,9 +2082,10 @@ pub fn jet_runtime_register_atexit<T>(handlers: &mut Vec<T>, handler: T) {
     handlers.push(handler);
 }
 
+/// Drain registered handlers exactly once, in reverse registration order.
 pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut(T)) {
     let pending = std::mem::take(handlers);
-    for handler in pending {
+    for handler in pending.into_iter().rev() {
         invoke(handler);
     }
 }

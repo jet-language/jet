@@ -844,20 +844,42 @@ macro_rules! jet_lane_show {
         super::jet_scheduler_current_task_trace()
     }
 
+    fn jet_select_duration_ns(value: &jet_foundation::Numeric::JetInt) -> i64 {
+        jet_int_owned_to_i64(value).unwrap_or_else(|error| {
+            super::jet_runtime_stop_with_context(
+                "E1003",
+                file!(),
+                line!(),
+                "",
+                "",
+                &error,
+            )
+        })
+    }
+
     /// D-CONC-CHAN1: wait on plain endpoints and return the selected arm plus
     /// its receive payload. Timer arms carry no value, so the option is absent.
     pub fn jet_select_wait_tagged<T: Send + 'static>(
-        recvs: &[JetReceiver<T>],
-        after_ns: Vec<i64>,
-    ) -> (i64, Option<T>) {
+        recvs: Vec<JetReceiver<T>>,
+        after_ns: Vec<jet_foundation::Numeric::JetInt>,
+    ) -> (jet_foundation::Numeric::JetInt, JetOutcome<T, JetAbsent>) {
         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
         let after_ms = after_ns
             .into_iter()
-            .map(|ns| super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(ns)))
+            .map(|ns| {
+                super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(
+                    jet_select_duration_ns(&ns),
+                ))
+            })
             .collect();
         match super::jet_scheduler_select(inners, after_ms) {
-            super::JetSelectOutcome::Recv { arm, value } => (arm as i64, Some(value)),
-            super::JetSelectOutcome::After { arm } => ((recvs.len() + arm) as i64, None),
+            super::JetSelectOutcome::Recv { arm, value } => {
+                (jet_int_owned_from_i64(arm as i64), Ok(value))
+            }
+            super::JetSelectOutcome::After { arm } => (
+                jet_int_owned_from_i64((recvs.len() + arm) as i64),
+                Err(JetAbsent),
+            ),
             super::JetSelectOutcome::Closed => super::jet_scheduler_fatal("select closed"),
         }
     }
@@ -865,18 +887,29 @@ macro_rules! jet_lane_show {
     /// D-CONC-CHAN2=D: probe a readiness table with an `else` arm. `-1` means
     /// that no receive or timer arm is ready, including a closed-only table.
     pub fn jet_select_try_wait_tagged<T: Send + 'static>(
-        recvs: &[JetReceiver<T>],
-        after_ns: Vec<i64>,
-    ) -> (i64, Option<T>) {
+        recvs: Vec<JetReceiver<T>>,
+        after_ns: Vec<jet_foundation::Numeric::JetInt>,
+    ) -> (jet_foundation::Numeric::JetInt, JetOutcome<T, JetAbsent>) {
         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
         let after_ms = after_ns
             .into_iter()
-            .map(|ns| super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(ns)))
+            .map(|ns| {
+                super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(
+                    jet_select_duration_ns(&ns),
+                ))
+            })
             .collect();
         match super::jet_scheduler_try_select(inners, after_ms) {
-            Some(super::JetSelectOutcome::Recv { arm, value }) => (arm as i64, Some(value)),
-            Some(super::JetSelectOutcome::After { arm }) => ((recvs.len() + arm) as i64, None),
-            Some(super::JetSelectOutcome::Closed) | None => (-1, None),
+            Some(super::JetSelectOutcome::Recv { arm, value }) => {
+                (jet_int_owned_from_i64(arm as i64), Ok(value))
+            }
+            Some(super::JetSelectOutcome::After { arm }) => (
+                jet_int_owned_from_i64((recvs.len() + arm) as i64),
+                Err(JetAbsent),
+            ),
+            Some(super::JetSelectOutcome::Closed) | None => {
+                (jet_int_owned_from_i64(-1), Err(JetAbsent))
+            }
         }
     }
 

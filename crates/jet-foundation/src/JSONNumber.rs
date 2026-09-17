@@ -111,6 +111,128 @@ pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {
     let negative = negative && digits.iter().any(|digit| *digit != 0);
     Ok((negative, digits, scale))
 }
+/// Project a decimal lexeme directly into the native small Decimal carrier.
+/// `None` means the lexeme is valid but its canonical mantissa needs the
+/// arbitrary-precision path. Validation and resource-limit errors are kept
+/// identical to `json_decimal_lexeme`, while successful small values allocate
+/// nothing.
+pub fn json_decimal_small(s: &str) -> Result<Option<(bool, i128, u32)>, String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return Err("empty decimal number".to_string());
+    }
+    let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = t.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, t)
+    };
+    let (mantissa, exponent) = body
+        .find(|ch| ch == 'e' || ch == 'E')
+        .map(|index| {
+            let exponent = body[index + 1..]
+                .parse::<i64>()
+                .map_err(|_| "decimal exponent is out of range".to_string())?;
+            Ok::<(&str, i64), String>((&body[..index], exponent))
+        })
+        .transpose()?
+        .unwrap_or((body, 0));
+    let mut parts = mantissa.split('.');
+    let int_part = parts.next().unwrap_or("");
+    let frac_part = parts.next().unwrap_or("");
+    if parts.next().is_some() || int_part.is_empty() && frac_part.is_empty() {
+        return Err(format!("invalid decimal number `{s}`"));
+    }
+
+    let mut valid = true;
+    let mut value = 0i128;
+    let mut significant = 0usize;
+    let mut nonzero = false;
+    let mut fits = true;
+    for digit in int_part.bytes().chain(frac_part.bytes()) {
+        if !digit.is_ascii_digit() {
+            valid = false;
+            continue;
+        }
+        if !nonzero {
+            if digit == b'0' {
+                continue;
+            }
+            nonzero = true;
+        }
+        significant += 1;
+        if fits {
+            let Some(next) = value
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(i128::from(digit - b'0')))
+            else {
+                fits = false;
+                continue;
+            };
+            value = next;
+        }
+    }
+    if !valid {
+        return Err(format!("invalid decimal number `{s}`"));
+    }
+
+    let raw_digits = int_part.len().saturating_add(frac_part.len());
+    if raw_digits > JSON_NUMBER_MAX_DIGITS {
+        return Err(format!(
+            "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+        ));
+    }
+    if exponent.unsigned_abs() > JSON_NUMBER_MAX_EXPONENT as u64 {
+        return Err(format!(
+            "decimal exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
+        ));
+    }
+    let mut scale = i64::try_from(frac_part.len())
+        .map_err(|_| "decimal scale is out of range".to_string())?
+        .checked_sub(exponent)
+        .ok_or_else(|| "decimal scale is out of range".to_string())?;
+    if scale < 0 {
+        let zeros =
+            usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
+        let total = raw_digits
+            .checked_add(zeros)
+            .ok_or_else(|| "decimal number is too large".to_string())?;
+        if total > JSON_NUMBER_MAX_DIGITS {
+            return Err(format!(
+                "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+            ));
+        }
+    }
+    if !nonzero {
+        let scale =
+            u32::try_from(scale.max(0)).map_err(|_| "decimal scale is out of range".to_string())?;
+        return Ok(Some((false, 0, scale)));
+    }
+    if !fits {
+        return Ok(None);
+    }
+    if scale < 0 {
+        let zeros =
+            usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
+        if significant
+            .checked_add(zeros)
+            .map_or(true, |digits| digits > 39)
+        {
+            return Ok(None);
+        }
+        for _ in 0..zeros {
+            let Some(next) = value.checked_mul(10) else {
+                return Ok(None);
+            };
+            value = next;
+        }
+        scale = 0;
+    }
+    let scale =
+        u32::try_from(scale).map_err(|_| "decimal scale is out of range".to_string())?;
+    Ok(Some((negative && value != 0, value, scale)))
+}
 
 /// Return signed integer text for a mathematically integral JSON number.
 /// Default `Int` and fixed-width destinations share this projection; only the

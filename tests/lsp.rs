@@ -3271,7 +3271,7 @@ fn lsp_rename_produces_workspace_edit() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "changes".to_string(),
+                    "documentChanges".to_string(),
                     "hello".to_string(),
                     "semantic_ops".to_string(),
                     "\"kind\":\"rename\"".to_string(),
@@ -3283,6 +3283,240 @@ fn lsp_rename_produces_workspace_edit() {
             },
         ],
     );
+}
+
+#[test]
+fn lsp_checked_identity_and_versioned_rename() {
+    let _guard = lock_lsp_process();
+    let root = common::Scratch::new("lsp-checked-rename");
+    fs::write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap();
+    let main = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn shadow(letter: Int) { print(letter) }\n";
+    let scoring = "pub fn letter(score: Int) String -> \"A\"\n";
+    let util = "pub fn letter(score: Int) String -> \"unrelated\"\n";
+    let sources = [("run.jet", main), ("scoring.jet", scoring), ("util.jet", util)];
+    for (name, source) in sources {
+        fs::write(root.join(name), source).unwrap();
+    }
+    let file_uri = |name: &str| format!("file://{}", root.join(name).display())
+        .replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29");
+    let main_uri = file_uri("run.jet");
+    let scoring_uri = file_uri("scoring.jet");
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .current_dir(&root.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let request = |stdin: &mut std::process::ChildStdin,
+                   stdout: &mut std::process::ChildStdout,
+                   method: &str, params: String| {
+        send_msg(stdin, &format!(
+            r#"{{"jsonrpc":"2.0","id":7,"method":"{method}","params":{params}}}"#
+        ));
+        loop {
+            let response = parse_json(&read_msg(stdout)).unwrap();
+            if matches!(json_get(&response, "id"), Some(DataTree::Int(7))) {
+                break response;
+            }
+        }
+    };
+    request(&mut stdin, &mut stdout, "initialize",
+        r#"{"capabilities":{"workspace":{"workspaceEdit":{"documentChanges":true}}}}"#.into());
+    for (name, source) in sources {
+        let uri = file_uri(name);
+        send_msg(&mut stdin, &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            json_string(source),
+        ));
+    }
+    // Unsaved inserted lines and a non-BMP scalar must not use disk offsets.
+    let overlay = format!("// unsaved \u{1f680}\n\n{scoring}");
+    send_msg(&mut stdin, &format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{scoring_uri}","version":2}},"contentChanges":[{{"text":{}}}]}}}}"#,
+        json_string(&overlay),
+    ));
+    let params = |extra: &str| format!(
+        r#"{{"textDocument":{{"uri":"{main_uri}"}},"position":{{"line":3,"character":19}}{extra}}}"#
+    );
+    let definition = request(&mut stdin, &mut stdout, "textDocument/definition", params(""));
+    let definition = json_object_field(&definition, "result");
+    assert_eq!(json_str(json_object_field(definition, "uri")), Some(scoring_uri.as_str()));
+    let expected_definition_range = parse_json(
+        r#"{"start":{"line":2,"character":7},"end":{"line":2,"character":13}}"#
+    ).unwrap();
+    assert_json_values_equal("definition", json_object_field(definition, "range"), &expected_definition_range);
+    let references = request(&mut stdin, &mut stdout, "textDocument/references",
+        params(r#","context":{"includeDeclaration":true}"#));
+    let references = json_array_field(&references, "result");
+    assert_eq!(references.len(), 2, "{references:?}");
+    let expected_call_range = parse_json(
+        r#"{"start":{"line":3,"character":17},"end":{"line":3,"character":23}}"#
+    ).unwrap();
+    for reference in references {
+        let uri = json_str(json_object_field(reference, "uri")).unwrap();
+        let expected = if uri == main_uri { &expected_call_range } else {
+            assert_eq!(uri, scoring_uri);
+            &expected_definition_range
+        };
+        assert_json_values_equal("reference", json_object_field(reference, "range"), expected);
+    }
+    let prepared = request(&mut stdin, &mut stdout, "textDocument/prepareRename", params(""));
+    assert_json_values_equal("prepare rename",
+        json_object_field(json_object_field(&prepared, "result"), "range"), &expected_call_range);
+    let renamed = request(&mut stdin, &mut stdout, "textDocument/rename", params(r#","newName":"grade""#));
+    let result = json_object_field(&renamed, "result");
+    let changes = json_array_field(result, "documentChanges");
+    assert_eq!(changes.len(), 2, "{renamed:?}");
+    for change in changes {
+        let document = json_object_field(change, "textDocument");
+        let uri = json_str(json_object_field(document, "uri")).unwrap();
+        let (version, expected) = if uri == main_uri { (1, &expected_call_range) } else {
+            assert_eq!(uri, scoring_uri);
+            (2, &expected_definition_range)
+        };
+        assert_json_values_equal("checked document version", json_object_field(document, "version"), &DataTree::Int(version));
+        let edits = json_array_field(change, "edits");
+        assert_eq!(edits.len(), 1);
+        assert_json_values_equal("rename range", json_object_field(&edits[0], "range"), expected);
+        assert_eq!(json_str(json_object_field(&edits[0], "newText")), Some("grade"));
+    }
+    let targets = json_array_field(&json_array_field(result, "semantic_ops")[0], "targets");
+    assert_eq!(targets.len(), 1, "{targets:?}");
+    assert_eq!(json_str(json_object_field(&targets[0], "before")), Some("fn:module:scoring::letter"));
+    assert_eq!(json_str(json_object_field(&targets[0], "after")), Some("fn:module:scoring::grade"));
+    let updated_main = format!("// moved\n{}", main.replace(
+        "    print(grades", "    print(\"\u{1f680}\"); print(grades"));
+    send_msg(&mut stdin, &format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{main_uri}","version":3}},"contentChanges":[{{"text":{}}}]}}}}"#,
+        json_string(&updated_main),
+    ));
+    let moved = request(&mut stdin, &mut stdout, "textDocument/rename", format!(
+        r#"{{"textDocument":{{"uri":"{main_uri}"}},"position":{{"line":4,"character":31}},"newName":"grade"}}"#
+    ));
+    let moved_changes = json_array_field(json_object_field(&moved, "result"), "documentChanges");
+    assert_eq!(moved_changes.len(), 2, "{moved:?}");
+    let moved_main = moved_changes.iter().find(|change| {
+        json_str(json_object_field(json_object_field(change, "textDocument"), "uri"))
+            == Some(main_uri.as_str())
+    }).unwrap();
+    assert_json_values_equal("new snapshot version",
+        json_object_field(json_object_field(moved_main, "textDocument"), "version"), &DataTree::Int(3));
+    let moved_range = parse_json(
+        r#"{"start":{"line":4,"character":30},"end":{"line":4,"character":36}}"#
+    ).unwrap();
+    assert_json_values_equal("shifted UTF-16 occurrence",
+        json_object_field(&json_array_field(moved_main, "edits")[0], "range"), &moved_range);
+    request(&mut stdin, &mut stdout, "shutdown", "{}".into());
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn lsp_checked_imported_diagnostics_and_repairs() {
+    let _guard = lock_lsp_process();
+    let root = common::Scratch::new("lsp-imported-reports");
+    fs::write(root.join("package.jet"), "name: \"reports\"\nversion: \"0.1.0\"\n").unwrap();
+    let main = "use \"scoring\"\nfn run() { print(scoring.letter(91)) }\n";
+    let scoring = "pub fn letter(score: Int, offset: Int) String -> {\n    adjusted = score + offset\n    return if {\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }\n}\nfn repair_probe() {\n    m :: [String:Int]{}\n    _ :: m.gett(\"a\")\n}\n";
+    let file_uri = |name: &str| format!("file://{}", root.join(name).display())
+        .replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29");
+    let main_uri = file_uri("run.jet");
+    let scoring_uri = file_uri("scoring.jet");
+    fs::write(root.join("run.jet"), main).unwrap();
+    fs::write(root.join("scoring.jet"), scoring).unwrap();
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .current_dir(&root.path)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let request = |stdin: &mut std::process::ChildStdin,
+                   stdout: &mut std::process::ChildStdout, method: &str, params: String| {
+        send_msg(stdin, &format!(
+            r#"{{"jsonrpc":"2.0","id":7,"method":"{method}","params":{params}}}"#
+        ));
+        let mut notifications = Vec::new();
+        loop {
+            let response = parse_json(&read_msg(stdout)).unwrap();
+            if matches!(json_get(&response, "id"), Some(DataTree::Int(7))) {
+                break (response, notifications);
+            }
+            notifications.push(response);
+        }
+    };
+    request(&mut stdin, &mut stdout, "initialize", r#"{"capabilities":{}}"#.into());
+    for (uri, source) in [(&main_uri, main), (&scoring_uri, scoring)] {
+        send_msg(&mut stdin, &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            json_string(source),
+        ));
+    }
+    let overlay = format!("// unsaved \u{1f680}\n\n{scoring}");
+    send_msg(&mut stdin, &format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{scoring_uri}","version":2}},"contentChanges":[{{"text":{}}}]}}}}"#,
+        json_string(&overlay),
+    ));
+    let action_params = |uri: &str| format!(
+        r#"{{"textDocument":{{"uri":"{uri}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":9,"character":0}}}},"context":{{"diagnostics":[]}}}}"#
+    );
+    let (main_actions, notifications) = request(
+        &mut stdin, &mut stdout, "textDocument/codeAction", action_params(&main_uri),
+    );
+    let reports = |uri: &str| notifications.iter().rev().find_map(|notification| {
+        let params = json_get(notification, "params")?;
+        (json_get(params, "uri").and_then(json_str) == Some(uri)).then_some(params)
+    }).unwrap();
+    let imported = reports(&scoring_uri);
+    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), &DataTree::Int(2));
+    let imported_errors: Vec<_> = json_array_field(imported, "diagnostics").iter()
+        .filter(|diagnostic| json_get(diagnostic, "code").and_then(json_str) == Some("E0107"))
+        .collect();
+    assert_eq!(imported_errors.len(), 3, "{imported:?}");
+    let first = json_object_field(json_object_field(imported_errors[0], "range"), "start");
+    assert_json_values_equal("imported body line", json_object_field(first, "line"), &DataTree::Int(3));
+    let caller = reports(&main_uri);
+    let caller_errors = json_array_field(caller, "diagnostics");
+    assert!(caller_errors.iter().all(|diagnostic| {
+        json_get(diagnostic, "code").and_then(json_str) != Some("E0107")
+    }), "{caller:?}");
+    let missing_arg = caller_errors.iter().find(|diagnostic| {
+        json_get(diagnostic, "code").and_then(json_str) == Some("E0104")
+    }).expect("missing argument remains a caller diagnostic");
+    let caller_start = json_object_field(json_object_field(missing_arg, "range"), "start");
+    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), &DataTree::Int(1));
+    assert!(json_array(json_object_field(&main_actions, "result"), "caller actions").iter()
+        .flat_map(|action| json_array_field(json_object_field(action, "edit"), "documentChanges"))
+        .flat_map(|change| json_array_field(change, "edits"))
+        .all(|edit| !matches!(json_get(edit, "newText").and_then(json_str), Some("get" | "_repair_probe"))),
+        "imported method repair must not be offered against the caller: {main_actions:?}");
+    let (scoring_actions, _) = request(
+        &mut stdin, &mut stdout, "textDocument/codeAction", action_params(&scoring_uri),
+    );
+    let actions = json_array(json_object_field(&scoring_actions, "result"), "imported actions");
+    let method_edit = actions.iter()
+        .flat_map(|action| json_array_field(json_object_field(action, "edit"), "documentChanges"))
+        .flat_map(|change| json_array_field(change, "edits"))
+        .find(|edit| json_get(edit, "newText").and_then(json_str) == Some("get"))
+        .expect("registered method repair");
+    let expected_range = parse_json(
+        r#"{"start":{"line":12,"character":11},"end":{"line":12,"character":15}}"#
+    ).unwrap();
+    assert_json_values_equal("repair selects imported gett", json_object_field(method_edit, "range"), &expected_range);
+    for action in actions {
+        for change in json_array_field(json_object_field(action, "edit"), "documentChanges") {
+            let document = json_object_field(change, "textDocument");
+            assert_eq!(json_get(document, "uri").and_then(json_str), Some(scoring_uri.as_str()));
+            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), &DataTree::Int(2));
+        }
+    }
+    request(&mut stdin, &mut stdout, "shutdown", "{}".into());
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
 }
 
 #[test]
@@ -3344,8 +3578,8 @@ impl Pattern.CheckedText {
         return ""
     }
 }
-fn use_pattern(value: Pattern) Pattern {
-    return value
+fn use_pattern(value: Pattern) {
+    return
 }
 fn run() {
     
@@ -3406,7 +3640,7 @@ fn run() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":23}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":12,"character":23}}}}}}"#,
                     uri
                 ),
                 expect_contains: Some(vec![
@@ -3433,8 +3667,8 @@ fn run() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "changes".to_string(),
-                    "Pattern2".to_string(),
+                    "documentChanges".to_string(),
+                    r#""newText":"Pattern2""#.to_string(),
                     "nominal_base".to_string(),
                     "CheckedText".to_string(),
                 ]),
@@ -3492,6 +3726,112 @@ fn run() { print(generated_value()) }
                 expect_contains: Some(vec![
                     ".jet/generated/main/made.jet".to_string(),
                     "range".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+#[test]
+fn lsp_generated_definition_uses_module_identity_and_preserves_ambiguity() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    // Keep the build query inside an isolated, declaration-backed authority.
+    // The generated artifact package is deliberately named `main` so its
+    // canonical BuildPlan paths remain `.jet/generated/main/...`.
+    let source = r#"fn build(b: BuildContext) BuildPlan -> {
+    b.generate("right") {
+        fn generated_value() String -> "right"
+    }
+    b.generate("left") {
+        fn generated_value() String -> "left"
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/right.jet", ".jet/generated/main/left.jet"], [])
+    return b.plan(app)
+}
+fn run() {
+    generated_value()
+    left.generated_value()
+    right.generated_value()
+}
+"#;
+    let root = common::Scratch::new("lsp-generated-definition-identity");
+    fs::write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n")
+        .expect("write generated identity package manifest");
+    fs::write(
+        root.join("workspace.jet"),
+        "module workspace { members: [] }\n",
+    )
+    .expect("write generated identity workspace authority");
+    fs::write(root.join("main.jet"), source).expect("write generated identity source");
+    // Generate the right-hand module first on purpose. A name-only fallback
+    // would return `right` for both calls; the checked module qualifier must
+    // select the BuildPlan identity instead.
+    let uri = format!("file://{}", root.join("main.jet").display());
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["definitionProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.clone(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":10}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["\"result\":null".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":12,"character":12}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"identity\":\"fn:module:left::generated_value\"".to_string(),
+                    "\"generated\":true".to_string(),
+                    "\"artifact\":\".jet/generated/main/left.jet\"".to_string(),
+                    "\"status\":\"available\"".to_string(),
+                    "\"generator\":\"left\"".to_string(),
+                    "\"schema\":null".to_string(),
+                    "\"source\":\".jet/generated/main/left.jet\"".to_string(),
+                    "\"plugin\":null".to_string(),
+                    "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}"
+                        .to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":13,"character":13}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"identity\":\"fn:module:right::generated_value\"".to_string(),
+                    "\"generated\":true".to_string(),
+                    "\"artifact\":\".jet/generated/main/right.jet\"".to_string(),
+                    "\"status\":\"available\"".to_string(),
+                    "\"generator\":\"right\"".to_string(),
+                    "\"schema\":null".to_string(),
+                    "\"source\":\".jet/generated/main/right.jet\"".to_string(),
+                    "\"plugin\":null".to_string(),
+                    "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}"
+                        .to_string(),
                 ]),
             },
             TranscriptStep::Send {

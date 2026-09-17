@@ -290,6 +290,14 @@ function jet_fmt_decimal(value, precision) {
   return jet_fmt_fixed_even(number, Math.max(0, Number(precision)));
 }
 
+function jet_fmt_quantity(value) {
+  const number = Number(value);
+  if (Number.isNaN(number)) return "NaN";
+  if (number === Infinity) return "inf";
+  if (number === -Infinity) return "-inf";
+  return String(number).replace(/\.0$/, "");
+}
+
 // Rust's fixed formatter uses nearest-even at an exact decimal tie. Rebuild
 // the finite Number as an integer over a power of two, scale by 10^places,
 // and round the rational quotient so the Web rail does not inherit toFixed's
@@ -400,6 +408,40 @@ function jet_debug(value) {
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number") return jet_float_display(value);
   if (typeof value === "bigint") return value.toString();
+  if (typeof value === "object") {
+    const facts = typeof __jet_print_type_facts === "undefined"
+      ? null
+      : __jet_print_type_facts;
+    const fact = facts?.[value.__jet_type];
+    if (fact != null && fact.auto_printable) {
+      if (fact.kind === "struct") {
+        const fields = fact.fields
+          .filter((field) => !field.computed)
+          .map((field) => `${field.name}: ${field.redacted ? "[redacted]" : jet_debug(value[field.key])}`);
+        return fields.length === 0
+          ? `${fact.name} {}`
+          : `${fact.name} { ${fields.join(", ")} }`;
+      }
+      if (fact.kind === "enum") {
+        const variant = fact.variants.find((candidate) => candidate.tag === value.tag);
+        if (variant == null) {
+          throw new Error(`unknown variant for printable type ${fact.name}`);
+        }
+        if (variant.kind === "unit") return variant.name;
+        if (variant.kind === "single") {
+          return `${variant.name}(${jet_debug(value.values?.[0])})`;
+        }
+        const fields = variant.fields
+          .map((field, index) => field.computed
+            ? null
+            : `${field.name}: ${field.redacted ? "[redacted]" : jet_debug(value.values?.[index])}`)
+          .filter((field) => field != null);
+        return fields.length === 0
+          ? `${variant.name} {}`
+          : `${variant.name} { ${fields.join(", ")} }`;
+      }
+    }
+  }
   if (typeof value === "object" && typeof value.tag === "string") {
     const payload = Array.isArray(value.values) ? value.values : [];
     return payload.length === 0

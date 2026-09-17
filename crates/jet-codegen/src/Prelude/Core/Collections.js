@@ -534,7 +534,7 @@ function jet_iter_zip(a, b, f) {
   })());
 }
 
-function jet_iter_zip_strict(a, b, f) {
+function jet_iter_zip_strict(a, b, f, policy, file, line, fn_name, source_line, col, caret_len) {
   const left = jet_iter_source(a);
   const right = jet_iter_source(b);
   return jet_iter_lazy((function* () {
@@ -542,7 +542,7 @@ function jet_iter_zip_strict(a, b, f) {
       const first = left.next();
       const second = right.next();
       if (first.done !== second.done) {
-        jet_runtime_stop("E3001", "<core.collections>", 0, "zip length mismatch");
+        jet_runtime_stop("E0128", file, line, policy, fn_name, source_line, col, caret_len);
       }
       if (first.done) return;
       yield f(first.value, second.value);

@@ -123,7 +123,12 @@ impl<C> JetColumns<C> {
 impl<C: Clone> JetColumns<C> {
     /// THE read, for an owning store: one record's cells at `index`.
     pub fn gather(&self, index: i64) -> Result<JetRowCells<C>, JetFixedListIndexError> {
-        jet_columns_gather(&self.views(), index)
+        jet_fixed_list_index(self.len(), index, |row| {
+            self.cols
+                .iter()
+                .map(|column| column[row].clone())
+                .collect()
+        })
     }
 
     /// The fused single-field read, for an owning store.
@@ -132,7 +137,7 @@ impl<C: Clone> JetColumns<C> {
         field: usize,
         index: i64,
     ) -> Result<C, JetFixedListIndexError> {
-        jet_columns_gather_cell(&self.views(), field, index)
+        jet_fixed_list_index(self.len(), index, |row| self.cols[field][row].clone())
     }
 
     /// Every record in row order — the array-of-structs view of the store.
@@ -157,3 +162,4 @@ impl<C: Clone> JetColumns<C> {
         columns
     }
 }
+

@@ -8,19 +8,17 @@ write permissions, and the disposition marker live in
 `.agents/skills/_shared/audit-dispositions.md`; load both where the method
 requires them.
 
-The owner should never have to ask for anything on this page. A request for
-"lessons", "a report", or "an audit" already includes all of it.
+## Scope and depth
 
-## Why this exists
+Use [Jet's priorities](../../../docs/spec/philosophy.md) to judge the requested subject. The task defines the domain, sources, workloads, and output; include dependencies needed to understand that subject, not every conceivable adjacent topic.
 
-Jet's goal is to be the last programming language and the best one: the language
-any agent would choose for any task in any situation. Analyze against that goal,
-not against a summary of whatever you were handed.
+An explicit full audit covers its entire declared corpus and required categories. A focused question stays focused. State the coverage boundary and account for unavailable evidence; do not silently sample away requested work. Record unrelated opportunities without automatically pursuing them.
+
+Apply the relevant sections below. Competitive questions belong to comparative work; the micro sweep belongs to language/API/UX analysis; live probes establish executable behavior. A skill or document audit does not require unrelated compiler runs. `spec-compliance-audit`, `isomorphic-ontology-audit`, and `type-unification-audit` use the probe and honesty sections, not the competitive frame.
 
 ## The four questions
 
-Answer all four in every report, whatever the subject is. When a question does
-not apply, say so in one line — do not drop it silently.
+For comparative work, answer these questions where the subject supplies evidence. Mark a required but inapplicable question with a short reason. Do not manufacture a comparison, advantage, or loss to fill a section.
 
 1. **How do we beat this on a level playing field?** Assume equal maturity,
    ecosystem, longevity, and hiring pool. Compete only on technical merit. Name
@@ -49,22 +47,11 @@ The frame for question 3, and the source of most micro findings.
 | d | **Context economy** | Tokens per unit of progress | source verbosity **and** diagnostic verbosity |
 | e | **Repair determinism** | How many valid fixes one error admits | one-mechanism design (I8) |
 
-Two consequences worth re-deriving rather than assuming:
-
-- The agent loop is a **closed loop with a machine oracle**, not "a strict type
-  system". Judge every language, Jet included, on whether the loop terminates:
-  emit → edit → re-run → count drops → zero.
-- The training-data problem is a consequence of (a)–(e), not of corpus size. A
-  language nobody trained on still works if the compiler teaches per edit,
-  in-loop. Treat Jet's unfamiliarity as a design target, never as a fixed tax.
+For agent-development claims, examine the whole feedback loop: emit, check, repair, and check again. Measure whether the compiler teaches an unfamiliar construct through useful diagnostics; do not infer agent success or failure from training-corpus size alone.
 
 ## The micro sweep
 
-Micro findings are not the small half of the work. They are where Jet actually
-wins or loses. Sweep every category below each run, not only the ones the
-subject dwells on. An empty category is a valid result; skipping one is not.
-Each item gets its own row and its own cross-check — never folded into a macro
-theme, never dropped for looking too small.
+Within the declared language/API/UX scope, account for each applicable category below, including clean categories and reasoned not-applicable results. Each concrete finding retains its own evidence; do not hide a small defect inside a macro theme. A full surface audit retains all ten category rows.
 
 - **Syntax** — a spelling that reads well or badly; noise, ceremony, sigils,
   nesting, punctuation that exists only to satisfy the compiler.
@@ -99,9 +86,7 @@ are all evidence that someone intended a thing. None is evidence that it works.
 The highest-value findings come from running Jet's version of the mechanism
 under study.
 
-- Build the smallest input that should exercise the surface, run the real
-  command through `scripts/agent/jet-env`, and read the actual output, exit
-  code, and emitted paths.
+- For a claim about current executable behavior, rebuild the relevant binary, construct the smallest representative input, and run the real command through `scripts/agent/jet-env`. Read its output, exit code, and emitted paths. Reuse evidence that already proves the same claim against the same source state; do not rerun unrelated checks.
 - Follow the code path from the emitter back to where the value is set. Fields
   that are documented, always empty, hardcoded, or derived by parsing prose are
   invisible to everyone who trusts the spec, and they are common.
@@ -112,9 +97,7 @@ under study.
 
 ## Honesty rules
 
-- **Name where Jet is behind.** A report with no "Jet loses here" section has
-  not looked hard enough. Losing on a competitor's strongest axis is the
-  finding, and it belongs at the top, not in a footnote.
+- **Report observed results.** Put evidenced losses and failures first. Zero losses is a valid result when required coverage and measurements are complete. Missing, invalid, or unavailable evidence cannot support a win; apply the strict performance gate when benchmarking.
 - **Mark shipped versus ratified-but-unbuilt** on every claimed advantage. Most
   beat-the-field vectors will be designed and unbuilt. "The design already wins;
   the risk is execution" is a legitimate verdict, but only when you checked.
@@ -131,7 +114,6 @@ under study.
 
 ## Reporting
 
-Follow the owner's format: visual-first, tables over prose, example-led, no hard
-wrapping, no stuffiness. Lead with the reframe when the popular reading of the
-subject is wrong. End with the strongest unverified assumption in the report
-when one exists — that line is worth more than another confirmed finding.
+Use the owner's requested format. Prefer worked examples and tables when they clarify findings; do not activate HTML merely because the result is a report. Preserve exact source links and technical terms. End with the strongest material unverified assumption when one remains.
+
+The evidence pass is complete when the declared scope and required categories are accounted for, claims have appropriate evidence or an explicit unknown, and findings have the requested recommendations. Publication and authorized board actions follow [audit-dispositions.md](audit-dispositions.md); completing a report never implies implementing its recommendations.

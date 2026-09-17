@@ -126,6 +126,10 @@ pub fn jet_std_math_atanh(value: f64) -> f64 {
 pub fn jet_std_math_cbrt(value: f64) -> f64 {
     value.cbrt()
 }
+pub fn jet_std_math_exp(value: f64) -> f64 {
+    value.exp()
+}
+
 
 pub fn jet_std_math_exp2(value: f64) -> f64 {
     value.exp2()
@@ -155,6 +159,18 @@ pub fn jet_std_math_fma(a: f64, b: f64, c: f64) -> f64 {
     a.mul_add(b, c)
 }
 
+pub fn jet_std_math_lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+pub fn jet_std_math_degrees(value: f64) -> f64 {
+    value.to_degrees()
+}
+
+pub fn jet_std_math_radians(value: f64) -> f64 {
+    value.to_radians()
+}
+
 pub fn jet_std_math_is_even(value: i64) -> bool {
     value % 2 == 0
 }
@@ -165,6 +181,13 @@ pub fn jet_std_math_is_odd(value: i64) -> bool {
 
 pub fn jet_std_math_checked_abs(value: i64) -> Option<i64> {
     value.checked_abs()
+}
+pub fn jet_std_math_checked_add(left: i64, right: i64) -> Option<i64> {
+    left.checked_add(right)
+}
+
+pub fn jet_std_math_saturating_add(left: i64, right: i64) -> i64 {
+    left.saturating_add(right)
 }
 
 pub fn jet_std_math_checked_neg(value: i64) -> Option<i64> {
@@ -181,6 +204,80 @@ pub fn jet_std_math_checked_rem(left: i64, right: i64) -> Option<i64> {
 
 pub fn jet_std_math_is_normal(value: f64) -> bool {
     value.is_normal()
+}
+pub fn jet_std_math_is_subnormal(value: f64) -> bool {
+    value.is_subnormal()
+}
+
+pub fn jet_std_math_is_canonical(value: f64) -> bool {
+    value.is_finite() || value.is_nan()
+}
+
+pub fn jet_std_math_is_signed(value: f64) -> bool {
+    value.is_sign_negative()
+}
+
+pub fn jet_std_math_is_zero(value: f64) -> bool {
+    value == 0.0
+}
+
+pub fn jet_std_math_is_integer(value: f64) -> bool {
+    value.is_finite() && value.fract() == 0.0
+}
+
+pub fn jet_std_math_sign_bit(value: f64) -> bool {
+    value.is_sign_negative()
+}
+pub fn jet_std_math_next_up(value: f64) -> f64 {
+    value.next_up()
+}
+
+pub fn jet_std_math_next_down(value: f64) -> f64 {
+    value.next_down()
+}
+
+pub fn jet_std_math_radix(_value: f64) -> i64 {
+    2
+}
+
+pub fn jet_std_math_zero() -> f64 {
+    0.0
+}
+
+pub fn jet_std_math_copy(value: f64) -> f64 {
+    value
+}
+pub fn jet_std_math_cot(value: f64) -> f64 {
+    1.0 / value.tan()
+}
+
+pub fn jet_std_math_inv(value: f64) -> f64 {
+    1.0 / value
+}
+pub fn jet_std_math_sin_cos(value: f64) -> (f64, f64) {
+    value.sin_cos()
+}
+
+pub fn jet_std_math_modf(value: f64) -> (f64, f64) {
+    (value.fract(), value.trunc())
+}
+
+pub fn jet_std_math_frexp(value: f64) -> (f64, i64) {
+    let exponent = jet_std_math_ilogb(value).unwrap_or(0);
+    let fraction = if value == 0.0 || !value.is_finite() {
+        value
+    } else {
+        jet_std_math_ldexp(value, -exponent)
+    };
+    (fraction, exponent)
+}
+
+pub fn jet_std_math_div_mod(left: i64, right: i64) -> (i64, i64) {
+    (left.div_euclid(right), left.rem_euclid(right))
+}
+
+pub fn jet_std_math_div_rem(left: i64, right: i64) -> (i64, i64) {
+    (left / right, left % right)
 }
 
 /// IEEE-754 bit conversions share this Prelude symbol across AOT, resident

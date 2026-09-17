@@ -163,7 +163,7 @@ impl<'a> Checker<'a> {
     fn pop_loop_value_frame(&mut self) {
         if let Some(frame) = self.loop_value_frames.pop() {
             if frame.kind == LoopValueKind::Result {
-                self.last_loop_result_type = frame.ty;
+                self.last_loop_result_type = frame.ty.map(|ty| ty.erased_carrier());
             }
         }
     }

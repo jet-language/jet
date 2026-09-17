@@ -184,10 +184,11 @@ shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     print(scores[0].points)
 }
 ";
-    let (code, stdout) = build_and_run("tir_generic_trait_object", src);
-    assert_eq!(code, 0);
-    // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
-    assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
+    assert_release_tiers_agree(
+        "tir_generic_trait_object",
+        src,
+        "circle: 3.14159\nsquare: 4.0\n5\n10\n",
+    );
 }
 
 /// A trait-object List.each lends each item to a callback. Its callback's
@@ -318,6 +319,33 @@ fn run() {
     let (code, stdout) = build_and_run("tir_borrowed_parameter_field_copy", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n2\n3\n");
+}
+
+/// D-MEM1: an owned destination receives an independent copy of a read list;
+/// mutating the source afterward must not alter that destination.
+#[test]
+fn borrowed_parameter_field_assignment_preserves_alias_isolation() {
+    let src = "\
+struct Ledger {
+    rows: [Int]
+    fn put_back(&self, s: [Int]) {
+        self.rows = s
+    }
+}
+fn run() {
+    data := [Int]{ 1, 2, 3 }
+    ledger := Ledger{ rows: [] }
+    ledger.put_back(data)
+    data[0] = 9
+    print(ledger.rows[0])
+    print(data[0])
+}
+";
+    assert_tiers_agree(
+        "tir_borrowed_parameter_field_alias_isolation",
+        src,
+        "1\n9\n",
+    );
 }
 
 /// D-MEM-COPYSEM1: extracting an owned optional payload from a read parameter

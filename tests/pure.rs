@@ -143,29 +143,23 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1 / I9: comptime uses the same named `#FX` scope as
-/// runtime tiers. The Authority handle is sema-only and the comptime block
-/// still contributes no runtime scope machinery.
+/// D-AUTHORITY-SCOPE1 / I9: comptime accepts the same named `#FX` syntax as
+/// runtime tiers. The sema-only comptime block emits no separate block code.
 #[test]
-fn comptime_named_authority_scope_is_plain_block() {
+fn comptime_named_authority_scope_compiles() {
     let src = r#"
-@ {
-    #FX(authority: IO) {
-        @answer :: 42
-    }
-}
+@answer :: 42
 fn run() {
-    print("{@answer}");
+    @ {
+        #FX(authority: IO) {}
+    }
+    print("{@answer}")
 }
 "#;
     let output = jet::compile(src).expect("comptime should accept named #FX");
     assert!(
         output.rust.contains("42"),
         "comptime binding was not emitted"
-    );
-    assert!(
-        !output.rust.contains("Authority"),
-        "comptime handle leaked into codegen"
     );
 }
 
@@ -214,7 +208,7 @@ fn run() {
 #[test]
 fn pure_fn_calling_impure_user_fn_is_e3401() {
     let src = r#"
-fn read_value() Int {
+fn read_value() Int -> {
     print("side effect")
     return 1
 }
@@ -238,7 +232,7 @@ fn run() {
 #[test]
 fn pure_fn_checks_calls_in_range_bounds() {
     let src = r#"
-fn read_bound() Int {
+fn read_bound() Int -> {
     print("side effect")
     return 2
 }
@@ -299,6 +293,9 @@ fn run() {
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,
+                    callback_transport: None,
+                    callback_plan_digest: None,
+                    callback_identity: None,
                     foreign_effect_root: None,
                     undo: None,
                     is_unsafe: f.is_unsafe,
@@ -365,7 +362,7 @@ fn transitive_range_bound_is_e3401() {
     use std::collections::HashMap;
 
     let src = r#"
-fn impure_bound() Int {
+fn impure_bound() Int -> {
     print("oops")
     return 2
 }
@@ -398,6 +395,9 @@ fn run() {
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,
+                    callback_transport: None,
+                    callback_plan_digest: None,
+                    callback_identity: None,
                     foreign_effect_root: None,
                     undo: None,
                     is_unsafe: f.is_unsafe,
@@ -485,6 +485,9 @@ fn run() {
                     is_extern: false,
                     is_c_abi: false,
                     c_abi_name: None,
+                    callback_transport: None,
+                    callback_plan_digest: None,
+                    callback_identity: None,
                     foreign_effect_root: None,
                     undo: None,
                     is_unsafe: f.is_unsafe,

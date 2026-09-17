@@ -16,11 +16,11 @@ fn jet_args_decode<T: __jet_Decode>(
     let fields = jet_args_shape_tree_values(spec, &parsed, names).map_err(|errors| {
         errors
             .into_iter()
-            .map(|error| {
+            .flat_map(|error| {
                 if error.path.is_empty() {
-                    jet_std::FieldError::one(error.reason)
+                    jet_std::FieldError::one(error.reason).into_iter()
                 } else {
-                    jet_std::FieldError::at(error.path, error.reason)
+                    jet_std::FieldError::at(error.path, error.reason).into_iter()
                 }
             })
             .collect::<Vec<_>>()
@@ -70,11 +70,11 @@ fn jet_config_merge<T: __jet_Encode + __jet_Decode>(
         .map_err(|errors| {
             errors
                 .into_iter()
-                .map(|error| {
+                .flat_map(|error| {
                     if error.path.is_empty() {
-                        jet_std::FieldError::one(error.reason)
+                        jet_std::FieldError::one(error.reason).into_iter()
                     } else {
-                        jet_std::FieldError::at(error.path, error.reason)
+                        jet_std::FieldError::at(error.path, error.reason).into_iter()
                     }
                 })
                 .collect::<Vec<_>>()
@@ -237,7 +237,12 @@ fn jet_args_guided_tui_prompt(
         error: error.map(str::to_string),
         done: false,
     };
-    let mut program = JetTuiProgram::new(model, jet_guided_tui_update, jet_guided_tui_view);
+    let update: fn(
+        JetGuidedTuiModel,
+        JetGuidedTuiMessage,
+    ) -> (JetGuidedTuiModel, JetTuiCommand<JetGuidedTuiMessage>) = jet_guided_tui_update;
+    let view: fn(&JetGuidedTuiModel) -> JetUiNode = jet_guided_tui_view;
+    let mut program = JetTuiProgram::new(model, update, view);
     program.set_constraint(jet_ui_constraint(
         0.0,
         0.0,
@@ -258,7 +263,7 @@ fn jet_args_guided_tui_prompt(
         | JetTuiEvent::Focus { .. } => None,
     });
     program.redraw();
-    jet_args_guided_tui_frame(&program)?;
+    jet_guided_tui_frame(&program)?;
     jet_term_enter();
     let _resize = program.dispatch_event(JetTuiEvent::resize(
         width as f64,
@@ -274,7 +279,7 @@ fn jet_args_guided_tui_prompt(
         let event = JetTuiEvent::key_with_modifiers(&key.code(), key.modifier_bits());
         program.dispatch_event(event);
         program.step();
-        if let Err(error) = jet_args_guided_tui_frame(&program) {
+        if let Err(error) = jet_guided_tui_frame(&program) {
             jet_term_leave();
             return Err(error);
         }
@@ -315,7 +320,7 @@ fn jet_args_guided_line_prompt(
     prompt.push(' ');
     jet_term_write_stderr(&prompt, true)
         .map_err(|output_error| format!("guided prompt output failed: {output_error}"))?;
-    match jet_term_read_stdin_line() {
+    match jet_term_read_stdin_line().map_err(|error| error.to_string())? {
         JetTermRead::Line(value) => Ok(value),
         JetTermRead::EndOfInput => {
             Err("guided input ended before the form was submitted".to_string())

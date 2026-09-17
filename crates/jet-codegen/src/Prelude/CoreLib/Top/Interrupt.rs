@@ -113,113 +113,130 @@ fn jet_interrupt_signal_bit(signal: i32) -> usize {
     }
 }
 
-/// The platform callback. It does no allocation, no locking, and no user work:
-/// one relaxed atomic update per applicable signal is the whole async-signal-
-/// safe body.
-#[cfg(unix)]
-extern "C" fn jet_interrupt_mark(signal: i32) {
-    let state = &*JET_INTERRUPT_STATE;
-    if signal == 2 {
-        state
-            .pending_interrupts
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-    let bit = jet_interrupt_signal_bit(signal);
-    if bit != 0 {
-        state
-            .pending_process_signals
-            .fetch_or(bit, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-#[cfg(windows)]
-unsafe extern "system" fn jet_interrupt_mark(kind: u32) -> i32 {
-    const CTRL_C_EVENT: u32 = 0;
-    if kind == CTRL_C_EVENT {
-        let state = &*JET_INTERRUPT_STATE;
-        state
-            .pending_interrupts
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        state
-            .pending_process_signals
-            .fetch_or(JET_SIGNAL_INT, std::sync::atomic::Ordering::Relaxed);
-        1
-    } else {
-        0
-    }
-}
-
-#[cfg(unix)]
-fn jet_interrupt_arm_mask(mask: usize) -> Result<(), String> {
-    if mask & !JET_SIGNAL_ALL != 0 {
-        return Err("invalid process signal".to_string());
-    }
-    extern "C" {
-        fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-    }
-    let state = &*JET_INTERRUPT_STATE;
-    let _lock = state
-        .install_lock
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let mut installed = state
-        .installed
-        .load(std::sync::atomic::Ordering::Acquire);
-    for (bit, number, name) in [
-        (JET_SIGNAL_INT, 2, "SIGINT"),
-        (JET_SIGNAL_HUP, 1, "SIGHUP"),
-        (JET_SIGNAL_TERM, 15, "SIGTERM"),
-    ] {
-        if mask & bit == 0 || installed & bit != 0 {
-            continue;
+/// The platform callback and installation path are kept behind one audited
+/// internal module. Its public-to-the-runtime surface is safe: callers can
+/// only request the checked arm operation, never pass a raw handler or FFI
+/// value through generated application code.
+//
+// JET_VETTED_UNSAFE_BEGIN: jet_os_interrupt_ffi
+#[cfg(any(unix, windows))]
+mod jet_os_interrupt_ffi {
+    #[cfg(unix)]
+    extern "C" fn jet_interrupt_mark(signal: i32) {
+        let state = &*super::JET_INTERRUPT_STATE;
+        if signal == 2 {
+            state
+                .pending_interrupts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-        let previous = unsafe { signal(number, jet_interrupt_mark) };
-        if previous == usize::MAX {
-            return Err(format!("could not install the {name} handler"));
+        let bit = super::jet_interrupt_signal_bit(signal);
+        if bit != 0 {
+            state
+                .pending_process_signals
+                .fetch_or(bit, std::sync::atomic::Ordering::Relaxed);
         }
-        installed |= bit;
+    }
+
+    #[cfg(windows)]
+    unsafe extern "system" fn jet_interrupt_mark(kind: u32) -> i32 {
+        const CTRL_C_EVENT: u32 = 0;
+        if kind == CTRL_C_EVENT {
+            let state = &*super::JET_INTERRUPT_STATE;
+            state
+                .pending_interrupts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            state
+                .pending_process_signals
+                .fetch_or(super::JET_SIGNAL_INT, std::sync::atomic::Ordering::Relaxed);
+            1
+        } else {
+            0
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn arm_mask(mask: usize) -> Result<(), String> {
+        if mask & !super::JET_SIGNAL_ALL != 0 {
+            return Err("invalid process signal".to_string());
+        }
+        extern "C" {
+            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+        }
+        let state = &*super::JET_INTERRUPT_STATE;
+        let _lock = state
+            .install_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let mut installed = state
+            .installed
+            .load(std::sync::atomic::Ordering::Acquire);
+        for (bit, number, name) in [
+            (super::JET_SIGNAL_INT, 2, "SIGINT"),
+            (super::JET_SIGNAL_HUP, 1, "SIGHUP"),
+            (super::JET_SIGNAL_TERM, 15, "SIGTERM"),
+        ] {
+            if mask & bit == 0 || installed & bit != 0 {
+                continue;
+            }
+            let previous = unsafe { signal(number, jet_interrupt_mark) };
+            if previous == usize::MAX {
+                return Err(format!("could not install the {name} handler"));
+            }
+            installed |= bit;
+            state
+                .installed
+                .store(installed, std::sync::atomic::Ordering::Release);
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub(super) fn arm_mask(mask: usize) -> Result<(), String> {
+        if mask & !(super::JET_SIGNAL_INT) != 0 {
+            return Err(super::jet_interrupt_unavailable_error().to_string());
+        }
+        extern "system" {
+            fn SetConsoleCtrlHandler(
+                handler: Option<unsafe extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+        let state = &*super::JET_INTERRUPT_STATE;
+        let _lock = state
+            .install_lock
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if state
+            .installed
+            .load(std::sync::atomic::Ordering::Acquire)
+            & super::JET_SIGNAL_INT
+            != 0
+        {
+            return Ok(());
+        }
+        // A parent may have disabled Ctrl-C with the documented NULL handler;
+        // clear that inherited process flag before installing Jet's handler.
+        unsafe { SetConsoleCtrlHandler(None, 0) };
+        let installed = unsafe { SetConsoleCtrlHandler(Some(jet_interrupt_mark), 1) };
+        if installed == 0 {
+            return Err("could not install the Windows console Ctrl-C handler".to_string());
+        }
         state
             .installed
-            .store(installed, std::sync::atomic::Ordering::Release);
+            .store(super::JET_SIGNAL_INT, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
-    Ok(())
+}
+// JET_VETTED_UNSAFE_END: jet_os_interrupt_ffi
+
+#[cfg(unix)]
+fn jet_interrupt_arm_mask(mask: usize) -> Result<(), String> {
+    jet_os_interrupt_ffi::arm_mask(mask)
 }
 
 #[cfg(windows)]
 fn jet_interrupt_arm_mask(mask: usize) -> Result<(), String> {
-    if mask & !(JET_SIGNAL_INT) != 0 {
-        return Err(jet_interrupt_unavailable_error().to_string());
-    }
-    extern "system" {
-        fn SetConsoleCtrlHandler(
-            handler: Option<unsafe extern "system" fn(u32) -> i32>,
-            add: i32,
-        ) -> i32;
-    }
-    let state = &*JET_INTERRUPT_STATE;
-    let _lock = state
-        .install_lock
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if state
-        .installed
-        .load(std::sync::atomic::Ordering::Acquire)
-        & JET_SIGNAL_INT
-        != 0
-    {
-        return Ok(());
-    }
-    // A parent may have disabled Ctrl-C with the documented NULL handler;
-    // clear that inherited process flag before installing Jet's handler.
-    unsafe { SetConsoleCtrlHandler(None, 0) };
-    let installed = unsafe { SetConsoleCtrlHandler(Some(jet_interrupt_mark), 1) };
-    if installed == 0 {
-        return Err("could not install the Windows console Ctrl-C handler".to_string());
-    }
-    state
-        .installed
-        .store(JET_SIGNAL_INT, std::sync::atomic::Ordering::Release);
-    Ok(())
+    jet_os_interrupt_ffi::arm_mask(mask)
 }
 
 #[cfg(not(any(unix, windows)))]

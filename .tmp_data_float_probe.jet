@@ -1,0 +1,11 @@
+use core.data as data
+#Codable
+struct Ticket { team: String minutes: Float }
+fn run() {
+ raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+ rows :: data.csv<Ticket>(raw) ?? panic("csv")
+ values :: rows.map(t -> t.minutes)
+ print("values: {values.len()}")
+ print(values[0])
+ print(values[1])
+}

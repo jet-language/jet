@@ -494,6 +494,87 @@ impl<'a> Checker<'a> {
         true
     }
 
+    /// Reconstruct the selected method's raw-protocol provenance from the
+    /// declaration that populated the ordinary method registry. `MethodSig`
+    /// intentionally keeps only callable shape, so this lookup preserves the
+    /// existing body-check policy without duplicating its trait vocabulary.
+    pub(crate) fn raw_protocol_return_for_method(&self, type_name: &str, method: &str) -> bool {
+        fn selected_method_raw(
+            items: &[crate::AST::Item],
+            type_name: &str,
+            method: &str,
+        ) -> Option<bool> {
+            for item in items {
+                match item {
+                    crate::AST::Item::Struct(definition) if definition.name == type_name => {
+                        if definition.methods.iter().any(|function| function.name == method) {
+                            return Some(false);
+                        }
+                        for block in &definition.trait_impls {
+                            if let Some(function) =
+                                block.methods.iter().find(|function| function.name == method)
+                            {
+                                return Some(crate::Sema::uses_raw_protocol_function_return(
+                                    Some(&block.trait_name),
+                                    block.compiler_generated,
+                                    function,
+                                ));
+                            }
+                        }
+                    }
+                    crate::AST::Item::Enum(definition) if definition.name == type_name => {
+                        if definition.methods.iter().any(|function| function.name == method) {
+                            return Some(false);
+                        }
+                        for block in &definition.trait_impls {
+                            if let Some(function) =
+                                block.methods.iter().find(|function| function.name == method)
+                            {
+                                return Some(crate::Sema::uses_raw_protocol_function_return(
+                                    Some(&block.trait_name),
+                                    block.compiler_generated,
+                                    function,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for item in items {
+                if let crate::AST::Item::Impl(implementation) = item {
+                    if implementation.type_name != type_name {
+                        continue;
+                    }
+                    if let Some(function) =
+                        implementation.methods.iter().find(|function| function.name == method)
+                    {
+                        return Some(crate::Sema::uses_raw_protocol_function_return(
+                            implementation.trait_name.as_deref(),
+                            false,
+                            function,
+                        ));
+                    }
+                }
+            }
+            None
+        }
+
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return false;
+        };
+        let Some(items) = (if owner == self.module_idx {
+            Some(self.items)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .map(|module| module.items.as_slice())
+        }) else {
+            return false;
+        };
+        selected_method_raw(items, leaf, method).unwrap_or(false)
+    }
     pub(crate) fn check_static_method(
         &mut self,
         type_name: &str,
@@ -930,7 +1011,8 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        self.check_method_args(
+        let raw_protocol_return = self.raw_protocol_return_for_method(type_name, method);
+        let checked = self.check_method_args(
             dispatch_type_name,
             method,
             &msig,
@@ -939,7 +1021,12 @@ impl<'a> Checker<'a> {
             span,
             pre_inferred_method.as_deref().or(pre_inferred.as_deref()),
             Some(call_access),
-        )
+        );
+        if raw_protocol_return && msig.return_type.is_some() {
+            msig.return_type.clone()
+        } else {
+            checked
+        }
     }
 
     /// D-GENERIC-CALL1=A: resolve method-owned call arguments after the receiver
@@ -2594,7 +2681,7 @@ impl<'a> Checker<'a> {
             let saved_esc = self.lambda_escapes;
             if let Some((_, _, fty)) = field_def {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-                let expected = if is_patch_lit {
+                let expected = if is_patch_lit && !self.compiler_generated {
                     inst.unwrap_option().cloned()
                 } else {
                     atomic_field_inner(&inst).cloned().or_else(|| Some(inst.clone()))
@@ -2664,7 +2751,7 @@ impl<'a> Checker<'a> {
                     if string_view_field && et == Type::String && !string_view_compatible {
                         // #1164: an owned String cannot fill a declared View<str> field.
                         self.report_owned_string_as_view_str(expr.span());
-                    } else if is_patch_lit {
+                    } else if is_patch_lit && !self.compiler_generated {
                         if let Some(inner) = inst.unwrap_option() {
                             let expected = atomic_field_inner(inner).unwrap_or(inner);
                             self.check_struct_field_assignable(

@@ -198,10 +198,6 @@ pub(crate) fn lower_fn_value_call(
             };
         }
     }
-    // Sema exposes the executable function-value signature at this boundary,
-    // even when the local binding keeps the source-facing return spelling.
-    // Keep both views: the raw view drives the actual call, while the
-    // effective view supplies the canonical carrier at this boundary.
     let effective_callee_ty = match &callee_t.ty {
         Type::Fn { .. } => callee_t.ty.with_effective_fn_returns(),
         _ => callee_t.ty.clone(),
@@ -218,16 +214,16 @@ pub(crate) fn lower_fn_value_call(
                     ..
                 },
             ) => {
-                let source_ret_ty = (**source_ret).clone();
-                let effective_ret_ty = (**effective_ret).clone();
+                let source_ret = (**source_ret).clone();
+                let effective_ret = (**effective_ret).clone();
                 let source_is_carrier =
-                    matches!(&source_ret_ty, Type::Result { .. } | Type::Option(_))
+                    matches!(&source_ret, Type::Result { .. } | Type::Option(_))
                         || matches!(
-                            &source_ret_ty,
+                            &source_ret,
                             Type::Named(name) if name == Syntax::TYPE_NEVER
                         );
-                let needs_carrier = !source_is_carrier && source_ret_ty != effective_ret_ty;
-                (source_ret_ty, effective_ret_ty, needs_carrier)
+                let needs_carrier = !source_is_carrier && source_ret != effective_ret;
+                (source_ret, effective_ret, needs_carrier)
             }
             _ => (unit_type(), unit_type(), false),
         };
@@ -287,17 +283,11 @@ pub(crate) fn lower_fn_value_call(
             },
         },
     };
-    // D-APILABEL1=A: a function type may declare a call contract, so a call
-    // through the value can reorder just like a named one. Apply the ordering
-    // to the raw call before adding the carrier adapter.
     let call = match source_arg_order(args) {
         Some(order) => preserve_source_arg_order(call, &order, args.len(), site),
         None => call,
     };
     if needs_carrier {
-        // A raw local/transformed callable returns its source value. Marshal it
-        // into the one effective Result carrier; an enclosing Try/?? consumes
-        // this adapter exactly once.
         TExpr {
             ty: effective_ret_ty,
             kind: TExprKind::Ok(Box::new(call)),
@@ -541,10 +531,22 @@ fn fallback_checked_method_return(
         }
         None => false,
     };
+    if recv_type
+        .and_then(|name| name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX))
+        == Some("core.term")
+        && method == Syntax::BUILTIN_PRINT
+    {
+        return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+    }
     if is_root {
         if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
             return Some(cx.expand_type_aliases(ret));
         }
+    }
+    if recv_type == Some(Syntax::TXN_HANDLE_TYPE)
+        && matches!(method, Syntax::TXN_ON_COMMIT | Syntax::TXN_ON_ROLLBACK)
+    {
+        return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     }
     if method == Syntax::MEM_ALLOC_NEW || method == "new" {
         let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
@@ -738,11 +740,20 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // source-visible success type. Inline code modules register their
         // callable return in `fn_types` as the effective `Result`/`Option`
         // ABI, while sema records the source type on `resolved_ret`. Keep
-        // that source type on the TIR node so field/pattern/print lowering
-        // consumes the payload; `ModuleCall.target_return` remains the ABI
-        // carrier used by the MIR adapter.
+        // the carrier for inline modules: generic module instances lift
+        // nominal return types to their generated identity, and restoring
+        // the defining module's bare source leaf reintroduces ambiguity.
         if let Some(resolved_ret) = resolved_ret.as_ref() {
-            if matches!(&lowered.kind, TExprKind::ModuleCall { .. }) {
+            let preserve_inline_carrier = matches!(
+                &lowered.kind,
+                TExprKind::ModuleCall {
+                    form: TModuleCallForm::InlineMangled { .. },
+                    ..
+                }
+            );
+            if matches!(&lowered.kind, TExprKind::ModuleCall { .. })
+                && !preserve_inline_carrier
+            {
                 lowered.ty = resolved_ret.clone();
             }
         }
@@ -845,6 +856,76 @@ fn lower_list_lit(elems: &[Expr], cx: &Cx, env: &mut LowerEnv) -> TExpr {
     }
 }
 
+/// D-PATCH2: a compiler-generated `T.Patch` field may already be an optional
+/// carrier, but lowering an `if` value has no field expectation to type a bare
+/// `None`. Reconcile that carrier at the Patch boundary so every branch and
+/// its phi use the declared `Option<T>` exactly once. This is deliberately
+/// structural: it preserves lowered bodies and ownership facts, retagging only
+/// the sema-proven carrier shape or adding the one missing `Present`.
+fn fit_patch_field_value(value: TExpr, expected: &Type) -> TExpr {
+    match value {
+        TExpr {
+            kind:
+                TExprKind::IfExpr {
+                    cond,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                },
+            ..
+        } => TExpr {
+            ty: expected.clone(),
+            kind: TExprKind::IfExpr {
+                cond,
+                then_body,
+                then_value: Box::new(fit_patch_field_value(*then_value, expected)),
+                else_body,
+                else_value: Box::new(fit_patch_field_value(*else_value, expected)),
+            },
+        },
+        TExpr {
+            kind: TExprKind::Absent,
+            ..
+        } if matches!(expected, Type::Option(_)) => TExpr {
+            ty: expected.clone(),
+            kind: TExprKind::Absent,
+        },
+        TExpr {
+            kind: TExprKind::Present(payload),
+            ..
+        } => match expected {
+            Type::Option(inner) => TExpr {
+                ty: expected.clone(),
+                kind: TExprKind::Present(Box::new(fit_patch_field_value(*payload, inner))),
+            },
+            _ => TExpr {
+                ty: Type::Option(Box::new(payload.ty.clone())),
+                kind: TExprKind::Present(payload),
+            },
+        },
+        value => {
+            if value.ty == *expected {
+                return value;
+            }
+            let Type::Option(inner) = expected else {
+                return value;
+            };
+            if matches!(&value.ty, Type::Option(_)) {
+                return value;
+            }
+            TExpr {
+                ty: expected.clone(),
+                kind: TExprKind::Present(Box::new(fit_patch_field_value(value, inner))),
+            }
+        }
+    }
+}
+
+/// Lower a `??` expression. Its fallback value is itself a potentially
+/// fallible expression, so it must be lowered under the carrier-specific
+/// environment before being joined with the subject.
+///
 pub(super) fn lower_or_fallback(
     value: &Expr,
     fallback: &OrFallback,
@@ -3169,6 +3250,7 @@ fn lower_boundary_typed_lit(
     };
     let mut literals = Vec::new();
     let mut holes = Vec::new();
+    let mut trusted_html = Vec::new();
     for part in parts {
         match part {
             StrPart::Lit(text) => literals.push(text.clone()),
@@ -3176,7 +3258,15 @@ fn lower_boundary_typed_lit(
                 if literals.len() == holes.len() {
                     literals.push(String::new());
                 }
-                holes.push(lower_expr(expr, cx, env));
+                let hole = lower_expr(expr, cx, env);
+                trusted_html.push(
+                    type_name == Syntax::TYPE_HTML
+                        && matches!(
+                            &hole.ty,
+                            Type::Named(name) if name == Syntax::TYPE_HTML
+                        ),
+                );
+                holes.push(hole);
             }
         }
     }
@@ -3191,6 +3281,7 @@ fn lower_boundary_typed_lit(
             kind,
             literals,
             holes,
+            trusted_html,
         })),
     })
 }
@@ -3227,7 +3318,13 @@ fn lower_unit_text(value: TExpr, style: crate::AST::UnitFormat, cx: &Cx) -> TExp
     } else {
         value
     };
-    let mut parts = vec![TStrPart::Interp(raw, crate::AST::StrFormat::Display)];
+    // Keep the raw magnitude on the dedicated quantity formatter route. The
+    // Unit selector is an internal TIR marker here; user Unit selectors are
+    // already lowered to this checked String-producing function.
+    let mut parts = vec![TStrPart::Interp(
+        raw,
+        crate::AST::StrFormat::Unit(crate::AST::UnitFormat::Bare),
+    )];
     if style != crate::AST::UnitFormat::Bare {
         let label = cx
             .unit_label(&original_ty)
@@ -3342,14 +3439,13 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx)
 }
 
-/// Preserve the checked Printable value for the shared Print operation.
-///
-/// Only an explicit Display capability is converted to text here.  Printable
-/// aggregates and scalar values remain typed so each backend can invoke the
-/// canonical JetShow implementation instead of silently selecting Display.
+/// Preserve typed Printable values for the shared Print operation, except for
+/// unit-bearing values whose canonical metadata renderer must run before the
+/// backend sees the erased numeric carrier.
 fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
+    let printable_unit = value.ty.quantity_parts().is_some() || cx.unit_label(&value.ty).is_some();
     let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name));
-    if explicit_display {
+    if printable_unit || explicit_display {
         lower_display_value(value, cx)
     } else {
         value
@@ -3362,10 +3458,18 @@ fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
 /// argument.  Keeping one Print node per argument preserves both contracts
 /// without forcing a Printable-only value through Display.
 pub(crate) fn print_values(values: impl IntoIterator<Item = TExpr>, cx: &Cx, site: usize) -> TExpr {
-    let values: Vec<TExpr> = values
+    let mut values: Vec<TExpr> = values
         .into_iter()
         .map(|value| lower_print_value(value, cx))
         .collect();
+    if values.len() == 1 {
+        return TExpr {
+            ty: unit_type(),
+            kind: TExprKind::Print(Box::new(
+                values.pop().expect("one-value print fast path has one value"),
+            )),
+        };
+    }
     let mut stmts = Vec::with_capacity(values.len() * 2);
     let mut locals = Vec::with_capacity(values.len());
     for (index, value) in values.into_iter().enumerate() {
@@ -5075,8 +5179,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             cx.sigs.contains_key(&wrapper).then_some((wrapper, policy))
                         });
                     if let Some((wrapper, policy)) = user_policy {
-                        let callee =
-                            lower_expr(&call.args.last().expect("checked above").expr, cx, env);
+                        let callee_expr = &call.args.last().expect("checked above").expr;
+                        let callee = lower_expr(callee_expr, cx, env);
                         let policy_sig = cx
                             .sigs
                             .get(&wrapper)
@@ -5105,6 +5209,32 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     .unwrap_or(AccessConvention::Read)
                             })
                             .collect();
+                        let mut capture_names = HashSet::new();
+                        for argument in &policy.args {
+                            let (reads, calls) =
+                                crate::Sema::expr_free_reads_and_calls(&argument.expr);
+                            capture_names.extend(reads);
+                            capture_names.extend(calls);
+                        }
+                        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(callee_expr);
+                        capture_names.extend(reads);
+                        capture_names.extend(calls);
+                        let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
+                        capture_names.sort();
+                        let captures = capture_names
+                            .into_iter()
+                            .filter_map(|name| {
+                                env.locals.contains_key(&name).then(|| {
+                                    (
+                                        name.clone(),
+                                        env.local_of(&name).name,
+                                        env.ty_of(&name)
+                                            .expect("checked policy capture has a type")
+                                            .clone(),
+                                    )
+                                })
+                            })
+                            .collect();
                         let fn_type = callee.ty.clone();
                         return TExpr {
                             ty: fn_type.clone(),
@@ -5113,6 +5243,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     fn_type,
                                     policy_args,
                                     policy_conventions,
+                                    wrapper_name: Some(wrapper),
+                                    captures,
                                     callee: Box::new(callee),
                                 },
                             },
@@ -5218,6 +5350,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return in_own_frame(|| {
                         let mut literals: Vec<String> = Vec::new();
                         let mut holes: Vec<TExpr> = Vec::new();
+                        let mut trusted_html: Vec<bool> = Vec::new();
                         for (i, a) in call.args.iter().enumerate() {
                             if i % 2 == 0 {
                                 let lit = match &a.expr {
@@ -5230,10 +5363,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 literals.push(lit);
                             } else {
                                 let mut hole = lower_expr(&a.expr, cx, env);
-                                if a.flags.trusted_html {
+                                let trusted = a.flags.trusted_html;
+                                if trusted {
                                     debug_assert_eq!(kind, Syntax::TypedHeadKind::HTML);
                                     hole.ty = Type::Named(Syntax::TYPE_HTML.to_string());
                                 }
+                                trusted_html.push(trusted);
                                 holes.push(hole);
                             }
                         }
@@ -5253,6 +5388,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind,
                                     literals,
                                     holes,
+                                    trusted_html,
                                 },
                             )),
                         };
@@ -5957,7 +6093,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             ]),
                         }
                     } else {
-                        consume_plain_helper_route(call, lowered, cx, env)
+                        consume_plain_helper_route(
+                            call.resolved_ret.as_ref(),
+                            call.name_span,
+                            lowered,
+                            cx,
+                            env,
+                        )
                     }
                 })
             })
@@ -6341,11 +6483,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 .iter()
                                 .map(|(fname, fty)| {
                                     let te = if let Some(fe) = provided.get(fname.as_str()) {
-                                        let inner = lower_expr(fe, cx, env);
-                                        TExpr {
-                                            ty: fty.clone(),
-                                            kind: TExprKind::Present(Box::new(inner)),
-                                        }
+                                        fit_patch_field_value(lower_expr(fe, cx, env), fty)
                                     } else {
                                         TExpr {
                                             ty: fty.clone(),
@@ -6372,7 +6510,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // identity; an entry-module local keeps its source spelling.
                     // The `jet run` TIR path lowers before the AOT context registers
                     // local structs, so an absent map entry remains ordinary.
-                    let resolved_name = cx
+                    let mut resolved_name = cx
                         .local_type_identities
                         .get(type_name)
                         .cloned()
@@ -6384,6 +6522,36 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             }
                         })
                         .unwrap_or_else(|| type_name.clone());
+                    // Generic-module bodies can retain a source leaf whose
+                    // instantiated nominal has the same leaf in the entry
+                    // module. A checked direct return carries the canonical
+                    // instance identity; prefer it only for that ambiguous
+                    // leaf instead of asking MIR to guess.
+                    let context_name = env
+                        .ret_ty
+                        .as_ref()
+                        .and_then(|ty| match ty {
+                            Type::Named(name) => Some(name.as_str()),
+                            _ => None,
+                        })
+                        .or(env.self_owner.as_deref());
+                    if let Some(context_name) = context_name {
+                        let same_leaf =
+                            context_name.rsplit("::").next().unwrap_or(context_name) == type_name;
+                        let leaf_count = cx
+                            .struct_fields
+                            .keys()
+                            .filter(|name| {
+                                name.rsplit("::").next().unwrap_or(name) == type_name
+                            })
+                            .count();
+                        if same_leaf
+                            && leaf_count > 1
+                            && cx.struct_fields.contains_key(context_name)
+                        {
+                            resolved_name = context_name.to_string();
+                        }
+                    }
                     let resolved_ty = if type_args.is_empty() {
                         Type::Named(resolved_name.clone())
                     } else {
@@ -6503,10 +6671,34 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     Expr::Field(_, name, _) => name.chars().next().is_some_and(char::is_uppercase),
                     _ => false,
                 };
-                if compiler_fact_receiver
-                    && (Syntax::compiler_fact_member(member).is_some()
-                        || jet_foundation::Registry::fact_read(member).is_some())
-                {
+                let fact_member = Syntax::compiler_fact_member(member).is_some()
+                    || jet_foundation::Registry::fact_read(member).is_some();
+                // Fact projections can follow a reflected list index, for example
+                // `info.methods[0].@effects`. Recovering this carrier type here
+                // keeps the projection canonical instead of falling through to
+                // the integer sentinel used only for impossible field shapes.
+                let reflected_fact_receiver = crate::Codegen::TIR::declared_field_ty(
+                    receiver,
+                    cx,
+                    env,
+                )
+                .is_some_and(|ty| {
+                    matches!(
+                        ty.without_user_tags(),
+                        Type::Named(type_name)
+                            if matches!(
+                                type_name.as_str(),
+                                "TypeInfo"
+                                    | "FunctionInfo"
+                                    | "MethodInfo"
+                                    | "FieldInfo"
+                                    | "TypeParamInfo"
+                                    | "FactInfo"
+                                    | "FactValue"
+                            )
+                    )
+                });
+                if fact_member && (compiler_fact_receiver || reflected_fact_receiver) {
                     return in_own_frame(|| {
                         let recv = lower_expr(receiver, cx, env);
                         return TExpr {
@@ -6555,8 +6747,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         )
                     {
                         return in_own_frame(|| {
+                            let ty = match env.ret_ty.as_ref() {
+                                Some(Type::Apply { name, args }) if name == enum_name => {
+                                    Type::Apply {
+                                        name: name.clone(),
+                                        args: args.clone(),
+                                    }
+                                }
+                                _ => Type::Named(enum_name.clone()),
+                            };
                             return TExpr {
-                                ty: Type::Named(enum_name.clone()),
+                                ty,
                                 kind: TExprKind::EnumLit {
                                     enum_type: enum_name.clone(),
                                     variant: member.clone(),
@@ -6839,47 +7040,68 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 }
                 let recv = lower_expr(receiver, cx, env);
-                if member == "value" {
-                    if let Type::Apply { name, args } = recv.ty.clone() {
-                        if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
-                            return in_own_frame(|| {
-                                return TExpr {
-                                    ty: args[0].clone(),
-                                    kind: TExprKind::SharedGuardValue {
-                                        guard: Box::new(recv),
-                                        editable: false,
-                                    },
-                                };
-                            });
+                let recv = match recv.ty.clone() {
+                    Type::Result { ok, .. }
+                        if struct_field_type(cx, ok.as_ref(), member).is_some() =>
+                    {
+                        let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                        TExpr {
+                            ty: ok.as_ref().clone(),
+                            kind: TExprKind::Try {
+                                inner: Box::new(recv),
+                                note: None,
+                                convert: TTryConvert::None,
+                                file: escape_rust_str(&cx.file),
+                                line,
+                                fn_name: escape_rust_str(&env.fn_name),
+                            },
                         }
                     }
-                    if let Type::Tagged { marker, inner } = recv.ty.clone() {
-                        if matches!(
-                            marker,
-                            crate::AST::TagMarker::Internal(
-                                crate::AST::InternalTag::SharedGuardRead
-                                    | crate::AST::InternalTag::SharedGuardEdit
-                            )
-                        ) {
-                            if let Type::Apply { name, args } = inner.as_ref() {
-                                if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
-                                    return in_own_frame(|| {
-                                        return TExpr {
-                                            ty: args[0].clone(),
-                                            kind: TExprKind::SharedGuardValue {
-                                                guard: Box::new(recv),
-                                                editable: matches!(
-                                                    marker,
-                                                    crate::AST::TagMarker::Internal(
-                                                        crate::AST::InternalTag::SharedGuardEdit
-                                                    )
-                                                ),
-                                            },
-                                        };
-                                    });
+                    _ => recv,
+                };
+                if member == "value" {
+                    let shared_guard = match recv.ty.without_user_tags() {
+                        Type::Apply { name, args }
+                            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+                        {
+                            Some((args[0].clone(), false))
+                        }
+                        Type::Tagged { marker, inner }
+                            if matches!(
+                                marker,
+                                crate::AST::TagMarker::Internal(
+                                    crate::AST::InternalTag::SharedGuardRead
+                                        | crate::AST::InternalTag::SharedGuardEdit
+                                )
+                            ) =>
+                        {
+                            match inner.without_user_tags() {
+                                Type::Apply { name, args }
+                                    if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
+                                {
+                                    Some((
+                                        args[0].clone(),
+                                        matches!(
+                                            marker,
+                                            crate::AST::TagMarker::Internal(
+                                                crate::AST::InternalTag::SharedGuardEdit
+                                            )
+                                        ),
+                                    ))
                                 }
+                                _ => None,
                             }
                         }
+                        _ => None,
+                    };
+                    if let Some((inner, editable)) = shared_guard {
+                        return in_own_frame(|| TExpr {
+                            ty: inner,
+                            kind: TExprKind::SharedGuardValue {
+                                guard: Box::new(recv),
+                                editable,
+                            },
+                        });
                     }
                 }
                 // D-FIELDPOL1: a computed field is not a Rust struct member — sema
@@ -7065,8 +7287,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         TEnumPayload::Named(named)
                     }
                 });
+                let ty = match env.ret_ty.as_ref() {
+                    Some(Type::Apply { name, args })
+                        if name == type_name || name == resolved_type =>
+                    {
+                        Type::Apply {
+                            name: name.clone(),
+                            args: args.clone(),
+                        }
+                    }
+                    _ => Type::Named(resolved_type.to_string()),
+                };
                 TExpr {
-                    ty: Type::Named(resolved_type.to_string()),
+                    ty,
                     kind: TExprKind::EnumLit {
                         enum_type: resolved_type.to_string(),
                         variant: variant.clone(),
@@ -7235,6 +7468,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             frame_schedule: None,
                             frame_schedule_derivation: None,
                             capture_facts: crate::Codegen::TIR::TCaptureFacts::default(),
+                            host_param_conventions: None,
                             effects: crate::Codegen::TIR::TEffectFacts::default(),
                             jit_name: String::new(),
                             is_move: true,
@@ -7482,11 +7716,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }),
         Expr::Ok(inner, _) => in_own_frame(|| {
             let mut t = lower_owned_expr(inner, cx, env);
-            // Sema uses `Ok(...)` to lift an unwrapped value-expected tail into
-            // the callable's effective Result carrier. A function-value call
-            // already has that carrier, so lifting it again would emit
-            // `Ok(Result<...>)` and leave rustc with a nested result. Preserve
-            // the existing carrier and wrap only a raw success value.
+            // Sema checks `Ok` against the enclosing success payload, while
+            // the executable value must carry that callable's exact error
+            // row. Preserve the existing carrier when this is already the
+            // expected result; otherwise lift the raw payload with the
+            // checked error type instead of manufacturing the default `Err`.
             if env.ret_ty.as_ref() == Some(&t.ty) {
                 return t;
             }
@@ -7494,10 +7728,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 t = preserve_typed_list_shape(t, ok, cx);
                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
             }
+            let err_ty = match env.ret_ty.as_ref() {
+                Some(Type::Result { err, .. }) => (**err).clone(),
+                _ => Type::Named(Syntax::TYPE_ERR.to_string()),
+            };
             TExpr {
                 ty: Type::Result {
                     ok: Box::new(t.ty.clone()),
-                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                    err: Box::new(err_ty),
                 },
                 kind: TExprKind::Ok(Box::new(t)),
             }
@@ -8090,12 +8328,15 @@ fn complex_from_scalar(value: TExpr) -> TExpr {
 /// fallible callee, so every backend sees `T` in value position and the
 /// default route still propagates. A `??` subject keeps the carrier: the
 /// fallback consumes it itself.
-fn consume_plain_helper_route(call: &Call, lowered: TExpr, cx: &Cx, env: &LowerEnv) -> TExpr {
+pub(crate) fn consume_plain_helper_route(
+    resolved_ret: Option<&Type>,
+    name_span: Span,
+    lowered: TExpr,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> TExpr {
     if env.fallback_subject
-        || !call
-            .resolved_ret
-            .as_ref()
-            .is_some_and(|declared| !declared.is_fallible())
+        || !resolved_ret.is_some_and(|declared| !declared.is_fallible())
     {
         return lowered;
     }
@@ -8109,7 +8350,7 @@ fn consume_plain_helper_route(call: &Call, lowered: TExpr, cx: &Cx, env: &LowerE
     } else {
         TTryConvert::None
     };
-    let line = crate::Diagnostics::span_line_col(&cx.src, call.name_span.start).0;
+    let line = crate::Diagnostics::span_line_col(&cx.src, name_span.start).0;
     TExpr {
         ty: (**ok).clone(),
         kind: TExprKind::Try {
@@ -8425,6 +8666,7 @@ pub(crate) fn wrap_foreign_undo(
         frame_schedule: None,
         frame_schedule_derivation: None,
         capture_facts,
+        host_param_conventions: None,
         failure_carrier: inverse_failure,
         effects: crate::Codegen::TIR::TEffectFacts::default(),
         source_params: Vec::new(),

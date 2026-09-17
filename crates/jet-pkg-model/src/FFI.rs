@@ -24,7 +24,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v6-uniform-slot-list-cabi";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v7-asm-output-contract";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -293,10 +293,9 @@ pub fn native_cacheable(bundle: &ProgramBundle) -> bool {
             || u.starts_with("core.crypto.expert::")
             || u == "core.auth"
             || u.starts_with("core.auth::")
-            || u == "core.crypto.vault"
-            || u.starts_with("core.crypto.vault::")
             || u == "core.plugin"
             || u.starts_with("core.plugin::")
+            || u.starts_with("core.plugin.")
     })
 }
 
@@ -378,7 +377,11 @@ pub fn prepare_for_target(
     let needs_plugin = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.plugin" || u.starts_with("core.plugin::"));
+        .any(|u| {
+            u == "core.plugin"
+                || u.starts_with("core.plugin::")
+                || u.starts_with("core.plugin.")
+        });
     // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` — decrypted-repo-secret read,
     // age-style crypto FFI bridge.
     let needs_secrets = bundle
@@ -458,16 +461,57 @@ fn inline_asm_target_diagnostic(entries: &[ExternEntry], target: &str) -> Option
             .as_ref()
             .is_some_and(|inline| inline.lang == "asm")
     })?;
-    if target.split('-').next() == Some("x86_64") {
-        return None;
+    if target.split('-').next() != Some("x86_64") {
+        return Some(Diagnostic::error(
+            "E3223",
+            format!(
+                "{} selects x86-64 registers, but target `{target}` does not",
+                asm.line_hint
+            ),
+            "inline assembly is validated and compiled for the driver's selected target, not the host architecture"
+                .to_string(),
+            "select an x86_64 target or provide an assembly body for the selected target".to_string(),
+            None,
+        ));
     }
-    Some(Diagnostic::error(
-        "E3223",
-        format!("{} selects x86-64 registers, but target `{target}` does not", asm.line_hint),
-        "inline assembly is validated and compiled for the driver's selected target, not the host architecture".to_string(),
-        "select an x86_64 target or provide an assembly body for the selected target".to_string(),
-        None,
-    ))
+    let inline = asm.inline.as_ref()?;
+    let returns_value = asm
+        .return_type
+        .as_ref()
+        .is_some_and(|ty| inline_rust_type(ty) != "()");
+    if returns_value
+        && !inline.source.lines().any(|line| {
+            line.contains("; -> return")
+                && (asm_output_register(line).is_some()
+                    || asm_output_param(line, &inline.param_names).is_some())
+        })
+    {
+        return Some(Diagnostic::error(
+            "E3223",
+            format!("{} has no checked output destination", asm.line_hint),
+            "a value-returning assembly body must identify its result with the first named output operand or an explicit target register"
+                .to_string(),
+            "write the result as `{name} ... ; -> return` or `mov rax, ... ; -> return` for the selected target"
+                .to_string(),
+            None,
+        ));
+    }
+    None
+}
+
+fn asm_first_operand(line: &str) -> Option<&str> {
+    let (_, operands) = line.split_once(|character: char| character.is_ascii_whitespace())?;
+    operands
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|operand| !operand.is_empty())
+}
+
+fn asm_output_param(line: &str, param_names: &[String]) -> Option<usize> {
+    let operand = asm_first_operand(line)?;
+    let name = operand.strip_prefix('{')?.strip_suffix('}')?;
+    param_names.iter().position(|candidate| candidate == name)
 }
 
 #[cfg(test)]
@@ -504,6 +548,33 @@ mod inline_asm_target_tests {
             .expect("x86 register body must be rejected for selected aarch64 target");
         assert_eq!(diagnostic.code, "E3223");
         assert!(diagnostic.what.contains("aarch64-unknown-linux-gnu"));
+    }
+
+    #[test]
+    fn inline_asm_uses_checked_output_and_discarded_clobber_operands() {
+        let mut entry = entry();
+        entry.inline.as_mut().unwrap().source =
+            "add {value}, 1 ; -> return\n; clobbers rbx, rbx".into();
+        let inline = entry.inline.as_ref().unwrap();
+        let wrapper = emit_asm_wrapper(&entry, inline);
+
+        assert!(wrapper.contains("value = inout(reg) p0"), "{wrapper}");
+        assert!(wrapper.contains("out(\"rbx\") _"), "{wrapper}");
+        assert!(!wrapper.contains("lateout(\"rbx\") _"), "{wrapper}");
+        assert_eq!(
+            wrapper.matches("out(\"rbx\") _").count(),
+            1,
+            "duplicate clobbers must normalize to one output operand: {wrapper}"
+        );
+    }
+
+    #[test]
+    fn inline_asm_requires_an_explicit_return_destination() {
+        let mut entry = entry();
+        entry.inline.as_mut().unwrap().source = "rdtsc ; -> return".into();
+        let diagnostic = inline_asm_target_diagnostic(&[entry], "x86_64-unknown-linux-gnu")
+            .expect("implicit rax fallback must be rejected");
+        assert!(diagnostic.what.contains("no checked output destination"));
     }
 }
 
@@ -5064,27 +5135,23 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         }
         instructions.push(clean);
     }
+    let return_reg = return_line.as_deref().and_then(asm_output_register);
+    let output_param = return_line
+        .as_deref()
+        .and_then(|line| asm_output_param(line, &inline.param_names));
+    if ret != "()" && output_param.is_none() && return_reg.is_none() {
+        return String::new();
+    }
     let mut operands = Vec::new();
     let mut result_expr = "()".to_string();
-    let mut output_param = None;
     if ret != "()" {
-        if let Some(line) = &return_line {
-            output_param = inline
-                .param_names
-                .iter()
-                .position(|name| line.contains(&format!("{{{name}}}")));
-        }
         if let Some(index) = output_param {
             operands.push(format!(
                 "{} = inout(reg) p{index}",
                 inline.param_names[index]
             ));
             result_expr = format!("p{index}");
-        } else {
-            let reg = return_line
-                .as_deref()
-                .and_then(asm_output_register)
-                .unwrap_or("rax");
+        } else if let Some(reg) = return_reg {
             operands.push(format!("lateout(\"{reg}\") __jet_result"));
             result_expr = "__jet_result".to_string();
         }
@@ -5094,10 +5161,10 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
             operands.push(format!("{name} = in(reg) p{index}"));
         }
     }
-    let return_reg = return_line.as_deref().and_then(asm_output_register);
+    let mut seen_clobbers = HashSet::new();
     for reg in clobbers {
-        if Some(reg.as_str()) != return_reg {
-            operands.push(format!("lateout(\"{reg}\") _"));
+        if Some(reg.as_str()) != return_reg && seen_clobbers.insert(reg.clone()) {
+            operands.push(format!("out(\"{reg}\") _"));
         }
     }
     let templates = instructions
@@ -5124,12 +5191,12 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
 }
 
 fn asm_output_register(line: &str) -> Option<&str> {
-    let operands = line.split_once(' ').map(|(_, rest)| rest)?;
-    operands
-        .split(',')
-        .next()
-        .map(str::trim)
-        .filter(|reg| reg.chars().all(|c| c.is_ascii_alphanumeric()))
+    let operand = asm_first_operand(line)?;
+    let register = operand.strip_prefix('%').unwrap_or(operand);
+    register
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric())
+        .then_some(register)
 }
 
 fn rust_string(value: &str) -> String {

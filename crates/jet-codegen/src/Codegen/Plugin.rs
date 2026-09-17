@@ -1586,8 +1586,10 @@ pub fn emit_plugin(
     );
 
     let mut guest_rust = String::from(whole_program_rust);
-    // Sandbox guests use the ordinary Prelude's Time implementation too; add
-    // the complete wasm TZif closure that browser emission already embeds.
+    super::MIRRust::append_web_time_zones(&mut guest_rust)
+        .unwrap_or_else(|error| panic!("cannot embed sandbox timezone data: {error}"));
+    // Sandbox guests use the ordinary Prelude's Time implementation too, so
+    // embed the complete wasm TZif closure that browser emission also uses.
     guest_rust.push_str(
         "\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n",
     );

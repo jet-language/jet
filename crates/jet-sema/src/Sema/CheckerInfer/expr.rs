@@ -717,7 +717,7 @@ fn reflected_fact_type(base: &Type, read: jet_foundation::Registry::FactRead) ->
 }
 
 impl<'a> Checker<'a> {
-    fn layout_target(&self) -> jet_foundation::Layout::TargetLayout {
+    pub(crate) fn layout_target(&self) -> jet_foundation::Layout::TargetLayout {
         self.modules
             .and_then(|modules| modules.get(self.module_idx))
             .map(|state| {
@@ -1179,14 +1179,20 @@ impl<'a> Checker<'a> {
                     .and_then(|modules| modules.get(self.module_idx))
                     .and_then(|state| crate::Comptime::build_fact_value(&state.build_facts, read))
                     .map(|value| (value.jet_type(), value)),
+                jet_foundation::Registry::FactRead::Maturity => match &**inner {
+                    Expr::Ident(function_name, _) => {
+                        crate::Comptime::registered_fact_value(read, function_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
                 jet_foundation::Registry::FactRead::BuildPackageName
                 | jet_foundation::Registry::FactRead::BuildPackageVersion
                 | jet_foundation::Registry::FactRead::BuildOS
                 | jet_foundation::Registry::FactRead::BuildStampGit
                 | jet_foundation::Registry::FactRead::BuildStampDirty
                 | jet_foundation::Registry::FactRead::BuildStampToolchain
-                | jet_foundation::Registry::FactRead::BuildStampAt
-                | jet_foundation::Registry::FactRead::Maturity => None,
+                | jet_foundation::Registry::FactRead::BuildStampAt => None,
                 jet_foundation::Registry::FactRead::Layout
                 | jet_foundation::Registry::FactRead::Name
                 | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
@@ -1456,7 +1462,11 @@ impl<'a> Checker<'a> {
     /// gate. An `HTML` hole in an `HTML` literal is the one direct-composition
     /// case: its nominal type proves the fragment already passed the HTML
     /// boundary, so escaping it again would corrupt the markup.
-    fn validate_typed_hole_printable(&mut self, inner: &mut Expr, type_name: &str) -> Option<Type> {
+    fn validate_typed_hole_printable(
+        &mut self,
+        inner: &mut Expr,
+        type_name: &str,
+    ) -> Option<(Type, bool)> {
         let was_borrow_ctx = self.borrow_ctx;
         self.borrow_ctx = true;
         let was_view_read = self.allow_string_view_read;
@@ -1470,7 +1480,7 @@ impl<'a> Checker<'a> {
         let trusted_html = type_name == jet_foundation::Syntax::TYPE_HTML
             && matches!(&ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_HTML);
         if trusted_html || is_printable(&ty, self.registry, self.trait_reg) {
-            return Some(ty);
+            return Some((ty, trusted_html));
         }
         self.diags.push(Diagnostic::error(
             "E0112",
@@ -1507,14 +1517,7 @@ impl<'a> Checker<'a> {
         for part in parts.iter_mut() {
             if let StrPart::Interp(inner, _) = part {
                 match self.validate_typed_hole_printable(inner, &type_name) {
-                    Some(ty) => trusted_html_holes.push(
-                        type_name == jet_foundation::Syntax::TYPE_HTML
-                            && matches!(
-                                ty,
-                                Type::Named(name)
-                                    if name == jet_foundation::Syntax::TYPE_HTML
-                            ),
-                    ),
+                    Some((_ty, trusted_html)) => trusted_html_holes.push(trusted_html),
                     None => holes_printable = false,
                 }
             }
@@ -1960,7 +1963,19 @@ impl<'a> Checker<'a> {
                 // Call checking returns the effective Result-shaped carrier,
                 // but the resolved return records the callee's declared
                 // contract. A plain helper must project its declared success
-                // type instead of entering the failure rail.
+                // type instead of entering the failure rail. An open callback
+                // is the exception: retain that checked carrier so its
+                // collection operation can select the fallible callback ABI.
+                if self.failure_carrier_inference
+                    && result
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
+                {
+                    if self.failure_carrier.is_none() {
+                        self.failure_carrier = result.clone();
+                    }
+                    self.task_body_propagates = true;
+                }
                 return Some(ret.clone());
             }
         }
@@ -2106,6 +2121,19 @@ impl<'a> Checker<'a> {
             // and surface E0102.
             if matches!(e, Expr::Call(_)) {
                 self.normalize_contextual_expr(e);
+            }
+            if self.implicit_loop_subject_depth > 0
+                || self
+                    .expected_type
+                    .as_ref()
+                    .is_some_and(|ty| {
+                        matches!(ty, Type::Fn { .. })
+                            || matches!(ty, Type::Named(name) if name == "UiShortcut")
+                    })
+            {
+                // CallValue dispatch skips infer_inner; canonicalize a bare
+                // method head before it can be mistaken for a field projection.
+                normalize_bare_method_head(e);
             }
             if matches!(e, Expr::Call(_) | Expr::CallValue { .. }) {
                 self.infer_call_like(e)

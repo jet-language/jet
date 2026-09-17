@@ -38,7 +38,7 @@ use core.process as process
 
 fn run() {{
     policy :: Authority.from_rights(["FS.Read:home"])
-    spec :: process.cmd(["sh", "-c", "printf escaped > '{marker}'"]).under(policy)
+    spec :: process.cmd(["sh", "-c", "printf escaped > '{marker}'"]).cwd("/tmp").under(policy)
     if spec.plan() == {{
         .Ok(_) -> print("escaped")
         .Err(_) -> print("refused")
@@ -64,6 +64,7 @@ fn run() {
         .stdout(.Capture)
         .stderr(.Capture)
         .output_limit(3)
+        .cwd("/tmp")
         .under(policy)
     if limited.plan() == {
         .Ok(_) -> {
@@ -78,11 +79,11 @@ fn run() {
     timeout :: Duration.milliseconds(50) ?? panic("timeout duration")
     slow :: process.cmd(["sh", "-c", "while true; do :; done"])
         .timeout(timeout)
+        .cwd("/tmp")
         .under(policy)
     if slow.plan() == {
         .Ok(_) -> {
-            result :: slow.run()
-            if result == {
+            if slow.run() == {
                 .Ok(receipt) -> print(receipt.timed_out)
                 .Err(_) -> print("timeout-error")
             }
@@ -93,6 +94,7 @@ fn run() {
     secret :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
         .env_clear()
         .env("SECRET_TOKEN", "agent-receipt-secret")
+        .cwd("/tmp")
         .under(policy)
     if secret.plan() == {
         .Ok(plan) -> {
@@ -161,11 +163,10 @@ use core.process as process
 fn run() {{
     policy :: process.workspace()
 
-    network :: process.cmd(["bash", "-c", "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then exit 41; else exit 0; fi"]).under(policy)
+    network :: process.cmd(["bash", "-c", "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
     if network.plan() == {{
         .Ok(_) -> {{
-            result :: network.run_checked()
-            if result == {{
+            if network.run_checked() == {{
                 .Ok(_) -> print("network-blocked")
                 .Err(_) -> print("network-escaped")
             }}
@@ -176,6 +177,7 @@ fn run() {{
     descendants :: process.cmd(["sh", "-c", "({sleep} 1; printf child-leaked) & exit 0"])
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if descendants.plan() == {{
         .Ok(_) -> {{

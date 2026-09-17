@@ -110,7 +110,7 @@ fn compute_set_requires_mutable_binding_before_codegen() {
     );
     assert_eq!(
         diagnostic.why,
-        "`compute.set` will change this value, so it must be mutable (`:=`)"
+        "`set` will change this value, so it must be mutable (`:=`)"
     );
     assert_eq!(diagnostic.fix, "Declare it with `tensor := ...`");
     assert!(diagnostic.span.is_some(), "{diagnostic:?}");

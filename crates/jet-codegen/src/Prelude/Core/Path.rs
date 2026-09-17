@@ -1,33 +1,47 @@
 // Lexical path value rules shared by AOT, JIT, and comptime.
 
+fn jet_std_path_lexical_source(path: &String) -> std::borrow::Cow<'_, str> {
+    if path.contains('\\') {
+        std::borrow::Cow::Owned(path.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(path.as_str())
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn jet_std_path_join(base: &String, part: &String) -> String {
-    std::path::Path::new(base.as_str())
-        .join(part.as_str())
+    let base = jet_std_path_lexical_source(base);
+    let part = jet_std_path_lexical_source(part);
+    std::path::Path::new(base.as_ref())
+        .join(part.as_ref())
         .to_string_lossy()
         .to_string()
 }
 
 pub(crate) fn jet_std_path_parent_opt(path: &String) -> Option<String> {
-    std::path::Path::new(path.as_str())
+    let source = jet_std_path_lexical_source(path);
+    std::path::Path::new(source.as_ref())
         .parent()
         .map(|value| value.to_string_lossy().to_string())
 }
 
 pub(crate) fn jet_std_path_extension_opt(path: &String) -> Option<String> {
-    std::path::Path::new(path.as_str())
+    let source = jet_std_path_lexical_source(path);
+    std::path::Path::new(source.as_ref())
         .extension()
         .map(|value| value.to_string_lossy().to_string())
 }
 
 pub(crate) fn jet_std_path_stem_opt(path: &String) -> Option<String> {
-    std::path::Path::new(path.as_str())
+    let source = jet_std_path_lexical_source(path);
+    std::path::Path::new(source.as_ref())
         .file_stem()
         .map(|value| value.to_string_lossy().to_string())
 }
 
 pub(crate) fn jet_std_path_normalize(path: &String) -> String {
-    let source = std::path::Path::new(path.as_str());
+    let source = jet_std_path_lexical_source(path);
+    let source = std::path::Path::new(source.as_ref());
     let rooted = source.has_root();
     let mut normalized = std::path::PathBuf::new();
     let mut normal_depth = 0usize;
@@ -51,10 +65,9 @@ pub(crate) fn jet_std_path_normalize(path: &String) -> String {
     normalized.to_string_lossy().into_owned()
 }
 
-/// Compare normalized native path components, not filesystem identity. The
-/// host `Path` parser is intentional here: on Unix `\\` is a filename byte,
-/// while Windows accepts both separator spellings. Canonicalize remains the
-/// explicit physical and symlink-resolving policy.
+/// Compare normalized lexical path components, not filesystem identity. Both
+/// slash spellings are separators on every host so the same Path relation is
+/// preserved across AOT, JIT, interpreter, and comptime.
 pub(crate) fn jet_std_path_is_within(path: &String, base: &String) -> bool {
     fn components(
         path: &std::path::Path,
@@ -88,8 +101,12 @@ pub(crate) fn jet_std_path_is_within(path: &String, base: &String) -> bool {
         (prefix, rooted, parts)
     }
 
-    let (base_prefix, base_rooted, base_parts) = components(std::path::Path::new(base));
-    let (path_prefix, path_rooted, path_parts) = components(std::path::Path::new(path));
+    let path_source = jet_std_path_lexical_source(path);
+    let base_source = jet_std_path_lexical_source(base);
+    let (base_prefix, base_rooted, base_parts) =
+        components(std::path::Path::new(base_source.as_ref()));
+    let (path_prefix, path_rooted, path_parts) =
+        components(std::path::Path::new(path_source.as_ref()));
     let base_is_relative_current = base_prefix.is_none() && !base_rooted && base_parts.is_empty();
     base_prefix == path_prefix
         && base_rooted == path_rooted
@@ -100,6 +117,7 @@ pub(crate) fn jet_std_path_is_within(path: &String, base: &String) -> bool {
                 .first()
                 .is_some_and(|part| part.as_os_str() == std::ffi::OsStr::new("..")))
 }
+
 
 pub(crate) fn jet_std_path_home() -> String {
     if cfg!(windows) {

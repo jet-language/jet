@@ -26,6 +26,16 @@ impl JetTestReport {
             unexpected_passes: 0,
         };
         for record in &view.evidence.records {
+            // Runtime records are diagnostic observations emitted while a
+            // test body fails.  The harness' Unit record is the terminal
+            // test outcome; counting both would turn one expected failure
+            // into two while dropping the raw diagnostic would lose evidence.
+            if !matches!(
+                record.kind,
+                EvidenceKind::Unit | EvidenceKind::Property | EvidenceKind::Doctest
+            ) {
+                continue;
+            }
             if record.is_unexpected_pass() {
                 view.unexpected_passes += 1;
                 continue;
@@ -339,7 +349,11 @@ mod test_report_tests {
             (0, 1, "xfail", 2, EvidenceExpectation::ExpectedFailure),
             (0, 0, "xpass", 3, EvidenceExpectation::ExpectedFailure),
             (0, 2, "skip", 4, EvidenceExpectation::Ordinary),
-            (2, 4, "error", 5, EvidenceExpectation::Ordinary),
+            (0, 4, "error", 5, EvidenceExpectation::Ordinary),
+            // Keep raw runtime observations in the report without counting
+            // them as additional terminal test outcomes.
+            (2, 1, "raw-xfail", 6, EvidenceExpectation::ExpectedFailure),
+            (2, 1, "raw-fail", 7, EvidenceExpectation::Ordinary),
         ];
         for (kind, state, name, line, expectation) in cases {
             let record = EvidenceRecord::from_test_codes(
@@ -367,7 +381,17 @@ mod test_report_tests {
         assert_eq!(view.skipped, 1);
         assert_eq!(view.expected_failures, 1);
         assert_eq!(view.unexpected_passes, 1);
-        assert_eq!(view.evidence.records.len(), 5);
+        assert_eq!(view.evidence.records.len(), 7);
+        assert!(view
+            .evidence
+            .records
+            .iter()
+            .any(|record| record.identity.claim_id == "raw-xfail"));
+        assert!(view
+            .evidence
+            .records
+            .iter()
+            .any(|record| record.identity.claim_id == "raw-fail"));
 
         let status = view.status_envelope().unwrap().json();
         assert!(status.contains("\"schema\":\"jet.status/v1\""));

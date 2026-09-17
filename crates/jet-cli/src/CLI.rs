@@ -1154,7 +1154,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
-        usage: Some("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>]"),
+        usage: Some("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>]"),
     },
     CommandSpec {
         name: "test-compare",
@@ -2021,10 +2021,10 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
-    FlagSpec { long: "--release", help: "With build/run/jobs/test: Optimize for release" },
-    FlagSpec { long: "--profile", help: "With build/run/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
+    FlagSpec { long: "--release", help: "With build/run/dev/jobs/test: Optimize for release" },
+    FlagSpec { long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
-    FlagSpec { long: "--set", help: "With build/run/jobs: Set one declared package setting as key=value" },
+    FlagSpec { long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value" },
     FlagSpec { long: "--builder", help: "With build/jobs: Select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics" },
@@ -2035,6 +2035,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--core", help: "With inspect structure: Show the canonical core module export facts" },
     // D-TESTKIT1=A: the shared test name-selection flag.
     FlagSpec { long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>" },
+    FlagSpec { long: "--grade", help: "With test: Select the generated property-test grade as --grade=generated" },
     FlagSpec { long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "With test: Run tests one at a time instead of the parallel default" },
     FlagSpec { long: "--show-default", help: "With run/build/dev/test: Use and report the stock default" },

@@ -1212,6 +1212,8 @@ fn core_fixed_sig_impl(
     let list_u8 = Type::List(Box::new(u8_ty()));
     let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
     let io_unit = result_ty(unit.clone(), io.clone());
+    let ui_error = Type::Named("UiHostError".to_string());
+    let ui_result = |ok| result_ty(ok, ui_error.clone());
     let ui_preview = Type::Named("UiPreview".to_string());
     let ui_node_callback = Type::Fn {
         params: vec![],
@@ -1561,9 +1563,23 @@ fn core_fixed_sig_impl(
             Some(Type::Option(Box::new(Type::String))),
         )),
         // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: closed token verification. The
-        // three-argument forms are the beginner surface; core_call.rs admits
-        // the same functions' optional named controls.
-        ("core.auth", "verify_jwt" | "verify_paseto") => Some((
+        // three-argument form is the beginner surface; verify_jwt's fixed
+        // signature also describes its five-parameter registry ABI. The
+        // arity-sensitive optional controls remain in core_call.rs.
+        ("core.auth", "verify_jwt") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Named("Duration".into())),
+            ],
+            Some(result_ty(
+                Type::Named("Claims".into()),
+                Type::Named("AuthError".into()),
+            )),
+        )),
+        ("core.auth", "verify_paseto") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -4440,9 +4456,41 @@ fn core_fixed_sig_impl(
                 Type::Named("HTTPError".to_string()),
             )),
         )),
-        // serve blocks until the listener is closed; handler is called per request.
-        // The handler type is resolved at the call site (lambda / fn pointer).
-        ("core.http", "serve") => None, // special-cased in check_core_call
+        // HTTP server bind/serve carry Jet optional controls, while their
+        // native non-direct rows consume Rust `Option` values.
+        ("core.http.server", "bind") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Named("HTTPMux".to_string())),
+                (
+                    read,
+                    Type::Option(Box::new(Type::Named("HTTPServerTls".to_string()))),
+                ),
+                (
+                    read,
+                    Type::Option(Box::new(Type::Named("Duration".to_string()))),
+                ),
+            ],
+            Some(result_ty(
+                Type::Named("HTTPServer".to_string()),
+                Type::Named("HTTPError".to_string()),
+            )),
+        )),
+        ("core.http.server", "serve") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Named("HTTPMux".to_string())),
+                (
+                    read,
+                    Type::Option(Box::new(Type::Named("HTTPServerTls".to_string()))),
+                ),
+                (
+                    read,
+                    Type::Option(Box::new(Type::Named("Duration".to_string()))),
+                ),
+            ],
+            Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))),
+        )),
         // D-REGEXENGINE1=A / D-REGEX-LIT1=D: runtime compilation stays
         // fallible; one-shot calls take a compile-checked Regex value.
         ("core.regex", "flags") => Some((
@@ -4851,6 +4899,11 @@ fn core_fixed_sig_impl(
             vec![(read, string.clone())],
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
         )),
+        // Exact whole-number math keeps the native i64 boundary explicit.
+        ("core.math", "isqrt" | "factorial") => Some((
+            vec![(read, int.clone())],
+            Some(Type::Option(Box::new(int.clone()))),
+        )),
         // D-NUMTYPE1=A: exact ratio, or nothing when the bottom is zero.
         ("core.math", "fraction") => Some((
             vec![(read, int.clone()), (read, int.clone())],
@@ -5143,7 +5196,7 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(string.clone()))),
                 (read, Type::List(Box::new(string.clone()))),
             ],
-            Some(Type::Named("UiFileFilterResult".to_string())),
+            Some(ui_result(Type::Named("UiFileFilter".to_string()))),
         )),
         ("core.ui.host", "file_filter_text") => Some((
             vec![],
@@ -5157,7 +5210,7 @@ fn core_fixed_sig_impl(
                 (read, string.clone()),
                 (read, Type::Named("UiFsRights".to_string())),
             ],
-            Some(Type::Named("UiFsGrantResult".to_string())),
+            Some(ui_result(Type::Named("UiFsGrant".to_string()))),
         )),
         ("core.ui.host", "open_request" | "save_request") => Some((
             vec![(read, Type::Named("UiFsGrant".to_string()))],
@@ -5165,63 +5218,69 @@ fn core_fixed_sig_impl(
         )),
         ("core.ui.host", "open_file" | "save_file") => Some((
             vec![(read, Type::Named("UiFileDialogRequest".to_string()))],
-            Some(Type::Named("UiFileDialogResult".to_string())),
+            Some(ui_result(Type::Named("UiFileDialogSelection".to_string()))),
         )),
         ("core.ui.host", "shortcut") => Some((
             vec![
                 (read, string.clone()),
                 (read, Type::Named("UiShortcutModifiers".to_string())),
             ],
-            Some(Type::Named("UiShortcutResult".to_string())),
+            Some(ui_result(Type::Named("UiShortcut".to_string()))),
         )),
         ("core.ui.host", "accessibility") => Some((
             vec![(read, string.clone()), (read, string.clone())],
-            Some(Type::Named("UiAccessibilityResult".to_string())),
+            Some(ui_result(Type::Named("UiAccessibility".to_string()))),
         )),
         ("core.ui.host.clipboard", "read_text") => Some((
             vec![],
-            Some(Type::Named("UiClipboardTextResult".to_string())),
+            Some(ui_result(Type::Named("UiClipboardText".to_string()))),
         )),
         ("core.ui.host.clipboard", "write_text") => Some((
             vec![(read, string.clone())],
-            Some(Type::Named("UiClipboardWriteResult".to_string())),
+            Some(ui_result(Type::Named("UiClipboardWrite".to_string()))),
         )),
         ("core.ui.host.ime", "poll") => Some((
             vec![],
-            Some(Type::Named("UiImeResult".to_string())),
+            Some(ui_result(Type::Option(Box::new(Type::Named(
+                "UiImeEvent".to_string(),
+            ))))),
         )),
         ("core.ui.host.drag_drop", "poll") => Some((
             vec![],
-            Some(Type::Named("UiDragResult".to_string())),
+            Some(ui_result(Type::Option(Box::new(Type::Named(
+                "UiDragEvent".to_string(),
+            ))))),
         )),
         ("core.ui.host.shortcuts", "binding") => Some((
             vec![
                 (read, Type::Named("UiShortcut".to_string())),
                 (read, string.clone()),
             ],
-            Some(Type::Named("UiShortcutBindingResult".to_string())),
+            Some(ui_result(Type::Named("UiShortcutBinding".to_string()))),
         )),
         ("core.ui.host.shortcuts", "register") => Some((
             vec![(read, Type::Named("UiShortcutBinding".to_string()))],
-            Some(Type::Named("UiShortcutBindingResult".to_string())),
+            Some(ui_result(Type::Named("UiShortcutBinding".to_string()))),
         )),
         ("core.ui.host.shortcuts", "dispatch") => Some((
             vec![(read, Type::Named("UiShortcut".to_string()))],
-            Some(Type::Named("UiShortcutDispatchResult".to_string())),
+            Some(ui_result(Type::Named("UiShortcutDispatch".to_string()))),
         )),
         ("core.ui.host.accessibility", "attach") => Some((
             vec![
                 (read, Type::Named("UiNode".to_string())),
                 (read, Type::Named("UiAccessibility".to_string())),
             ],
-            Some(Type::Named("UiAccessibilityNodeResult".to_string())),
+            Some(ui_result(unit.clone())),
         )),
         ("core.ui.host.accessibility", "project") => Some((
             vec![
                 (read, Type::Named("UiNode".to_string())),
                 (read, Type::Named("UiNodeId".to_string())),
             ],
-            Some(Type::Named("UiAccessibilityProjectionResult".to_string())),
+            Some(ui_result(Type::Option(Box::new(Type::Named(
+                "UiAccessibilityProjection".to_string(),
+            ))))),
         )),
         // D-FLAGSHIP-WEBAPI1=A: first-party browser API for web flagship slices.
         ("core.web", "on") => Some((
@@ -5563,6 +5622,13 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 default: Some(CoreDefault::Absent),
             },
         ]),
+        ("core.http.server", "cors_policy") => Some(vec![
+            required_either("origins"),
+            optional("methods", CoreDefault::EmptyList),
+            optional("headers", CoreDefault::EmptyList),
+            optional("credentials", CoreDefault::Bool(false)),
+            optional("max_age", CoreDefault::Int(86_400)),
+        ]),
         ("core.encoding.csv", "parse") => Some(vec![
             required("text"),
             optional("delimiter", CoreDefault::String(",")),
@@ -5658,4 +5724,81 @@ pub(crate) fn apply_core_call_defaults(
         &mut ignored_diagnostics,
     )
     .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{core_fixed_sig, result_ty};
+    use crate::AST::Type;
+
+    #[test]
+    fn ui_host_result_signatures_are_structural_results() {
+        let ui_error = Type::Named("UiHostError".to_string());
+        let expected = [
+            ("core.ui.host", "file_filter", Type::Named("UiFileFilter".to_string())),
+            ("core.ui.host", "fs_grant", Type::Named("UiFsGrant".to_string())),
+            (
+                "core.ui.host",
+                "open_file",
+                Type::Named("UiFileDialogSelection".to_string()),
+            ),
+            ("core.ui.host", "shortcut", Type::Named("UiShortcut".to_string())),
+            (
+                "core.ui.host",
+                "accessibility",
+                Type::Named("UiAccessibility".to_string()),
+            ),
+            (
+                "core.ui.host.clipboard",
+                "read_text",
+                Type::Named("UiClipboardText".to_string()),
+            ),
+            (
+                "core.ui.host.clipboard",
+                "write_text",
+                Type::Named("UiClipboardWrite".to_string()),
+            ),
+            (
+                "core.ui.host.ime",
+                "poll",
+                Type::Option(Box::new(Type::Named("UiImeEvent".to_string()))),
+            ),
+            (
+                "core.ui.host.drag_drop",
+                "poll",
+                Type::Option(Box::new(Type::Named("UiDragEvent".to_string()))),
+            ),
+            (
+                "core.ui.host.shortcuts",
+                "binding",
+                Type::Named("UiShortcutBinding".to_string()),
+            ),
+            (
+                "core.ui.host.shortcuts",
+                "register",
+                Type::Named("UiShortcutBinding".to_string()),
+            ),
+            (
+                "core.ui.host.shortcuts",
+                "dispatch",
+                Type::Named("UiShortcutDispatch".to_string()),
+            ),
+            (
+                "core.ui.host.accessibility",
+                "attach",
+                Type::Named("Unit".to_string()),
+            ),
+            (
+                "core.ui.host.accessibility",
+                "project",
+                Type::Option(Box::new(Type::Named(
+                    "UiAccessibilityProjection".to_string(),
+                ))),
+            ),
+        ];
+        for (module, name, ok) in expected {
+            let (_, ret) = core_fixed_sig(module, name).expect("UI host row must have a signature");
+            assert_eq!(ret, Some(result_ty(ok, ui_error.clone())), "{module}::{name}");
+        }
+    }
 }

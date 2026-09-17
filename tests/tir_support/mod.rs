@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::common::unique_tmp;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -238,6 +239,95 @@ fn interpreter_run_with_package(
 pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     assert_tiers_agree_with_package(name, src, expected_stdout, None);
 }
+
+/// Run one plugin-backed program from a fresh project carrying the matching
+/// frozen Component interface snapshot. The artifact itself may live outside
+/// the project; only its stem selects the snapshot alias.
+pub fn run_plugin_tier(
+    name: &str,
+    src: &str,
+    tier: &str,
+    artifact: &Path,
+    api_snapshot: &str,
+) -> (i32, String, String) {
+    let dir = unique_tmp(&format!("jet_plugin_tier_{name}_{tier}"));
+    fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
+    let api_dir = dir.join(".jet/cache/api");
+    fs::create_dir_all(&api_dir).unwrap();
+    let stem = artifact
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_else(|| panic!("plugin artifact has no UTF-8 stem: {}", artifact.display()));
+    fs::write(api_dir.join(format!("plugin__{stem}.api")), api_snapshot).unwrap();
+    let path = dir.join(format!("{name}.jet"));
+    fs::write(&path, src).unwrap();
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command.arg("run");
+    match tier {
+        "release" => {
+            command.arg("--release");
+        }
+        "jit" => {}
+        "interpreter" => {
+            command.arg("--interpret");
+        }
+        other => panic!("unknown plugin tier `{other}`"),
+    }
+    command
+        .arg(&path)
+        .current_dir(&dir)
+        .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
+        .env("JETPACK_ROOT", dir.join(format!("jetpack-{tier}")))
+        .env("JETPACK_ENV", "1")
+        .env("NO_COLOR", "1");
+    let output = command.output().unwrap();
+    let result = (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        normalize_workspace_root_paths(&String::from_utf8_lossy(&output.stderr), &dir),
+    );
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
+/// Prove one plugin call through release/AOT, default JIT, and forced
+/// interpreter with one staged immutable interface contract.
+pub fn assert_tiers_agree_with_plugin(
+    name: &str,
+    src: &str,
+    expected_stdout: &str,
+    artifact: &Path,
+    api_snapshot: &str,
+) {
+    let mut runs = vec![
+        ("jit", run_plugin_tier(name, src, "jit", artifact, api_snapshot)),
+        (
+            "interpreter",
+            run_plugin_tier(name, src, "interpreter", artifact, api_snapshot),
+        ),
+    ];
+    if have_rustc() {
+        runs.push((
+            "release",
+            run_plugin_tier(name, src, "release", artifact, api_snapshot),
+        ));
+    }
+    let (baseline_tier, baseline) = runs.first().expect("plugin tier list is non-empty");
+    assert_eq!(
+        baseline.0, 0,
+        "{baseline_tier} plugin run failed:\n{}",
+        baseline.2
+    );
+    assert_eq!(baseline.1, expected_stdout, "{baseline_tier} plugin output");
+    for (tier, result) in runs.iter().skip(1) {
+        assert_eq!(result.0, baseline.0, "{tier} plugin exit code disagreed");
+        assert_eq!(result.1, baseline.1, "{tier} plugin output disagreed");
+        assert_eq!(result.2, baseline.2, "{tier} plugin stderr disagreed");
+    }
+}
+
 
 /// Tier parity with a temporary package policy. Effectful snippets need an
 /// application authority decision before the real JIT and interpreter paths

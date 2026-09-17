@@ -75,15 +75,11 @@ fn try_compile_debug_aot_on_stack(
             "Cranelift debug-AOT object emission is unavailable on this architecture".into(),
         );
     }
-    let plan = plan_mir_tiers(program, artifact);
-    if plan.whole_program_deopt || !plan.deopt.is_empty() {
-        return Err("the checked MIR program is not fully applicable to Cranelift".into());
-    }
-    // Keep debug AOT at the same unoptimized Cranelift level as the resident
-    // JIT; #2919 owns any opt-level change after the cross-tier corpus gate.
+    // Keep debug AOT at Cranelift's optimized speed level so it matches the
+    // resident JIT's cross-tier performance contract.
     let mut flags = settings::builder();
     flags
-        .set("opt_level", "none")
+        .set("opt_level", "speed")
         .map_err(|error| format!("Cranelift debug flags: {error}"))?;
     flags
         .set("use_colocated_libcalls", "false")
@@ -134,9 +130,6 @@ pub(crate) fn try_resident(
     }
     super::types_meta::install_struct_redact(program);
     let plan = plan_mir_tiers(program, artifact);
-    if plan.whole_program_deopt || !plan.deopt.is_empty() {
-        return Err(plan);
-    }
     note_jit_execution();
     match catch_jit_panic("resident run", || {
         resident_run_fresh(program, None, artifact, release_devtools_policy)
@@ -163,9 +156,6 @@ pub(crate) fn try_resident_hot_swap(
     }
     super::types_meta::install_struct_redact(program);
     let plan = plan_mir_tiers(program, artifact);
-    if plan.whole_program_deopt || !plan.deopt.is_empty() {
-        return Err(plan);
-    }
     note_jit_execution();
     match catch_jit_panic("resident hot swap", || {
         resident_hot_swap(program, None, artifact, release_devtools_policy)
@@ -194,9 +184,6 @@ pub(crate) fn try_resident_restart(
     jet_foundation::Persist::shared_clear();
     super::types_meta::install_struct_redact(program);
     let plan = plan_mir_tiers(program, artifact);
-    if plan.whole_program_deopt || !plan.deopt.is_empty() {
-        return Err(plan);
-    }
     note_jit_execution();
     match catch_jit_panic("resident restart", || {
         resident_run_fresh(program, None, artifact, release_devtools_policy)
@@ -246,13 +233,6 @@ pub fn try_compile_program(
         if !cranelift_host_supported() {
             return Err("cranelift-jit host path unsupported on this architecture".to_string());
         }
-        let plan = plan_mir_tiers(program, artifact);
-        if plan.whole_program_deopt || !plan.deopt.is_empty() {
-            return Err(plan
-                .gap
-                .map(|gap| format!("{}: {}", gap.function_name, gap.reason))
-                .unwrap_or_else(|| "checked MIR is not fully applicable to Cranelift".into()));
-        }
         catch_jit_panic("compile", || {
             resident_teardown();
             RESIDENT_RUNTIME.with(|slot| {
@@ -273,13 +253,6 @@ pub fn run_resident_strict_for_test(
     crate::on_compiler_stack(|| {
         if !cranelift_host_supported() {
             return Err("cranelift-jit host path unsupported on this architecture".to_string());
-        }
-        let plan = plan_mir_tiers(program, artifact);
-        if plan.whole_program_deopt || !plan.deopt.is_empty() {
-            return Err(plan
-                .gap
-                .map(|gap| format!("{}: {}", gap.function_name, gap.reason))
-                .unwrap_or_else(|| "checked MIR is not fully applicable to Cranelift".into()));
         }
         try_resident(program, artifact, release_devtools_policy).map_err(|plan| {
             plan.gap
@@ -380,6 +353,7 @@ fn semantic_tag(operation: &MirSemanticOp) -> &'static str {
         MirSemanticOp::LayoutCompare { .. } => "LayoutCompare",
         MirSemanticOp::LayoutLiteral { .. } => "LayoutLiteral",
         MirSemanticOp::StructLiteral { .. } => "StructLiteral",
+        MirSemanticOp::ReflectOf { .. } => "ReflectOf",
         MirSemanticOp::SharedGuardSplit { .. } => "SharedGuardSplit",
         MirSemanticOp::SharedGuardWait { .. } => "SharedGuardWait",
         MirSemanticOp::ConditionNotify { .. } => "ConditionNotify",
@@ -393,6 +367,8 @@ fn semantic_tag(operation: &MirSemanticOp) -> &'static str {
         MirSemanticOp::HostBorrowCallback { .. } => "HostBorrowCallback",
         MirSemanticOp::TextPatternMatch { .. } => "TextPatternMatch",
         MirSemanticOp::BinaryPatternMatch { .. } => "BinaryPatternMatch",
+        MirSemanticOp::CursorTakePattern { .. } => "CursorTakePattern",
+        MirSemanticOp::ReaderTakePattern { .. } => "ReaderTakePattern",
         MirSemanticOp::NumericMethod { .. } => "NumericMethod",
         MirSemanticOp::NumericBinaryMethod { .. } => "NumericBinaryMethod",
         MirSemanticOp::OverflowOption { .. } => "OverflowOption",

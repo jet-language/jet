@@ -1,6 +1,6 @@
 // 67 — scope-exit cleanup via core.mem.scope.guard (D-DEFER1 option B).
 // Guard fires on every exit path — normal return, early return, and `?`
-// propagation. Multiple guards in the same scope drop LIFO.
+// propagation. Guards run once at scope exit in reverse declaration order.
 use core.mem.scope as scope
 
 #Error
@@ -11,6 +11,7 @@ enum Fail {
 fn with_guards(succeed: Bool) Int !Fail -> {
     _g1 :: scope.guard(() -> print("guard 1 runs"))
     _g2 :: scope.guard(() -> print("guard 2 runs"))
+    print("body")
     if succeed -> return Ok(42)
     return Err(Fail.Bad)
 }

@@ -61,7 +61,7 @@ pub use Session::ResidentDevSession;
 pub use WatchService::{
     any_stamp_changed, within_budget, ChangeKind, DevWatchEntry, HotReplaceTxn,
     InvalidationReceipt, PersistEntry, PersistOutcome, PersistStore, RootKind, SessionSnapshot,
-    WatchGraph, WatchSession, EDIT_TO_VISIBLE_BUDGET_MS, WATCH_COALESCE_MS,
+    WatchGraph, WatchSession, WatchWake, EDIT_TO_VISIBLE_BUDGET_MS, WATCH_COALESCE_MS,
     WATCH_POLL_INTERVAL_MS,
 };
 

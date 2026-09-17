@@ -61,7 +61,7 @@ const asObject = (value) => isObject(value) ? value : {};
 const asArray = (value) => Array.isArray(value) ? value : [];
 const finiteNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 const countValue = (value, fallback) => Number.isInteger(value) && value >= 0 ? value : fallback;
-const recognizedVerdict = (value) => ["win", "parity", "loss", "unmeasured", "not_applicable"].includes(value);
+const recognizedVerdict = (value) => ["win", "parity", "loss", "unmeasured", "not_applicable", "inconclusive"].includes(value);
 
 function normalizeReportPath(value) {
   if (value == null) return null;
@@ -403,6 +403,7 @@ function isMeasured(value) {
 
 function metricVerdict(peer, metric, mode, policyByMode) {
   const comparison = asObject(peer?.metric_comparisons?.[metric] ?? peer?.metrics?.[metric]);
+  if (peer?.verdict === "inconclusive" || comparison.verdict === "inconclusive") return "unmeasured";
   const tiers = asObject(comparison.tiers);
   const hasExplicitPolicy = Array.isArray(peer?.required_tiers) || isObject(peer?.tier_policy);
   const declared = asArray(peer?.required_tiers).length
@@ -417,7 +418,7 @@ function metricVerdict(peer, metric, mode, policyByMode) {
   const values = tierNames.map((tier) => {
     const item = tiers[tier];
     if (!item) return "unmeasured";
-    if (item.status === "not_applicable") return "not_applicable";
+    if (item.verdict === "inconclusive") return "unmeasured";
     if (isMeasured(item)) return ratioVerdict(item.ratio, peer.peer);
     return "unmeasured";
   });
@@ -790,6 +791,10 @@ function scopeOf(report) {
   return value;
 }
 
+function isFullMatrixReport(report) {
+  return scopeOf(report) === "full_matrix";
+}
+
 function normalizeInputReports(input, reportPaths = []) {
   return asArray(input).map((item, index) => {
     const report = isObject(item?.report) ? item.report : item;
@@ -801,6 +806,7 @@ function normalizeInputReports(input, reportPaths = []) {
       report,
       reportPath,
       stamp: reportStamp(report, reportPath),
+      scope: scopeOf(report),
       primaryMetricByMode: asObject(scoreboard.primary_metric_by_mode ?? reproducibility.primary_metric_by_mode),
       tierPolicyByMode: reproducibility.tier_policy_by_mode ?? {},
     };
@@ -835,15 +841,24 @@ function chooseMetricCandidate(candidates) {
 
 function mergeAxisParts(parts) {
   const byId = new Map();
-  for (const part of parts) {
-    for (const [id, axis] of Object.entries(part.report.axes ?? {})) {
-      const state = byId.get(id) ?? { latest: null, parts: [] };
-      if (!state.latest || compareStamps(state.latest.stamp, part.stamp) < 0) {
-        state.latest = { axis, stamp: part.stamp, projected: part.axes[id] };
-      }
-      state.parts.push({ axis, stamp: part.stamp, projected: part.axes[id] });
-      byId.set(id, state);
-    }
+  const axisIds = [...new Set(parts.flatMap((part) => Object.keys(asObject(part.report.axes))))];
+  for (const id of axisIds) {
+    const candidates = parts.filter((part) => Object.hasOwn(asObject(part.report.axes), id));
+    const fullCandidates = candidates.filter((part) => isFullMatrixReport(part.report));
+    const selectedParts = fullCandidates.length ? fullCandidates : candidates;
+    const latestPart = selectedParts.at(-1);
+    byId.set(id, {
+      latest: {
+        axis: latestPart.report.axes[id],
+        stamp: latestPart.stamp,
+        projected: latestPart.axes[id],
+      },
+      parts: selectedParts.map((part) => ({
+        axis: part.report.axes[id],
+        stamp: part.stamp,
+        projected: part.axes[id],
+      })),
+    });
   }
   return Object.fromEntries([...byId.entries()].map(([id, state]) => {
     const latest = state.latest?.projected ?? {};
@@ -884,7 +899,10 @@ function mergeAxisParts(parts) {
 }
 
 function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
-  const definitions = parts
+  const matchingParts = parts.filter((part) => part.cells.some((cell) => cell.source.id === cellId));
+  const fullParts = matchingParts.filter((part) => isFullMatrixReport(part.report));
+  const selectedParts = fullParts.length ? fullParts : matchingParts;
+  const definitions = selectedParts
     .flatMap((part) => part.cells.filter((cell) => cell.source.id === cellId))
     .sort((left, right) => compareStamps(left.stamp, right.stamp));
   const latest = definitions.at(-1)?.source ?? { id: cellId };
@@ -972,11 +990,14 @@ function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
   return cell;
 }
 
+
 export function mergeStatus(input, reportPaths = []) {
   const normalized = normalizeInputReports(input, reportPaths).map(projectedPart);
   if (!normalized.length) throw new Error("no gauntlet report files found");
-  const primaryMetricByMode = Object.assign({}, ...normalized.map((part) => part.primaryMetricByMode));
-  const tierPolicyByMode = Object.assign({}, ...normalized.map((part) => part.tierPolicyByMode));
+  const fullReports = normalized.filter((part) => isFullMatrixReport(part.report));
+  const policyParts = fullReports.length ? fullReports : normalized;
+  const primaryMetricByMode = Object.assign({}, ...policyParts.map((part) => part.primaryMetricByMode));
+  const tierPolicyByMode = Object.assign({}, ...policyParts.map((part) => part.tierPolicyByMode));
   const cellIds = [...new Set(normalized.flatMap((part) => part.cells.map((cell) => cell.source.id).filter(Boolean)))];
   const cells = cellIds
     .map((id) => mergeCellParts(normalized, id, primaryMetricByMode, tierPolicyByMode))
@@ -997,9 +1018,10 @@ export function mergeStatus(input, reportPaths = []) {
     metric_not_applicable: metricVerdicts.filter((value) => value === "not_applicable").length,
   };
   const latest = normalized.at(-1);
+  const authoritative = fullReports.at(-1) ?? latest;
   const runIds = [...new Set(normalized.map((part) => part.stamp.runId).filter(Boolean))];
   const files = [...new Set(normalized.map((part) => part.stamp.sourceFile).filter(Boolean))];
-  const latestReport = latest.report;
+  const latestReport = authoritative.report;
   const historicalReceipts = normalized.map((part) => ({
     run_id: part.stamp.runId,
     generated: part.stamp.generated,
@@ -1011,9 +1033,9 @@ export function mergeStatus(input, reportPaths = []) {
     contract: "gauntlet-status-v1",
     generated: latestReport.generated ?? null,
     source: {
-      report_path: latest.stamp.sourceFile,
+      report_path: authoritative.stamp.sourceFile,
       report_contract: latestReport.contract ?? null,
-      run_id: latest.stamp.runId,
+      run_id: authoritative.stamp.runId,
       run_ids: runIds,
       files,
       scope: "merge",
@@ -1104,6 +1126,10 @@ async function loadMatrix() {
 }
 
 async function writeStatusAndReport(status, matrix) {
+  if (status?.source?.scope === "partial_entry") {
+    console.log(`status\tskipped partial scope; ${path.relative(repoDir, statusPath).split(path.sep).join("/")} was not overwritten`);
+    return;
+  }
   const strictBlockers = applyStatusGate(status, matrix);
   await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
   console.log(`status\t${path.relative(repoDir, statusPath).split(path.sep).join("/")}`);

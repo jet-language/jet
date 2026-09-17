@@ -622,6 +622,13 @@ fn try_box_atomic_cell(
 }
 
 impl FfiAtomicCell {
+    /// JIT scalar arguments are borrowed raw words. Exact `Int` carries an
+    /// owning Foundation node behind that word, so give each atomic cell
+    /// operation its own owner before `JetAtomic` consumes a wire.
+    fn clone_int(value: i64) -> i64 {
+        // SAFETY: checked JIT `Int` arguments are borrowed exact words.
+        unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw()
+    }
     fn new(value: i64, kind_tag: i64) -> Option<Self> {
         match kind_tag {
             0 => Some(Self::Bool(atomic_prelude::JetAtomic::new(value != 0))),
@@ -653,7 +660,7 @@ impl FfiAtomicCell {
             Self::U32(cell) => cell.store(value as u32),
             Self::I64(cell) => cell.store(value),
             Self::U64(cell) => cell.store(value as u64),
-            Self::Int(cell) => cell.store(value),
+            Self::Int(cell) => cell.store(Self::clone_int(value)),
         }
     }
     fn add(&self, delta: i64) -> Option<i64> {
@@ -663,7 +670,7 @@ impl FfiAtomicCell {
             Self::U32(cell) => Some(cell.add(delta as u32) as i64),
             Self::I64(cell) => Some(cell.add(delta)),
             Self::U64(cell) => Some(cell.add(delta as u64) as i64),
-            Self::Int(cell) => Some(cell.add(delta)),
+            Self::Int(cell) => Some(cell.add(Self::clone_int(delta))),
         }
     }
     fn compare_exchange(&self, expected: i64, replacement: i64) -> bool {
@@ -673,7 +680,7 @@ impl FfiAtomicCell {
             Self::U32(cell) => cell.compare_exchange(expected as u32, replacement as u32),
             Self::I64(cell) => cell.compare_exchange(expected, replacement),
             Self::U64(cell) => cell.compare_exchange(expected as u64, replacement as u64),
-            Self::Int(cell) => cell.compare_exchange(expected, replacement),
+            Self::Int(cell) => cell.compare_exchange(Self::clone_int(expected), Self::clone_int(replacement)),
         }
     }
     fn publish(&self, value: i64) {
@@ -683,7 +690,7 @@ impl FfiAtomicCell {
             Self::U32(cell) => cell.publish(value as u32),
             Self::I64(cell) => cell.publish(value),
             Self::U64(cell) => cell.publish(value as u64),
-            Self::Int(cell) => cell.publish(value),
+            Self::Int(cell) => cell.publish(Self::clone_int(value)),
         }
     }
 
@@ -703,7 +710,7 @@ impl FfiAtomicCell {
 impl FfiAtomicCell {
     fn try_add(&self, delta: i64) -> Result<i64, jet_foundation::Outcome::AllocError> {
         match self {
-            Self::Int(cell) => cell.try_add(delta),
+            Self::Int(cell) => cell.try_add(Self::clone_int(delta)),
             _ => Err(jet_foundation::Outcome::jet_alloc_error(
                 0,
                 "Atomic.try_add",

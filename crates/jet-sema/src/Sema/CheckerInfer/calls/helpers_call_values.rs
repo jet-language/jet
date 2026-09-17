@@ -106,11 +106,18 @@ impl<'a> Checker<'a> {
         }) else {
             return None;
         };
-        // D-CALLBACK-ABI: function values expose the effective executable
-        // carrier at the call boundary. Local bindings retain source spelling
-        // for diagnostics, so normalize exactly once before binding arguments
-        // and projecting the result.
-        let callee_ty = callee_ty.with_effective_fn_returns();
+        // D-CALLBACK-ABI: ordinary function values expose the effective
+        // executable carrier at the call boundary. A collecting loop is an
+        // immediately evaluated list value, so keep its inferred source type;
+        // result loops retain the effective callback carrier.
+        let callee_ty = if matches!(
+            callee.as_ref(),
+            Expr::Lambda(lam) if lam.meta.collecting_loop
+        ) {
+            callee_ty
+        } else {
+            callee_ty.with_effective_fn_returns()
+        };
         let Type::Fn {
             params,
             ret,

@@ -171,7 +171,7 @@ pub fn jet_runtime_stop_fields<'a>(
 }
 
 pub fn jet_runtime_stop_has_context(code: &str) -> bool {
-    matches!(code, "E3001" | "E3012" | "E3014")
+    matches!(code, "E0128" | "E3001" | "E3012" | "E3014")
 }
 
 pub fn jet_runtime_stop_status(row: Option<JetRuntimeDiagnosticRow>) -> i32 {

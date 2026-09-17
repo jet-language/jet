@@ -1,44 +1,35 @@
-Error [E0106]: The name `Cache` is built in and can't be redefined
-  --> tests/ui/local_cell_crossing.jet:12:8
-    |
- 12 | struct Cache {
-    |        ^^^^^
- Why: `Cache` is provided by the language itself
- Fix: Choose a different name for this struct
-More: jet-lang.dev/e/E0106
-
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
-  --> tests/ui/local_cell_crossing.jet:2:20
+  --> tests/ui/local_cell_crossing.jet:4:20
     |
-  2 |     worker :: task {
+  4 |     worker :: task {
     |                    ^
  Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
  Fix: Create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
 More: jet-lang.dev/e/E1102
 
-Error [E0120]: `cell` was not moved here, so it cannot be taken with the move marker `^`
-  --> tests/ui/local_cell_crossing.jet:3:14
-    |
-  3 |         _ :: cell
-    |              ^^^^
- Why: This function has read access only and does not own the value
- Fix: Copy it instead: `_ :: ~cell`
-More: jet-lang.dev/e/E0120
-
 Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:9:17
+  --> tests/ui/local_cell_crossing.jet:11:17
     |
-  9 |     _ :: shared cell
+ 11 |     _ :: shared cell
     |                 ^^^^
  Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
  Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
 More: jet-lang.dev/e/E1102
 
-Error [E0119]: There's no type called `Cache`
-  --> tests/ui/local_cell_crossing.jet:16:31
+Error [E1102]: `LocalCache` cannot be stored in `Shared<T>`
+  --> tests/ui/local_cell_crossing.jet:19:17
     |
- 16 | fn cross_shared_nested(cache: Cache) {
-    |                               ^^^^^
- Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: Check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
+ 19 |     _ :: shared cache
+    |                 ^^^^^
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
+More: jet-lang.dev/e/E1102
+
+Error [E1102]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
+  --> tests/ui/local_cell_crossing.jet:25:18
+    |
+ 25 |     mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe
+ Fix: Capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state
+More: jet-lang.dev/e/E1102

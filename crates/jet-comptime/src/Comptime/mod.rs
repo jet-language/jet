@@ -155,7 +155,7 @@ pub use Methods::{
     apply_raylib_ambient_core_call, apply_repl_authorized_core_call,
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
-    sketch_add, with_world_rng_provider, HistoryCommandSchema,
+    set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
@@ -321,6 +321,22 @@ pub fn data_status_rows() -> Vec<(String, String, String, String, String, String
     Methods::data_status_rows()
 }
 pub use crate::AST::{CtReport, CtValue};
+/// Preserve the exact value of a source integer literal across the comptime
+/// boundary. The AST's `i64` field is only a lexer fast path; overflowed
+/// literals retain their source spelling in the fourth field.
+pub(crate) fn exact_integer_ct_value(value: i64, raw: Option<&str>) -> CtValue {
+    let Some(raw) = raw else {
+        return CtValue::Int(value);
+    };
+    let Ok(exact) = crate::Numeric::CtBigInt::from_literal(raw) else {
+        return CtValue::Int(value);
+    };
+    match exact.try_i64() {
+        Some(value) => CtValue::Int(value),
+        None => CtValue::BigInt(exact),
+    }
+}
+
 pub use Purity::{
     check_build_time_io, walk_calls, walk_expr_nodes_for_validation, walk_identifiers,
     walk_purity_expr, walk_purity_stmts, walk_purity_stmts_from,
@@ -870,6 +886,7 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
         extern_names,
         base_dir,
         globals,
+        &HashMap::new(),
         core_imports,
         gates,
         initial_impure_depth,
@@ -913,6 +930,13 @@ fn build_fact_expr(value: &CtValue, span: crate::Diagnostics::Span) -> Option<cr
     Some(match value {
         CtValue::Bool(value) => crate::AST::Expr::Bool(*value, span),
         CtValue::Int(value) => crate::AST::Expr::Int(*value, span, None, None),
+        CtValue::BigInt(value) => crate::AST::Expr::Int(
+            0,
+            span,
+            None,
+            Some(value.to_string_rep()),
+        ),
+
         CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false, None),
         CtValue::Char(value) => crate::AST::Expr::Char(*value, span),
         CtValue::Str(value) => {
@@ -1099,6 +1123,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         extern_names,
         base_dir,
         globals,
+        &HashMap::new(),
         core_imports,
         gates,
         initial_impure_depth,
@@ -1117,6 +1142,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     extern_names: &HashSet<String>,
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
+    binding_types: &HashMap<String, crate::AST::Type>,
     core_imports: &HashMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
@@ -1138,7 +1164,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
             data_pipeline: &mut data_pipeline,
             expr: init,
             funcs,
-            binding_types: &HashMap::new(),
+            binding_types,
             error_conversions: &[],
             method_traits: empty_method_traits(),
             methods,
@@ -1864,15 +1890,13 @@ fn insert_item_method_ref<'a>(
     }
 }
 
-/// Evaluate with sema-checked callable bodies and the module's nominal context.
-/// Item declarations supply types; executable methods come only from `funcs`.
-#[allow(clippy::too_many_arguments)]
 pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
     init: &crate::AST::Expr,
     funcs: &'a HashMap<String, Func>,
     extern_names: &HashSet<String>,
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
+    binding_types: &HashMap<String, crate::AST::Type>,
     core_imports: &HashMap<String, String>,
     gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
@@ -1976,6 +2000,7 @@ pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
         extern_names,
         base_dir,
         globals,
+        binding_types,
         core_imports,
         gates,
         initial_impure_depth,
@@ -2130,7 +2155,9 @@ fn template_literal_value(expr: &crate::AST::Expr) -> Option<CtValue> {
             value: Some(value), ..
         } => Some(value.clone()),
         crate::AST::Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
-        crate::AST::Expr::Int(value, _, _, _) => Some(CtValue::Int(*value)),
+        crate::AST::Expr::Int(value, _, _, raw) => {
+            Some(exact_integer_ct_value(*value, raw.as_deref()))
+        }
         crate::AST::Expr::Float(value, _, is_f32, _) => Some(CtValue::Float(if *is_f32 {
             crate::AST::CtFloat::F32(*value as f32)
         } else {
@@ -3445,6 +3472,7 @@ pub fn evaluate_checked_text_check<'a>(
         &HashSet::new(),
         base_dir,
         globals,
+        &HashMap::new(),
         core_imports,
         jet_foundation::Policy::GateSet::default(),
         0,
@@ -3509,6 +3537,7 @@ pub fn evaluate_checked_text_hole<'a>(
         &HashSet::new(),
         base_dir,
         globals,
+        &HashMap::new(),
         core_imports,
         jet_foundation::Policy::GateSet::default(),
         0,

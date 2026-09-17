@@ -1,23 +1,12 @@
 ---
 name: jet-router
-description: >-
-  Route a Jet request to one primary audit, research, planning, cleanup, or
-  verify skill. Use when the skill is unclear, or for a pulse or health check.
+description: Choose a Jet method when the requested outcome does not clearly identify one. Use for routing questions or an ambiguous health check.
 ---
 
 # Jet Router
 
-## Contract
+Read the [operational routing table](../JetSkillsRouter.md) and choose the method that matches the user's result. Do not load the source/disposition inventory during ordinary routing.
 
-- **Requested outcome:** One primary Jet skill and outcome for the request.
-- **Supplied inputs:** The user's wording, relevant existing context, and the routing index.
-- **Allowed child result:** The selected primary may return only bounded evidence, records, reviews, or support named by its own contract. Child work cannot become another primary or open an undeclared agenda.
-- **Completion owner:** The selected primary owns completion; Tower owns durable board state when applicable.
-- **Return point:** Every child handoff returns to the selected primary before it records its result.
-- **Stopping condition:** Stop when the primary's completion criterion is met. Passive references are not extra routes, and host metadata is not runtime proof.
+Honor explicit scope and output boundaries. A report is not implementation authorization; HTML needs an explicit HTML or interactive-page request. A clear status request goes directly to `pulse`.
 
-Choose one **primary skill** from `.agents/skills/JetSkillsRouter.md`. The primary
-owns the requested outcome. It may use only the bounded handoffs or passive
-references that its contract names; every child result returns to that primary.
-Keep composition acyclic, refuse silent scope expansion, and do not jump from
-planning to implementation.
+The selected method owns completion. Bounded support returns to that owner without widening the task or starting a second agenda. Route until the requested method is identified, then follow its observable completion condition; do not stop an implementation task merely because routing is finished.

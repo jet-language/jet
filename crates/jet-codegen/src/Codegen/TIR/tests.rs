@@ -1513,7 +1513,7 @@ fn covers_fallible_return_and_try() {
 
 #[test]
 fn compiler_owned_default_err_is_a_struct_row() {
-    let declarations = super::lower_declarations_from_items(&[], "");
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(&[], "");
     let err = declarations
         .type_defs
         .iter()
@@ -1528,6 +1528,37 @@ fn compiler_owned_default_err_is_a_struct_row() {
         assert!(kind.contains(field), "default Err missing field {field} in {kind}");
     }
 }
+#[test]
+fn compiler_owned_core_ui_registry_has_nominal_rows() {
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(&[], "");
+    for entry in jet_foundation::CoreModuleExports::core_modules()
+        .iter()
+        .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
+    {
+        for &(name, _) in entry.type_exports {
+            if crate::Codegen::core_ui_rust_type_name(name).is_some() {
+                assert!(
+                    declarations.type_defs.iter().any(|row| row.key == name),
+                    "Core UI type {name} must have a canonical TIR declaration row"
+                );
+            }
+        }
+    }
+
+    let shortcut = declarations
+        .type_defs
+        .iter()
+        .find(|row| row.key == "UiShortcut")
+        .expect("UiShortcut must have a canonical declaration row");
+    let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &shortcut.kind else {
+        panic!("UiShortcut must lower as a struct row");
+    };
+    assert_eq!(
+        fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+        vec!["key", "modifiers"]
+    );
+}
+
 
 #[test]
 fn mir_lowers_default_err_return() {

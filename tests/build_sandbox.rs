@@ -1338,6 +1338,7 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
     let source_link = base.join("link");
     std::os::unix::fs::symlink(&host_secret, &source_link).unwrap();
     let agent_fill_path = format!("/tmp/jet-agent-hostile-fill-{}", std::process::id());
+    let base_literal = jet_string_literal(&base.to_string_lossy());
 
     let mut network_thread = None;
     let commands: Vec<(&str, String)> = cases
@@ -1402,9 +1403,10 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
     );
     for (index, (case_id, command)) in commands.iter().enumerate() {
         source.push_str(&format!(
-            "    print({})\n    result{index} :: process.cmd([\"bash\", \"-c\", {}]).under(policy).run_checked()\n    if result{index} == {{\n        .Ok(value) -> print(value.output)\n        .Err(_) -> print(\"unsupported\")\n    }}\n",
+            "    print({})\n    if process.cmd([\"bash\", \"-c\", {}]).cwd({}).under(policy).run_checked() == {{\n        .Ok(value) -> print(value.output)\n        .Err(_) -> print(\"unsupported\")\n    }}\n",
             jet_string_literal(case_id),
             jet_string_literal(command),
+            &base_literal,
         ));
     }
     source.push_str("}\n");

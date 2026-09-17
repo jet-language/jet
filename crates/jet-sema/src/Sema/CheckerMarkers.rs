@@ -215,6 +215,13 @@ fn validate_rule_arguments(
             crate::Policy::RuleArgType::String => {
                 matches!(observation.ty, Some(crate::AST::Type::String))
             }
+            crate::Policy::RuleArgType::Path => {
+                matches!(
+                    &observation.ty,
+                    Some(crate::AST::Type::Named(name))
+                        if name == crate::Syntax::TYPE_PATH
+                )
+            }
             crate::Policy::RuleArgType::Ident => matches!(
                 argument,
                 crate::AST::Expr::Ident(..)
@@ -230,8 +237,11 @@ fn validate_rule_arguments(
             crate::Policy::RuleArgType::DurationOrString => {
                 matches!(argument, crate::AST::Expr::UnitLit { .. })
                     || matches!(observation.ty, Some(crate::AST::Type::String))
-                    || matches!(observation.ty, Some(crate::AST::Type::Named(ref name))
-                        if name == crate::Syntax::DURATION_TYPE)
+                    || matches!(
+                        &observation.ty,
+                        Some(crate::AST::Type::Named(name))
+                            if name == crate::Syntax::DURATION_TYPE
+                    )
             }
             crate::Policy::RuleArgType::EffectRoots => {
                 matches!(argument, crate::AST::Expr::ListLit(..))
@@ -552,6 +562,11 @@ pub(crate) fn resolve_static_rule_products(
                 crate::Comptime::CtValue::Str(_) => Some(crate::AST::Type::String),
                 crate::Comptime::CtValue::Bool(_) => Some(crate::AST::Type::Bool),
                 crate::Comptime::CtValue::Int(_) => Some(crate::AST::Type::Int),
+                crate::Comptime::CtValue::Struct { type_name, .. }
+                    if type_name == crate::Syntax::TYPE_PATH =>
+                {
+                    Some(crate::AST::Type::Named(crate::Syntax::TYPE_PATH.to_string()))
+                }
                 _ => None,
             };
             RuleArgumentObservation {
@@ -566,8 +581,21 @@ pub(crate) fn resolve_static_rule_products(
                 continue;
             }
         };
-        if let Some(crate::Comptime::CtValue::Str(text)) = arguments.constant_for_source(0) {
-            static_strings.push((marker.name.clone(), marker.span, text.clone()));
+        let static_text = arguments.constant_for_source(0).and_then(|value| match value {
+            crate::Comptime::CtValue::Str(text) => Some(text.clone()),
+            crate::Comptime::CtValue::Struct {
+                type_name,
+                fields,
+            } if marker.name == Syntax::MARKER_HTML && type_name == Syntax::TYPE_PATH => fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("inner", crate::Comptime::CtValue::Str(text)) => Some(text.clone()),
+                    _ => None,
+                }),
+            _ => None,
+        });
+        if let Some(text) = static_text {
+            static_strings.push((marker.name.clone(), marker.span, text));
         }
         validated.insert(marker.name_span.start, arguments);
     }

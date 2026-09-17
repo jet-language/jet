@@ -191,7 +191,139 @@ pub fn run_bundle_at_stage(
     (hooks().run_bundle_at_stage)(bundle, sink, gates, stage)
 }
 
+/// Evaluate the pure projection subset directly on values already owned by a
+/// comptime scope.  Template expansion reaches this bridge before sema has
+/// rewritten reflected field reads into `ComptimeName` nodes, so a nested
+/// `@fact`/index/collection-length path must still use the same CtValue
+/// projection semantics without forcing a synthetic MIR method dispatch.
+fn static_ct_value(
+    expr: &Expr,
+    globals: &HashMap<String, CtValue>,
+    mutated: Option<&HashMap<String, CtValue>>,
+) -> Option<CtValue> {
+    match expr {
+        Expr::Int(value, _, _, raw) => Some(crate::Comptime::exact_integer_ct_value(
+            *value,
+            raw.as_deref(),
+        )),
+        Expr::Bool(value, _) => Some(CtValue::Bool(*value)),
+        Expr::Char(value, _) => Some(CtValue::Char(*value)),
+        Expr::Str(parts, _) => parts
+            .iter()
+            .try_fold(String::new(), |mut value, part| match part {
+                crate::AST::StrPart::Lit(text) => {
+                    value.push_str(text);
+                    Some(value)
+                }
+                crate::AST::StrPart::Interp(..) => None,
+            })
+            .map(CtValue::Str),
+        Expr::TypedLit {
+            head: Some(Type::Named(type_name)),
+            body: crate::AST::TypedLitBody::Value(inner),
+            ..
+        } if type_name == jet_foundation::Syntax::TYPE_PATH => {
+            let CtValue::Str(text) = static_ct_value(inner, globals, mutated)? else {
+                return None;
+            };
+            Some(CtValue::Struct {
+                type_name: type_name.clone(),
+                fields: vec![("inner".to_string(), CtValue::Str(text))],
+            })
+        }
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| static_ct_value(value, globals, mutated))
+            .collect::<Option<Vec<_>>>()
+            .map(CtValue::List),
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
+            static_ct_value(inner, globals, mutated)
+        }
+        Expr::Ident(name, _) => mutated
+            .and_then(|values| values.get(name))
+            .or_else(|| globals.get(name))
+            .cloned(),
+        Expr::ComptimeName {
+            value: Some(value),
+            ..
+        } => Some(value.clone()),
+        Expr::ComptimeName { name, value: None, .. } => mutated
+            .and_then(|values| values.get(name))
+            .or_else(|| globals.get(name))
+            .cloned(),
+        Expr::Field(base, member, _) => {
+            let value = static_ct_value(base, globals, mutated)?;
+            if let Some(read) = jet_foundation::Registry::fact_read(member) {
+                return crate::Comptime::reflected_fact_field(&value, read).cloned();
+            }
+            let CtValue::Struct { fields, .. } = value else {
+                return None;
+            };
+            fields
+                .iter()
+                .find(|(field, _)| field == member)
+                .map(|(_, value)| value.clone())
+        }
+        Expr::Index { base, index, .. } => {
+            let value = static_ct_value(base, globals, mutated)?;
+            let index = match static_ct_value(index, globals, mutated)? {
+                CtValue::Int(index) => usize::try_from(index).ok()?,
+                _ => return None,
+            };
+            match value {
+                CtValue::List(values) => values.get(index).cloned(),
+                CtValue::Bytes(values) => values
+                    .get(index)
+                    .copied()
+                    .map(|value| CtValue::Int(i64::from(value))),
+                _ => None,
+            }
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == "has_marker" => {
+            let value = static_ct_value(receiver, globals, mutated)?;
+            let args = args
+                .iter()
+                .map(|arg| static_ct_value(&arg.expr, globals, mutated))
+                .collect::<Option<Vec<_>>>()?;
+            crate::Comptime::Builtins::apply_method(
+                &value,
+                method,
+                args,
+                expr.span(),
+            )
+            .ok()
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == "len" && args.is_empty() => {
+            let value = static_ct_value(receiver, globals, mutated)?;
+            let len = match value {
+                CtValue::List(values) => values.len(),
+                CtValue::Bytes(values) => values.len(),
+                CtValue::Map(values) => values.len(),
+                CtValue::Str(value) => value.chars().count(),
+                _ => return None,
+            };
+            i64::try_from(len).ok().map(CtValue::Int)
+        }
+        _ => None,
+    }
+}
+
+/// Run one expression through the canonical evaluator, retaining the pure
+/// reflected CtValue projection path for template-time aggregate reads.
 pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {
+    if let Some(value) = static_ct_value(req.expr, req.globals, req.mutated.as_deref()) {
+        return Ok(value);
+    }
     (hooks().eval_expr)(req)
 }
 

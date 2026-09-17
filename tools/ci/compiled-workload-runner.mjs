@@ -12,15 +12,47 @@ import { pathToFileURL } from "node:url";
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const corpus = path.join(root, "tests", "compiled_workloads");
 const contractScript = path.join(root, "tools", "ci", "compiled-workload-gate.sh");
+const MEASUREMENT_REGISTRY = Object.freeze({
+  network: "network=disabled",
+  rss: Object.freeze({
+    linux: Object.freeze({
+      collector: "proc-status",
+      fields: Object.freeze(["VmHWM", "VmRSS"]),
+      unit: "bytes",
+    }),
+    macos: Object.freeze({
+      collector: "ps",
+      command: "ps",
+      args: Object.freeze(["-axo", "pid=,ppid=,rss="]),
+      unit: "bytes",
+    }),
+    windows: Object.freeze({
+      collector: "powershell",
+      shells: Object.freeze(["pwsh", "powershell"]),
+      processProperty: "PeakWorkingSet64",
+      unit: "bytes",
+    }),
+  }),
+});
 let platform = process.env.JET_COMPILED_WORKLOAD_PLATFORM || "";
 let reportDir = "";
+let printMeasurementRegistry = false;
 for (let i = 2; i < process.argv.length; i += 1) {
   if (process.argv[i] === "--platform") platform = process.argv[++i] || "";
   else if (process.argv[i] === "--report-dir") reportDir = process.argv[++i] || "";
+  else if (process.argv[i] === "--measurement-registry") printMeasurementRegistry = true;
   else {
     console.error("usage: compiled-workload-runner.mjs --platform linux|macos|windows --report-dir DIR");
     process.exit(64);
   }
+}
+if (printMeasurementRegistry) {
+  if (process.argv.length !== 3) {
+    console.error("usage: compiled-workload-runner.mjs --measurement-registry");
+    process.exit(64);
+  }
+  process.stdout.write(JSON.stringify(MEASUREMENT_REGISTRY) + "\n");
+  process.exit(0);
 }
 if (!["linux", "macos", "windows"].includes(platform) || !reportDir) {
   console.error("usage: compiled-workload-runner.mjs --platform linux|macos|windows --report-dir DIR");
@@ -330,6 +362,7 @@ function nowNs() {
 const MEASURE_CHILD = String.raw`
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+const measurementRegistry = ${JSON.stringify(MEASUREMENT_REGISTRY)};
 const command = JSON.parse(process.env.JET_MEASURE_COMMAND);
 const timeoutMs = Number(process.env.JET_MEASURE_TIMEOUT_MS);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -340,7 +373,9 @@ const started = process.hrtime.bigint();
 let peak = 0;
 let collectorError = "";
 function rssFromStatus(text) {
-  const values = [...text.matchAll(/^Vm(?:HWM|RSS):\s+([0-9]+)\s+kB$/gm)]
+  const values = measurementRegistry.rss.linux.fields
+    .map(field => text.match(new RegExp("^" + field + ":\\s+([0-9]+)\\s+kB$", "m")))
+    .filter(Boolean)
     .map(match => Number(match[1]) * 1024);
   return values.length ? Math.max(...values) : null;
 }
@@ -384,7 +419,8 @@ function linuxRss(rootPid) {
   return treeRss(rootPid, processes);
 }
 function macosRss(rootPid) {
-  const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8" });
+  const macos = measurementRegistry.rss.macos;
+  const result = spawnSync(macos.command, macos.args, { encoding: "utf8" });
   if (result.error || result.status !== 0) return null;
   const processes = new Map();
   for (const line of String(result.stdout).split(/\r?\n/)) {
@@ -400,14 +436,15 @@ function macosRss(rootPid) {
   return treeRss(rootPid, processes);
 }
 function windowsRss(rootPid) {
+  const windows = measurementRegistry.rss.windows;
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Get-CimInstance Win32_Process | ForEach-Object {",
     "  $process = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue",
-    "  if ($null -ne $process) { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $process.WorkingSet64 }",
+    "  if ($null -ne $process) { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $process." + windows.processProperty + " }",
     "}",
   ].join("; ");
-  for (const shell of ["pwsh", "powershell"]) {
+  for (const shell of windows.shells) {
     const result = spawnSync(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
     if (result.error || result.status !== 0) continue;
     const processes = new Map();
@@ -860,8 +897,8 @@ const candidateCommit = candidateCommitResult.stdout.trim();
 if (!/^[0-9a-f]{40}$/.test(candidateCommit)) fail("candidate commit is not immutable");
 const taskEnvironment = new Map(manifest.map(row => [
   row.task_id,
-  "os=" + platform + ";ci=compiled-workload;locale=C;network=" +
-    (row.authority.includes("network=loopback-only") ? "loopback-only" : "disabled"),
+  "os=" + platform + ";ci=compiled-workload;locale=C;" +
+    (row.authority.includes("network=loopback-only") ? "network=loopback-only" : MEASUREMENT_REGISTRY.network),
 ]));
 const environment = "os=" + platform + ";ci=compiled-workload;locale=C;network=per-task-declared";
 const machine = os.platform() + "-" + os.arch() + "-" + cleanText(os.release()).replaceAll(" ", "_");

@@ -2209,6 +2209,12 @@ pub fn service_show_value_runtime(value: &MirRuntimeValue) -> Option<String> {
         MirRuntimeValue::Enum { type_name, .. } if type_name == "ServiceDelivery" => {
             Some(runtime_to_delivery(value, span).ok()?.jet_show())
         }
+        MirRuntimeValue::Enum { type_name, .. } if type_name == "TaskOutcome" => {
+            Some(runtime_to_task_outcome(value, span).ok()?.jet_show())
+        }
+        MirRuntimeValue::Enum { type_name, .. } if type_name == "TaskStatus" => {
+            Some(runtime_to_task_status(value, span).ok()?.jet_show())
+        }
         MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceStateStore" => {
             Some(runtime_to_state_store(value, span).ok()?.jet_show())
         }

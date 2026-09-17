@@ -11,9 +11,11 @@ const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoDir = path.resolve(harnessDir, "../..");
 const AXIS_OUTPUT_LIMIT = 4_000;
 const AXIS_HTTP_BODY_LIMIT = 4 * 1024 * 1024;
+const AXIS_JET_APP_BODY_LIMIT = 5 * 1024 * 1024;
 const AXIS_READY_SETTLE_MS = 150;
 const PROCESS_TERM_TIMEOUT_MS = 5_000;
 const PROCESS_KILL_TIMEOUT_MS = 1_000;
+
 
 function monotonicNow() {
   return performance.now();
@@ -253,7 +255,7 @@ function childFailure(child) {
   return null;
 }
 
-function httpProbe(port, probe, timeoutMs = 5_000) {
+function httpProbe(port, probe, timeoutMs = 5_000, bodyLimit = AXIS_HTTP_BODY_LIMIT) {
   return new Promise((resolve) => {
     const started = monotonicNow();
     const chunks = [];
@@ -275,8 +277,8 @@ function httpProbe(port, probe, timeoutMs = 5_000) {
     }, (response) => {
       response.on("data", (chunk) => {
         bytes += chunk.length;
-        if (bytes > AXIS_HTTP_BODY_LIMIT) {
-          finish({ ok: false, error: `HTTP probe body exceeded ${AXIS_HTTP_BODY_LIMIT} bytes`, fatal: true });
+        if (bytes > bodyLimit) {
+          finish({ ok: false, error: `HTTP probe body exceeded ${bodyLimit} bytes`, fatal: true });
           request.destroy();
           return;
         }
@@ -294,6 +296,11 @@ function httpProbe(port, probe, timeoutMs = 5_000) {
     if (body !== undefined) request.write(body);
     request.end();
   });
+}
+function axisOutputBodyLimit(runner, output) {
+  return runner?.id === "jet-dev" && output?.path === "/app.js"
+    ? AXIS_JET_APP_BODY_LIMIT
+    : AXIS_HTTP_BODY_LIMIT;
 }
 
 async function waitForAxisReady(child, port, readiness, timeoutMs, pollIntervalMs, previousValue = null) {
@@ -359,7 +366,7 @@ function markerMatches(body, expectedMarker, staleMarker) {
     !body.includes(expectedMarker)) return false;
   return typeof staleMarker !== "string" || staleMarker.length === 0 || !body.includes(staleMarker);
 }
-async function waitForAxisOutput(child, port, output, expectedMarker, staleMarker, timeoutMs, pollIntervalMs) {
+async function waitForAxisOutput(child, port, output, expectedMarker, staleMarker, timeoutMs, pollIntervalMs, bodyLimit = AXIS_HTTP_BODY_LIMIT) {
   const started = monotonicNow();
   const expectedStatus = output.status ?? 200;
   let lastReason = `output did not acknowledge ${JSON.stringify(expectedMarker)}`;
@@ -367,7 +374,7 @@ async function waitForAxisOutput(child, port, output, expectedMarker, staleMarke
     const failure = childFailure(child);
     if (failure) throw new Error(failure);
     const remaining = Math.max(1, timeoutMs - (monotonicNow() - started));
-    const result = await httpProbe(port, { path: output.path }, Math.min(1_000, remaining));
+    const result = await httpProbe(port, { path: output.path }, Math.min(1_000, remaining), bodyLimit);
     if (result.ok && result.status === expectedStatus && markerMatches(result.body, expectedMarker, staleMarker)) {
       const observedAt = monotonicNow();
       return {
@@ -392,12 +399,11 @@ async function waitForAxisOutput(child, port, output, expectedMarker, staleMarke
   }
   throw new Error(`${output.path} did not acknowledge ${JSON.stringify(expectedMarker)} within ${timeoutMs}ms: ${lastReason}`);
 }
-
-async function waitForAxisState({ child, port, readiness, output, expectedMarker, staleMarker, timeoutMs, pollIntervalMs, previousValue = null }) {
+async function waitForAxisState({ child, port, readiness, output, expectedMarker, staleMarker, timeoutMs, pollIntervalMs, previousValue = null, bodyLimit = AXIS_HTTP_BODY_LIMIT }) {
   const started = monotonicNow();
   const ready = await waitForAxisReady(child, port, readiness, timeoutMs, pollIntervalMs, previousValue);
   const remaining = Math.max(1, timeoutMs - (monotonicNow() - started));
-  const acknowledged = await waitForAxisOutput(child, port, output, expectedMarker, staleMarker, remaining, pollIntervalMs);
+  const acknowledged = await waitForAxisOutput(child, port, output, expectedMarker, staleMarker, remaining, pollIntervalMs, bodyLimit);
   return { ready, output: acknowledged, observed_at_ms: acknowledged.observed_at_ms };
 }
 async function waitForAxisReadyStable(child, port, readiness, timeoutMs, pollIntervalMs, settleMs = AXIS_READY_SETTLE_MS) {
@@ -600,6 +606,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
     sampleFailure(sample, error);
     return sample;
   }
+  const outputBodyLimit = axisOutputBodyLimit(runner, output);
   let child = null;
   try {
     await normalizeAxisMarker(editPath, budget.edit_from, budget.edit_to);
@@ -614,6 +621,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
       staleMarker: budget.edit_to,
       timeoutMs: budget.startup_timeout_ms,
       pollIntervalMs: budget.poll_interval_ms,
+      bodyLimit: outputBodyLimit,
     });
     await waitForAxisReadyStable(child, port, runner.readiness, budget.startup_timeout_ms, budget.poll_interval_ms);
     sample.readiness = {
@@ -637,6 +645,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
         timeoutMs: budget.reload_timeout_ms,
         pollIntervalMs: budget.poll_interval_ms,
         previousValue: previous,
+        bodyLimit: outputBodyLimit,
       });
       warmup.push({ edit: warmedAfterEdit, readiness: warmedAfter.ready.value, output: warmedAfter.output.marker });
       await waitForAxisReadyStable(child, port, runner.readiness, budget.reload_timeout_ms, budget.poll_interval_ms);
@@ -652,6 +661,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
         timeoutMs: budget.reload_timeout_ms,
         pollIntervalMs: budget.poll_interval_ms,
         previousValue: previous,
+        bodyLimit: outputBodyLimit,
       });
       warmup.push({ edit: warmedBeforeEdit, readiness: warmedBefore.ready.value, output: warmedBefore.output.marker });
       await waitForAxisReadyStable(child, port, runner.readiness, budget.reload_timeout_ms, budget.poll_interval_ms);
@@ -672,6 +682,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
       timeoutMs: budget.reload_timeout_ms,
       pollIntervalMs: budget.poll_interval_ms,
       previousValue: previous,
+      bodyLimit: outputBodyLimit,
     });
     sample.edit = { ...edit, started_at_ms: editStartedAt, written_at_ms: editWrittenAt };
     sample.readiness.after = observed.ready.value;
@@ -874,7 +885,9 @@ export async function runLiveReloadAxis(axis, runDir, jetBin, options = {}) {
 export const liveReloadInternals = {
   applyAxisEdit,
   axisCommand,
+  axisOutputBodyLimit,
   cleanupProcessGroup,
+  httpProbe,
   markerMatches,
   normalizeAxisMarker,
   outputSpec,

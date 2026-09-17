@@ -11,7 +11,6 @@ use std::sync::{Arc as JetLiveArc, Mutex as JetLiveMutex, OnceLock as JetLiveOnc
 
 const JET_LIVE_MAX_QUERIES: usize = 1024;
 const JET_LIVE_MAX_WS_SINKS: usize = 1024;
-const JET_LIVE_MAX_OBSERVERS: usize = 1024;
 const JET_LIVE_MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 const JET_LIVE_MAX_TRANSPORT_EVENTS: usize = 2048;
 const JET_LIVE_MAX_TRANSPORT_EVENT: usize = 1024 * 1024;
@@ -126,7 +125,6 @@ struct JetLiveRecord {
     lifecycle: JetLiveLifecycle,
     rerun: Option<JetLiveRerun>,
     sink: Option<JetLiveSink>,
-    sinks: Vec<JetLiveSink>,
 }
 
 #[derive(Default)]
@@ -263,18 +261,14 @@ pub(crate) fn jet_app_live_keyed(
             record.rerun = rerun;
         }
         if let Some(sink) = sink {
-            if record.sinks.len() < JET_LIVE_MAX_OBSERVERS {
-                record.sinks.push(sink.clone());
-            }
-            if record.sink.is_none() {
-                record.sink = Some(sink);
-            }
+            record.sink = Some(sink);
         }
         return jet_live_query(id, record);
     }
     let Some(id) = state.next_id.checked_add(1) else {
         return jet_live_error_query(0, footprint, "live query id space exhausted");
     };
+    state.next_id = id;
     if state.queries.len() >= JET_LIVE_MAX_QUERIES {
         if let Some(oldest) = state.queries.keys().next().copied() {
             state.queries.remove(&oldest);
@@ -282,7 +276,6 @@ pub(crate) fn jet_app_live_keyed(
         }
     }
     let now = jet_live_now_ms();
-    let sinks = sink.clone().into_iter().collect();
     let record = JetLiveRecord {
         key,
         footprint,
@@ -290,7 +283,6 @@ pub(crate) fn jet_app_live_keyed(
         lifecycle: JetLiveLifecycle::active(now),
         rerun,
         sink,
-        sinks,
     };
     let query = jet_live_query(id, &record);
     state.queries.insert(id, record);
@@ -371,9 +363,6 @@ fn jet_app_live_bind_sink(query: &JetLiveQuery, sink: JetLiveSink) -> JetLiveQue
     if !record.lifecycle.active {
         return jet_live_error_query(query.id, record.footprint.clone(), "live query is closed");
     }
-    if record.sinks.len() < JET_LIVE_MAX_OBSERVERS {
-        record.sinks.push(sink.clone());
-    }
     record.sink = Some(sink);
     jet_live_query(query.id, record)
 }
@@ -448,7 +437,7 @@ fn jet_app_live_observers(query: &JetLiveQuery) -> i64 {
     state
         .queries
         .get(&query.id)
-        .map(|record| record.sinks.len().min(i64::MAX as usize) as i64)
+        .map(|record| if record.sink.is_some() { 1 } else { 0 })
         .unwrap_or(0)
 }
 
@@ -709,7 +698,7 @@ fn jet_live_run_refreshes(mut reruns: Vec<(u64, u64, JetLiveRerun)>) {
         }
         runs += 1;
         let result = rerun();
-        let mut delivery: Option<(JetLiveQuery, Vec<JetLiveSink>, String)> = None;
+        let mut delivery: Option<(JetLiveQuery, Option<JetLiveSink>, String)> = None;
         let mut next = None;
         if let Ok(mut state) = jet_live_registry().lock() {
             let schedule_latest = if let Some(query) = state.queries.get_mut(&id) {
@@ -722,7 +711,7 @@ fn jet_live_run_refreshes(mut reruns: Vec<(u64, u64, JetLiveRerun)>) {
                                 let _ = query.lifecycle.publish(generation, jet_live_now_ms());
                                 delivery = Some((
                                     jet_live_query(id, query),
-                                    query.sinks.clone(),
+                                    query.sink.clone(),
                                     value,
                                 ));
                             } else {
@@ -760,8 +749,8 @@ fn jet_live_run_refreshes(mut reruns: Vec<(u64, u64, JetLiveRerun)>) {
                 next = pending.pop();
             }
         }
-        if let Some((updated, sinks, value)) = delivery {
-            for sink in sinks {
+        if let Some((updated, sink, value)) = delivery {
+            if let Some(sink) = sink {
                 sink(value.clone());
             }
             jet_live_publish_ws(
@@ -864,10 +853,10 @@ fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
     let generation = updated.lifecycle.generation;
     let _ = updated.lifecycle.publish(generation, jet_live_now_ms());
     updated.lifecycle.invalidation_cause = "signal-push".to_string();
-    let sinks = updated.sinks.clone();
+    let sink = updated.sink.clone();
     let result = jet_live_query(query.id, updated);
     drop(state);
-    for sink in sinks {
+    if let Some(sink) = sink {
         sink(payload.clone());
     }
     jet_live_publish_ws(
@@ -917,7 +906,7 @@ fn jet_app_live_show(query: &JetLiveQuery) -> String {
         stored.lifecycle.active,
         stored.lifecycle.dirty,
         stored.lifecycle.refreshing,
-        stored.sinks.len(),
+        if stored.sink.is_some() { 1 } else { 0 },
         jet_live_age_ms(stored.lifecycle.fresh_at_ms),
         stored.lifecycle.invalidation_cause,
         stored.value.len(),

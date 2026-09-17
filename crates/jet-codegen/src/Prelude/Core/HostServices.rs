@@ -603,7 +603,7 @@ mod jet_harfbuzz {
         #[link_name = "jet_hb_buffer_guess_segment_properties"]
         fn buffer_guess_segment_properties(buffer: *mut c_void);
         #[link_name = "jet_hb_shape"]
-        fn shape(
+        fn hb_shape(
             font: *mut c_void,
             buffer: *mut c_void,
             features: *const c_void,
@@ -718,7 +718,7 @@ mod jet_harfbuzz {
                 -1,
             );
             buffer_guess_segment_properties(resources.buffer);
-            shape(resources.font, resources.buffer, std::ptr::null(), 0);
+            hb_shape(resources.font, resources.buffer, std::ptr::null(), 0);
         }
 
         let length = unsafe { buffer_get_length(resources.buffer) };

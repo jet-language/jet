@@ -2994,6 +2994,20 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         binding_ty.is_some_and(|ty| cx.type_contains_boxed_edge(ty));
                     let skip_ct_typed_literal_bake =
                         binding_ty.is_some_and(|ty| cx.type_contains_typed_literal_edge(ty));
+                    // A typed pointer constructor is semantically a checked runtime
+                    // operation even when its address operand is a literal. Baking the
+                    // sema scalar fact would erase `PtrFromAddr` and leave AOT with an
+                    // integer literal in a `Ptr<T>` slot.
+                    let skip_ct_ptr_bake = {
+                        let mut init = &b.init;
+                        loop {
+                            match init {
+                                Expr::Paren(inner, _) => init = inner,
+                                Expr::PtrFromAddr { .. } => break true,
+                                _ => break false,
+                            }
+                        }
+                    };
                     // Enum literals need the TIR enum-prefix resolver: a comptime enum
                     // serialization preserves the Jet dotted variant (`Fire.Burn`) but
                     // does not know the flat Rust variant spelling.
@@ -3005,6 +3019,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         && !skip_ct_boxed_bake
                         && !skip_ct_typed_literal_bake
                         && !skip_ct_enum_bake
+                        && !skip_ct_ptr_bake
                     {
                         return in_own_frame(|| {
                             let let_ty = crate::Codegen::TIR::let_ty_for_opt(
@@ -3444,6 +3459,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             None
                         };
                         let kind = inferred_kind.as_ref().unwrap_or(kind);
+                        let base_t = if matches!(kind, IndexKind::List | IndexKind::FixedListProof) {
+                            lower_expr_as_mut_place(base, cx, env)
+                        } else {
+                            base_t
+                        };
                         debug_assert!(
                             !matches!(kind, IndexKind::Unknown),
                             "sema-to-TIR handoff violated: unresolved index kind"

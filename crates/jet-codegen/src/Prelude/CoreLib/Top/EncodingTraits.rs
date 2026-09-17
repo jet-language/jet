@@ -571,8 +571,8 @@ fn jet_datatree_float(
 ) -> Result<f64, Vec<jet_std::FieldError>> {
     <jet_std::DataTree as jet_std::JetDataTreeAccess>::float(tree)
 }
-fn jet_datatree_to_text(tree: &jet_std::DataTree) -> Option<String> {
-    <jet_std::DataTree as jet_std::JetDataTreeAccess>::to_text(tree)
+fn jet_datatree_to_text(tree: &jet_std::DataTree) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(<jet_std::DataTree as jet_std::JetDataTreeAccess>::to_text(tree))
 }
 fn jet_datatree_equal_unordered(
     tree: &jet_std::DataTree,

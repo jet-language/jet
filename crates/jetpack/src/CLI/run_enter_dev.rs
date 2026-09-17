@@ -11,7 +11,7 @@ use super::services_secrets_config::{
 };
 use super::tool::reject_unavailable_provider;
 use super::trust_env_build::{
-    compose_env, compose_env_scoped, compose_env_scoped_with_warm, validate_integration_facts,
+    compose_env, compose_env_scoped_with_warm, validate_integration_facts,
 };
 use super::workspace_sources::{
     builtin_table, cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
@@ -1909,25 +1909,6 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
     mark("trust-gate");
-    let locked_nix_replayed = match replay_locked_nix(
-        &theme,
-        &roots,
-        &project_dir,
-        &plan.refs,
-        &plan.table,
-        flags.offline,
-    ) {
-        Ok(replayed) => replayed,
-        Err(error) => {
-            theme.error_coded(
-                "E1350",
-                "locked Nix closure could not be replayed",
-                &error,
-                "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock",
-            );
-            return 1;
-        }
-    };
 
     let previous_receipt = read_env_entry_receipt(&project_dir);
     let secret_identity = Secrets::validation_identity(
@@ -1980,6 +1961,33 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         })
     };
     let warm_reused = warm.is_some();
+    // Do not replay a locked Nix bundle until the receipt has had a chance to
+    // prove an exact warm entry. Replay imports and journals the bundle; doing
+    // that before this check both spends the warm-path cost and changes the
+    // WAL stamp used by the receipt, turning a valid hit into a miss.
+    let locked_nix_replayed = if warm_reused {
+        false
+    } else {
+        match replay_locked_nix(
+            &theme,
+            &roots,
+            &project_dir,
+            &plan.refs,
+            &plan.table,
+            flags.offline,
+        ) {
+            Ok(replayed) => replayed,
+            Err(error) => {
+                theme.error_coded(
+                    "E1350",
+                    "locked Nix closure could not be replayed",
+                    &error,
+                    "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock",
+                );
+                return 1;
+            }
+        }
+    };
     // A verified warm receipt already binds the package selections, store
     // journal, sealed manifests, and environment definition. Package catalog
     // policy is needed only to realize a miss; consulting it before this point
@@ -2232,6 +2240,22 @@ fn environment_entry_definition_fingerprint(
         requested_preset,
         requested_environment,
     );
+    environment_entry_definition_fingerprint_with_hook(
+        requested_preset,
+        requested_environment,
+        plan,
+        secret_identity,
+        hook_fingerprint.as_deref(),
+    )
+}
+
+fn environment_entry_definition_fingerprint_with_hook(
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+    plan: &RunPlan,
+    secret_identity: Option<&str>,
+    hook_fingerprint: Option<&str>,
+) -> (String, Option<String>) {
     let semantic_fingerprint = Trust::environment_definition_hash(
         &plan.refs,
         &plan.table,
@@ -2241,7 +2265,7 @@ fn environment_entry_definition_fingerprint(
     let target = std::env::var("JET_TARGET").unwrap_or_default();
     let mut canonical = b"jetpack-env-definition-v3\0".to_vec();
     for field in [
-        hook_fingerprint.as_deref().unwrap_or_default(),
+        hook_fingerprint.unwrap_or_default(),
         semantic_fingerprint.as_str(),
         requested_preset.unwrap_or_default(),
         requested_environment.unwrap_or_default(),
@@ -2251,7 +2275,10 @@ fn environment_entry_definition_fingerprint(
         canonical.extend_from_slice(&(field.len() as u64).to_le_bytes());
         canonical.extend_from_slice(field.as_bytes());
     }
-    (crate::SHA256::sha256_hex(&canonical), hook_fingerprint)
+    (
+        crate::SHA256::sha256_hex(&canonical),
+        hook_fingerprint.map(str::to_owned),
+    )
 }
 
 fn env_entry_plan_references(plan: &RunPlan) -> Vec<String> {
@@ -2427,6 +2454,10 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     }
+    // `use` can verify many packages that share one Hangar closure. Keep the
+    // same per-command seal view as `env`, without weakening cross-command
+    // invalidation.
+    Store::arm_command_memo();
 
     let table = builtin_table();
     let mut refs = Vec::with_capacity(parsed.positional.len());
@@ -2457,9 +2488,27 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::Use, true)
+    let warm_references = plan
+        .refs
+        .iter()
+        .map(|spec| spec.raw.clone())
+        .collect::<Vec<_>>();
+    let warm = Store::reuse_verified_user_profile_batch(
+        &roots,
+        &warm_references,
+        parsed.flags.local_nix_catalog.is_some(),
+    );
+    let env = match compose_env_scoped_with_warm(
+        theme,
+        &roots,
+        &parsed.flags,
+        &plan,
+        RealizeScope::Use,
+        true,
+        warm,
+    )
     {
-        Ok(env) => env,
+        Ok((env, _)) => env,
         Err(code) => return code,
     };
     if parsed.flags.prep {
@@ -3573,7 +3622,9 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // cwd-relative plan/realize path composes it exactly like `jet env`
         // would from inside it. This process exits immediately after, so
         // changing its own cwd affects nothing else.
-        let _ = std::env::set_current_dir(&root);
+        if std::env::set_current_dir(&root).is_err() {
+            return 0;
+        }
         let roots = Store::resolve();
         let mut plan = match load_project_plan_with_selections(
             theme,
@@ -3636,8 +3687,80 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             }
         }
 
-        let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
-            Ok(env) => env,
+        let secret_identity = Secrets::validation_identity(
+            &root,
+            &plan.secrets,
+            plan.environment.active_environment.as_deref(),
+        )
+        .ok()
+        .flatten();
+        let previous_receipt = read_env_entry_receipt(&root);
+        let reuse_verified_store = previous_receipt.as_ref().is_some_and(|receipt| {
+            secret_identity.as_deref().is_some_and(|identity| {
+                !receipt.secret_identity.is_empty() && receipt.secret_identity == identity
+            })
+        });
+        if validate_declared_secrets_with_reuse(
+            theme,
+            &root,
+            &plan.secrets,
+            plan.environment.active_environment.as_deref(),
+            reuse_verified_store,
+        )
+        .is_err()
+        {
+            return 0;
+        }
+        let (definition_fingerprint, _) = environment_entry_definition_fingerprint_with_hook(
+            parsed.flags.preset.as_deref(),
+            parsed.flags.environment.as_deref(),
+            &plan,
+            secret_identity.as_deref(),
+            target_hash.as_deref(),
+        );
+        let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
+        let warm = previous_receipt.as_ref().and_then(|receipt| {
+            if !env_entry_matches_plan(receipt, &plan) {
+                return None;
+            }
+            Store::reuse_verified_environment(
+                &roots,
+                &receipt.stamp,
+                &root,
+                &definition_fingerprint,
+                inherited_loader_path.as_deref(),
+                &receipt.packages,
+            )
+            .ok()
+            .flatten()
+        });
+        let warm_reused = warm.is_some();
+        // Locked Nix replay is cold-path preparation. Do not import/journal it
+        // before the exact receipt warm check above; the replay mutates the WAL
+        // stamp that authenticates the receipt.
+        if !warm_reused {
+            if let Err(error) = replay_locked_nix(
+                theme,
+                &roots,
+                &root,
+                &plan.refs,
+                &plan.table,
+                parsed.flags.offline,
+            ) {
+                theme.detail(&format!("locked Nix replay was unavailable: {error}"));
+                return 0;
+            }
+        }
+        let (env, ready_stats) = match compose_env_scoped_with_warm(
+            theme,
+            &roots,
+            &parsed.flags,
+            &plan,
+            RealizeScope::Project,
+            false,
+            warm,
+        ) {
+            Ok(result) => result,
             Err(_) => {
                 return 0;
             }
@@ -3684,7 +3807,15 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         if active_s.is_some() {
             script.push_str(&EnvHook::render_unload(kind, &base_path));
         }
-        let composed_path = env.composed_path(&base_path);
+        let composed_path = match env.composed_path_for_parent(&base_path) {
+            Some(path) => path,
+            None => {
+                theme.detail(
+                    "environment activation was not published because a package lease has no durable parent-shell path",
+                );
+                return 0;
+            }
+        };
         let activation = match EnvHook::render_activate(
             kind,
             &EnvHook::Activation {
@@ -3704,6 +3835,19 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             }
         };
         script.push_str(&activation);
+        if !warm_reused {
+            if let Err(error) = record_env_entry_receipt(
+                theme,
+                &root,
+                &roots,
+                &definition_fingerprint,
+                inherited_loader_path.as_deref(),
+                secret_identity.as_deref().unwrap_or_default(),
+                &ready_stats,
+            ) {
+                theme.detail(&format!("couldn't record env entry: {error}"));
+            }
+        }
         if watched_reload_ready {
             EnvHook::clear_watch_reload(&root);
         }

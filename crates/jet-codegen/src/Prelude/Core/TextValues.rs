@@ -2,24 +2,55 @@
 // execution seam. Engines may marshal a carrier into these impls, but they do
 // not choose a container shape or re-encode an outcome's clean/told meaning.
 
+fn jet_text_list<I>(values: I) -> String
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut out = String::from("[");
+    let mut first = true;
+    for value in values {
+        if !first {
+            out.push_str(", ");
+        }
+        out.push_str(&value);
+        first = false;
+    }
+    out.push(']');
+    out
+}
+
 fn jet_text_map<I>(entries: I) -> String
 where
     I: IntoIterator<Item = (String, String)>,
 {
-    let entries = entries
-        .into_iter()
-        .map(|(key, value)| format!("{key}: {value}"))
-        .collect::<Vec<_>>();
-    if entries.is_empty() {
+    let mut out = String::from("[");
+    let mut first = true;
+    for (key, value) in entries {
+        if !first {
+            out.push_str(", ");
+        }
+        out.push_str(&key);
+        out.push_str(": ");
+        out.push_str(&value);
+        first = false;
+    }
+    if first {
         "[:]".to_string()
     } else {
-        format!("[{}]", entries.join(", "))
+        out.push(']');
+        out
     }
 }
 
 fn jet_text_debug_optional(payload: Option<String>) -> String {
     match payload {
-        Some(payload) => format!("Val({payload})"),
+        Some(payload) => {
+            let mut out = String::with_capacity(payload.len() + 5);
+            out.push_str("Val(");
+            out.push_str(&payload);
+            out.push(')');
+            out
+        }
         None => "None".to_string(),
     }
 }
@@ -37,14 +68,12 @@ impl<T: JetDebug> JetDebug for &T {
 
 impl<T: JetDisplay> JetDisplay for [T] {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_display()))
     }
 }
 impl<T: JetDebug> JetDebug for [T] {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_debug()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_debug()))
     }
 }
 
@@ -74,65 +103,59 @@ impl<T: JetDisplay> JetDisplay for std::collections::HashSet<T> {
     fn jet_display(&self) -> String {
         let mut parts: Vec<String> = self.iter().map(|value| value.jet_display()).collect();
         parts.sort();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(parts)
     }
 }
 impl<T: JetDebug> JetDebug for std::collections::HashSet<T> {
     fn jet_debug(&self) -> String {
         let mut parts: Vec<String> = self.iter().map(|value| value.jet_debug()).collect();
         parts.sort();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(parts)
     }
 }
 
 impl<T: Ord + JetDisplay> JetDisplay for std::collections::BTreeSet<T> {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_display()))
     }
 }
 impl<T: Ord + JetDebug> JetDebug for std::collections::BTreeSet<T> {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_debug()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_debug()))
     }
 }
 
 impl<T: Ord + Clone + JetDisplay> JetDisplay for std::collections::BinaryHeap<T> {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self
-            .clone()
-            .into_sorted_vec()
-            .into_iter()
-            .rev()
-            .map(|value| value.jet_display())
-            .collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(
+            self.clone()
+                .into_sorted_vec()
+                .into_iter()
+                .rev()
+                .map(|value| value.jet_display()),
+        )
     }
 }
 impl<T: Ord + Clone + JetDebug> JetDebug for std::collections::BinaryHeap<T> {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self
-            .clone()
-            .into_sorted_vec()
-            .into_iter()
-            .rev()
-            .map(|value| value.jet_debug())
-            .collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(
+            self.clone()
+                .into_sorted_vec()
+                .into_iter()
+                .rev()
+                .map(|value| value.jet_debug()),
+        )
     }
 }
 
 impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_display()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_display()))
     }
 }
 impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self.iter().map(|value| value.jet_debug()).collect();
-        format!("[{}]", parts.join(", "))
+        jet_text_list(self.iter().map(|value| value.jet_debug()))
     }
 }
 

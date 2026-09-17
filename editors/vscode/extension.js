@@ -793,6 +793,25 @@ function activate(context) {
       {
         documentSelector: [{ scheme: "file", language: "jet" }],
         middleware: {
+          async provideRenameEdits(document, position, newName, token, next) {
+            const versions = new Map(vscode.workspace.textDocuments.map(
+              (open) => [open.uri.toString(), open.version]
+            ));
+            const edits = await next(document, position, newName, token);
+            if (!edits || token.isCancellationRequested) return null;
+            for (const [uri] of edits.entries()) {
+              const key = uri.toString();
+              const current = vscode.workspace.textDocuments.find(
+                (open) => open.uri.toString() === key
+              );
+              if (versions.get(key) !== current?.version) {
+                throw new Error(
+                  "Source changed while rename was checked. Run Rename again for a new preview."
+                );
+              }
+            }
+            return edits;
+          },
           // ExecuteCommandFeature owns registration for every server-advertised command.
           executeCommand(command, args, next) {
             if (command === "jet.reasoning") {

@@ -318,10 +318,10 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     None
 }
 
-/// The canonical leaf for a plain Core call that may wait on external work.
+/// The canonical leaf for a plain Core call that performs a precise effect.
 ///
 /// Keep this beside `effect_for`: every engine already consumes the row returned
-/// by this module, so a blocking call cannot acquire a second sema-only key.
+/// by this module, so a call cannot acquire a second sema-only key.
 const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
         return Some("Time.Wait");
@@ -332,8 +332,10 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
     if same_text(module, "core.files") && same_text(method, "scope") {
         return Some("FS.Read");
     }
-    if same_text(module, "core.files") {
-        return Some("Time.Wait");
+    if same_text(module, "core.files")
+        && one_of(method, &["read", "read_bytes", "walk", "walk_parallel"])
+    {
+        return Some("FS.Read");
     }
     if same_text(module, "core.term")
         && one_of(
@@ -1262,7 +1264,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 899a77cc91eadc9185e289e89a0dec593cbb1ce6f0834dadf77fdac0ae061648
+// Source SHA-256: ff34cae9f8bde523fddf6a8095ff3e6daf64e808173032bb77cd388c0b79dd9a
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.uuid", "v7"),
@@ -1445,6 +1447,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.sys", "mkfifo"),
     ("core.process", "workspace"),
     ("core.process", "run"),
+    ("core.process", "run_with_authority"),
     ("core.process", "cmd"),
     ("core.process", "pipeline"),
     ("core.process", "argv"),
@@ -1567,6 +1570,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.http.server", "sse"),
     ("core.http.server", "json"),
     ("core.http.server", "cors"),
+    ("core.http.server", "cors_policy"),
     ("core.http.server", "access_log"),
     ("core.http.server", "request_id"),
     ("core.files", "write_at"),
@@ -1627,6 +1631,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_NEW_METHOD, "jet_std::channel", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_channel_new"),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_BOUNDED_METHOD, "jet_std::channel_bounded", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_channel_bounded"),
     CoreCallRecord::new( "core.reactive", "signal", "jet_std::JetSignal::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.reactive.loadable", "idle", "jet_loadable_idle", false, &[]).with_jit_symbol("jet_jit_loadable_idle"),
+    CoreCallRecord::new("core.reactive.loadable", "loading", "jet_loadable_loading", false, &[]).with_jit_symbol("jet_jit_loadable_loading"),
+    CoreCallRecord::new("core.reactive.loadable", "loaded", "jet_loadable_loaded", false, &[false]).with_jit_symbol("jet_jit_loadable_loaded"),
+    CoreCallRecord::new("core.reactive.loadable", "failed", "jet_loadable_failed", false, &[false]).with_jit_symbol("jet_jit_loadable_failed"),
     CoreCallRecord::new( "core.event", "scope", "jet_std::JetEventScope::new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.event", "hook", "jet_std::JetHook::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new( "core.event", "decision_hook", "jet_std::JetDecisionHook::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .without_direct_jit(),
@@ -1758,6 +1766,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.process", "exit", "jet_std_process_exit", true, &[false], ) .with_jit_symbol("jet_jit_process_exit"),
     CoreCallRecord::new( "core.process", "workspace", "jet_std_process_workspace", true, &[], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.process", "run_with_authority", "jet_std_process_run_with_authority", true, &[true, true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1773,7 +1782,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.testing", "corpus", "jet_testing_corpus", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "fake_clock", "jet_std_clock_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_rng", "jet_std_rng_new", true, &[false], ),
-    CoreCallRecord::new( "core.testing", "fake_data", "jet_testing_fake_new", true, &[false], ),
+    CoreCallRecord::new( "core.testing", "fake_data", "jet_testing_fake_new", true, &[false], ) .with_jit_symbol("jet_jit_fake_new"),
     CoreCallRecord::new( "core.testing", "test_suite", "jet_test_suite_new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.testing", "compare", "jet_testing_compare", true, &[true, true, true, true]) .with_jit_symbol("jet_jit_testing_compare").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.testing", "histories", "jet_testing_histories", true, &[true, true, false, true, true, true]) .with_max_arity(6) .with_jit_symbol("jet_jit_testing_histories").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1784,6 +1793,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "round", "jet_std_math_round", true, &[false]),
     CoreCallRecord::new("core.math", "sin", "jet_std_math_sin", true, &[false]) .with_jit_symbol("jet_jit_math_sin") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "cos", "jet_std_math_cos", true, &[false]) .with_jit_symbol("jet_jit_math_cos") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "tan", "jet_std_math_tan", true, &[false]) .with_jit_symbol("jet_jit_math_tan") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "asin", "jet_std_math_asin", true, &[false]) .with_jit_symbol("jet_jit_math_asin") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "acos", "jet_std_math_acos", true, &[false]) .with_jit_symbol("jet_jit_math_acos") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "atan", "jet_std_math_atan", true, &[false]) .with_jit_symbol("jet_jit_math_atan") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "sinh", "jet_std_math_sinh", true, &[false]) .with_jit_symbol("jet_jit_math_sinh") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "cosh", "jet_std_math_cosh", true, &[false]) .with_jit_symbol("jet_jit_math_cosh") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "tanh", "jet_std_math_tanh", true, &[false]) .with_jit_symbol("jet_jit_math_tanh") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "ln", "jet_std_math_ln", true, &[false]) .with_jit_symbol("jet_jit_math_ln") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "log10", "jet_std_math_log10", true, &[false]) .with_jit_symbol("jet_jit_math_log10") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "log2", "jet_std_math_log2", true, &[false]) .with_jit_symbol("jet_jit_math_log2") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "trunc", "jet_std_math_trunc", true, &[false]) .with_jit_symbol("jet_jit_math_trunc") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "fract", "jet_std_math_fract", true, &[false]) .with_jit_symbol("jet_jit_math_fract") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "min", "jet_std_math_min_f64", true, &[false, false]) .with_jit_symbol("jet_jit_math_min_f64") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "floor", "jet_std_math_floor", true, &[false]) .with_jit_symbol("jet_jit_math_floor") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "clamp", "jet_std_math_clamp_f64", true, &[false, false, false]) .with_jit_symbol("jet_jit_math_clamp_f64") .with_pure_route(CoreCallPureRoute::Math),
@@ -1822,13 +1843,20 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "acosh", "jet_std_math_acosh", true, &[false]) .with_jit_symbol("jet_jit_math_acosh") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "atanh", "jet_std_math_atanh", true, &[false]) .with_jit_symbol("jet_jit_math_atanh") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "cbrt", "jet_std_math_cbrt", true, &[false]) .with_jit_symbol("jet_jit_math_cbrt") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "exp", "jet_std_math_exp", true, &[false]) .with_jit_symbol("jet_jit_math_exp") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "exp2", "jet_std_math_exp2", true, &[false]) .with_jit_symbol("jet_jit_math_exp2") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "exp_m1", "jet_std_math_exp_m1", true, &[false]) .with_jit_symbol("jet_jit_math_exp_m1") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "ln_1p", "jet_std_math_ln_1p", true, &[false]) .with_jit_symbol("jet_jit_math_ln_1p") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log", "jet_std_math_log", true, &[false, false]) .with_jit_symbol("jet_jit_math_log") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "copysign", "jet_std_math_copysign", true, &[false, false]) .with_jit_symbol("jet_jit_math_copysign") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "signum", "jet_std_math_signum", true, &[false]) .with_jit_symbol("jet_jit_math_signum") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "sign", "jet_std_math_sign", true, &[false]) .with_jit_symbol("jet_jit_math_sign") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "checked_add", "jet_std_math_checked_add", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_add"),
+    CoreCallRecord::new("core.math", "saturating_add", "jet_std_math_saturating_add", true, &[false, false]) .with_jit_symbol("jet_jit_math_saturating_add"),
     CoreCallRecord::new("core.math", "fma", "jet_std_math_fma", true, &[false, false, false]) .with_jit_symbol("jet_jit_math_fma") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "degrees", "jet_std_math_degrees", true, &[false]) .with_jit_symbol("jet_jit_math_degrees") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "radians", "jet_std_math_radians", true, &[false]) .with_jit_symbol("jet_jit_math_radians") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "lerp", "jet_std_math_lerp", true, &[false, false, false]) .with_jit_symbol("jet_jit_math_lerp") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "is_even", "jet_std_math_is_even", true, &[false]) .with_jit_symbol("jet_jit_math_is_even") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "is_odd", "jet_std_math_is_odd", true, &[false]) .with_jit_symbol("jet_jit_math_is_odd") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "checked_abs", "jet_std_math_checked_abs", true, &[false]) .with_jit_symbol("jet_jit_math_checked_abs"),
@@ -1836,6 +1864,24 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "checked_div", "jet_std_math_checked_div", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_div"),
     CoreCallRecord::new("core.math", "checked_rem", "jet_std_math_checked_rem", true, &[false, false]) .with_jit_symbol("jet_jit_math_checked_rem"),
     CoreCallRecord::new("core.math", "is_normal", "jet_std_math_is_normal", true, &[false]) .with_jit_symbol("jet_jit_math_is_normal") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "is_subnormal", "jet_std_math_is_subnormal", true, &[false]) .with_jit_symbol("jet_jit_math_is_subnormal") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "is_canonical", "jet_std_math_is_canonical", true, &[false]) .with_jit_symbol("jet_jit_math_is_canonical") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "is_signed", "jet_std_math_is_signed", true, &[false]) .with_jit_symbol("jet_jit_math_is_signed") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "is_zero", "jet_std_math_is_zero", true, &[false]) .with_jit_symbol("jet_jit_math_is_zero_f") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "is_integer", "jet_std_math_is_integer", true, &[false]) .with_jit_symbol("jet_jit_math_is_integer") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "sign_bit", "jet_std_math_sign_bit", true, &[false]) .with_jit_symbol("jet_jit_math_is_signed") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "next_up", "jet_std_math_next_up", true, &[false]) .with_jit_symbol("jet_jit_math_next_up") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "next_down", "jet_std_math_next_down", true, &[false]) .with_jit_symbol("jet_jit_math_next_down") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "radix", "jet_std_math_radix", true, &[false]) .with_jit_symbol("jet_jit_math_radix") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "zero", "jet_std_math_zero", true, &[]) .with_jit_symbol("jet_jit_math_zero") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "copy", "jet_std_math_copy", true, &[false]) .with_jit_symbol("jet_jit_math_copy") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "cot", "jet_std_math_cot", true, &[false]) .with_jit_symbol("jet_jit_math_cot") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "inv", "jet_std_math_inv", true, &[false]) .with_jit_symbol("jet_jit_math_inv") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "sin_cos", "jet_std_math_sin_cos", true, &[false]) .with_jit_symbol("jet_jit_math_sin_cos") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "modf", "jet_std_math_modf", true, &[false]) .with_jit_symbol("jet_jit_math_modf") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "frexp", "jet_std_math_frexp", true, &[false]) .with_jit_symbol("jet_jit_math_frexp") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "div_mod", "jet_std_math_div_mod", true, &[false, false]) .with_jit_symbol("jet_jit_math_div_mod") .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "div_rem", "jet_std_math_div_rem", true, &[false, false]) .with_jit_symbol("jet_jit_math_div_rem") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math.random", "int", "jet_std_random_int", true, &[false, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math.random", "float", "jet_std_random_float", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math.random", "float_range", "jet_std_random_float_range", true, &[false, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2001,6 +2047,47 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "endpoint_receive", "jet_services_endpoint_receive", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_show", "jet_services_endpoint_show", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "delivery_status", "jet_services_delivery_status", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "append_event", "jet_services_append_event", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "chaos_fail", "jet_services_chaos_fail", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "commit_snapshot", "jet_services_commit_snapshot", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "dead_letter_count", "jet_services_dead_letter_count", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_cancel", "jet_services_delivery_cancel", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_events", "jet_services_delivery_events", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_receipt", "jet_services_delivery_receipt", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_retry", "jet_services_delivery_retry", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_wait", "jet_services_delivery_wait", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "directory_generation", "jet_services_directory_generation", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "directory_register", "jet_services_directory_register", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "directory_resolve", "jet_services_directory_resolve", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "drain_dead_letters", "jet_services_drain_dead_letters", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "drain_worker", "jet_services_drain_worker", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "event_count", "jet_services_event_count", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "fail_worker", "jet_services_fail_worker", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "group", "jet_services_group", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "handoff_generation", "jet_services_handoff_generation", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "mailbox_depth", "jet_services_mailbox_depth", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "observe", "jet_services_observe", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "partition_worker", "jet_services_partition_worker", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "receive", "jet_services_receive", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "reconcile_worker", "jet_services_reconcile_worker", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "replay_events", "jet_services_replay_events", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "restarts", "jet_services_restarts", true, &[true, true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "restore_snapshot", "jet_services_restore_snapshot", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "rollback_generation", "jet_services_rollback_generation", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "send", "jet_services_send", true, &[true, true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "send_durable", "jet_services_send_durable", true, &[true, true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "set_restart", "jet_services_set_restart", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "set_state_empty", "jet_services_set_state_empty", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "set_state_event_log", "jet_services_set_state_event_log", true, &[true, false, false, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "set_state_snapshot", "jet_services_set_state_snapshot", true, &[true, false, false, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "upgrade_receipt", "jet_services_upgrade_receipt", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_activity", "jet_services_workflow_activity", true, &[true, false, false, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_activity_complete", "jet_services_workflow_activity_complete", true, &[true, false, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_activity_retry", "jet_services_workflow_activity_retry", true, &[true, false, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_activity_wait", "jet_services_workflow_activity_wait", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_all", "jet_services_workflow_all", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_sleep", "jet_services_workflow_sleep", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "workflow_step", "jet_services_workflow_step", true, &[true, false, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data", "load", "jet_data_loader_load", true, &[true, true]) .without_direct_jit(),
     CoreCallRecord::new("core.data", "load_default", "jet_data_loader_load_default", true, &[true]) .without_direct_jit(),
     CoreCallRecord::new("core.data", "file", "jet_data_loader_file", true, &[true, true, true]) .without_direct_jit(),
@@ -2072,7 +2159,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.xml", "parse", "jet_std_xml_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.xml", "parse_with", "jet_std_xml_parse_with", true, &[true, true], ),
     CoreCallRecord::new( "core.encoding.xml", "to_string", "jet_std_xml_render", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.xml", "canonical", "jet_std_xml_canonical", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::EncodingXml),
+    CoreCallRecord::new( "core.encoding.xml", "canonical", "jet_std_xml_canonical", true, &[true, true], ) .with_jit_symbol("jet_jit_xml_canonical") .with_pure_route(CoreCallPureRoute::EncodingXml),
     CoreCallRecord::new( "core.encoding.xml", "root", "jet_std_xml_root", true, &[true], ),
     CoreCallRecord::new( "core.encoding.xml", "attribute", "jet_std_xml_attribute", true, &[true, true], ),
     CoreCallRecord::new( "core.encoding.xml", "content", "jet_std_xml_content", true, &[true], ),
@@ -2104,6 +2191,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net.mime", "from_extension", "jet_mime_from_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new( "core.net.mime", "extension", "jet_mime_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new("core.email", "address", "jet_email::address", true, &[true]) .with_pure_route(CoreCallPureRoute::Email),
+    CoreCallRecord::new("core.email", "limits_safe", "jet_email::Limits::safe", true, &[]) .with_jit_symbol("jet_jit_email_limits_safe"),
     CoreCallRecord::new( "core.email", "attachment", "jet_email::attachment", true, &[true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),
@@ -2171,11 +2259,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.crypto", "sha1", "jet_crypto_sha1_hex", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.crypto", "sha256", "jet_crypto_sha256_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha256"),
-    CoreCallRecord::new("core.crypto", "blake3", "jet_crypto_blake3_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_blake3"),
-    CoreCallRecord::new("core.crypto", "sha512", "jet_crypto_sha512_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha512"),
-    CoreCallRecord::new("core.crypto", "__digest256_hex", "jet_crypto_digest256_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest256_hex"),
-    CoreCallRecord::new("core.crypto", "__digest512_hex", "jet_crypto_digest512_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest512_hex"),
+    CoreCallRecord::new("core.crypto", "sha256", "jet_ffi::jet_crypto_sha256_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha256"),
+    CoreCallRecord::new("core.crypto", "blake3", "jet_ffi::jet_crypto_blake3_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_blake3"),
+    CoreCallRecord::new("core.crypto", "sha512", "jet_ffi::jet_crypto_sha512_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha512"),
+    CoreCallRecord::new("core.crypto", "__digest256_hex", "jet_ffi::jet_crypto_digest256_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest256_hex"),
+    CoreCallRecord::new("core.crypto", "__digest512_hex", "jet_ffi::jet_crypto_digest512_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest512_hex"),
     CoreCallRecord::new( "core.crypto", "sha224", "jet_crypto_sha224_hex", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.crypto", "sha384", "jet_crypto_sha384_hex", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.crypto", "sha3_224", "jet_crypto_sha3_224_hex", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2424,7 +2512,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.ui.host.accessibility", "attach", "jet_ui_host_attach_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
     CoreCallRecord::new( "core.ui.host.accessibility", "project", "jet_ui_host_project_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
     sema_web_call("core.web", "openapi", "jet_web_openapi", &[true]),
-    sema_web_call("core.web", "form", "jet_web_forms_typed", &[true, false]),
+    sema_web_call("core.web", "form", "jet_web_form", &[true, false]),
     sema_web_call("core.web.router", "new", "jet_web_router_new", &[]),
     sema_web_call( "core.web.router", "route", "jet_web_router_route", &[true, false, false, false, false], ),
     sema_web_call( "core.web.router", "route_with_search_codec", "jet_web_router_route_with_search_codec", &[true, false, false, false, false, false], ),
@@ -2644,6 +2732,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.web.browser", "connect", "jet_browser_connect", false, &[true], ),
     CoreCallRecord::new( "core.web.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false], ),
     CoreCallRecord::new( "core.http.server", "serve", "jet_http_mux_serve", false, &[true, false, false, false], ) .with_max_arity(4) .without_direct_aot() .without_direct_jit(),
+    CoreCallRecord::new( "core.http.server", "cors_policy", "jet_http_cors_policy", false, &[true, true, true, true, true, true, true], ) .with_max_arity(7) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_http_cors_policy") .without_direct_aot(),
     CoreCallRecord::new( "core.http.server", "serve_once", "jet_http_mux_serve_once", false, &[true, false], ) .without_direct_aot() .without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "serve_once_listener", "jet_http_mux_serve_once_listener", false, &[true, true], ) .without_direct_aot() .without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "static_file", "jet_http_srv_static_file", false, &[true, true], ) .without_direct_aot() .without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2655,7 +2744,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.http.server", "json", "jet_http_srv_json", false, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "access_log", "jet_http_srv_access_log", false, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true], ).with_jit_symbol("jet_jit_http_request_id").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.ws", "connect", "jet_ws_connect", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.ws", "upgrade", "jet_ws_upgrade", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "new", "JetDate::new", false, &[false, false, false], ) .with_pure_route(CoreCallPureRoute::Date) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
@@ -2681,8 +2770,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.crypto", "__wrapped_bytes", "jet_crypto_wrapped_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_wrapped_bytes"),
     CoreCallRecord::new( "core.crypto", "__x25519_public_bytes", "jet_crypto_x25519_public_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_public_bytes"),
     CoreCallRecord::new( "core.crypto", "__sealed_bytes", "jet_crypto_sealed_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_sealed_bytes"),
-    CoreCallRecord::new( "core.crypto", "__digest256_bytes", "jet_crypto_digest256_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest256_bytes"),
-    CoreCallRecord::new( "core.crypto", "__digest512_bytes", "jet_crypto_digest512_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest512_bytes"),
+    CoreCallRecord::new( "core.crypto", "__digest256_bytes", "jet_ffi::jet_crypto_digest256_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest256_bytes"),
+    CoreCallRecord::new( "core.crypto", "__digest512_bytes", "jet_ffi::jet_crypto_digest512_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest512_bytes"),
     CoreCallRecord::new( "core.encoding.xml", "decode", "jet_enc_xml_decode", true, &[true], ) .with_pure_route(CoreCallPureRoute::EncodingXml) .with_max_arity(2) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new( "core.encoding.xml", "decode_bytes", "jet_enc_xml_decode_bytes", true, &[true], ) .with_pure_route(CoreCallPureRoute::EncodingXml) .with_max_arity(2) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "with_column", &[false], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),
@@ -2941,8 +3030,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.crypto", "__x25519_generate", "jet_crypto_x25519_generate_impl", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_x25519_generate"),
     CoreCallRecord::new("core.crypto", "__signing_generate", "jet_crypto_signing_generate_impl", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_signing_generate"),
     CoreCallRecord::new("core.crypto", "__hasher_new", "jet_crypto_hasher_new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_new"),
-    CoreCallRecord::new("core.crypto", "__hasher_update", "jet_crypto_hasher_update", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_update"),
-    CoreCallRecord::new("core.crypto", "__hasher_digest", "jet_crypto_hasher_digest", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_digest"),
+    CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true]).with_jit_symbol("jet_jit_toml_to_string"),
     CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]).with_jit_symbol("jet_jit_yaml_to_string"),
     CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]).with_jit_symbol("jet_jit_xml_to_bytes"),
@@ -2957,6 +3045,23 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.crypto", "__x25519_public_from_text", "jet_crypto_x25519_public_from_text_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_x25519_public_from_text"),
     CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_db_policy"),
+    CoreCallRecord::new("core.archive", "zip_open", "jet_foundation::CoreArchive::jet_archive_zip_open", false, &[true]).with_jit_symbol("jet_jit_archive_zip_open"),
+    CoreCallRecord::new("core.archive", "zip_next", "jet_foundation::CoreArchive::jet_archive_zip_next", false, &[true, false]).with_jit_symbol("jet_jit_archive_zip_next"),
+    CoreCallRecord::new("core.archive", "zip_read", "jet_foundation::CoreArchive::jet_archive_zip_read", false, &[true, true]).with_jit_symbol("jet_jit_archive_zip_read"),
+    CoreCallRecord::new("core.archive", "zip_write", "jet_foundation::CoreArchive::jet_archive_zip_write", false, &[true, true, true]).with_jit_symbol("jet_jit_archive_zip_write"),
+    CoreCallRecord::new("core.archive", "zip_close", "jet_foundation::CoreArchive::jet_archive_zip_close", false, &[true]).with_jit_symbol("jet_jit_archive_zip_close"),
+    CoreCallRecord::new("core.archive", "zip_extract", "jet_foundation::CoreArchive::jet_archive_zip_extract", false, &[true, true]).with_jit_symbol("jet_jit_archive_zip_extract"),
+    CoreCallRecord::new("core.archive", "unzip", "jet_foundation::CoreArchive::jet_archive_unzip", false, &[true, true]).with_jit_symbol("jet_jit_archive_unzip"),
+    CoreCallRecord::new("core.archive", "tar_add", "jet_foundation::CoreArchive::jet_archive_tar_add", false, &[true, true, true]).with_jit_symbol("jet_jit_tar_add"),
+    CoreCallRecord::new("core.archive", "tar_get", "jet_foundation::CoreArchive::jet_archive_tar_get", false, &[true, true]).with_jit_symbol("jet_jit_tar_get"),
+    CoreCallRecord::new("core.archive", "tar_names_json", "jet_foundation::CoreArchive::jet_archive_tar_names_json", false, &[true]).with_jit_symbol("jet_jit_tar_names_json"),
+    CoreCallRecord::new("core.archive", "crc32", "jet_foundation::CoreArchive::jet_archive_crc32", false, &[true]).with_jit_symbol("jet_jit_archive_crc32"),
+    CoreCallRecord::new("core.archive", "adler32", "jet_foundation::CoreArchive::jet_archive_adler32", false, &[true]).with_jit_symbol("jet_jit_archive_adler32"),
+    CoreCallRecord::new("core.crypto", "password_hash", "jet_crypto_password_hash_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_hash"),
+    CoreCallRecord::new("core.crypto", "password_verify", "jet_crypto_password_verify_typed_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_verify"),
+    CoreCallRecord::new("core.crypto", "__secret_from_text", "jet_crypto_secret_from_text_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_secret_from_text"),
+    CoreCallRecord::new("core.crypto", "__hasher_update", "jet_crypto_hasher_update", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_update"),
+    CoreCallRecord::new("core.crypto", "__hasher_digest", "jet_crypto_hasher_digest", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_crypto_hasher_digest"),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
 ];
 // END GENERATED CORE CALLS
@@ -3274,4 +3379,34 @@ pub fn core_call_mismatch(
         }
     }
     violations
+}
+#[cfg(test)]
+mod tests {
+    use super::core_call;
+    use crate::Effects::Effect;
+
+    #[test]
+    fn filesystem_reads_and_walks_use_fs_read_leaf() {
+        for method in ["read", "read_bytes", "walk", "walk_parallel"] {
+            let row = core_call("core.files", method)
+                .unwrap_or_else(|| panic!("missing core.files.{method} row"));
+            let leaf = row.effect_leaf();
+            assert_eq!(leaf, Some("FS.Read"), "core.files.{method}");
+            assert_ne!(leaf, Some("Time.Wait"), "core.files.{method}");
+        }
+    }
+
+    #[test]
+    fn http_client_requests_require_network_and_wait() {
+        for method in ["get", "post", "request"] {
+            let row = core_call("core.http.client", method)
+                .unwrap_or_else(|| panic!("missing core.http.client.{method} row"));
+            assert_eq!(row.effect(), Some(Effect::Net), "core.http.client.{method}");
+            assert_eq!(
+                row.effect_leaf(),
+                Some("Time.Wait"),
+                "core.http.client.{method}"
+            );
+        }
+    }
 }

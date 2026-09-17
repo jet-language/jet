@@ -1,177 +1,43 @@
 ---
 name: isomorphic-ontology-audit
 description: >-
-  Audit Jet syntax against a language-agnostic foundational ontology. Map every
-  surface form to what it fundamentally is; find missed isomorphisms, false
-  rhymes, and clarity/ceremony failures. Use for isomorphic ontology audits,
-  concept-unity reviews, or “ohhh” consistency checks — not surface-audit
-  cosmetics.
+  Map a declared Jet surface to a closed programming ontology. Use when checking
+  concept unity or an “ohhh” consistency question, not shape cosmetics.
 ---
 
-# Isomorphic Ontology Audit
+# Isomorphic ontology audit
 
-Map Jet’s user-facing surface onto fundamental programming concepts. Optimize
-for **clarity first**, then **legitimate conceptual reuse**, then density.
-Do **not** run a surface-audit (shape/outlier cosmetics). Do **not** chain
-other audit skills unless the owner asks.
+Map Jet's running surface onto fundamental programming concepts. Optimize for clarity, then legitimate conceptual reuse, then density. Do not run a surface audit or chain another audit unless the owner asks.
 
-## Mission
+Reject cosmetic rhyme with no shared ontology, shared ontology with unrelated spelling, ceremony caused by splitting one concept, golf that hurts scanability, and consistency that obscures what a form is.
 
-Success looks like:
+Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). The shared files own publication, permissions, scope depth, and common evidence rules. This method owns ontology classification, dual-facet analysis, probes, findings, and its finite closeout.
 
-> Reader sees A and B share form → realizes A is subset / same / dual of B →
-> “ohhh, of course.”
+Use this authority order: owner instruction → ratified Tower verdicts and acceptance terms → relevant domain spec → `AGENTS.md` invariants and owner gates → this skill. Code shows implementation state, not design law.
 
-Failure modes to reject:
+## Contract and scope
 
-- Cosmetic rhyme with no shared ontology (**false rhyme**)
-- Shared ontology with unrelated spelling (**missed isomorphism**)
-- Ceremony that exists only because two concepts were split wrongly
-- Golf that hurts scanability
-- Consistency that obscures what a form *is*
+At activation, record a finite target concept or area and its reachable inventory. Search the live target surfaces and dependencies that explain it: specs, examples, stdlib, Syntax registry, CLI, and direct analogues. Map every inventoried running form to one primary ontology family plus optional orthogonal axes; cluster by concept rather than glyph; and recommend the smallest move that creates the “ohhh,” or leave it alone. The target inventory is complete within that declared closure, not an invitation to map unrelated Jet.
 
-## Dual-facet bar (both required)
+`ontology.md` is the canonical category catalog. It is closed at the family layer and open at the instance layer: land each idea in one primary family with optional axes, extend the catalog only through its extension protocol, and never invent a parallel taxonomy.
 
-1. **Exploratory / analysis (Python bar).** Typical Python scripts and
-   data/exploration programs should be close to as short in Jet — or shorter —
-   via simpler surface + stronger builtins/stdlib. Clarity still wins over
-   cryptic density.
-2. **Systems / safety (Zig–Rust–Odin–C–C++ bar).** Fully explicit, safe,
-   low-level, and systems-grade programs must remain expressible without a
-   second language or hidden second mechanism. Expert power is opt-in, not
-   deleted.
+## Dual-facet bar
 
-Conflict rule: **clarity beats mere consistency**. Consistency wins only when
-it teaches ontology. Compression wins only when it preserves or improves
-clarity.
+Every material finding addresses both facets:
 
-Authority: owner instruction → ratified Tower verdicts and acceptance terms →
-the relevant domain spec → `AGENTS.md` invariants and owner gates →
-this skill. Code shows implementation state,
-not design law.
+- **Exploratory / Python:** ordinary scripts and data exploration are as short as, or shorter than, Python through a clear surface and strong builtins/stdlib.
+- **Systems / safety:** explicit, safe, low-level, systems-grade programs remain expressible without a second language or hidden mechanism. Expert power stays opt-in.
 
-Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
-shared publication, workflow-boundary, and disposition mechanics; this method
-still owns ontology classification, dual-facet analysis, probes, and findings.
+Clarity beats a cosmetic rhyme. Consistency wins only when it teaches the ontology. A false rhyme that leaves Jet worse than a peer must be stated plainly.
 
-## Foundation
+## Evidence and finding kinds
 
-Read and use as the closed category catalog:
+Use the applicable running-binary and honesty sections of the standing lens for the declared target. Skip unrelated four-question, micro-sweep, or competitive work. Map what runs, not only what the spec describes: parser acceptance with ignored sema or no emitted behavior belongs in the map with that fact attached. Cite paths, lines, real syntax, probes, and decisions; mark missing evidence `unknown`.
 
-- [`ontology.md`](ontology.md) — language-agnostic primitives, axes, calibration
-  isomorphisms, extension protocol
+Use exactly these finding kinds: `missed unification`, `false rhyme`, `clarity failure`, `ceremony without teaching`, `facet failure`, and `keep / celebrate`. Full inventory and report detail are in [`references/inventory.md`](references/inventory.md) and [`references/report.md`](references/report.md).
 
-Do not invent a parallel taxonomy. Extend `ontology.md` only when a concept
-cannot land in an existing family (follow its extension protocol).
+## Completion and permissions
 
-## The standing lens (partial)
+Stop when the finite target inventory and relevant ontology families are accounted for, every form has a mapping or honest `unknown`, both facets have evidence or a named unknown for each material finding, the scorecard and ranked report are complete, and the shared disposition marker is ready. A clean category is a result. Report completion does not implement a proposed spelling or semantic change.
 
-Apply the **probe the running binary** and **honesty rules** sections of
-`.agents/skills/_shared/standing-lens.md`. Skip the four questions and the micro
-sweep: this skill measures Jet's internal concept unity, and a competitive frame
-would pull it toward comparison shopping instead.
-
-Two rules from that page matter most here. Map the surface that **runs**, not
-the one the spec describes — a form the parser accepts but sema ignores, or a
-declared construct nothing emits, belongs in the map with that fact attached.
-And say plainly where a false rhyme means Jet is currently worse than a peer at
-the same concept; internal coherence work is where that admission is hardest and
-most useful.
-
-## Method
-
-Search live specs, examples, stdlib, Syntax registry, and CLI surfaces. Prefer
-`scripts/agent/jet-env` and `rg` over memory.
-
-1. **Inventory Jet forms.** Keywords, sigils, declaration shapes, expression
-   forms, patterns, type syntax, attributes, module/import forms, expert
-   escapes. Cite files.
-2. **Classify each form** into ontology ids from `ontology.md` (primary family
-   + orthogonal X-axes). One sentence: *what is this?*
-3. **Cluster by ontology**, not by glyph. Build concept families.
-4. **Score each family** with the lenses in `ontology.md` §16:
-   clarity, isomorphism, exploratory density, systems expressiveness,
-   ceremony tax, tiering.
-5. **Emit findings** only as:
-   - **Missed unification** — same ontology, divergent spelling
-   - **False rhyme** — similar spelling, different ontology
-   - **Clarity failure** — form does not teach what it is
-   - **Ceremony without teaching** — tokens that buy neither safety nor clarity
-   - **Facet failure** — loses Python-density bar or systems-expressiveness bar
-   - **Keep / celebrate** — isomorphism that already creates the “ohhh”
-6. **Recommend** the smallest spelling/semantics move that creates the “ohhh”
-   (or explicit “leave alone”). No stubs. No parallel mechanisms (I8). Owner
-   gates (new syntax, etc.) → ballot titles only unless asked to raise them.
-
-Calibration examples (do not merely restate; find more):
-
-- Named function ≈ named binding of a function value
-- Lambda ≈ same function, anonymous (X01)
-- Method ≈ function + receiver (+ dispatch rule)
-
-## Output artifact
-
-This is a report-only method. Write one markdown report under `docs/audits/`
-through the project-approved non-serve CLI. Do not create Tower work or
-implementation edits unless the owner explicitly asks. Read
-`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
-publication rules and the required finding-disposition table. Keep the required
-ontology report sections below; report completion does not mean a proposed
-spelling or semantic change is implemented.
-
-### Required report sections
-
-```markdown
-# Isomorphic ontology audit — YYYY-MM-DD
-
-## Thesis
-One paragraph: what Jet currently teaches about its own ontology.
-
-## Dual-facet scorecard
-| Lens | Grade (aligned/drift/unknown) | Evidence |
-| Exploratory density vs Python | … | … |
-| Systems expressiveness vs Zig/Rust/Odin/C/C++ | … | … |
-| Clarity | … | … |
-| Isomorphic consistency | … | … |
-
-## Concept map (Jet → ontology)
-Table: Jet surface form → ontology id(s) → X-axes → one-line “what it is” →
-status (teaches well / partial / broken / false rhyme / absent).
-
-Cover every inventoried form. Group rows by ontology family.
-
-## Concept families
-For each non-trivial family:
-- Members
-- Shared ontology (one sentence)
-- Spellings today
-- Isomorphism / clarity score
-- Exploratory + systems impact
-- Smallest “ohhh” move (or leave alone)
-
-## Findings
-Ranked. Each finding: kind, evidence, ontology ids, dual-facet impact,
-recommendation, owner-gate? (yes/no + ballot title if yes).
-
-## Celebrated isomorphisms
-What already works — preserve these.
-
-## Ontology gaps / extensions
-Concepts in ontology.md with no Jet landing (absent vs deferred vs
-deliberately out of scope). Any ontology.md extensions made this run.
-
-## Next actions
-Ballot titles or card ids only — do not create cards unless asked.
-```
-
-## Anti-goals
-
-- Not surface-audit (uniformity/outlier cosmetics without ontology)
-- Not gauntlet (measured peer competition)
-- Not mission-audit (philosophy scorecard alone)
-- Not “make everything look the same”
-- Not proposing a second mechanism for one semantic job
-
-Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
-required marker table. Keep next actions as ballot titles or card IDs and do
-not create them in this report-only run.
+This is report-only by default: cite existing Tower records read-only, list ballot titles or card IDs as next actions, and create no cards, decisions, ballots, or implementation edits. An owner can explicitly change the boundary; then follow the shared permission contract rather than inferring authorization from a recommendation.

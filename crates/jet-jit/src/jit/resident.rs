@@ -1,6 +1,7 @@
 use cranelift_module::Module;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
+use cranelift_jit::JITModule;
 use jet_foundation::{
     HotSwap::HotSwapDecision,
     JitBackend::RunOutcome,
@@ -13,7 +14,9 @@ use jet_foundation::{
 use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
 use super::deopt::clear_deopt_state;
-use super::functions_compile::compile_program;
+use super::functions_compile::{
+    compile_program, install_finalized_iterable_hooks, CompiledMirProgram,
+};
 use super::runtime_host::{new_jit_module, ResidentModule};
 use super::safety::artifact_entry;
 use super::tiers::{runtime_decision_rows, TierRow};
@@ -112,6 +115,35 @@ fn main_error_type(program: &MirProgram, artifact: MirArtifactId) -> Option<Stri
 fn main_error_is_packed(_program: &MirProgram, _artifact: MirArtifactId) -> bool {
     false
 }
+fn install_cli_function_pointers(
+    module: &JITModule,
+    compiled: &CompiledMirProgram,
+) -> Result<(), String> {
+    let Some(user_run) = crate::CLI::cli_user_run_target() else {
+        return Ok(());
+    };
+    let user_run_id = compiled
+        .function_ids
+        .get(&user_run)
+        .copied()
+        .ok_or_else(|| format!("JIT CLI run function {user_run:?} was not compiled"))?;
+    let user_run_ptr = module.get_finalized_function(user_run_id);
+    if user_run_ptr.is_null() {
+        return Err("JIT CLI run function has no finalized address".to_string());
+    }
+    crate::CLI::install_cli_run_ptr(user_run_ptr);
+    for command in crate::CLI::cli_command_targets() {
+        let Some(command_id) = compiled.function_ids.get(&command).copied() else {
+            return Err(format!("JIT CLI command {command:?} was not compiled"));
+        };
+        let command_ptr = module.get_finalized_function(command_id);
+        if command_ptr.is_null() {
+            return Err(format!("JIT CLI command {command:?} has no finalized address"));
+        }
+        crate::CLI::install_cli_command_ptr(command, command_ptr);
+    }
+    Ok(())
+}
 
 pub(crate) fn fresh_runtime(release_devtools_policy: ReleaseDevtoolsPolicy) -> JitRuntime {
     fresh_runtime_with_allocator_cap(release_devtools_policy, None)
@@ -178,9 +210,12 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         next_option_lift2_thunk: 0,
         next_shared_txn_thunk: 0,
         jit_callables: Vec::new(),
+        scope_guards: Vec::new(),
+        transactions: Vec::new(),
         atexit_handlers: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
+        task_skip_join_deadline: Vec::new(),
         task_groups: Vec::new(),
         cells: crate::Cell::CellState::new(),
         results: Vec::new(),
@@ -247,6 +282,8 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         raylib_atlases: Vec::new(),
         raylib_draw_calls: Vec::new(),
         time_values: Vec::new(),
+        deterministic_world: None,
+        deterministic_world_scope: None,
         realtime_values: Vec::new(),
         regex_values: Vec::new(),
         decimal_values: Vec::new(),
@@ -268,6 +305,8 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
     }
 }
 fn reset_run_heap(rt: &mut JitRuntime) {
+    rt.deterministic_world_scope.take();
+    rt.deterministic_world.take();
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
     rt.int_list_views.clear();
@@ -289,12 +328,15 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.current_source_line.clear();
     rt.host_fault = false;
     rt.host_fault_payload_captured = false;
+    rt.transactions.clear();
     rt.jit_callables.clear();
+    rt.scope_guards.clear();
     rt.atexit_handlers.clear();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
     rt.task_controls.clear();
+    rt.task_skip_join_deadline.clear();
     rt.task_groups.clear();
     rt.results.clear();
     rt.errors.clear();
@@ -354,6 +396,7 @@ pub(crate) fn ensure_resident_module(
     let main_error_type = main_error_type(program, artifact);
     let main_error_is_packed = main_error_is_packed(program, artifact);
     let main_returns_app = main_returns_app(program, artifact);
+    crate::CLI::prepare_cli_from_mir(program, artifact);
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
         let (mut module, host) = new_jit_module()?;
@@ -361,6 +404,8 @@ pub(crate) fn ensure_resident_module(
             .with(|slot| slot.borrow_mut().take())
             .unwrap_or_else(|| fresh_runtime(release_devtools_policy.clone()));
         let compiled = compile_program(&mut module, &host, program, artifact, &mut runtime)?;
+        install_cli_function_pointers(&module, &compiled)?;
+        install_finalized_iterable_hooks(&module, &mut runtime, &compiled)?;
         runtime.snapshot_compile_strings();
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
         RESIDENT_MODULE.with(|slot| {
@@ -391,6 +436,8 @@ pub(crate) fn ensure_resident_module(
                 artifact,
                 runtime,
             )?;
+            install_cli_function_pointers(&resident.module, &compiled)?;
+            install_finalized_iterable_hooks(&resident.module, runtime, &compiled)?;
             runtime.snapshot_compile_strings();
             resident.main_id = compiled.entry_id;
             resident.main_returns_result = main_returns_result;
@@ -420,6 +467,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         })
         .ok_or_else(|| "resident module missing".to_string())?;
 
+    let cli_adapter = crate::CLI::cli_run_requires_adapter();
     RESIDENT_RUNTIME.with(|slot| {
         let mut rt_guard = slot.borrow_mut();
         let runtime = rt_guard.as_mut().ok_or("resident runtime missing")?;
@@ -433,7 +481,9 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::set_active_runtime(Some(ptr));
         jet_codegen::scheduler::jet_observe_runtime_start_from_env(Vec::new());
         jet_codegen::scheduler::jet_scheduler_task_completion_begin();
-        if main_returns_result || main_returns_app {
+        if cli_adapter {
+            let _ = crate::CLI::jet_jit_cli_main();
+        } else if main_returns_result || main_returns_app {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
             let _ = entry();
         } else {

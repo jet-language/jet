@@ -6,6 +6,201 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use std::cell::{Cell, RefCell};
+
+struct JitSentryFunctionMark {
+    guard_depth: usize,
+    frame_depth: usize,
+}
+
+thread_local! {
+    static JIT_SENTRY_GUARDS:
+        RefCell<Vec<jet_foundation::MemSentry::JetSentryGuard>> =
+        const { RefCell::new(Vec::new()) };
+    static JIT_SENTRY_FRAMES:
+        RefCell<Vec<jet_foundation::MemSentry::JetSentryFrame>> =
+        const { RefCell::new(Vec::new()) };
+    static JIT_SENTRY_FUNCTIONS: RefCell<Vec<JitSentryFunctionMark>> =
+        const { RefCell::new(Vec::new()) };
+    static JIT_SENTRY_RUN: Cell<(usize, u64)> = const { Cell::new((0, 0)) };
+}
+
+static ACTIVE_JIT_SENTRY_RUN: LazyLock<Mutex<Option<(usize, u64)>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn clear_jit_sentry_local() {
+    JIT_SENTRY_GUARDS.with(|guards| guards.borrow_mut().clear());
+    JIT_SENTRY_FRAMES.with(|frames| frames.borrow_mut().clear());
+    JIT_SENTRY_FUNCTIONS.with(|functions| functions.borrow_mut().clear());
+}
+
+pub(crate) fn reset_jit_sentry_state() {
+    clear_jit_sentry_local();
+    jet_foundation::MemSentry::jet_sentry_reset();
+    JIT_SENTRY_RUN.with(|run| run.set((0, 0)));
+    *ACTIVE_JIT_SENTRY_RUN
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
+fn prepare_jit_sentry_run(rt: &crate::JitRuntime) {
+    let identity = (rt as *const crate::JitRuntime as usize, rt.invocations);
+    let local_changed = JIT_SENTRY_RUN.with(|run| run.get() != identity);
+    if !local_changed {
+        return;
+    }
+    clear_jit_sentry_local();
+    let should_reset_foundation = {
+        let mut active = ACTIVE_JIT_SENTRY_RUN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *active == Some(identity) {
+            false
+        } else {
+            *active = Some(identity);
+            true
+        }
+    };
+    if should_reset_foundation {
+        jet_foundation::MemSentry::jet_sentry_reset();
+    }
+    JIT_SENTRY_RUN.with(|run| run.set(identity));
+}
+
+fn sentry_address(address: i64) -> usize {
+    usize::try_from(address).unwrap_or(0)
+}
+
+fn sentry_bytes(bytes: i64) -> usize {
+    usize::try_from(bytes).unwrap_or(0).max(1)
+}
+
+fn sentry_scope_text(rt: &crate::JitRuntime, handle: i64) -> String {
+    rt.heap.clone_string(handle).unwrap_or_default()
+}
+
+fn jet_jit_sentry_scope_enter(
+    kind: i64,
+    enabled: i64,
+    file: i64,
+    line: i64,
+    reason: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        prepare_jit_sentry_run(rt);
+        let file = sentry_scope_text(rt, file);
+        let reason = sentry_scope_text(rt, reason);
+        let guard = match kind {
+            2 => jet_foundation::MemSentry::jet_sentry_policy_scope(enabled != 0),
+            3 => jet_foundation::MemSentry::jet_sentry_fenced_scope(
+                enabled != 0,
+                &file,
+                line.max(0) as u32,
+                &reason,
+            ),
+            _ => jet_foundation::MemSentry::jet_sentry_scope(
+                enabled != 0,
+                &file,
+                line.max(0) as u32,
+                &reason,
+            ),
+        };
+        JIT_SENTRY_GUARDS.with(|guards| guards.borrow_mut().push(guard));
+    });
+}
+
+fn jet_jit_sentry_scope_exit() {
+    JIT_SENTRY_GUARDS.with(|guards| {
+        let _ = guards.borrow_mut().pop();
+    });
+}
+
+fn jet_jit_sentry_frame_enter() {
+    Concurrency::with_runtime_mut(|rt| {
+        prepare_jit_sentry_run(rt);
+        let frame = jet_foundation::MemSentry::jet_sentry_frame();
+        JIT_SENTRY_FRAMES.with(|frames| frames.borrow_mut().push(frame));
+    });
+}
+
+fn jet_jit_sentry_frame_exit() {
+    JIT_SENTRY_FRAMES.with(|frames| {
+        let _ = frames.borrow_mut().pop();
+    });
+}
+
+fn jet_jit_sentry_function_mark() {
+    JIT_SENTRY_FUNCTIONS.with(|functions| {
+        let guard_depth = JIT_SENTRY_GUARDS.with(|guards| guards.borrow().len());
+        let frame_depth = JIT_SENTRY_FRAMES.with(|frames| frames.borrow().len());
+        functions
+            .borrow_mut()
+            .push(JitSentryFunctionMark { guard_depth, frame_depth });
+    });
+}
+
+fn jet_jit_sentry_function_exit() {
+    let Some(mark) = JIT_SENTRY_FUNCTIONS.with(|functions| functions.borrow_mut().pop()) else {
+        return;
+    };
+    JIT_SENTRY_FRAMES.with(|frames| frames.borrow_mut().truncate(mark.frame_depth));
+    JIT_SENTRY_GUARDS.with(|guards| guards.borrow_mut().truncate(mark.guard_depth));
+}
+
+fn jet_jit_sentry_register_stack(address: i64, bytes: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        prepare_jit_sentry_run(rt);
+        jet_foundation::MemSentry::jet_sentry_register_stack_allocation(
+            sentry_address(address),
+            sentry_bytes(bytes),
+        );
+    });
+}
+
+fn jet_jit_sentry_check(
+    address: i64,
+    bytes: i64,
+    alignment: i64,
+    operation: i64,
+    obligation: i64,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        prepare_jit_sentry_run(rt);
+        let operation = sentry_scope_text(rt, operation);
+        let obligation = sentry_scope_text(rt, obligation);
+        let fault = jet_foundation::MemSentry::jet_sentry_check(
+            sentry_address(address),
+            sentry_bytes(bytes),
+            sentry_bytes(alignment),
+            &operation,
+            &obligation,
+        );
+        if let Some(fault) = fault {
+            crate::runtime_host::set_sentry_fault(rt, fault);
+        }
+    });
+}
+
+fn jet_jit_sentry_check_fixed(
+    rt: &mut crate::JitRuntime,
+    address: i64,
+    operation: &str,
+) -> bool {
+    prepare_jit_sentry_run(rt);
+    let fault = jet_foundation::MemSentry::jet_sentry_check(
+        sentry_address(address),
+        std::mem::size_of::<i64>(),
+        std::mem::align_of::<i64>(),
+        operation,
+        "valid_ptr",
+    );
+    if let Some(fault) = fault {
+        crate::runtime_host::set_sentry_fault(rt, fault);
+        false
+    } else {
+        true
+    }
+}
 use std::sync::atomic::{compiler_fence, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -38,12 +233,133 @@ static SHARED_SNAPSHOTS: LazyLock<Mutex<Vec<Arc<SharedSnapshot>>>> =
 
 type SharedTransactionCallback = unsafe extern "C" fn(i64, i64) -> i64;
 
+mod jet_uninit_semantics {
+    include!("../../jet-codegen/src/Prelude/Uninit.rs");
+}
+
+mod jet_fixed_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FixedAllocator.rs");
+}
+
+// The resident host has no generated Observe module; allocator accounting is
+// still owned by the canonical storage runtime, while these hooks preserve the
+// shared Prelude's observation seam without introducing a second policy.
+fn jet_observe_arena_open() {}
+fn jet_observe_arena_alloc(_bytes: usize) {}
+fn jet_observe_arena_retain(_bytes: usize) {}
+fn jet_observe_arena_release(_bytes: usize) {}
+fn jet_observe_arena_reset(_allocations: usize, _bytes: usize) {}
+fn jet_observe_arena_close() {}
+
+fn jet_fault_should_fail_allocation() -> bool {
+    crate::fault_injection::jet_fault_should_fail_allocation()
+}
+
+fn jet_sentry_runtime_stop(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    _gate: &str,
+    _operation: &str,
+    _obligation: &str,
+    _obligation_status: &str,
+    _foreign_component: Option<&str>,
+    _foreign_fenced: Option<bool>,
+    detail: &str,
+) -> ! {
+    crate::runtime_host::runtime_stop_unwind_at(code, file, line, detail)
+}
+
+mod canonical_mem {
+    mod jet_sentry {
+        pub use jet_foundation::MemSentry::{
+            jet_memory_ledger_record, jet_sentry_check, jet_sentry_check_foreign,
+            jet_sentry_check_foreign_strict, jet_sentry_check_foreign_with_component,
+            jet_sentry_current_frame, jet_sentry_fenced_scope, jet_sentry_frame,
+            jet_sentry_policy_scope, jet_sentry_quarantine, jet_sentry_quarantine_owner,
+            jet_sentry_register_allocation, jet_sentry_register_owned_allocation,
+            jet_sentry_register_stack_allocation, jet_sentry_reset, jet_sentry_scope,
+            jet_sentry_set_hardened, JetSentryFault, JetSentryFrame, JetSentryGuard,
+            MemoryLedgerWitness,
+        };
+    }
+
+    include!("../../jet-codegen/src/Prelude/Mem.rs");
+}
+
+pub use jet_foundation::Outcome::{jet_alloc_error, jet_try_alloc_value, AllocError};
+
+enum CanonicalAllocator {
+    Arena(canonical_mem::JetArena),
+    Bump(canonical_mem::JetBump),
+    Pool(canonical_mem::JetPool),
+    Fixed(canonical_mem::JetFixed),
+}
+
+impl CanonicalAllocator {
+    fn named(allocator: &'static str) -> (Self, Option<Vec<u8>>) {
+        match allocator {
+            "Bump" => (Self::Bump(canonical_mem::JetBump::new()), None),
+            "Pool" => (Self::Pool(canonical_mem::JetPool::new()), None),
+            "Fixed" => Self::with_capacity("Fixed", 1),
+            _ => (Self::Arena(canonical_mem::JetArena::new()), None),
+        }
+    }
+
+    fn with_capacity(
+        allocator: &'static str,
+        capacity: usize,
+    ) -> (Self, Option<Vec<u8>>) {
+        let capacity = capacity.max(1);
+        match allocator {
+            "Bump" => (
+                Self::Bump(canonical_mem::JetBump::with_capacity(capacity)),
+                None,
+            ),
+            "Pool" => (
+                Self::Pool(canonical_mem::JetPool::with_slots(capacity)),
+                None,
+            ),
+            "Fixed" => {
+                let mut backing = vec![0_u8; capacity];
+                let runtime = canonical_mem::JetFixed::over(backing.as_mut_slice());
+                (Self::Fixed(runtime), Some(backing))
+            }
+            _ => (
+                Self::Arena(canonical_mem::JetArena::with_capacity(capacity)),
+                None,
+            ),
+        }
+    }
+
+    fn try_alloc(&self, value: i64) -> Result<*mut i64, ()> {
+        let result = match self {
+            Self::Arena(allocator) => allocator.try_alloc(value),
+            Self::Bump(allocator) => allocator.try_alloc(value),
+            Self::Pool(allocator) => allocator.try_alloc(value),
+            Self::Fixed(allocator) => allocator.try_alloc(value),
+        };
+        result
+            .map(|slot| slot as *mut i64)
+            .map_err(|_| ())
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::Arena(allocator) => allocator.reset(),
+            Self::Bump(allocator) => allocator.reset(),
+            Self::Pool(allocator) => allocator.reset(),
+            Self::Fixed(allocator) => allocator.reset(),
+        }
+    }
+}
+
 pub(crate) struct AllocatorState {
     generation: u32,
-    used: usize,
-    capacity: usize,
     allocator: &'static str,
-    fixed: bool,
+    runtime: CanonicalAllocator,
+    // Declared after `runtime` so Fixed drops its values before this backing.
+    fixed_backing: Option<Vec<u8>>,
     slots: Vec<AllocatorSlot>,
     closed: bool,
 }
@@ -51,7 +367,7 @@ pub(crate) struct AllocatorState {
 #[derive(Clone, Copy)]
 struct AllocatorSlot {
     generation: u32,
-    value: i64,
+    ptr: *mut i64,
 }
 
 #[derive(Clone, Copy)]
@@ -60,17 +376,36 @@ pub(crate) struct AllocatorView {
     slot: i64,
 }
 
-impl Default for AllocatorState {
-    fn default() -> Self {
+impl AllocatorState {
+    fn from_parts(
+        allocator: &'static str,
+        runtime: CanonicalAllocator,
+        fixed_backing: Option<Vec<u8>>,
+    ) -> Self {
         Self {
             generation: 0,
-            used: 0,
-            capacity: 4096,
-            allocator: "Arena",
-            fixed: false,
+            allocator,
+            runtime,
+            fixed_backing,
             slots: Vec::new(),
             closed: false,
         }
+    }
+
+    fn named(allocator: &'static str) -> Self {
+        let (runtime, fixed_backing) = CanonicalAllocator::named(allocator);
+        Self::from_parts(allocator, runtime, fixed_backing)
+    }
+
+    fn with_capacity(allocator: &'static str, capacity: usize) -> Self {
+        let (runtime, fixed_backing) = CanonicalAllocator::with_capacity(allocator, capacity);
+        Self::from_parts(allocator, runtime, fixed_backing)
+    }
+}
+
+impl Default for AllocatorState {
+    fn default() -> Self {
+        Self::named("Arena")
     }
 }
 
@@ -425,56 +760,31 @@ fn allocator_state_mut(
     Ok(state)
 }
 
-/// Store one allocator value through the shared fallible-allocation seam.
+/// Store one allocator value through the shared canonical allocator runtime.
 ///
-/// The JIT owns only its handle table and the Arena growth bookkeeping. The
-/// fit decision, charge accounting, and typed failure remain in the Prelude
-/// function shared with AOT and TIR-eval.
+/// The resident tier keeps only the erased pointer and generation table; the
+/// Prelude allocator owns placement, capacity, destruction, and reset.
 fn allocator_try_store(
     state: &mut AllocatorState,
     value: i64,
     requested: usize,
     fail: bool,
-) -> Result<usize, jet_foundation::Outcome::AllocError> {
+) -> Result<usize, AllocError> {
     if fail {
         return Err(jet_foundation::Outcome::jet_alloc_error(
             requested,
             state.allocator,
         ));
     }
-
-    let overhead = if state.fixed {
-        3 * std::mem::size_of::<usize>()
-    } else {
-        0
-    };
-    if state.allocator == "Arena" {
-        let needed = state
-            .used
-            .saturating_add(requested.saturating_add(overhead));
-        while state.capacity < needed {
-            let next = state.capacity.saturating_mul(2).max(needed);
-            if next == state.capacity {
-                break;
-            }
-            state.capacity = next;
-        }
-    }
-
-    let (_, next_used) = jet_foundation::Outcome::jet_try_alloc_value(
-        value,
-        state.used,
-        state.capacity,
-        requested,
-        state.allocator,
-        overhead,
-    )?;
+    let ptr = state
+        .runtime
+        .try_alloc(value)
+        .map_err(|_| jet_foundation::Outcome::jet_alloc_error(requested, state.allocator))?;
     let index = state.slots.len();
     state.slots.push(AllocatorSlot {
         generation: state.generation,
-        value,
+        ptr,
     });
-    state.used = next_used;
     Ok(index)
 }
 
@@ -534,42 +844,23 @@ fn jet_jit_allocator_new_named(kind: i64) -> i64 {
         2 => "Pool",
         _ => "Arena",
     };
-    let capacity = match allocator {
-        "Bump" => 64 * 1024,
-        "Pool" => usize::MAX,
-        _ => 4096,
-    };
     Concurrency::with_runtime_mut(|rt| {
-        rt.allocators.push(AllocatorState {
-            generation: 0,
-            used: 0,
-            capacity,
-            allocator,
-            fixed: false,
-            slots: Vec::new(),
-            closed: false,
-        });
+        rt.allocators.push(AllocatorState::named(allocator));
         rt.allocators.len() as i64
     })
 }
 
 fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
-    let (allocator, is_fixed) = match fixed {
-        1 => ("Fixed", true),
-        2 => ("Bump", false),
-        3 => ("Pool", false),
-        _ => ("Arena", false),
+    let allocator = match fixed {
+        1 => "Fixed",
+        2 => "Bump",
+        3 => "Pool",
+        _ => "Arena",
     };
+    let capacity = usize::try_from(capacity.max(1)).unwrap_or(usize::MAX);
     Concurrency::with_runtime_mut(|rt| {
-        rt.allocators.push(AllocatorState {
-            generation: 0,
-            used: 0,
-            capacity: capacity.max(1) as usize,
-            allocator,
-            fixed: is_fixed,
-            slots: Vec::new(),
-            closed: false,
-        });
+        rt.allocators
+            .push(AllocatorState::with_capacity(allocator, capacity));
         rt.allocators.len() as i64
     })
 }
@@ -597,45 +888,33 @@ fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64
 
 fn jet_jit_allocator_view_read(view: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
-        Ok((_, slot)) => slot.value,
+        Ok((_, slot)) => {
+            // SAFETY: the slot is live under its allocator generation.
+            unsafe { slot.ptr.read() }
+        }
         Err(message) => {
             rt.set_trap(&message);
             0
         }
     })
 }
+fn jet_jit_view_string(view: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match crate::runtime_host::view_string(rt, view) {
+        Some(value) => rt.heap.alloc_string(value),
+        None => {
+            rt.set_trap("string view is invalid or not a text view");
+            0
+        }
+    })
+}
 
 fn jet_jit_allocator_view_write(view: i64, value: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let view = match allocator_view(rt, view) {
-            Ok(view) => view,
-            Err(message) => {
-                rt.set_trap(&message);
-                return;
-            }
-        };
-        let Some(state) = rt
-            .allocators
-            .get_mut((view.allocator as usize).wrapping_sub(1))
-        else {
-            rt.set_trap("allocator view is invalid or no longer live");
-            return;
-        };
-        let closed = state.closed;
-        let current_generation = state.generation;
-        let Some((index, generation)) = unpack_id(view.slot) else {
-            rt.set_trap("allocator view is invalid or no longer live");
-            return;
-        };
-        let Some(slot) = state.slots.get_mut(index) else {
-            rt.set_trap("allocator view is invalid or no longer live");
-            return;
-        };
-        if closed || generation != current_generation || slot.generation != generation {
-            rt.set_trap("allocator view is invalid or no longer live");
-            return;
+    Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
+        Ok((_, slot)) => {
+            // SAFETY: the slot is live under its allocator generation.
+            unsafe { slot.ptr.write(value) };
         }
-        slot.value = value;
+        Err(message) => rt.set_trap(&message),
     });
 }
 
@@ -676,7 +955,7 @@ fn jet_jit_allocator_try_alloc(handle: i64, value: i64, requested_bytes: i64) ->
             }
             Err(error) => {
                 let record = rt.heap.alloc_record(2);
-                let allocator = rt.heap.alloc_string(allocator);
+                let allocator = rt.heap.alloc_string(error.allocator);
                 let _ = rt.heap.record_set_int(record, 0, error.requested_bytes);
                 let _ = rt.heap.record_set_string(record, 1, allocator);
                 crate::runtime_host::alloc_jit_result(rt, false, record as u64)
@@ -691,8 +970,12 @@ fn jet_jit_allocator_reset(handle: i64) {
             rt.set_trap("allocator handle is closed or invalid");
             return;
         };
+        if state.closed {
+            rt.set_trap("allocator handle is closed or invalid");
+            return;
+        }
+        state.runtime.reset();
         state.generation = state.generation.wrapping_add(1);
-        state.used = 0;
         state.slots.clear();
     });
 }
@@ -707,9 +990,9 @@ fn jet_jit_allocator_close(handle: i64) {
             rt.set_trap("allocator handle is closed or invalid");
             return;
         }
+        state.runtime.reset();
         state.closed = true;
         state.slots.clear();
-        state.used = 0;
     });
 }
 
@@ -1177,6 +1460,97 @@ fn jet_jit_shared_replace(handle: i64, value: i64) -> i64 {
     previous
 }
 
+fn shared_callback_slot(callback: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback))
+}
+
+fn shared_callback_fault(message: &str) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_host_fault(message);
+        0
+    })
+}
+
+fn jet_jit_shared_read(handle: i64, callback: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return shared_callback_fault("Shared.read received an invalid shared handle");
+    };
+    if let Some(staged) = shared_transaction_staged(&shared) {
+        let value = *staged.borrow();
+        let Some(slot) = shared_callback_slot(callback) else {
+            return shared_callback_fault("Shared.read callback handle is invalid");
+        };
+        let Some(result) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            return shared_callback_fault("Shared.read callback has no unary universal thunk");
+        };
+        return result;
+    }
+    let Some(permit) = shared_protocol::jet_shared_acquire(&shared.protocol, false, || false)
+    else {
+        return 0;
+    };
+    let value = shared.value.load(Ordering::Acquire);
+    let result = shared_callback_slot(callback)
+        .and_then(|slot| crate::runtime_host::invoke_universal_unary(slot, value));
+    let stopped = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::runtime_stop_pending(rt)
+    });
+    drop(permit);
+    if stopped {
+        return 0;
+    }
+    result.unwrap_or_else(|| shared_callback_fault("Shared.read callback is invalid"))
+}
+
+fn jet_jit_shared_edit(handle: i64, callback: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return shared_callback_fault("Shared.edit received an invalid shared handle");
+    };
+    if let Some(staged) = shared_transaction_stage_for_write(&shared) {
+        let Some(slot) = shared_callback_slot(callback) else {
+            return shared_callback_fault("Shared.edit callback handle is invalid");
+        };
+        let mut value = staged.borrow_mut();
+        let address = (&mut *value as *mut i64) as i64;
+        let Some(result) = crate::runtime_host::invoke_universal_unary(slot, address) else {
+            return shared_callback_fault("Shared.edit callback has no unary universal thunk");
+        };
+        return result;
+    }
+    let Some(permit) = shared_protocol::jet_shared_acquire(&shared.protocol, true, || false)
+    else {
+        return 0;
+    };
+    let mut value = shared.value.load(Ordering::Acquire);
+    let result = shared_callback_slot(callback).and_then(|slot| {
+        let address = (&mut value as *mut i64) as i64;
+        crate::runtime_host::invoke_universal_unary(slot, address)
+    });
+    let stopped = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::runtime_stop_pending(rt)
+    });
+    if stopped {
+        drop(permit);
+        return 0;
+    }
+    let Some(result) = result else {
+        drop(permit);
+        return shared_callback_fault("Shared.edit callback is invalid");
+    };
+    let Ok(next) = shared_next_revision(&shared) else {
+        drop(permit);
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedRevisionError.GenerationExhausted");
+            0
+        });
+    };
+    shared.value.store(value, Ordering::Release);
+    shared.revision.store(next, Ordering::Release);
+    drop(permit);
+    result
+}
+
+
 fn jet_jit_shared_capture(handle: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
@@ -1482,6 +1856,14 @@ fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
     };
     let value = shared.value.load(Ordering::Acquire);
     Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, handle, value, state))
+}
+
+fn jet_jit_shared_guard_read(handle: i64) -> i64 {
+    jet_jit_shared_guard_begin(handle, 0)
+}
+
+fn jet_jit_shared_guard_edit(handle: i64) -> i64 {
+    jet_jit_shared_guard_begin(handle, 1)
 }
 
 fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
@@ -2070,12 +2452,24 @@ fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
 }
 
 fn jet_jit_volatile_read(address: i64) -> i64 {
-    // SAFETY: the source `#Unsafe` gate owns validity of the typed pointer.
+    let allowed = Concurrency::with_runtime_mut(|rt| {
+        jet_jit_sentry_check_fixed(rt, address, "volatile_read")
+    });
+    if !allowed {
+        return 0;
+    }
+    // SAFETY: the sentry check above owns validity of the typed pointer.
     unsafe { std::ptr::read_volatile(address as *const i64) }
 }
 
 fn jet_jit_volatile_write(address: i64, value: i64) {
-    // SAFETY: the source `#Unsafe` gate owns validity of the typed pointer.
+    let allowed = Concurrency::with_runtime_mut(|rt| {
+        jet_jit_sentry_check_fixed(rt, address, "volatile_write")
+    });
+    if !allowed {
+        return;
+    }
+    // SAFETY: the sentry check above owns validity of the typed pointer.
     unsafe { std::ptr::write_volatile(address as *mut i64, value) };
 }
 
@@ -2088,6 +2482,7 @@ host_fns! {
         let cc = module.target_config().default_call_conv;
         let mut noarg_i64 = Signature::new(cc);
         noarg_i64.returns.push(AbiParam::new(types::I64));
+        let noarg_void = Signature::new(cc);
         let mut unary = Signature::new(cc);
         unary.params.push(AbiParam::new(types::I64));
         unary.returns.push(AbiParam::new(types::I64));
@@ -2151,6 +2546,15 @@ host_fns! {
     allocator_new_capacity: "jet_jit_allocator_new_capacity" => jet_jit_allocator_new_capacity: binary;
     allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: ternary;
     allocator_view_read: "jet_jit_allocator_view_read" => jet_jit_allocator_view_read: unary;
+    sentry_check: "jet_jit_sentry_check" => jet_jit_sentry_check: quinary_void;
+    sentry_scope_enter: "jet_jit_sentry_scope_enter" => jet_jit_sentry_scope_enter: quinary_void;
+    sentry_scope_exit: "jet_jit_sentry_scope_exit" => jet_jit_sentry_scope_exit: noarg_void;
+    sentry_function_mark: "jet_jit_sentry_function_mark" => jet_jit_sentry_function_mark: noarg_void;
+    sentry_function_exit: "jet_jit_sentry_function_exit" => jet_jit_sentry_function_exit: noarg_void;
+    sentry_frame_enter: "jet_jit_sentry_frame_enter" => jet_jit_sentry_frame_enter: noarg_void;
+    sentry_frame_exit: "jet_jit_sentry_frame_exit" => jet_jit_sentry_frame_exit: noarg_void;
+    sentry_register_stack: "jet_jit_sentry_register_stack" => jet_jit_sentry_register_stack: binary_void;
+    view_string: "jet_jit_view_string" => jet_jit_view_string: unary;
     index_pool_get: "jet_std::jet_pool_get" => jet_jit_pool_get_checked: sig_index_pool_get;
     index_pool_get_mut: "jet_std::jet_pool_get_mut" => jet_jit_pool_get_checked: sig_index_pool_get;
     index_pool_set: "jet_std::jet_pool_set" => jet_jit_index_pool_set: sig_index_pool_set;
@@ -2181,6 +2585,8 @@ host_fns! {
     shared_get: "jet_shared_get" => jet_jit_shared_get: unary;
     shared_set: "jet_shared_set" => jet_jit_shared_set: binary_void;
     shared_replace: "jet_shared_replace" => jet_jit_shared_replace: binary;
+    shared_read: "jet_shared_read" => jet_jit_shared_read: binary;
+    shared_edit: "jet_shared_edit" => jet_jit_shared_edit: binary;
     shared_capture: "jet_shared_capture" => jet_jit_shared_capture: unary;
     shared_capture_with: "jet_shared_capture_with" => jet_jit_shared_capture_with: binary;
     shared_capture_txn_plain: "jet_shared_capture_txn_plain" => jet_jit_shared_capture_txn_plain: binary;
@@ -2200,7 +2606,8 @@ host_fns! {
     condition_new: "jet_jit_condition_new" => jet_jit_condition_new: noarg_i64;
     condition_notify_one: "jet_jit_condition_notify_one" => jet_jit_condition_notify_one: unary_void;
     condition_notify_all: "jet_jit_condition_notify_all" => jet_jit_condition_notify_all: unary_void;
-    shared_guard_begin: "jet_jit_shared_guard_begin" => jet_jit_shared_guard_begin: binary;
+    shared_guard_read: "jet_shared_guard_read" => jet_jit_shared_guard_read: unary;
+    shared_guard_edit: "jet_shared_guard_edit" => jet_jit_shared_guard_edit: unary;
     shared_guard_map: "jet_shared_guard_map" => jet_jit_shared_guard_map: ternary;
     shared_guard_split: "jet_shared_guard_split" => jet_jit_shared_guard_split: quaternary;
     shared_guard_clone: "jet_jit_shared_guard_clone" => jet_jit_shared_guard_clone: binary;

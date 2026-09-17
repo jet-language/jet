@@ -1,4 +1,4 @@
-use core.[files, regex]
+use core.files
 
 #CLI
 struct Args {
@@ -15,7 +15,7 @@ fn run(args: Args) {
     directory :: args.path
     entries :: files.list_dir(directory) ?? panic("cannot list directory")
     pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
-    photos := entries.filter(entry -> !entry.is_dir && pattern.is_match(entry.name)).map(entry -> {
+    photos := entries.filter(entry -> !entry.is_dir && (~pattern).is_match(entry.name)).map(entry -> {
         match :: pattern.match(entry.name) ?? panic("bad photo")
         Photo{
             number: Int.parse(match.group(1) ?? panic("bad photo")) ?? panic("bad photo"),

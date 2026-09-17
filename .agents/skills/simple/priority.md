@@ -1,35 +1,22 @@
-# Priority stack (all `simple*` skills)
+# Priority for governed prose
 
-Higher row wins when rules fight.
+Use this stack when `simple` writes a governed artifact or the caller requests STE detail. A higher row wins when rules conflict.
 
-| Rank | Rule | Notes |
-|------|------|-------|
-| 1 | Exact tokens | Code, paths, IDs, errors, Jet syntax — never synonymize |
-| 2 | Orwell #6 | No barbarous, ambiguous, or false text |
-| 3 | STE completeness | Keep article + subject + verb |
-| 4 | STE shape | Length limits, one idea, lists, verb-form limits |
-| 5 | Orwell 1–5 | No cliché, short word, cut dead weight, active, no decorative jargon |
-| 6 | Caveman anti-filler | Only in `simple-caveman` and `simple-ponytail-caveman` |
-| 7 | Ponytail ladder | Only in ponytail variants — governs **code**, not grammar |
-| 8 | Word table | Everyday prefer/avoid list |
+| Rank | Rule | Meaning |
+|---|---|---|
+| 1 | Exact tokens | Keep code, paths, IDs, errors, and Jet syntax exact. |
+| 2 | Orwell #6 | Do not write barbarous, ambiguous, or false text. |
+| 3 | STE completeness | Keep the article, subject, and verb. |
+| 4 | STE shape | Apply sentence length, one-idea, list, and verb-form limits. |
+| 5 | Orwell 1–5 | Cut stale figures, prefer short words, cut dead weight, use active voice, and avoid decorative jargon. |
+| 6 | Everyday word table | Prefer the common word when it does not change a technical meaning. |
 
-## Variant overlays
+## Hard boundaries
 
-| Skill | Prose | Code |
-|-------|-------|------|
-| `simple` | ranks 1–5, 8 | unchanged |
-| `simple-caveman` | ranks 1–6, 8 | unchanged |
-| `simple-ponytail` | ranks 1–5, 8 | rank 7 |
-| `simple-ponytail-caveman` | ranks 1–6, 8 | rank 7 |
+- Do not drop articles to sound terse.
+- Do not paraphrase diagnostic snapshot copy, ratified decision text, or user quotes unless asked.
+- Do not claim full ASD-STE100 dictionary compliance.
+- Do not rename APIs or technical terms for clarity.
+- Do not let style rules hide a caveat, safety condition, uncertainty, or required order.
 
-## Hard bans (all variants)
-
-- Dropping articles to sound like classic caveman **full/ultra**
-- Paraphrasing diagnostic snapshot copy or ratified decision text unless asked
-- Claiming full ASD-STE100 dictionary compliance
-- Renaming APIs “for clarity”
-
-## Stop phrases
-
-`normal mode`, or `stop simple` / `stop simple-caveman` / `stop simple-ponytail` /
-`stop simple-ponytail-caveman` (match the active skill).
+Stop when the requested prose passes the applicable core and contextual checks. `normal mode` and `stop simple` end this skill's active use.

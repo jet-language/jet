@@ -13,7 +13,7 @@ use jet_foundation::Names::{
 struct LivenessCandidate {
     code: &'static str,
     name: String,
-    source: String,
+    module: usize,
     span: Span,
     detail: &'static str,
     edit: crate::Diagnostics::TextEdit,
@@ -25,11 +25,11 @@ impl LivenessCandidate {
             .with_edit(self.edit.clone())
     }
 
-    fn fact(&self) -> StructureFact {
+    fn fact(&self, source: &str) -> StructureFact {
         StructureFact::new(
             StructureFactKind::Liveness,
             self.name.clone(),
-            self.source.clone(),
+            source.to_string(),
             self.span,
             "unreachable",
             self.detail,
@@ -50,18 +50,29 @@ pub(super) fn check_liveness(
     collect_unreachable_exports(bundle, ledger, app_graph, &mut candidates);
 
     candidates.sort_by(|a, b| {
-        a.source
-            .cmp(&b.source)
+        bundle.modules[a.module].display
+            .cmp(&bundle.modules[b.module].display)
             .then(a.span.start.cmp(&b.span.start))
             .then(a.code.cmp(b.code))
             .then(a.name.cmp(&b.name))
     });
 
+    let mut origins = std::collections::HashMap::new();
     candidates
         .into_iter()
         .map(|candidate| {
-            ledger.record_structure_fact(candidate.fact());
-            candidate.diagnostic()
+            let module = &bundle.modules[candidate.module];
+            let origin = origins.entry(candidate.module).or_insert_with(|| {
+                std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
+                    module.display.clone(),
+                    module.path.to_string_lossy().into_owned(),
+                    module.source.clone(),
+                ))
+            });
+            ledger.record_structure_fact(candidate.fact(&module.display));
+            let mut diagnostic = candidate.diagnostic();
+            diagnostic.set_origin(origin.clone());
+            diagnostic
         })
         .collect()
 }
@@ -151,7 +162,7 @@ fn collect_unused_imports(
                         candidates.push(LivenessCandidate {
                             code: "L0103",
                             name: name.clone(),
-                            source: module.display.clone(),
+                            module: module_idx,
                             span,
                             detail: "import is never read",
                             edit,
@@ -179,7 +190,7 @@ fn collect_unused_imports(
                 candidates.push(LivenessCandidate {
                     code: "L0103",
                     name: name.clone(),
-                    source: module.display.clone(),
+                    module: module_idx,
                     span,
                     detail: "import is never read",
                     edit: rename_edit(span, &name),
@@ -222,7 +233,7 @@ fn collect_unused_private_functions(
         candidates.push(LivenessCandidate {
             code: "L0104",
             name,
-            source: module.display.clone(),
+            module: declaration.module,
             span: declaration.span,
             detail: "private function is never reached",
             edit,
@@ -250,13 +261,13 @@ fn collect_unreachable_exports(
         {
             continue;
         }
-        let Some(module) = bundle.modules.get(declaration.module) else {
+        let Some(_) = bundle.modules.get(declaration.module) else {
             continue;
         };
         candidates.push(LivenessCandidate {
             code: "L0105",
             name: display_name(declaration),
-            source: module.display.clone(),
+            module: declaration.module,
             span: declaration.span,
             detail: "package export is unreachable",
             edit: rename_edit(declaration.span, &display_name(declaration)),
@@ -288,7 +299,7 @@ fn collect_unreachable_exports(
                 candidates.push(LivenessCandidate {
                     code: "L0105",
                     name: name.clone(),
-                    source: module.display.clone(),
+                    module: module_idx,
                     span,
                     detail: "package re-export is unreachable",
                     edit: rename_edit(span, &name),

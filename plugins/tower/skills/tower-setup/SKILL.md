@@ -1,44 +1,63 @@
 ---
 name: tower-setup
-description: Set up or configure Tower — init plugins/tower/.tower, import an older tower.json, or tune config.json. Use for "set up tower", "configure tower", or first-run problems (no Tower data found).
+description: >-
+  Initialize Tower data, import an older board, or inspect first-run
+  `config.json`. Use when `plugins/tower/.tower/` is missing, a board must be
+  migrated, or configuration needs a bounded inspection. Do not use for board
+  operations, ballots, ranking, preparation, or execution.
 ---
 
-# Tower — set up in a project
+# Tower — initialize or inspect setup
 
 ## Contract
 
-- **Requested outcome:** An initialized or repaired Tower data/configuration directory, ready for the owner to start the board when needed.
-- **Supplied inputs:** Project name, existing Tower state or import file, config values, and the installed Tower path.
-- **Allowed child result:** Passive reads and `tower` CLI inspection may return state/config facts. No child starts the server, edits board JSON, or changes project policy.
-- **Completion owner:** `tower-setup` owns initialization and configuration; the owner owns server startup and board exposure.
-- **Return point:** Return from each inspection or import to setup, then report the exact resulting paths and config.
-- **Stopping condition:** Stop after init/import/config is complete and the owner has the command to start the server. Do not start `tower serve` automatically.
+- **Requested outcome:** Tower data is initialized or imported, or the existing
+  configuration has been inspected and reported.
+- **Supplied inputs:** Project name, existing Tower state or import file,
+  installed Tower path, and any owner-requested configuration facts.
+- **Allowed child result:** Passive reads and non-serve Tower CLI inspection may
+  return state or configuration facts. No child starts the server, edits board
+  JSON, or changes project policy.
+- **Completion owner:** `tower-setup` owns initialization and import. The
+  owner owns server startup and board exposure.
+- **Return point:** Return from each inspection or import to setup, then report
+  exact resulting paths and configuration facts.
+- **Stopping condition:** Stop after the requested init, import, or inspection
+  is complete and the owner has the command to start the server. Never start
+  `tower serve` automatically.
 
-Tower's code lives where it's installed (plugin dir or vendored `Tower/`);
-its DATA lives at `plugins/tower/.tower/` beside this app. Setup = create that
-dir and shape the config. The owner starts the board server when needed.
+## Data path and commands
 
-```
-# Jet (vendored):
+Tower code lives where it is installed (`plugins/tower/` here, or a vendored
+`Tower/`). Its data lives beside that app in `plugins/tower/.tower/`.
+Initialization and import are the only state-creating operations in this
+route:
+
+```sh
+# Jet (vendored)
 node plugins/tower/tower.mjs init --name "<Project>"
+node plugins/tower/tower.mjs import <old-tower.json> --name "<Project>"
 
-# Plugin install (Claude Code / Cursor):
+# Plugin install
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
+node ${CLAUDE_PLUGIN_ROOT}/tower.mjs import <old-tower.json> --name "<Project>"
 ```
 
-The owner decides when to run `tower serve --open`; setup does not start a
-server or open a browser.
+For an old v3 board, `binder` becomes `ideas`; epochs and cards carry over
+losslessly. Inspect the installed command surface with `tower help` rather
+than guessing a subcommand.
 
-`init` creates `plugins/tower/.tower/tower.json` (all state), public `plugins/tower/.tower/config.json`,
-and a `.gitignore` for `backups/`, `secrets.json`, and crash-residue
-`.secrets.json.tmp-*` files. Commit `plugins/tower/.tower/` so the
-team shares the board —
-including `plugins/tower/.tower/history.json` once it appears (retired cards/decisions,
-see below); it's board history, not a cache, and is NOT gitignored.
-Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
-(v3-era files: `binder` → ideas, epochs/cards carried losslessly).
+`init` creates `plugins/tower/.tower/tower.json`, public `config.json`, and a
+`.gitignore` for `backups/`, `secrets.json`, and crash-residue
+`.secrets.json.tmp-*`. Commit the data directory so the team shares the board,
+including `history.json` after it appears; history is not a cache and is not
+gitignored.
 
-## config.json — everything optional
+## Configuration inspection
+
+There is no invented `tower config` command. For a configuration inspection,
+read the existing `plugins/tower/.tower/config.json` as a normal file and
+report only facts relevant to the request. All fields are optional:
 
 ```json
 {
@@ -54,36 +73,23 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 }
 ```
 
-- **`port`** — CLI and UI both use it; if a different tool already owns
-  7878, set another port here. The server listens on the local network —
-  treat it as trusted-network-only (LAN/tailnet).
-- **`retireAfterDays`** — the walk-back buffer: how long a done card, or a
-  ratified decision, sits live before it retires into `plugins/tower/.tower/history.json`
-  (`tower archive status|show|restore` reads it back). Nothing retires the
-  instant it's ratified — the owner sees it on Now's "Recently decided"
-  strip and can reopen it in one tap while it's fresh.
+`port` is shared by CLI and UI; if another local service owns 7878, the owner
+may choose another value. `retireAfterDays` is the walk-back buffer before a
+done card or ratified decision moves to `history.json`. Do not add removed
+authentication or push fields. Do not treat configuration inspection as
+permission to edit board state or project policy.
 
-## LAN access, git linking
+## Server boundary
 
-- Tower needs no credentials or setup key for LAN access. Open
-  `http://<machine-hostname>:<port>` or `http://<machine-ip>:<port>` from
-  another device. Every device on the LAN can read and change the board; do
-  not expose Tower to the public Internet.
-- Browser mutations require same-origin evidence. CLI mutations must send the
-  explicit `X-Tower-Client: cli` header.
-- Opening the board silently creates a short-lived HttpOnly owner interaction
-  session. Acceptance uses a one-time challenge tied to that session.
-- `auth` and `push` are removed fields. Tower rejects them in tracked
-  `config.json`; existing ignored `secrets.json` files are not read.
-- `tower githook` installs a post-commit hook so commits mentioning `#12`
-  append to that card's log — install it once per repo.
+**Only the owner starts `tower serve`.** Setup does not start a server, pass
+owner credentials, or open a browser. Use the owner-facing command only after
+setup stops:
 
-## First work session
+```sh
+tower serve --open
+```
 
-1. Create the structure: `tower epoch add e1 --name "…" --goal "…"`,
-   `tower epoch current e1`, `tower milestone add --epoch e1 --title "…"`.
-2. Seed cards: `tower card add --title "…" --priority P1 …` — they land
-   straight in `planning`, agent-ready; no owner greenlight step.
-3. Add a line to the host repo's CLAUDE.md / AGENTS.md pointing agents at
-   the **tower** skill (or the plugin's `AGENTS.md` for other agents) so every
-   session knows the board is the source of truth.
+Read [remote access and first session](references/remote-and-first-session.md)
+only when the owner requests LAN access, a git hook, or initial epoch/card
+seeding. Read [tower](../tower/SKILL.md) for ordinary board operations. Do not
+load remote or campaign detail during a bounded init or inspection.

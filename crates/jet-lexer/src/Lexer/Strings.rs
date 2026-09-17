@@ -293,8 +293,8 @@ impl<'a> Lexer<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0002",
                             "this `{` never gets a matching `}`".to_string(),
-                            "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends".to_string(),
-                            "add a `}` after the value, or write `{{` for a literal brace".to_string(),
+                            "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends; escaped braces use `{{`/`}}`, while raw backtick strings keep braces literal".to_string(),
+                            "add a `}` after the value, write `{{` for an escaped brace, or write the text as ``…`` for raw text".to_string(),
                             Some(Span::new(open_pos, self.pos(self.i))),
                         ));
                         // Skip to the end of the line; one error is enough.
@@ -610,8 +610,8 @@ impl<'a> Lexer<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0002",
                             "this `{` never gets a matching `}`".to_string(),
-                            "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends".to_string(),
-                            "add a `}` after the value, or write `{{` for a literal brace".to_string(),
+                            "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends; escaped braces use `{{`/`}}`, while raw backtick strings keep braces literal".to_string(),
+                            "add a `}` after the value, write `{{` for an escaped brace, or write the text as ``…`` for raw text".to_string(),
                             Some(Span::new(open_pos, self.pos(k))),
                         ));
                         self.i = close + 3;

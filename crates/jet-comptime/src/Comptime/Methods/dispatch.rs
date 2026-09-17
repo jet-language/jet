@@ -734,7 +734,11 @@ fn class_matches(class: &[char], needle: char) -> bool {
 /// ranged distinct-type constructor (`eval_distinct_ctor`).
 fn literal_int(e: &Expr) -> Option<i64> {
     match e {
-        Expr::Int(n, _, _, _) => Some(*n),
+        Expr::Int(n, _, _, raw) => match crate::Comptime::exact_integer_ct_value(*n, raw.as_deref()) {
+            CtValue::Int(value) => Some(value),
+            CtValue::BigInt(_) => None,
+            _ => None,
+        },
         Expr::Unary(UnOp::Neg, inner, _) => literal_int(inner).and_then(i64::checked_neg),
         Expr::Paren(inner, _) => literal_int(inner),
         _ => None,

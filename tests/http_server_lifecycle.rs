@@ -23,26 +23,25 @@ trait __jet_Encode {}
 impl<T> __jet_Encode for T {}
 
 trait __jet_Decode: Sized {
-    fn from_json_fixture(text: &str) -> Result<Self, String>;
-}
-
-impl __jet_Decode for String {
-    fn from_json_fixture(text: &str) -> Result<Self, String> {
-        let trimmed = text.trim_start();
-        if trimmed.starts_with('{') || trimmed.starts_with('[') || trimmed.starts_with('"') {
-            Ok(text.to_string())
-        } else {
-            Err("fixture JSON decode failed".to_string())
-        }
-    }
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
 fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
     r#"{"ok":true}"#.to_string()
 }
 
-fn jet_enc_json_decode<T: __jet_Decode>(text: &str) -> Result<T, String> {
-    T::from_json_fixture(text)
+impl __jet_Decode for String {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        Ok(jet_std::render_datatree_json(tree, false, 0))
+    }
+}
+
+fn jet_enc_json_decode<T: __jet_Decode>(
+    text: &str,
+) -> Result<T, Vec<jet_std::FieldError>> {
+    let tree = jet_std::parse_json_typed_datatree(text)
+        .map_err(|error| jet_std::FieldError::one(error.reason))?;
+    T::jet_decode(&tree)
 }
 
 struct JetFileReader {
@@ -52,10 +51,22 @@ struct JetFileReader {
 struct JetFileWriter {
     inner: Box<dyn std::io::Write + Send>,
 }
+mod jet_encoding_json {
+    pub use jet_foundation::EncodingJson::*;
+}
+
+mod jet_json_number {
+    pub use jet_foundation::JSONNumber::*;
+}
+
+include!("../crates/jet-foundation/src/LiveLifecycle.rs");
 
 mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    pub use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Shape::ShapeProjection;
+
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
 
     #[derive(Clone, Copy)]
@@ -69,6 +80,73 @@ mod jet_std {
         pub fn as_millis(self) -> i64 {
             self.ms
         }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum IOOperation {
+        Read,
+        Write,
+        Flush,
+        Connect,
+        Accept,
+        Close,
+        Resolve,
+        Codec,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct IOContext {
+        pub operation: IOOperation,
+        pub resource: JetOutcome<String, JetAbsent>,
+        pub os_code: JetOutcome<i64, JetAbsent>,
+        pub cause: JetOutcome<String, JetAbsent>,
+    }
+
+    impl IOContext {
+        pub fn new(
+            operation: IOOperation,
+            resource: Option<String>,
+            os_code: Option<i64>,
+            cause: Option<String>,
+        ) -> Self {
+            Self {
+                operation,
+                resource: jet_outcome_of(resource),
+                os_code: jet_outcome_of(os_code),
+                cause: jet_outcome_of(cause),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum IOError {
+        InvalidInput(IOContext),
+        NotFound(IOContext),
+        PermissionDenied(IOContext),
+        TimedOut(IOContext),
+        Cancelled(IOContext),
+        Closed(IOContext),
+        Protocol(IOContext),
+        Other(IOContext),
+    }
+
+    // The canonical DataTree extension calls these exact-Int helpers. This
+    // fixture does not exercise large integer ownership, so the host i64
+    // carrier is sufficient while the type and decode modules stay canonical.
+    pub fn jet_int_from_i64(value: i64) -> i64 {
+        value
+    }
+    pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+        value.parse::<i64>().map_err(|error| error.to_string())
+    }
+    pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+        Some(value)
+    }
+    pub fn jet_int_to_string(value: i64) -> String {
+        value.to_string()
+    }
+    pub fn jet_int_to_f64(value: i64) -> f64 {
+        value as f64
     }
 
     #[derive(Clone, Debug)]
@@ -93,6 +171,16 @@ mod jet_std {
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    use crate::jet_encoding_json::quote_json;
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
+    jet_datatree_decode_helpers!();
+
 }
 
 enum JetParaRuntimeFailure {
@@ -3839,11 +3927,13 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
     assert!(
         jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 })
             .unwrap_err()
+            .to_string()
             .contains("already requested")
     );
     assert_eq!(serve_thread.join().expect("serve join").user_completed, 1);
     assert!(jet_http_server_serve(&server)
         .unwrap_err()
+        .to_string()
         .contains("only be served once"));
 }
 
@@ -3928,6 +4018,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict, None, None)
         .err()
         .expect("conflict")
+        .to_string()
         .contains("route conflict"));
     let legacy = jet_http_mux_new();
     jet_http_mux_add(&legacy, "GET", "/users/{id}", |_| {
@@ -3936,6 +4027,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy, None, None)
         .err()
         .expect("brace pattern")
+        .to_string()
         .contains("E2805"));
 
     let bare = jet_http_mux_new();
@@ -3945,17 +4037,20 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), bare, None, None)
         .err()
         .expect("bare wildcard")
+        .to_string()
         .contains("`*wildcard`"));
 
     let bare_once = jet_http_mux_new();
     jet_http_mux_add(&bare_once, "GET", "/files/*", |_| {
         jet_http_srv_response(200, &String::new())
     });
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind invalid route probe");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
     assert!(
         jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &bare_once)
             .err()
             .expect("serve-once validation")
+            .to_string()
             .contains("`*wildcard`")
     );
 
@@ -3966,6 +4061,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(
         jet_http_mux_serve_once(&"not a socket address".to_string(), invalid_before_bind)
             .expect_err("route validation must precede bind")
+            .to_string()
             .contains("E2805")
     );
 

@@ -1501,6 +1501,17 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             resolved_ret,
             ..
         } => {
+            if recv_type.as_deref() == Some("SQL") {
+                match method.as_str() {
+                    "template" => return Some(Type::String),
+                    "params" => {
+                        return Some(Type::List(Box::new(Type::Named(
+                            crate::Syntax::TYPE_DB_VALUE.to_string(),
+                        ))))
+                    }
+                    _ => {}
+                }
+            }
             // `resolved_ret` exists only when sema persisted a result more exact
             // than the generic method table (or another required exact shape).
             if let Some(ty) = resolved_ret {

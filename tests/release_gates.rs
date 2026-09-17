@@ -291,6 +291,19 @@ fn version_banner() {
     assert_eq!(stdout, Manifest::version_banner());
     check_fixture("version_banner.txt", &stdout);
 }
+#[test]
+fn prerelease_status_is_not_a_shipped_1_0_policy() {
+    let status = Manifest::current_release_status();
+    assert_eq!(status.channel(), "prerelease");
+    assert_eq!(status.readiness(), "not-ready");
+    assert_eq!(status.policy(), "future-1.0");
+    assert!(!status.policy_active());
+
+    let banner = Manifest::version_banner();
+    assert!(banner.contains("release status: prerelease"));
+    assert!(banner.contains("release readiness: not-ready"));
+    assert!(banner.contains("1.0 compatibility policy: future-1.0 (not active)"));
+}
 
 #[test]
 fn edition_too_new() {
@@ -344,7 +357,7 @@ fn cbor_deprecation_release_fixture() {
     let root = std::env::temp_dir().join(format!("jet_release_deprecation_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
-    let source = "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree := json.parse(\"{{}}\") ?? panic(\"json\")\n    payload := cbor.encode(tree)\n    print(\"ok\")\n}\n";
+    let source = "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree :: json.parse(\"{{}}\") ?? panic(\"json\")\n    payload :: cbor.encode(tree)\n    print(\"ok\")\n}\n";
     let mut rendered = String::new();
     for edition in ["2027", "2028"] {
         fs::write(
@@ -396,14 +409,11 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         assert!(gate.contains(field), "compiled workload gate lost {field}");
     }
 
-    let runner = fs::read_to_string(root.join("tools/ci/compiled-workload-runner.mjs"))
-        .expect("read compiled workload runner");
+    let runner_path = root.join("tools/ci/compiled-workload-runner.mjs");
+    let runner = fs::read_to_string(&runner_path).expect("read compiled workload runner");
     for field in [
         "runMeasured",
         "process.hrtime.bigint",
-        "VmHWM",
-        "VmRSS",
-        "PeakWorkingSet64",
         "JET_WEB_CHROMIUM",
         "CdpDriver",
         "network=loopback-only",
@@ -416,6 +426,35 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
     ] {
         assert!(runner.contains(field), "compiled workload runner lost {field}");
     }
+    let metric_registry = Command::new("node")
+        .arg(&runner_path)
+        .arg("--measurement-registry")
+        .current_dir(&root)
+        .output()
+        .expect("probe compiled workload measurement registry");
+    assert!(
+        metric_registry.status.success(),
+        "compiled workload measurement registry probe failed:\n{}",
+        String::from_utf8_lossy(&metric_registry.stderr)
+    );
+    let metric_registry = String::from_utf8_lossy(&metric_registry.stdout);
+    for field in [
+        "\"linux\"",
+        "\"macos\"",
+        "\"windows\"",
+        "\"VmHWM\"",
+        "\"VmRSS\"",
+        "\"PeakWorkingSet64\"",
+    ] {
+        assert!(
+            metric_registry.contains(field),
+            "compiled workload measurement registry lost {field}: {metric_registry}"
+        );
+    }
+    assert!(
+        metric_registry.contains("\"processProperty\":\"PeakWorkingSet64\""),
+        "Windows memory measurement must use peak working set: {metric_registry}"
+    );
 
     let self_check = fs::read_to_string(root.join("tools/ci/test-compiled-workload-gate.sh"))
         .expect("read compiled workload gate self-check");

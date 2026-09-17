@@ -10,7 +10,7 @@ use std::process::{exit, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
@@ -239,7 +239,7 @@ fn dev_session_label(action: DevSessionAction) -> &'static str {
     }
 }
 
-fn spawn_dev_session_input() -> Receiver<u8> {
+fn spawn_dev_session_input(wake: jet_devserver::WatchWake) -> Receiver<u8> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let mut stdin = std::io::stdin();
@@ -251,6 +251,7 @@ fn spawn_dev_session_input() -> Receiver<u8> {
                     if sender.send(byte[0]).is_err() {
                         break;
                     }
+                    wake.wake();
                 }
             }
         }
@@ -495,7 +496,12 @@ fn refresh_terminal_host(
     *previous = Some(frame);
 }
 
-fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
+fn run_dev_tests(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    filters: &[String],
+) -> Vec<String> {
     let executable = match std::env::current_exe() {
         Ok(path) => path,
         Err(error) => {
@@ -515,6 +521,12 @@ fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
     for filter in selected_filters {
         let mut command = Command::new(&executable);
         command.arg("test").arg(file);
+        if profile != "dev" {
+            command.arg(format!("--profile={profile}"));
+        }
+        for (key, value) in setting_overrides {
+            command.arg(format!("--set={key}={value}"));
+        }
         if let Some(filter) = filter {
             command.arg(format!("--filter={filter}"));
         }
@@ -1014,6 +1026,8 @@ fn run_dev_inner(
         }
     };
     register_dev_watch_paths(&mut watch, path);
+    let mut incremental_cache = jet::Sema::IncrementalSemaCache::new();
+
 
     // The checked snapshot from the last successful load, kept so a resident
     // edit can be diffed against it for type stability (D-HOTSWAP1).
@@ -1028,6 +1042,12 @@ fn run_dev_inner(
         profile,
         setting_overrides,
     );
+    if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
+        if prev_snapshot.is_some() {
+            prime_dev_incremental_cache(file, &mut incremental_cache);
+        }
+    }
+
     let mut static_host = if canvas_host.is_none() && prev_snapshot.is_some() {
         start_static_output_host(
             file,
@@ -1096,7 +1116,7 @@ fn run_dev_inner(
     let mut terminal_frame = None;
     refresh_terminal_host(&mut terminal_host, &resident_session, &mut terminal_frame);
 
-    let input = spawn_dev_session_input();
+    let input = spawn_dev_session_input(watch.wake_handle());
     let mut failed_claims = Vec::new();
     let mut game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
         matches!(
@@ -1104,9 +1124,15 @@ fn run_dev_inner(
             jet::Interpreter::DevMode::Resident
         )
     });
+    let mut first_tick = true;
 
     loop {
-        jet_jit::scheduler_sleep_ms(jet_devserver::WATCH_POLL_INTERVAL_MS);
+        let watch_woke = if first_tick {
+            first_tick = false;
+            true
+        } else {
+            watch.wait_for_change_for(next_dev_job_wake(prev_snapshot.as_ref()))
+        };
         while let Ok(byte) = input.try_recv() {
             let action = if terminal_host.capabilities().tty {
                 terminal_session_action(
@@ -1183,21 +1209,18 @@ fn run_dev_inner(
                     if let Err(error) = resident_session.reopen_game_asset_watcher(file) {
                         eprintln!("game assets: {error}");
                     }
-                    watch = match jet_devserver::WatchSession::open(path) {
-                        Ok(watch) => watch,
-                        Err(diagnostic) => {
-                            eprint!(
-                                "{}",
-                                jet::render_all_colored(
-                                    file,
-                                    "",
-                                    &[diagnostic],
-                                    mode.color_stderr(),
-                                )
-                            );
-                            exit(ExitCodes::USER_ERROR);
-                        }
-                    };
+                    if let Err(diagnostic) = watch.reopen(path) {
+                        eprint!(
+                            "{}",
+                            jet::render_all_colored(
+                                file,
+                                "",
+                                &[diagnostic],
+                                mode.color_stderr(),
+                            )
+                        );
+                        exit(ExitCodes::USER_ERROR);
+                    }
                     register_dev_watch_paths(&mut watch, path);
                     prev_snapshot = render_dev_iteration(
                         file,
@@ -1210,6 +1233,13 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
+                    incremental_cache.clear();
+                    if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
+                        if prev_snapshot.is_some() {
+                            prime_dev_incremental_cache(file, &mut incremental_cache);
+                        }
+                    }
+
                     game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
                         matches!(
                             jet::Interpreter::detect_dev_mode(&snapshot.bundle),
@@ -1325,7 +1355,7 @@ fn run_dev_inner(
                     );
                 }
                 DevSessionAction::Tests => {
-                    failed_claims = run_dev_tests(file, &[]);
+                    failed_claims = run_dev_tests(file, profile, setting_overrides, &[]);
                 }
                 DevSessionAction::FailedClaimsOnly => {
                     if failed_claims.is_empty() {
@@ -1334,7 +1364,7 @@ fn run_dev_inner(
                         }
                     } else {
                         let previous = failed_claims.clone();
-                        failed_claims = run_dev_tests(file, &previous);
+                        failed_claims = run_dev_tests(file, profile, setting_overrides, &previous);
                     }
                 }
                 DevSessionAction::Quit => {
@@ -1358,7 +1388,8 @@ fn run_dev_inner(
             );
             sync_persist_bindings(&snapshot.bundle, &mut persist);
         }
-        if let Some(receipt) = watch.poll() {
+        if watch_woke {
+            if let Some(receipt) = watch.poll() {
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
@@ -1384,6 +1415,8 @@ fn run_dev_inner(
                 profile,
                 &release_policy,
                 setting_overrides,
+                &mut incremental_cache,
+
                 receipt.game_dev_entries(),
                 &mut game_facts,
                 canvas_host.as_ref().or(static_host.as_ref()),
@@ -1547,6 +1580,7 @@ fn run_dev_inner(
                     );
                 }
             }
+            }
         }
         let project_session = static_host
             .as_ref()
@@ -1573,6 +1607,12 @@ fn run_dev_inner(
                     &mut game_controls_enabled,
                     &mut canvas_hint_printed,
                 );
+                incremental_cache.clear();
+                if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
+                    if prev_snapshot.is_some() {
+                        prime_dev_incremental_cache(file, &mut incremental_cache);
+                    }
+                }
                 if let Err(error) = project_session.finish_project_rebuild(&request, result) {
                     if !mode.quiet {
                         eprintln!("Project rebuild receipt: {error}");
@@ -1647,6 +1687,40 @@ fn provision_live_lineage_env(
     ] {
         std::env::set_var(key, value);
     }
+}
+
+/// Return the next timer wake needed by scheduled dev jobs. File changes
+/// continue to wake through the native watcher; a timer is only needed when a
+/// checked `#Every(…)` schedule is present.
+fn next_dev_job_wake(snapshot: Option<&jet::CheckedMirSnapshot>) -> Option<Duration> {
+    let snapshot = snapshot?;
+    let jobs = jet::Interpreter::scheduled_jobs(&snapshot.bundle);
+    if jobs.is_empty() {
+        return None;
+    }
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let second_of_day = now_secs % 86_400;
+    jobs.into_iter()
+        .map(|(_, schedule)| match schedule {
+            jet::AST::EverySchedule::Duration { nanos } => {
+                Duration::from_nanos(nanos.max(1) as u64)
+            }
+            jet::AST::EverySchedule::WallClockTime { hour, minute } => {
+                let target = hour as u64 * 3_600 + minute as u64 * 60;
+                let seconds = if second_of_day >= target && second_of_day < target + 60 {
+                    1
+                } else if second_of_day < target {
+                    target - second_of_day
+                } else {
+                    86_400 - second_of_day + target
+                };
+                Duration::from_secs(seconds.max(1))
+            }
+        })
+        .min()
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
@@ -1912,19 +1986,12 @@ fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSc
     }
 }
 fn dev_artifact_request(
+    bundle: &jet::AST::ProgramBundle,
     target: jet_foundation::MIR::MirArtifactTarget,
     profile: &str,
 ) -> jet_foundation::MIR::MirArtifactRequest {
-    let build_mode = match profile {
-        "dev" | "debug" | "ci" | "hardened" | "small" | "no-os" => {
-            jet_foundation::MIR::MirArtifactBuildMode::Dev
-        }
-        "release" => jet_foundation::MIR::MirArtifactBuildMode::Release,
-        "test" => jet_foundation::MIR::MirArtifactBuildMode::Test,
-        "fuzz" => jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
-        "coverage" => jet_foundation::MIR::MirArtifactBuildMode::Coverage,
-        other => jet_foundation::ice!(None, "unsupported MIR artifact build profile `{other}`"),
-    };
+    let build_mode =
+        jet::Driver::mir_artifact_build_mode_for(bundle, jet::Sema::CompileMode::Run, profile);
     let kind = match build_mode {
         jet_foundation::MIR::MirArtifactBuildMode::Test
         | jet_foundation::MIR::MirArtifactBuildMode::Coverage => {
@@ -1941,36 +2008,37 @@ fn dev_artifact_request(
     jet_foundation::MIR::MirArtifactRequest::new(target, kind, build_mode)
 }
 
-/// Handle one detected file change: pick swap vs rerun vs restart and render.
-/// Returns the freshly checked snapshot (or `None` if it failed to load) for
-/// the next watch iteration.
-fn render_dev_change(
+fn dev_incremental_reload_enabled(
+    entry_fn: Option<&str>,
+    profile: &str,
+    gates: jet::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> bool {
+    entry_fn.is_none() && profile == "dev" && gates.is_empty() && setting_overrides.is_empty()
+}
+
+fn prime_dev_incremental_cache(
+    file: &str,
+    cache: &mut jet::Sema::IncrementalSemaCache,
+) {
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts_incremental(file, None, false, cache);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+    {
+        cache.clear();
+    }
+}
+
+fn load_and_check_dev_change(
     file: &str,
     entry_fn: Option<&str>,
-    program_args: &[&String],
-    try_anyway: bool,
-    policy: WatchPolicy,
-    prev: Option<&jet::CheckedMirSnapshot>,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
-    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
     setting_overrides: &BTreeMap<String, String>,
-    game_entries: &[jet_devserver::DevWatchEntry],
-    game_facts_out: &mut Vec<jet_foundation::Game::JetGameChangeFact>,
-    devtools_host: Option<&jet_devserver::WebHost::WebHost>,
-) -> Option<jet::CheckedMirSnapshot> {
-    if !game_entries.is_empty() {
-        match game_change_facts(game_entries, None) {
-            Ok(facts) => *game_facts_out = facts,
-            Err(reason) => {
-                eprintln!("[hot-swap] checked game facts rejected: {reason}");
-                return None;
-            }
-        }
-    }
-    // Load+check the new bundle so we can both diff its type surface and run it.
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
     let mut new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             if let Err(diags) =
@@ -1995,14 +2063,6 @@ fn render_dev_change(
         jet::Driver::swap_entry_point(&mut new_bundle, entry_fn);
     }
 
-    // Decide whether this save uses the swap path for the selected callable.
-    let resident = match policy {
-        WatchPolicy::Swap => true,
-        WatchPolicy::Restart => false,
-        WatchPolicy::Once => false, // unreachable here (handled in run_dev)
-        WatchPolicy::Auto => true,
-    };
-
     let (diags, effect_facts) = jet::Sema::check_bundle_gates_with_effect_facts(
         &mut new_bundle,
         jet::Sema::CompileMode::Run,
@@ -2017,11 +2077,122 @@ fn render_dev_change(
         let src = fs::read_to_string(file).unwrap_or_default();
         println!("\n— {} changed —", file);
         report_problems(mode, file, &src, &errs);
-        // Keep the previous bundle as the swap baseline; the bad edit
-        // never became the running version.
         return None;
     }
     render_dev_lints(file, mode, &diags);
+    Some((new_bundle, effect_facts))
+}
+
+/// Handle one detected file change: pick swap vs rerun vs restart and render.
+/// Returns the freshly checked snapshot (or `None` if it failed to load) for
+/// the next watch iteration.
+fn render_dev_change(
+    file: &str,
+    entry_fn: Option<&str>,
+    program_args: &[&String],
+    try_anyway: bool,
+    policy: WatchPolicy,
+    prev: Option<&jet::CheckedMirSnapshot>,
+    gates: jet::Policy::GateSet,
+    mode: OutputMode,
+    use_interpreter: bool,
+    profile: &str,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
+    setting_overrides: &BTreeMap<String, String>,
+    incremental_cache: &mut jet::Sema::IncrementalSemaCache,
+    game_entries: &[jet_devserver::DevWatchEntry],
+    game_facts_out: &mut Vec<jet_foundation::Game::JetGameChangeFact>,
+    devtools_host: Option<&jet_devserver::WebHost::WebHost>,
+) -> Option<jet::CheckedMirSnapshot> {
+    if !game_entries.is_empty() {
+        match game_change_facts(game_entries, None) {
+            Ok(facts) => *game_facts_out = facts,
+            Err(reason) => {
+                eprintln!("[hot-swap] checked game facts rejected: {reason}");
+                return None;
+            }
+        }
+    }
+    let mut incremental_decision = None;
+    let incrementally_checked = if prev.is_some()
+        && dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides)
+    {
+        let old = prev.expect("incremental reload requires a baseline");
+        let module_name = old
+            .bundle
+            .modules
+            .get(old.bundle.entry)
+            .map(|module| module.display.clone())
+            .unwrap_or_else(|| file.to_string());
+        let source = fs::read_to_string(file).unwrap_or_default();
+        let (diags, bundle, facts, decision) = jet::Driver::check_file_with_hot_swap_incremental(
+            &old.bundle,
+            file,
+            Some((Path::new(file), source.as_str())),
+            false,
+            &module_name,
+            incremental_cache,
+        );
+        let errs: Vec<_> = diags
+            .iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .cloned()
+            .collect();
+        if !errs.is_empty() {
+            println!("\n— {} changed —", file);
+            report_problems(mode, file, &source, &errs);
+            return None;
+        }
+        let safe_for_run = bundle.as_ref().is_some_and(|bundle| {
+            let has_run = bundle
+                .modules
+                .get(bundle.entry)
+                .is_some_and(|module| {
+                    module.items.iter().any(|item| {
+                        matches!(item, jet::AST::Item::Func(function) if function.name == "run")
+                    })
+                });
+            let has_build = bundle.modules.iter().any(|module| {
+                module.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        jet::AST::Item::Func(function) if jet::Sema::is_build_entry(function)
+                    )
+                })
+            });
+            has_run && !has_build
+        });
+        if safe_for_run {
+            render_dev_lints(file, mode, &diags);
+            incremental_decision = decision;
+            bundle.map(|bundle| (bundle, facts))
+        } else {
+            incremental_cache.clear();
+            None
+        }
+    } else {
+        None
+    };
+    let (new_bundle, effect_facts) = match incrementally_checked {
+        Some(checked) => checked,
+        None => load_and_check_dev_change(
+            file,
+            entry_fn,
+            gates,
+            mode,
+            profile,
+            setting_overrides,
+        )?,
+    };
+
+    // Decide whether this save uses the swap path for the selected callable.
+    let resident = match policy {
+        WatchPolicy::Swap => true,
+        WatchPolicy::Restart => false,
+        WatchPolicy::Once => false, // unreachable here (handled in run_dev)
+        WatchPolicy::Auto => true,
+    };
+
     let artifact_target = if use_interpreter {
         jet_foundation::MIR::MirArtifactTarget::Interpreter
     } else {
@@ -2029,7 +2200,7 @@ fn render_dev_change(
     };
     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
         &new_bundle,
-        dev_artifact_request(artifact_target, profile),
+        dev_artifact_request(&new_bundle, artifact_target, profile),
     );
 
     if resident {
@@ -2041,11 +2212,15 @@ fn render_dev_change(
             .unwrap_or_else(|| file.to_string());
         match prev {
             Some(old) => {
-                match jet::Sema::HotSwap::type_stable_decision(
-                    &old.bundle,
-                    &new_bundle,
-                    &module_name,
-                ) {
+                let decision_result = match incremental_decision.take() {
+                    Some(decision) => Ok(decision),
+                    None => jet::Sema::HotSwap::type_stable_decision(
+                        &old.bundle,
+                        &new_bundle,
+                        &module_name,
+                    ),
+                };
+                match decision_result {
                     Ok(decision) => {
                         let facts = match game_change_facts(game_entries, Some(&decision)) {
                             Ok(facts) => facts,

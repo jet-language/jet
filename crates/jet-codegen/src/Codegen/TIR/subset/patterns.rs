@@ -210,6 +210,20 @@ pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {
         _ => false,
     }
 }
+/// Whether a variant pattern needs the matched payload to be lowered.
+///
+/// A tag-only pattern (`State`) and an ignored payload (`State(_)`) only
+/// inspect the enum discriminant; bindings and payload ranges require the
+/// corresponding value type to be covered as well.
+pub(crate) fn variant_pattern_uses_payload(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Variant { bindings, .. } => bindings
+            .iter()
+            .any(|slot| !matches!(slot, PatSlot::Wildcard)),
+        Pattern::Or(alts, _) => alts.iter().any(variant_pattern_uses_payload),
+        _ => true,
+    }
+}
 
 /// The owning enum of a variant (or or-of-variant) pattern, via `cx.variant_owner`.
 pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {

@@ -1756,6 +1756,24 @@ fn verify_block_references(
                     ensure_value_dominates(function, defs, dominators, block.id, index, value, instruction.span)?;
                 }
             }
+            if let MirOperation::ScopeEnter { scope, .. } = operation {
+                if let Some(deadline) = function
+                    .scopes
+                    .iter()
+                    .find(|candidate| candidate.id == *scope)
+                    .and_then(|scope| scope.deadline)
+                {
+                    ensure_value_dominates(
+                        function,
+                        defs,
+                        dominators,
+                        block.id,
+                        index,
+                        deadline,
+                        instruction.span,
+                    )?;
+                }
+            }
             for place_id in operation_place_refs(operation) {
                 let Some(place) = place_map.get(&place_id).copied() else {
                     return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("place {place_id:?}"), span: instruction.span });
@@ -3080,6 +3098,36 @@ fn verify_semantic_operation(
             }
             verify_binary_pattern_parts(parts, type_ids, function.id)?;
         }
+        MirSemanticOp::CursorTakePattern {
+            receiver_place,
+            parts,
+            ..
+        } => {
+            let Some(place) = function.places.iter().find(|candidate| candidate.id == *receiver_place) else {
+                return invalid(format!("receiver place {receiver_place:?}"));
+            };
+            if place.access != MirAccess::Write {
+                return invalid(format!(
+                    "Cursor take_pattern receiver place {receiver_place:?} is not writable"
+                ));
+            }
+            verify_text_pattern_parts(parts, type_ids, function.id)?;
+        }
+        MirSemanticOp::ReaderTakePattern {
+            receiver_place,
+            parts,
+            ..
+        } => {
+            let Some(place) = function.places.iter().find(|candidate| candidate.id == *receiver_place) else {
+                return invalid(format!("receiver place {receiver_place:?}"));
+            };
+            if place.access != MirAccess::Write {
+                return invalid(format!(
+                    "Reader take_pattern receiver place {receiver_place:?} is not writable"
+                ));
+            }
+            verify_binary_pattern_parts(parts, type_ids, function.id)?;
+        }
         MirSemanticOp::RequireStop {
             kind,
             condition,
@@ -3205,6 +3253,7 @@ fn verify_semantic_operation(
             kind,
             literals,
             holes,
+            trusted_html,
         } => {
             let (member, symbol, arity, borrow_mask) = typed_text_interp_route_shape(*kind);
             let Some(route) = prelude_calls.get(call) else {
@@ -3222,12 +3271,21 @@ fn verify_semantic_operation(
             ) {
                 return invalid(format!("typed-text route {call:?} does not match {symbol}/{member}/{arity}"));
             }
-            for hole in holes {
-                check_value(*hole)?;
-            }
             if literals.len() != holes.len().saturating_add(1) {
                 return invalid(
                     "typed-text interpolation must have one literal edge per hole".to_string(),
+                );
+            }
+            if trusted_html.len() != holes.len() {
+                return invalid(
+                    "typed-text interpolation trust metadata must match hole arity".to_string(),
+                );
+            }
+            if !matches!(*kind, crate::Syntax::TypedHeadKind::HTML)
+                && trusted_html.iter().any(|trusted| *trusted)
+            {
+                return invalid(
+                    "non-HTML typed-text interpolation carries HTML trust metadata".to_string(),
                 );
             }
         }
@@ -3803,7 +3861,20 @@ fn verify_moves_and_borrows(
             continue;
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
-            for value in instruction.operation.value_uses() {
+            let scope_deadline = match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } => function
+                    .scopes
+                    .iter()
+                    .find(|candidate| candidate.id == *scope)
+                    .and_then(|scope| scope.deadline),
+                _ => None,
+            };
+            for value in instruction
+                .operation
+                .value_uses()
+                .into_iter()
+                .chain(scope_deadline)
+            {
                 if let Some((_, consumed_block, consumed_index, consumed_span)) =
                     consumed.iter().find(|(candidate, _, _, _)| *candidate == value)
                 {
@@ -5135,6 +5206,7 @@ fn inline_call(
             kind: scope.kind.clone(),
             span: scope.span,
             name: scope.name.clone(),
+            deadline: scope.deadline.map(|value| inline_value(&ids, value)),
             facts: scope.facts.clone(),
         })
         .collect::<Vec<_>>();
@@ -5585,8 +5657,12 @@ fn inline_operation(
                 })
                 .collect(),
         },
-        MirOperation::BuildList { values } => MirOperation::BuildList {
+        MirOperation::BuildList {
+            values,
+            trait_coercion,
+        } => MirOperation::BuildList {
             values: values.iter().map(|value| inline_value(ids, *value)).collect(),
+            trait_coercion: *trait_coercion,
         },
         MirOperation::BuildMap { entries } => MirOperation::BuildMap {
             entries: entries
@@ -5998,6 +6074,25 @@ fn inline_semantic(
             trait_coercion: *trait_coercion,
             boxed_fields: boxed_fields.clone(),
         },
+        MirSemanticOp::ReflectOf {
+            type_name,
+            path,
+            display,
+            fields,
+        } => MirSemanticOp::ReflectOf {
+            type_name: type_name.clone(),
+            path: path.clone(),
+            display: inline_value(ids, *display),
+            fields: fields
+                .iter()
+                .map(|field| crate::MIR::MirReflectField {
+                    name: field.name.clone(),
+                    type_name: field.type_name.clone(),
+                    path: field.path.clone(),
+                    value: inline_value(ids, field.value),
+                })
+                .collect(),
+        },
         MirSemanticOp::CellGuardProject {
             map_call,
             split_call,
@@ -6197,6 +6292,24 @@ fn inline_semantic(
             subject: inline_value(ids, *subject),
             parts: parts.clone(),
         },
+        MirSemanticOp::CursorTakePattern {
+            receiver,
+            receiver_place,
+            parts,
+        } => MirSemanticOp::CursorTakePattern {
+            receiver: inline_value(ids, *receiver),
+            receiver_place: inline_place(ids, *receiver_place),
+            parts: parts.clone(),
+        },
+        MirSemanticOp::ReaderTakePattern {
+            receiver,
+            receiver_place,
+            parts,
+        } => MirSemanticOp::ReaderTakePattern {
+            receiver: inline_value(ids, *receiver),
+            receiver_place: inline_place(ids, *receiver_place),
+            parts: parts.clone(),
+        },
         MirSemanticOp::NumericMethod { call, receiver } => MirSemanticOp::NumericMethod {
             call: *call,
             receiver: inline_value(ids, *receiver),
@@ -6334,11 +6447,13 @@ fn inline_semantic(
             kind,
             literals,
             holes,
+            trusted_html,
         } => MirSemanticOp::TypedTextInterp {
             call: *call,
             kind: kind.clone(),
             literals: literals.clone(),
             holes: holes.iter().map(|value| inline_value(ids, *value)).collect(),
+            trusted_html: trusted_html.clone(),
         },
         MirSemanticOp::CCallback {
             call,
@@ -6861,7 +6976,8 @@ fn normalize_fixed_reduction_loop(
         .filter_map(|id| function.blocks.iter().find(|block| block.id == *id))
         .flat_map(|block| block.instructions.iter())
         .collect::<Vec<_>>();
-    if !vector_has_indexed_input(function, &body_instructions, cursor, None) {
+    let cursor_place = loop_cursor_place(function, &body_ids, cursor);
+    if !vector_has_indexed_input(function, &body_instructions, cursor, cursor_place) {
         return None;
     }
     let (accumulator, addend, _) = fixed_reduction_plan(function, &body_instructions)?;
@@ -6933,7 +7049,7 @@ fn normalize_fixed_reduction_loop(
         }
     })?;
     let bool_ty = value_type(bool_value)?;
-    let bool_type = MirType::from_kind(MirTypeKind::Bool);
+    let bool_type = bool_ty.clone();
     let base = format!("{}:{}:", function.id.0, fact.loop_header.0);
     macro_rules! ni {
         ($role:expr, $ty:expr, $operation:expr) => {
@@ -7466,13 +7582,7 @@ fn fixed_reduction_plan(
                 return None;
             };
             let is_read = |candidate: MirValueId| {
-                instructions.iter().any(|instruction| {
-                    instruction.result == Some(candidate)
-                        && matches!(
-                            &instruction.operation,
-                            MirOperation::ReadPlace(read) if *read == *place
-                        )
-                })
+                value_reads_place(instructions, candidate, *place, &mut HashSet::new())
             };
             let (seed, addend) = if is_read(*left) {
                 (*left, *right)
@@ -7983,6 +8093,11 @@ fn value_use_counts(function: &MirFunction) -> HashMap<MirValueId, usize> {
     for place in &function.places {
         for value in place_value_uses(place) { add(value); }
     }
+    for scope in &function.scopes {
+        if let Some(deadline) = scope.deadline {
+            add(deadline);
+        }
+    }
     for block in &function.blocks {
         for instruction in &block.instructions {
             for value in instruction.operation.value_uses() { add(value); }
@@ -8241,7 +8356,8 @@ fn derive_loop_and_vector_facts(program: &mut MirProgram) {
             }
         }
         for (row, shape) in &shapes {
-            let vector = vector_fact(function, row, shape, &prelude_calls, type_defs);
+            let vector =
+                vector_fact(function, row, shape, &prelude_calls, type_defs);
             function.optimization.loop_facts.push(row.clone());
             function.optimization.vector_facts.push(vector);
         }
@@ -8530,7 +8646,7 @@ fn normalized_fixed_reduction_shape(
     Some(CanonicalLoopShape {
         form: MirLoopForm::Counted,
         cursor: Some(cursor),
-        cursor_place: None,
+        cursor_place: loop_cursor_place(function, &body_blocks, cursor),
         range: Some(range),
         body,
         exit: Some(else_target),
@@ -8763,7 +8879,7 @@ fn counted_shape(
         return Some(CanonicalLoopShape {
             form,
             cursor: Some(cursor),
-            cursor_place: None,
+            cursor_place: loop_cursor_place(function, &blocks, cursor),
             range: canonical_range_for_cursor(function, cursor),
             body: then_target,
             exit: Some(else_target),
@@ -8773,6 +8889,41 @@ fn counted_shape(
     }
     scalar_counted_shape(function, header, then_target, else_target, blocks)
 }
+fn loop_cursor_place(
+    function: &MirFunction,
+    blocks: &[MirBlockId],
+    cursor: MirValueId,
+) -> Option<MirPlaceId> {
+    let cursor_values = blocks
+        .iter()
+        .filter_map(|block_id| function.blocks.iter().find(|block| block.id == *block_id))
+        .flat_map(|block| block.instructions.iter())
+        .filter_map(|instruction| {
+            let matches = matches!(
+                &instruction.operation,
+                MirOperation::LoopRangeValue { cursor: source, .. }
+                    | MirOperation::LoopIterValue { cursor: source, .. }
+                    if *source == cursor
+            );
+            matches.then_some(instruction.result).flatten()
+        })
+        .collect::<HashSet<_>>();
+    let mut places = HashSet::new();
+    for block_id in blocks {
+        let Some(block) = function.blocks.iter().find(|block| block.id == *block_id) else {
+            continue;
+        };
+        for instruction in &block.instructions {
+            if let MirOperation::WritePlace { place, value } = &instruction.operation {
+                if cursor_values.contains(value) {
+                    places.insert(*place);
+                }
+            }
+        }
+    }
+    (places.len() == 1).then(|| places.into_iter().next()).flatten()
+}
+
 
 fn canonical_range_for_cursor(
     function: &MirFunction,
@@ -9039,8 +9190,42 @@ fn cursor_value_matches(
     cursor: MirValueId,
     cursor_place: Option<MirPlaceId>,
 ) -> bool {
-    value == cursor
-        || cursor_place.is_some_and(|place| direct_read_place(function, value) == Some(place))
+    fn inner(
+        function: &MirFunction,
+        value: MirValueId,
+        cursor: MirValueId,
+        cursor_place: Option<MirPlaceId>,
+        seen: &mut HashSet<MirValueId>,
+    ) -> bool {
+        if value == cursor {
+            return true;
+        }
+        if !seen.insert(value) {
+            return false;
+        }
+        let Some(instruction) = find_value_instruction(function, value) else {
+            return false;
+        };
+        match &instruction.operation {
+            MirOperation::ReadPlace(place) => cursor_place == Some(*place),
+            MirOperation::LoopRangeValue { cursor: source, .. }
+            | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
+            MirOperation::Copy { value }
+            | MirOperation::Move { value }
+            | MirOperation::AttachTag { value, .. }
+            | MirOperation::Convert { value, .. } => {
+                inner(function, *value, cursor, cursor_place, seen)
+            }
+            _ => false,
+        }
+    }
+    inner(
+        function,
+        value,
+        cursor,
+        cursor_place,
+        &mut HashSet::new(),
+    )
 }
 
 fn scalar_int_constant(
@@ -9386,11 +9571,19 @@ fn vector_fact(
     });
     let element_type = vector_element_type(function, &instructions, cursor_place);
     let lane = lane_width(element_type.as_ref());
-    let proven_indexing =
-        vector_indexing_is_proven(function, &instructions, cursor, cursor_place, shape.range);
+    let proven_indexing = vector_indexing_is_proven(
+        function,
+        &instructions,
+        cursor,
+        cursor_place,
+        shape.range,
+        prelude_calls,
+    );
     let indexed_input = cursor.is_some_and(|cursor| {
         vector_has_indexed_input(function, &instructions, cursor, cursor_place)
-    });
+    }) || accesses
+        .iter()
+        .any(|access| access.field.is_some() && access.layout != MirVectorLayout::Flat);
     let has_early_exit = row.exit.is_some_and(|exit| {
         body_blocks.iter().any(|block_id| {
             function
@@ -9410,6 +9603,7 @@ fn vector_fact(
                 })
         })
     });
+    let no_early_exit = !has_early_exit;
     let has_branch = body_blocks.iter().any(|block_id| {
         function
             .blocks
@@ -9418,6 +9612,7 @@ fn vector_fact(
             .is_some_and(|block| matches!(&block.terminator, crate::MIR::MirTerminator::Branch { .. }))
     });
     let rmw = vector_rmw(&instructions);
+    let rmw_places = vector_rmw_places(&instructions);
     let rmw_accumulator_type = vector_rmw_accumulator_type(function, &instructions);
     let has_comparison = instructions.iter().any(|instruction| {
         matches!(
@@ -9441,9 +9636,14 @@ fn vector_fact(
         && !instructions.iter().any(|instruction| {
             vector_operation_has_effect(function, &instruction.operation, prelude_calls)
         });
-    let no_early_exit = !has_early_exit;
-    let (no_aliasing, no_cross_iteration_dependencies) =
-        vector_memory_facts(function, &body_blocks, cursor, cursor_place, rule);
+    let (no_aliasing, no_cross_iteration_dependencies) = vector_memory_facts(
+        function,
+        &body_blocks,
+        cursor,
+        cursor_place,
+        rule,
+        rmw_places.as_slice(),
+    );
     let conditional_plan = if rule == MirVectorRule::ConditionalAccumulate {
         conditional_accumulate_plan(
             function,
@@ -9609,6 +9809,7 @@ fn vector_indexing_is_proven(
     cursor: Option<MirValueId>,
     cursor_place: Option<MirPlaceId>,
     range: Option<CanonicalLoopRange>,
+    prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> bool {
     let Some(cursor) = cursor else {
         return false;
@@ -9645,6 +9846,21 @@ fn vector_indexing_is_proven(
                 .and_then(|index| index.checked_add(1))
         }
     };
+    let index_is_proven =
+        |base: Option<MirValueId>, base_ty: Option<&MirType>, index, cursor_index| {
+            required_len(index, cursor_index).is_some_and(|end| {
+                base_ty.is_some_and(|ty| vector_fixed_bound_covers(ty, end))
+                    || base.is_some_and(|base| {
+                        function.values.iter().any(|(value, ty, ..)| {
+                            *value == base && vector_fixed_bound_covers(ty, end)
+                        })
+                    })
+            }) || (cursor_index
+                && range_end.is_none()
+                && base.is_some_and(|base| {
+                    vector_list_length_matches(function, range.end, base, prelude_calls)
+                }))
+        };
     let mut indexed = false;
     for instruction in instructions {
         if let MirOperation::Index { base, index, kind, .. } = &instruction.operation {
@@ -9652,14 +9868,24 @@ fn vector_indexing_is_proven(
             indexed |= cursor_index;
             if *kind != MirIndexKind::FixedListProof
                 && (*kind != MirIndexKind::List
-                    || !required_len(*index, cursor_index).is_some_and(|end| {
-                        function.values.iter().any(|(value, ty, ..)| {
-                            *value == *base && vector_fixed_bound_covers(ty, end)
-                        })
-                    }))
+                    || !index_is_proven(Some(*base), None, *index, cursor_index))
             {
                 return false;
             }
+        }
+        if let MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, index, .. }) =
+            &instruction.operation
+        {
+            // The fused column read is the checked `list[index].field` form.
+            // Keep the packed path tied to the canonical loop cursor and to
+            // the same collection extent used by the loop range.
+            let cursor_index = cursor_value_matches(function, *index, cursor, cursor_place);
+            if !cursor_index
+                || !index_is_proven(Some(*base), None, *index, cursor_index)
+            {
+                return false;
+            }
+            indexed = true;
         }
         for place_id in operation_place_refs(&instruction.operation) {
             let Some(place) = function.places.iter().find(|place| place.id == place_id) else {
@@ -9673,26 +9899,11 @@ fn vector_indexing_is_proven(
                     if *kind == MirIndexKind::FixedListProof {
                         continue;
                     }
-                    let base_ty = match &place.base {
-                        MirPlaceBase::Local(local) => function
-                            .locals
-                            .iter()
-                            .find(|candidate| candidate.id == *local)
-                            .map(|local| &local.ty),
-                        MirPlaceBase::Parameter(value)
-                        | MirPlaceBase::Capture(value)
-                        | MirPlaceBase::Temporary(value) => function
-                            .values
-                            .iter()
-                            .find(|(candidate, ..)| candidate == value)
-                            .map(|(_, ty, ..)| ty),
-                        MirPlaceBase::Static(_) => None,
-                    };
+                    let base = place_base_value(place);
+                    let base_ty = place_base_type(function, &place.base);
                     if *kind != MirIndexKind::List
                         || position != 0
-                        || !required_len(*index, cursor_index)
-                            .zip(base_ty)
-                            .is_some_and(|(end, ty)| vector_fixed_bound_covers(ty, end))
+                        || !index_is_proven(base, base_ty.as_ref(), *index, cursor_index)
                     {
                         return false;
                     }
@@ -9702,6 +9913,124 @@ fn vector_indexing_is_proven(
     }
     indexed
 }
+
+fn place_base_value(place: &MirPlace) -> Option<MirValueId> {
+    match &place.base {
+        MirPlaceBase::Parameter(value)
+        | MirPlaceBase::Capture(value)
+        | MirPlaceBase::Temporary(value) => Some(*value),
+        MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => None,
+    }
+}
+
+fn vector_list_length_matches(
+    function: &MirFunction,
+    length: MirValueId,
+    base: MirValueId,
+    prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> bool {
+    fn inner(
+        function: &MirFunction,
+        length: MirValueId,
+        base: MirValueId,
+        prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+        seen: &mut HashSet<MirValueId>,
+    ) -> bool {
+        if !seen.insert(length) {
+            return false;
+        }
+        let Some(instruction) = find_value_instruction(function, length) else {
+            return false;
+        };
+        match &instruction.operation {
+            MirOperation::Copy { value }
+            | MirOperation::Move { value }
+            | MirOperation::AttachTag { value, .. }
+            | MirOperation::Convert { value, .. } => {
+                inner(function, *value, base, prelude_calls, seen)
+            }
+            MirOperation::CoreCall { route, args, .. } => {
+                vector_length_route_matches(function, *route, args, base, prelude_calls)
+            }
+            MirOperation::Call {
+                callee: MirCallee::Prelude(route),
+                args,
+                ..
+            } => vector_length_route_matches(function, *route, args, base, prelude_calls),
+            MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                call,
+                receiver,
+                args,
+                ..
+            }) => prelude_calls.get(call).is_some_and(|route| {
+                route.member == "len"
+                    && args.is_empty()
+                    && vector_same_collection_value(function, *receiver, base)
+            }),
+            MirOperation::Semantic(MirSemanticOp::StaticPreludeCall { call, args, .. }) => {
+                vector_length_route_matches(function, *call, args, base, prelude_calls)
+            }
+            _ => false,
+        }
+    }
+    inner(
+        function,
+        length,
+        base,
+        prelude_calls,
+        &mut HashSet::new(),
+    )
+}
+
+fn vector_length_route_matches(
+    function: &MirFunction,
+    call: MirPreludeCallId,
+    args: &[crate::MIR::MirCallArg],
+    base: MirValueId,
+    prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> bool {
+    let Some(route) = prelude_calls.get(&call) else {
+        return false;
+    };
+    route.member == "len"
+        && args.len() == 1
+        && vector_same_collection_value(function, args[0].value, base)
+}
+fn vector_same_collection_value(
+    function: &MirFunction,
+    left: MirValueId,
+    right: MirValueId,
+) -> bool {
+    fn direct_place(
+        function: &MirFunction,
+        value: MirValueId,
+        seen: &mut HashSet<MirValueId>,
+    ) -> Option<MirPlaceId> {
+        if !seen.insert(value) {
+            return None;
+        }
+        let instruction = find_value_instruction(function, value)?;
+        match &instruction.operation {
+            MirOperation::ReadPlace(place) => Some(*place),
+            MirOperation::Copy { value }
+            | MirOperation::Move { value }
+            | MirOperation::AttachTag { value, .. }
+            | MirOperation::Convert { value, .. } => direct_place(function, *value, seen),
+            _ => None,
+        }
+    }
+    if left == right {
+        return true;
+    }
+    match (
+        direct_place(function, left, &mut HashSet::new()),
+        direct_place(function, right, &mut HashSet::new()),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
 
 fn vector_fixed_bound_covers(ty: &MirType, required_len: u64) -> bool {
     match ty.kind() {
@@ -9958,15 +10287,36 @@ fn vector_rmw(instructions: &[&crate::MIR::MirInstruction]) -> Option<MirBinaryO
         else {
             return None;
         };
-        let reads_place = [left, right].into_iter().any(|operand| {
-            instructions.iter().any(|candidate| {
-                candidate.result == Some(*operand)
-                    && matches!(&candidate.operation, MirOperation::ReadPlace(read) if *read == *place)
-            })
-        });
+        let reads_place = [left, right]
+            .into_iter()
+            .any(|operand| value_reads_place(instructions, *operand, *place, &mut HashSet::new()));
         reads_place.then_some(*op)
     })
 }
+fn vector_rmw_places(instructions: &[&crate::MIR::MirInstruction]) -> Vec<MirPlaceId> {
+    let mut places = Vec::new();
+    for instruction in instructions {
+        let MirOperation::WritePlace { place, value } = &instruction.operation else {
+            continue;
+        };
+        let Some(defining) = instructions.iter().find(|candidate| candidate.result == Some(*value)) else {
+            continue;
+        };
+        let MirOperation::Binary { left, right, .. } = &defining.operation else {
+            continue;
+        };
+        if [left, right]
+            .into_iter()
+            .any(|operand| value_reads_place(instructions, *operand, *place, &mut HashSet::new()))
+            && !places.contains(place)
+        {
+            places.push(*place);
+        }
+    }
+    places
+}
+
+
 fn vector_rmw_accumulator_type(
     function: &MirFunction,
     instructions: &[&crate::MIR::MirInstruction],
@@ -9979,12 +10329,9 @@ fn vector_rmw_accumulator_type(
         let MirOperation::Binary { left, right, .. } = &defining.operation else {
             return None;
         };
-        let reads_place = [left, right].into_iter().any(|operand| {
-            instructions.iter().any(|candidate| {
-                candidate.result == Some(*operand)
-                    && matches!(&candidate.operation, MirOperation::ReadPlace(read) if *read == *place)
-            })
-        });
+        let reads_place = [left, right]
+            .into_iter()
+            .any(|operand| value_reads_place(instructions, *operand, *place, &mut HashSet::new()));
         reads_place.then(|| {
             function
                 .places
@@ -9993,6 +10340,41 @@ fn vector_rmw_accumulator_type(
                 .map(|candidate| candidate.ty.clone())
         })?
     })
+}
+
+fn value_reads_place(
+    instructions: &[&crate::MIR::MirInstruction],
+    value: MirValueId,
+    place: MirPlaceId,
+    seen: &mut HashSet<MirValueId>,
+) -> bool {
+    if !seen.insert(value) {
+        return false;
+    }
+    let Some(instruction) = instructions
+        .iter()
+        .find(|candidate| candidate.result == Some(value))
+    else {
+        return false;
+    };
+    match &instruction.operation {
+        MirOperation::ReadPlace(read) | MirOperation::MovePlace { place: read } => *read == place,
+        MirOperation::Copy { value }
+        | MirOperation::Move { value }
+        | MirOperation::AttachTag { value, .. }
+        | MirOperation::Unary { value, .. }
+        | MirOperation::Convert { value, .. } => {
+            value_reads_place(instructions, *value, place, seen)
+        }
+        MirOperation::Binary { left, right, .. } => {
+            value_reads_place(instructions, *left, place, seen)
+                || value_reads_place(instructions, *right, place, seen)
+        }
+        MirOperation::Phi { incoming } => incoming
+            .iter()
+            .any(|(_, value)| value_reads_place(instructions, *value, place, seen)),
+        _ => false,
+    }
 }
 
 
@@ -10252,24 +10634,33 @@ fn value_type(function: &MirFunction, value: MirValueId) -> Option<MirType> {
 }
 
 fn value_access_root(function: &MirFunction, value: MirValueId) -> MirVectorAccessRoot {
-    find_value_instruction(function, value)
-        .and_then(|instruction| match &instruction.operation {
+    fn inner(
+        function: &MirFunction,
+        value: MirValueId,
+        seen: &mut HashSet<MirValueId>,
+    ) -> MirVectorAccessRoot {
+        if !seen.insert(value) {
+            return MirVectorAccessRoot::Value(value);
+        }
+        let Some(instruction) = find_value_instruction(function, value) else {
+            return MirVectorAccessRoot::Value(value);
+        };
+        match &instruction.operation {
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
-                Some(MirVectorAccessRoot::Place(*place))
+                MirVectorAccessRoot::Place(*place)
             }
             MirOperation::Copy { value }
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Field { base: value, .. }
-            | MirOperation::Index { base: value, .. } => {
-                Some(value_access_root(function, *value))
-            }
+            | MirOperation::Index { base: value, .. } => inner(function, *value, seen),
             MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, .. }) => {
-                Some(value_access_root(function, *base))
+                inner(function, *base, seen)
             }
-            _ => None,
-        })
-        .unwrap_or(MirVectorAccessRoot::Value(value))
+            _ => MirVectorAccessRoot::Value(value),
+        }
+    }
+    inner(function, value, &mut HashSet::new())
 }
 
 fn list_element_type(ty: &MirType) -> Option<&MirType> {
@@ -10362,6 +10753,9 @@ fn vector_operation_has_effect(
         | MirOperation::Index { call, .. }
         | MirOperation::Slice { call, .. } => !prelude_call_is_pure(prelude_calls, *call),
         MirOperation::Convert { conversion, .. } => !conversion_is_pure(conversion, prelude_calls),
+        MirOperation::Semantic(MirSemanticOp::ColumnarRead { accessor, .. }) => {
+            !prelude_call_is_pure(prelude_calls, *accessor)
+        }
         MirOperation::Semantic(operation) => semantic_operation_has_effect(operation, prelude_calls),
         MirOperation::LoopRangeInit { call, .. }
         | MirOperation::LoopRangeHasNext { call, .. }
@@ -10440,6 +10834,7 @@ fn vector_memory_facts(
     cursor: Option<MirValueId>,
     cursor_place: Option<MirPlaceId>,
     rule: MirVectorRule,
+    rmw_places: &[MirPlaceId],
 ) -> (bool, bool) {
     let mut reads = BTreeSet::new();
     let mut writes = BTreeSet::new();
@@ -10452,6 +10847,9 @@ fn vector_memory_facts(
         };
         for instruction in &block.instructions {
             for place_id in operation_place_refs(&instruction.operation) {
+                if cursor_place == Some(place_id) {
+                    continue;
+                }
                 let Some(place) = function.places.iter().find(|place| place.id == place_id) else {
                     continue;
                 };
@@ -10550,13 +10948,24 @@ fn vector_memory_facts(
                 && !root.starts_with("static:")
                 && !root.starts_with("temporary:")
         });
+    let accumulator_roots = rmw_places
+        .iter()
+        .filter_map(|place_id| {
+            function
+                .places
+                .iter()
+                .find(|place| place.id == *place_id)
+                .map(place_root)
+        })
+        .collect::<BTreeSet<_>>();
     let mut no_cross = true;
     for root in writes.intersection(&reads) {
         let same_iteration = indexed_writes.contains(root) && indexed_reads.contains(root);
         let loop_carried_accumulator = matches!(
             rule,
             MirVectorRule::ConditionalAccumulate | MirVectorRule::Reduction
-        ) && !indexed_writes.contains(root);
+        ) && !indexed_writes.contains(root)
+            && accumulator_roots.contains(root);
         if !same_iteration && !loop_carried_accumulator {
             no_cross = false;
             break;
@@ -10648,11 +11057,6 @@ fn canonicalize_program_order(program: &mut MirProgram) {
     }
     for link in &mut program.links {
         link.link_closure.sort();
-    }
-    for harness in &mut program.harnesses {
-        harness.tests.sort();
-        harness.output_checks.sort_by_key(|check| (check.id, check.name.clone()));
-        harness.coverage_points.sort_by_key(|point| (point.id, point.function, point.block));
     }
     for artifact in &mut program.artifacts {
         artifact.modules.sort();
@@ -11700,17 +12104,17 @@ fn encode_core_closure_kind(writer: &mut CanonicalWriter, kind: crate::MIR::MirC
         build_id,
         revision,
         ..
-    } = kind
+    } = &kind
     {
-        writer.bool(playground);
-        writer.str(&source_file);
-        writer.span(source_span);
-        writer.u64(u64::from(source_start_line));
-        writer.u64(u64::from(source_start_column));
-        writer.u64(u64::from(source_end_line));
-        writer.u64(u64::from(source_end_column));
-        writer.str(&build_id);
-        writer.str(&revision);
+        writer.bool(*playground);
+        writer.str(source_file);
+        writer.span(*source_span);
+        writer.u64(u64::from(*source_start_line));
+        writer.u64(u64::from(*source_start_column));
+        writer.u64(u64::from(*source_end_line));
+        writer.u64(u64::from(*source_end_column));
+        writer.str(build_id);
+        writer.str(revision);
     }
 }
 
@@ -12051,6 +12455,7 @@ fn encode_cli_input(writer: &mut CanonicalWriter, input: &MirCliInput) {
 }
 
 fn encode_cli_entry(writer: &mut CanonicalWriter, cli: &crate::MIR::MirCliEntry) {
+    writer.bool(cli.record_inputs);
     writer.option_str(cli.description.as_deref());
     writer.len(cli.inputs.len());
     for input in &cli.inputs {
@@ -13017,6 +13422,24 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
                 writer.u64(field.0);
             }
         }
+        MirSemanticOp::ReflectOf {
+            type_name,
+            path,
+            display,
+            fields,
+        } => {
+            writer.tag("reflect-of");
+            writer.str(type_name);
+            writer.str(path);
+            writer.u64(display.0);
+            writer.len(fields.len());
+            for field in fields {
+                writer.str(&field.name);
+                writer.str(&field.type_name);
+                writer.str(&field.path);
+                writer.u64(field.value.0);
+            }
+        }
         MirSemanticOp::CellGuardProject {
             map_call,
             split_call,
@@ -13229,6 +13652,26 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             writer.u64(subject.0);
             encode_binary_pattern_parts(writer, parts);
         }
+        MirSemanticOp::CursorTakePattern {
+            receiver,
+            receiver_place,
+            parts,
+        } => {
+            writer.tag("cursor-take-pattern");
+            writer.u64(receiver.0);
+            writer.u64(receiver_place.0);
+            encode_text_pattern_parts(writer, parts);
+        }
+        MirSemanticOp::ReaderTakePattern {
+            receiver,
+            receiver_place,
+            parts,
+        } => {
+            writer.tag("reader-take-pattern");
+            writer.u64(receiver.0);
+            writer.u64(receiver_place.0);
+            encode_binary_pattern_parts(writer, parts);
+        }
         MirSemanticOp::NumericMethod { call, receiver } => {
             writer.tag("numeric-method");
             writer.u64(call.0);
@@ -13395,6 +13838,7 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             kind,
             literals,
             holes,
+            trusted_html,
         } => {
             writer.tag("typed-text-interp");
             writer.u64(call.0);
@@ -13404,6 +13848,10 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
                 writer.str(literal);
             }
             encode_values(writer, holes);
+            writer.len(trusted_html.len());
+            for trusted in trusted_html {
+                writer.bool(*trusted);
+            }
         }
         MirSemanticOp::CCallback {
             call,
@@ -13981,6 +14429,7 @@ fn encode_optimization_facts(writer: &mut CanonicalWriter, facts: &MirOptimizati
             }
         }
     }
+    writer.debug(&facts.checked_vector_facts);
     writer.debug(&facts.fusion_facts);
     let mut acceleration_facts = facts.acceleration_facts.iter().collect::<Vec<_>>();
     acceleration_facts.sort_by_key(|fact| (fact.loop_header, fact.transform));

@@ -1,0 +1,10 @@
+use core.data as data
+#Codable
+struct Ticket { team: String minutes: Float }
+fn run() {
+ raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+ rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+ means :: data.query(rows).group_by(t -> t.team).mean(t -> t.minutes).collect() ?? panic("mean")
+ print("means: {means.len()}")
+ loop g in means -> print("{g.key}: {g.value}")
+}

@@ -20,14 +20,14 @@ fn wait_until_cancel(
     changed: Condition,
     started: Shared<Int>,
     began: Condition
-) Int {
+) Int -> {
     mark_started(started, began)
     guard :: handle.guard_edit()
     guard.wait(changed, value -> value == 1) ?? panic("wait failed")
     return 1
 }
 
-fn finish_after_start(started: Shared<Int>, began: Condition) Int {
+fn finish_after_start(started: Shared<Int>, began: Condition) Int -> {
     started_guard :: started.guard_edit()
     started_guard.wait(began, value -> value == 1) ?? panic("start failed")
     return 7
@@ -51,16 +51,21 @@ fn run() {
 "#;
 
 const EARLY_EXITS: &str = r#"
+#Error
+enum EarlyExitError {
+    Stop
+}
+
 fn return_early(handle: Shared<Int>) {
     guard :: handle.guard_edit()
     guard.value += 1
     return
 }
 
-fn fail_early(handle: Shared<Int>) Int !String {
+fn fail_early(handle: Shared<Int>) Int !EarlyExitError -> {
     guard :: handle.guard_edit()
     guard.value += 1
-    return .Err("stop")
+    return .Err(EarlyExitError.Stop)
 }
 
 fn run() {
@@ -74,7 +79,7 @@ fn run() {
 "#;
 
 const HELPERS: &str = r#"
-fn inspect(guard: SharedGuard<Int>) Int {
+fn inspect(guard: SharedGuard<Int>) Int -> {
     return guard.value
 }
 
@@ -92,11 +97,11 @@ fn run() {
 "#;
 
 const RETURNED_GUARD: &str = r#"
-fn acquire(handle: Shared<Int>) SharedGuard<Int> {
+fn acquire(handle: Shared<Int>) SharedGuard<Int> -> {
     return handle.guard_edit()
 }
 
-fn read_returned(handle: Shared<Int>) Int {
+fn read_returned(handle: Shared<Int>) Int -> {
     guard :: acquire(handle)
     return guard.value
 }
@@ -179,11 +184,11 @@ enum Held {
     Guard(SharedGuard<Int>)
 }
 
-fn ignore_union(value: SharedGuard<Int> | Int) Int {
+fn ignore_union(value: SharedGuard<Int> | Int) Int -> {
     return 0
 }
 
-fn read_stored(handle: Shared<Int>) Int {
+fn read_stored(handle: Shared<Int>) Int -> {
     HeldGuard{ stored } :: HeldGuard{
         stored: (lease: handle.guard_edit(), marker: 0),
     }
@@ -194,11 +199,11 @@ fn read_stored(handle: Shared<Int>) Int {
 fn acquire_pair(
     first: Shared<Int>,
     second: Shared<Int>
-) (left: SharedGuard<Int>, right: SharedGuard<Int>) {
+) (left: SharedGuard<Int>, right: SharedGuard<Int>) -> {
     return (left: first.guard_edit(), right: second.guard_edit())
 }
 
-fn read_pair(first: Shared<Int>, second: Shared<Int>) Int {
+fn read_pair(first: Shared<Int>, second: Shared<Int>) Int -> {
     (left, right) :: acquire_pair(first, second)
     return left.value + right.value
 }

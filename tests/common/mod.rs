@@ -14,6 +14,35 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::OnceLock;
+const TEST_PACKAGE_MANIFEST: &str = "name: \"test-fixture\"\nversion: \"0.1.0\"\n";
+
+/// Create a fixture root that cannot inherit authority from a sibling or
+/// parent scratch tree. Keep an explicit manifest if the caller supplied one.
+fn prepare_test_fixture_root(path: &Path) {
+    fs::create_dir_all(path)
+        .unwrap_or_else(|error| panic!("create test fixture root `{}`: {error}", path.display()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap_or_else(|error| {
+            panic!(
+                "make test fixture root private `{}`: {error}",
+                path.display()
+            )
+        });
+    }
+    let manifest = path.join("package.jet");
+    match fs::symlink_metadata(&manifest) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::write(&manifest, TEST_PACKAGE_MANIFEST).unwrap_or_else(|error| {
+                panic!("write test fixture manifest `{}`: {error}", manifest.display())
+            });
+        }
+        Err(error) => panic!("inspect test fixture manifest `{}`: {error}", manifest.display()),
+    }
+}
+
 /// Lower a checked bundle through the canonical MIR/artifact seam used by
 /// resident JIT tests.  Keep the target and artifact identity together so
 /// callers cannot accidentally invoke a backend with a bundle or mismatched
@@ -630,7 +659,9 @@ pub fn test_scratch_root(scope: &str) -> PathBuf {
 /// a dir.
 pub fn unique_tmp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    test_scratch_root("scratch").join(format!("{prefix}_{}_{}", std::process::id(), n))
+    let path = test_scratch_root("scratch").join(format!("{prefix}_{}_{}", std::process::id(), n));
+    prepare_test_fixture_root(&path);
+    path
 }
 
 // --- interactive example stdin ----------------------------------------------
@@ -866,7 +897,7 @@ impl Scratch {
             std::process::id(),
             std::thread::current().id()
         ));
-        fs::create_dir_all(&path).unwrap();
+        prepare_test_fixture_root(&path);
         Scratch { path }
     }
 

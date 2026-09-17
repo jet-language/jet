@@ -4160,10 +4160,10 @@ fn run() {
 }
 "#
             }
-            "sum_overflow" => {
+            "sum_bigint" => {
                 r#"
 fn run() {
-    print([9223372036854775807, 1].sum())
+    print([Int.MAX, 1].sum())
 }
 "#
             }
@@ -4172,8 +4172,8 @@ fn run() {
         jet_jit::reset_jit_trace_for_test();
         let outcome = run_cranelift_outcome_without_fallback(source, &format!("1216_{case}"));
         match case.as_str() {
-            "oob" | "sum_overflow" => {
-                // Live arithmetic and bounds traps use the registered E3010 stop.
+            "oob" => {
+                // Live bounds traps use the registered E3010 stop.
                 let RunOutcome::Ran {
                     stdout: _,
                     stderr,
@@ -4196,11 +4196,6 @@ fn run() {
                         stderr.contains("the list has 1 items, so position 4 doesn't exist"),
                         "`oob` trap wording: {stderr}"
                     );
-                } else {
-                    assert!(
-                        stderr.contains("overflow") || stderr.contains("overflowed"),
-                        "`sum_overflow` trap wording: {stderr}"
-                    );
                 }
             }
             expected_case => {
@@ -4212,6 +4207,7 @@ fn run() {
                     "generator" => "1\n3\ndone\n",
                     "raw_alias" => "9\n",
                     "option_minus_one" => "-1\nnull\n",
+                    "sum_bigint" => "9223372036854775808\n",
                     _ => unreachable!(),
                 };
                 assert_eq!(stdout, expected);
@@ -4255,7 +4251,7 @@ fn run() {
         "generator",
         "raw_alias",
         "option_minus_one",
-        "sum_overflow",
+        "sum_bigint",
     ] {
         let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
         command

@@ -493,14 +493,21 @@ impl NameLedger {
     }
 
     /// Return every source-name key in one module with its canonical path.
-    /// This is the projection boundary for codegen and runtime tooling: the
-    /// consumers do not walk declarations or aliases themselves.
+    /// Nominal declarations also publish their semantic identity as a key.
+    /// Codegen uses that second key only to project canonical semantic types
+    /// back to their source-facing path; the identity itself remains the
+    /// package/path-qualified key used for uniqueness.
     pub fn canonical_paths(&self, module: usize) -> Vec<(String, String)> {
         let mut paths = BTreeSet::new();
         for ((owner, name), declaration) in &self.declarations {
             if *owner == module {
                 let path = declaration.path.clone();
                 paths.insert((name.clone(), path.clone()));
+                if declaration.kind == "type" {
+                    if let Some(identity) = self.nominal_identity(module, &declaration.name) {
+                        paths.insert((identity, path.clone()));
+                    }
+                }
                 // A qualified type name is itself a source key. Keep it in
                 // the same projection so consumers never reconstruct it from
                 // declaration storage.
@@ -697,7 +704,12 @@ impl NameLedger {
 
     pub fn merge_references(&mut self, other: &Self) {
         self.alias_uses.extend(other.alias_uses.iter().copied());
-        self.references.extend(other.references.clone());
+        self.references.extend(
+            other
+                .references
+                .iter()
+                .map(|(site, reference)| (site.clone(), reference.clone())),
+        );
     }
 
     /// Copy lookup facts for an incremental body check without copying prior
@@ -977,6 +989,12 @@ mod tests {
             ledger.canonical_path(1, "Thing"),
             Some("lib.Thing".to_string())
         );
+        assert!(ledger
+            .canonical_paths(1)
+            .contains(&(
+                "pkg::lib.jet::Thing".to_string(),
+                "lib.Thing".to_string()
+            )));
         assert_eq!(
             ledger.canonical_path_at(1, 3, 7),
             Some("lib.Thing".to_string())

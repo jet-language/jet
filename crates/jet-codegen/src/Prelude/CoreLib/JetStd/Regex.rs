@@ -250,8 +250,19 @@ fn regex_outcome<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
     value.ok_or(JetAbsent)
 }
 
-fn regex_char_index(text: &str, byte: usize) -> usize {
-    text[..byte].chars().count()
+fn regex_char_index(text: &str, byte: usize) -> Option<i64> {
+    let prefix = text.get(..byte)?;
+    i64::try_from(prefix.chars().count()).ok()
+}
+
+fn regex_rebase_span(
+    text: &str,
+    base: usize,
+    span: (usize, usize),
+) -> Option<(usize, usize)> {
+    let start = base.checked_add(span.0)?;
+    let end = base.checked_add(span.1)?;
+    text.get(start..end).map(|_| (start, end))
 }
 
 fn regex_simple_fold(cp: u32) -> u32 {
@@ -362,12 +373,12 @@ impl JetRegexMatch {
 
     pub fn group_start(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
         let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-        regex_outcome(self.span_for(n).map(|(start, _)| regex_char_index(&self.text, start) as i64))
+        regex_outcome(self.span_for(n).and_then(|(start, _)| regex_char_index(&self.text, start)))
     }
 
     pub fn group_end(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
         let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-        regex_outcome(self.span_for(n).map(|(_, end)| regex_char_index(&self.text, end) as i64))
+        regex_outcome(self.span_for(n).and_then(|(_, end)| regex_char_index(&self.text, end)))
     }
 
     pub fn group_count(&self) -> usize {
@@ -428,7 +439,7 @@ impl JetRegexMatch {
                 .map(|spans| {
                     spans
                         .into_iter()
-                        .map(|span| span.map(|(start, end)| (start + base, end + base)))
+                        .map(|span| span.and_then(|span| regex_rebase_span(&self.text, base, span)))
                         .collect()
                 })
                 .unwrap_or_else(|| vec![Some(self.span)])
@@ -541,18 +552,17 @@ impl JetRegex {
     }
 
     fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-        let span = regex_run(
+        let run = regex_run(
             &self.program,
             &self.flags,
             self.groups,
             text,
             0,
             false,
-            false,
-        )?
-        .span;
+            true,
+        )?;
         let text = std::sync::Arc::<str>::from(text);
-        Some(self.make_match(&text, span))
+        Some(self.make_match_with_captures(&text, run.span, run.caps))
     }
 
     pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
@@ -758,6 +768,18 @@ pub fn jet_regex_escape(text: &str) -> String {
 
 pub fn jet_regex_compile(pattern: &str) -> Result<JetRegex, String> {
     jet_regex_compile_with(pattern, &RegexFlags::default())
+}
+pub fn jet_string_matches(text: &str, pattern: &str) -> Result<bool, String> {
+    let regex = jet_regex_compile(pattern)?;
+    Ok(regex.is_match(text))
+}
+
+pub fn jet_string_match(
+    text: &str,
+    pattern: &str,
+) -> Result<JetOutcome<String, JetAbsent>, String> {
+    let regex = jet_regex_compile(pattern)?;
+    Ok(regex.find(text))
 }
 
 pub fn jet_regex_literal(pattern: &str) -> JetRegex {
@@ -1455,7 +1477,11 @@ fn regex_slots_to_spans(slots: &[Option<usize>]) -> Vec<Option<(usize, usize)>> 
     slots
         .chunks(2)
         .map(|pair| match pair {
-            [Some(start), Some(end)] => Some((*start, *end)),
+            [Some(start), Some(end)]
+                if *end != usize::MAX && *start <= *end =>
+            {
+                Some((*start, *end))
+            }
             _ => None,
         })
         .collect()
@@ -1554,7 +1580,7 @@ fn regex_scan<F>(
     if start > text.len() {
         return;
     }
-    if !anchored && !capture && !flags.case_insensitive {
+    if !anchored && !capture && !flags.case_insensitive && groups == 0 {
         if let Some(literal) = program.literal.as_deref() {
             regex_scan_literal(text, literal, start, &mut on_match);
             return;
@@ -1909,15 +1935,21 @@ fn regex_prefix_literal(node: &RegexNode) -> Option<Vec<u8>> {
 
 fn regex_literal_candidate(node: &RegexNode) -> Option<Vec<u8>> {
     let RegexNode::Seq(pieces) = node else { return None };
-    let mut literal = String::new();
+    let mut literal = Vec::new();
     for piece in pieces {
         if !matches!(&piece.quant, RegexQuant::One) {
             return None;
         }
-        let RegexAtom::Literal(ch) = &piece.atom else { return None };
-        literal.push(*ch);
+        match &piece.atom {
+            RegexAtom::Literal(ch) => {
+                let mut bytes = [0; 4];
+                literal.extend_from_slice(ch.encode_utf8(&mut bytes).as_bytes());
+            }
+            RegexAtom::Group(_, inner) => literal.extend(regex_literal_candidate(inner)?),
+            _ => return None,
+        }
     }
-    (!literal.is_empty()).then(|| literal.into_bytes())
+    (!literal.is_empty()).then_some(literal)
 }
 
 fn regex_required_literals(node: &RegexNode) -> Vec<Vec<u8>> {

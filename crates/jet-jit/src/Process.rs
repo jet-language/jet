@@ -9,9 +9,12 @@ use std::cell::RefCell;
 use super::Concurrency;
 use crate::ProcessPrelude::process_prelude;
 use crate::Marshal::{clone_string, result_ok};
-use jet_codegen::Comptime::AmbientMirHandleResult;
+use jet_codegen::Comptime::{AmbientMirHandleResult, DevSink};
+use jet_foundation::AST::{CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
-use jet_foundation::MIR::{MirRuntimeValue, MirType, MirTypeKind, MirNominalRef};
+use jet_foundation::MIR::{
+    MirHandleToken, MirRuntimeValue, MirType, MirTypeKind, MirNominalRef,
+};
 use jet_foundation::Outcome::JetAbsent;
 
 pub(crate) type JitProcessSpec = process_prelude::ProcessSpec;
@@ -35,14 +38,20 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         // fields preserve the shipped ProcessResult layout; audit facts are
         // appended so old field lowering cannot silently change ABI slots.
         let record = rt.heap.alloc_record(18);
-        let _ = rt.heap.record_set_int(record, 0, out.code);
+        let _ = rt
+            .heap
+            .record_set_int(record, 0, out.code.to_i64().unwrap_or(-1));
         let output = rt.heap.alloc_string(out.output.clone());
         let _ = rt.heap.record_set_string(record, 1, output);
         let errors = rt.heap.alloc_string(out.errors.clone());
         let _ = rt.heap.record_set_string(record, 2, errors);
         let _ = rt.heap.record_set_bool(record, 3, out.success);
         // A present narrow value is encoded as handle+1; zero is absent.
-        let signal = out.signal.map(|value| value.wrapping_add(1)).unwrap_or(0);
+        let signal = out
+            .signal
+            .as_ref()
+            .map(|value| value.to_i64().unwrap_or(0).wrapping_add(1))
+            .unwrap_or(0);
         let _ = rt.heap.record_set_int(record, 4, signal);
         let _ = rt.heap.record_set_bool(record, 5, out.timed_out);
         let executable = rt.heap.alloc_string(out.executable_identity.clone());
@@ -84,21 +93,12 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         let outputs = rt.heap.alloc_int_list(output_values);
         let _ = rt.heap.record_set_int(record, 14, outputs);
         let _ = rt.heap.record_set_bool(record, 15, out.redacted);
-        let _ = rt.heap.record_set_int(record, 16, out.pid);
+        let _ = rt
+            .heap
+            .record_set_int(record, 16, out.pid.to_i64().unwrap_or(0));
         let limit_hit = out
             .limit_hit
-            .map(|limit| {
-                let name = match limit {
-                    process_prelude::ProcessResourceLimit::WallTime => "WallTime",
-                    process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
-                    process_prelude::ProcessResourceLimit::Memory => "Memory",
-                    process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
-                    process_prelude::ProcessResourceLimit::Output => "Output",
-                };
-                crate::types_meta::prelude_enum_variant_index("ProcessResourceLimit", name)
-                    .unwrap_or(0)
-                    .wrapping_add(1)
-            })
+            .map(|limit| process_resource_limit_variant(limit).wrapping_add(1))
             .unwrap_or(0);
         let _ = rt.heap.record_set_int(record, 17, limit_hit);
         record
@@ -155,50 +155,87 @@ fn outcome_to_result(out: process_prelude::ProcessReceipt) -> i64 {
     result_ok(alloc_process_result(&out) as u64)
 }
 
+fn process_prelude_variant_index(enum_name: &str, variant: &str) -> i64 {
+    crate::types_meta::prelude_enum_variant_index(enum_name, variant).unwrap_or_else(|| {
+        panic!("Prelude enum `{enum_name}` variant `{variant}` is missing metadata")
+    })
+}
+
 fn process_io_operation_bits(operation: process_prelude::IOOperation) -> i64 {
-    match operation {
-        process_prelude::IOOperation::Read => 0,
-        process_prelude::IOOperation::Write => 1,
-        process_prelude::IOOperation::Flush => 2,
-        process_prelude::IOOperation::Connect => 3,
-        process_prelude::IOOperation::Accept => 4,
-        process_prelude::IOOperation::Close => 5,
-        process_prelude::IOOperation::Resolve => 6,
-        process_prelude::IOOperation::Codec => 7,
-    }
+    let variant = match operation {
+        process_prelude::IOOperation::Read => "Read",
+        process_prelude::IOOperation::Write => "Write",
+        process_prelude::IOOperation::Flush => "Flush",
+        process_prelude::IOOperation::Connect => "Connect",
+        process_prelude::IOOperation::Accept => "Accept",
+        process_prelude::IOOperation::Close => "Close",
+        process_prelude::IOOperation::Resolve => "Resolve",
+        process_prelude::IOOperation::Codec => "Codec",
+    };
+    process_prelude_variant_index(jet_foundation::Syntax::TYPE_IO_OPERATION, variant)
+}
+
+fn process_io_error_variant(variant: &str) -> i64 {
+    process_prelude_variant_index(jet_foundation::Syntax::TYPE_IO_ERROR, variant)
+}
+
+fn process_resource_limit_variant(limit: process_prelude::ProcessResourceLimit) -> i64 {
+    let variant = match limit {
+        process_prelude::ProcessResourceLimit::WallTime => "WallTime",
+        process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
+        process_prelude::ProcessResourceLimit::Memory => "Memory",
+        process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
+        process_prelude::ProcessResourceLimit::Output => "Output",
+    };
+    process_prelude_variant_index(
+        jet_foundation::Syntax::TYPE_PROCESS_RESOURCE_LIMIT,
+        variant,
+    )
 }
 
 fn process_io_error_result(error: process_prelude::IOError) -> i64 {
     let (variant, context) = match error {
-        process_prelude::IOError::InvalidInput(context) => (0, context),
-        process_prelude::IOError::NotFound(context) => (1, context),
-        process_prelude::IOError::PermissionDenied(context) => (2, context),
-        process_prelude::IOError::TimedOut(context) => (3, context),
-        process_prelude::IOError::Cancelled(context) => (4, context),
-        process_prelude::IOError::Closed(context) => (5, context),
-        process_prelude::IOError::Protocol(context) => (6, context),
-        process_prelude::IOError::Other(context) => (7, context),
+        process_prelude::IOError::InvalidInput(context) => {
+            (process_io_error_variant("InvalidInput"), context)
+        }
+        process_prelude::IOError::NotFound(context) => {
+            (process_io_error_variant("NotFound"), context)
+        }
+        process_prelude::IOError::PermissionDenied(context) => {
+            (process_io_error_variant("PermissionDenied"), context)
+        }
+        process_prelude::IOError::TimedOut(context) => {
+            (process_io_error_variant("TimedOut"), context)
+        }
+        process_prelude::IOError::Cancelled(context) => {
+            (process_io_error_variant("Cancelled"), context)
+        }
+        process_prelude::IOError::Closed(context) => {
+            (process_io_error_variant("Closed"), context)
+        }
+        process_prelude::IOError::Protocol(context) => {
+            (process_io_error_variant("Protocol"), context)
+        }
+        process_prelude::IOError::Other(context) => {
+            (process_io_error_variant("Other"), context)
+        }
         process_prelude::IOError::ResourceLimit(limit) => {
             return Concurrency::with_runtime_mut(|rt| {
-                let limit_name = match limit {
-                    process_prelude::ProcessResourceLimit::WallTime => "WallTime",
-                    process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
-                    process_prelude::ProcessResourceLimit::Memory => "Memory",
-                    process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
-                    process_prelude::ProcessResourceLimit::Output => "Output",
-                };
-                let disc = crate::types_meta::prelude_enum_variant_index(
-                    "ProcessResourceLimit",
-                    limit_name,
-                )
-                .unwrap_or(0);
-                let error_disc = jet_foundation::Syntax::IO_ERROR_VARIANTS
-                    .iter()
-                    .position(|name| *name == "ResourceLimit")
-                    .unwrap_or(8) as u64;
+                // ResourceLimit uses the same one-slot enum record that generic
+                // MIR enum construction and field access use. The outer
+                // IOError carrier only packs that record's handle.
+                let limit_record = rt.heap.alloc_record(1);
+                let _ = rt.heap.record_set_int(
+                    limit_record,
+                    0,
+                    process_resource_limit_variant(limit),
+                );
+                let error_variant = process_io_error_variant("ResourceLimit");
                 rt.results.push(super::JitResultValue {
                     ok: false,
-                    bits: ((disc as u64) << 8) | error_disc,
+                    bits: limit_record
+                        .wrapping_shl(8)
+                        .wrapping_add(error_variant) as u64,
                 });
                 rt.results.len() as i64
             });
@@ -238,16 +275,14 @@ fn process_io_error_result(error: process_prelude::IOError) -> i64 {
     })
 }
 /// Render a packed `IOError` with the canonical Prelude wording.
-/// `ResourceLimit` stores its `ProcessResourceLimit` discriminant in the
+/// `ResourceLimit` stores its `ProcessResourceLimit` enum-record handle in the
 /// payload word; ordinary I/O errors store an `IOContext` heap record.
 pub(crate) fn process_error_show_text(packed: i64, heap: &jet_rt::JetArena) -> String {
     let variant = packed & 0xff;
-    let resource_limit = jet_foundation::Syntax::IO_ERROR_VARIANTS
-        .iter()
-        .position(|name| *name == "ResourceLimit")
-        .unwrap_or(8) as i64;
-    if variant == resource_limit {
-        let name = jet_foundation::StructuralDebug::jet_show_process_resource_limit(packed >> 8);
+    if variant == process_io_error_variant("ResourceLimit") {
+        let limit_record = packed >> 8;
+        let limit_variant = heap.record_get_int(limit_record, 0).unwrap_or(-1);
+        let name = jet_foundation::StructuralDebug::jet_show_process_resource_limit(limit_variant);
         return format!("process resource limit exceeded: {name}");
     }
     let context = packed >> 8;
@@ -307,7 +342,9 @@ fn update_spec(handle: i64, f: impl FnOnce(JitProcessSpec) -> JitProcessSpec) ->
         let Some(spec) = rt.process_specs.get_mut(idx) else {
             return 0;
         };
-        let current = spec.clone();
+        // The handle owns the stored spec. Move it through the builder rather
+        // than cloning every argv/env vector and stream policy on each call.
+        let current = std::mem::replace(spec, process_prelude::spec_new(Vec::new()));
         *spec = f(current);
         handle
     })
@@ -487,6 +524,182 @@ fn process_ambient_diag(message: impl Into<String>, span: Span) -> Diagnostic {
     )
 }
 
+/// The forced interpreter reaches plain process constructors through the typed
+/// ambient Core-call seam. Keep workspace authority construction on the
+/// shared authority carrier rather than inventing a process-only value.
+fn ct_process_string_list(
+    value: &CtValue,
+    operation: &str,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(process_ambient_diag(
+            format!("{operation} expects a List<String>"),
+            span,
+        ));
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(process_ambient_diag(
+                format!("{operation} expects every command word to be a String"),
+                span,
+            )),
+        })
+        .collect()
+}
+fn ct_process_spec_list(
+    value: &CtValue,
+    operation: &str,
+    span: Span,
+) -> Result<Vec<JitProcessSpec>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(process_ambient_diag(
+            format!("{operation} expects a List<ProcessSpec>"),
+            span,
+        ));
+    };
+    values
+        .iter()
+        .map(|value| {
+            let CtValue::Closure(data) = value else {
+                return Err(process_ambient_diag(
+                    format!("{operation} received a non-opaque ProcessSpec"),
+                    span,
+                ));
+            };
+            let Some(token) = data
+                .opaque
+                .as_ref()
+                .and_then(|owner| owner.downcast_ref::<MirHandleToken>())
+            else {
+                return Err(process_ambient_diag(
+                    format!("{operation} received a foreign opaque value"),
+                    span,
+                ));
+            };
+            let raw = token.raw().filter(|raw| *raw != 0).ok_or_else(|| {
+                process_ambient_diag(
+                    format!("{operation} received a moved ProcessSpec"),
+                    span,
+                )
+            })?;
+            with_ambient_spec(raw, |spec| spec.clone()).ok_or_else(|| {
+                process_ambient_diag(
+                    format!("{operation} received an unknown ProcessSpec identity"),
+                    span,
+                )
+            })
+        })
+        .collect()
+}
+
+fn ct_process_pipeline(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let [value] = args else {
+        return Err(process_ambient_diag(
+            "core.process.pipeline expects one ProcessSpec list",
+            span,
+        ));
+    };
+    let specs = ct_process_spec_list(value, "core.process.pipeline", span)?;
+    let value = match process_prelude::spec_pipeline(&specs) {
+        Ok(receipt) => MirRuntimeValue::Present(Box::new(mir_process_receipt(receipt))),
+        Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+    };
+    jet_codegen::Comptime::MirBridge::mir_to_ct_value(value, span)
+}
+
+
+fn ct_process_authority_wire(value: &CtValue, operation: &str, span: Span) -> Result<String, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(process_ambient_diag(
+            format!("{operation} expects an Authority"),
+            span,
+        ));
+    };
+    if type_name != "Authority" {
+        return Err(process_ambient_diag(
+            format!("{operation} received {type_name}, expected Authority"),
+            span,
+        ));
+    }
+    let Some((_, CtValue::List(rights))) = fields.iter().find(|(name, _)| name == "rights") else {
+        return Err(process_ambient_diag(
+            format!("{operation} received an Authority without `rights`"),
+            span,
+        ));
+    };
+    rights
+        .iter()
+        .map(|right| match right {
+            CtValue::Str(right) => Ok(right.clone()),
+            _ => Err(process_ambient_diag(
+                format!("{operation} expects Authority.rights to be a List<String>"),
+                span,
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|rights| rights.join("\n"))
+}
+
+fn ct_process_run(
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if !matches!(args.len(), 1 | 2) {
+        return Err(process_ambient_diag(
+            "core.process.run expects one command list and an optional Authority",
+            span,
+        ));
+    }
+    let command = ct_process_string_list(&args[0], "core.process.run", span)?;
+    let mut spec = process_prelude::spec_new(command);
+    if let Some(authority) = args.get(1) {
+        let wire = ct_process_authority_wire(authority, "core.process.run", span)?;
+        spec = process_prelude::spec_under_wire(spec, &wire);
+    }
+    let value = match process_prelude::spec_run(&spec) {
+        Ok(receipt) => MirRuntimeValue::Present(Box::new(mir_process_receipt(receipt))),
+        Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+    };
+    jet_codegen::Comptime::MirBridge::mir_to_ct_value(value, span)
+}
+
+pub(crate) fn ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module != "core.process" {
+        return None;
+    }
+    match method {
+        "workspace" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "core.process.workspace expects no arguments",
+                    span,
+                )));
+            }
+            let rights = crate::Collections::authority_semantics::jet_authority_workspace_rights()
+                .into_iter()
+                .map(CtValue::Str)
+                .collect();
+            Some(Ok(CtValue::Struct {
+                type_name: "Authority".to_string(),
+                fields: vec![("rights".to_string(), CtValue::List(rights))],
+            }))
+        }
+        "pipeline" => Some(ct_process_pipeline(&args, span)),
+        "run" | "run_with_authority" => Some(ct_process_run(&args, span)),
+        _ => None,
+    }
+}
+
 fn mir_named(name: &str) -> MirType {
     MirType::from_kind(MirTypeKind::Apply { name: MirNominalRef::from_name(name), args: Vec::new() })
 }
@@ -609,7 +822,9 @@ fn mir_io_error(error: process_prelude::IOError) -> MirRuntimeValue {
 
 fn mir_process_receipt(receipt: process_prelude::ProcessReceipt) -> MirRuntimeValue {
     let signal = match receipt.signal {
-        Ok(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(value))),
+        Ok(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(
+            value.to_i64().unwrap_or(0),
+        ))),
         Err(JetAbsent) => mir_absent("Int"),
     };
     let limit_hit = match receipt.limit_hit {
@@ -619,7 +834,10 @@ fn mir_process_receipt(receipt: process_prelude::ProcessReceipt) -> MirRuntimeVa
     MirRuntimeValue::Struct {
         type_name: "ProcessReceipt".to_string(),
         fields: vec![
-            ("code".to_string(), MirRuntimeValue::Int(receipt.code)),
+            (
+                "code".to_string(),
+                MirRuntimeValue::Int(receipt.code.to_i64().unwrap_or(-1)),
+            ),
             ("output".to_string(), MirRuntimeValue::String(receipt.output)),
             ("errors".to_string(), MirRuntimeValue::String(receipt.errors)),
             ("success".to_string(), MirRuntimeValue::Bool(receipt.success)),
@@ -650,7 +868,10 @@ fn mir_process_receipt(receipt: process_prelude::ProcessReceipt) -> MirRuntimeVa
             ("limits".to_string(), mir_string_list(&receipt.limits)),
             ("outputs".to_string(), mir_string_list(&receipt.outputs)),
             ("redacted".to_string(), MirRuntimeValue::Bool(receipt.redacted)),
-            ("pid".to_string(), MirRuntimeValue::Int(receipt.pid)),
+            (
+                "pid".to_string(),
+                MirRuntimeValue::Int(receipt.pid.to_i64().unwrap_or(0)),
+            ),
             ("limit_hit".to_string(), limit_hit),
         ],
     }
@@ -710,7 +931,251 @@ fn mir_process_stream_mode(
     }
 }
 
+fn mir_process_string(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    match value {
+        MirRuntimeValue::String(value) => Ok(value.clone()),
+        _ => Err(process_ambient_diag(
+            format!("{operation} expects a String"),
+            span,
+        )),
+    }
+}
+
+fn mir_process_int(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    match value {
+        MirRuntimeValue::Int(value) => Ok(*value),
+        _ => Err(process_ambient_diag(
+            format!("{operation} expects an Int"),
+            span,
+        )),
+    }
+}
+fn mir_process_terminal_size(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<process_prelude::TerminalSize, Diagnostic> {
+    let cols = mir_process_field(value, "TerminalSize", "cols", operation, span)?;
+    let rows = mir_process_field(value, "TerminalSize", "rows", operation, span)?;
+    Ok(process_prelude::TerminalSize {
+        cols: mir_process_int(cols, operation, span)?,
+        rows: mir_process_int(rows, operation, span)?,
+    })
+}
+
+fn mir_process_field<'a>(
+    value: &'a MirRuntimeValue,
+    type_name: &str,
+    field_name: &str,
+    operation: &str,
+    span: Span,
+) -> Result<&'a MirRuntimeValue, Diagnostic> {
+    let MirRuntimeValue::Struct {
+        type_name: actual,
+        fields,
+    } = value
+    else {
+        return Err(process_ambient_diag(
+            format!("{operation} received a non-{type_name} value"),
+            span,
+        ));
+    };
+    if actual != type_name {
+        return Err(process_ambient_diag(
+            format!("{operation} received {actual}, expected {type_name}"),
+            span,
+        ));
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| (name == field_name).then_some(value))
+        .ok_or_else(|| {
+            process_ambient_diag(
+                format!("{operation} received a {type_name} without `{field_name}`"),
+                span,
+            )
+        })
+}
+
+fn mir_process_duration(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<process_prelude::Duration, Diagnostic> {
+    let ns = mir_process_field(value, "Duration", "ns", operation, span)?;
+    Ok(process_prelude::Duration {
+        ns: mir_process_int(ns, operation, span)?,
+    })
+}
+
+fn mir_process_authority_wire(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    let rights = mir_process_field(value, "Authority", "rights", operation, span)?;
+    let MirRuntimeValue::List(rights) = rights else {
+        return Err(process_ambient_diag(
+            format!("{operation} expects Authority.rights to be a List<String>"),
+            span,
+        ));
+    };
+    rights
+        .iter()
+        .map(|right| mir_process_string(right, operation, span))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|rights| rights.join("\n"))
+}
+
+fn mir_process_terminal_policy(
+    value: &MirRuntimeValue,
+    operation: &str,
+    span: Span,
+) -> Result<process_prelude::TerminalPolicy, Diagnostic> {
+    let size = mir_process_field(value, "TerminalPolicy", "size", operation, span)?;
+    let cols = mir_process_field(size, "TerminalSize", "cols", operation, span)?;
+    let rows = mir_process_field(size, "TerminalSize", "rows", operation, span)?;
+    let mode = mir_process_field(value, "TerminalPolicy", "mode", operation, span)?;
+    let MirRuntimeValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = mode
+    else {
+        return Err(process_ambient_diag(
+            format!("{operation} expects TerminalPolicy.mode to be a TerminalMode"),
+            span,
+        ));
+    };
+    if type_name != "TerminalMode" || !args.is_empty() {
+        return Err(process_ambient_diag(
+            format!("{operation} received a malformed TerminalMode"),
+            span,
+        ));
+    }
+    let mode = match variant.as_str() {
+        "Raw" => process_prelude::TerminalMode::Raw,
+        "Cooked" => process_prelude::TerminalMode::Cooked,
+        _ => {
+            return Err(process_ambient_diag(
+                format!("{operation} received an unknown TerminalMode variant"),
+                span,
+            ))
+        }
+    };
+    Ok(process_prelude::TerminalPolicy {
+        size: process_prelude::TerminalSize {
+            cols: mir_process_int(cols, operation, span)?,
+            rows: mir_process_int(rows, operation, span)?,
+        },
+        mode,
+    })
+}
+
+fn mir_process_plan(plan: process_prelude::ProcessPlan) -> MirRuntimeValue {
+    MirRuntimeValue::Struct {
+        type_name: "ProcessPlan".to_string(),
+        fields: vec![
+            (
+                "executable_identity".to_string(),
+                MirRuntimeValue::String(plan.executable_identity),
+            ),
+            ("argv".to_string(), mir_string_list(&plan.argv)),
+            (
+                "input_digest".to_string(),
+                MirRuntimeValue::String(plan.input_digest),
+            ),
+            (
+                "policy_digest".to_string(),
+                MirRuntimeValue::String(plan.policy_digest),
+            ),
+            ("backend".to_string(), MirRuntimeValue::String(plan.backend)),
+            ("authority".to_string(), mir_string_list(&plan.authority)),
+            (
+                "descendants".to_string(),
+                MirRuntimeValue::String(plan.descendants),
+            ),
+            ("limits".to_string(), mir_string_list(&plan.limits)),
+            ("outputs".to_string(), mir_string_list(&plan.outputs)),
+        ],
+    }
+}
+
+fn mir_process_abilities(facts: std::collections::HashSet<String>) -> MirRuntimeValue {
+    let mut facts = facts.into_iter().collect::<Vec<_>>();
+    facts.sort();
+    MirRuntimeValue::Struct {
+        type_name: "Set".to_string(),
+        fields: vec![("items".to_string(), mir_string_list(&facts))],
+    }
+}
+
+fn process_ambient_spec_update(
+    operation: &str,
+    handle: Option<i64>,
+    span: Span,
+    update: impl FnOnce(process_prelude::ProcessSpec) -> process_prelude::ProcessSpec,
+) -> Result<AmbientMirHandleResult, Diagnostic> {
+    let Some(handle) = handle else {
+        return Err(process_ambient_diag(
+            format!("{operation} has no typed receiver handle"),
+            span,
+        ));
+    };
+    let Some(handle) = update_ambient_spec(handle, update) else {
+        return Err(process_ambient_diag(
+            format!("{operation} used an unavailable process handle"),
+            span,
+        ));
+    };
+    Ok(AmbientMirHandleResult::Handle(handle))
+}
+
 fn process_ambient_value(value: MirRuntimeValue) -> AmbientMirHandleResult { AmbientMirHandleResult::Value(value) }
+
+fn process_ambient_child_unit(
+    operation: &str,
+    handle: Option<i64>,
+    args: &[MirRuntimeValue],
+    span: Span,
+    action: fn(&process_prelude::ProcessChild) -> Result<(), process_prelude::IOError>,
+) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+    let Some(handle) = handle else {
+        return Some(Err(process_ambient_diag(
+            format!("{operation} has no typed receiver handle"),
+            span,
+        )));
+    };
+    if !args.is_empty() {
+        return Some(Err(process_ambient_diag(
+            format!("{operation} received unexpected arguments"),
+            span,
+        )));
+    }
+    let Some(child) = with_ambient_child(handle, Clone::clone) else {
+        let error = mir_io_error(process_prelude::IOError::other(
+            process_prelude::IOOperation::Close,
+            Some("ProcessChild".to_string()),
+            "unavailable process handle",
+        ));
+        return Some(Ok(process_ambient_value(
+            MirRuntimeValue::FailedTold(Box::new(error)),
+        )));
+    };
+    let value = match action(&child) {
+        Ok(()) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Unit)),
+        Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+    };
+    Some(Ok(process_ambient_value(value)))
+}
 
 /// Dispatch the checked process carrier operations for MIR interpreter/deopt.
 ///
@@ -738,32 +1203,298 @@ pub(crate) fn ambient_mir_handle(
             let spec = process_prelude::spec_new(command);
             Some(Ok(AmbientMirHandleResult::Handle(push_ambient_spec(spec))))
         }
-        "process.spec.stdin" => {
-            let Some(handle) = handle else {
+        "process.spec.cwd" => {
+            let [cwd] = args.as_slice() else {
                 return Some(Err(process_ambient_diag(
-                    "ProcessSpec.stdin() has no typed receiver handle",
+                    "ProcessSpec.cwd() expects one String argument",
                     span,
                 )));
             };
-            if args.len() != 1 {
+            let cwd = match mir_process_string(cwd, "ProcessSpec.cwd()", span) {
+                Ok(cwd) => cwd,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.cwd()",
+                handle,
+                span,
+                |spec| process_prelude::spec_cwd(spec, &cwd),
+            ))
+        }
+        "process.spec.env" => {
+            let [name, value] = args.as_slice() else {
                 return Some(Err(process_ambient_diag(
-                    "ProcessSpec.stdin() received the wrong checked argument shape",
+                    "ProcessSpec.env() expects two String arguments",
+                    span,
+                )));
+            };
+            let name = match mir_process_string(name, "ProcessSpec.env()", span) {
+                Ok(name) => name,
+                Err(error) => return Some(Err(error)),
+            };
+            let value = match mir_process_string(value, "ProcessSpec.env()", span) {
+                Ok(value) => value,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.env()",
+                handle,
+                span,
+                |spec| process_prelude::spec_env(spec, &name, &value),
+            ))
+        }
+        "process.spec.env_remove" => {
+            let [name] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.env_remove() expects one String argument",
+                    span,
+                )));
+            };
+            let name = match mir_process_string(name, "ProcessSpec.env_remove()", span) {
+                Ok(name) => name,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.env_remove()",
+                handle,
+                span,
+                |spec| process_prelude::spec_env_remove(spec, &name),
+            ))
+        }
+        "process.spec.env_clear" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.env_clear() received unexpected arguments",
                     span,
                 )));
             }
-            let mode = match mir_process_stream_mode(&args[0], span) {
-                Ok(mode) => mode,
-                Err(error) => return Some(Err(error)),
-            };
-            let Some(handle) =
-                update_ambient_spec(handle, |spec| process_prelude::spec_stdin(spec, &mode))
-            else {
+            Some(process_ambient_spec_update(
+                "ProcessSpec.env_clear()",
+                handle,
+                span,
+                process_prelude::spec_env_clear,
+            ))
+        }
+        "process.spec.stdin" | "process.spec.stdout" | "process.spec.stderr" => {
+            let [mode] = args.as_slice() else {
                 return Some(Err(process_ambient_diag(
-                    "ProcessSpec.stdin() used an unavailable process handle",
+                    "ProcessSpec stream builder expects one ProcessStreamMode argument",
                     span,
                 )));
             };
-            Some(Ok(AmbientMirHandleResult::Handle(handle)))
+            let mode = match mir_process_stream_mode(mode, span) {
+                Ok(mode) => mode,
+                Err(error) => return Some(Err(error)),
+            };
+            let operation_name = match operation {
+                "process.spec.stdin" => "ProcessSpec.stdin()",
+                "process.spec.stdout" => "ProcessSpec.stdout()",
+                _ => "ProcessSpec.stderr()",
+            };
+            Some(process_ambient_spec_update(
+                operation_name,
+                handle,
+                span,
+                move |spec| match operation {
+                    "process.spec.stdin" => process_prelude::spec_stdin(spec, &mode),
+                    "process.spec.stdout" => process_prelude::spec_stdout(spec, &mode),
+                    _ => process_prelude::spec_stderr(spec, &mode),
+                },
+            ))
+        }
+        "process.spec.timeout" | "process.spec.cpu_time_limit" => {
+            let [duration] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec duration builder expects one Duration argument",
+                    span,
+                )));
+            };
+            let duration = match mir_process_duration(duration, operation, span) {
+                Ok(duration) => duration,
+                Err(error) => return Some(Err(error)),
+            };
+            let operation_name = if operation == "process.spec.timeout" {
+                "ProcessSpec.timeout()"
+            } else {
+                "ProcessSpec.cpu_time_limit()"
+            };
+            Some(process_ambient_spec_update(
+                operation_name,
+                handle,
+                span,
+                move |spec| {
+                    if operation == "process.spec.timeout" {
+                        process_prelude::spec_timeout(spec, &duration)
+                    } else {
+                        process_prelude::spec_cpu_time_limit(spec, &duration)
+                    }
+                },
+            ))
+        }
+        "process.spec.output_limit"
+        | "process.spec.memory_limit"
+        | "process.spec.open_file_limit" => {
+            let [limit] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec limit builder expects one Int argument",
+                    span,
+                )));
+            };
+            let limit = match mir_process_int(limit, operation, span) {
+                Ok(limit) => limit,
+                Err(error) => return Some(Err(error)),
+            };
+            let operation_name = match operation {
+                "process.spec.output_limit" => "ProcessSpec.output_limit()",
+                "process.spec.memory_limit" => "ProcessSpec.memory_limit()",
+                _ => "ProcessSpec.open_file_limit()",
+            };
+            Some(process_ambient_spec_update(
+                operation_name,
+                handle,
+                span,
+                move |spec| match operation {
+                    "process.spec.output_limit" => {
+                        process_prelude::spec_output_limit(spec, limit)
+                    }
+                    "process.spec.memory_limit" => {
+                        process_prelude::spec_memory_limit(spec, limit)
+                    }
+                    _ => process_prelude::spec_open_file_limit(spec, limit),
+                },
+            ))
+        }
+        "process.spec.detached" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.detached() received unexpected arguments",
+                    span,
+                )));
+            }
+            Some(process_ambient_spec_update(
+                "ProcessSpec.detached()",
+                handle,
+                span,
+                process_prelude::spec_detached,
+            ))
+        }
+        "process.spec.terminal" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.terminal() received unexpected arguments",
+                    span,
+                )));
+            }
+            Some(process_ambient_spec_update(
+                "ProcessSpec.terminal()",
+                handle,
+                span,
+                process_prelude::spec_terminal,
+            ))
+        }
+        "process.spec.terminal_with_policy" => {
+            let [policy] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.terminal(policy) expects one TerminalPolicy argument",
+                    span,
+                )));
+            };
+            let policy = match mir_process_terminal_policy(policy, "ProcessSpec.terminal(policy)", span)
+            {
+                Ok(policy) => policy,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.terminal(policy)",
+                handle,
+                span,
+                |spec| process_prelude::spec_terminal_with_policy(spec, &policy),
+            ))
+        }
+        "process.spec.under" => {
+            let [authority] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.under() expects one Authority argument",
+                    span,
+                )));
+            };
+            let authority =
+                match mir_process_authority_wire(authority, "ProcessSpec.under()", span) {
+                    Ok(authority) => authority,
+                    Err(error) => return Some(Err(error)),
+                };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.under()",
+                handle,
+                span,
+                |spec| process_prelude::spec_under_wire(spec, &authority),
+            ))
+        }
+        "process.spec.abilities" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.abilities() received unexpected arguments",
+                    span,
+                )));
+            }
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.abilities() has no typed receiver handle",
+                    span,
+                )));
+            };
+            let Some(spec) = with_ambient_spec(handle, Clone::clone) else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.abilities() used an unavailable process handle",
+                    span,
+                )));
+            };
+            Some(Ok(process_ambient_value(mir_process_abilities(
+                process_prelude::spec_abilities(&spec),
+            ))))
+        }
+        "process.spec.plan" | "process.spec.run" | "process.spec.run_checked" => {
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec execution method received unexpected arguments",
+                    span,
+                )));
+            }
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec execution method has no typed receiver handle",
+                    span,
+                )));
+            };
+            let Some(spec) = with_ambient_spec(handle, Clone::clone) else {
+                let error = mir_io_error(process_prelude::IOError::other(
+                    process_prelude::IOOperation::Resolve,
+                    Some("ProcessSpec".to_string()),
+                    "unavailable process handle",
+                ));
+                return Some(Ok(process_ambient_value(
+                    MirRuntimeValue::FailedTold(Box::new(error)),
+                )));
+            };
+            let value = match operation {
+                "process.spec.plan" => match process_prelude::spec_plan(&spec) {
+                    Ok(plan) => MirRuntimeValue::Present(Box::new(mir_process_plan(plan))),
+                    Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+                },
+                "process.spec.run" => match process_prelude::spec_run(&spec) {
+                    Ok(receipt) => {
+                        MirRuntimeValue::Present(Box::new(mir_process_receipt(receipt)))
+                    }
+                    Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+                },
+                _ => match process_prelude::spec_run_checked(&spec) {
+                    Ok(receipt) => {
+                        MirRuntimeValue::Present(Box::new(mir_process_receipt(receipt)))
+                    }
+                    Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+                },
+            };
+            Some(Ok(process_ambient_value(value)))
         }
         "process.spec.spawn" => {
             let Some(handle) = handle else {
@@ -817,6 +1548,141 @@ pub(crate) fn ambient_mir_handle(
                 )));
             };
             Some(Ok(AmbientMirHandleResult::Handle(stdin)))
+        }
+        "process.child.id" => {
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.id() has no typed receiver handle",
+                    span,
+                )));
+            };
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.id() received unexpected arguments",
+                    span,
+                )));
+            }
+            let id = with_ambient_child(handle, Clone::clone)
+                .map(|child| process_prelude::child_id(&child))
+                .unwrap_or(0);
+            Some(Ok(process_ambient_value(MirRuntimeValue::Int(id))))
+        }
+        "process.child.exited" => {
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.exited() has no typed receiver handle",
+                    span,
+                )));
+            };
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.exited() received unexpected arguments",
+                    span,
+                )));
+            }
+            let Some(child) = with_ambient_child(handle, Clone::clone) else {
+                let error = mir_io_error(process_prelude::IOError::other(
+                    process_prelude::IOOperation::Close,
+                    Some("ProcessChild".to_string()),
+                    "unavailable process handle",
+                ));
+                return Some(Ok(process_ambient_value(
+                    MirRuntimeValue::FailedTold(Box::new(error)),
+                )));
+            };
+            let value = match process_prelude::child_exited(&child) {
+                Ok(exited) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Bool(exited))),
+                Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+            };
+            Some(Ok(process_ambient_value(value)))
+        }
+        "process.child.kill" => {
+            process_ambient_child_unit(
+                operation,
+                handle,
+                &args,
+                span,
+                process_prelude::child_kill,
+            )
+        }
+        "process.child.terminate" => {
+            process_ambient_child_unit(
+                operation,
+                handle,
+                &args,
+                span,
+                process_prelude::child_terminate,
+            )
+        }
+        "process.child.interrupt" => {
+            process_ambient_child_unit(
+                operation,
+                handle,
+                &args,
+                span,
+                process_prelude::child_interrupt,
+            )
+        }
+        "process.child.terminal" => {
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.terminal has no typed receiver handle",
+                    span,
+                )));
+            };
+            if !args.is_empty() {
+                return Some(Err(process_ambient_diag(
+                    "ProcessChild.terminal received unexpected arguments",
+                    span,
+                )));
+            }
+            let present = with_ambient_child(handle, |child| child.terminal.is_ok()).unwrap_or(false);
+            if present {
+                Some(Ok(AmbientMirHandleResult::Handle(handle)))
+            } else {
+                Some(Ok(process_ambient_value(mir_absent("TerminalSession"))))
+            }
+        }
+        "terminal.resize" => {
+            let Some(handle) = handle else {
+                return Some(Err(process_ambient_diag(
+                    "TerminalSession.resize() has no typed receiver handle",
+                    span,
+                )));
+            };
+            let [size] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "TerminalSession.resize() expects one TerminalSize argument",
+                    span,
+                )));
+            };
+            let size = match mir_process_terminal_size(size, operation, span) {
+                Ok(size) => size,
+                Err(error) => return Some(Err(error)),
+            };
+            let Some(child) = with_ambient_child(handle, Clone::clone) else {
+                return Some(Ok(process_ambient_value(MirRuntimeValue::FailedTold(
+                    Box::new(mir_io_error(process_prelude::IOError::other(
+                        process_prelude::IOOperation::Resolve,
+                        Some("process terminal".to_string()),
+                        "unavailable process handle",
+                    ))),
+                ))));
+            };
+            let value = match child.terminal.as_ref().ok() {
+                Some(session) => match process_prelude::terminal_session_resize(session, &size) {
+                    Ok(()) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Unit)),
+                    Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
+                },
+                None => MirRuntimeValue::FailedTold(Box::new(mir_io_error(
+                    process_prelude::IOError::other(
+                        process_prelude::IOOperation::Resolve,
+                        Some("process terminal".to_string()),
+                        "this child has no terminal session",
+                    ),
+                ))),
+            };
+            Some(Ok(process_ambient_value(value)))
         }
         "process.child.wait" => {
             let Some(handle) = handle else {
@@ -925,8 +1791,13 @@ pub(crate) fn ambient_mir_handle(
     }
 }
 
-fn process_stream_mode(disc: i64) -> process_prelude::ProcessStreamMode {
+fn process_stream_mode(handle: i64) -> process_prelude::ProcessStreamMode {
+    // Non-ordering core enums use the ordinary heap-record ABI in Cranelift:
+    // slot zero is the checked variant discriminant.
+    let disc = Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(handle, 0))
+        .unwrap_or(-1);
     match disc {
+        0 => process_prelude::ProcessStreamMode::Stream,
         1 => process_prelude::ProcessStreamMode::Inherit,
         2 => process_prelude::ProcessStreamMode::Capture,
         _ => process_prelude::ProcessStreamMode::Stream,
@@ -1395,6 +2266,7 @@ host_fns! {
     cmd: "jet_jit_process_cmd" => jet_jit_process_cmd: sig_unary;
     run: "jet_jit_process_run" => jet_jit_process_run: sig_unary;
     run_with_authority: "jet_jit_process_run_with_authority" => jet_jit_process_run_with_authority: sig_binary;
+    run_with_authority_shared: "jet_std_process_run_with_authority" => jet_jit_process_run_with_authority: sig_binary;
     pipeline: "jet_jit_process_pipeline" => jet_jit_process_pipeline: sig_unary;
     spec_stdout: "jet_jit_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
     spec_stderr: "jet_jit_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;
@@ -1413,7 +2285,7 @@ host_fns! {
     spec_terminal_with_policy: "jet_jit_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
     spec_abilities: "jet_jit_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
     spec_under: "jet_jit_process_spec_under" => jet_jit_process_spec_under: sig_binary;
-    spec_plan: "jet_jit_process_spec_plan" => jet_jit_process_spec_plan: sig_unary;
+    spec_under_shared: "jet_std_process_spec_under" => jet_jit_process_spec_under: sig_binary;
     spec_run: "jet_jit_process_spec_run" => jet_jit_process_spec_run: sig_unary;
     spec_run_checked: "jet_jit_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
     spec_spawn: "jet_jit_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;
@@ -1433,4 +2305,30 @@ host_fns! {
     child_wait_shared: "jet_process_child_wait" => jet_jit_process_child_wait: sig_unary;
     stdin_write_shared: "jet_process_stdin_write" => jet_jit_process_stdin_write: sig_binary;
     stdin_close_shared: "jet_process_stdin_close" => jet_jit_process_stdin_close: sig_unary;
+    spec_stdout_shared: "jet_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
+    spec_stderr_shared: "jet_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;
+    spec_timeout_shared: "jet_process_spec_timeout" => jet_jit_process_spec_timeout: sig_binary;
+    spec_output_limit_shared: "jet_process_spec_output_limit" => jet_jit_process_spec_output_limit: sig_binary;
+    spec_cpu_time_limit_shared: "jet_process_spec_cpu_time_limit" => jet_jit_process_spec_cpu_time_limit: sig_binary;
+    spec_memory_limit_shared: "jet_process_spec_memory_limit" => jet_jit_process_spec_memory_limit: sig_binary;
+    spec_open_file_limit_shared: "jet_process_spec_open_file_limit" => jet_jit_process_spec_open_file_limit: sig_binary;
+    spec_cwd_shared: "jet_process_spec_cwd" => jet_jit_process_spec_cwd: sig_binary;
+    spec_env_shared: "jet_process_spec_env" => jet_jit_process_spec_env: sig_ternary;
+    spec_env_remove_shared: "jet_process_spec_env_remove" => jet_jit_process_spec_env_remove: sig_binary;
+    spec_env_clear_shared: "jet_process_spec_env_clear" => jet_jit_process_spec_env_clear: sig_unary;
+    spec_detached_shared: "jet_process_spec_detached" => jet_jit_process_spec_detached: sig_unary;
+    spec_terminal_shared: "jet_process_spec_terminal" => jet_jit_process_spec_terminal: sig_unary;
+    spec_terminal_with_policy_shared: "jet_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
+    spec_abilities_shared: "jet_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
+    spec_plan_shared: "jet_process_spec_plan" => jet_jit_process_spec_plan: sig_unary;
+    spec_run_shared: "jet_process_spec_run" => jet_jit_process_spec_run: sig_unary;
+    spec_run_checked_shared: "jet_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
+    process_cmd_shared: "jet_std_process_cmd" => jet_jit_process_cmd: sig_unary;
+    process_run_shared: "jet_std_process_run" => jet_jit_process_run: sig_unary;
+    process_pipeline_shared: "jet_std_process_pipeline" => jet_jit_process_pipeline: sig_unary;
+    child_id_shared: "jet_process_child_id" => jet_jit_process_child_id: sig_unary;
+    child_exited_shared: "jet_process_child_exited" => jet_jit_process_child_exited: sig_unary;
+    child_kill_shared: "jet_process_child_kill" => jet_jit_process_child_kill: sig_unary;
+    child_terminate_shared: "jet_process_child_terminate" => jet_jit_process_child_terminate: sig_unary;
+    child_interrupt_shared: "jet_process_child_interrupt" => jet_jit_process_child_interrupt: sig_unary;
 }

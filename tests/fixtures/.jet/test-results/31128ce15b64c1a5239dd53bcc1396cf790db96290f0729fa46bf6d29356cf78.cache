@@ -1,0 +1,54 @@
+JET_TEST_RESULT_V2
+0
+1213637
+missing golden: FAIL
+unreadable golden: FAIL
+mismatched golden: FAIL
+missing fixture: FAIL
+0 passed, 4 failed, 0 skipped
+Stop [E3001]: `panic: golden file is missing: tests/fixtures/testing_failure_reports.missing`
+  --> testing_failure_reports.jet:4 in __test_missing golden
+    |
+4 |     assert(testing.golden("tests/fixtures/testing_failure_reports.missing", "actual\n"))
+    |     ^^^^^^
+locals: path: tests/fixtures/testing_failure_reports.missing
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+Stop [E3001]: `panic: golden file cannot be read: tests/fixtures`
+  --> testing_failure_reports.jet:8 in __test_unreadable golden
+    |
+8 |     assert(testing.golden("tests/fixtures", "actual\n"))
+    |     ^^^^^^
+locals: path: tests/fixtures
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+Stop [E3001]: `panic: golden file differs: tests/fixtures/testing_failure_reports.golden`
+  --> testing_failure_reports.jet:12 in __test_mismatched golden
+     |
+12 |     assert(testing.golden("tests/fixtures/testing_failure_reports.golden", "actual\n"))
+     |     ^^^^^^
+locals: path: tests/fixtures/testing_failure_reports.golden
+--- expected tests/fixtures/testing_failure_reports.golden
++++ actual tests/fixtures/testing_failure_reports.golden
+@@ -1,1 +1,1 @@
+-expected
++actual
+
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+Stop [E3001]: `panic: fixture is missing: tests/fixtures/testing_failure_reports.missing`
+  --> testing_failure_reports.jet:16 in __test_missing fixture
+     |
+16 |     assert_eq(testing.fixture("tests/fixtures/testing_failure_reports.missing"), "expected\n")
+     |     ^^^^^^^^^
+locals: path: tests/fixtures/testing_failure_reports.missing
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+

@@ -2451,6 +2451,12 @@ pub fn jet_web_forms_typed(
     input.form(endpoint)
 }
 
+// The model-derived input has already passed `forms.input`. Its constructor
+// returns a form, not the Result carrier used by runtime schema construction.
+pub fn jet_web_form(input: &JetWebFormInput, action: String) -> JetWebFormTyped {
+    jet_web_forms_typed(input, action).expect("validated web.form input")
+}
+
 pub fn jet_web_forms_typed_submit(form: &JetWebFormTyped) -> Result<String, String> {
     form.submit()
 }

@@ -343,6 +343,9 @@ pub(crate) fn prepare_cli_from_mir(program: &MirProgram, artifact_id: MirArtifac
     else {
         return;
     };
+    if !cli.record_inputs || run_function.params.len() != 1 {
+        return;
+    }
     let field_types = cli
         .inputs
         .iter()
@@ -364,12 +367,7 @@ pub(crate) fn prepare_cli_from_mir(program: &MirProgram, artifact_id: MirArtifac
         version,
         field_types,
         commands,
-        run_record: run_function.params.len() == 1
-            && run_function.params[0].ty.identity.is_some_and(|id| {
-                program.types.iter().any(|definition| {
-                    definition.id == id && definition.cli.is_some()
-                })
-            }),
+        run_record: true,
         run_returns_value: !run_function.return_type.is_unit(),
         user_run,
     });

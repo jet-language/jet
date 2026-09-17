@@ -18,7 +18,7 @@ function fixture() {
         failures: [{ card: 123, metric: 'runtime_wall_seconds' }], loss_owners: [{ card_number: 456 }],
         peers: [
           { peer: 'rust', required_tiers: ['aot'], metric_comparisons: { runtime_wall_seconds: { tiers: { aot: tier(1.02, 'loss') } } } },
-          { peer: 'python', required_tiers: ['aot'], metric_comparisons: { runtime_wall_seconds: { tiers: { aot: tier(0.71, 'loss') } } } },
+          { peer: 'python', required_tiers: ['aot'], metric_comparisons: { runtime_wall_seconds: { tiers: { aot: tier(9), run: tier(0.71), dev: tier(0.8) } } } },
         ],
       },
       { id: 'empty.cell', domain: 'other', entry: null, mode: 'batch', primary_metric: 'runtime_wall_seconds', verdict: 'unmeasured', peers: [] },
@@ -32,21 +32,26 @@ function fixture() {
   };
 }
 
-test('projects cells and axes into one fixed matrix in domain order', () => {
+test('groups compiled and dynamic peers using their assigned execution samples', () => {
   const matrix = projectGauntletMatrix(fixture());
   assert.deepEqual(matrix.columns, ['rust', 'python']);
-  assert.deepEqual(matrix.axisColumns, ['vite']);
+  assert.deepEqual(matrix.groups, [{ label: 'AOT', columns: ['rust'] }, { label: 'Run / dev', columns: ['python'] }]);
+  assert.deepEqual(matrix.axisColumns, ['bun', 'nodemon', 'vite']);
   assert.deepEqual(matrix.rows.map((row) => row.id), ['text.kernel', 'empty.cell', 'axis:live_reload']);
   const text = matrix.rows.find((row) => row.id === 'text.kernel');
   assert.equal(text.peers.rust.verdict, 'parity');
   assert.equal(text.peers.rust.ratio, 1.02);
   assert.equal(text.peers.python.verdict, 'win');
   assert.equal(text.peers.python.detail.verdict, 'win');
+  assert.deepEqual(text.peers.python.samples.map(({ tier, ratio }) => [tier, ratio]), [['run', 0.71], ['dev', 0.8]]);
+  assert.equal(text.verdict, 'parity');
   assert.equal(text.peers.vite, undefined);
   const axis = matrix.axisRows[0];
   assert.equal(axis.mode, 'live_reload');
   assert.equal(axis.peers.vite.verdict, 'loss');
   assert.equal(axis.peers.vite.tier, 'cold');
+  assert.equal(axis.peers.nodemon.verdict, 'unmeasured');
+  assert.equal(axis.verdict, 'unmeasured');
   assert.equal(matrix.rows.find((row) => row.id === 'empty.cell').peers.rust, undefined);
 });
 
@@ -63,42 +68,27 @@ test('formats both sides in one plain unit at three significant figures', () => 
   assert.equal(formatStamp(null, null), 'not measured');
 });
 
-test('builds the detail card: every tier, best/median/mean, memory, and stamp', () => {
-  const row = projectGauntletMatrix(fixture()).rows.find((item) => item.id === 'text.kernel');
-  const html = buildGauntletTooltip(row.peers.python.detail);
-  assert.match(html, /TEXT\.KERNEL|text\.kernel/);
-  assert.match(html, /wordfreq · Jet vs python · wall time/);
-  assert.match(html, /gtip__state--win/);
-  assert.match(html, /<th>aot<\/th><td>710 ms<\/td><td>1,000 ms<\/td><td class="gtip__ratio">0\.71×<\/td>/);
-  assert.match(html, /<th>best<\/th>[\s\S]*<th>median<\/th>[\s\S]*<th>mean<\/th>[\s\S]*<th>peak memory<\/th><td>318 MB<\/td><td>14\.2 MB<\/td>[\s\S]*<th>samples<\/th><td>3<\/td><td>3<\/td>/);
-  assert.match(html, /Sep 2, 2026 · \d{2}:\d{2}/);
-  assert.match(html, /run run-2/);
-  assert.doesNotMatch(html, /\d[eE][+-]\d/, 'no exponent notation');
-  for (const banned of ['Mode', 'Rule', 'Failures', 'Loss owners', 'undefined', 'null']) {
-    assert.doesNotMatch(html, new RegExp(banned), banned);
-  }
-});
 
-test('keeps a published peer verdict when a legacy row has no metric tiers', () => {
+test('does not reuse a historical aggregate when the assigned tier has no measurement', () => {
   const matrix = projectGauntletMatrix({
     cells: [{
-      id: 'legacy.cell',
-      domain: 'legacy',
+      id: 'unmeasured.cell',
       primary_metric: 'runtime_wall_seconds',
       peers: [{ peer: 'rust', verdict: 'parity', metric_comparisons: {} }],
     }],
   });
-  assert.equal(matrix.rows[0].peers.rust.verdict, 'parity');
+  assert.equal(matrix.rows[0].peers.rust.verdict, 'unmeasured');
+  assert.equal(matrix.rows[0].peers.rust.ratio, null);
 });
 
-test('shows the tier that determines an aggregate loss', () => {
+test('a compiled-peer run loss cannot replace its AOT score', () => {
   const matrix = projectGauntletMatrix({
     cells: [{
       id: 'tiered.cell',
       domain: 'tiered',
       primary_metric: 'runtime_wall_seconds',
       peers: [{
-        peer: 'python',
+        peer: 'rust',
         required_tiers: ['aot', 'run'],
         metric_comparisons: {
           runtime_wall_seconds: { tiers: { aot: tier(0.7, 'win'), run: tier(1.2, 'loss') } },
@@ -106,6 +96,89 @@ test('shows the tier that determines an aggregate loss', () => {
       }],
     }],
   });
-  const peer = matrix.rows[0].peers.python;
-  assert.deepEqual([peer.verdict, peer.tier, peer.ratio], ['loss', 'run', 1.2]);
+  const peer = matrix.rows[0].peers.rust;
+  assert.deepEqual([peer.verdict, peer.tier, peer.ratio], ['win', 'aot', 0.7]);
+  assert.equal(peer.detail.peer.metric_comparisons.runtime_wall_seconds.tiers.run.ratio, 1.2);
+});
+
+test('a missing dev measurement stays visible beside a measured run', () => {
+  const matrix = projectGauntletMatrix({
+    cells: [{
+      id: 'dynamic.cell', primary_metric: 'runtime_wall_seconds',
+      peers: [{ peer: 'python', required_tiers: ['aot', 'run'],
+        metric_comparisons: { runtime_wall_seconds: { tiers: { aot: tier(0.1), run: tier(0.5) } } } }],
+    }],
+  });
+  const peer = matrix.cellRows[0].peers.python;
+  assert.equal(peer.verdict, 'unmeasured');
+  assert.deepEqual(peer.samples.map(({ tier, ratio, verdict }) => [tier, ratio, verdict]),
+    [['run', 0.5, 'win'], ['dev', null, 'unmeasured']]);
+});
+
+test('JavaScript occupies one column without picking the faster duplicate record', () => {
+  const peer = (name, ratio) => ({ peer: name, metric_comparisons: {
+    runtime_wall_seconds: { tiers: { aot: tier(ratio), run: tier(ratio), dev: tier(ratio) } },
+  } });
+  const source = { cells: [{
+    id: 'js.cell', primary_metric: 'runtime_wall_seconds',
+    peers: [peer('node', 0.2), peer('js', 1.4)],
+  }, {
+    id: 'node-only.cell', primary_metric: 'runtime_wall_seconds', peers: [peer('node', 0.3)],
+  }] };
+  const snapshot = JSON.stringify(source);
+  const matrix = projectGauntletMatrix(source);
+  assert.deepEqual(matrix.columns, ['js']);
+  const js = matrix.cellRows.find((row) => row.id === 'js.cell').peers.js;
+  assert.equal(js.ratio, 1.4);
+  assert.equal(js.verdict, 'loss');
+  assert.equal(matrix.cellRows.find((row) => row.id === 'node-only.cell').peers.js.ratio, 0.3);
+  const tooltip = buildGauntletTooltip(js.detail);
+  assert.ok(tooltip.includes('node · run · reference'));
+  assert.ok(tooltip.includes('0.2×'));
+  assert.equal(JSON.stringify(source), snapshot);
+});
+
+test('web development retains its tool peers without gating on compiled workflow speed', () => {
+  const source = { axes: { live_reload: {
+    metric: 'reload_latency_ms', comparisons: Object.fromEntries(
+      ['bun', 'nodemon', 'vite', 'entr+cc'].map((name) => [name, {
+        cold: tier(name === 'entr+cc' ? 10 : 0.5), warm: tier(0.5),
+      }])),
+  } } };
+  const matrix = projectGauntletMatrix(source);
+  assert.equal(matrix.axisRows[0].verdict, 'win');
+  assert.equal(matrix.axisRows[0].peers['entr+cc'].verdict, 'loss');
+  assert.equal(matrix.axisRows[0].peers['entr+cc'].detail.reference, true);
+  source.axes.live_reload.comparisons.nodemon.warm = tier(2);
+  assert.equal(projectGauntletMatrix(source).axisRows[0].verdict, 'loss');
+});
+
+test('invalid samples cannot turn a favorable ratio into a win', () => {
+  const matrix = projectGauntletMatrix({ cells: [{
+    id: 'wrong.cell', primary_metric: 'runtime_wall_seconds', peers: [{
+      peer: 'rust', metric_comparisons: {
+        runtime_wall_seconds: { tiers: { aot: { ...tier(0.1), status: 'wrong' } } },
+      },
+    }],
+  }] });
+  const peer = matrix.cellRows[0].peers.rust;
+  assert.equal(peer.verdict, 'unmeasured');
+  assert.equal(peer.samples[0].ratio, null);
+});
+
+test('expert measurements do not add columns or alter the displayed ordinary score', () => {
+  const source = { cells: [{
+    id: 'expert.cell', primary_metric: 'runtime_wall_seconds',
+    peers: ['rust', 'rust-expert', 'c-expert', 'jet-expert'].map((name) => ({
+      peer: name, metric_comparisons: {
+        runtime_wall_seconds: { tiers: { aot: tier(name === 'rust' ? 0.5 : 20) } },
+      },
+    })),
+  }] };
+  const snapshot = JSON.stringify(source);
+  const matrix = projectGauntletMatrix(source);
+  assert.deepEqual(matrix.columns, ['rust']);
+  assert.equal(matrix.cellRows[0].verdict, 'win');
+  assert.equal(matrix.summary.win, 1);
+  assert.equal(JSON.stringify(source), snapshot);
 });

@@ -10,7 +10,9 @@ pub(crate) mod process_prelude {
         jet_process_signal_error, jet_process_signal_register,
     };
     use jet_codegen::scheduler::{
-        jet_scheduler_root_task_control, jet_scheduler_wait_without_unwind, JetSchedulerWait,
+        jet_scheduler_current_task_control, jet_scheduler_root_task_control,
+        jet_scheduler_shielded, jet_scheduler_wait_without_unwind, jet_task_deliver_cancel,
+        JetSchedulerWait,
     };
     use jet_foundation::Outcome::{jet_outcome_of, JetAbsent, JetOutcome};
 
@@ -152,13 +154,14 @@ pub(crate) mod process_prelude {
 
         #[derive(Clone, Debug, PartialEq)]
         pub struct ProcessReceipt {
-            pub code: i64,
+            // Keep exact Jet `Int` fields aligned with the AOT Prelude type.
+            pub code: jet_foundation::Numeric::JetInt,
             pub output: String,
             pub errors: String,
             pub success: bool,
             // Mirrors the Prelude declaration (JetStd/Open.rs): the one
             // optional carrier, never a raw Rust `Option`.
-            pub signal: JetOutcome<i64, JetAbsent>,
+            pub signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
             pub timed_out: bool,
             pub executable_identity: String,
             pub argv: Vec<String>,
@@ -170,7 +173,7 @@ pub(crate) mod process_prelude {
             pub limits: Vec<String>,
             pub outputs: Vec<String>,
             pub redacted: bool,
-            pub pid: i64,
+            pub pid: jet_foundation::Numeric::JetInt,
             pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
         }
 
@@ -478,7 +481,7 @@ pub(crate) mod process_prelude {
     };
 
     pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
-        jet_std_process_cmd(&cmd)
+        jet_std_process_cmd_owned(cmd)
     }
 
     pub(crate) fn spec_cwd(spec: ProcessSpec, cwd: &String) -> ProcessSpec {
@@ -514,7 +517,10 @@ pub(crate) mod process_prelude {
     }
 
     pub(crate) fn spec_output_limit(spec: ProcessSpec, output_limit: i64) -> ProcessSpec {
-        jet_process_spec_output_limit(spec, output_limit)
+        jet_process_spec_output_limit(
+            spec,
+            jet_foundation::Numeric::JetInt::from_i64(output_limit),
+        )
     }
 
     pub(crate) fn spec_cpu_time_limit(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
@@ -522,11 +528,17 @@ pub(crate) mod process_prelude {
     }
 
     pub(crate) fn spec_memory_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
-        jet_process_spec_memory_limit(spec, limit)
+        jet_process_spec_memory_limit(
+            spec,
+            jet_foundation::Numeric::JetInt::from_i64(limit),
+        )
     }
 
     pub(crate) fn spec_open_file_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
-        jet_process_spec_open_file_limit(spec, limit)
+        jet_process_spec_open_file_limit(
+            spec,
+            jet_foundation::Numeric::JetInt::from_i64(limit),
+        )
     }
 
     pub(crate) fn spec_detached(spec: ProcessSpec) -> ProcessSpec {

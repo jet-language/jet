@@ -19,35 +19,6 @@ use std::collections::HashSet;
 /// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
 /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
-/// c109 Phase 19: is this MethodCall the arena allocator constructor `mem.Arena.new(…)`
-/// (D-ALLOC1)? Reproduces `emit_method_call`'s constructor branch (Expression.rs ~L1515):
-/// the receiver is `Field(Ident(alias), <AllocType>)` where `alias ∈ core_imports` maps to
-/// `core.mem` and `<AllocType> ∈ {Arena,Bump,Pool,Fixed}`, and `method == "new"`. Returns
-/// the resolved allocator type-name (so the gate can admit it) or `None`.
-pub(crate) fn alloc_new_type<'a>(
-    receiver: &'a Expr,
-    method: &str,
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> Option<&'a str> {
-    let Expr::Field(inner, alloc_type, _) = receiver else {
-        return None;
-    };
-    let Expr::Ident(alias, _) = &**inner else {
-        return None;
-    };
-    if locals.contains(alias) {
-        return None;
-    }
-    if cx.any_core_import_module(alias) != Some(Syntax::CORE_MEM_MODULE) {
-        return None;
-    }
-    match alloc_type.as_str() {
-        "Fixed" if method == "over" || method == Syntax::MEM_ALLOC_NEW => Some(alloc_type.as_str()),
-        "Arena" | "Bump" | "Pool" if method == Syntax::MEM_ALLOC_NEW => Some(alloc_type.as_str()),
-        _ => None,
-    }
-}
 
 /// D-SOLVER-LIB1=A: is this `solve.Solver.new(seed)`?
 pub(crate) fn solve_new_type<'a>(

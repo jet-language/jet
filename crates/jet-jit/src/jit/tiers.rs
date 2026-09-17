@@ -1,11 +1,11 @@
 //! MIR-native tier classification and trace publication.
 
 use super::gap::JitGap;
-use super::safety::{artifact_entry, function_name, resident_safe_mir_program};
+use super::safety::{artifact_entry, function_name};
 use jet_foundation::JSON::json_escape;
 use jet_foundation::MIR::{
-    MirArtifactId, MirDecisionDisposition, MirDecisionKind, MirDecisionRow, MirFunctionId,
-    MirProgram,
+    MirArtifactId, MirCallee, MirDecisionDisposition, MirDecisionKind, MirDecisionRow,
+    MirFunctionId, MirLoopSourceKind, MirOperation, MirProgram,
 };
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -41,9 +41,6 @@ impl TierTraceAggregate {
     fn append(&mut self, rows: &[TierRow]) {
         self.native_rows += rows.iter().filter(|row| row.tier == Tier::Native).count();
         self.interp_rows += rows.iter().filter(|row| row.tier == Tier::Interp).count();
-        if !rows.is_empty() && rows.iter().all(|row| row.tier == Tier::Interp) {
-            self.whole_program_deopt = true;
-        }
         self.rows.extend(rows.iter().cloned());
     }
 
@@ -291,27 +288,188 @@ pub fn write_trace_sidecar(path: &Path, aggregate: &TierTraceAggregate) -> std::
     result
 }
 
-/// Plan every function from upstream applicability facts.  There is no second
-/// expression scanner here: a false Cranelift fact is a named tier gap.
+/// Return a direct MIR function target.  The artifact planner must follow
+/// checked user calls and closure constructors, but never infer a target from
+/// a rendered symbol or from an opaque indirect call.
+fn direct_function_call(operation: &MirOperation) -> Option<MirFunctionId> {
+    match operation {
+        MirOperation::Call {
+            callee:
+                MirCallee::User(function)
+                | MirCallee::Associated { function, .. }
+                | MirCallee::Method { function, .. },
+            ..
+        }
+        | MirOperation::Closure { function, .. } => Some(*function),
+        _ => None,
+    }
+}
+
+fn insert_symbol_target(
+    program: &MirProgram,
+    selected: &mut BTreeSet<MirFunctionId>,
+    symbol: &str,
+) {
+    if let Some(function) = program
+        .functions
+        .iter()
+        .find(|function| function.key == symbol)
+    {
+        selected.insert(function.id);
+    }
+}
+
+/// Seed an artifact's callable roots.  Functions outside these roots are
+/// metadata, helper declarations for other targets, or otherwise unreachable
+/// from this invocation and must not poison its tier plan.
+fn artifact_roots(program: &MirProgram, artifact: MirArtifactId) -> BTreeSet<MirFunctionId> {
+    let Some(plan) = program.artifacts.iter().find(|plan| plan.id == artifact) else {
+        return BTreeSet::new();
+    };
+    let mut selected = BTreeSet::new();
+    if let Some(entry) = &plan.entry {
+        if let Some(function) = entry.function {
+            selected.insert(function);
+        }
+        if let Some(cli) = &entry.cli {
+            selected.extend(cli.commands.iter().map(|command| command.function));
+        }
+    }
+    selected.extend(plan.exports.iter().map(|export| export.function));
+    for job_id in &plan.jobs {
+        if let Some(job) = program.jobs.iter().find(|job| job.id == *job_id) {
+            selected.insert(job.function);
+        }
+    }
+    if let Some(harness_id) = plan.harness {
+        if let Some(harness) = program
+            .harnesses
+            .iter()
+            .find(|harness| harness.id == harness_id)
+        {
+            let test_ids = harness
+                .selected_test
+                .into_iter()
+                .chain(harness.tests.iter().copied());
+            for test_id in test_ids {
+                if let Some(test) = program.tests.iter().find(|test| test.id == test_id) {
+                    selected.insert(test.function);
+                    if let Some(eligibility) = test.eligibility {
+                        selected.insert(eligibility);
+                    }
+                }
+            }
+            selected.extend(
+                harness
+                    .output_checks
+                    .iter()
+                    .map(|check| check.function),
+            );
+            selected.extend(
+                harness
+                    .coverage_points
+                    .iter()
+                    .map(|point| point.function),
+            );
+        }
+    }
+    for setup in &program.facts.hardware_setups {
+        if let jet_foundation::MIR::MirHardwareSetup::InterruptBind {
+            handler_symbol, ..
+        } = setup
+        {
+            insert_symbol_target(program, &mut selected, handler_symbol);
+        }
+    }
+    selected
+}
+
+/// Add function targets that are encoded in operation metadata rather than a
+/// normal MIR call.  These are still checked, transitive artifact edges:
+/// iterable hooks are named by their source fact and typed CSV calls resolve a
+/// concrete Decode method from their row type.
+fn append_operation_targets(
+    program: &MirProgram,
+    function: &jet_foundation::MIR::MirFunction,
+    selected: &mut BTreeSet<MirFunctionId>,
+) {
+    for instruction in function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+    {
+        if let Some(callee) = direct_function_call(&instruction.operation) {
+            selected.insert(callee);
+        }
+        match &instruction.operation {
+            MirOperation::LoopIterInit {
+                source_kind:
+                    MirLoopSourceKind::Iterable {
+                        iter_symbol,
+                        next_symbol,
+                        ..
+                    },
+                ..
+            } => {
+                insert_symbol_target(program, selected, iter_symbol);
+                insert_symbol_target(program, selected, next_symbol);
+            }
+            MirOperation::CoreCall {
+                call, type_args, ..
+            } if type_args.len() == 1 => {
+                let Some(core) = program.core_calls.iter().find(|core| core.id == *call) else {
+                    continue;
+                };
+                if !matches!(
+                    (core.module.as_str(), core.member.as_str()),
+                    ("core.data", "csv") | ("core.encoding.csv", "decode" | "query")
+                ) {
+                    continue;
+                }
+                for candidate in &program.functions {
+                    if candidate.is_decode_for(&type_args[0]) {
+                        selected.insert(candidate.id);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn selected_function_ids(program: &MirProgram, artifact: MirArtifactId) -> BTreeSet<MirFunctionId> {
+    let mut selected = artifact_roots(program, artifact);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let current = selected.iter().copied().collect::<Vec<_>>();
+        for function_id in current {
+            let Some(function) = program
+                .functions
+                .iter()
+                .find(|function| function.id == function_id)
+            else {
+                continue;
+            };
+            let before = selected.len();
+            append_operation_targets(program, function, &mut selected);
+            changed |= selected.len() != before;
+        }
+    }
+    selected
+}
+
+/// Plan only the transitive function closure rooted in the requested artifact.
+/// A function rejected by sema remains a named per-function interpreter row;
+/// unrelated functions never turn a resident run into a whole-program deopt.
 pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierPlan {
     let mut plan = MirTierPlan::default();
-    if let Err(reason) = resident_safe_mir_program(program) {
-        if let Some(id) = artifact_entry(program, artifact) {
-            let name = function_name(program, id);
-            plan.rows.push(TierRow {
-                function: id,
-                function_name: name.clone(),
-                tier: Tier::Interp,
-                reason: reason.clone(),
-                millis: 0.0,
-            });
-            plan.deopt.push((id, reason.clone()));
-            plan.gap = Some(JitGap::new(id, name, reason));
-        }
-        plan.whole_program_deopt = true;
-        return plan;
-    }
-    for function in &program.functions {
+    let selected = selected_function_ids(program, artifact);
+    for function in program
+        .functions
+        .iter()
+        .filter(|function| selected.contains(&function.id))
+    {
         if function.target_applicability.cranelift {
             plan.native.insert(function.id);
             plan.rows.push(TierRow {
@@ -333,7 +491,6 @@ pub fn plan_mir_tiers(program: &MirProgram, artifact: MirArtifactId) -> MirTierP
             });
         }
     }
-    plan.whole_program_deopt = plan.native.is_empty() && !plan.rows.is_empty();
     plan
 }
 

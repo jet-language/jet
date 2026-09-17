@@ -2637,6 +2637,75 @@ fn jet_jit_xml_to_string(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+fn xml_canonical_options_from_heap(
+    handle: i64,
+) -> Result<jet_foundation::XmlPull::CanonicalOptions, String> {
+    Concurrency::with_runtime_mut(|rt| {
+        Some((|| {
+            let mode_value = rt
+                .heap
+                .record_get_int(handle, 0)
+                .ok_or_else(|| "invalid XML canonical mode".to_string())?;
+            let mode = match rt.heap.record_get_int(mode_value, 0).unwrap_or(mode_value) {
+                0 => jet_foundation::XmlPull::CanonicalMode::Inclusive11,
+                1 => jet_foundation::XmlPull::CanonicalMode::Exclusive10,
+                value => return Err(format!("invalid XML canonical mode {value}")),
+            };
+            let comments = rt
+                .heap
+                .record_get_bool(handle, 1)
+                .or_else(|| rt.heap.record_get_int(handle, 1).map(|value| value != 0))
+                .ok_or_else(|| "invalid XML canonical comments flag".to_string())?;
+            let prefixes_handle = rt
+                .heap
+                .record_get_int(handle, 2)
+                .ok_or_else(|| "invalid XML canonical inclusive prefixes".to_string())?;
+            let length = rt
+                .heap
+                .list_len(prefixes_handle)
+                .ok_or_else(|| "invalid XML canonical inclusive prefixes".to_string())?;
+            let length = usize::try_from(length)
+                .map_err(|_| "invalid XML canonical inclusive prefixes length".to_string())?;
+            let mut inclusive_prefixes = Vec::with_capacity(length);
+            for index in 0..length {
+                let prefix = rt
+                    .heap
+                    .list_get_string(prefixes_handle, index as i64)
+                    .ok_or_else(|| {
+                        "XML canonical inclusive prefixes must be strings".to_string()
+                    })?;
+                inclusive_prefixes.push(prefix);
+            }
+            Ok(jet_foundation::XmlPull::CanonicalOptions {
+                mode,
+                comments,
+                inclusive_prefixes,
+            })
+        })())
+    })
+    .unwrap_or_else(|| Err("XML canonical options require an active runtime".to_string()))
+}
+
+fn jet_jit_xml_canonical(tree: i64, options: i64) -> i64 {
+    let options = match xml_canonical_options_from_heap(options) {
+        Ok(options) => options,
+        Err(reason) => {
+            return result_err_encoding(xml_shape_error(reason));
+        }
+    };
+    match xml_tree_value(tree).and_then(|value| {
+        jet_foundation::XmlKernel::canonical_document(&value, &options).map_err(xml_error_encoding)
+    }) {
+        Ok(rendered) => {
+            let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered));
+            result_ok(handle as u64)
+        }
+        Err(error) => {
+            result_err_encoding(error)
+        }
+    }
+}
+
 fn xml_tree_value(
     tree: i64,
 ) -> Result<jet_foundation::XmlPull::Value, json_rt::EncodingError> {
@@ -3852,6 +3921,7 @@ host_fns! {
     data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_binary;
     db_decode: "jet_jit_db_decode" => jet_jit_db_decode: sig_binary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
+    datatree_display: "jet_jit_datatree_display" => jet_jit_json_to_string: sig_unary;
     json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
     json_canonical: "jet_jit_json_canonical" => jet_jit_json_canonical: sig_unary;
     json_canonical_checked: "jet_jit_json_canonical_checked" => jet_jit_json_canonical_checked: sig_binary;
@@ -3859,6 +3929,7 @@ host_fns! {
     jsonl_parse: "jet_jit_jsonl_parse" => jet_jit_jsonl_parse: sig_unary;
     jsonl_to_string: "jet_jit_jsonl_to_string" => jet_jit_jsonl_to_string: sig_unary;
     xml_parse: "jet_jit_xml_parse" => jet_jit_xml_parse: sig_unary;
+    xml_canonical: "jet_jit_xml_canonical" => jet_jit_xml_canonical: sig_binary;
     xml_to_string: "jet_jit_xml_to_string" => jet_jit_xml_to_string: sig_unary;
     xml_root: "jet_jit_xml_root" => jet_jit_xml_root: sig_unary;
     xml_expanded_name: "jet_jit_xml_expanded_name" => jet_jit_xml_expanded_name: sig_unary;

@@ -483,8 +483,8 @@ pub(super) fn check_bundle_opts_for_output(
 }
 
 /// Checking is an unbounded-depth recursive descent over user syntax, so the
-/// frame requirement is per source-nesting level, not per program size. This
-/// is the narrowest point every public `check_bundle*` shares, so the sized
+/// frame requirement is per source-nesting level, not per program size. This is
+/// the narrowest point every public `check_bundle*` shares, so the sized
 /// stack is installed here instead of being chased caller by caller:
 /// `Sema::check_bundle` and its siblings are public API, and an embedder
 /// holding its own bundle — or a 2 MiB libtest worker — would otherwise run

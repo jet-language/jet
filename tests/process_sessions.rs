@@ -65,6 +65,7 @@ fn run() {{
             print("closed:error")
         }}
 }}
+}}
 "#,
         fixture = jet_string_path(&fixture),
     );
@@ -115,6 +116,7 @@ fn run() {{
         .Err(_) -> {{
             print(true)
         }}
+}}
 }}
 "#,
         fixture = fixture,
@@ -173,11 +175,10 @@ use core.process as process
 
 fn run() {{
     cpu_budget :: Duration.milliseconds(1000) ?? panic("duration failed")
-    result :: process.pipeline([
+    if process.pipeline([
         process.cmd(["{fixture}", "cpu"]).cpu_time_limit(cpu_budget),
         process.cmd(["cat"])
-    ])
-    if result == {{
+    ]) == {{
         .Ok(_) -> print("cpu:missed")
         .Err(error) -> {{
             if error == {{
@@ -220,8 +221,7 @@ fn run() {{
     accepted :: process.cmd(["{fixture}", "output", "small"]){resource_builders}.output_limit(16).run() ?? panic("under-limit run failed")
     print(accepted.success)
     print(accepted.output == "ok\n")
-    limited :: process.cmd(["{fixture}", "output", "large"]).output_limit(16).run()
-    if limited == {{
+    if process.cmd(["{fixture}", "output", "large"]).output_limit(16).run() == {{
         .Ok(_) -> {{ print("limit:accepted") }}
         .Err(error) -> {{
             if error == {{
@@ -264,8 +264,7 @@ use core.process as process
 
 fn run() {{
     cpu_budget :: Duration.milliseconds(1000) ?? panic("duration failed")
-    cpu :: process.cmd(["{fixture}", "cpu"]).cpu_time_limit(cpu_budget).run()
-    if cpu == {{
+    if process.cmd(["{fixture}", "cpu"]).cpu_time_limit(cpu_budget).run() == {{
         .Ok(_) -> print("cpu:missed")
         .Err(error) -> {{
             if error == {{
@@ -274,8 +273,7 @@ fn run() {{
             }}
         }}
     }}
-    memory :: process.cmd(["{fixture}", "memory"]).memory_limit(33554432).run()
-    if memory == {{
+    if process.cmd(["{fixture}", "memory"]).memory_limit(33554432).run() == {{
         .Ok(_) -> print("memory:missed")
         .Err(error) -> {{
             if error == {{
@@ -284,8 +282,7 @@ fn run() {{
             }}
         }}
     }}
-    files :: process.cmd(["{fixture}", "files"]).open_file_limit(64).run()
-    if files == {{
+    if process.cmd(["{fixture}", "files"]).open_file_limit(64).run() == {{
         .Ok(_) -> print("files:missed")
         .Err(error) -> {{
             if error == {{

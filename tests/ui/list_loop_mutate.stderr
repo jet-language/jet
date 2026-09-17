@@ -1,8 +1,8 @@
 Error [E0507]: While the loop is reading `nums`, nothing may change it
-  --> tests/ui/list_loop_mutate.jet:3:23
+  --> list_loop_mutate.jet:3:23
     |
   3 |     loop x in nums -> nums.push(3)
     |                       ^^^^
- Why: The loop reads `nums` across its body, so `nums.push()` changes the collection being visited
- Fix: Choose the collection intent explicitly instead of changing `nums` with `nums.push()`: collect a separate result when the original traversal should stay unchanged; snapshot `nums` before the loop when only original values belong in the traversal; or use an explicit work queue when newly added values should be visited
+ Why: The loop reads `nums` across its body, so `nums.push()` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `nums` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
 More: jet-lang.dev/e/E0507

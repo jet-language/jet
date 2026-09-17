@@ -55,7 +55,10 @@ pub use data_plan::{
     project_data_plan, DataPlanError, TDataPlan, TDataPlanNode, TDataPlanPhysicalNode,
     TDATA_PLAN_SCHEMA_VERSION,
 };
-pub use mir::{lower_checked_mir_program_for, lower_tir_to_mir, LowerError};
+pub use mir::{
+    lower_checked_mir_program_for, lower_checked_mir_program_for_with_debug, lower_tir_to_mir,
+    LowerError,
+};
 use tir_to_mir_types::{
     lower_declarations_from_items_with_boxed_edges, lower_tir_declarations, TirDeclarations,
 };
@@ -1799,8 +1802,27 @@ pub(crate) fn bind_generic_type(
     subst: &mut std::collections::HashMap<String, Type>,
 ) -> bool {
     match template {
-        Type::Named(name) if params.contains(name) => match subst.get(name) {
-            Some(bound) => bound == actual,
+        Type::Named(name) if params.contains(name) => match subst.get(name).cloned() {
+            Some(bound) if bound == *actual => true,
+            Some(Type::Named(bound_name)) => {
+                let Type::Named(actual_name) = actual else {
+                    return false;
+                };
+                let same_leaf = bound_name.rsplit("::").next() == actual_name.rsplit("::").next();
+                let one_is_unqualified =
+                    !bound_name.contains("::") || !actual_name.contains("::");
+                if same_leaf && one_is_unqualified {
+                    // Sema may spell an explicit type argument with its source
+                    // leaf while a lowered value carries the canonical module
+                    // path. Keep the resolved value identity for the instance
+                    // key instead of rejecting the already-checked call.
+                    subst.insert(name.clone(), actual.clone());
+                    true
+                } else {
+                    false
+                }
+            }
+            Some(_) => false,
             None => {
                 subst.insert(name.clone(), actual.clone());
                 true
@@ -1850,6 +1872,16 @@ pub(crate) fn bind_generic_type(
                     .all(|(template, actual)| bind_generic_type(template, actual, params, subst))
                 && match (template_ret, actual_ret) {
                     (Some(template), Some(actual)) => {
+                        // Callable values expose the executable failure carrier
+                        // in sema (`fn(T) U` becomes `fn(T) Result<U, Err>`).
+                        // Generic source signatures still bind against the
+                        // source-level return, so unwrap that carrier only when
+                        // the template is not already a Result.
+                        let actual = match (template.as_ref(), actual.as_ref()) {
+                            (Type::Result { .. }, actual) => actual,
+                            (_, Type::Result { ok, .. }) => ok.as_ref(),
+                            (_, actual) => actual,
+                        };
                         bind_generic_type(template, actual, params, subst)
                     }
                     (None, None) => true,
@@ -1969,9 +2001,6 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             break;
         }
         for (called_name, shapes) in calls {
-            if funcs.iter().any(|func| func.name == called_name) {
-                continue;
-            }
             let mut unique = shapes;
             unique.sort_by_key(|shape| format!("{shape:?}"));
             unique.dedup();
@@ -2046,10 +2075,6 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
                 let mut function_type_params = previous_type_params.clone();
                 function_type_params.extend(residual_type_params);
                 cx.current_type_params.replace(function_type_params);
-                if !tir_covers(&specialized, cx) {
-                    cx.current_type_params.replace(previous_type_params);
-                    continue;
-                }
                 let mut lowered = lower_func(&specialized, cx);
                 cx.current_type_params.replace(previous_type_params);
                 lowered.key = function_semantic_key(&lowered.module, &emitted_name);
@@ -2742,8 +2767,17 @@ fn lower_mir_fragment(
             }));
         }
     }
+    // Unit-family members are already supplied by their family item. The
+    // distinct-base map carries the same checked rows for evaluator lookup,
+    // but adding them as synthetic items would lower each member twice.
+    let unit_family_members = context
+        .unit_families
+        .iter()
+        .flat_map(|family| family.distinct_defs())
+        .map(|definition| definition.name)
+        .collect::<std::collections::HashSet<_>>();
     for (name, base) in context.distinct_bases {
-        if context.structs.contains_key(name) {
+        if context.structs.contains_key(name) || unit_family_members.contains(name) {
             continue;
         }
         let range = context.distinct_ranges.get(name).and_then(|bounds| {
@@ -3276,11 +3310,20 @@ pub fn lower_checked_tir_program_for(
     bundle: &ProgramBundle,
     request: MirArtifactRequest,
 ) -> Result<TirProgram, LowerError> {
+    lower_checked_tir_program_for_with_debug(bundle, request, false)
+}
+
+/// Lower checked TIR with the native debug source-map markers enabled.
+pub fn lower_checked_tir_program_for_with_debug(
+    bundle: &ProgramBundle,
+    request: MirArtifactRequest,
+    debug_linemap: bool,
+) -> Result<TirProgram, LowerError> {
     if jet_foundation::CompilerStack::on_compiler_worker() {
-        return lower_checked_tir_program_on_stack(bundle, request);
+        return lower_checked_tir_program_on_stack(bundle, request, debug_linemap);
     }
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        lower_checked_tir_program_on_stack(bundle, request)
+        lower_checked_tir_program_on_stack(bundle, request, debug_linemap)
     })
 }
 
@@ -3360,10 +3403,10 @@ fn nominal_identity_projection(
         })
         .collect()
 }
-/// Name a selected zero-argument imported Executable or Service the way the
-/// imported function table does. Local Outputs deliberately stay on the
-/// original entry selection path below; Check Outputs are plural test-harness
-/// entries, not a singular JIT entry.
+/// Select zero-argument entries by canonical module-qualified semantic keys.
+/// Loader aliases and generated Rust names are display projections only.
+///
+/// Check Outputs are plural test-harness entries, not a singular JIT entry.
 fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
     let module = bundle.modules.get(bundle.entry)?;
     module.items.iter().find_map(|item| {
@@ -3381,7 +3424,8 @@ fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String
         {
             return None;
         }
-        Some(output.lowered_name.clone())
+        let module = artifact_plan::module_identity(bundle, output.module);
+        Some(function_semantic_key(&module, &output.semantic_name))
     })
 }
 fn selected_test_override_tir_entry(
@@ -3402,16 +3446,20 @@ fn selected_test_override_tir_entry(
         .items
         .iter()
         .any(|item| matches!(item, Item::Func(function) if function.name == "test"))
-        .then(|| "test".to_string())
+        .then(|| {
+            let module = artifact_plan::module_identity(bundle, bundle.entry);
+            function_semantic_key(&module, "test")
+        })
 }
 fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
     let module = bundle.modules.get(bundle.entry)?;
+    let entry_module = artifact_plan::module_identity(bundle, bundle.entry);
     selected_imported_zero_arg_tir_entry(bundle)
         .or_else(|| {
             module.items.iter().find_map(|item| match item {
                 Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
                     (output.selected && output.module == bundle.entry && output.params.is_empty())
-                        .then(|| output.semantic_name.clone())
+                        .then(|| function_semantic_key(&entry_module, &output.semantic_name))
                 }),
                 _ => None,
             })
@@ -3419,7 +3467,7 @@ fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
         .or_else(|| {
             module.items.iter().find_map(|item| match item {
                 Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                    Some("run".to_string())
+                    Some(function_semantic_key(&entry_module, "run"))
                 }
                 _ => None,
             })
@@ -3771,10 +3819,88 @@ fn child_module_identity(module: &str, child: &str) -> String {
         format!("{module}::{child}")
     }
 }
+/// Collect every named callback handed directly to an HTTP router/mux.
+///
+/// Route registration is a checked callback boundary: sema has already
+/// validated the handler's Send/Sync contract, while the checked TIR lowering
+/// still needs a concrete TFunc row for the named-function value. Keep this
+/// discovery on the AST side of the one lowering walk so entry and imported
+/// modules use the same helper path.
+fn collect_http_route_handlers(items: &[Item], out: &mut std::collections::HashSet<String>) {
 
+    fn collect_body(body: &[crate::AST::Stmt], out: &mut std::collections::HashSet<String>) {
+        for statement in body {
+            statement.for_each_expr(|expr| {
+                let Expr::MethodCall {
+                    recv_type: Some(recv_type),
+                    method,
+                    args,
+                    ..
+                } = expr
+                else {
+                    return;
+                };
+                if !matches!(recv_type.as_str(), "HTTPRouter" | "HTTPMux")
+                    || !matches!(
+                        method.as_str(),
+                        "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+                    )
+                    || args.len() != 2
+                {
+                    return;
+                }
+                let mut handler = &args[1].expr;
+                while let Expr::Paren(inner, _) = handler {
+                    handler = inner;
+                }
+                if let Expr::Ident(name, _) = handler {
+                    out.insert(name.clone());
+                }
+            });
+        }
+    }
+
+    for item in items {
+        match item {
+            Item::Func(function) => collect_body(&function.body, out),
+            Item::Struct(definition) => {
+                for method in &definition.methods {
+                    collect_body(&method.body, out);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        collect_body(&method.body, out);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for method in &definition.methods {
+                    collect_body(&method.body, out);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        collect_body(&method.body, out);
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    collect_body(&method.body, out);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_http_route_handlers(body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
 fn lower_checked_tir_program_on_stack(
     bundle: &ProgramBundle,
     request: MirArtifactRequest,
+    debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
@@ -3789,8 +3915,10 @@ fn lower_checked_tir_program_on_stack(
             &extern_funcs,
             &bundle.edition,
         );
+        cx.debug_linemap = debug_linemap;
         populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
+        crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
         let mut funcs = Vec::new();
         let include_tests = matches!(
@@ -3849,12 +3977,18 @@ fn lower_checked_tir_program_on_stack(
         cx.jit_canonical_calls.borrow_mut().clear();
         // #2502: the canonical contract sampling plan this walk records and
         // artifact discovery replays.
+        let mut http_route_handlers = std::collections::HashSet::new();
+        collect_http_route_handlers(&module.items, &mut http_route_handlers);
         let mut contract_rows = artifact_plan::ContractSamplingPlan::new();
         for item in &module.items {
             match item {
                 Item::Func(f) => {
                     // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
-                    let covered = f.inline_foreign.is_none() && tir_covers(f, &cx);
+                    // Named HTTP callbacks are checked at the route boundary and must
+                    // still get a TFunc row even when the enclosing route helper is
+                    // outside the broad resident subset.
+                    let covered = f.inline_foreign.is_none()
+                        && (tir_covers(f, &cx) || http_route_handlers.contains(&f.name));
                     materialize_contract_sampling(
                         f,
                         &entry_module_identity,
@@ -3873,7 +4007,7 @@ fn lower_checked_tir_program_on_stack(
                 Item::Test(test)
                     if include_tests
                         && test.name.is_some()
-                        && tir_covers_test_body(&test.body, &cx) =>
+                        && tir_covers_test_body(&test.body, &test.params, &cx) =>
                 {
                     funcs.push(lower_test_item(test, &entry_module_identity, &cx));
                 }
@@ -4025,7 +4159,11 @@ fn lower_checked_tir_program_on_stack(
                                     &imp.type_name,
                                     &cx,
                                     trait_name,
-                                    imp.is_generated_serde && specialized.compiler_generated,
+                                    (imp.is_generated_serde && specialized.compiler_generated)
+                                        || (specialized.compiler_generated
+                                            && specialized.state_transition.is_some()
+                                            && specialized.return_type.is_some()
+                                            && specialized.failure_contract().is_default()),
                                     imp.operator_rhs.as_ref(),
                                 )
                             } else {
@@ -4037,7 +4175,10 @@ fn lower_checked_tir_program_on_stack(
                                     &imp.type_name,
                                     owner_ty.clone(),
                                     &cx,
-                                    false,
+                                    specialized.compiler_generated
+                                        && specialized.state_transition.is_some()
+                                        && specialized.return_type.is_some()
+                                        && specialized.failure_contract().is_default(),
                                 )
                             };
                             set_lowered_method_name(&mut lowered, || format!("{}::{}", owner_ty.name(), method.name));
@@ -4082,7 +4223,7 @@ fn lower_checked_tir_program_on_stack(
                             Item::Test(test)
                                 if include_tests
                                     && test.name.is_some()
-                                    && tir_covers_test_body(&test.body, &cx) =>
+                                    && tir_covers_test_body(&test.body, &test.params, &cx) =>
                             {
                                 let child = child_module_identity(&entry_module_identity, &cm.name);
                                 funcs.push(lower_test_item(test, &child, &cx));
@@ -4168,6 +4309,7 @@ fn lower_checked_tir_program_on_stack(
                 &extern_funcs,
                 &bundle.edition,
             );
+            imported_cx.debug_linemap = debug_linemap;
             populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
             auto_printable_by_module
@@ -4182,6 +4324,7 @@ fn lower_checked_tir_program_on_stack(
             // qualified name, and the default tier deopted (E0956) on methods
             // and generated codecs the program plainly declares.
             register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
+            crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
             imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
             lower_imported_generated_codecs(bundle, module_idx, &imported_cx, &mut funcs);
             for (owner, sources) in memo_dependency_facts(&imported_cx) {
@@ -4205,6 +4348,25 @@ fn lower_checked_tir_program_on_stack(
                             Some(format!("{}::", mangle(&imported.alias)));
                         if covered {
                             let mut lowered = lower_func(function, &imported_cx);
+                            let binders = qualification_binders(&[], Some(function));
+                            for (_, ty, _) in &mut lowered.params {
+                                *ty = qualify_imported_type(
+                                    bundle,
+                                    module_idx,
+                                    &imported_owner,
+                                    &binders,
+                                    ty,
+                                );
+                            }
+                            lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                qualify_imported_type(
+                                    bundle,
+                                    module_idx,
+                                    &imported_owner,
+                                    &binders,
+                                    ty,
+                                )
+                            });
                             lowered.name =
                                 format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
                             funcs.push(lowered);
@@ -4222,7 +4384,7 @@ fn lower_checked_tir_program_on_stack(
                     Item::Test(test)
                         if include_tests
                             && test.name.is_some()
-                            && tir_covers_test_body(&test.body, &imported_cx) =>
+                            && tir_covers_test_body(&test.body, &test.params, &imported_cx) =>
                     {
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
@@ -4236,7 +4398,7 @@ fn lower_checked_tir_program_on_stack(
                             if let Item::Test(test) = inner {
                                 if include_tests
                                     && test.name.is_some()
-                                    && tir_covers_test_body(&test.body, &imported_cx)
+                                    && tir_covers_test_body(&test.body, &test.params, &imported_cx)
                                 {
                                     let child =
                                         child_module_identity(&imported_owner, &code_module.name);
@@ -4273,6 +4435,25 @@ fn lower_checked_tir_program_on_stack(
                                 &function.name,
                             );
                             let mut lowered = lower_func(&mangled_function, &imported_cx);
+                            let binders = qualification_binders(&[], Some(function));
+                            for (_, ty, _) in &mut lowered.params {
+                                *ty = qualify_imported_type(
+                                    bundle,
+                                    module_idx,
+                                    &imported_owner,
+                                    &binders,
+                                    ty,
+                                );
+                            }
+                            lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                qualify_imported_type(
+                                    bundle,
+                                    module_idx,
+                                    &imported_owner,
+                                    &binders,
+                                    ty,
+                                )
+                            });
                             lowered.name = format!(
                                 "{}::{}",
                                 mangle(&code_module.name),
@@ -4537,7 +4718,8 @@ fn lower_checked_tir_program_on_stack(
                     })
             } else {
                 funcs.iter().any(|function| {
-                    function.name == entry_name && matches!(&function.kind, TFuncKind::TopLevel)
+                    function.key == entry_name
+                        && matches!(&function.kind, TFuncKind::TopLevel)
                 })
             };
             if !entry_ok {
@@ -5506,6 +5688,8 @@ pub enum THostCall {
     },
     /// Bare fn name used as a value before FnValue wrapping (Jet name).
     FnName(String),
+    /// Statistics projection for a sema-proved memoized function.
+    MemoStats { name: String },
     /// GC edit expression — structured slots; emit formats jet_gc edit wrappers.
     GcEdit {
         /// The checked source local owning the GC root. Backend place spellings
@@ -5553,6 +5737,8 @@ pub enum THostCall {
         kind: TTypedTextInterpKind,
         literals: Vec<String>,
         holes: Vec<TExpr>,
+        /// Sema-proved HTML holes compose as markup; every other hole escapes.
+        trusted_html: Vec<bool>,
     },
     /// `expect(x).snapshot()` harness call.
     ExpectSnapshot {
@@ -7721,6 +7907,7 @@ fn collect_cost_expr_with_state_and_context(
                 collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
             }
             THostCall::FnName(_)
+            | THostCall::MemoStats { .. }
             | THostCall::GcRead { .. }
             | THostCall::SwitchSubjectField { .. }
             | THostCall::SwitchSubjectValue
@@ -8882,6 +9069,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
             );
             populate_cx_from_bundle(&mut cx, bundle, callable.module);
             register_own_struct_shapes(&mut cx, bundle, callable.module);
+            crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);
             update_cloneability_with_foreign_types(&mut cx, &module.items);
             cx
@@ -9138,6 +9326,25 @@ pub enum TAllocCtor {
     /// `Fixed.over` borrows an existing mutable fixed byte buffer.
     FixedOver,
 }
+/// Return the allocator constructor owner from sema's checked method facts.
+///
+/// The front end rewrites core-module constructor receivers to their nominal
+/// sentinel (`Arena`, `Bump`, `Pool`, or `Fixed`) before TIR sees the checked
+/// AST. Keep constructor admission on that carried dispatch fact rather than
+/// re-walking source spelling or guessing from a backend name.
+pub(crate) fn allocator_constructor_owner<'a>(
+    recv_type: Option<&'a str>,
+    method: &str,
+) -> Option<&'a str> {
+    let owner = recv_type?;
+    let valid = match owner {
+        "Arena" | "Bump" | "Pool" => method == "new",
+        "Fixed" => matches!(method, "new" | "over"),
+        _ => false,
+    };
+    valid.then_some(owner)
+}
+
 #[derive(Clone)]
 pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
@@ -10031,6 +10238,10 @@ pub enum TFnValueKind {
         fn_type: Type,
         policy_args: Vec<TCallArg>,
         policy_conventions: Vec<crate::AST::AccessConvention>,
+        /// Canonical generated wrapper selected by sema for this target.
+        wrapper_name: Option<String>,
+        /// Outer locals read by the policy settings or callable.
+        captures: Vec<(String, String, Type)>,
         callee: Box<TExpr>,
     },
     /// A call through a fn-value. `callee` lowers to its place (a local
@@ -10450,6 +10661,11 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
             web: true,
         };
     };
+    if foreign.lang.eq_ignore_ascii_case("asm") {
+        // Assembly has no target-aware MIRRust lowering or resident provider;
+        // keep every tier unavailable rather than claiming a partial bridge.
+        return TTargetApplicability::default();
+    }
     let web = foreign.lang.eq_ignore_ascii_case("js") || foreign.lang.eq_ignore_ascii_case("web");
     TTargetApplicability {
         rust_aot: true,
@@ -10507,6 +10723,9 @@ pub struct TLambda {
     /// Sema-selected failure and effect carriers for this closure.
     pub failure_carrier: TFailureCarrier,
     pub effects: TEffectFacts,
+    /// Host callback ABI conventions, when this lambda is lowered for a
+    /// value-consuming helper rather than an ordinary Jet function value.
+    pub host_param_conventions: Option<Vec<crate::AST::AccessConvention>>,
     /// Unmangled source parameter names for non-Rust targets.
     pub source_params: Vec<String>,
     /// Stable native symbol and resolved signature for noncapturing JIT calls.
@@ -11461,6 +11680,8 @@ pub enum THandleOp {
     /// D-TYPE2-TIME1=A: dimensional algebra reads canonical Time in seconds;
     /// the stored carrier remains i64 nanoseconds.
     DurationSecondsValue,
+    /// D-CONC-SELECT1: project the canonical nanosecond carrier for select timers.
+    DurationNsValue,
     /// D-TIMERES1=A: checked scalar arithmetic on the canonical nanosecond
     /// carrier. The factor is the sole plain argument.
     DurationScale,
@@ -11573,6 +11794,7 @@ pub enum THandleOp {
     /// D-PROCESS1: ProcessSpec builder/run/spawn methods.
     ProcessSpecMethod {
         method: String,
+        args_len: usize,
     },
     /// D-PROCESS1: ProcessChild control/streaming methods.
     ProcessChildMethod {

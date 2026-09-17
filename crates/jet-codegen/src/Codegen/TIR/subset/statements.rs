@@ -14,6 +14,7 @@ use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
+use crate::Codegen::TIR::enum_tag_is_covered;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
@@ -22,6 +23,7 @@ use crate::Codegen::TIR::orfallback_rhs_in_subset;
 use crate::Codegen::TIR::pattern_is_variant_or_orvariant;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
+use crate::Codegen::TIR::variant_pattern_uses_payload;
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
@@ -659,7 +661,12 @@ pub(crate) fn if_cond_in_subset(
                     })
                     .collect();
                 if let Some(owner) = cx.variant_owner.get(variant) {
-                    if enum_is_covered(owner, cx) {
+                    let covered = if variant_pattern_uses_payload(pattern) {
+                        enum_is_covered(owner, cx)
+                    } else {
+                        enum_tag_is_covered(owner, cx)
+                    };
+                    if covered {
                         return Some(names);
                     }
                 } else {
@@ -891,6 +898,10 @@ pub(crate) fn switch_in_subset(
         let subj_enum = arms.iter().find_map(|a| {
             arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
         });
+        let payload_used = arms.iter().any(|a| {
+            arm_variant_pattern(cx, &a.cond, subject)
+                .is_some_and(|pattern| variant_pattern_uses_payload(&pattern))
+        });
         // D-UNIONTYPE1=A: union matches use member-type arm heads. Those tags are
         // not in `variant_owner` (they collide with DataTree/etc.), so the owning
         // enum is resolved later from the subject's Jet type in `lower_enum_match`.
@@ -905,7 +916,12 @@ pub(crate) fn switch_in_subset(
             return false;
         }
         if let Some(enum_name) = &subj_enum {
-            if enum_name != "HookOutcome" && !enum_is_covered(enum_name, cx) {
+            let covered = if payload_used {
+                enum_is_covered(enum_name, cx)
+            } else {
+                enum_tag_is_covered(enum_name, cx)
+            };
+            if enum_name != "HookOutcome" && !covered {
                 return false;
             }
         }

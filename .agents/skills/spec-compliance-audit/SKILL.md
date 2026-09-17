@@ -1,52 +1,27 @@
 ---
 name: spec-compliance-audit
 description: >-
-  Audit the codebase against ratified syntax and spec. Measure shipped vs gap.
-  Do not reopen syntax.
+  Compare a declared Jet feature with ratified law without reopening syntax. Use
+  when checking whether a feature is shipped, partial, gated, or a gap.
 ---
 
-# Spec Compliance Audit
+# Spec compliance audit
 
-Locate the relevant ratified section by searching
-`docs/spec/syntax-decisions.md` for the requested feature or decision. Follow
-only linked or task-triggered spec sections; do not preload unrelated specs.
-Compare the selected ratified law to parser, sema, tests, and examples. Status
-keys: `shipped`, `partial`, `gap`, `gated`, `declined`, `stale-doc`. Cite paths.
-Do not invent or reopen syntax.
+Locate the relevant ratified section by searching `docs/spec/syntax-decisions.md` for the requested feature or decision. Follow only linked or task-triggered sections; do not preload unrelated specs. Compare that law with the parser, sema, tests, examples, and running behavior. Use only these status keys: `shipped`, `partial`, `gap`, `gated`, `declined`, `stale-doc`. Cite paths. Do not invent or reopen syntax.
 
-Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
-shared publication, workflow-boundary, and disposition mechanics; this method
-still owns comparison against ratified law, live probes, status keys, and
-stopping conditions.
+Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns comparison against ratified law, live probes, status keys, and finite closeout.
 
+## Evidence
 
-## The standing lens (partial)
+Apply only the standing-lens probe and honesty sections relevant to the selected ratified sections. Skip unrelated questions, quantities, micro-sweep, or competitive work. A spec paragraph, code path, or test name is not proof of executable behavior. Run the real surface through `scripts/agent/jet-env` and read its output, exit code, and emitted paths before assigning `shipped`.
 
-Apply the **probe the running binary** and **honesty rules** sections of
-`.agents/skills/_shared/standing-lens.md`. Skip the four questions, the five
-quantities, and the micro sweep: this skill measures shipped against ratified,
-and a competitive or design frame would distort that measurement.
+Keep these failures visible:
 
-Probing is not optional here — it is the whole method. A `shipped` status
-earned from a spec paragraph, a code path that looks right, or a passing name in
-a test list is not earned. Run the surface and read the real output before
-writing `shipped`.
+- A registered surface that cannot fire, such as a diagnostic with no implementation, a documented field emitted as a constant, or a parsed-but-ignored flag.
+- A surface that works for the demo case and nothing else. Mark it `partial` and name the covered case.
 
-Two failures this skill exists to catch, both of which read as `shipped` from a
-distance:
+## Completion and output
 
-- A registered surface that cannot fire — a diagnostic code with no
-  implementation, a documented field emitted as a constant, a flag parsed and
-  ignored.
-- A surface that fires for the demo case and nothing else. Record it as
-  `partial` with the covered case named, never as `shipped`.
+Stop when every task-triggered ratified section has a status plus live evidence or an honest `unknown`, every required path and output is recorded, and the report's disposition marker is complete. `unknown` must name the missing probe or source; it never becomes `shipped` by distance. Report completion does not change a `gap`, `partial`, or `gated` status into implementation completion.
 
-## Output
-
-This is a report-only method. Write one markdown report under `docs/audits/`
-through the project-approved non-serve CLI. Do not create Tower work or
-implementation edits unless the owner explicitly asks. Read
-`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
-publication rules and the required finding-disposition table. Report completion
-does not change a `gap`, `partial`, or `gated` status into implementation
-completion.
+This is a report-only method. Write one report under `docs/audits/` through the project-approved non-serve CLI, cite existing Tower records read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Do not reopen syntax during that authorized change.

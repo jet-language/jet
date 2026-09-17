@@ -12,10 +12,11 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use jet_codegen::scheduler::{
-    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_is_cancel_unwind,
-    jet_scheduler_is_deadline_unwind, jet_scheduler_propagate_deadline, jet_scheduler_shielded,
-    jet_scheduler_spawn_blocking_with_control_at, jet_scheduler_yield, jet_std_time_now,
-    jet_task_join_deadline_check, JetSchedulerJoin, JetTaskControl,
+    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_blocking_wait_enter,
+    jet_scheduler_blocking_wait_leave, jet_scheduler_is_cancel_unwind,
+    jet_scheduler_is_deadline_unwind, jet_scheduler_propagate_deadline,
+    jet_scheduler_shielded, jet_scheduler_spawn_blocking_with_control_at, jet_scheduler_yield,
+    jet_std_time_now, jet_task_join_deadline_check, JetSchedulerJoin, JetTaskControl,
     JetTaskFailure, JetTypedDeadlineBoundary, ParkSlot,
 };
 use jet_codegen::task_group::jet_task_deadline_if_expired;
@@ -112,7 +113,7 @@ impl JitCb {
 }
 #[derive(Clone, Copy)]
 enum AsyncEventCallback {
-    Universal(crate::runtime_host::JitCallableSlot),
+    Universal { handle: i64, epoch: usize },
 }
 
 fn async_event_callback(
@@ -128,23 +129,39 @@ fn async_event_callback(
         rt.set_host_fault("JIT async Event listener has no unary universal callback thunk");
         return None;
     }
-    Some(AsyncEventCallback::Universal(slot))
+    let epoch = Concurrency::http_runtime_epoch();
+    Some(AsyncEventCallback::Universal {
+        handle: slot.handle,
+        epoch,
+    })
 }
 
 fn invoke_async_event_callback(
     callback: AsyncEventCallback,
     payload: i64,
 ) -> Result<(), String> {
-    let AsyncEventCallback::Universal(slot) = callback;
+    let AsyncEventCallback::Universal { handle, epoch } = callback;
     let Some(result) = Concurrency::with_http_jet_runtime(|| {
-        crate::runtime_host::invoke_universal_unary(slot, payload)
+        if Concurrency::http_runtime_epoch() != epoch {
+            return None;
+        }
+        let slot = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_callable_parts(rt, handle)
+        });
+        slot.and_then(|slot| crate::runtime_host::invoke_universal_unary(slot, payload))
     }) else {
-        return Err("async Event listener callback has no result".to_string());
+        return Err("async Event listener callback runtime snapshot expired".to_string());
     };
     if result == 0 {
+        // Unit-returning handlers have no Result carrier; their universal thunk
+        // uses zero as the ordinary infallible return value. Explicit
+        // `Result<(), E>` handlers return a nonzero heap result handle below.
         return Ok(());
     }
-    Concurrency::with_http_jet_runtime(|| {
+    let outcome = Concurrency::with_http_jet_runtime(|| {
+        if Concurrency::http_runtime_epoch() != epoch {
+            return Err("async Event listener callback result runtime expired".to_string());
+        }
         Concurrency::with_runtime_string(|rt| {
             let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
                 return Err("async Event listener callback returned an invalid Result".to_string());
@@ -158,7 +175,8 @@ fn invoke_async_event_callback(
                     .unwrap_or_else(|| "async Event listener failed".to_string()))
             }
         })
-    })
+    });
+    outcome
 }
 fn event_callback(
     rt: &mut crate::runtime_host::JitRuntime,
@@ -611,6 +629,29 @@ fn jet_jit_loadable_loaded(payload: i64) -> i64 {
 }
 fn jet_jit_loadable_failed(payload: i64) -> i64 {
     (payload << 8) | i64::from(loadable_kernel::JET_LOADABLE_FAILED)
+}
+fn jet_jit_loadable_is_idle(handle: i64) -> i8 {
+    jet_jit_loadable_is(handle, i64::from(loadable_kernel::JET_LOADABLE_IDLE))
+}
+
+fn jet_jit_loadable_is_loading(handle: i64) -> i8 {
+    jet_jit_loadable_is(handle, i64::from(loadable_kernel::JET_LOADABLE_LOADING))
+}
+
+fn jet_jit_loadable_is_loaded(handle: i64) -> i8 {
+    jet_jit_loadable_is(handle, i64::from(loadable_kernel::JET_LOADABLE_LOADED))
+}
+
+fn jet_jit_loadable_is_failed(handle: i64) -> i8 {
+    jet_jit_loadable_is(handle, i64::from(loadable_kernel::JET_LOADABLE_FAILED))
+}
+
+fn jet_jit_loadable_loaded_value(handle: i64) -> i64 {
+    if loadable_kernel::jet_loadable_has_value((handle & 0xff) as u8) {
+        (handle >> 8).wrapping_add(1)
+    } else {
+        0
+    }
 }
 
 fn jet_jit_loadable_is(handle: i64, kind: i64) -> i8 {
@@ -1288,7 +1329,7 @@ fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
         with_rt(|rt| rt.set_host_fault("JIT async Event emit received an invalid event"));
         return 0;
     };
-    Concurrency::spawn_ffi_task(move || {
+    Concurrency::spawn_ffi_task_typed(move || {
         let task = event.emit_async(payload);
         let report = match task.join() {
             Ok(report) => async_dispatch_report_slot(report),
@@ -1450,6 +1491,9 @@ host_fns! {
         let mut unary = Signature::new(cc);
         unary.params.push(AbiParam::new(types::I64));
         unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
         let mut unary_void = Signature::new(cc);
         unary_void.params.push(AbiParam::new(types::I64));
         let mut binary = Signature::new(cc);
@@ -1505,6 +1549,16 @@ host_fns! {
     loadable_loading: "jet_jit_loadable_loading" => jet_jit_loadable_loading: nullary;
     loadable_loaded: "jet_jit_loadable_loaded" => jet_jit_loadable_loaded: unary;
     loadable_failed: "jet_jit_loadable_failed" => jet_jit_loadable_failed: unary;
+    loadable_idle_aot: "jet_loadable_idle" => jet_jit_loadable_idle: nullary;
+    loadable_loading_aot: "jet_loadable_loading" => jet_jit_loadable_loading: nullary;
+    loadable_loaded_aot: "jet_loadable_loaded" => jet_jit_loadable_loaded: unary;
+    loadable_failed_aot: "jet_loadable_failed" => jet_jit_loadable_failed: unary;
+    loadable_is_idle_method: "JetLoadable::is_idle" => jet_jit_loadable_is_idle: unary_i8;
+    loadable_is_loading_method: "JetLoadable::is_loading" => jet_jit_loadable_is_loading: unary_i8;
+    loadable_is_loaded_method: "JetLoadable::is_loaded" => jet_jit_loadable_is_loaded: unary_i8;
+    loadable_is_failed_method: "JetLoadable::is_failed" => jet_jit_loadable_is_failed: unary_i8;
+    loadable_loaded_method: "JetLoadable::loaded" => jet_jit_loadable_loaded_value: unary;
+    loadable_or_else_method: "JetLoadable::or_else" => jet_jit_loadable_or_else: binary;
     loadable_is: "jet_jit_loadable_is" => jet_jit_loadable_is: binary_i8;
     loadable_payload: "jet_jit_loadable_payload" => jet_jit_loadable_payload: unary;
     loadable_or_else: "jet_jit_loadable_or_else" => jet_jit_loadable_or_else: binary;

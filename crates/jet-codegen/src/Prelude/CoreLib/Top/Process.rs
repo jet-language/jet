@@ -60,11 +60,23 @@ fn jet_process_spec_timeout(
     spec.timeout_ms = Some(timeout.as_millis().max(0));
     spec
 }
+fn jet_process_limit_i64(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    value
+        .to_i64()
+        .unwrap_or_else(|| {
+            if value < &jet_foundation::Numeric::JetInt::from_i64(0) {
+                0
+            } else {
+                i64::MAX
+            }
+        })
+        .max(0)
+}
 fn jet_process_spec_output_limit(
     mut spec: jet_std::ProcessSpec,
-    output_limit: i64,
+    output_limit: jet_foundation::Numeric::JetInt,
 ) -> jet_std::ProcessSpec {
-    spec.output_limit = Some(output_limit.max(0));
+    spec.output_limit = Some(jet_process_limit_i64(&output_limit));
     spec
 }
 fn jet_process_spec_cpu_time_limit(
@@ -76,16 +88,16 @@ fn jet_process_spec_cpu_time_limit(
 }
 fn jet_process_spec_memory_limit(
     mut spec: jet_std::ProcessSpec,
-    memory_bytes: i64,
+    memory_bytes: jet_foundation::Numeric::JetInt,
 ) -> jet_std::ProcessSpec {
-    spec.memory_limit_bytes = Some(memory_bytes.max(0));
+    spec.memory_limit_bytes = Some(jet_process_limit_i64(&memory_bytes));
     spec
 }
 fn jet_process_spec_open_file_limit(
     mut spec: jet_std::ProcessSpec,
-    open_files: i64,
+    open_files: jet_foundation::Numeric::JetInt,
 ) -> jet_std::ProcessSpec {
-    spec.open_file_limit = Some(open_files.max(0));
+    spec.open_file_limit = Some(jet_process_limit_i64(&open_files));
     spec
 }
 
@@ -388,7 +400,7 @@ fn jet_process_receipt(
     pid: i64,
     code: i64,
     success: bool,
-    signal: JetOutcome<i64, JetAbsent>,
+    signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
     timed_out: bool,
     output: String,
     errors: String,
@@ -441,7 +453,7 @@ fn jet_process_receipt(
     outputs.push(format!("captured-bytes={}", output.len() + errors.len()));
     let redacted = spec.policy_wire.is_some() || !secret_values.is_empty();
     jet_std::ProcessReceipt {
-        code,
+        code: jet_foundation::Numeric::JetInt::from_i64(code),
         output: jet_process_redact_text(&output, secret_values),
         errors: jet_process_redact_text(&errors, secret_values),
         success,
@@ -457,7 +469,7 @@ fn jet_process_receipt(
         limits,
         outputs,
         redacted,
-        pid,
+        pid: jet_foundation::Numeric::JetInt::from_i64(pid),
         limit_hit: jet_outcome_of(
             timed_out.then_some(jet_std::ProcessResourceLimit::WallTime),
         ),
@@ -615,6 +627,14 @@ fn jet_process_pipeline_resource_limits_check(
     Ok(())
 }
 
+fn jet_process_policy_sandbox_cwd(
+    spec: &jet_std::ProcessSpec,
+) -> Result<&std::path::Path, jet_std::IOError> {
+    Ok(std::path::Path::new(
+        jet_process_policy_authority_cwd(spec)?.unwrap_or("/"),
+    ))
+}
+
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
@@ -643,7 +663,7 @@ fn jet_process_spec_spawn(
         let plan = launch_plan
             .as_ref()
             .expect("authority launch must have a plan");
-        let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+        let cwd = jet_process_policy_sandbox_cwd(spec)?;
         let sandbox_scope =
             jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
         let output_dir = if sandbox_scope.output_writable {
@@ -781,7 +801,7 @@ fn jet_process_terminal_spawn(
     let child = if spec.policy_wire.is_some() {
         let executable =
             executable_identity.expect("authority terminal launch must have a resolved executable");
-        let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+        let cwd = jet_process_policy_sandbox_cwd(spec)?;
         let sandbox_scope = jet_process_policy_sandbox_scope(spec, executable)?;
         let output_dir = if sandbox_scope.output_writable {
             Some(
@@ -1436,7 +1456,7 @@ fn jet_process_spec_run_windows(
     }
     let plan = jet_process_spec_plan(spec)?;
     jet_process_verify_launch_plan(spec, &plan)?;
-    let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+    let cwd = jet_process_policy_sandbox_cwd(spec)?;
     let sandbox_scope =
         jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
     let output_dir = if sandbox_scope.output_writable {
@@ -1513,12 +1533,180 @@ fn jet_process_sandbox_error_windows(
     )
 }
 
+#[cfg(unix)]
+fn jet_process_direct_group_cleanup(pid: u32) -> Option<jet_std::IOError> {
+    match jet_process_pty::signal_group(pid, jet_process_signal_kill()) {
+        Ok(()) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(jet_process_cleanup_io_error(error)),
+    }
+}
+
+#[cfg(unix)]
+fn jet_process_spec_run_direct(
+    spec: &jet_std::ProcessSpec,
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
+    let mut command = jet_process_command_base_with_identity(spec, None)?;
+    jet_process_attach_process_group(&mut command, spec).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
+    })?;
+    let mut child = command.spawn().map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
+    })?;
+    let child_pid = child.id();
+    let pid = i64::from(child_pid);
+
+    // The ordinary run has no public child or live stream. Let the existing
+    // bounded drain workers own the pipes while the parent blocks in wait.
+    // They terminate the process group on overflow/read failure, so this
+    // avoids the 10 ms supervisor poll without weakening output limits.
+    let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
+    let output_budget =
+        output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_groups = std::sync::Arc::new(std::sync::Mutex::new(vec![child_pid]));
+    let output_drain = jet_process_drain_reader(
+        child.stdout.take(),
+        output_limit,
+        output_budget.clone(),
+        output_limit_hit.clone(),
+        output_cancel.clone(),
+        output_groups.clone(),
+    );
+    let stderr_drain = jet_process_drain_reader(
+        child.stderr.take(),
+        output_limit,
+        output_budget,
+        output_limit_hit.clone(),
+        output_cancel,
+        output_groups.clone(),
+    );
+    let cancel_control = jet_scheduler_current_task_control();
+    let cancel_guard = cancel_control.as_ref().map(|control| {
+        let groups = output_groups.clone();
+        control.register_cancel_callback(std::sync::Arc::new(move || {
+            jet_process_pipeline_stop_groups(&groups);
+        }))
+    });
+    jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Starting);
+    jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Running);
+    let wait = match child.wait() {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            jet_process_pipeline_stop_groups(&output_groups);
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(error)
+        }
+    };
+    drop(cancel_guard);
+    let cleanup_error = wait
+        .as_ref()
+        .ok()
+        .and_then(|_| jet_process_direct_group_cleanup(child_pid));
+    let drained = jet_process_collect_output((output_drain, stderr_drain));
+    let cancellation_pending = cancel_control.as_ref().is_some_and(|control| {
+        control
+            .cancelled
+            .load(std::sync::atomic::Ordering::Acquire)
+    });
+    let (output, errors, output_exceeded) = match drained {
+        Ok(drained) => drained,
+        Err(error) => {
+            jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
+            if cancellation_pending && !jet_scheduler_shielded() {
+                jet_task_deliver_cancel();
+            }
+            return Err(error);
+        }
+    };
+    if cancellation_pending && !jet_scheduler_shielded() {
+        jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
+        jet_task_deliver_cancel();
+    }
+    let status = match wait {
+        Ok(status) => status,
+        Err(error) => {
+            jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
+            return Err(jet_std::IOError::other(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                error,
+            ));
+        }
+    };
+    if let Some(error) = cleanup_error {
+        jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
+        return Err(error);
+    }
+    if output_exceeded || output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+        jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Failed);
+        return Err(jet_std::IOError::ResourceLimit(
+            jet_std::ProcessResourceLimit::Output,
+        ));
+    }
+    let signal = jet_outcome_of(
+        std::os::unix::process::ExitStatusExt::signal(&status)
+            .map(i64::from)
+            .map(jet_foundation::Numeric::JetInt::from_i64),
+    );
+    let result = jet_process_receipt(
+        spec,
+        None,
+        true,
+        pid,
+        status.code().unwrap_or(-1) as i64,
+        status.success(),
+        signal,
+        false,
+        output,
+        errors,
+        None,
+    );
+    jet_process_publish_topology_id(
+        pid,
+        if status.success() {
+            JetDevtoolsTopologyProcessState::Exited
+        } else {
+            JetDevtoolsTopologyProcessState::Failed
+        },
+    );
+    Ok(result)
+}
+
+#[cfg(unix)]
+fn jet_process_spec_can_run_direct(spec: &jet_std::ProcessSpec) -> bool {
+    spec.policy_wire.is_none()
+        && spec.terminal.is_none()
+        && !spec.detached
+        && spec.stdin.is_none()
+        && spec.stdout == jet_std::ProcessStreamMode::Capture
+        && spec.stderr == jet_std::ProcessStreamMode::Capture
+        && spec.timeout_ms.is_none()
+        && spec.cpu_time_limit_ms.is_none()
+        && spec.memory_limit_bytes.is_none()
+        && spec.open_file_limit.is_none()
+}
+
 fn jet_process_spec_run_inner(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     #[cfg(target_os = "windows")]
     if spec.policy_wire.is_some() {
         return jet_process_spec_run_windows(spec);
+    }
+    #[cfg(unix)]
+    if jet_process_spec_can_run_direct(spec) {
+        return jet_process_spec_run_direct(spec);
     }
     let child = jet_process_spec_spawn(spec)?;
     jet_process_child_wait(&child)
@@ -1574,7 +1762,7 @@ fn jet_process_sandbox_pipeline_spawn(
             "terminal sessions cannot be used as pipeline stages; spawn the session directly",
         ));
     }
-    let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+    let cwd = jet_process_policy_sandbox_cwd(spec)?;
     let sandbox_scope =
         jet_process_policy_sandbox_scope(spec, &launch_plan.executable_identity)?;
     let output_dir = if sandbox_scope.output_writable {
@@ -2527,8 +2715,11 @@ fn jet_process_child_wait(
     }
     let code = status.code().unwrap_or(-1) as i64;
     #[cfg(unix)]
-    let signal =
-        jet_outcome_of(std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from));
+    let signal = jet_outcome_of(
+        std::os::unix::process::ExitStatusExt::signal(&status)
+            .map(i64::from)
+            .map(jet_foundation::Numeric::JetInt::from_i64),
+    );
     #[cfg(not(unix))]
     let signal = Err(JetAbsent);
     let result = jet_process_receipt(

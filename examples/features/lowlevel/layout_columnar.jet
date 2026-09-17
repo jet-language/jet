@@ -29,6 +29,15 @@ fn total_mass(ps: [Particle]) Float -> {
     return sum
 }
 
+// Indexed field arithmetic keeps the physical column access contiguous.
+fn particle_energy(ps: [Particle]) Float -> {
+    total := Float{0.0}
+    loop i in 0..<ps.len() {
+        total += ps[i].x * ps[i].y + ps[i].mass
+    }
+    return total
+}
+
 fn run() {
     // Construct a columnar list with an ordinary list literal.
     ps := [Particle]{Particle{x: 0.0, y: 0.0, mass: 1.0}, Particle{x: 1.0, y: 2.0, mass: 3.0}}
@@ -42,6 +51,8 @@ fn run() {
     print(ps[1].y)  // 2.0
     // Iteration produces each logical Particle.
     print(total_mass(ps))  // 10.0
+    // Indexed arithmetic uses the packed direct-column path.
+    print(particle_energy(ps))  // 32.0
     // Serialization transparency: identical output for columnar vs plain.
     plain :: [PlainParticle]{
         PlainParticle{x: 0.0, y: 0.0, mass: 1.0},

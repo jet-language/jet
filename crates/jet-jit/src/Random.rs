@@ -677,4 +677,9 @@ host_fns! {
     fake_email: "jet_jit_fake_email" => jet_jit_fake_email: sig_i64_i64;
     fake_host: "jet_jit_fake_host" => jet_jit_fake_host: sig_i64_i64;
     fake_address: "jet_jit_fake_address" => jet_jit_fake_address: sig_i64_i64;
+    fake_locale_prelude: "jet_fake_locale" => jet_jit_fake_locale: sig_i64_i64_i64;
+    fake_name_prelude: "jet_fake_name" => jet_jit_fake_name: sig_i64_i64;
+    fake_email_prelude: "jet_fake_email" => jet_jit_fake_email: sig_i64_i64;
+    fake_host_prelude: "jet_fake_host" => jet_jit_fake_host: sig_i64_i64;
+    fake_address_prelude: "jet_fake_address" => jet_jit_fake_address: sig_i64_i64;
 }

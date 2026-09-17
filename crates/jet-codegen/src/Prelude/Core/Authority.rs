@@ -32,6 +32,10 @@ impl JetAuthority {
         }
     }
 }
+
+pub(crate) fn jet_authority_from_rights(rights: Vec<String>) -> JetAuthority {
+    JetAuthority::from_rights(rights)
+}
 /// D-FILES-SCOPE1: a file scope is an owned attenuation of an Authority.
 /// It keeps only explicit resource-qualified read roots; a bare `FS.Read`
 /// grant never becomes an ambient filesystem handle.
@@ -153,9 +157,11 @@ pub(crate) fn jet_authority_without_right(
 pub(crate) fn jet_authority_with(
     authority: &JetAuthority,
     requested: &str,
-) -> Result<JetAuthority, String> {
-    jet_authority_with_right(&authority.rights, requested)
-        .map(|rights| JetAuthority { rights })
+) -> JetAuthority {
+    match jet_authority_with_right(&authority.rights, requested) {
+        Ok(rights) => JetAuthority { rights },
+        Err(message) => panic!("{message}"),
+    }
 }
 
 /// Shared AOT/Wasm operation for the `without` family member.

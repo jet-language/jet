@@ -101,9 +101,6 @@ pub fn jet_zip_pad_step<A: Clone, B: Clone>(
     }
 }
 
-pub fn jet_zip_length_mismatch_message() -> &'static str {
-    "zip length mismatch"
-}
 
 /// Shared predicate count kernel for eager List adapters.
 fn jet_list_count_where_kernel<T, F>(xs: &[T], mut predicate: F) -> i64
@@ -138,7 +135,7 @@ where
 }
 
 /// Error-propagating form used by the reference evaluator's callback ABI.
-fn jet_list_count_where_result_kernel<T, E, F>(
+pub(crate) fn jet_list_count_where_result_kernel<T, E, F>(
     xs: &[T],
     mut predicate: F,
 ) -> Result<i64, E>
@@ -156,7 +153,7 @@ where
 
 /// Error-propagating first-match replacement kernel for the reference
 /// evaluator. Replacement is moved only after a successful predicate.
-fn jet_list_update_first_result_kernel<T, E, F>(
+pub(crate) fn jet_list_update_first_result_kernel<T, E, F>(
     xs: &mut Vec<T>,
     mut predicate: F,
     replacement: T,

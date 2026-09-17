@@ -1803,6 +1803,7 @@ host_fns! {
     email_envelope: "jet_jit_email_envelope" => jet_jit_email_envelope: sig2;
     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
     email_limits_safe: "jet_jit_email_limits_safe" => jet_jit_email_limits_safe: sig0;
+    email_limits_safe_prelude: "jet_email::Limits::safe" => jet_jit_email_limits_safe: sig0;
     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
     email_smtp_from_env: "jet_jit_email_smtp_from_env" => jet_jit_email_smtp_from_env: sig0;
     email_message_envelope: "jet_jit_email_message_envelope" => jet_jit_email_message_envelope: sig1;

@@ -1,11 +1,11 @@
 ---
 name: tower-rank
 description: >-
-  Rank and prioritize Tower cards into a dependency-safe ordered queue while
-  preserving scope, gates, and active ownership. Use when asked to rank,
-  reorder, triage, thin, choose next Tower work, or when invoked as
-  /tower-rank. Produces or applies workOrder values; does not implement,
-  review, verify, plan, or ballot cards.
+  Rank or reorder an explicitly requested Tower `workOrder` queue while
+  preserving scope, dependencies, gates, and active ownership. Use for queue
+  ranking, reordering, or choosing the next queued work; “triage” or “thin”
+  only count when the user names the queue. Produces or applies `workOrder`
+  values; does not implement, review, verify, plan, or ballot cards.
 ---
 
 # Tower — rank the queue
@@ -19,9 +19,10 @@ description: >-
 - **Return point:** Return from each reference read to the same ranking pass.
 - **Stopping condition:** Stop after the queue is reported or requested `workOrder` writes are read back. Do not claim cards or open planning/implementation.
 
-One job: turn live Tower state into a dependency-safe ordered queue. Stop after
-reporting the queue or applying requested `workOrder` values. Planning is
-**tower-prep**. Closing cards is **tower-burndown**.
+One job: turn live Tower state into a dependency-safe ordered queue when the
+user asks for queue ranking or `workOrder` changes. Stop after reporting the
+queue or applying requested `workOrder` values. Planning is **tower-prep**.
+Closing cards is **tower-burndown**; general board triage stays with **tower**.
 
 ## Reference index
 

@@ -10,9 +10,12 @@ Jet local report bundle
 
 This bundle was created only because you ran `jet report`.
 Jet has not sent it anywhere and has no `jet report --send` command.
+This is a local diagnostic bundle, not a release census or readiness report.
+The version and edition lines are informational; they do not assert that Jet
+1.0 compatibility or a stable release has shipped.
 
 Included:
-- Jet version and supported edition information
+- current compiler version, prerelease status, and supported edition information
 - compiler target, operating-system family, and architecture
 - the permanent zero-telemetry policy
 
@@ -23,13 +26,15 @@ Excluded:
 - hostname, username, machine identifiers, and network addresses
 - crash data and package names
 
-To share this bundle, attach the directory yourself through a support
-channel you already trust.
+To inspect release claims, run `jet inspect claims --json`; that command consumes
+the evidence relation. To share this local bundle, attach the directory
+yourself through a support channel you already trust.
 ";
 
 fn report_text() -> String {
     format!(
         "Jet local report\n\
+scope: local diagnostics only; release claims and readiness are not evaluated\n\
 policy: zero telemetry; no network transmission\n\
 target: {}\n\
 os: {}\n\

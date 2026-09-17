@@ -66,6 +66,10 @@ fn jet_transaction_on_commit(transaction: &mut JetTransaction, callback: Box<dyn
 fn jet_transaction_on_rollback(transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>) {
     transaction.on_rollback(callback);
 }
+/// Canonical MIR route for the lexical transaction commit boundary.
+fn jet_transaction_commit(transaction: &mut JetTransaction) {
+    transaction.commit();
+}
 impl Drop for JetTransaction {
     fn drop(&mut self) {
         if self.committed {

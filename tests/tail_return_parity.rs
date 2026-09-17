@@ -39,9 +39,9 @@ fn packet_value(packet: Packet) Int -> {
             if value == 0 -> return 9
             if value > 0 -> { value + 1 } else -> { -1 }
         }
-        .Ignore(_) -> 0
+        .Ignore(_) -> { 0 }
         .Empty -> { 0 }
-        else -> -2
+        else -> { -2 }
     }
 }
 
@@ -116,9 +116,9 @@ fn packet_value(packet: Packet) Int -[]> {
             if value == 0 -> return 9
             if value > 0 -> { value + 1 } else -> { -1 }
         }
-        .Ignore(_) -> 0
+        .Ignore(_) -> { 0 }
         .Empty -> { 0 }
-        else -> -2
+        else -> { -2 }
     }
 }
 
@@ -183,6 +183,13 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
     fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
     fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    fs::write(
+        scratch.join("harness.mjs"),
+        r#"const { jet_main } = await import("./app.js");
+await jet_main();
+"#,
+    )
+    .unwrap();
     let wasm = Command::new("rustc")
         .current_dir(&scratch.path)
         .args([
@@ -198,9 +205,9 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
     );
     let output = Command::new("node")
         .current_dir(&scratch.path)
-        .arg("app.js")
+        .arg("harness.mjs")
         .output()
-        .expect("node must run the generated web app");
+        .expect("node must run the generated web harness");
     assert!(
         output.status.success(),
         "generated web app failed:\n{}",

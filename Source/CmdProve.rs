@@ -3668,15 +3668,15 @@ fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, S
     // tree-input reader.
     let compiler_digest = proof_compiler_digest();
 
-    let rustc = Command::new("rustc")
-        .args(["-vV"])
-        .output()
-        .map_err(|error| format!("cannot identify rustc: {error}"))?;
-    if !rustc.status.success() {
-        return Err("cannot identify rustc: `rustc -vV` failed".to_string());
-    }
-    let rustc_identity =
-        String::from_utf8(rustc.stdout).map_err(|_| "rustc identity is not UTF-8".to_string())?;
+    let rustc_identity = match Command::new("rustc").args(["-vV"]).output() {
+        Ok(rustc) if rustc.status.success() => String::from_utf8(rustc.stdout)
+            .map_err(|_| "rustc identity is not UTF-8".to_string())?,
+        Ok(_) => return Err("cannot identify rustc: `rustc -vV` failed".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            "<unavailable: rustc executable not installed>".to_string()
+        }
+        Err(error) => return Err(format!("cannot identify rustc: {error}")),
+    };
     let fields = vec![
         ("compiler".to_string(), compiler_digest.as_bytes().to_vec()),
         (

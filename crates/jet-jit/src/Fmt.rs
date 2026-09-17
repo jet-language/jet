@@ -25,6 +25,10 @@ fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
 
+fn jet_jit_fmt_quantity(value: f64) -> i64 {
+    alloc_string(fmt_rt::jet_fmt_quantity(value))
+}
+
 fn jet_jit_fmt_decimal_int(value: i64, precision: i64) -> i64 {
     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
     alloc_string(fmt_rt::jet_fmt_decimal_int(&value, precision))
@@ -112,6 +116,9 @@ host_fns! {
         use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_i64 = Signature::new(cc);
+        let mut sig_f64 = Signature::new(cc);
+        sig_f64.params.push(AbiParam::new(types::F64));
+        sig_f64.returns.push(AbiParam::new(types::I64));
         sig_i64.params.push(AbiParam::new(types::I64));
         sig_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_f64_i64 = Signature::new(cc);
@@ -128,6 +135,7 @@ host_fns! {
         sig_i64x3.params.push(AbiParam::new(types::I64));
         sig_i64x3.returns.push(AbiParam::new(types::I64));
     }
+    quantity: "jet_jit_fmt_quantity" => jet_jit_fmt_quantity: sig_f64;
     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
     pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;

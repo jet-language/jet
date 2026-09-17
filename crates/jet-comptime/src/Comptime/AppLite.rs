@@ -2737,6 +2737,10 @@ pub fn apply_suite(
             };
             web_result(input.map(opaque_web))
         }
+        ("core.web", "form") => Ok(opaque_web(web_kernel::jet_web_form(
+            web_opaque::<web_kernel::JetWebFormInput>(one(0)?, span)?,
+            web_string(one(1)?, "form action", span)?,
+        ))),
         ("core.web.forms", "typed") => web_result(web_kernel::jet_web_forms_typed(
             web_opaque::<web_kernel::JetWebFormInput>(one(0)?, span)?,
             web_string(one(1)?, "form action", span)?,

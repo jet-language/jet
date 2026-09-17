@@ -234,10 +234,18 @@ pub(crate) mod text_rt {
         jet_text_trim_end(&s.to_string())
     }
     pub(crate) fn pad_start(s: &str, width: i64, fill: &str) -> String {
-        jet_text_pad_start(&s.to_string(), width, &fill.to_string())
+        jet_text_pad_start(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(crate) fn pad_end(s: &str, width: i64, fill: &str) -> String {
-        jet_text_pad_end(&s.to_string(), width, &fill.to_string())
+        jet_text_pad_end(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(crate) fn index_of(s: &str, needle: &str) -> Option<i64> {
         jet_unicode_index_of(&s.to_string(), &needle.to_string())
@@ -279,13 +287,17 @@ pub(crate) mod text_rt {
         jet_unicode_last_index_of(&s.to_string(), &needle.to_string())
     }
     pub(crate) fn split_once(s: &str, separator: &str) -> Option<(String, String)> {
-        jet_unicode_split_once(&s.to_string(), &separator.to_string())
+        jet_unicode_split_once(&s.to_string(), &separator.to_string()).ok()
     }
     pub(crate) fn cut_last(s: &str, separator: &str) -> Option<(String, String)> {
-        jet_unicode_cut_last(&s.to_string(), &separator.to_string())
+        jet_unicode_cut_last(&s.to_string(), &separator.to_string()).ok()
     }
     pub(crate) fn center(s: &str, width: i64, fill: &str) -> String {
-        jet_text_center(&s.to_string(), width, &fill.to_string())
+        jet_text_center(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(crate) fn starts_any(s: &str, prefixes: &[String]) -> bool {
         jet_text_starts_any(&s.to_string(), &prefixes.to_vec())
@@ -553,6 +565,44 @@ fn jet_jit_text_is_ascii(s: i64) -> i8 {
     i8::from(text_rt::is_ascii(&clone_string(s)))
 }
 
+fn jet_jit_text_is_lower(s: i64) -> i8 {
+    i8::from(text_rt::is_lower(&clone_string(s)))
+}
+
+fn jet_jit_text_is_upper(s: i64) -> i8 {
+    i8::from(text_rt::is_upper(&clone_string(s)))
+}
+
+fn jet_jit_text_capitalize(s: i64) -> i64 {
+    alloc_string(text_rt::capitalize(&clone_string(s)))
+}
+
+fn jet_jit_text_swapcase(s: i64) -> i64 {
+    alloc_string(text_rt::swapcase(&clone_string(s)))
+}
+fn jet_jit_text_remove_prefix(s: i64, prefix: i64) -> i64 {
+    alloc_string(text_rt::remove_prefix(
+        &clone_string(s),
+        &clone_string(prefix),
+    ))
+}
+
+fn jet_jit_text_remove_suffix(s: i64, suffix: i64) -> i64 {
+    alloc_string(text_rt::remove_suffix(
+        &clone_string(s),
+        &clone_string(suffix),
+    ))
+}
+
+fn jet_jit_text_compare(a: i64, b: i64) -> i64 {
+    text_rt::compare(&clone_string(a), &clone_string(b))
+}
+
+fn jet_jit_text_reverse(s: i64) -> i64 {
+    alloc_string(text_rt::reverse(&clone_string(s)))
+}
+
+
 fn jet_jit_text_trim_start(s: i64) -> i64 {
     alloc_string(text_rt::trim_start(&clone_string(s)))
 }
@@ -585,6 +635,11 @@ fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
     text_rt::index_of(&clone_string(s), &clone_string(needle))
         .map_or(0, |index| index.wrapping_add(1))
 }
+fn jet_jit_text_last_index_of(s: i64, needle: i64) -> i64 {
+    text_rt::last_index_of(&clone_string(s), &clone_string(needle))
+        .map_or(0, |index| index.wrapping_add(1))
+}
+
 
 fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
     text_rt::count(&clone_string(s), &clone_string(needle))
@@ -733,6 +788,18 @@ fn option_string_bits(opt: Option<String>) -> i64 {
         }
     }
 }
+fn option_string_result(
+    value: text_rt::jet_std::JetOutcome<String, text_rt::jet_std::JetAbsent>,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match value {
+        Ok(text) => {
+            let sid = rt.heap.alloc_string(text);
+            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+        }
+        Err(_) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+    })
+}
+
 
 fn option_int_bits(opt: Option<i64>) -> i64 {
     opt.map_or(0, |value| value.wrapping_add(1))
@@ -1037,6 +1104,20 @@ fn jet_jit_regex_split_limit(pat: i64, text: i64, limit: i64) -> i64 {
         .unwrap_or_default()
 }
 
+fn jet_jit_string_matches(text: i64, pattern: i64) -> i64 {
+    match text_rt::jet_std::jet_string_matches(&clone_string(text), &clone_string(pattern)) {
+        Ok(value) => regex_result_ok(u64::from(value)),
+        Err(error) => regex_result_err(error),
+    }
+}
+
+fn jet_jit_string_match(text: i64, pattern: i64) -> i64 {
+    match text_rt::jet_std::jet_string_match(&clone_string(text), &clone_string(pattern)) {
+        Ok(value) => regex_result_ok(option_string_result(value) as u64),
+        Err(error) => regex_result_err(error),
+    }
+}
+
 fn jet_jit_regex_compile(pat: i64) -> i64 {
     match text_rt::jet_std::jet_regex_compile(&clone_string(pat)) {
         Ok(rx) => regex_result_ok(push_regex(RegexValue::Regex(rx)) as u64),
@@ -1119,17 +1200,36 @@ host_fns! {
     is_numeric: "jet_jit_text_is_numeric" => jet_jit_text_is_numeric: unary_i8;
     is_whitespace: "jet_jit_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
     is_ascii: "jet_jit_text_is_ascii" => jet_jit_text_is_ascii: unary_i8;
+    checked_text_is_alphabetic: "jet_text_is_alphabetic" => jet_jit_text_is_alphabetic: unary_i8;
+    checked_text_is_numeric: "jet_text_is_numeric" => jet_jit_text_is_numeric: unary_i8;
+    checked_text_is_whitespace: "jet_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
+    is_lower: "jet_text_is_lower" => jet_jit_text_is_lower: unary_i8;
+    is_upper: "jet_text_is_upper" => jet_jit_text_is_upper: unary_i8;
+    capitalize: "jet_text_capitalize" => jet_jit_text_capitalize: unary;
+    swapcase: "jet_text_swapcase" => jet_jit_text_swapcase: unary;
+    remove_prefix: "jet_text_remove_prefix" => jet_jit_text_remove_prefix: binary;
+    remove_suffix: "jet_text_remove_suffix" => jet_jit_text_remove_suffix: binary;
+    compare: "jet_text_compare" => jet_jit_text_compare: binary;
+    reverse: "jet_text_reverse" => jet_jit_text_reverse: unary;
+    checked_text_is_ascii: "jet_text_unicode_is_ascii" => jet_jit_text_is_ascii: unary_i8;
+    direct_trim_start: "jet_text_trim_start" => jet_jit_text_trim_start: unary;
     trim_start: "jet_jit_text_trim_start" => jet_jit_text_trim_start: unary;
     trim: "jet_unicode_trim" => jet_jit_text_trim: unary;
     checked_text_trim: "jet_text_trim" => jet_jit_text_trim: unary;
+    direct_trim_end: "jet_text_trim_end" => jet_jit_text_trim_end: unary;
     trim_end: "jet_jit_text_trim_end" => jet_jit_text_trim_end: unary;
+    direct_pad_start: "jet_text_pad_start" => jet_jit_text_pad_start: ternary;
     pad_start: "jet_jit_text_pad_start" => jet_jit_text_pad_start: ternary;
+    direct_pad_end: "jet_text_pad_end" => jet_jit_text_pad_end: ternary;
     pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;
     index_of: "jet_jit_text_index_of" => jet_jit_text_index_of: binary;
     checked_unicode_index_of: "jet_unicode_index_of" => jet_jit_text_index_of: binary;
+    checked_unicode_last_index_of: "jet_unicode_last_index_of" => jet_jit_text_last_index_of: binary;
     checked_unicode_count: "jet_unicode_count" => jet_jit_text_count: binary;
     count: "jet_jit_text_count" => jet_jit_text_count: binary;
+    direct_title: "jet_text_title" => jet_jit_text_title: unary;
     title: "jet_jit_text_title" => jet_jit_text_title: unary;
+    normalize_nfc: "jet_text_normalize_nfc" => jet_jit_text_nfc: unary;
     split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
     checked_unicode_split_once: "jet_unicode_split_once" => jet_jit_text_split_once: binary;
 
@@ -1144,6 +1244,11 @@ host_fns! {
     regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
     regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
     regex_literal: "jet_jit_regex_literal" => jet_jit_regex_literal: unary;
+    direct_regex_flags: "jet_std::jet_regex_flags" => jet_jit_regex_flags: ternary;
+    direct_regex_escape: "jet_std::jet_regex_escape" => jet_jit_regex_escape: unary;
+    direct_regex_compile: "jet_std::jet_regex_compile" => jet_jit_regex_compile: unary;
+    direct_regex_compile_with: "jet_std::jet_regex_compile_with" => jet_jit_regex_compile_with: binary;
+    direct_regex_literal: "jet_std::jet_regex_literal" => jet_jit_regex_literal: unary;
     regex_is_match: "jet_jit_regex_is_match" => jet_jit_regex_is_match: binary_i8;
     regex_full_match: "jet_jit_regex_full_match" => jet_jit_regex_full_match: binary_i8;
     regex_find: "jet_jit_regex_find" => jet_jit_regex_find: binary;
@@ -1152,8 +1257,20 @@ host_fns! {
     regex_match: "jet_jit_regex_match" => jet_jit_regex_match: binary;
     regex_replace: "jet_jit_regex_replace" => jet_jit_regex_replace: ternary;
     regex_replace_first: "jet_jit_regex_replace_first" => jet_jit_regex_replace_first: ternary;
+    string_matches: "jet_std::jet_string_matches" => jet_jit_string_matches: binary;
+    string_match: "jet_std::jet_string_match" => jet_jit_string_match: binary;
     regex_split: "jet_jit_regex_split" => jet_jit_regex_split: binary;
     regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;
+    direct_regex_is_match: "jet_std::jet_regex_is_match" => jet_jit_regex_is_match: binary_i8;
+    direct_regex_full_match: "jet_std::jet_regex_full_match" => jet_jit_regex_full_match: binary_i8;
+    direct_regex_match: "jet_std::jet_regex_match" => jet_jit_regex_match: binary;
+    direct_regex_find: "jet_std::jet_regex_find" => jet_jit_regex_find: binary;
+    direct_regex_find_all: "jet_std::jet_regex_find_all" => jet_jit_regex_find_all: binary;
+    direct_regex_matches: "jet_std::jet_regex_matches" => jet_jit_regex_matches: binary;
+    direct_regex_split: "jet_std::jet_regex_split" => jet_jit_regex_split: binary;
+    direct_regex_split_limit: "jet_std::jet_regex_split_limit" => jet_jit_regex_split_limit: ternary;
+    direct_regex_replace: "jet_std::jet_regex_replace" => jet_jit_regex_replace: ternary;
+    direct_regex_replace_first: "jet_std::jet_regex_replace_first" => jet_jit_regex_replace_first: ternary;
     regex_compile: "jet_jit_regex_compile" => jet_jit_regex_compile: unary;
     regex_compile_with: "jet_jit_regex_compile_with" => jet_jit_regex_compile_with: binary;
     checked_regex_pattern: "jet_std::JetRegex::pattern" => jet_jit_regex_pattern: unary;

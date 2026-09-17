@@ -2018,15 +2018,9 @@ fn collection_changed_in_loop_with_operation(
     let operation = operation
         .map(|method| format!("`{name}.{method}()`"))
         .unwrap_or_else(|| format!("a mutation of `{name}`"));
-    Diagnostic::error(
+    Diagnostic::from_row(
         "E0507",
-        format!("while the loop is reading `{name}`, nothing may change it"),
-        format!(
-            "the loop reads `{name}` across its body, so {operation} changes the collection being visited"
-        ),
-        format!(
-            "choose the collection intent explicitly instead of changing `{name}` with {operation}: collect a separate result when the original traversal should stay unchanged; snapshot `{name}` before the loop when only original values belong in the traversal; or use an explicit work queue when newly added values should be visited"
-        ),
+        &[("name", name), ("operation", operation.as_str())],
         Some(span),
     )
 }

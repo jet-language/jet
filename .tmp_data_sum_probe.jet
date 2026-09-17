@@ -1,0 +1,10 @@
+use core.data as data
+#Codable
+struct Ticket { team: String minutes: Float }
+fn run() {
+ raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+ rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+ sums :: data.query(rows).group_by(t -> t.team).sum(t -> t.minutes).collect() ?? panic("sum")
+ print("sums: {sums.len()}")
+ loop g in sums -> print("{g.key}: {g.value}")
+}

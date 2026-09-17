@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{report_clear_counts, Diagnostic, ReportPath, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::ProgramBundle;
+use crate::AST::{Item, ProgramBundle, Type};
 use jet_driver::QueryService::CompilerQueries;
 #[cfg(test)]
 use jet_queries::{FileKey, QueryKey};
@@ -11,16 +11,16 @@ use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 
 use super::Adapter::{editor_host_error_code, EditorHostAdapter};
-use super::Check::{collect_fixes_from_diagnostics, Fix};
+use super::Check::{collect_fixes_from_diagnostics, retain_document_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
     checked_rename_span_at, checked_semantic_identity_at, compute_definition,
-    compute_discovery_hover, compute_generated_definition, compute_hover, compute_refactor_actions,
-    compute_references, compute_rename, encode_semantic_tokens_in_span_with_arithmetic,
-    encode_semantic_tokens_with_arithmetic, format_inlay_hints, reasoning_inlay_hints,
-    reasoning_view_json, semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json,
-    RefactorAction,
+    compute_discovery_hover, compute_hover, compute_refactor_actions, compute_references,
+    compute_rename, encode_semantic_tokens_in_span_with_arithmetic,
+    encode_semantic_tokens_with_arithmetic, format_inlay_hints, generated_declaration_at,
+    reasoning_inlay_hints, reasoning_view_json, register_generated_declarations,
+    semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -50,6 +50,9 @@ struct CheckedBundle {
     diags: Vec<Diagnostic>,
     bundle: Option<Arc<ProgramBundle>>,
     facts: jet_semindex::SemIndexEffectFacts,
+    /// Canonical checked source URI -> the open document version used to
+    /// produce this bundle. Navigation must reject a later document revision.
+    checked_versions: HashMap<String, i32>,
 }
 
 impl Document {
@@ -79,6 +82,7 @@ struct Server {
     workspace_folders: bool,
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
+    diagnostic_targets: HashMap<String, std::collections::HashSet<String>>,
     /// D-LSP1=C: the canonical driver query service shared with `jet check`.
     queries: std::cell::RefCell<CompilerQueries>,
     /// One typed transport for both VS Code and Zed editor workbenches.
@@ -94,6 +98,7 @@ impl Server {
             workspace_roots: Vec::new(),
             workspace_folders: false,
             dirty: std::collections::HashSet::new(),
+            diagnostic_targets: HashMap::new(),
             queries: std::cell::RefCell::new(CompilerQueries::new()),
             editor_host: EditorHostAdapter::new(),
             shutdown: false,
@@ -102,20 +107,22 @@ impl Server {
 
     /// D-LSP1 stage 2: diagnostics run through the query engine instead of a
     /// private LSP-only cache.
-    fn check(&self, doc: &Document) -> Vec<Diagnostic> {
-        self.check_with_bundle(doc).diags
-    }
-
     fn check_with_bundle(&self, doc: &Document) -> CheckedBundle {
         let mut queries = self.queries.borrow_mut();
         for open in self.docs.values() {
             queries.set_document(&open.path, &open.text);
         }
         let checked = queries.check_text(&doc.path, &doc.text, true);
+        let checked_versions = checked
+            .bundle
+            .as_deref()
+            .map(|bundle| checked_document_versions(self, bundle))
+            .unwrap_or_default();
         CheckedBundle {
             diags: checked.diagnostics.as_ref().clone(),
             bundle: checked.bundle,
             facts: checked.effect_facts.as_ref().clone(),
+            checked_versions,
         }
     }
 
@@ -520,6 +527,16 @@ fn handle_notification(
                 if let Some(doc) = server.docs.remove(uri) {
                     server.queries.borrow_mut().remove_document(&doc.path);
                 }
+                server.dirty.remove(uri);
+                if let Some(targets) = server.diagnostic_targets.remove(uri) {
+                    for target in targets {
+                        if !server.diagnostic_targets.values().any(|targets| targets.contains(&target)) {
+                            let file = ReportPath::from_process(&uri_to_path(&target));
+                            let clear = publish_diagnostics(&target, &file, "", None, &[], &[], &[]);
+                            write_message(stdout, &clear)?;
+                        }
+                    }
+                }
             }
             Ok(())
         }
@@ -728,12 +745,7 @@ fn publish_after_change_impl(
     }
     if is_open {
         // Always publish on open — client expects initial diagnostics.
-        if let Some(doc) = server.docs.get(&uri) {
-            let diags = server.check(doc);
-            let file = ReportPath::from_process(&doc.path);
-            let notif = publish_diagnostics(&uri, &file, &doc.text, doc.version, &diags);
-            write_message(stdout, &notif)?;
-        }
+        publish_document_diagnostics(server, &uri, stdout)?;
         server.dirty.remove(&uri);
     } else {
         // Mark dirty; diagnostics will be flushed before the next request.
@@ -800,14 +812,66 @@ fn lsp_uinteger(value: &DataTree) -> Option<u32> {
 fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
     let dirty: Vec<String> = server.dirty.drain().collect();
     for uri in dirty {
-        if let Some(doc) = server.docs.get(&uri) {
-            let text = doc.text.clone();
-            let diags = server.check(doc);
-            let file = ReportPath::from_process(&doc.path);
-            let notif = publish_diagnostics(&uri, &file, &text, doc.version, &diags);
-            write_message(stdout, &notif)?;
+        publish_document_diagnostics(server, &uri, stdout)?;
+    }
+    Ok(())
+}
+
+fn publish_document_diagnostics(
+    server: &mut Server,
+    uri: &str,
+    stdout: &mut impl Write,
+) -> io::Result<()> {
+    let Some(doc) = server.docs.get(uri) else {
+        return Ok(());
+    };
+    let checked = server.check_with_bundle(doc);
+    let mut groups = BTreeMap::<String, Vec<usize>>::new();
+    groups.insert(uri.to_string(), Vec::new());
+    for (index, diagnostic) in checked.diags.iter().enumerate() {
+        let target = diagnostic.origin.as_ref().map_or_else(
+            || uri.to_string(),
+            |origin| server.docs.iter()
+                .find(|(_, open)| source_paths_equal(&open.path, &origin.path))
+                .map_or_else(|| path_to_uri(&origin.path), |(uri, _)| uri.clone()),
+        );
+        groups.entry(target).or_default().push(index);
+    }
+    let targets = groups.keys().cloned().collect();
+    if let Some(previous) = server.diagnostic_targets.get(uri) {
+        for target in previous {
+            if groups.contains_key(target) {
+                continue;
+            }
+            let still_checked = checked.bundle.as_ref().is_some_and(|bundle| {
+                let path = uri_to_path(target);
+                bundle.modules.iter().any(|module| {
+                    source_paths_equal(&module.path.to_string_lossy(), &path)
+                })
+            });
+            let retained_elsewhere = server.diagnostic_targets.iter()
+                .any(|(root, targets)| root != uri && targets.contains(target));
+            if still_checked || !retained_elsewhere {
+                groups.insert(target.clone(), Vec::new());
+            }
         }
     }
+    let clears = report_clear_counts(&checked.diags);
+    for (target, indices) in groups {
+        let origin = indices.iter().find_map(|&index| checked.diags[index].origin.as_ref());
+        let open = server.docs.get(&target);
+        let source = origin.map(|origin| origin.source.as_str())
+            .or_else(|| open.map(|doc| doc.text.as_str())).unwrap_or("");
+        let path = origin.map(|origin| origin.path.as_str())
+            .or_else(|| open.map(|doc| doc.path.as_str())).unwrap_or("");
+        let version = open.filter(|doc| doc.text == source).map(|doc| doc.version);
+        let file = ReportPath::from_process(path);
+        let notification = publish_diagnostics(
+            &target, &file, source, version, &checked.diags, &indices, &clears,
+        );
+        write_message(stdout, &notification)?;
+    }
+    server.diagnostic_targets.insert(uri.to_string(), targets);
     Ok(())
 }
 
@@ -815,21 +879,23 @@ fn publish_diagnostics(
     uri: &str,
     file: &ReportPath,
     src: &str,
-    version: i32,
+    version: Option<i32>,
     diags: &[Diagnostic],
+    indices: &[usize],
+    clears: &[usize],
 ) -> String {
     let mut items = String::new();
-    let clears = report_clear_counts(diags);
-    for (i, d) in diags.iter().enumerate() {
+    for (i, &index) in indices.iter().enumerate() {
         if i > 0 {
             items.push(',');
         }
         items.push_str(&diagnostic_json_with_clears(
-            d, file, src, clears[i], uri, diags,
+            &diags[index], file, src, clears[index], uri, diags,
         ));
     }
+    let version = version.map(|version| format!(r#","version":{version}"#)).unwrap_or_default();
     format!(
-        r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
+        r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}"{},"diagnostics":[{}]}}}}"#,
         json_escape(uri),
         version,
         items
@@ -898,10 +964,12 @@ fn related_information_json(
         let Some(span) = cause.span else {
             continue;
         };
+        let cause_uri = cause.origin.as_ref().map(|origin| path_to_uri(&origin.path));
+        let cause_source = cause.origin.as_ref().map_or(src, |origin| origin.source.as_str());
         related.push(format!(
             r#"{{"location":{{"uri":"{}","range":{}}},"message":"{}"}}"#,
-            json_escape(uri),
-            range_json(byte_span_to_range(src, span)),
+            json_escape(cause_uri.as_deref().unwrap_or(uri)),
+            range_json(byte_span_to_range(cause_source, span)),
             json_escape(&cause.what),
         ));
     }
@@ -926,7 +994,8 @@ fn code_action_response(
         lsp_pos_to_offset(&doc.text, requested.start),
         lsp_pos_to_offset(&doc.text, requested.end),
     );
-    let checked = server.check_with_bundle(doc);
+    let mut checked = server.check_with_bundle(doc);
+    retain_document_diagnostics(&mut checked.diags, &doc.path, &doc.text);
     let fixes = collect_fixes_from_diagnostics(checked.diags.clone(), &doc.text);
     let mut db = checked
         .bundle
@@ -1548,16 +1617,11 @@ fn document_symbol_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let checked = server.check_with_bundle(doc);
-    // SymbolDB stores Loader display paths; LSP documents carry absolute paths.
-    // Resolve the requested bundle module before filtering its definitions.
-    let document_path = normalize_path(&doc.path);
-    let target_module_display = checked.bundle.as_ref().and_then(|bundle| {
-        bundle
-            .modules
-            .iter()
-            .find(|module| normalize_path_buf(&module.path) == document_path)
-            .map(|module| module.display.clone())
-    });
+    let target_module_display = checked
+        .bundle
+        .as_ref()
+        .and_then(|bundle| checked_module(bundle, &doc.path))
+        .map(|module| module.display.clone());
     let db = match checked.bundle {
         Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
@@ -2025,9 +2089,12 @@ fn hover_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> 
 
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
-    let db = match checked.bundle {
+    let module_path = checked.bundle.as_ref()
+        .and_then(|bundle| checked_module(bundle, &doc.path))
+        .map_or(doc.path.as_str(), |module| module.display.as_str());
+    let db = match checked.bundle.as_ref() {
         Some(b) => {
-            let mut db = build_symbol_db(&b, &checked.facts);
+            let mut db = build_symbol_db(b, &checked.facts);
             if let Some(package) =
                 jet_semindex::package_facts_for_entry(std::path::Path::new(&doc.path))
                     .ok()
@@ -2044,7 +2111,7 @@ fn hover_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> 
     let hover = discovery
         .as_ref()
         .and_then(|index| compute_discovery_hover(&doc.text, offset, index))
-        .or_else(|| compute_hover(&db, &tokens, &doc.text, &doc.path, offset))
+        .or_else(|| compute_hover(&db, &tokens, &doc.text, module_path, offset))
         .map(|text| {
             if text.contains("required effects:") {
                 text
@@ -2084,75 +2151,110 @@ fn definition_response(
 
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
-    let db = checked
+    let mut db = checked
         .bundle
-        .as_ref()
-        .map(|bundle| build_symbol_db(bundle, &checked.facts))
+        .as_deref()
+        .map(|bundle| build_navigation_symbol_db(bundle, &checked.facts))
         .unwrap_or_else(SymbolDB::new);
-
-    match compute_definition(&db, &tokens, &doc.text, &doc.path, offset) {
-        Some((def_path, def_span)) => {
-            let Some(bundle) = checked.bundle.as_ref() else {
-                return Some(error_response(
-                    id,
-                    -32603,
-                    "definition source is not in a checked snapshot",
-                ));
-            };
-            let Some((src, _version)) = checked_source_snapshot(server, bundle, &def_path) else {
-                return Some(error_response(
-                    id,
-                    -32603,
-                    "definition source is not in a checked snapshot",
-                ));
-            };
-            let Some(range) = checked_byte_span_to_range(src, def_span) else {
-                return Some(error_response(
-                    id,
-                    -32603,
-                    "definition range is outside the checked snapshot",
-                ));
-            };
-            let def_uri = path_to_uri(&def_path);
-            let data = semantic_symbol_at_span(&db, &def_path, def_span)
-                .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
-                .map(|data| format!(",\"data\":{data}"))
-                .unwrap_or_default();
-            let result = format!(
-                r#"{{"uri":"{}","range":{}{}}}"#,
-                json_escape(&def_uri),
-                range_json(range),
-                data,
-            );
-            Some(response(id, &result))
-        }
-        None => {
-            let generated = crate::Driver::query_build_plan_with_overlay(&doc.path, &doc.text)
-                .ok()
-                .flatten()
-                .and_then(|plan| compute_generated_definition(&plan, &tokens, offset));
-            let Some((relative_path, source, span)) = generated else {
-                return Some(response(id, "null"));
-            };
-            let root = std::path::Path::new(&doc.path)
-                .parent()
-                .unwrap_or(std::path::Path::new("."));
-            let def_path = root.join(relative_path).to_string_lossy().into_owned();
-            let Some(range) = checked_byte_span_to_range(&source, span) else {
-                return Some(error_response(
-                    id,
-                    -32603,
-                    "generated definition range is outside its checked source",
-                ));
-            };
-            let result = format!(
-                r#"{{"uri":"{}","range":{}}}"#,
-                json_escape(&path_to_uri(&def_path)),
-                range_json(range)
-            );
-            Some(response(id, &result))
+    let module_path = checked
+        .bundle
+        .as_deref()
+        .and_then(|bundle| checked_module(bundle, &doc.path))
+        .map_or(doc.path.as_str(), |module| module.display.as_str());
+    let mut generated = Vec::new();
+    if compute_definition(&db, &tokens, &doc.text, &module_path, offset).is_none() {
+        match crate::Driver::query_build_plan_with_overlay(&doc.path, &doc.text) {
+            Ok(Some(plan)) => {
+                generated = register_generated_declarations(&mut db, &plan, &module_path, &tokens);
+            }
+            Ok(None) => {}
+            Err(_) => {}
         }
     }
+    let Some((def_path, def_span)) =
+        compute_definition(&db, &tokens, &doc.text, module_path, offset)
+    else {
+        return Some(response(id, "null"));
+    };
+
+    if let Some(declaration) = generated_declaration_at(&generated, &def_path, def_span) {
+        let root = std::path::Path::new(&doc.path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let absolute_path = root.join(&declaration.module_path);
+        let Some(range) = checked_byte_span_to_range(&declaration.source, declaration.span) else {
+            return Some(error_response(
+                id,
+                -32603,
+                "generated definition range is outside its checked source",
+            ));
+        };
+        let artifact = declaration.module_path.as_str();
+        let origin_status = if declaration.module_name.is_empty() && declaration.plugin.is_none() {
+            "missing"
+        } else {
+            "available"
+        };
+        let plugin = declaration
+            .plugin
+            .as_deref()
+            .map(|plugin| format!("\"{}\"", json_escape(plugin)))
+            .unwrap_or_else(|| "null".to_string());
+        let origin = format!(
+            r#"{{"status":"{}","generator":"{}","schema":null,"source":"{}","plugin":{}}}"#,
+            origin_status,
+            json_escape(&declaration.module_name),
+            json_escape(artifact),
+            plugin,
+        );
+        let data = format!(
+            r#","data":{{"identity":"{}","generated":true,"artifact":"{}","origin":{}}}"#,
+            json_escape(&declaration.identity),
+            json_escape(artifact),
+            origin,
+        );
+        let result = format!(
+r#"{{"uri":"{}","range":{}{}}}"#,
+            json_escape(&path_to_uri(&absolute_path.to_string_lossy())),
+            range_json(range),
+            data,
+        );
+        return Some(response(id, &result));
+    }
+
+    let Some(_) = checked.bundle.as_ref() else {
+        return Some(error_response(
+            id,
+            -32603,
+            "definition source is not in a checked snapshot",
+        ));
+    };
+    let Some((source, _version)) = checked_source_snapshot(server, &checked, &def_path) else {
+        return Some(error_response(
+            id,
+            -32603,
+            "definition source is not in a checked snapshot",
+        ));
+    };
+    let Some(range) = checked_byte_span_to_range(&source.source, def_span) else {
+        return Some(error_response(
+            id,
+            -32603,
+            "definition range is outside the checked snapshot",
+        ));
+    };
+    let def_uri = path_to_uri(&source.path.to_string_lossy());
+    let data = semantic_symbol_at_span(&db, &def_path, def_span)
+        .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
+        .map(|data| format!(",\"data\":{data}"))
+        .unwrap_or_default();
+    let result = format!(
+r#"{{"uri":"{}","range":{}{}}}"#,
+        json_escape(&def_uri),
+        range_json(range),
+        data,
+    );
+    Some(response(id, &result))
 }
 
 fn execute_command_response(
@@ -2355,23 +2457,24 @@ fn references_response(
     let Some(bundle) = checked.bundle.as_ref() else {
         return Some(response(id, "[]"));
     };
-    let db = build_symbol_db(bundle, &checked.facts);
+    let db = build_navigation_symbol_db(bundle, &checked.facts);
+    let module = checked_module(bundle, &doc.path)?;
 
-    let refs = compute_references(&db, &tokens, &doc.path, offset, include_decl);
-    let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
+    let refs = compute_references(&db, &tokens, &module.display, offset, include_decl);
+    let data = semantic_symbol_at(&db, &tokens, &module.display, offset)
         .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
         .map(|data| format!(",\"data\":{data}"))
         .unwrap_or_default();
     let mut items = String::new();
     for (i, (ref_path, span)) in refs.iter().enumerate() {
-        let Some((src, _version)) = checked_source_snapshot(server, bundle, ref_path) else {
+        let Some((source, _version)) = checked_source_snapshot(server, &checked, ref_path) else {
             return Some(error_response(
                 id,
                 -32603,
                 "reference source is not in a checked snapshot",
             ));
         };
-        let Some(range) = checked_byte_span_to_range(src, *span) else {
+        let Some(range) = checked_byte_span_to_range(&source.source, *span) else {
             return Some(error_response(
                 id,
                 -32603,
@@ -2381,7 +2484,7 @@ fn references_response(
         if i > 0 {
             items.push(',');
         }
-        let ref_uri = path_to_uri(ref_path);
+        let ref_uri = path_to_uri(&source.path.to_string_lossy());
         items.push_str(&format!(
             r#"{{"uri":"{}","range":{}{}}}"#,
             json_escape(&ref_uri),
@@ -2426,9 +2529,10 @@ fn prepare_rename_response(
     let Some(bundle) = checked.bundle.as_ref() else {
         return Some(response(id, "null"));
     };
-    let db = build_symbol_db(bundle, &checked.facts);
+    let db = build_navigation_symbol_db(bundle, &checked.facts);
+    let module = checked_module(bundle, &doc.path)?;
     let Some((_identity, span)) =
-        checked_rename_span_at(&db, &tokens, &doc.path, offset)
+        checked_rename_span_at(&db, &tokens, &module.display, offset)
     else {
         return Some(response(id, "null"));
     };
@@ -2473,9 +2577,10 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
             "document did not check cleanly",
         ));
     };
-    let db = build_symbol_db(bundle, &checked.facts);
+    let db = build_navigation_symbol_db(bundle, &checked.facts);
+    let module = checked_module(bundle, &doc.path)?;
 
-    match compute_rename(&db, &tokens, &doc.path, offset, new_name) {
+    match compute_rename(&db, &tokens, &module.display, offset, new_name) {
         Ok(spans) => {
             let mut by_file: BTreeMap<String, Vec<Span>> = BTreeMap::new();
             for (path, span) in spans {
@@ -2486,7 +2591,7 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
                 if index > 0 {
                     changes.push(',');
                 }
-                let Some((src, _version)) = checked_source_snapshot(server, bundle, path) else {
+                let Some((source, version)) = checked_source_snapshot(server, &checked, path) else {
                     return Some(error_response(
                         id,
                         -32603,
@@ -2495,7 +2600,7 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
                 };
                 let mut edits = String::new();
                 for (j, span) in file_spans.iter().enumerate() {
-                    let Some(range) = checked_byte_span_to_range(src, *span) else {
+                    let Some(range) = checked_byte_span_to_range(&source.source, *span) else {
                         return Some(error_response(
                             id,
                             -32603,
@@ -2511,21 +2616,25 @@ fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) ->
                         json_escape(new_name)
                     ));
                 }
-                let file_uri = path_to_uri(path);
-                changes.push_str(&format!(r#""{}": [{}]"#, json_escape(&file_uri), edits));
+                let file_uri = path_to_uri(&source.path.to_string_lossy());
+                let version = version.map_or_else(|| "null".to_string(), |value| value.to_string());
+                changes.push_str(&format!(
+                    r#"{{"textDocument":{{"uri":"{}","version":{}}},"edits":[{}]}}"#,
+                    json_escape(&file_uri), version, edits,
+                ));
             }
             let old_name = ident_at(&tokens, offset).unwrap_or("");
-            let identity = checked_semantic_identity_at(&db, &tokens, &doc.path, offset)
+            let identity = checked_semantic_identity_at(&db, &tokens, &module.display, offset)
                 .unwrap_or_default();
             let semantic_op = lsp_rename_semantic_op(&db.index, &identity, old_name, new_name);
-            let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
+            let data = semantic_symbol_at(&db, &tokens, &module.display, offset)
                 .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
                 .map(|data| format!(",\"data\":{data}"))
                 .unwrap_or_default();
             Some(response(
                 id,
                 &format!(
-                    r#"{{"changes":{{{}}},"semantic_ops":[{}]{}}}"#,
+                    r#"{{"documentChanges":[{}],"semantic_ops":[{}]{}}}"#,
                     changes, semantic_op, data
                 ),
             ))
@@ -2550,7 +2659,7 @@ fn lsp_rename_semantic_op(
             let before = json_escape(&fact.human_identity);
             let after_identity = fact
                 .human_identity
-                .strip_suffix(&fact.name)
+                .strip_suffix(from)
                 .map(|prefix| format!("{prefix}{to}"))
                 .unwrap_or_else(|| to.to_string());
             format!(
@@ -3932,7 +4041,7 @@ mod project_part_tests {
         let before = "pub fn alpha() Int { return 1 }\npub fn beta() Int { return 2 }\n";
         let mut doc = Document::new(path.to_string(), before.to_string(), 1);
         let server = Server::new();
-        assert!(server.check(&doc).is_empty());
+        assert!(server.check_with_bundle(&doc).diags.is_empty());
 
         let value = before.rfind('2').unwrap();
         let range = LspRange {
@@ -3940,15 +4049,15 @@ mod project_part_tests {
             end: byte_offset_to_lsp(before, value + 1),
         };
         assert!(doc.apply_range_edit(range, Some(1), "\"wrong\""));
-        let incremental = server.check(&doc);
+        let incremental = server.check_with_bundle(&doc);
         let fresh = super::super::Check::check_document(path, &doc.text);
         let file = ReportPath::from_process(path);
 
         assert_eq!(
-            crate::render_all_json(&file, &doc.text, &incremental),
+            crate::render_all_json(&file, &doc.text, &incremental.diags),
             crate::render_all_json(&file, &doc.text, &fresh)
         );
-        assert!(!incremental.is_empty());
+        assert!(!incremental.diags.is_empty());
     }
 
     #[cfg(unix)]
@@ -4055,12 +4164,12 @@ mod project_part_tests {
         let mut a = Document::new(a_path, "fn run() {}\n".into(), 1);
         let b = Document::new(b_path.clone(), "fn helper() {}\n".into(), 1);
 
-        assert!(server.check(&a).is_empty());
-        assert!(server.check(&a).is_empty());
-        assert!(server.check(&b).is_empty());
+        assert!(server.check_with_bundle(&a).diags.is_empty());
+        assert!(server.check_with_bundle(&a).diags.is_empty());
+        assert!(server.check_with_bundle(&b).diags.is_empty());
         a.replace_text("fn run() { print(\"changed\") }\n".into());
-        assert!(server.check(&a).is_empty());
-        assert!(server.check(&b).is_empty());
+        assert!(server.check_with_bundle(&a).diags.is_empty());
+        assert!(server.check_with_bundle(&b).diags.is_empty());
 
         let queries = server.queries.borrow();
         let stats = queries.stats();
@@ -4107,9 +4216,9 @@ mod project_part_tests {
             ),
         );
 
-        let broken = server.check(server.docs.get(&main_uri).unwrap());
+        let broken = server.check_with_bundle(server.docs.get(&main_uri).unwrap());
         assert!(
-            !broken.is_empty(),
+            !broken.diags.is_empty(),
             "the importer must see the unsaved dependency"
         );
         server
@@ -4117,9 +4226,9 @@ mod project_part_tests {
             .get_mut(&dependency_uri)
             .unwrap()
             .replace_text("pub fn value() Int { return 2 }\n".into());
-        let repaired = server.check(server.docs.get(&main_uri).unwrap());
+        let repaired = server.check_with_bundle(server.docs.get(&main_uri).unwrap());
 
-        assert!(repaired.is_empty(), "{repaired:#?}");
+        assert!(repaired.diags.is_empty(), "{:#?}", repaired.diags);
         assert_eq!(
             server.queries.borrow().recompute_count(&QueryKey::for_file(
                 "checked.lsp",
@@ -4210,35 +4319,562 @@ mod project_part_tests {
     }
 }
 
+fn build_navigation_symbol_db(
+    bundle: &ProgramBundle,
+    facts: &jet_semindex::SemIndexEffectFacts,
+) -> SymbolDB {
+    let mut db = build_symbol_db(bundle, facts);
+    rebind_checked_reference_identities(&mut db);
+    add_checked_type_references(bundle, &facts.name_ledger, &mut db);
+    rebind_checked_reference_identities(&mut db);
+    db
+}
+
+/// Sema anchors carry the package-scoped nominal identity used by compiler
+/// facts. Navigation consumes the semindex identity on the matching checked
+/// definition, so resolve that identity by the anchor's canonical
+/// module/kind/span rather than by source spelling.
+fn rebind_checked_reference_identities(db: &mut SymbolDB) {
+    for index in 0..db.refs.len() {
+        let Some(anchor) = db.refs[index].target.clone() else {
+            continue;
+        };
+        let identity = db
+            .defs
+            .iter()
+            .filter(|definition| {
+                definition.module_path == anchor.module_path
+                    && definition.def_span.start == anchor.def_span.start
+                    && definition.def_span.end == anchor.def_span.end
+                    && navigation_target_kind_matches(&definition.kind, &anchor.kind)
+            })
+            .map(|definition| definition.identity.clone())
+            .reduce(|left, right| if left == right { left } else { String::new() })
+            .filter(|identity| !identity.is_empty())
+            .or_else(|| {
+                let name = db.refs[index].name.as_str();
+                db.defs
+                    .iter()
+                    .filter(|definition| {
+                        definition.module_path == anchor.module_path
+                            && definition.name == name
+                            && navigation_target_kind_matches(&definition.kind, &anchor.kind)
+                    })
+                    .map(|definition| definition.identity.clone())
+                    .reduce(|left, right| if left == right { left } else { String::new() })
+                    .filter(|identity| !identity.is_empty())
+            });
+        if let Some(target) = db.refs[index].target.as_mut() {
+            target.semantic_identity = identity;
+        }
+    }
+}
+
+fn navigation_target_kind_matches(kind: &SymKind, target: &str) -> bool {
+    match target {
+        "module" | "import_alias" => matches!(kind, SymKind::Module),
+        "function" | "method" | "extern" => matches!(kind, SymKind::Function { .. }),
+        "struct" => matches!(kind, SymKind::Struct { .. }),
+        "enum" => matches!(kind, SymKind::Enum { .. }),
+        "trait" => matches!(kind, SymKind::Trait),
+        "tag" => matches!(kind, SymKind::Tag),
+        "type" | "protocol" => matches!(
+            kind,
+            SymKind::Struct { .. }
+                | SymKind::Enum { .. }
+                | SymKind::Trait
+                | SymKind::Type { .. }
+        ),
+        "state" | "enum_variant" | "variant" => {
+            matches!(kind, SymKind::EnumVariant { .. } | SymKind::Type { .. })
+        }
+        "const" => matches!(kind, SymKind::Const),
+        "field" => matches!(kind, SymKind::Field { .. }),
+        "local" => matches!(kind, SymKind::Local { .. }),
+        "param" => matches!(kind, SymKind::Param { .. }),
+        _ => true,
+    }
+}
+
+/// `jet-semindex` indexes expression references, while checked type
+/// annotations are represented by typed AST slots. Add the missing use-site
+/// anchors from those slots, resolving targets through the sema-owned ledger.
+fn add_checked_type_references(
+    bundle: &ProgramBundle,
+    ledger: &jet_foundation::Names::NameLedger,
+    db: &mut SymbolDB,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for item in &module.items {
+            add_item_type_references(
+                item,
+                module_idx,
+                &module.display,
+                &module.source,
+                ledger,
+                db,
+            );
+        }
+    }
+}
+
+fn add_item_type_references(
+    item: &Item,
+    module_idx: usize,
+    module_path: &str,
+    source: &str,
+    ledger: &jet_foundation::Names::NameLedger,
+    db: &mut SymbolDB,
+) {
+    match item {
+        Item::Func(function) => {
+            add_func_type_references(function, module_idx, module_path, source, ledger, db);
+        }
+        Item::Struct(definition) => {
+            for field in &definition.fields {
+                add_checked_type_reference(
+                    &field.ty,
+                    field.ty_span,
+                    module_idx,
+                    module_path,
+                    source,
+                    ledger,
+                    db,
+                );
+            }
+            for method in &definition.methods {
+                add_func_type_references(method, module_idx, module_path, source, ledger, db);
+            }
+            for implementation in &definition.trait_impls {
+                for method in &implementation.methods {
+                    add_func_type_references(method, module_idx, module_path, source, ledger, db);
+                }
+            }
+        }
+        Item::Enum(definition) => {
+            for variant in &definition.variants {
+                match &variant.payload {
+                    crate::AST::VariantPayload::Single(ty, span) => {
+                        add_checked_type_reference(
+                            ty,
+                            *span,
+                            module_idx,
+                            module_path,
+                            source,
+                            ledger,
+                            db,
+                        );
+                    }
+                    crate::AST::VariantPayload::Named(fields) => {
+                        for field in fields {
+                            add_checked_type_reference(
+                                &field.ty,
+                                field.ty_span,
+                                module_idx,
+                                module_path,
+                                source,
+                                ledger,
+                                db,
+                            );
+                        }
+                    }
+                    crate::AST::VariantPayload::Unit => {}
+                }
+            }
+            for method in &definition.methods {
+                add_func_type_references(method, module_idx, module_path, source, ledger, db);
+            }
+            for implementation in &definition.trait_impls {
+                for method in &implementation.methods {
+                    add_func_type_references(method, module_idx, module_path, source, ledger, db);
+                }
+            }
+        }
+        Item::Distinct(definition) => {
+            add_checked_type_reference(
+                &definition.base,
+                definition.base_span,
+                module_idx,
+                module_path,
+                source,
+                ledger,
+                db,
+            );
+        }
+        Item::TypeAlias(definition) => {
+            add_checked_type_reference(
+                &definition.target,
+                definition.target_span,
+                module_idx,
+                module_path,
+                source,
+                ledger,
+                db,
+            );
+        }
+        Item::Impl(definition) => {
+            add_named_type_reference(
+                &definition.type_name,
+                definition.type_span,
+                module_idx,
+                module_path,
+                source,
+                ledger,
+                db,
+            );
+            if let (Some(name), Some(span)) = (&definition.trait_name, definition.trait_span) {
+                add_named_type_reference(
+                    name,
+                    span,
+                    module_idx,
+                    module_path,
+                    source,
+                    ledger,
+                    db,
+                );
+            }
+            for (_, span, ty) in &definition.assoc_type_impls {
+                add_checked_type_reference(
+                    ty,
+                    *span,
+                    module_idx,
+                    module_path,
+                    source,
+                    ledger,
+                    db,
+                );
+            }
+            for method in &definition.methods {
+                add_func_type_references(method, module_idx, module_path, source, ledger, db);
+            }
+        }
+        Item::Trait(definition) => {
+            for method in &definition.methods {
+                for parameter in &method.params {
+                    add_checked_type_reference(
+                        &parameter.ty,
+                        parameter.ty_span,
+                        module_idx,
+                        module_path,
+                        source,
+                        ledger,
+                        db,
+                    );
+                }
+            }
+        }
+        Item::CodeModule(definition) => {
+            if let Some(body) = &definition.body {
+                for nested in body {
+                    add_item_type_references(
+                        nested,
+                        module_idx,
+                        module_path,
+                        source,
+                        ledger,
+                        db,
+                    );
+                }
+            }
+        }
+        Item::GenericModule(definition) => {
+            for nested in &definition.body {
+                add_item_type_references(
+                    nested,
+                    module_idx,
+                    module_path,
+                    source,
+                    ledger,
+                    db,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_func_type_references(
+    function: &crate::AST::Func,
+    module_idx: usize,
+    module_path: &str,
+    source: &str,
+    ledger: &jet_foundation::Names::NameLedger,
+    db: &mut SymbolDB,
+) {
+    for parameter in &function.params {
+        add_checked_type_reference(
+            &parameter.ty,
+            parameter.ty_span,
+            module_idx,
+            module_path,
+            source,
+            ledger,
+            db,
+        );
+    }
+    if let (Some(ty), Some(span)) = (&function.return_type, function.return_type_span) {
+        add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, db);
+    }
+}
+
+fn add_checked_type_reference(
+    ty: &Type,
+    span: Span,
+    module_idx: usize,
+    module_path: &str,
+    source: &str,
+    ledger: &jet_foundation::Names::NameLedger,
+    db: &mut SymbolDB,
+) {
+    let Some(name) = (match ty {
+        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+        Type::TraitObject(names) if names.len() == 1 => names.first().map(String::as_str),
+        _ => None,
+    }) else {
+        return;
+    };
+    add_named_type_reference(
+        name,
+        span,
+        module_idx,
+        module_path,
+        source,
+        ledger,
+        db,
+    );
+}
+
+fn add_named_type_reference(
+    name: &str,
+    span: Span,
+    module_idx: usize,
+    module_path: &str,
+    source: &str,
+    ledger: &jet_foundation::Names::NameLedger,
+    db: &mut SymbolDB,
+) {
+    if span.start >= span.end
+        || span.end > source.len()
+        || !source.is_char_boundary(span.start)
+        || !source.is_char_boundary(span.end)
+    {
+        return;
+    }
+    let Some((target_module, declaration)) =
+        checked_type_declaration(ledger, module_idx, name)
+    else {
+        return;
+    };
+    let Some(identity) = ledger.semantic_identity(target_module, &declaration.name) else {
+        return;
+    };
+    let target_path = ledger
+        .module_path(target_module)
+        .unwrap_or(module_path)
+        .to_string();
+    let target = jet_semindex::DefinitionAnchor {
+        module_path: target_path,
+        kind: declaration.kind.clone(),
+        def_span: declaration.span.into(),
+        semantic_identity: Some(identity.clone()),
+    };
+    if db.refs.iter().any(|reference| {
+        reference.module_path == module_path
+            && reference.span == span
+            && reference
+                .target
+                .as_ref()
+                .and_then(|target| target.semantic_identity.as_deref())
+                == Some(identity.as_str())
+    }) {
+        return;
+    }
+    db.refs.push(jet_semindex::SymRef {
+        name: name.to_string(),
+        span,
+        module_path: module_path.to_string(),
+        scope_identity: None,
+        target: Some(target),
+        fact: None,
+    });
+}
+
+fn checked_type_declaration<'a>(
+    ledger: &'a jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    name: &str,
+) -> Option<(usize, &'a jet_foundation::Names::NameDeclaration)> {
+    if let Some(declaration) = ledger.declaration(module_idx, name) {
+        return Some((module_idx, declaration));
+    }
+    if let Some(target_module) = ledger.nominal_module(name) {
+        let canonical_name = name
+            .rsplit_once("::")
+            .map_or(name, |(_, canonical_name)| canonical_name);
+        if let Some(declaration) = ledger.declaration(target_module, canonical_name) {
+            return Some((target_module, declaration));
+        }
+        let leaf = canonical_name
+            .rsplit_once('.')
+            .map_or(canonical_name, |(_, leaf)| leaf);
+        if let Some(declaration) = ledger.declaration(target_module, leaf) {
+            return Some((target_module, declaration));
+        }
+    }
+    if let Some(alias) = ledger.effective_alias(module_idx, name) {
+        if let Some(target_module) = alias.target_module {
+            let target_name = alias
+                .target
+                .rsplit_once('.')
+                .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+            if let Some(declaration) = ledger.declaration(target_module, target_name) {
+                return Some((target_module, declaration));
+            }
+        }
+    }
+    let (qualifier, leaf) = name.rsplit_once('.')?;
+    let alias = ledger.effective_alias(module_idx, qualifier)?;
+    let target_module = alias.target_module?;
+    ledger
+        .declaration(target_module, leaf)
+        .map(|declaration| (target_module, declaration))
+}
+
 fn source_paths_equal(left: &str, right: &str) -> bool {
     left == right
         || std::path::Path::new(left) == std::path::Path::new(right)
         || left.trim_start_matches("./") == right.trim_start_matches("./")
 }
 
-/// Return only the source snapshot used by the checked bundle or an open
-/// document overlay. Cross-file LSP ranges must never be reconstructed from
-/// the current filesystem after checking.
-fn checked_source_snapshot<'a>(
-    server: &'a Server,
+fn canonical_source_uri(
+    value: &str,
+    project_root: Option<&std::path::Path>,
+) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    let raw_path = if value.starts_with("file://") {
+        let path = uri_to_path(value);
+        (!path.is_empty()).then_some(path)?
+    } else {
+        value.to_string()
+    };
+    let path = std::path::Path::new(&raw_path);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Some(project_root) = project_root {
+        project_root.join(path)
+    } else {
+        path.to_path_buf()
+    };
+    let canonical = normalize_path_buf(&path);
+    (!canonical.is_empty()).then(|| path_to_uri(&canonical))
+}
+
+fn checked_module_path_identity(
+    bundle: &ProgramBundle,
+    module: &crate::AST::LoadedModule,
+) -> Option<String> {
+    canonical_source_uri(
+        &module.path.to_string_lossy(),
+        Some(&bundle.project_root),
+    )
+}
+
+fn checked_module_display_identity(
+    bundle: &ProgramBundle,
+    module: &crate::AST::LoadedModule,
+) -> Option<String> {
+    (!module.display.is_empty())
+        .then(|| canonical_source_uri(&module.display, Some(&bundle.project_root)))
+        .flatten()
+}
+
+fn checked_document_identity(
+    uri: &str,
+    document: &Document,
+    project_root: &std::path::Path,
+) -> Option<String> {
+    let uri = canonical_source_uri(uri, Some(project_root))?;
+    let path = canonical_source_uri(&document.path, Some(project_root))?;
+    (uri == path).then_some(uri)
+}
+
+fn checked_document_versions(server: &Server, bundle: &ProgramBundle) -> HashMap<String, i32> {
+    let mut module_counts = HashMap::new();
+    for module in &bundle.modules {
+        if let Some(identity) = checked_module_path_identity(bundle, module) {
+            *module_counts.entry(identity).or_insert(0usize) += 1;
+        }
+    }
+    let mut versions = HashMap::new();
+    for module in &bundle.modules {
+        let Some(identity) = checked_module_path_identity(bundle, module) else {
+            continue;
+        };
+        if module_counts.get(&identity) != Some(&1) {
+            continue;
+        }
+        let mut matching = server.docs.iter().filter(|(uri, document)| {
+            checked_document_identity(uri, document, &bundle.project_root).as_deref()
+                == Some(identity.as_str())
+        });
+        let first = matching.next().map(|(_, document)| document.version);
+        if let Some(version) = first.filter(|_| matching.next().is_none()) {
+            versions.insert(identity, version);
+        }
+    }
+    versions
+}
+
+fn checked_module<'a>(
     bundle: &'a ProgramBundle,
     path: &str,
-) -> Option<(&'a str, Option<i32>)> {
-    if let Some(document) = server
-        .docs
-        .values()
-        .find(|document| source_paths_equal(&document.path, path))
-    {
-        return Some((&document.text, Some(document.version)));
+) -> Option<&'a crate::AST::LoadedModule> {
+    let target = canonical_source_uri(path, Some(&bundle.project_root))?;
+    let mut path_matches = bundle.modules.iter().filter(|module| {
+        checked_module_path_identity(bundle, module).as_deref() == Some(target.as_str())
+    });
+    if path_matches.next().is_some() && path_matches.next().is_some() {
+        return None;
     }
-    bundle
-        .modules
-        .iter()
-        .find(|module| {
-            source_paths_equal(&module.display, path)
-                || source_paths_equal(&module.path.to_string_lossy(), path)
-        })
-        .map(|module| (module.source.as_str(), None))
+    let mut matches = bundle.modules.iter().filter(|module| {
+        checked_module_path_identity(bundle, module).as_deref() == Some(target.as_str())
+            || checked_module_display_identity(bundle, module).as_deref() == Some(target.as_str())
+    });
+    let module = matches.next()?;
+    matches.next().is_none().then_some(module)
+}
+
+/// Project locations from the checked source, never a later disk or overlay
+/// revision. The client must apply edits only to the returned document version.
+fn checked_source_snapshot<'a>(
+    server: &'a Server,
+    checked: &'a CheckedBundle,
+    path: &str,
+) -> Option<(&'a crate::AST::LoadedModule, Option<i32>)> {
+    let bundle = checked.bundle.as_deref()?;
+    let module = checked_module(bundle, path)?;
+    let identity = checked_module_path_identity(bundle, module)?;
+    let mut matching = server.docs.iter().filter(|(uri, document)| {
+        checked_document_identity(uri, document, &bundle.project_root).as_deref()
+            == Some(identity.as_str())
+    });
+    let current_version = matching.next().map(|(_, document)| document.version);
+    let current_version = match (current_version, matching.next()) {
+        (None, None) => None,
+        (Some(version), None) => Some(version),
+        _ => return None,
+    };
+    match current_version {
+        Some(version) => checked
+            .checked_versions
+            .get(&identity)
+            .copied()
+            .filter(|checked_version| *checked_version == version)
+            .map(|_| (module, Some(version))),
+        None => (!checked.checked_versions.contains_key(&identity)).then_some((module, None)),
+    }
 }
 
 fn checked_byte_span_to_range(src: &str, span: Span) -> Option<LspRange> {

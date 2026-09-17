@@ -1735,20 +1735,47 @@ fn testing_ambient_core_call(
     _resolved_ret: Option<Type>,
     _sink: Option<&mut DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    if module != "core.testing" || method != "temp_dir" {
+    if module != "core.testing" {
         return None;
     }
-    let [CtValue::Str(prefix)] = args.as_slice() else {
-        return Some(Err(testing_diag(
-            "core.testing.temp_dir received malformed arguments",
-            span,
-        )));
-    };
-    Some(
-        crate::testing_shared::jet_testing_temp_dir_path(prefix)
-            .map(CtValue::Str)
-            .map_err(|error| testing_diag(error.to_string(), span)),
-    )
+    match method {
+        "golden" => {
+            let [CtValue::Str(path), CtValue::Str(actual)] = args.as_slice() else {
+                return Some(Err(testing_diag(
+                    "core.testing.golden received malformed arguments",
+                    span,
+                )));
+            };
+            Some(Ok(CtValue::Bool(
+                crate::testing_shared::jet_testing_golden_result(path, actual).is_ok_and(|value| value),
+            )))
+        }
+        "fixture" => {
+            let [CtValue::Str(path)] = args.as_slice() else {
+                return Some(Err(testing_diag(
+                    "core.testing.fixture received malformed arguments",
+                    span,
+                )));
+            };
+            Some(Ok(CtValue::Str(
+                crate::testing_shared::jet_testing_fixture_result(path).unwrap_or_default(),
+            )))
+        }
+        "temp_dir" => {
+            let [CtValue::Str(prefix)] = args.as_slice() else {
+                return Some(Err(testing_diag(
+                    "core.testing.temp_dir received malformed arguments",
+                    span,
+                )));
+            };
+            Some(
+                crate::testing_shared::jet_testing_temp_dir_path(prefix)
+                    .map(CtValue::Str)
+                    .map_err(|error| testing_diag(error.to_string(), span)),
+            )
+        }
+        _ => None,
+    }
 }
 
 /// Register the selected checked hardware profile for interpreter execution.
@@ -1789,6 +1816,7 @@ pub fn with_interpreter_ambient<R>(
 ) -> R {
     crate::Process::with_interpreter_process_state(|| {
         let mut context = InterpreterAmbientContext::default();
+        context.register_core_call(crate::Process::ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);

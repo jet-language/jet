@@ -68,3 +68,52 @@ impl JetShow for JetReflectField {
         format!("Field({}: {})", self.name, self.value.display())
     }
 }
+fn jet_reflect_value_finish(
+    type_name: String,
+    path: String,
+    display: String,
+    fields: Vec<JetReflectField>,
+) -> JetReflectValue {
+    JetReflectValue {
+        type_name,
+        path,
+        display,
+        fields,
+    }
+}
+
+fn jet_reflect_value_from_field<T: JetShow>(
+    value: &T,
+    type_name: &str,
+    path: &str,
+) -> JetReflectValue {
+    JetReflectValue::from_field(value, type_name, path)
+}
+
+fn jet_reflect_field_new(name: String, value: JetReflectValue) -> JetReflectField {
+    JetReflectField { name, value }
+}
+
+fn jet_reflect_value_type_name(value: &JetReflectValue) -> String {
+    value.type_name()
+}
+
+fn jet_reflect_value_path(value: &JetReflectValue) -> String {
+    value.path()
+}
+
+fn jet_reflect_value_display(value: &JetReflectValue) -> String {
+    value.display()
+}
+
+fn jet_reflect_value_fields(value: &JetReflectValue) -> Vec<JetReflectField> {
+    value.fields()
+}
+
+fn jet_reflect_field_name(value: &JetReflectField) -> String {
+    value.name()
+}
+
+fn jet_reflect_field_value(value: &JetReflectField) -> JetReflectValue {
+    value.value()
+}

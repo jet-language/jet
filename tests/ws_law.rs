@@ -22,14 +22,18 @@ trait JetDisplay {
 trait __jet_Encode {}
 impl<T> __jet_Encode for T {}
 
-trait __jet_Decode: Sized {}
+trait __jet_Decode: Sized {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+}
 
 fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
     String::new()
 }
 
-fn jet_enc_json_decode<T: __jet_Decode>(_text: &str) -> Result<T, String> {
-    Err("unused test decoder".to_string())
+fn jet_enc_json_decode<T: __jet_Decode>(
+    _text: &str,
+) -> Result<T, Vec<jet_std::FieldError>> {
+    Err(jet_std::FieldError::one("unused test decoder"))
 }
 
 struct JetFileReader {
@@ -39,10 +43,22 @@ struct JetFileReader {
 struct JetFileWriter {
     inner: Box<dyn std::io::Write + Send>,
 }
+mod jet_encoding_json {
+    pub use jet_foundation::EncodingJson::*;
+}
+
+mod jet_json_number {
+    pub use jet_foundation::JSONNumber::*;
+}
+
+include!("../crates/jet-foundation/src/LiveLifecycle.rs");
 
 mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    pub use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Shape::ShapeProjection;
+
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
 
     #[derive(Clone, Copy)]
@@ -58,6 +74,72 @@ mod jet_std {
         }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum IOOperation {
+        Read,
+        Write,
+        Flush,
+        Connect,
+        Accept,
+        Close,
+        Resolve,
+        Codec,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct IOContext {
+        pub operation: IOOperation,
+        pub resource: JetOutcome<String, JetAbsent>,
+        pub os_code: JetOutcome<i64, JetAbsent>,
+        pub cause: JetOutcome<String, JetAbsent>,
+    }
+
+    impl IOContext {
+        pub fn new(
+            operation: IOOperation,
+            resource: Option<String>,
+            os_code: Option<i64>,
+            cause: Option<String>,
+        ) -> Self {
+            Self {
+                operation,
+                resource: jet_outcome_of(resource),
+                os_code: jet_outcome_of(os_code),
+                cause: jet_outcome_of(cause),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum IOError {
+        InvalidInput(IOContext),
+        NotFound(IOContext),
+        PermissionDenied(IOContext),
+        TimedOut(IOContext),
+        Cancelled(IOContext),
+        Closed(IOContext),
+        Protocol(IOContext),
+        Other(IOContext),
+    }
+
+    // The canonical DataTree extension calls these exact-Int helpers. This
+    // fixture does not exercise large integer ownership, so the host i64
+    // carrier is sufficient while the type and decode modules stay canonical.
+    pub fn jet_int_from_i64(value: i64) -> i64 {
+        value
+    }
+    pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+        value.parse::<i64>().map_err(|error| error.to_string())
+    }
+    pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+        Some(value)
+    }
+    pub fn jet_int_to_string(value: i64) -> String {
+        value.to_string()
+    }
+    pub fn jet_int_to_f64(value: i64) -> f64 {
+        value as f64
+    }
     #[derive(Clone, Debug)]
     pub struct JetURL {
         pub scheme: String,
@@ -80,7 +162,18 @@ mod jet_std {
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    use crate::jet_encoding_json::quote_json;
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
+    jet_datatree_decode_helpers!();
 }
+
 
 enum JetParaRuntimeFailure {
     SchedulerFatal { msg: String },
@@ -325,9 +418,9 @@ fn live_query_rerun_publishes_and_reconnect_replays_latest() {
         Ok(format!("v{}", call + 1))
     });
     assert!(
-        query.error.is_empty(),
+        query.lifecycle.error.is_empty(),
         "query registration failed: {:?}",
-        query.error
+        query.lifecycle.error
     );
 
     let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
@@ -337,9 +430,9 @@ fn live_query_rerun_publishes_and_reconnect_replays_latest() {
         std::sync::Arc::new(move |value| delivered_sink.lock().unwrap().push(value)),
     );
     assert!(
-        query.error.is_empty(),
+        query.lifecycle.error.is_empty(),
         "sink binding failed: {:?}",
-        query.error
+        query.lifecycle.error
     );
     assert_eq!(jet_app_live_get(&query), "v1");
 
@@ -403,9 +496,9 @@ fn live_query_commit_delivers_to_sink_bound_during_rerun() {
         std::sync::Arc::new(move |value| old_values_sink.lock().unwrap().push(value)),
     );
     assert!(
-        query.error.is_empty(),
+        query.lifecycle.error.is_empty(),
         "initial sink binding failed: {:?}",
-        query.error
+        query.lifecycle.error
     );
 
     let invalidation_footprint = footprint.clone();
@@ -419,9 +512,9 @@ fn live_query_commit_delivers_to_sink_bound_during_rerun() {
         std::sync::Arc::new(move |value| new_values_sink.lock().unwrap().push(value)),
     );
     assert!(
-        query.error.is_empty(),
+        query.lifecycle.error.is_empty(),
         "canonical sink rebinding failed: {:?}",
-        query.error
+        query.lifecycle.error
     );
 
     rerun_release.wait();
@@ -652,16 +745,59 @@ fn direct_ws_consumers_include_client_core_first() {
     }
 
     fn collect_rs(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
-        let mut entries = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
-        entries.sort();
-        for path in entries {
-            if path.is_dir() {
-                collect_rs(&path, files);
-            } else if path.extension().and_then(|part| part.to_str()) == Some("rs") {
-                files.push(path);
+        let boundary = std::fs::canonicalize(dir.parent().unwrap_or(dir)).unwrap();
+        let mut pending = vec![dir.to_path_buf()];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(current) = pending.pop() {
+            let current_is_link = std::fs::symlink_metadata(&current)
+                .unwrap()
+                .file_type()
+                .is_symlink();
+            let identity = if current_is_link {
+                let Ok(identity) = std::fs::canonicalize(&current) else {
+                    // A broken link or a link cycle is not a source directory.
+                    continue;
+                };
+                identity
+            } else {
+                std::fs::canonicalize(&current).unwrap()
+            };
+            if !identity.starts_with(&boundary) {
+                continue;
+            }
+            if !visited.insert(identity) {
+                continue;
+            }
+            let mut entries = std::fs::read_dir(&current)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for path in entries.into_iter().rev() {
+                let link = std::fs::symlink_metadata(&path).unwrap();
+                if link.file_type().is_symlink() {
+                    let Ok(target) = std::fs::metadata(&path) else {
+                        continue;
+                    };
+                    if target.is_dir() {
+                        // Follow a real source directory through a link; the
+                        // canonical identity set above prevents cycles and
+                        // duplicate walks.
+                        pending.push(path);
+                    } else if target.is_file()
+                        && path.extension().and_then(|part| part.to_str()) == Some("rs")
+                        && std::fs::canonicalize(&path)
+                            .is_ok_and(|identity| identity.starts_with(&boundary))
+                    {
+                        files.push(path);
+                    }
+                } else if link.is_dir() {
+                    pending.push(path);
+                } else if link.is_file()
+                    && path.extension().and_then(|part| part.to_str()) == Some("rs")
+                {
+                    files.push(path);
+                }
             }
         }
     }

@@ -104,6 +104,66 @@ fn run() {
 }
 
 #[test]
+fn core_files_optional_walk_keeps_jet_outcome_native_carrier() {
+    let out = compile_temp(
+        "core_files_optional_walk.jet",
+        r#"
+use core.files as fs
+
+fn run() {
+    entries :: fs.walk(".", ignore: ".git") ?? panic("walk failed")
+    print(entries.len())
+}
+"#,
+    );
+    assert!(
+        out.rust.contains("fn jet_std_fs_walk(")
+            && out
+                .rust
+                .contains("ignore_name: JetOutcome<String, JetAbsent>"),
+        "filesystem walk must keep its JetOutcome helper ABI"
+    );
+    let call = out
+        .rust
+        .lines()
+        .find(|line| line.contains("jet_std_fs_walk(") && !line.contains("fn jet_std_fs_walk("))
+        .expect("generated source must call the filesystem walk helper");
+    assert!(
+        !call.contains(").ok()"),
+        "direct filesystem rows must not project JetOutcome to native Option:\n{call}"
+    );
+}
+
+#[test]
+fn core_http_server_optional_controls_project_to_native_options() {
+    let out = compile_temp(
+        "core_http_server_optional_controls.jet",
+        r#"
+use core.http.server as http_server
+
+fn run() !HTTPError {
+    mux :: http_server.mux()
+    mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "hello")))
+    server :: http_server.bind("127.0.0.1:18080", mux, deadline: 2s)
+    server.serve()
+}
+"#,
+    );
+    let calls = out
+        .rust
+        .lines()
+        .filter(|line| {
+            line.contains("jet_http_server_bind(")
+                && !line.contains("fn jet_http_server_bind(")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        calls.iter().any(|line| line.contains(").ok()")),
+        "HTTP present optional carriers must project to native Option:\n{calls:?}"
+    );
+}
+
+#[test]
 fn core_files_depth_example_runs() {
     let jet = jet_bin();
     if !jet.exists() {

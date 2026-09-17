@@ -2169,6 +2169,33 @@ mod tests {
             Some(StructuredFix::SuggestedSourceEdit),
             "E0311 must authorize its suggested raise-site edit through the registry"
         );
+        assert_eq!(
+            diagnostic("E0109").and_then(|row| row.structured_fix),
+            None,
+            "E0109 must remain conservative until a producer proves a source-derived edit"
+        );
+        assert_eq!(
+            diagnostic("E0109").and_then(|row| row.fix_safety),
+            None
+        );
+        assert!(
+            diagnostic("E0109")
+                .and_then(|row| row.no_fix_reason)
+                .is_some(),
+            "E0109 must retain a reviewed next action for unsupported operands"
+        );
+        let collection = diagnostic("E0507").expect("E0507 row");
+        let rendered = collection.render(&[("name", "nums"), ("operation", "`nums.push()`")]);
+        assert!(rendered.fix.contains("separate result"));
+        assert!(rendered.fix.contains("original values"));
+        assert!(rendered.fix.contains("explicit work queue"));
+        assert!(collection.no_fix_reason.is_some());
+        assert_eq!(
+            collection.structured_fix,
+            None,
+            "E0507 has no machine edit while traversal intent is unknown"
+        );
+        assert_eq!(collection.fix_safety, None);
         let rendered = crypto.render(&[("why", "the bound is 32 bytes"), ("fix", "pass 32 bytes")]);
         assert_eq!(rendered.why, "the bound is 32 bytes");
         assert_eq!(

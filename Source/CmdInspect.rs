@@ -4824,7 +4824,20 @@ fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, jso
     }
 }
 
+const HARDENING_SURFACE_SCHEMA: &str = "jet.hardening.surface.v1";
+const HARDENING_SURFACE_VERSION: i128 = 1;
 const CAPABILITY_RELATION_SCHEMA: &str = "jet.capability.relation.v1";
+const CAPABILITY_RELATION_VERSION: i128 = 1;
+const CAPABILITY_RELATION_DISPOSITIONS: &[&str] = &[
+    "planned",
+    "implemented-unqualified",
+    "passed",
+    "failed",
+    "stale",
+    "unavailable",
+    "unsupported",
+    "owner-ratified-not-applicable",
+];
 
 fn capability_status_field<'a>(value: &'a StatusValue, name: &str) -> Option<&'a StatusValue> {
     match value {
@@ -4842,13 +4855,487 @@ fn capability_status_string(value: &StatusValue) -> Option<&str> {
     }
 }
 
+fn capability_status_integer(value: &StatusValue) -> Option<i128> {
+    match value {
+        StatusValue::Integer(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn capability_status_bool(value: &StatusValue) -> Option<bool> {
+    match value {
+        StatusValue::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn capability_digest(value: &StatusValue) -> Option<&str> {
+    let value = capability_status_string(value)?;
+    let hex = value.strip_prefix("sha256:")?;
+    (hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit()))
+        .then_some(value)
+}
+
+fn capability_canonical_json(value: &StatusValue) -> Result<String, String> {
+    fn encode(value: &StatusValue, root: bool) -> Result<String, String> {
+        match value {
+            StatusValue::Null => Ok("null".to_string()),
+            StatusValue::Bool(value) => Ok(value.to_string()),
+            StatusValue::Integer(value) => Ok(value.to_string()),
+            StatusValue::Float(_) => {
+                Err("canonical capability metadata cannot contain floating-point numbers".into())
+            }
+            StatusValue::String(value) => Ok(format!("\"{}\"", json_escape(value))),
+            StatusValue::Array(values) => Ok(format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| encode(value, false))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(",")
+            )),
+            StatusValue::Object(fields) => {
+                let mut entries = fields.iter().collect::<Vec<_>>();
+                entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+                if entries
+                    .windows(2)
+                    .any(|window| window[0].0 == window[1].0)
+                {
+                    return Err("canonical capability metadata has duplicate object keys".into());
+                }
+                let entries = entries
+                    .into_iter()
+                    .filter(|(name, _)| !(root && *name == "content_digest"))
+                    .map(|(name, value)| {
+                        Ok(format!(
+                            "\"{}\":{}",
+                            json_escape(name),
+                            encode(value, false)?
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Ok(format!("{{{}}}", entries.join(",")))
+            }
+        }
+    }
+    encode(value, true)
+}
+
+fn validate_capability_content_digest(value: &StatusValue, label: &str) -> Result<(), String> {
+    let actual = capability_status_field(value, "content_digest")
+        .and_then(capability_digest)
+        .ok_or_else(|| format!("{label} content_digest is missing or invalid"))?;
+    let canonical = capability_canonical_json(value)?;
+    let expected = format!("sha256:{}", jet::SHA256::sha256_hex(canonical.as_bytes()));
+    if actual != expected {
+        return Err(format!("{label} content_digest does not match canonical content"));
+    }
+    Ok(())
+}
+
+fn validate_hardening_manifest(manifest: &StatusValue) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if capability_status_field(manifest, "schema").and_then(capability_status_string)
+        != Some(HARDENING_SURFACE_SCHEMA)
+    {
+        errors.push(format!("schema must be {HARDENING_SURFACE_SCHEMA}"));
+    }
+    if capability_status_field(manifest, "schema_version")
+        .and_then(capability_status_integer)
+        != Some(HARDENING_SURFACE_VERSION)
+    {
+        errors.push(format!("schema_version must be {HARDENING_SURFACE_VERSION}"));
+    }
+    if let Err(error) = validate_capability_content_digest(manifest, "hardening manifest") {
+        errors.push(error);
+    }
+    let Some(snapshot) = capability_status_field(manifest, "source_snapshot") else {
+        errors.push("source_snapshot is required".to_string());
+        return Err(errors.join("; "));
+    };
+    if capability_status_field(snapshot, "algorithm").and_then(capability_status_string)
+        != Some("sha256")
+    {
+        errors.push("source_snapshot algorithm must be sha256".to_string());
+    }
+    if capability_status_field(snapshot, "hash")
+        .and_then(capability_digest)
+        .is_none() {
+        errors.push("source_snapshot hash is missing or invalid".to_string());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn validate_capability_relation(
+    manifest: &StatusValue,
+    relation: &StatusValue,
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if capability_status_field(relation, "schema").and_then(capability_status_string)
+        != Some(CAPABILITY_RELATION_SCHEMA)
+    {
+        errors.push(format!("schema must be {CAPABILITY_RELATION_SCHEMA}"));
+    }
+    if capability_status_field(relation, "schema_version")
+        .and_then(capability_status_integer)
+        != Some(CAPABILITY_RELATION_VERSION)
+    {
+        errors.push(format!("schema_version must be {CAPABILITY_RELATION_VERSION}"));
+    }
+    if let Err(error) = validate_capability_content_digest(relation, "capability relation") {
+        errors.push(error);
+    }
+    let relation_source = capability_status_field(relation, "source_snapshot_hash")
+        .and_then(capability_digest);
+    let manifest_source = capability_status_field(manifest, "source_snapshot")
+        .and_then(|snapshot| capability_status_field(snapshot, "hash"))
+        .and_then(capability_digest);
+    if relation_source.is_none() {
+        errors.push("source_snapshot_hash is missing or invalid".to_string());
+    } else if relation_source != manifest_source {
+        errors.push("source_snapshot_hash does not match the manifest".to_string());
+    }
+    if capability_status_field(relation, "revision_rule")
+        .and_then(capability_status_string)
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        errors.push("revision_rule is missing or empty".to_string());
+    }
+
+    let empty: &[StatusValue] = &[];
+    let identity_rows = match capability_status_field(relation, "identities") {
+        Some(StatusValue::Array(values)) => values.as_slice(),
+        _ => {
+            errors.push("identities are required".to_string());
+            empty
+        }
+    };
+    let mut identity_modes = BTreeMap::<String, BTreeSet<String>>::new();
+    for identity in identity_rows {
+        let Some(identity_id) =
+            capability_status_field(identity, "capability_id").and_then(capability_status_string)
+        else {
+            errors.push("identity capability_id is missing".to_string());
+            continue;
+        };
+        if identity_id.trim().is_empty() {
+            errors.push("identity capability_id is empty".to_string());
+            continue;
+        }
+        if identity_modes.contains_key(identity_id) {
+            errors.push(format!("duplicate identity: {identity_id}"));
+        }
+        let modes = match capability_status_field(identity, "applicable_modes") {
+            Some(StatusValue::Array(values)) => values.as_slice(),
+            _ => {
+                errors.push(format!("identity has no applicable modes: {identity_id}"));
+                &[]
+            }
+        };
+        let mut mode_set = BTreeSet::new();
+        for mode in modes {
+            let Some(mode) = capability_status_string(mode) else {
+                errors.push(format!("identity mode is malformed: {identity_id}"));
+                continue;
+            };
+            if mode.trim().is_empty() || !mode_set.insert(mode.to_string()) {
+                errors.push(format!("identity mode is empty or duplicated: {identity_id}"));
+            }
+        }
+        let source_identity = capability_status_field(identity, "source_identity");
+        if capability_status_field(identity, "source_identity")
+            .and_then(|value| capability_status_field(value, "path"))
+            .and_then(capability_status_string)
+            .is_none_or(|value| value.trim().is_empty())
+            || source_identity
+                .and_then(|value| capability_status_field(value, "digest"))
+                .and_then(capability_digest)
+            .is_none()
+        {
+            errors.push(format!("identity source is invalid: {identity_id}"));
+        }
+        identity_modes.insert(identity_id.to_string(), mode_set);
+    }
+
+    let row_rows = match capability_status_field(relation, "rows") {
+        Some(StatusValue::Array(values)) => values.as_slice(),
+        _ => {
+            errors.push("rows are required".to_string());
+            empty
+        }
+    };
+    let mut row_ids = BTreeSet::new();
+    let mut disposition_counts = BTreeMap::<String, usize>::new();
+    let mut counted_rows = 0usize;
+    for (index, row) in row_rows.iter().enumerate() {
+        let label = format!("row#{index}");
+        let Some(row_id) =
+            capability_status_field(row, "row_id").and_then(capability_status_string)
+        else {
+            errors.push(format!("{label} row_id is missing"));
+            continue;
+        };
+        if row_id.trim().is_empty() || !row_ids.insert(row_id.to_string()) {
+            errors.push(format!("duplicate or empty row_id: {row_id}"));
+        }
+        let capability_id =
+            capability_status_field(row, "capability_id").and_then(capability_status_string);
+        let mode = capability_status_field(row, "mode").and_then(capability_status_string);
+        if let (Some(capability_id), Some(mode)) = (capability_id, mode) {
+            if row_id != format!("{capability_id}@{mode}") {
+                errors.push(format!("row identity is not canonical: {row_id}"));
+            }
+            match identity_modes.get(capability_id) {
+                Some(modes) if modes.contains(mode) => {}
+                Some(_) => errors.push(format!("row has an inapplicable mode: {row_id}")),
+                None => errors.push(format!("row has no identity: {row_id}")),
+            }
+        } else {
+            errors.push(format!("row capability_id or mode is missing: {row_id}"));
+        }
+        let disposition =
+            capability_status_field(row, "disposition").and_then(capability_status_string);
+        if let Some(disposition) = disposition {
+            if !CAPABILITY_RELATION_DISPOSITIONS.contains(&disposition) {
+                errors.push(format!("row has an invalid disposition: {row_id}"));
+            }
+            *disposition_counts
+                .entry(disposition.to_string())
+                .or_default() += 1;
+            if capability_status_field(row, "status").and_then(capability_status_string)
+                != Some(disposition)
+            {
+                errors.push(format!("row status contradicts disposition: {row_id}"));
+            }
+            if disposition != "passed"
+                && capability_status_field(row, "owner_link")
+                    .and_then(capability_status_string)
+                    .is_none_or(|value| value.trim().is_empty())
+            {
+                errors.push(format!("non-pass row has no owner link: {row_id}"));
+            }
+            if disposition == "passed" {
+                let evidence_passed = capability_status_field(row, "evidence")
+                    .and_then(|value| capability_status_field(value, "status"))
+                    .and_then(capability_status_string)
+                    == Some("passed");
+                let independent_oracle = capability_status_field(row, "oracle")
+                    .and_then(|value| {
+                        capability_status_field(value, "independent_expected_behavior")
+                    })
+                    .and_then(capability_status_bool)
+                    == Some(true);
+                let value_consuming = capability_status_field(row, "observable")
+                    .and_then(|value| capability_status_field(value, "value_consuming"))
+                    .and_then(capability_status_bool)
+                    == Some(true);
+                if !evidence_passed || !independent_oracle || !value_consuming {
+                    errors.push(format!(
+                        "passed row lacks evidence, independent oracle, or observable value: {row_id}"
+                    ));
+                }
+                let exact_identity = capability_status_field(row, "identity")
+                    .and_then(|value| capability_status_field(value, "candidate"))
+                    .and_then(|value| capability_status_field(value, "status"))
+                    .and_then(capability_status_string)
+                    == Some("available");
+                let concrete_identity = ["compiler_identity", "tool_identity", "target_identity"]
+                    .iter()
+                    .all(|field| matches!(capability_status_field(row, field), Some(StatusValue::Object(_))));
+                let candidate_available = capability_status_field(row, "candidate_identity")
+                    .and_then(|value| capability_status_field(value, "status"))
+                    .and_then(capability_status_string)
+                    == Some("available");
+                if !exact_identity || !concrete_identity || !candidate_available {
+                    errors.push(format!("passed row lacks exact candidate identity: {row_id}"));
+                }
+                if capability_status_field(row, "candidate_identity")
+                    .and_then(|value| capability_status_field(value, "status"))
+                    .and_then(capability_status_string)
+                    == Some("stale")
+                {
+                    errors.push(format!("stale candidate is marked passed: {row_id}"));
+                }
+            }
+            if disposition == "owner-ratified-not-applicable" {
+                let ratified = capability_status_field(row, "exclusion").is_some_and(|value| {
+                    ["reason", "owner", "decision"].iter().all(|field| {
+                        capability_status_field(value, field)
+                            .and_then(capability_status_string)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                });
+                if !ratified {
+                    errors.push(format!("capability exclusion is not owner-ratified: {row_id}"));
+                }
+            }
+        } else {
+            errors.push(format!("row disposition is missing: {row_id}"));
+        }
+        for field in [
+            "contract",
+            "route",
+            "observable",
+            "oracle",
+            "evidence",
+            "identity",
+            "owner",
+            "source_identity",
+            "candidate_identity",
+        ] {
+            if !matches!(capability_status_field(row, field), Some(StatusValue::Object(_))) {
+                errors.push(format!("row {field} is missing: {row_id}"));
+            }
+        }
+        if capability_status_field(row, "counted").and_then(capability_status_bool) != Some(true) {
+            errors.push(format!("row is not counted: {row_id}"));
+        } else {
+            counted_rows += 1;
+        }
+    }
+    for (identity, modes) in &identity_modes {
+        for mode in modes {
+            let row_id = format!("{identity}@{mode}");
+            if !row_ids.contains(&row_id) {
+                errors.push(format!("missing applicable mode row: {row_id}"));
+            }
+        }
+    }
+
+    let denominator = capability_status_field(relation, "denominator");
+    let Some(denominator) = denominator.filter(|value| matches!(value, StatusValue::Object(_)))
+    else {
+        errors.push("denominator is required".to_string());
+        return if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        };
+    };
+    let integer_field = |value: Option<&StatusValue>| {
+        value
+            .and_then(capability_status_integer)
+            .and_then(|value| usize::try_from(value).ok())
+    };
+    if integer_field(capability_status_field(denominator, "row_count")) != Some(row_rows.len()) {
+        errors.push("denominator row_count is stale".to_string());
+    }
+    if integer_field(capability_status_field(denominator, "counted_rows")) != Some(counted_rows) {
+        errors.push("denominator counted_rows is stale".to_string());
+    }
+    let denominator_ids = match capability_status_field(denominator, "identity_ids") {
+        Some(StatusValue::Array(values)) => {
+            let mut ids = BTreeSet::new();
+            for value in values {
+                if let Some(value) = capability_status_string(value) {
+                    if !ids.insert(value.to_string()) {
+                        errors.push("denominator identity_ids contain duplicates".to_string());
+                    }
+                } else {
+                    errors.push("denominator identity_ids contain a malformed value".to_string());
+                }
+            }
+            Some(ids)
+        }
+        _ => {
+            errors.push("denominator identity_ids are required".to_string());
+            None
+        }
+    };
+    if integer_field(capability_status_field(denominator, "identity_count"))
+        != Some(identity_modes.len())
+        || denominator_ids.as_ref().is_some_and(|ids| {
+            ids.len() != identity_modes.len() || ids.iter().any(|id| !identity_modes.contains_key(id))
+        })
+    {
+        errors.push("denominator identities are stale".to_string());
+    }
+    let disposition_values = capability_status_field(denominator, "dispositions");
+    if let Some(StatusValue::Object(fields)) = disposition_values {
+        for (name, _) in fields.iter() {
+            if !CAPABILITY_RELATION_DISPOSITIONS.contains(&name) {
+                errors.push(format!("denominator has unknown disposition: {name}"));
+            }
+        }
+        for disposition in CAPABILITY_RELATION_DISPOSITIONS {
+            let actual = disposition_values
+                .and_then(|value| capability_status_field(value, disposition))
+                .and_then(capability_status_integer)
+                .and_then(|value| usize::try_from(value).ok());
+            if actual != Some(*disposition_counts.get(*disposition).unwrap_or(&0)) {
+                errors.push(format!("denominator disposition count is stale: {disposition}"));
+            }
+        }
+    } else {
+        errors.push("denominator dispositions are required".to_string());
+    }
+
+    let consumers = capability_status_field(relation, "consumers");
+    for consumer in ["inspect", "hardening", "learner", "release"] {
+        let Some(consumer_value) = consumers.and_then(|value| capability_status_field(value, consumer))
+        else {
+            errors.push(format!("consumer metadata is missing: {consumer}"));
+            continue;
+        };
+        if capability_status_field(consumer_value, "relation")
+            .and_then(capability_status_string)
+            != Some("manifest.capability_relation.rows")
+        {
+            errors.push(format!("consumer relation is not canonical: {consumer}"));
+        }
+        if consumer == "release"
+            && capability_status_field(consumer_value, "candidate")
+                .and_then(capability_status_string)
+                != Some("row.candidate_identity")
+        {
+            errors.push("release consumer candidate is not canonical".to_string());
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
 fn capability_relation_status(value: &StatusValue) -> &str {
     capability_status_field(value, "status")
         .and_then(capability_status_string)
         .unwrap_or("unavailable")
 }
 
-pub(crate) fn capability_relation_projection(root: &Path) -> StatusValue {
+fn capability_relation_has_candidate_evidence(value: &StatusValue) -> bool {
+    let Some(StatusValue::Array(rows)) = capability_status_field(value, "rows") else {
+        return false;
+    };
+    !rows.is_empty()
+        && rows.iter().all(|row| {
+            if capability_status_field(row, "counted").and_then(capability_status_bool)
+                != Some(true)
+            {
+                return false;
+            }
+            match capability_status_field(row, "disposition").and_then(capability_status_string) {
+                Some("owner-ratified-not-applicable") => true,
+                Some("passed") => {
+                    capability_status_field(row, "evidence")
+                        .and_then(|value| capability_status_field(value, "status"))
+                        .and_then(capability_status_string)
+                        == Some("passed")
+                        && capability_status_field(row, "candidate_identity")
+                            .and_then(|value| capability_status_field(value, "status"))
+                            .and_then(capability_status_string)
+                            == Some("available")
+                }
+                _ => false,
+            }
+        })
+}
+pub(crate) fn capability_relation_projection(root: &Path) -> Result<StatusValue, String> {
     let path = root.join(".jet/hardening-manifest.json");
     let unavailable = |reason: String| {
         StatusValue::object(
@@ -4863,62 +5350,47 @@ pub(crate) fn capability_relation_projection(root: &Path) -> StatusValue {
     };
     let raw = match fs::read_to_string(&path) {
         Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(unavailable(format!(
+                "capability relation source `{}` is absent",
+                path.display()
+            )));
+        }
         Err(error) => {
-            return unavailable(format!(
-                "can't read capability relation `{}`: {error}",
+            return Err(format!(
+                "can't read canonical capability relation source `{}`: {error}",
                 path.display()
             ));
         }
     };
-    let manifest = match StatusValue::parse(&raw) {
-        Ok(value) => value,
-        Err(error) => {
-            return unavailable(format!(
-                "can't parse capability relation source `{}`: {error}",
-                path.display()
-            ));
-        }
-    };
-    let relation_fields = match capability_status_field(&manifest, "capability_relation") {
-        Some(StatusValue::Object(fields)) => fields.clone(),
+    let manifest = StatusValue::parse(&raw)
+        .map_err(|error| format!("can't parse canonical manifest `{}`: {error}", path.display()))?;
+    validate_hardening_manifest(&manifest)
+        .map_err(|error| format!("canonical manifest `{}` is invalid: {error}", path.display()))?;
+    let relation = match capability_status_field(&manifest, "capability_relation") {
+        Some(StatusValue::Object(_)) => capability_status_field(&manifest, "capability_relation")
+            .expect("capability relation field was checked above"),
         Some(_) => {
-            return unavailable("manifest capability_relation must be an object".to_string());
+            return Err(format!(
+                "canonical manifest `{}` has a non-object capability_relation",
+                path.display()
+            ));
         }
         None => {
-            return unavailable("manifest has no capability_relation".to_string());
+            return Ok(unavailable(
+                "manifest has no capability_relation evidence".to_string(),
+            ));
         }
     };
-    let relation = StatusValue::Object(relation_fields.clone());
-    if capability_status_field(&relation, "schema").and_then(capability_status_string)
-        != Some(CAPABILITY_RELATION_SCHEMA)
-    {
-        return unavailable("capability relation schema is missing or unsupported".to_string());
-    }
-    if !matches!(
-        capability_status_field(&relation, "rows"),
-        Some(StatusValue::Array(_))
-    ) {
-        return unavailable("capability relation rows are missing or not an array".to_string());
-    }
-    for field in ["source_snapshot_hash", "content_digest"] {
-        if !matches!(
-            capability_status_field(&relation, field),
-            Some(StatusValue::String(value)) if !value.is_empty()
-        ) {
-            return unavailable(format!("capability relation {field} is missing or empty"));
-        }
-    }
-    let relation_source = capability_status_field(&relation, "source_snapshot_hash")
-        .and_then(capability_status_string);
-    let manifest_source = capability_status_field(&manifest, "source_snapshot")
-        .and_then(|snapshot| capability_status_field(snapshot, "hash"))
-        .and_then(capability_status_string);
-    if relation_source.is_none() || relation_source != manifest_source {
-        return unavailable(
-            "capability relation source snapshot does not match the manifest".to_string(),
-        );
-    }
-
+    validate_capability_relation(&manifest, relation).map_err(|error| {
+        format!(
+            "canonical capability relation `{}` is invalid: {error}",
+            path.display()
+        )
+    })?;
+    let StatusValue::Object(relation_fields) = relation else {
+        unreachable!("capability relation object was checked above")
+    };
     let mut projection = StatusFields::new();
     for (name, value) in relation_fields.iter() {
         if matches!(name, "status" | "relation" | "path") {
@@ -4937,7 +5409,7 @@ pub(crate) fn capability_relation_projection(root: &Path) -> StatusValue {
     projection
         .insert("path", path.display().to_string())
         .expect("capability relation path field must be unique");
-    StatusValue::object(projection)
+    Ok(StatusValue::object(projection))
 }
 
 /// `inspect claims --json` consumes this exact manifest relation without
@@ -5039,7 +5511,19 @@ fn run_claims(file: &str, json: bool) {
         .flatten()
         .and_then(|facts| facts.policy.claims_min);
     let floor_met = projection.floor_met(floor);
-    let capability_relation = capability_relation_projection(&root);
+    let capability_relation = capability_relation_projection(&root).unwrap_or_else(|error| {
+        crate::cli_error!(
+            @fix "E2105",
+            error,
+            "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims"
+        );
+        exit(jet::ExitCodes::USER_ERROR);
+    });
+    let release = jet::Manifest::current_release_status();
+    let release_ready = floor_met
+        && capability_relation_status(&capability_relation) == "available"
+        && capability_relation_has_candidate_evidence(&capability_relation)
+        && release.readiness() == "ready";
 
     if json {
         let rows = claims
@@ -5087,6 +5571,14 @@ fn run_claims(file: &str, json: bool) {
             .unwrap_or(StatusValue::Null);
         let fields = StatusFields::new()
             .with("file", file)
+            .with("release", StatusValue::object(
+                StatusFields::new()
+                    .with("status", release.channel())
+                    .with("readiness", release.readiness())
+                    .with("compatibility_policy", release.policy())
+                    .with("compatibility_policy_active", release.policy_active()),
+            ))
+            .with("release_ready", release_ready)
             .with("capability_relation", capability_relation.clone())
             .with("claims", StatusValue::array(rows))
             .with("grade", grade.render())
@@ -5098,12 +5590,24 @@ fn run_claims(file: &str, json: bool) {
             .with("floor_met", floor_met);
         println!(
             "{}",
-            StatusEnvelope::new("inspect.claims", floor_met)
+            StatusEnvelope::new("inspect.claims", release_ready)
                 .with_fields(fields)
                 .json()
         );
     } else {
         println!("claims");
+        println!(
+            "release: {} (readiness: {}; 1.0 compatibility policy: {} [{}])",
+            release.channel(),
+            release.readiness(),
+            release.policy(),
+            if release.policy_active() {
+                "active"
+            } else {
+                "not active"
+            }
+        );
+        println!("release ready: {}", if release_ready { "yes" } else { "no" });
         println!(
             "capability relation: {}",
             capability_relation_status(&capability_relation)

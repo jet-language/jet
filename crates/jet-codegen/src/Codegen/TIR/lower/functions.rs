@@ -661,9 +661,13 @@ fn contract_result_for_scope(
     let declared = owner_type
         .map(|owner| resolve_self_ty(&declared, owner))
         .unwrap_or(declared);
-    let binding_ty = cx.canonicalize_checked_type(&declared, &type_param_names);
+    let binding_ty = canonical_owner_type(
+        cx,
+        &cx.canonicalize_checked_type(&declared, &type_param_names),
+    );
     let carrier_ty = ret
         .map(|ty| cx.canonicalize_checked_type(&ty, &type_param_names))
+        .map(|ty| canonical_owner_type(cx, &ty))
         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     let mode = contract_result_mode(&carrier_ty, &binding_ty);
     let binding_local = TLocal::generated("result");
@@ -800,6 +804,31 @@ pub(crate) fn param_place_generic(
     param_place(name, &p)
 }
 
+/// Project a method owner through the same canonical nominal identities used
+/// by field and MIR lowering. Trait-generated methods can otherwise retain a
+/// bare local owner and become ambiguous when an imported type shares its leaf.
+fn canonical_owner_type(cx: &Cx, ty: &Type) -> Type {
+    let entry_local = cx.jit_local_call_prefix.is_none();
+    let mapped = ty.map_named_types(&|name| {
+        if entry_local && cx.local_type_names.contains(name) {
+            return None;
+        }
+        let canonical = crate::Codegen::TIR::canonical_enum_owner(cx, name);
+        (canonical != name).then_some(canonical)
+    });
+    match mapped {
+        Type::Apply { name, args } => Type::Apply {
+            name: crate::Codegen::TIR::canonical_enum_owner(cx, &name),
+            args,
+        },
+        other => other,
+    }
+}
+
+fn canonical_owner_name(cx: &Cx, name: &str) -> String {
+    crate::Codegen::TIR::canonical_enum_owner(cx, name)
+}
+
 /// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a
 /// `TFunc`. Mirrors `emit_method`'s slot construction exactly:
 ///  - the `self` parameter (if any) becomes a slot whose place is the bare `self`
@@ -840,14 +869,15 @@ fn lower_method_for_owner_inner(
     cx: &Cx,
     raw_protocol_return: bool,
 ) -> TFunc {
+    let owner_ty = canonical_owner_type(cx, &owner_ty);
     let declared_return_type = f
         .return_type
         .clone()
         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     let return_type = if raw_protocol_return {
         debug_assert!(
-            f.compiler_generated && f.return_type.is_some(),
-            "compiler-generated trait protocols must declare their raw return type"
+            f.return_type.is_some(),
+            "state-transition methods must declare their raw return type",
         );
         resolve_self_ty(&declared_return_type, type_name)
     } else {
@@ -860,13 +890,14 @@ fn lower_method_for_owner_inner(
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
     cx.current_type_params.replace(method_type_params.clone());
-    let return_type = cx.canonicalize_checked_type(&return_type, &method_type_params);
+    let return_type =
+        canonical_owner_type(cx, &cx.canonicalize_checked_type(&return_type, &method_type_params));
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     env.ret_ty = Some(return_type.clone());
     env.raw_protocol_return = raw_protocol_return;
-    env.self_owner = Some(type_name.to_string());
+    env.self_owner = Some(canonical_owner_name(cx, type_name));
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
@@ -900,7 +931,7 @@ fn lower_method_for_owner_inner(
         if p.variadic {
             pty = Type::List(Box::new(pty));
         }
-        pty = cx.canonicalize_checked_type(&pty, &method_type_params);
+        pty = canonical_owner_type(cx, &cx.canonicalize_checked_type(&pty, &method_type_params));
         let mut slot_param = p.clone();
         slot_param.ty = pty.clone();
         let convention = effective_generic_convention(&slot_param, &f.type_params);
@@ -1088,6 +1119,7 @@ fn lower_trait_method_inner(
         },
         _ => Type::Named(type_name.to_string()),
     };
+    let owner_ty = canonical_owner_type(cx, &owner_ty);
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
     if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
@@ -1095,14 +1127,15 @@ fn lower_trait_method_inner(
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
     cx.current_type_params.replace(method_type_params.clone());
-    let return_type = cx.canonicalize_checked_type(&return_type, &method_type_params);
+    let return_type =
+        canonical_owner_type(cx, &cx.canonicalize_checked_type(&return_type, &method_type_params));
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     env.ret_ty = Some(return_type.clone());
     env.raw_protocol_return = raw_protocol_return;
-    env.self_owner = Some(type_name.to_string());
+    env.self_owner = Some(canonical_owner_name(cx, type_name));
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
     let mut self_conv = None;
@@ -1135,9 +1168,12 @@ fn lower_trait_method_inner(
         } else {
             param_place(&p.name, p)
         };
-        let pty = cx.canonicalize_checked_type(
-            &resolve_self_ty(&p.ty, type_name),
-            &method_type_params,
+        let pty = canonical_owner_type(
+            cx,
+            &cx.canonicalize_checked_type(
+                &resolve_self_ty(&p.ty, type_name),
+                &method_type_params,
+            ),
         );
         bind_resource_param(
             &p.name,

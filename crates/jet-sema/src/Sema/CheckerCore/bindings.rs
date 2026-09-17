@@ -259,11 +259,9 @@ fn canonical_fragment_type(
     }
 }
 
-/// A bound lambda can borrow a written capture only while every later use in
-/// the current lexical scope invokes it directly. Any other use may retain the
-/// callable, so sema keeps the conservative owning-capture route. A read-only
-/// lambda with a non-cloneable capture also needs that route: codegen must move
-/// the capture into its `move` closure.
+/// A bound lambda with captures owns copyable values at closure creation, even
+/// when every later use invokes it directly. Non-copyable/view captures retain
+/// the conservative escape route or the direct borrow route respectively.
 fn stmt_uses_name_only_as_direct_call(stmt: &Stmt, name: &str) -> bool {
     let mut nested_capture = false;
     stmt.for_each_expr(|expr| {
@@ -372,21 +370,30 @@ impl<'a> Checker<'a> {
             &mut mut_caps,
         );
         read_caps.extend(lambda.take_names.iter().map(|(capture, _)| capture.clone()));
-        for capture in read_caps {
-            if param_names.contains(&capture)
-                || take_names.contains(&capture)
-                || mut_caps.contains(&capture)
+        for capture in read_caps.iter().chain(mut_caps.iter()) {
+            if param_names.contains(capture)
+                || take_names.contains(capture)
             {
                 continue;
             }
+            // A view is already a deliberate borrow window. Keep direct
+            // invocation on that path; ordinary values below use the
+            // copy-at-creation ownership route.
+            if self.is_view(capture) {
+                continue;
+            }
             let cap_ty = self
-                .lookup(&capture)
+                .lookup(capture)
                 .map(|info| info.ty.clone())
-                .or_else(|| self.consts.get(&capture).cloned());
+                .or_else(|| self.consts.get(capture).cloned());
             let Some(cap_ty) = cap_ty else {
                 continue;
             };
-            if self.is_resource_type(&cap_ty) || !is_cloneable(&cap_ty, self.registry) {
+            let cloneable = is_cloneable(&cap_ty, self.registry);
+            if cloneable {
+                return true;
+            }
+            if self.is_resource_type(&cap_ty) && !mut_caps.contains(capture) {
                 return true;
             }
         }
@@ -1736,6 +1743,7 @@ impl<'a> Checker<'a> {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
             let globals = self.current_ct_globals().into_owned();
+            let binding_types = self.current_ct_binding_types(&globals);
             // D-META-EFFECT1: pass core_imports so the interpreter can
             // resolve effect-approved Core calls (e.g. `math.sqrt(x)`).
             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
@@ -1748,6 +1756,7 @@ impl<'a> Checker<'a> {
                 self.ct_externs,
                 self.ct_base_dir,
                 &globals,
+                &binding_types,
                 self.core_imports,
                 self.gates,
                 self.ct_impure_depth,
@@ -1791,6 +1800,7 @@ impl<'a> Checker<'a> {
             // one guard where the value is minted, not a syntactic
             // pattern match here that a stray `(...)` could dodge.)
             let globals = self.current_ct_globals().into_owned();
+            let binding_types = self.current_ct_binding_types(&globals);
             let mut mutated = std::collections::HashMap::new();
             let checked_nominals = self.checked_comptime_nominals();
             let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
@@ -1799,6 +1809,7 @@ impl<'a> Checker<'a> {
                 self.ct_externs,
                 self.ct_base_dir,
                 &globals,
+                &binding_types,
                 self.core_imports,
                 self.gates,
                 0,

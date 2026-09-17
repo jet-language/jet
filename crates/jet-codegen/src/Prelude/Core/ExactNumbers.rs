@@ -222,13 +222,27 @@ impl JetWasmInt {
     }
 
     fn from_decimal_digits(digits: &[u8]) -> Self {
-        let mut value = Self::zero();
-        for &digit in digits {
-            value = value.mul_small(10).add_small(u32::from(digit));
+        if digits.is_empty() {
+            return Self::zero();
         }
-        value
+        let groups = digits.len().div_ceil(9);
+        let mut limbs = Vec::with_capacity(groups);
+        let mut end = digits.len();
+        while end != 0 {
+            let start = end.saturating_sub(9);
+            let mut limb = 0u32;
+            for &digit in &digits[start..end] {
+                limb = limb * 10 + u32::from(digit);
+            }
+            limbs.push(limb);
+            end = start;
+        }
+        Self {
+            negative: false,
+            limbs,
+        }
+        .normalize()
     }
-
     fn to_i128(&self) -> Option<i128> {
         let base = u128::from(JET_WASM_INT_BASE);
         let mut magnitude = 0u128;
@@ -249,11 +263,38 @@ impl JetWasmInt {
         }
     }
 
-    fn mul_pow10(mut self, scale: u32) -> Self {
-        for _ in 0..scale {
-            self = self.mul_small(10);
+    fn mul_pow10(self, scale: u32) -> Self {
+        if self.is_zero() || scale == 0 {
+            return self;
         }
-        self
+        let chunk_shift = (scale / 9) as usize;
+        let remainder = scale % 9;
+        let mut limbs = Vec::with_capacity(
+            self.limbs
+                .len()
+                .saturating_add(chunk_shift)
+                .saturating_add(usize::from(remainder != 0)),
+        );
+        limbs.resize(chunk_shift, 0);
+        if remainder == 0 {
+            limbs.extend_from_slice(&self.limbs);
+        } else {
+            let factor = 10u32.pow(remainder);
+            let mut carry = 0u64;
+            for &limb in &self.limbs {
+                let product = u64::from(limb) * u64::from(factor) + carry;
+                limbs.push((product % JET_WASM_INT_BASE) as u32);
+                carry = product / JET_WASM_INT_BASE;
+            }
+            if carry != 0 {
+                limbs.push(carry as u32);
+            }
+        }
+        Self {
+            negative: self.negative,
+            limbs,
+        }
+        .normalize()
     }
 
     fn decimal_len(&self) -> usize {

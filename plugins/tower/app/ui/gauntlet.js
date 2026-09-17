@@ -1,11 +1,17 @@
 const VERDICTS = new Set(['win', 'parity', 'loss', 'unmeasured']);
 const TIERS = ['aot', 'run', 'dev', 'cold', 'warm'];
 const PEER_ORDER = [
-  'rust', 'python', 'c', 'zig', 'node', 'go', 'java', 'kotlin', 'swift',
-  'typescript', 'javascript', 'ruby', 'php', 'lua', 'jet-expert',
+  'rust', 'c', 'zig', 'go', 'python', 'js',
+  'java', 'kotlin', 'swift', 'typescript', 'ruby', 'php', 'lua',
 ];
 const UNMEASURED = 'unmeasured';
 const GAUNTLET_STATES = new Set(['win', 'parity', 'loss', 'unmeasured', 'n/a']);
+const AOT_PEERS = new Set(['rust', 'c', 'zig', 'go']);
+const DYNAMIC_PEERS = new Set(['python', 'js']);
+// Old receipts retain their original rail identity; the chart groups languages.
+const languageName = (name) => name === 'node' || name === 'javascript' ? 'js' : name;
+const comparisonTiers = (name) => AOT_PEERS.has(name) ? ['aot']
+  : DYNAMIC_PEERS.has(name) ? ['run', 'dev'] : null;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const object = (value) => isObject(value) ? value : {};
@@ -23,6 +29,7 @@ function peerName(peer) {
 function tierStatus(item, peer) {
   if (!item) return UNMEASURED;
   if (item.status === 'not_applicable') return 'n/a';
+  if (item.status && !['measured', 'ok'].includes(item.status)) return UNMEASURED;
   if (finite(item.ratio)) return ratioVerdict(item.ratio, peer);
   return verdict(item.verdict) ?? UNMEASURED;
 }
@@ -38,11 +45,11 @@ function selectTier(tiers, names, peer, includeMissing = false) {
   return candidates[0] ?? null;
 }
 
-function metricValue(peer, metric) {
+function metricValue(peer, metric, requiredTiers = null) {
   const comparison = object(peer?.metric_comparisons?.[metric] ?? peer?.metrics?.[metric]);
   const tiers = object(comparison.tiers);
   const declared = Object.keys(tiers);
-  const required = array(peer?.required_tiers);
+  const required = requiredTiers ?? array(peer?.required_tiers);
   const names = required.length
     ? [...new Set(required)]
     : [...TIERS.filter((name) => declared.includes(name)), ...declared.filter((name) => !TIERS.includes(name))];
@@ -73,24 +80,19 @@ function reduce(values) {
   return 'win';
 }
 
-function peerMetricVerdict(peer, metric) {
+function peerMetricVerdict(peer, metric, requiredTiers = null) {
   if (peer?.applicable === false) return 'n/a';
-  const selected = metricValue(peer, metric);
+  const selected = metricValue(peer, metric, requiredTiers);
   const comparison = selected.comparison;
   const tiers = object(comparison.tiers);
-  const required = array(peer?.required_tiers).length ? peer.required_tiers
-    : Object.keys(tiers).filter((tier) => ['aot', 'run'].includes(tier));
+  const required = requiredTiers ?? (array(peer?.required_tiers).length ? peer.required_tiers
+    : Object.keys(tiers).filter((tier) => ['aot', 'run'].includes(tier)));
   const names = required.length ? required : (selected.tier ? [selected.tier] : []);
   if (!names.length) {
     if (comparison.status === 'not_applicable' || comparison.applicability === 'not_applicable') return 'n/a';
     return verdict(comparison.verdict) ?? verdict(peer?.metric_verdicts?.[metric]) ?? verdict(peer?.verdict) ?? UNMEASURED;
   }
-  const values = names.map((tier) => {
-    const item = object(tiers[tier]);
-    if (item.status === 'not_applicable') return 'n/a';
-    if (finite(item.ratio)) return ratioVerdict(item.ratio, peerName(peer));
-    return verdict(item.verdict) ?? UNMEASURED;
-  });
+  const values = names.map((tier) => tierStatus(tiers[tier], peerName(peer)));
   return reduce(values);
 }
 
@@ -106,26 +108,28 @@ function sortPeers(names) {
   });
 }
 
-function rowPeer(cell, peerNameValue, hasPeers) {
-  const peer = array(cell?.peers).find((item) => peerName(item) === peerNameValue) ?? null;
+function rowPeer(cell, peerNameValue, records) {
+  const peer = records.find((item) => peerName(item) === peerNameValue) ?? records[0];
   const metric = cell?.primary_metric ?? null;
-  if (!peer) {
-    const state = hasPeers ? 'n/a' : UNMEASURED;
-    return {
-      peer: peerNameValue, verdict: state, ratio: null, tier: null, values: {},
-      detail: { cell, peer: { peer: peerNameValue }, metric, values: {}, verdict: state },
-    };
-  }
-  const selected = metricValue(peer, metric);
+  const requiredTiers = comparisonTiers(peerNameValue);
+  const selected = metricValue(peer, metric, requiredTiers);
   const values = selected.values ?? {};
-  const state = peerMetricVerdict(peer, metric);
+  const state = peerMetricVerdict(peer, metric, requiredTiers);
+  const detail = { cell, peer, records, peer_name: peerNameValue, metric, tier: selected.tier, values, verdict: state, requiredTiers };
+  const samples = requiredTiers?.map((tier) => {
+    const item = object(selected.comparison.tiers?.[tier]);
+    const state = peer.applicable === false ? 'n/a' : tierStatus(selected.comparison.tiers?.[tier], peerNameValue);
+    return { tier, values: item, verdict: state, ratio: state === 'unmeasured' || state === 'n/a' ? null : item.ratio,
+      detail: { ...detail, tier, values: item, verdict: state } };
+  });
   return {
     peer: peerNameValue,
     verdict: state,
-    ratio: finite(values.ratio) ? values.ratio : null,
+    ratio: state === UNMEASURED || state === 'n/a' ? null : (finite(values.ratio) ? values.ratio : null),
     tier: selected.tier,
     values,
-    detail: { cell, peer, metric, tier: selected.tier, values, verdict: state },
+    samples,
+    detail,
   };
 }
 
@@ -159,8 +163,16 @@ function axisPeer(axis, peerNameValue) {
 }
 
 function cellRow(cell) {
-  const hasPeers = array(cell?.peers).length > 0;
-  const names = array(cell?.peers).map(peerName);
+  const records = new Map();
+  for (const peer of array(cell?.peers)) {
+    const name = languageName(peerName(peer));
+    if (!name || name.endsWith('-expert')) continue;
+    if (!records.has(name)) records.set(name, []);
+    records.get(name).push(peer);
+  }
+  const names = [...records.keys()];
+  const peers = Object.fromEntries(names.map((name) => [name, rowPeer(cell, name, records.get(name))]));
+  const required = names.filter((name) => comparisonTiers(name));
   return {
     kind: 'cell',
     id: cell?.id ?? null,
@@ -168,16 +180,27 @@ function cellRow(cell) {
     entry: cell?.entry ?? null,
     mode: cell?.mode ?? null,
     primary_metric: cell?.primary_metric ?? null,
-    verdict: verdict(cell?.verdict) ?? UNMEASURED,
+    verdict: required.length ? reduce(required.map((name) => peers[name].verdict)) : UNMEASURED,
     cell,
     peerNames: names,
-    peers: Object.fromEntries(names.map((name) => [name, rowPeer(cell, name, hasPeers)])),
+    peers,
   };
 }
 
 function axisRow(id, axis) {
-  const names = Object.keys(object(axis?.comparisons));
-  const peers = Object.fromEntries(names.map((name) => [name, axisPeer(axis, name)]));
+  const recordedNames = Object.keys(object(axis?.comparisons));
+  const names = id === 'live_reload'
+    ? [...new Set(['bun', recordedNames.includes('node') ? 'node' : 'nodemon', 'vite', ...recordedNames])]
+    : recordedNames;
+  const peers = Object.fromEntries(names.map((name) => {
+    const projected = axisPeer(axis, name);
+    projected.detail.reference = id === 'live_reload' && !['node', 'nodemon', 'bun', 'vite'].includes(name);
+    if (id === 'live_reload' && !projected.detail.reference && !axis?.comparisons?.[name]) {
+      projected.verdict = UNMEASURED;
+      projected.detail.verdict = UNMEASURED;
+    }
+    return [name, projected];
+  }));
   return {
     kind: 'axis',
     id: `axis:${id}`,
@@ -185,7 +208,7 @@ function axisRow(id, axis) {
     entry: null,
     mode: id,
     primary_metric: axis?.metric ?? null,
-    verdict: reduce(Object.values(peers).map((peer) => peer.verdict)),
+    verdict: reduce(Object.values(peers).filter((peer) => !peer.detail.reference).map((peer) => peer.verdict)),
     axis: { ...axis, id },
     peerNames: names,
     peers,
@@ -202,17 +225,25 @@ const domainRank = (domain) => {
   return index < 0 ? DOMAIN_ORDER.length : index;
 };
 
-// Language rails are the matrix columns; axis comparisons (live reload versus
-// vite, nodemon, …) compare tools, so they carry their own column set and sit
-// in a labelled band under the cells.
+// Execution groups select samples from immutable receipts, not their old
+// aggregate verdicts. Tool workflows keep a separate column set.
 export function projectGauntletMatrix(status) {
   const source = object(status);
   const cells = array(source.cells).map(cellRow).sort((left, right) =>
     domainRank(left.domain) - domainRank(right.domain) || String(left.id).localeCompare(String(right.id)));
   const axisRows = Object.entries(object(source.axes)).map(([id, axis]) => axisRow(id, axis));
-  const columns = sortPeers(cells.flatMap((row) => row.peerNames));
+  const names = sortPeers(cells.flatMap((row) => row.peerNames));
+  const groups = [
+    { label: 'AOT', columns: names.filter((name) => AOT_PEERS.has(name)) },
+    { label: 'Run / dev', columns: names.filter((name) => DYNAMIC_PEERS.has(name)) },
+    { label: 'Reference', columns: names.filter((name) => !comparisonTiers(name)) },
+  ].filter((group) => group.columns.length);
+  const columns = groups.flatMap((group) => group.columns);
   const axisColumns = sortPeers(axisRows.flatMap((row) => row.peerNames));
-  return { columns, axisColumns, rows: [...cells, ...axisRows], cellRows: cells, axisRows };
+  const rows = [...cells, ...axisRows];
+  const summary = { win: 0, parity: 0, loss: 0, unmeasured: 0 };
+  for (const row of rows) if (row.verdict in summary) summary[row.verdict]++;
+  return { columns, groups, axisColumns, rows, cellRows: cells, axisRows, summary };
 }
 
 // ---- formatting -------------------------------------------------------------
@@ -296,22 +327,24 @@ export function formatStamp(iso, date) {
 
 // ---- detail card ------------------------------------------------------------
 const TIER_ORDER = ['aot', 'run', 'dev', 'cold', 'warm'];
-const tierState = (item, peer) => {
-  if (!item || !Object.keys(item).length) return UNMEASURED;
-  if (item.status === 'not_applicable') return 'n/a';
-  if (finite(item.ratio)) return ratioVerdict(item.ratio, peer);
-  return verdict(item.verdict) ?? UNMEASURED;
-};
+const tierState = tierStatus;
 
 function tierRows(detail, peerLabel) {
-  const tiers = detail.axis
-    ? Object.fromEntries(['cold', 'warm'].map((phase) => [phase, object(detail.peer?.[phase])]))
-    : object(object(detail.peer?.metric_comparisons?.[detail.metric] ?? detail.peer?.metrics?.[detail.metric]).tiers);
-  const names = [...TIER_ORDER.filter((name) => name in tiers), ...Object.keys(tiers).filter((name) => !TIER_ORDER.includes(name))];
-  return names.map((name) => {
-    const item = object(tiers[name]);
-    const pair = formatPair(detail.metric, item.jet, item.peer);
-    return { name, state: tierState(item, peerLabel), pair, ratio: formatRatio(item.ratio), selected: name === detail.tier };
+  const records = detail.axis ? [detail.peer] : (detail.records ?? [detail.peer]);
+  return records.flatMap((record) => {
+    const tiers = detail.axis
+      ? Object.fromEntries(['cold', 'warm'].map((phase) => [phase, object(record?.[phase])]))
+      : object(object(record?.metric_comparisons?.[detail.metric] ?? record?.metrics?.[detail.metric]).tiers);
+    const declared = [...new Set([...Object.keys(tiers), ...array(detail.requiredTiers)])];
+    const names = [...TIER_ORDER.filter((name) => declared.includes(name)), ...declared.filter((name) => !TIER_ORDER.includes(name))];
+    return names.map((name) => {
+      const item = object(tiers[name]);
+      const pair = formatPair(detail.metric, item.jet, item.peer);
+      const reference = detail.reference || (detail.requiredTiers && !detail.requiredTiers.includes(name)) || record !== detail.peer;
+      const label = `${records.length > 1 ? `${peerName(record)} · ` : ''}${name}${reference ? ' · reference' : ''}`;
+      return { name: label, state: tierState(tiers[name], peerLabel), pair, ratio: formatRatio(item.ratio),
+        selected: record === detail.peer && name === detail.tier };
+    });
   });
 }
 
@@ -334,7 +367,7 @@ export function buildGauntletTooltip(detail = {}) {
   const cell = object(detail.cell);
   const axis = object(detail.axis);
   const values = object(detail.values);
-  const peerLabel = peerName(detail.peer) ?? detail.peer_name ?? 'peer';
+  const peerLabel = detail.peer_name ?? peerName(detail.peer) ?? 'peer';
   const metric = detail.metric ?? axis.metric ?? cell.primary_metric ?? null;
   const state = GAUNTLET_STATES.has(detail.verdict) ? detail.verdict : tierState(values, peerLabel);
   const title = cell.id ?? (axis.id ? `axis · ${String(axis.id).replaceAll('_', ' ')}` : 'Gauntlet detail');
@@ -357,6 +390,9 @@ export function buildGauntletTooltip(detail = {}) {
       <div><strong>${esc(title)}</strong><small>${esc(subtitle)}</small></div>
       <span class="gtip__state gtip__state--${state === 'n/a' ? 'na' : state}">${esc(state)}</span>
     </div>
+    ${peerName(detail.peer) === 'node' ? '<div class="gtip__foot">JavaScript · Node runtime</div>' : ''}
+    ${peerLabel === 'nodemon' ? '<div class="gtip__foot">Node workflow · nodemon watcher</div>' : ''}
+    ${detail.reference ? '<div class="gtip__foot">Non-blocking reference comparison</div>' : ''}
     ${tierTable}${statTable}
     <div class="gtip__foot"><span>${esc(stamp)}</span>${runId ? `<span>run ${esc(runId)}</span>` : ''}</div>
   </div>`;

@@ -1950,29 +1950,22 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     // parse as a `Val` binding with the magic sentinel name. `run_repl_step`
     // then echoes the value without adding it to the session scope.
     //
-    // For statements (bindings/print/if/…) or suppressed inputs, try the plain
-    // statement-wrapping form first; if that fails, try the echo sentinel.
+    // For statements (bindings/print/if/loop/…) or suppressed inputs, try
+    // the plain statement-wrapping form first; if that fails, try the echo
+    // sentinel.
     let try_stmt_first = starts_with_stmt_keyword(trimmed) || suppress;
 
-    // Plain statement wrapping: add `;` if the input doesn't end in `;` or `}`.
-    // Jet requires explicit semicolons after statements. REPL inputs omit them
-    // for brevity, so we inject them.
-    let plain_input = {
-        let t = trimmed.trim_end();
-        if t.ends_with(';') || t.ends_with('}') {
-            t.to_string()
-        } else {
-            format!("{};", t)
-        }
-    };
+    // Keep generated wrappers in canonical Jet syntax. The lexer inserts
+    // synthetic line terminators before the closing brace; authored
+    // semicolons would be reported as E0373 by the source-aware parser.
+    let plain_input = trimmed.trim_end().to_string();
     let plain_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, plain_input);
     // Echo-sentinel wrapping (D-BIND4: `::` sigil binding).
     let echo_stmt = format!("__repl_echo__ :: {}", trimmed);
     let echo_src = format!("// repl:{}\nfn __repl__() {{\n{}\n}}\n", step, echo_stmt);
-
     if try_stmt_first {
         // Try plain statement form; if it succeeds, return it.
-        // The check_src is the full statement content (with `;` for sema).
+        // The check source uses the same line-boundary terminator.
         let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse_with_source(&toks, &plain_src) {
@@ -1992,8 +1985,9 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
             if let Ok(prog) = crate::Parser::parse_with_source(&toks, &echo_src) {
                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
                     if !f.body.is_empty() {
-                        // check_src must end in `;` for type_check_stmts.
-                        let echo_check_src = format!("{};", echo_stmt);
+                        // The check source uses the same line-boundary
+                        // terminator before the generated closing brace.
+                        let echo_check_src = echo_stmt.clone();
                         return Ok(InputKind::Stmts(f.body, suppress, echo_check_src));
                     }
                 }

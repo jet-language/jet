@@ -100,9 +100,16 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
     );
 
     let manifest = fs::read_to_string(project.join("package.jet")).expect("web scaffold manifest");
+    let manifest_facts = jet::Package::PackageFacts::parse(&manifest, "package.jet")
+        .expect("web scaffold manifest must remain valid");
+    let allowed_effects = manifest_facts
+        .authority
+        .holds
+        .allow
+        .as_ref()
+        .expect("web scaffold authority must declare allowed effects");
     assert!(
-        manifest.contains("authority: { holds: { allow: [IO, Browser] } }")
-            || manifest.contains("authority: { holds: { allow: [Browser, IO] } }"),
+        allowed_effects.iter().any(|effect| effect == "Browser"),
         "web scaffold authority must grant Browser:\n{manifest}"
     );
 
@@ -153,10 +160,54 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
     let (status, body) = http_get(port, "/").expect("GET scaffold page");
     assert_eq!(status, 200, "web scaffold page was not served");
     let page = String::from_utf8_lossy(&body);
-    assert!(page.contains("<title>jet web app</title>"), "{page}");
-    assert!(page.contains("import \"./app.js\";"), "{page}");
+    assert!(
+        page.contains("type=\"module\"") && page.contains("src=\"./app.js\""),
+        "generated scaffold page must load its Web module: {page}"
+    );
     assert!(
         !page.contains("jet_main"),
         "generated scaffold page must not know an export name: {page}"
     );
+}
+
+#[test]
+fn jet_new_native_scaffold_builds_for_explicit_web_target() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping native scaffold Web build (need rustc)");
+        return;
+    }
+
+    let scratch = Scratch::new("web-target-native-scaffold");
+    let project_root = scratch.path.clone();
+    let created = Command::new(jet_bin())
+        .current_dir(&project_root)
+        .args(["new", "demo"])
+        .output()
+        .expect("spawn jet new native scaffold");
+    assert!(
+        created.status.success(),
+        "jet new failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr)
+    );
+
+    let project = project_root.join("demo");
+    let source = fs::read_to_string(project.join("run.jet")).expect("native scaffold source");
+    assert!(source.contains("#CLI"), "native scaffold lost its CLI schema:\n{source}");
+    assert!(source.contains("fn run(args: GreetingArgs)"), "{source}");
+
+    let build = Command::new(jet_bin())
+        .current_dir(&project)
+        .args(["build", "--target", "web"])
+        .output()
+        .expect("spawn explicit Web build for native scaffold");
+    assert!(
+        build.status.success(),
+        "native scaffold Web build failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    for artifact in ["build/index.html", "build/app.js", "build/app.wasm"] {
+        assert!(project.join(artifact).is_file(), "missing Web scaffold artifact {artifact}");
+    }
 }

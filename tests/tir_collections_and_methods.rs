@@ -1812,3 +1812,58 @@ fn run() {
         "-1\n1\n1\ntrue\n",
     );
 }
+/// The E0507 advice names three contracts instead of pretending that an index
+/// rewrite preserves an unknown traversal.  Keep one executable witness for
+/// each supported repair: a separate result, a fixed original set, and an
+/// explicit queue that removes and appends work until empty.
+#[test]
+fn collection_mutation_intents_preserve_declared_contracts() {
+    let src = r#"
+fn count_work(work: &[Int]) Int -> {
+    visits := 0
+    loop work.len() > 0 {
+        _value :: work.pop() ?? -1
+        visits += 1
+    }
+    return visits
+}
+
+fn run() {
+    input :: [Int]{3, -1, 0, 2}
+    selected := [Int]{}
+    loop value in input {
+        if value > 0 -> selected.push(value)
+    }
+    print("separate input={input}")
+    print("separate result={selected}")
+
+    values := [Int]{3, -1, 0, 2}
+    fixed_len :: values.len()
+    loop index in 0..<fixed_len {
+        values[index] = values[index] + 1
+    }
+    print("fixed values={values}")
+
+    work := [Int]{1, 2}
+    seen := [Int]{}
+    loop work.len() > 0 {
+        value :: work.pop() ?? -1
+        seen.push(value)
+        if value < 3 -> work.push(value + 2)
+    }
+    print("work seen={seen} empty={work.len() == 0}")
+
+    empty := [Int]{}
+    print("empty visits={count_work(&empty)}")
+}
+"#;
+    assert_tiers_agree(
+        "tir_collection_mutation_intents",
+        src,
+        "separate input=[3, -1, 0, 2]\n\
+separate result=[3, 2]\n\
+fixed values=[4, 0, 1, 3]\n\
+work seen=[2, 4, 1, 3] empty=true\n\
+empty visits=0\n",
+    );
+}

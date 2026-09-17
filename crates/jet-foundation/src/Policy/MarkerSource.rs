@@ -122,10 +122,11 @@ fn declaration(line: &str) -> AppliedRule {
     }
 }
 
-/// D-RULEARG-TYPES1=A: a parameter's written type names either one of the seven
-/// argument shapes the binder knows or a closed menu published in `core.compiler.lang`.
-/// A menu name is written as a bare identifier, so anything that is not one of
-/// the remaining six reads as an identifier from that menu.
+/// D-RULEARG-TYPES1=A: a parameter's written type names either one of the
+/// typed argument shapes the binder knows or a closed menu published in
+/// `core.compiler.lang`. A menu name is written as a bare identifier, so
+/// anything outside the primitive shapes below reads as an identifier from
+/// that menu.
 ///
 /// `PolicySetting` is the one menu whose entries are written `key = value`
 /// rather than as a bare name, so it binds as a free value.
@@ -133,6 +134,7 @@ fn arg_type(source_type: &str) -> RuleArgType {
     match source_type {
         "Value" | "PolicySetting" => RuleArgType::Any,
         "String" => RuleArgType::String,
+        "Path" => RuleArgType::Path,
         "Ident" => RuleArgType::Ident,
         "Bool" => RuleArgType::Bool,
         "Int" => RuleArgType::Int,

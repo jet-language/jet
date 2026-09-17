@@ -96,11 +96,13 @@ fn run() {
     print("stream cancelled")
 
     json_path :: Path.from(root).join("events.json").to_string()
-    files.write(json_path, "[{\"service\":\"cache\",\"latency_ms\":2.0}]") ?? panic("write json")
+    files.write(json_path, `[{"service":"cache","latency_ms":2.0}]`) ?? panic("write json")
     json_input :: files.open(json_path) ?? panic("open json")
     json_reader := data.json_reader<Event>(json_input, limits) ?? panic("json reader")
     json_first :: data_stream.next(&json_reader) ?? panic("json next")
-    print("json:{json_first != None}")
+    assert(json_first.service == "cache")
+    assert(json_first.latency_ms == 2.0)
+    print("json:{json_first.service}:{json_first.latency_ms}")
 
     values :: [Event]{Event{service: "memory", latency_ms: 1.0}}
     value_loader := data.value<[Event]>(values, limits) ?? panic("value loader")

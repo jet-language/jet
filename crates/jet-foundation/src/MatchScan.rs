@@ -14,8 +14,8 @@ mod bin_kernel {
 
 
 pub use bin_kernel::{
-    jet_binary_pattern_match, jet_text_pattern_match, JetBinMatchPart, JetPatternCapture,
-    JetTextHoleKind, JetTextMatchPart,
+    jet_bin_match_scan, jet_binary_pattern_match, jet_text_match_scan, jet_text_pattern_match,
+    JetBinMatchPart, JetBinMatchValue, JetPatternCapture, JetTextHoleKind, JetTextMatchPart,
 };
 mod inline_range_semantics {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");

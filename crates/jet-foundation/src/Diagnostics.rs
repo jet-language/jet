@@ -2088,6 +2088,27 @@ mod crypto_diagnostic_contract_tests {
         );
         assert_eq!(diagnostic.applicability, Some(FixApplicability::Safe));
     }
+    #[test]
+    fn source_derived_suggestion_uses_one_typed_reviewable_edit() {
+        let span = Span::new(4, 16);
+        let diagnostic = Diagnostic::error(
+            "E0109",
+            "text values `first` and `last` aren't joined with `+`".into(),
+            "there's one way to build text: interpolation (S8)".into(),
+            "write the pieces inside one string: \"{first}{last}\"".into(),
+            Some(span),
+        )
+        .with_source_derived_suggestion(span, "\"{first}{last}\"");
+
+        assert_eq!(diagnostic.all_edits().len(), 1);
+        assert_eq!(
+            diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
+            Some("\"{first}{last}\"")
+        );
+        assert_eq!(diagnostic.applicability, Some(FixApplicability::Suggested));
+        assert_eq!(diagnostic.safety, Some(FixSafety::NeedsReview));
+        assert!(diagnostic.no_fix_reason.is_none());
+    }
 
     #[test]
     fn construction_edit_survives_fix_rewording() {

@@ -372,10 +372,69 @@ fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
     xs.sort_by(|left, right| right.cmp(left));
 }
 
-#[inline(always)]
-fn jet_list_push<T>(xs: &mut Vec<T>, value: T) {
-    xs.push(value);
+trait JetListSurface {
+    fn jet_len(&self) -> i64;
+    fn jet_is_empty(&self) -> bool;
 }
+
+impl<T> JetListSurface for Vec<T> {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        self.len() as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T> JetListSurface for [T] {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        self.len() as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T, const N: usize> JetListSurface for [T; N] {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        N as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        N == 0
+    }
+}
+
+
+trait JetListPushSurface {
+    type Item;
+
+    fn jet_push(&mut self, value: Self::Item);
+}
+
+impl<T> JetListPushSurface for Vec<T> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
+
+#[inline(always)]
+fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
+    xs.jet_push(value);
+}
+
 
 #[inline(always)]
 fn jet_list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
@@ -442,13 +501,13 @@ where
 }
 
 #[inline(always)]
-fn jet_list_len<T>(xs: &[T]) -> i64 {
-    xs.len() as i64
+fn jet_list_len<C: JetListSurface + ?Sized>(xs: &C) -> i64 {
+    xs.jet_len()
 }
 
 #[inline(always)]
-fn jet_list_is_empty<T>(xs: &[T]) -> bool {
-    xs.is_empty()
+fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
+    xs.jet_is_empty()
 }
 
 #[inline(always)]
@@ -517,8 +576,64 @@ fn jet_set_len<T>(set: &std::collections::HashSet<T>) -> i64 {
 }
 
 #[inline(always)]
+fn jet_set_capacity<T>(set: &std::collections::HashSet<T>) -> i64 {
+    set.capacity() as i64
+}
+
+#[inline(always)]
 fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
     set.is_empty()
+}
+#[inline(always)]
+fn jet_set_has<T: Eq + std::hash::Hash>(
+    set: &std::collections::HashSet<T>,
+    value: &T,
+) -> bool {
+    set.contains(value)
+}
+
+#[inline(always)]
+fn jet_set_to_list<T: Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
+    set.iter().cloned().collect()
+}
+#[inline(always)]
+fn jet_set_values<T: 'static + Clone>(
+    set: &std::collections::HashSet<T>,
+) -> JetIter<T> {
+    jet_iter_from_vec(jet_set_to_list(set))
+}
+
+
+#[inline(always)]
+fn jet_set_max<T: Ord + Clone>(
+    set: &std::collections::HashSet<T>,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(set.iter().cloned().max())
+}
+
+#[inline(always)]
+fn jet_set_sort<T: Ord + Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
+    let mut values = jet_set_to_list(set);
+    jet_list_sort(&mut values);
+    values
+}
+
+#[inline(always)]
+fn jet_set_shuffle<T: 'static + Clone>(set: &std::collections::HashSet<T>) -> Vec<T> {
+    jet_iter_shuffle(jet_iter_from_vec(jet_set_to_list(set))).to_list()
+}
+
+#[inline(always)]
+fn jet_set_equal<T: Eq + std::hash::Hash>(
+    left: &std::collections::HashSet<T>,
+    right: &std::collections::HashSet<T>,
+) -> bool {
+    left == right
+}
+
+#[inline(always)]
+fn jet_set_first<T: Clone>(set: &std::collections::HashSet<T>) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(set.iter().next().cloned())
 }
 
 #[inline(always)]
@@ -652,6 +767,10 @@ fn jet_string_copy(text: &String) -> String {
 #[inline(always)]
 fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
     text.ends_with(suffix)
+}
+#[inline(always)]
+fn jet_string_replace(text: &String, from: &String, to: &String) -> String {
+    text.replace(from, to)
 }
 
 #[inline(always)]
@@ -1480,6 +1599,9 @@ impl<T: 'static> JetLoopSource for Vec<T> {
     }
 }
 
+
+
+
 impl<T: Clone + 'static> JetLoopSource for &mut Vec<T> {
     fn jet_loop_source(
         self,
@@ -1564,6 +1686,35 @@ impl<T: Clone + 'static, const N: usize> JetLoopSource for &mut [T; N] {
         }
     }
 }
+impl<T: Clone + 'static> JetLoopSource for &mut &[T] {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = self.to_vec();
+                Box::new(
+                    values
+                        .into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
 
 impl<K: Ord + Clone + 'static, V: Clone + 'static> JetLoopSource for JetMap<K, V> {
     fn jet_loop_source(
@@ -2109,9 +2260,9 @@ fn jet_iter_intersperse<T: 'static + Clone>(it: JetIter<T>, sep: T) -> JetIter<T
 }
 fn jet_iter_enumerate<T: 'static, U: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<U>
 where
-    F: FnMut(i64, T) -> U,
+    F: FnMut(i64, &T) -> U,
 {
-    JetIter(Box::new(it.0.enumerate().map(move |(i, x)| f(i as i64, x))))
+    JetIter(Box::new(it.0.enumerate().map(move |(i, x)| f(i as i64, &x))))
 }
 /// D-RANGE-EXCL1=C: every valid Int index for a sequence of length `n`.
 fn jet_iter_indexes(n: i64) -> JetIter<i64> {
@@ -2138,10 +2289,25 @@ fn jet_iter_empty<T: 'static>() -> JetIter<T> {
 fn jet_iter_some<T: 'static>(it: JetIter<T>) -> JetIter<JetOutcome<T, JetAbsent>> {
     JetIter(Box::new(it.0.map(Ok)))
 }
-fn jet_iter_zip_strict<A: 'static, B: 'static, O: 'static, F: 'static>(
+
+// Strict zip carries its policy through the registered E0128 runtime row;
+// preserve the user source context at the shared boundary.
+fn jet_iter_zip_strict<
+    A: 'static,
+    B: 'static,
+    O: 'static,
+    F: 'static,
+>(
     mut a: JetIter<A>,
     mut b: JetIter<B>,
     mut f: F,
+    policy: String,
+    file: String,
+    line: u32,
+    fn_name: String,
+    source_line: String,
+    col: u32,
+    caret_len: u32,
 ) -> JetIter<O>
 where
     F: FnMut(A, B) -> O,
@@ -2150,7 +2316,19 @@ where
         move || match jet_zip_strict_step(a.0.next(), b.0.next()) {
             Ok(Some((x, y))) => Some(f(x, y)),
             Ok(None) => None,
-            Err(()) => jet_panic("<core.collections>", 0, jet_zip_length_mismatch_message()),
+            Err(()) => {
+                jet_panic_rich_code(
+                    "E0128",
+                    &file,
+                    line,
+                    &fn_name,
+                    &source_line,
+                    col,
+                    caret_len,
+                    &policy,
+                    "",
+                )
+            }
         },
     )))
 }

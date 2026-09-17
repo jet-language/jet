@@ -767,6 +767,61 @@ impl JetArena {
             _ => None,
         }
     }
+    /// Read one list slot through the erased i64 ABI used by generic MIR
+    /// indexing. Dense integers stay packed; heterogeneous values preserve
+    /// handles and materialize inline carriers only when a handle is required.
+    pub fn list_get_raw(&mut self, list: i64, index: i64) -> Option<i64> {
+        if index < 0 {
+            return None;
+        }
+        let value = match self.values.get(list as usize)? {
+            JetVal::IntList(values) => JetVal::Int(*values.get(index as usize)?),
+            JetVal::List(values) => values.get(index as usize)?.clone(),
+            JetVal::UninitList {
+                values,
+                initialized,
+            } => {
+                let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
+                values.get(index)?.clone()
+            }
+            _ => return None,
+        };
+        match value {
+            JetVal::UninitList {
+                values,
+                initialized,
+            } => Some(self.alloc_value(JetVal::UninitList {
+                values,
+                initialized,
+            })),
+            JetVal::Int(value) | JetVal::RecordRef(value) => Some(value),
+            JetVal::Float(value) => Some(value.to_bits() as i64),
+            JetVal::Bool(value) => Some(i64::from(value)),
+            JetVal::Char(value) => Some(i64::from(value as u32)),
+            JetVal::String(value) => Some(self.alloc_string(value)),
+            JetVal::StringView { owner, start, end } => {
+                let value = self.get_string(owner)?.get(start..end)?.to_owned();
+                Some(self.alloc_string(value))
+            }
+            JetVal::IntList(values) => Some(self.alloc_int_list(values)),
+            JetVal::List(values) => Some(self.alloc_list_values(values)),
+            JetVal::Range {
+                start,
+                end,
+                exclusive,
+            } => Some(self.alloc_value(JetVal::Range {
+                start,
+                end,
+                exclusive,
+            })),
+            JetVal::Map(values) => Some(self.alloc_value(JetVal::Map(values))),
+            JetVal::Record(values) => Some(self.alloc_record_values(values)),
+            JetVal::ExactInt(value) => Some(self.own_exact(
+                jet_foundation::Numeric::JetInt::from_big(value),
+            )),
+        }
+    }
+
 
     /// Read a sema-proven fixed-list integer slot. This path has no user-facing
     /// bounds check; an invalid carrier is an internal compiler/runtime fault.
@@ -1073,6 +1128,13 @@ impl JetArena {
         }
         match self.values.get(record as usize) {
             Some(JetVal::Record(fields)) => fields.get(index as usize),
+            _ => None,
+        }
+    }
+
+    pub fn record_len(&self, record: i64) -> Option<i64> {
+        match self.values.get(record as usize) {
+            Some(JetVal::Record(fields)) => i64::try_from(fields.len()).ok(),
             _ => None,
         }
     }
@@ -1432,6 +1494,10 @@ impl JetArena {
     pub fn int_abs(&mut self, value: i64) -> i64 {
         if self.int_is_negative(value) {
             self.int_neg(value)
+        } else if Self::int_is_tagged(value) {
+            // Positive spilled values are borrowed raw carriers. Re-pack them
+            // so the result is rooted independently in this arena.
+            self.int_pack(self.int_value(value))
         } else {
             value
         }

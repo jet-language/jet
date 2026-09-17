@@ -236,6 +236,7 @@ enum JetParaRuntimeFailure {
         msg: String,
     },
     Rich {
+        code: &'static str,
         file: String,
         line: u32,
         fn_name: String,
@@ -271,6 +272,7 @@ impl JetParaRuntimeFailure {
                 msg,
             } => jet_runtime_stop_with_context(code, &file, line, &fn_name, &src_line, &msg),
             Self::Rich {
+                code,
                 file,
                 line,
                 fn_name,
@@ -279,8 +281,8 @@ impl JetParaRuntimeFailure {
                 caret_len,
                 msg,
                 locals,
-            } => jet_panic_rich(
-                &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals,
+            } => jet_panic_rich_code(
+                code, &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals,
             ),
             Self::Diagnostic { rendered } => jet_runtime_diagnostic(rendered),
             Self::Contract {
@@ -602,14 +604,38 @@ struct JetTestExpectFrame {
     stop: Option<String>,
 }
 
+struct JetTestingFailure {
+    message: String,
+    detail: String,
+}
+
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEST_EXPECT_UNMET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_TEST_TIMEOUTS: std::cell::RefCell<Vec<(u64, std::time::Instant, i64, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_WHOLE_SKIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_TESTING_FAILURE: std::cell::RefCell<Option<JetTestingFailure>> = const { std::cell::RefCell::new(None) };
 }
+
+fn jet_testing_record_failure(message: String, detail: String) {
+    JET_TESTING_FAILURE.with(|slot| {
+        *slot.borrow_mut() = Some(JetTestingFailure { message, detail });
+    });
+}
+
+fn jet_testing_take_failure() -> Option<JetTestingFailure> {
+    JET_TESTING_FAILURE.with(|slot| slot.borrow_mut().take())
+}
+
+fn jet_testing_clear_failure() {
+    JET_TESTING_FAILURE.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
 
 pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>) {
     JET_TEST_EXPECT_FAIL.with(|frames| {
@@ -636,7 +662,13 @@ pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
         frames
             .iter()
             .rposition(|frame| frame.scope == scope)
-            .and_then(|index| frames.remove(index).stop)
+            .and_then(|index| {
+                if frames[index].stop.is_some() {
+                    frames.remove(index).stop
+                } else {
+                    None
+                }
+            })
     })
 }
 
@@ -649,8 +681,10 @@ pub fn jet_test_record_stop(code: &str) {
         }
     });
 }
-
 pub fn jet_test_expect_fail_matching_scope() -> Option<u64> {
+    if JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get) {
+        return None;
+    }
     JET_TEST_EXPECT_FAIL.with(|frames| {
         frames.borrow().iter().rev().find_map(|frame| {
             let code = frame.stop.as_deref()?;
@@ -689,9 +723,11 @@ pub fn jet_test_expect_fail_catch_scope() -> Option<u64> {
 pub fn jet_test_expect_fail_abort() {
     JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow_mut().clear());
     JET_TEST_EXPECT_COMPLETED.with(|completed| completed.borrow_mut().clear());
+    JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(false));
 }
 
 pub fn jet_test_expect_fail_unmet(expected: Option<&str>) -> ! {
+    JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
     let message = jet_test_expect_fail_message(expected);
     jet_runtime_stop("E3001", "", 0, &message)
 }
@@ -828,14 +864,19 @@ struct JetRenderedRuntimeStop {
 /// the interpreter carries it as the child's E0953 `what`
 /// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
 ///
-/// Every other unwinding frame keeps the typed report: an `#Interrupt`
-/// handler, `jet test`'s expect-fail region, and the top-level
-/// `jet_runtime_boundary` each want the whole rendered stop and its exit code,
-/// and `jet_runtime_boundary` deliberately treats loose panic text as a host
-/// fault rather than a user stop.
+/// Every intentional unwinding frame keeps the typed report: an `#Interrupt`
+/// handler and `jet test`'s expect-fail region catch the rendered stop, while
+/// scheduler tasks receive the program's message above. The ordinary process
+/// path may cross a boundary that cannot carry an unwind. This matters for
+/// debug native dispatch: its `extern "C"` trampoline is a non-unwinding ABI,
+/// so resuming a panic there aborts before `jet_runtime_boundary` can observe
+/// the report. End that path at the shared process boundary instead.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
+    }
+    if !jet_runtime_should_unwind() {
+        jet_runtime_process_exit(exit_code, Some(&rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered,
@@ -1318,6 +1359,7 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
         }));
     }
     let report = jet_contract_report(clause_kw, msg, file, line);
+    jet_test_record_stop("E3005");
     jet_proof_record(2, 1, "E3005", &report.what, file, line);
     std::panic::resume_unwind(Box::new(report))
 }
@@ -1971,11 +2013,11 @@ jet_fixed_route_kernels!(
     };
     rotate: { jet_u64_rotate_left, jet_u64_rotate_right }
 );
-/// E3001 (E2-M12, D-OBS1/D-OBS2): rich panic report — includes the function name,
-/// a source-line context box, and (in debug builds only) safe local variable values.
+/// Render a rich runtime stop with its registered code — including the function
+/// name, source-line context box, and (in debug builds only) safe locals.
 /// `col` is 1-based; `caret_len` covers the highlighted span in the source line.
-/// `locals` is an empty string in release builds; "x = 1, y = false" in debug builds.
-fn jet_panic_rich(
+fn jet_panic_rich_code(
+    code: &'static str,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -1985,9 +2027,10 @@ fn jet_panic_rich(
     msg: &str,
     locals: &str,
 ) -> ! {
-    jet_test_record_stop("E3001");
+    jet_test_record_stop(code);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
+            code,
             file: file.to_string(),
             line,
             fn_name: fn_name.to_string(),
@@ -1998,15 +2041,30 @@ fn jet_panic_rich(
             locals: locals.to_string(),
         }));
     }
-    jet_proof_record(2, 1, "E3001", msg, file, line);
-    let _ = jet_production_failure_receipt_write("E3001", file, line, fn_name);
+    jet_proof_record(2, 1, code, msg, file, line);
+    let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
     let report = jet_runtime_stop_report(
-        "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
+        code, file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
+}
+
+fn jet_panic_rich(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    msg: &str,
+    locals: &str,
+) -> ! {
+    jet_panic_rich_code(
+        "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
+    )
 }
 /// Render a test assertion failure through the same rich diagnostic formatter
 /// used by runtime stops. Test adapters and the generated harness call this
@@ -2021,11 +2079,26 @@ pub(crate) fn jet_test_failure_message(
     msg: &str,
     locals: &str,
 ) -> String {
+    if let Some(failure) = jet_testing_take_failure() {
+        return jet_runtime_stop_report(
+            "E3001",
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &failure.message,
+            &failure.detail,
+        )
+        .rendered;
+    }
     jet_runtime_stop_report(
         "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
     )
     .rendered
 }
+
 
 /// Canonical checked equality condition used by semantic `require_eq`.
 fn jet_eq<T: PartialEq>(left: &T, right: &T) -> bool {
@@ -2043,9 +2116,23 @@ fn jet_require(
     caret_len: u32,
     locals: &str,
 ) {
-    if !condition {
-        jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals);
+    if condition {
+        jet_testing_clear_failure();
+        return;
     }
+    if let Some(failure) = jet_testing_take_failure() {
+        jet_panic_rich(
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &failure.message,
+            &failure.detail,
+        );
+    }
+    jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals);
 }
 
 /// Rich source-context form of `#require_eq`.
@@ -2064,12 +2151,26 @@ fn jet_require_eq(
     caret_len: u32,
     locals: &str,
 ) {
-    if !condition {
-        let msg = format!("expected: {right_debug}, got: {left_debug}");
+    if condition {
+        jet_testing_clear_failure();
+        return;
+    }
+    if let Some(failure) = jet_testing_take_failure() {
         jet_panic_rich(
-            file, line, fn_name, src_line, col, caret_len, &msg, locals,
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &failure.message,
+            &failure.detail,
         );
     }
+    let msg = format!("expected: {right_debug}, got: {left_debug}");
+    jet_panic_rich(
+        file, line, fn_name, src_line, col, caret_len, &msg, locals,
+    );
 }
 
 /// Non-panicking test carrier for rich source-context `#require`.
@@ -2085,6 +2186,7 @@ fn jet_test_require(
     locals: &str,
 ) -> Result<(), String> {
     if condition {
+        jet_testing_clear_failure();
         Ok(())
     } else {
         Err(jet_test_failure_message(
@@ -2107,6 +2209,7 @@ fn jet_test_require_eq(
     locals: &str,
 ) -> Result<(), String> {
     if condition {
+        jet_testing_clear_failure();
         Ok(())
     } else {
         let msg = format!("expected: {right_debug}, got: {left_debug}");
@@ -2115,6 +2218,9 @@ fn jet_test_require_eq(
         ))
     }
 }
+
+
+
 
 /// E3002 / D-FAIL-CTX1: `?`-propagation trace.
 ///
@@ -2294,6 +2400,23 @@ fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'
     let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
     &xs[start as usize..end as usize]
 }
+fn jet_view_new_range<'a, T>(
+    xs: &'a [T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> &'a [T] {
+    let (start, end) = jet_checked_view_window(
+        range.start,
+        range.end,
+        range.exclusive,
+        xs.len() as i64,
+        file,
+        line,
+    );
+    &xs[start as usize..end as usize]
+}
+
 
 fn jet_view_mut_new<'a, T>(
     xs: &'a mut [T],
@@ -2303,6 +2426,22 @@ fn jet_view_mut_new<'a, T>(
     line: u32,
 ) -> &'a mut [T] {
     let (start, end) = jet_checked_view_window(a, b, false, xs.len() as i64, file, line);
+    &mut xs[start as usize..end as usize]
+}
+fn jet_view_mut_new_range<'a, T>(
+    xs: &'a mut [T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> &'a mut [T] {
+    let (start, end) = jet_checked_view_window(
+        range.start,
+        range.end,
+        range.exclusive,
+        xs.len() as i64,
+        file,
+        line,
+    );
     &mut xs[start as usize..end as usize]
 }
 
@@ -2644,11 +2783,15 @@ where
     }
 }
 #[inline(always)]
-fn jet_map_insert<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V)
+fn jet_map_insert<M, K: Ord + Clone, V: Clone>(
+    m: &mut M,
+    k: K,
+    v: V,
+) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
-    m.insert(k, v);
+    jet_outcome_of(m.insert(k, v))
 }
 
 #[inline(always)]
@@ -3140,6 +3283,12 @@ fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
     let mut out = left.to_vec();
     out.extend(right.iter().cloned());
     out
+}
+fn jet_list_join<T: JetShow>(xs: &[T], separator: &String) -> String {
+    xs.iter()
+        .map(JetShow::jet_show)
+        .collect::<Vec<_>>()
+        .join(separator)
 }
 fn jet_fixed_list_concat<
     T: Clone,

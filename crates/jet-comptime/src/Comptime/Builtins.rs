@@ -744,6 +744,20 @@ mod tests {
         }
     }
 
+    fn value_map(entries: impl IntoIterator<Item = (&'static str, CtValue)>) -> CtValue {
+        CtValue::Map(
+            entries
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        CtKey::from_value(CtValue::Str(key.into())).unwrap(),
+                        value,
+                    )
+                })
+                .collect(),
+        )
+    }
+
     #[test]
     fn string_add_uses_the_shared_prelude_kernel() {
         assert_eq!(
@@ -873,6 +887,74 @@ mod tests {
     }
 
     #[test]
+    fn map_extrema_and_top_n_share_float_sort_order() {
+        let span = Span::new(0, 0);
+        let values = value_map([
+            ("low", CtValue::Float(CtFloat::f64(-1.0))),
+            ("nan", CtValue::Float(CtFloat::f64(f64::NAN))),
+            ("high", CtValue::Float(CtFloat::f64(2.0))),
+        ]);
+
+        assert_eq!(
+            apply_method(&values, "min", Vec::new(), span).unwrap(),
+            CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(-1.0)))),
+        );
+        let maximum = apply_method(&values, "max", Vec::new(), span).unwrap();
+        assert!(matches!(
+            maximum,
+            CtValue::Present(value)
+                if matches!(*value, CtValue::Float(value) if value.as_f64().is_nan())
+        ));
+
+        let CtValue::List(rows) =
+            apply_method(&values, "top_n", vec![CtValue::Int(1)], span).unwrap()
+        else {
+            panic!("Map.top_n must return rows");
+        };
+        assert!(matches!(
+            rows.first(),
+            Some(CtValue::Struct { fields, .. })
+                if fields.iter().any(|(name, value)| {
+                    name == "value"
+                        && matches!(value, CtValue::Float(value) if value.as_f64().is_nan())
+                })
+        ));
+    }
+
+    #[test]
+    fn map_ordering_keeps_exact_integer_and_aggregate_values_typed() {
+        let span = Span::new(0, 0);
+        let wide = crate::Numeric::CtBigInt::from_str("18446744073709551618").unwrap();
+        let integers = value_map([
+            ("negative", CtValue::Int(-2)),
+            ("wide", CtValue::BigInt(wide.clone())),
+        ]);
+        assert_eq!(
+            apply_method(&integers, "min", Vec::new(), span).unwrap(),
+            CtValue::Present(Box::new(CtValue::Int(-2))),
+        );
+        assert_eq!(
+            apply_method(&integers, "max", Vec::new(), span).unwrap(),
+            CtValue::Present(Box::new(CtValue::BigInt(wide))),
+        );
+
+        let aggregates = value_map([
+            ("short", CtValue::List(vec![CtValue::Int(2)])),
+            ("long", CtValue::List(vec![CtValue::Int(10)])),
+        ]);
+        assert_eq!(
+            apply_method(&aggregates, "top_n", vec![CtValue::Int(1)], span).unwrap(),
+            CtValue::List(vec![CtValue::Struct {
+                type_name: String::new(),
+                fields: vec![
+                    ("key".into(), CtValue::Str("long".into())),
+                    ("value".into(), CtValue::List(vec![CtValue::Int(10)])),
+                ],
+            }]),
+        );
+    }
+
+    #[test]
     fn ordering_reverse_swaps_less_and_greater() {
         let span = Span::new(0, 0);
         for (input, expected) in [("Less", "Greater"), ("Equal", "Equal"), ("Greater", "Less")] {
@@ -945,7 +1027,7 @@ fn extreme_ref<'a>(
         return Ok(None);
     };
     for value in values {
-        let order = cmp_ref(value, best, span)?;
+        let order = cmp_for_sort_ref(value, best, span)?;
         if (maximum && order != std::cmp::Ordering::Less)
             || (!maximum && order == std::cmp::Ordering::Less)
         {
@@ -2121,25 +2203,27 @@ pub fn apply_method(
                     Ok(CtValue::Float(total))
                 }
                 CtValue::Int(_) | CtValue::BigInt(_) => {
-                    let mut total = 0i64;
+                    let mut total = crate::Numeric::CtBigInt::from_int(0);
                     for value in xs {
-                        total = total
-                            .checked_add(as_int(value, span)?)
-                            .ok_or_else(|| overflow("sum", span))?;
+                        let value = exact_big(value).ok_or_else(|| {
+                            unsupported("sum on mixed numeric types", span)
+                        })?;
+                        total = total.add(&value);
                     }
-                    Ok(CtValue::Int(total))
+                    Ok(exact_int_value(total))
                 }
                 _ => Err(unsupported("sum on non-numeric values", span)),
             }
         }
         (CtValue::List(xs), "product") => {
-            let mut total = 1i64;
-            for x in xs {
-                total = total
-                    .checked_mul(as_int(x, span)?)
-                    .ok_or_else(|| overflow("product", span))?;
+            let mut total = crate::Numeric::CtBigInt::from_int(1);
+            for value in xs {
+                let value = exact_big(value).ok_or_else(|| {
+                    unsupported("product on mixed numeric types", span)
+                })?;
+                total = total.mul(&value);
             }
-            Ok(CtValue::Int(total))
+            Ok(exact_int_value(total))
         }
         (CtValue::List(xs), "min") => {
             let Some(mut best) = xs.first().cloned() else {

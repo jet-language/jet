@@ -24,6 +24,7 @@ fn run() {
     spec :: process.cmd(["printf", "agent-safe"])
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
@@ -67,11 +68,10 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    read_spec :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).under(policy)
+    read_spec :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
     if read_spec.plan() == {
         .Ok(_) -> {
-            read :: read_spec.run_checked()
-            if read == {
+            if read_spec.run_checked() == {
                 .Ok(_) -> print("host-read-blocked")
                 .Err(_) -> print("host-read-escaped")
             }
@@ -79,11 +79,10 @@ fn run() {
         .Err(_) -> print("unsupported")
     }
 
-    write_spec :: process.cmd(["sh", "-c", "if printf escaped > '__MARKER__'; then exit 41; else exit 0; fi"]).under(policy)
+    write_spec :: process.cmd(["sh", "-c", "if printf escaped > '__MARKER__'; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
     if write_spec.plan() == {
         .Ok(_) -> {
-            write :: write_spec.run_checked()
-            if write == {
+            if write_spec.run_checked() == {
                 .Ok(_) -> print("host-write-blocked")
                 .Err(_) -> print("host-write-escaped")
             }
@@ -116,6 +115,7 @@ fn run() {
     spec :: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.spawn() == {
         .Ok(child) -> {
@@ -145,7 +145,7 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy)
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             receipt :: spec.run_checked() ?? panic("Windows authority-bound run failed")
@@ -188,7 +188,7 @@ use core.process as process
 
 fn run() {{
     policy :: process.workspace()
-    spec :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).under(policy)
+    spec :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).cwd("/tmp").under(policy)
     if spec.plan() == {{
         .Ok(plan) -> {{
             print(plan.backend)

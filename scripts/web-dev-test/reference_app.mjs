@@ -171,20 +171,48 @@ async function exerciseReferenceApp() {
   const cartCount = await dom(`document.querySelector('[data-panel="store"]')?.getAttribute("data-cart-count") || ""`);
   assert(cartCount === "1", `cart link did not update store state: ${cartCount}`);
 
-  const formResult = await dom(`(async () => {
+  const formBeforeSubmit = await dom(`(() => {
     const form = document.querySelector('form[action="/actions/ship-order-progressive"]');
     if (!form) return null;
-    const body = new URLSearchParams(Array.from(new FormData(form), ([key, value]) => [key, String(value)]));
-    const response = await fetch(form.action, {
-      method: form.method || "POST",
-      body,
-      credentials: "same-origin"
-    });
-    return { action: form.action, method: form.method, status: response.status, text: await response.text() };
+    return {
+      action: form.action,
+      method: form.method,
+      fields: Array.from(form.querySelectorAll("input")).map((input) => ({
+        name: input.name,
+        value: input.value,
+        required: input.required,
+      })),
+      submit: Boolean(form.querySelector('button[type="submit"]')),
+    };
   })()`);
-  assert(formResult?.action.endsWith("/actions/ship-order-progressive"), "progressive form action was not rendered");
-  assert(String(formResult.method).toUpperCase() === "POST", "progressive form method was not POST");
-  assert(formResult.status === 200 && formResult.text.includes("ship-order submitted"), `progressive form failed: ${JSON.stringify(formResult)}`);
+  assert(formBeforeSubmit?.action.endsWith("/actions/ship-order-progressive"), "progressive form action was not rendered");
+  assert(String(formBeforeSubmit.method).toUpperCase() === "POST", "progressive form method was not POST");
+  assert(
+    formBeforeSubmit.fields.some((field) => field.name === "id" && field.value === "41" && field.required) &&
+      formBeforeSubmit.fields.some((field) => field.name === "carrier" && field.value === "Parcel" && field.required) &&
+      formBeforeSubmit.fields.some((field) => field.name === "tracking" && field.value === "PX-41" && field.required),
+    `progressive form fields were not rendered: ${JSON.stringify(formBeforeSubmit)}`,
+  );
+  assert(formBeforeSubmit.submit, "progressive form submit control was not rendered");
+
+  const loaded = driver.waitForEvent("Page.loadEventFired", driver.pageSession);
+  const submitted = await dom(`(() => {
+    const form = document.querySelector('form[action="/actions/ship-order-progressive"]');
+    if (!form) return false;
+    form.querySelector('[name="carrier"]').value = "Parcel";
+    form.requestSubmit();
+    return true;
+  })()`);
+  assert(submitted, "progressive form was not submitted through the DOM");
+  await loaded;
+  const formResult = await dom(`(() => ({
+    url: location.href,
+    text: document.body?.innerText || "",
+  }))()`);
+  assert(
+    formResult.text.includes("ship-order submitted for 41 via Parcel"),
+    `progressive DOM form submit failed: ${JSON.stringify(formResult)}`,
+  );
 }
 
 async function startBrowser() {

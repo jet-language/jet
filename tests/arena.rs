@@ -118,6 +118,51 @@ fn run() {
 }
 
 #[test]
+fn erased_close_does_not_consume_arena_owner() {
+    let src = r#"
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    #Off {
+        close(^arena)
+    }
+    value :: arena.alloc(42)
+    print(value)
+    close(^arena)
+}
+"#;
+    assert_eq!(
+        error_codes(src),
+        Vec::<String>::new(),
+        "an erased close must not consume the arena owner"
+    );
+    if let Some(out) = build_and_run("erased_close", src) {
+        assert_eq!(out, "42\n");
+    }
+    tir_support::assert_tiers_agree("arena_erased_close", src, "42\n");
+}
+
+#[test]
+fn use_after_close_is_e0121_before_backend() {
+    let src = r#"
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    close(^arena)
+    value :: arena.alloc(42)
+    print(value)
+}
+"#;
+    assert_eq!(
+        error_codes(src),
+        vec!["E0121".to_string()],
+        "allocation after an active close must be rejected by sema"
+    );
+}
+
+#[test]
 fn view_escape_is_e0631() {
     let src = r#"
 use core.mem
@@ -127,6 +172,8 @@ fn make() Int -> {
     x :: arena.alloc(42)
     return x
 }
+
+fn run() { print(make()) }
 "#;
     assert_eq!(
         error_codes(src),

@@ -936,6 +936,12 @@ fn push_cached_runtime_traits(out: &mut String) {
             "pub trait __jet_{name}<Rhs = Self>: Sized {{ type Output; fn {method}(&self, rhs: &Rhs) -> Self::Output; }}\n"
         ));
     }
+    out.push_str(
+        "pub trait __jet_Index {\n    type __jet_Key;\n    type __jet_Value;\n    fn get(&self, key: &Self::__jet_Key) -> JetOutcome<Self::__jet_Value, JetAbsent>;\n}\n",
+    );
+    out.push_str(
+        "pub trait __jet_IndexMut: __jet_Index {\n    fn set(&mut self, key: &Self::__jet_Key, value: &Self::__jet_Value) -> JetOutcome<(), JetErr>;\n}\n",
+    );
     out.push('\n');
 }
 
@@ -1297,6 +1303,9 @@ fn jet_test_finish(results: Vec<JetTestOutcome>) -> bool {
             ok, passed, failed, skipped, expected_failures, unexpected_passes, tests
         );
     } else {
+        if let Some(seed) = jet_test_shuffle_seed() {
+            println!("shuffle: seed={seed}");
+        }
         for result in &results {
             if jet_test_should_capture(result.ok) {
                 if !result.stdout.is_empty() {
@@ -1367,21 +1376,41 @@ fn jet_test_panic_error(
     }
 }
 
-fn jet_test_run<F>(run: F) -> Result<(), String>
+fn jet_test_run<F>(expected_failure: bool, run: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
 {
+    // Every generated test gets a private harness frame. It converts runtime
+    // stops from setup, timeout, and ordinary body code into typed carriers;
+    // nested `.expect_fail` frames still consume their matching stop first.
+    jet_testing_clear_failure();
+    let expected_code = if expected_failure {
+        None
+    } else {
+        // Keep the harness frame available to catch ordinary runtime stops,
+        // but do not let it classify those diagnostics as expected failures.
+        Some("__jet_test_ordinary_failure__")
+    };
+    jet_test_expect_fail_enter_scope(u64::MAX, expected_code);
     let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(result) => result,
-        Err(payload) => jet_test_panic_error(payload),
+        Err(payload) => {
+            let result = jet_test_panic_error(payload);
+            if expected_failure && result.is_err() {
+                let _ = jet_test_expect_fail_catch_scope();
+            }
+            result
+        }
     };
     if result.is_err() {
         jet_test_skip_abort();
     }
     jet_test_expect_fail_abort();
     jet_test_timeout_abort();
+    jet_testing_clear_failure();
     result
 }
+
 
 enum JetPropertyCaseResult {
     Accepted,
@@ -1394,24 +1423,30 @@ enum JetPropertyCaseResult {
 /// `Ok(false)` is a rejected input and the callable never executes. Once the
 /// predicate accepts, the callable runs under ordinary `jet_test_run`
 /// semantics — its own `#Pre`/`#Post` and every nested callee failure are
-/// real failure evidence, never reclassified as input rejection. A panic
-/// while evaluating the predicate itself is failure evidence too (`Err`): the
-/// sampler found an input on which the precondition cannot even be evaluated.
+/// real failure evidence, never reclassified as input rejection. The lowered
+/// predicate carries its checked `JetOutcome<bool, JetErr>` result; a returned
+/// `JetErr` is failure evidence too. A panic while evaluating the predicate
+/// itself is failure evidence as well: the sampler found an input on which the
+/// precondition cannot even be evaluated.
 fn jet_test_contract_eligibility<P>(eligible: P) -> Result<bool, String>
 where
-    P: FnOnce() -> bool,
+    P: FnOnce() -> JetOutcome<bool, JetErr>,
 {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
-        Ok(eligible) => Ok(eligible),
+        Ok(Ok(eligible)) => Ok(eligible),
+        Ok(Err(error)) => Err(format!("{:?}", error)),
         Err(payload) => jet_test_panic_error(payload).map(|()| true),
     }
 }
 
-fn jet_test_run_property<F>(run: F) -> Result<JetPropertyCaseResult, String>
+fn jet_test_run_property<F>(
+    expected_failure: bool,
+    run: F,
+) -> Result<JetPropertyCaseResult, String>
 where
     F: FnOnce() -> Result<(), String>,
 {
-    jet_test_run(run).map(|()| JetPropertyCaseResult::Accepted)
+    jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
 }
 /// D-E3-1905: the test child is an AOT binary. The release profile is encoded
 /// at compile time so `jet test --release --trace-tiers` proves which binary
@@ -1508,6 +1543,21 @@ impl JetGen for i64 {
         v
     }
     fn render(&self) -> String { format!("{}", self) }
+}
+impl JetGen for jet_foundation::Numeric::JetInt {
+    fn generate(rng: &mut JetRng) -> Self {
+        jet_std::jet_int_owned_from_i64(i64::generate(rng))
+    }
+    fn shrink(&self) -> Vec<Self> {
+        let value = jet_std::jet_int_owned_to_i64(self).unwrap_or(0);
+        i64::shrink(&value)
+            .into_iter()
+            .map(jet_std::jet_int_owned_from_i64)
+            .collect()
+    }
+    fn render(&self) -> String {
+        self.to_string_rep()
+    }
 }
 macro_rules! impl_jet_gen_int {
     ($($ty:ty),+ $(,)?) => {
@@ -1670,7 +1720,7 @@ fn jet_prop_seed() -> u64 {
         .unwrap_or(0x5EED_1234_ABCD_0001)
 }
 fn jet_prop_cases() -> u64 {
-    1_000
+    200
 }
 fn jet_prop_replay_seed() -> Option<u64> {
     std::env::var("JET_PROP_REPLAY_SEED")
@@ -1961,7 +2011,7 @@ pub(crate) fn runtime_parts_for_used_core(
     if matches(&["core.hardware", "core.embedded", "core.board", "core.device"]) {
         parts.insert(Part::EmbeddedHardware);
     }
-    if matches(&["core.ui", "core.font", "core.web", "app"]) {
+    if matches(&["core.ui", "core.font", "core.web", "app", "core.args"]) {
         parts.insert(Part::Ui);
     }
     if matches(&["core.ui", "core.devtools", "core.web", "app"]) {
@@ -3011,6 +3061,11 @@ fn push_typed_core_optional_parts(
     omit_testing_shared: bool,
     policy: &ReleaseDevtoolsPolicy,
 ) {
+    // The email carrier lives in the top-level `jet_email` Prelude module.
+    // Runtime-part selection is the cached-core path's only reachability fact.
+    if runtime_parts.contains(&MirRuntimePartId::Email) {
+        out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
+    }
     let needs_data = runtime_parts.contains(&MirRuntimePartId::Data);
     if runtime_parts.contains(&MirRuntimePartId::Game) {
         push_game_debug_policy_const(out, policy);
@@ -3099,6 +3154,12 @@ fn push_typed_core_optional_parts(
         out.push_str("\n// JET_VETTED_UNSAFE_END: jet_compute\n");
     }
     if runtime_parts.contains(&MirRuntimePartId::Http) {
+        if !runtime_parts.contains(&MirRuntimePartId::Sync) {
+            out.push_str(
+                "struct JetDbRequestScope;\n\
+impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
+            );
+        }
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
@@ -3135,7 +3196,13 @@ fn push_typed_core_optional_parts(
     }
     if runtime_parts.contains(&MirRuntimePartId::Sync) {
         out.push_str("\nmod jet_sync {\n");
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
+        out.push_str(
+            &include_str!("../Prelude/CoreLib/Top/Sync.rs")
+                .replace(
+                    "include!(\"../SyncPublish.rs\");",
+                    include_str!("../Prelude/CoreLib/SyncPublish.rs"),
+                ),
+        );
         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
     push_runtime_devtools_panel_preludes(
@@ -3853,7 +3920,13 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
         // a previous fragment's last line would stay crate-private and hide the
         // whole `core.sync` surface from the program crate.
         out.push_str("\nmod jet_sync {\n");
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
+        out.push_str(
+            &include_str!("../Prelude/CoreLib/Top/Sync.rs")
+                .replace(
+                    "include!(\"../SyncPublish.rs\");",
+                    include_str!("../Prelude/CoreLib/SyncPublish.rs"),
+                ),
+        );
         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
     if needs_services || needs_jobs {

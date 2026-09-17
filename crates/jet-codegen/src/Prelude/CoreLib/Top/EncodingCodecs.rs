@@ -100,43 +100,44 @@ fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pu
     }
 }
 
-fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::EncodingError {
-    use crate::jet_xml_pull::Reason;
-    let kind = match error.kind {
-        Reason::EntityCycle | Reason::Limit => jet_std::EncodingErrorKind::Limit,
-        Reason::Canonicalization | Reason::Unsupported => {
-            jet_std::EncodingErrorKind::Unsupported
-        }
-        Reason::Malformed
-            if error.reason.contains("ended")
-                || error.reason.contains("unterminated")
-                || error.reason.contains("truncated") =>
-        {
-            jet_std::EncodingErrorKind::Truncated
-        }
-        _ => jet_std::EncodingErrorKind::Syntax,
-    };
-    jet_std::EncodingError::new(
-        jet_std::EncodingFormat::XML,
-        kind,
-        error.offset as i64,
-        jet_outcome_of(error.line.map(|value| value as i64)),
-        jet_outcome_of(error.column.map(|value| value as i64)),
-        error.path,
-        error.reason,
-    )
+fn jet_xml_reason(reason: crate::jet_xml_pull::Reason) -> jet_std::XMLReason {
+    use crate::jet_xml_pull::Reason as Source;
+    match reason {
+        Source::InvalidEncoding => jet_std::XMLReason::InvalidEncoding,
+        Source::Malformed => jet_std::XMLReason::Malformed,
+        Source::MismatchedTag => jet_std::XMLReason::MismatchedTag,
+        Source::InvalidName => jet_std::XMLReason::InvalidName,
+        Source::Namespace => jet_std::XMLReason::Namespace,
+        Source::DuplicateAttribute => jet_std::XMLReason::DuplicateAttribute,
+        Source::Entity => jet_std::XMLReason::Entity,
+        Source::EntityCycle => jet_std::XMLReason::EntityCycle,
+        Source::Limit => jet_std::XMLReason::Limit,
+        Source::Canonicalization => jet_std::XMLReason::Canonicalization,
+        Source::Shape => jet_std::XMLReason::Shape,
+        Source::Unsupported => jet_std::XMLReason::Unsupported,
+    }
 }
 
-fn jet_xml_shape_error(reason: String) -> jet_std::EncodingError {
-    jet_std::EncodingError::new(
-        jet_std::EncodingFormat::XML,
-        jet_std::EncodingErrorKind::Syntax,
-        0,
-        Err(JetAbsent),
-        Err(JetAbsent),
-        "",
+fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
+    jet_std::XMLError {
+        kind: jet_xml_reason(error.kind),
+        byte_offset: jet_outcome_of(Some(error.offset as i64)),
+        line: jet_outcome_of(error.line.map(|value| value as i64)),
+        column: jet_outcome_of(error.column.map(|value| value as i64)),
+        path: error.path,
+        reason: error.reason,
+    }
+}
+
+fn jet_xml_shape_error(reason: String) -> jet_std::XMLError {
+    jet_std::XMLError {
+        kind: jet_std::XMLReason::Shape,
+        byte_offset: jet_outcome_of(Some(0)),
+        line: Err(JetAbsent),
+        column: Err(JetAbsent),
+        path: String::new(),
         reason,
-    )
+    }
 }
 
 fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
@@ -162,8 +163,7 @@ fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::P
         },
     }
 }
-
-fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document(text)
         .map(jet_xml_to_data_tree)
         .map_err(jet_xml_error)
@@ -172,7 +172,7 @@ fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::Encodi
 fn jet_std_xml_parse_with(
     text: &String,
     options: &jet_std::XMLParseOptions,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+) -> Result<jet_std::DataTree, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document_with(text, &jet_xml_options(options))
         .map(jet_xml_to_data_tree)
         .map_err(jet_xml_error)
@@ -181,7 +181,7 @@ fn jet_std_xml_parse_with(
 fn jet_std_xml_parse_bytes(
     bytes: &Vec<u8>,
     options: jet_std::XMLParseOptions,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+) -> Result<jet_std::DataTree, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document_bytes_with(bytes, &jet_xml_options(&options))
         .map(jet_xml_to_data_tree)
         .map_err(jet_xml_error)
@@ -189,7 +189,7 @@ fn jet_std_xml_parse_bytes(
 
 fn jet_std_xml_render(
     d: &jet_std::DataTree,
-) -> Result<String, jet_std::EncodingError> {
+) -> Result<String, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::render_document(&value).map_err(jet_xml_error)
 }
@@ -197,7 +197,7 @@ fn jet_std_xml_render(
 fn jet_std_xml_to_bytes(
     d: &jet_std::DataTree,
     options: jet_std::XMLRenderOptions,
-) -> Result<Vec<u8>, jet_std::EncodingError> {
+) -> Result<Vec<u8>, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::render_document_bytes(
         &value,
@@ -221,7 +221,7 @@ fn jet_enc_xml_to_string_shape<T: __jet_Encode>(
 fn jet_std_xml_canonical(
     d: &jet_std::DataTree,
     options: &jet_std::XMLCanonical,
-) -> Result<String, jet_std::EncodingError> {
+) -> Result<String, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
     let mode = match options.mode {
         jet_std::XMLCanonicalMode::Inclusive11 => crate::jet_xml_pull::CanonicalMode::Inclusive11,
@@ -241,7 +241,7 @@ fn jet_std_xml_canonical(
 // D-ENCXML-PROJECTION1=A: focused helpers + typed decode over the closed tree.
 fn jet_std_xml_root(
     document: &jet_std::DataTree,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+) -> Result<jet_std::DataTree, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(document).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::document_root(&value)
         .map(jet_xml_to_data_tree)
@@ -257,7 +257,7 @@ fn jet_std_xml_expanded_name(
         String,
         JetOutcome<String, JetAbsent>,
     ),
-    jet_std::EncodingError,
+    jet_std::XMLError,
 > {
     let value = jet_xml_from_data_tree(node).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::expanded_name_parts(&value)
@@ -270,7 +270,7 @@ fn jet_std_xml_expanded_name(
 fn jet_std_xml_attribute(
     element: &jet_std::DataTree,
     name: &String,
-) -> Result<JetOutcome<String, JetAbsent>, jet_std::EncodingError> {
+) -> Result<JetOutcome<String, JetAbsent>, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::lookup_attribute(&value, name)
         .map(jet_outcome_of)
@@ -279,7 +279,7 @@ fn jet_std_xml_attribute(
 
 fn jet_std_xml_content(
     element: &jet_std::DataTree,
-) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
+) -> Result<Vec<jet_std::DataTree>, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::element_content(&value)
         .map(|nodes| nodes.into_iter().map(jet_xml_to_data_tree).collect())
@@ -297,19 +297,25 @@ fn jet_decode_path(path: &str) -> String {
     }
 }
 
-fn jet_xml_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
-    let mut location = format!(" at byte {}", error.byte_offset);
-    match (error.line, error.column) {
-        (Ok(line), Ok(column)) => {
+fn jet_xml_field_error(error: jet_std::XMLError) -> Vec<jet_std::FieldError> {
+    let mut location = format!(
+        " at byte {}",
+        error.byte_offset.as_ref().ok().copied().unwrap_or(0)
+    );
+    match (
+        error.line.as_ref().ok().copied(),
+        error.column.as_ref().ok().copied(),
+    ) {
+        (Some(line), Some(column)) => {
             location.push_str(&format!(" (line {line}, column {column})"));
         }
-        (Ok(line), Err(_)) => {
+        (Some(line), None) => {
             location.push_str(&format!(" (line {line})"));
         }
-        (Err(_), Ok(column)) => {
+        (None, Some(column)) => {
             location.push_str(&format!(" (column {column})"));
         }
-        (Err(_), Err(_)) => {}
+        (None, None) => {}
     }
     jet_std::FieldError::at(
         jet_decode_path(&error.path),
@@ -321,7 +327,7 @@ fn jet_xml_decode_source_error(error: crate::jet_xml_pull::Error) -> Vec<jet_std
     jet_xml_field_error(jet_xml_error(error))
 }
 
-fn jet_xml_decode_value_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+fn jet_xml_decode_value_error(error: jet_std::XMLError) -> Vec<jet_std::FieldError> {
     jet_xml_field_error(error)
 }
 

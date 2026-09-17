@@ -13,21 +13,26 @@ pub enum TestEvidenceError {
     EmptyReportId,
     EmptyClaimId,
     EmptyEvidenceId,
-    IdentityConflict {
-        field: &'static str,
-        expected: String,
-        found: String,
-    },
     InvalidOutcome { outcome: EvidenceOutcome },
     InvalidExpectation {
         expectation: EvidenceExpectation,
         outcome: EvidenceOutcome,
+    },
+    IdentityConflict {
+        field: &'static str,
+        expected: String,
+        found: String,
     },
     Io {
         operation: String,
         path: String,
         message: String,
     },
+    GoldenMissing { path: String },
+    GoldenUnreadable { path: String },
+    GoldenMismatch { path: String, diff: String },
+    FixtureMissing { path: String },
+    FixtureUnreadable { path: String },
     ContradictoryOutcome {
         claim_id: String,
         existing: EvidenceOutcome,
@@ -47,6 +52,16 @@ impl TestEvidenceError {
             path: path.into(),
             message: message.into(),
         }
+    }
+
+    /// Split a typed test-evidence failure into the message and detail slots
+    /// consumed by the canonical runtime-stop renderer.
+    pub fn report_parts(&self) -> (String, String) {
+        let rendered = self.to_string();
+        rendered
+            .split_once('\n')
+            .map(|(message, detail)| (message.to_string(), detail.to_string()))
+            .unwrap_or((rendered, String::new()))
     }
 }
 
@@ -96,6 +111,21 @@ impl std::fmt::Display for TestEvidenceError {
                 output,
                 "test evidence {operation} failed for {path}: {message}"
             ),
+            Self::GoldenMissing { path } => {
+                write!(output, "golden file is missing: {path}\npath: {path}")
+            }
+            Self::GoldenUnreadable { path } => {
+                write!(output, "golden file cannot be read: {path}\npath: {path}")
+            }
+            Self::GoldenMismatch { path, diff } => {
+                write!(output, "golden file differs: {path}\npath: {path}\n{diff}")
+            }
+            Self::FixtureMissing { path } => {
+                write!(output, "fixture is missing: {path}\npath: {path}")
+            }
+            Self::FixtureUnreadable { path } => {
+                write!(output, "fixture cannot be read: {path}\npath: {path}")
+            }
             Self::ContradictoryOutcome {
                 claim_id,
                 existing,

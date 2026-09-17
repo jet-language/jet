@@ -2461,7 +2461,7 @@ impl<'a> Checker<'a> {
                                 "write the pieces inside one string: \"{{{left}}}{{{right}}}\""
                             )
                         }
-                        _ => "write the pieces inside one string: \"{a}{b}\"".to_string(),
+                        _ => "write the pieces inside one interpolated string (schematic: the checked operands are not simple names)".to_string(),
                     };
                     let mut diagnostic = Diagnostic::error(
                         "E0109",

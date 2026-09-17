@@ -2138,6 +2138,24 @@ fn jet_jit_typed_datetime_interpolate(literals: i64, holes: i64) -> i64 {
         .unwrap_or(0)
 }
 
+/// The canonical DateTime typed-head route carries a parsed civil-time handle,
+/// not the interpolated source text. AOT and the interpreter both preserve the
+/// DateTime value; the JIT adapter must do the same before civil dispatch.
+fn jet_jit_typed_datetime_literal(literals: i64, holes: i64) -> i64 {
+    let Some(text) = typed_datetime_interpolate(literals, holes) else {
+        return 0;
+    };
+    match crate::Time::time_rt::jet_time_parse_rfc3339(&text) {
+        Ok(value) => crate::Time::push(crate::Time::TimeValue::DateTime(value)),
+        Err(error) => Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault(&format!(
+                "invalid DateTime typed-head value reached the JIT: {error}"
+            ));
+            0
+        }),
+    }
+}
+
 fn alloc_string_list(values: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -3142,7 +3160,7 @@ host_fns! {
     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
     typed_path_interp_canonical: "jet_typed_path_literal" => jet_jit_typed_path_interpolate: sig_binary;
     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
-    typed_datetime_interp_canonical: "jet_typed_datetime_literal" => jet_jit_typed_datetime_interpolate: sig_binary;
+    typed_datetime_interp_canonical: "jet_typed_datetime_literal" => jet_jit_typed_datetime_literal: sig_binary;
 }
 
 #[cfg(test)]

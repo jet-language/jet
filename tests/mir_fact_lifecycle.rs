@@ -143,6 +143,56 @@ fn run() {}
     );
 }
 
+#[test]
+fn columnar_field_arithmetic_keeps_packed_direct_layout() {
+    let source = r#"
+#Layout(columnar)
+struct Particle {
+    x: Float
+    y: Float
+    mass: Float
+}
+
+fn energy(ps: [Particle]) Float {
+    total := Float{0.0}
+    loop i in 0..<ps.len() {
+        total += ps[i].x * ps[i].y + ps[i].mass
+    }
+    return total
+}
+
+fn run() {}
+"#;
+    let mir = lower_checked(source);
+    let policy = MirOptimizationPolicy::conservative();
+    let optimized = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let energy = function(&optimized, "energy");
+    let fact = energy
+        .optimization
+        .vector_facts
+        .iter()
+        .find(|fact| fact.layout == jet_foundation::MIR::MirVectorLayout::ColumnarDirect)
+        .unwrap_or_else(|| panic!("missing direct columnar vector fact: {:#?}", energy.optimization.vector_facts));
+    assert!(
+        fact.decision.is_eligible(),
+        "columnar arithmetic should be eligible: {fact:#?}"
+    );
+    assert!(
+        fact.packed,
+        "columnar arithmetic should retain packed lowering: {fact:#?}"
+    );
+    assert!(
+        fact.no_cross_iteration_dependencies,
+        "independent field reads must not inherit a scalar loop-carried dependency: {fact:#?}"
+    );
+    assert!(
+        fact.accesses
+            .iter()
+            .any(|access| access.layout == jet_foundation::MIR::MirVectorLayout::ColumnarDirect),
+        "vector fact must retain a direct columnar access: {fact:#?}"
+    );
+}
+
 fn function_mut<'a>(
     program: &'a mut jet_foundation::MIR::MirProgram,
     name: &str,

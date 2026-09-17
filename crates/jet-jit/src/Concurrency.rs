@@ -12,8 +12,8 @@ use jet_codegen::scheduler::{
     jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, jet_std_time_duration_to_millis,
     jet_stream_key_by, jet_stream_with_event_time_i64, jet_stream_with_event_time_ns,
     jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted, jet_task_join_deadline_check,
-    JetDeadlineGuard, JetLateEventDisposition, JetSchedulerChannel, JetSchedulerJoin,
-    JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
+    JetDeadlineGuard, JetDeterministicWorld, JetLateEventDisposition, JetSchedulerChannel,
+    JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
@@ -458,7 +458,17 @@ where
     out.unwrap_or_else(absent)
 }
 
+fn clear_active_runtime_sentry_state() {
+    // JIT sentry guards and frames are thread-local, so the resident runtime
+    // boundary must release their Foundation state before this TLS slot is
+    // cleared or the worker thread can tear down.
+    crate::Memory::reset_jit_sentry_state();
+}
+
 pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
+    if ptr.is_none() {
+        clear_active_runtime_sentry_state();
+    }
     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
     // Publish on install only. Clearing TLS (spawn worker epilogue / post-drain)
     // must not drop the shared pointer while HTTP OS threads still serve.
@@ -472,8 +482,12 @@ pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
 }
 
 fn set_active_runtime_local(ptr: Option<*mut super::JitRuntime>) {
+    if ptr.is_none() {
+        clear_active_runtime_sentry_state();
+    }
     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
 }
+
 
 pub(crate) fn clear_http_shared_runtime() {
     let _guard = RuntimeAccessGuard::enter();
@@ -574,6 +588,7 @@ struct HttpRuntimeTlsRestore {
 impl Drop for HttpRuntimeTlsRestore {
     fn drop(&mut self) {
         if self.clear {
+            clear_active_runtime_sentry_state();
             ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
         }
     }
@@ -1226,13 +1241,18 @@ type SpawnFn2 = extern "C" fn(i64, i64) -> i64;
 type SpawnFn3 = extern "C" fn(i64, i64, i64) -> i64;
 type SpawnFn4 = extern "C" fn(i64, i64, i64, i64) -> i64;
 
-fn store_task(join: JetSchedulerJoin<i64>, control: Arc<JetTaskControl>) -> i64 {
+fn store_task(
+    join: JetSchedulerJoin<i64>,
+    control: Arc<JetTaskControl>,
+    skip_join_deadline: bool,
+) -> i64 {
     let runtime = active_runtime_ptr().map(|ptr| ptr as usize);
     let published = control.clone();
     let task = with_runtime_mut(|rt| {
         let id = rt.tasks.len() as i64;
         rt.tasks.push(Some(join));
         rt.task_controls.push(control);
+        rt.task_skip_join_deadline.push(skip_join_deadline);
         id
     });
     if let Some(runtime) = runtime {
@@ -1341,6 +1361,15 @@ where
     spawn_with_runtime(f)
 }
 
+/// Spawn a typed async adapter task. Its public join result is the canonical
+/// dispatch report, so parent deadline checks must not overwrite that report.
+pub(crate) fn spawn_ffi_task_typed<F>(f: F) -> i64
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
+    spawn_with_runtime_at_label_policy(0, None, true, f)
+}
+
 pub(crate) fn detach_ffi_task(task: i64) {
     jet_jit_task_detach(task);
 }
@@ -1359,7 +1388,23 @@ where
     spawn_with_runtime_at_label(spawn_site, None, f)
 }
 
-fn spawn_with_runtime_at_label<F>(spawn_site: usize, explicit_label: Option<String>, f: F) -> i64
+fn spawn_with_runtime_at_label<F>(
+    spawn_site: usize,
+    explicit_label: Option<String>,
+    f: F,
+) -> i64
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
+    spawn_with_runtime_at_label_policy(spawn_site, explicit_label, false, f)
+}
+
+fn spawn_with_runtime_at_label_policy<F>(
+    spawn_site: usize,
+    explicit_label: Option<String>,
+    skip_join_deadline: bool,
+    f: F,
+) -> i64
 where
     F: FnOnce() -> i64 + Send + 'static,
 {
@@ -1442,7 +1487,7 @@ where
         },
         control.clone(),
     );
-    let task = store_task(join, control);
+    let task = store_task(join, control, skip_join_deadline);
     start_gate.wake();
     task
 }
@@ -1718,17 +1763,26 @@ fn jet_jit_task_join_status(task: i64) -> i64 {
         if idx >= rt.tasks.len() {
             return None;
         }
-        rt.tasks[idx].take()
+        let skip_join_deadline = rt
+            .task_skip_join_deadline
+            .get(idx)
+            .copied()
+            .unwrap_or(false);
+        Some((rt.tasks[idx].take()?, skip_join_deadline))
     });
     match join {
-        Some(mut j) => {
+        Some((mut j, skip_join_deadline)) => {
             let mut joined = false;
             let status = wait_task_result_status(
                 || {
-                    jet_task_join_deadline_check();
+                    if !skip_join_deadline {
+                        jet_task_join_deadline_check();
+                    }
                     let result = j.join();
                     joined = true;
-                    jet_task_join_deadline_check();
+                    if !skip_join_deadline {
+                        jet_task_join_deadline_check();
+                    }
                     result
                 },
                 |_rt, value| value as u64,
@@ -1977,9 +2031,14 @@ fn jet_jit_select_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
     let status = wait_status(|| {
         let (arm, value) = jet_scheduler_select_int_channels_tagged(&channels, after_ns);
         with_runtime_mut(|rt| {
+            let option = crate::runtime_host::alloc_jit_result(
+                rt,
+                value.is_some(),
+                value.unwrap_or(0) as u64,
+            );
             let result = rt.heap.alloc_record(2);
             let _ = rt.heap.record_set_int(result, 0, arm);
-            let _ = rt.heap.record_set_int(result, 1, value.unwrap_or(0));
+            let _ = rt.heap.record_set_int(result, 1, option);
             result
         })
     });
@@ -2014,9 +2073,14 @@ fn jet_jit_select_try_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
     let status = wait_status(|| {
         let (arm, value) = jet_scheduler_try_select_int_channels_tagged(&channels, after_ns);
         with_runtime_mut(|rt| {
+            let option = crate::runtime_host::alloc_jit_result(
+                rt,
+                value.is_some(),
+                value.unwrap_or(0) as u64,
+            );
             let result = rt.heap.alloc_record(2);
             let _ = rt.heap.record_set_int(result, 0, arm);
-            let _ = rt.heap.record_set_int(result, 1, value.unwrap_or(0));
+            let _ = rt.heap.record_set_int(result, 1, option);
             result
         })
     });
@@ -2127,6 +2191,102 @@ fn jet_jit_task_timeout(nanos: i64) -> i64 {
     jet_codegen::scheduler::jet_task_timeout_duration_ns(nanos);
     0
 }
+/// Start the canonical deterministic world scope for a synchronous JIT
+/// callback. The scheduler module owns the clock/provider semantics; the
+/// resident runtime only retains the scope across the generated callback.
+fn jet_jit_testing_world_begin() -> i64 {
+    with_runtime_mut(|rt| {
+        if rt.deterministic_world.is_some() {
+            rt.set_host_fault("jit testing.world: deterministic world already active");
+            return 0;
+        }
+        let world = JetDeterministicWorld::new();
+        let scope = world.enter();
+        rt.deterministic_world = Some(world);
+        rt.deterministic_world_scope = Some(scope);
+        1
+    })
+}
+
+fn jet_jit_testing_world_end(handle: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        if handle != 1 || rt.deterministic_world.is_none() {
+            rt.set_host_fault("jit testing.world: invalid deterministic world handle");
+            return 0;
+        }
+        if let Some(world) = rt.deterministic_world.as_ref() {
+            world.wait_idle();
+            world.ensure_closed();
+        }
+        rt.deterministic_world_scope.take();
+        rt.deterministic_world.take();
+        0
+    })
+}
+
+fn jet_world_now(world: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        if world != 1 {
+            rt.set_host_fault("jit deterministic_world.now: invalid world handle");
+            return 0;
+        }
+        rt.deterministic_world
+            .as_ref()
+            .map(JetDeterministicWorld::now)
+            .unwrap_or_else(|| {
+                rt.set_host_fault("jit deterministic_world.now: world is not active");
+                0
+            })
+    })
+}
+
+fn jet_world_advance(world: i64, duration_ns: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        if world != 1 {
+            rt.set_host_fault("jit deterministic_world.advance: invalid world handle");
+            return 0;
+        }
+        rt.deterministic_world
+            .as_ref()
+            .map(|world| world.advance_ns(duration_ns))
+            .unwrap_or_else(|| {
+                rt.set_host_fault("jit deterministic_world.advance: world is not active");
+                0
+            })
+    })
+}
+
+fn jet_world_wait_idle(world: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        if world != 1 {
+            rt.set_host_fault("jit deterministic_world.wait_idle: invalid world handle");
+            return 0;
+        }
+        if let Some(active) = rt.deterministic_world.as_ref() {
+            active.wait_idle();
+        } else {
+            rt.set_host_fault("jit deterministic_world.wait_idle: world is not active");
+        }
+        0
+    })
+}
+
+fn jet_world_history(world: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        if world != 1 {
+            rt.set_host_fault("jit deterministic_world.history: invalid world handle");
+            return 0;
+        }
+        rt.deterministic_world
+            .as_ref()
+            .map(|world| rt.heap.alloc_string(world.history()))
+            .unwrap_or_else(|| {
+                rt.set_host_fault("jit deterministic_world.history: world is not active");
+                0
+            })
+    })
+}
+
 
 host_fns! {
     struct ConcurrencyHostFns;
@@ -2247,7 +2407,14 @@ host_fns! {
     sleep: "jet_jit_sleep" => jet_jit_sleep: sig_i64;
     task_timeout: "jet_jit_task_timeout" => jet_jit_task_timeout: sig_i64;
     time_now: "jet_jit_time_now" => jet_jit_time_now: sig_noarg_i64;
+    time_now_canonical: "jet_std_time_now" => jet_jit_time_now: sig_noarg_i64;
     deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
+    testing_world_begin: "jet_jit_testing_world_begin" => jet_jit_testing_world_begin: sig_noarg_i64;
+    testing_world_end: "jet_jit_testing_world_end" => jet_jit_testing_world_end: sig_i64;
+    world_now: "jet_world_now" => jet_world_now: sig_i64;
+    world_advance: "jet_world_advance" => jet_world_advance: sig_i64_i64;
+    world_wait_idle: "jet_world_wait_idle" => jet_world_wait_idle: sig_i64;
+    world_history: "jet_world_history" => jet_world_history: sig_i64;
     deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
 
@@ -2319,6 +2486,7 @@ mod tests {
                         let id = rt.tasks.len() as i64;
                         rt.tasks.push(Some(nested_join));
                         rt.task_controls.push(nested_control);
+                        rt.task_skip_join_deadline.push(false);
                         id
                     });
                     nested_id_for_child.store(nested, Ordering::Release);
@@ -2336,6 +2504,7 @@ mod tests {
         let outer = runtime.tasks.len() as i64;
         runtime.tasks.push(Some(child));
         runtime.task_controls.push(control);
+        runtime.task_skip_join_deadline.push(false);
         jet_jit_task_group_register(group, outer);
 
         release.store(true, Ordering::Release);

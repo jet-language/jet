@@ -17,7 +17,9 @@ hierarchy.
 | Semantics | Semantic tokens full/range/delta, inlay hints, call hierarchy, trait/type hierarchy |
 | Workspace | Multiple roots with folder add/remove notifications; `jet.impact` and `jet.budgetReports` commands |
 
-Every advertised feature maps to a named non-vacuous test in `tests/lsp.rs`.
+Rename uses the checked versions of the edited documents. If one changes
+while the rename request is pending, the extension refuses the edits.
+Run Rename again to get a new preview.
 
 ## Setup
 

@@ -10,6 +10,12 @@ list or release promise. Specific goals, plans, priorities between work items,
 and development status belong in Tower. Code and executable evidence establish
 what works. [AGENTS.md](../../AGENTS.md) defines authority and decision rights.
 
+## Philosophy Pillars
+
+1. **Beginner Magic, Expert Control, Enterprise Auditability:** We strive for useful defaults, little boilerplate/ceremony, genuinely useful, descriptive errors that guide to user-intended resolution with the what, the why, and the how to fix. Experts should never have anything short of full control available to them, HOWEVER, instead of the more common opt-in to useful defaults or "magic" for beginners (who wouldn't know what to opt into anyway), experts should generally opt-out, because they have the appropriate domain knowledge & experience to know when either approach is best. Enterprises need auditability, traceability, & enforceability for large codebases - that is what Jet should excel at.
+2. **Easy To Reason About, Read, & Write:** While we maintain a strong emphasis on UX/DX/ergonomics, most of the time spent with code is reading & the most critical time spent with code is reasoning about it. We strive to prioritize the ability of a developer to reason about the code they are working with to the greatest exent possible for a programming language. Jet is also targeting high readability & excellent ergonomics.
+3. **Friction Inversely Proportional To Commonality:** The most common operations, tasks, functions, methods, should have the least amount of friction. The more rare an operation, the more leeway for additional friction, while targeting minimal everywhere. 
+
 ## Design priorities
 
 When priorities conflict, the earlier one wins:

@@ -33,6 +33,7 @@ fn placeholder(ty: RuleArgType, source_type: &str) -> String {
     }
     match ty {
         RuleArgType::String => "\"x\"".to_string(),
+        RuleArgType::Path => "Path{\"x\"}".to_string(),
         RuleArgType::Int => "1".to_string(),
         RuleArgType::Bool => "true".to_string(),
         RuleArgType::DurationOrString => "1s".to_string(),

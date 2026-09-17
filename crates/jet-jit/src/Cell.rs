@@ -3,10 +3,8 @@
 use crate::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_codegen::local_cell::{
-    JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellOptionLike, JetCellReadGuard,
-};
-use jet_foundation::MIR::{MirType, MirTypeKind, MirRuntimeValue};
+use jet_codegen::local_cell::{JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard};
+use jet_foundation::MIR::{MirRuntimeValue, MirType, MirTypeKind};
 use std::collections::HashSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 

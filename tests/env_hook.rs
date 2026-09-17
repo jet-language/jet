@@ -18,6 +18,7 @@
 use std::fs;
 #[cfg(unix)]
 use std::io::Write;
+use jetpack::SHA256;
 use std::process::{Command, Stdio};
 
 mod common;
@@ -245,6 +246,111 @@ fn export_activates_nearest_env_from_root_and_subdir() {
         assert!(stdout.contains("export JETPACK_ENV_OLD_PATH="), "{stdout}");
         assert!(stdout.contains("export PATH="), "{stdout}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn export_uses_a_durable_hangar_path_for_realized_package() {
+    let project = Scratch::new("package-export");
+    let root = Scratch::new("package-export-root");
+    let fixtures = Scratch::new("package-export-fixtures");
+    let home = Scratch::new("package-export-home");
+    let artifact = fixtures.join("omp-1.0.0");
+    fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' cached\n").unwrap();
+    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev { packages: [\"omp@releases#1.0.0\"] }\n",
+    )
+    .unwrap();
+
+    let prep = Command::new(jetpack_bin())
+        .args([
+            "env",
+            "--prep",
+            "--yes",
+            "--trust",
+            "--offline",
+            "--no-color",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_DENY_NETWORK", "1")
+        .output()
+        .unwrap();
+    assert!(
+        prep.status.success(),
+        "env --prep failed: {}",
+        String::from_utf8_lossy(&prep.stderr)
+    );
+    fs::remove_file(fixtures.join("jetpackage-omp.json")).unwrap();
+    fs::remove_file(&artifact).unwrap();
+
+    let out = export_cmd(&project.path)
+        .args(["enter", "--trust", "--offline", "export", "bash"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_DENY_NETWORK", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "package export failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let script = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !script.contains("/proc/self/fd/"),
+        "parent-shell activation leaked a process-local lease path:\n{script}"
+    );
+    let durable_bin = root.path.join("hangar/objects").join(&digest).join("bin");
+    assert!(
+        script.contains(&format!("export PATH='{}:", durable_bin.display())),
+        "activation did not publish the sealed Hangar bin directory:\n{script}"
+    );
+
+    let mut shell = Command::new("bash")
+        .args([
+            "--noprofile",
+            "--norc",
+            "-c",
+            "source /dev/stdin; omp",
+        ])
+        .current_dir(&project.path)
+        .env_clear()
+        .env("HOME", &home.path)
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    shell
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(out.stdout.as_slice())
+        .unwrap();
+    let shell_out = shell.wait_with_output().unwrap();
+    assert!(
+        shell_out.status.success(),
+        "generated activation did not run after exporter exit: {}",
+        String::from_utf8_lossy(&shell_out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&shell_out.stdout).trim(),
+        "cached"
+    );
 }
 
 #[test]

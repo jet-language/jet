@@ -48,7 +48,8 @@ use Validation::{apply_helper_layer_inference, qualified_effect_facts, taint_che
 pub(crate) use Validation::{
     checker_for_module, check_module_bodies, collect_core_expr, collect_core_lvalue,
     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
-    func_sig_to_fn_type, register_func_item, uses_raw_protocol_return,
+    func_sig_to_fn_type, register_func_item, uses_raw_protocol_function_return,
+    uses_raw_protocol_return,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -991,7 +992,7 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
         clear_callable_bodies(&mut item);
         // Span-stripped signature only. Absolute locations move when an
         // earlier body changes length; those positions belong in the
-        // per-function cache input as origin-relative spans, not here.
+        // per-function cache input, not the module's semantic interface.
         out.extend(crate::CanonicalAST::canonical_fragment(&item));
     }
     out
@@ -1228,7 +1229,7 @@ fn builtin_type_registry() -> TypeRegistry {
     }
 }
 
-fn unit_fact(
+pub(crate) fn unit_fact(
     family: &crate::AST::UnitFamilyDef,
     type_name: &str,
     dimension: Option<crate::AST::Dimension>,

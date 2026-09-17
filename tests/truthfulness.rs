@@ -387,6 +387,89 @@ fn readme_subcommands_exist_in_cli() {
 // entry, and service/browser entries use the same proof paths as their real
 // runners.
 // ---------------------------------------------------------------------------
+fn feature_source_stem(path: &Path, ex_dir: &Path) -> String {
+    path.strip_prefix(ex_dir)
+        .expect("feature path must be below examples/features")
+        .to_string_lossy()
+        .strip_suffix(".jet")
+        .expect("feature source must use the Jet extension")
+        .replace('\\', "/")
+}
+
+fn collect_feature_golden_sources(ex_dir: &Path) -> Vec<(PathBuf, String)> {
+    fn visit_project(dir: &Path, ex_dir: &Path, entries: &mut Vec<(PathBuf, String)>) {
+        let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        if name.starts_with('.') || name == "expected" {
+            return;
+        }
+
+        let run = dir.join("run.jet");
+        if run.is_file() {
+            let stem = dir
+                .strip_prefix(ex_dir)
+                .expect("feature project must be below examples/features")
+                .to_string_lossy()
+                .replace('\\', "/");
+            entries.push((run, stem));
+            return;
+        }
+
+        // A package/workspace without a canonical run entry owns its
+        // descendants; they are modules, build scripts, or member fixtures.
+        if dir.join("package.jet").is_file() || dir.join("workspace.jet").is_file() {
+            return;
+        }
+
+        let Ok(children) = fs::read_dir(dir) else {
+            return;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_dir() {
+                visit_project(&path, ex_dir, entries);
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    let Ok(topics) = fs::read_dir(ex_dir) else {
+        return entries;
+    };
+    for topic in topics.flatten() {
+        let topic_path = topic.path();
+        let Some(topic_name) = topic_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !topic_path.is_dir() || topic_name.starts_with('.') || topic_name == "expected" {
+            continue;
+        }
+        let Ok(children) = fs::read_dir(&topic_path) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_file()
+                && path.extension().and_then(|extension| extension.to_str()) == Some("jet")
+                && path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
+                && path.file_name().and_then(|name| name.to_str()) != Some("workspace.jet")
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+            {
+                let stem = feature_source_stem(&path, ex_dir);
+                entries.push((path, stem));
+            } else if path.is_dir() {
+                visit_project(&path, ex_dir, &mut entries);
+            }
+        }
+    }
+    entries.sort_by(|left, right| left.1.cmp(&right.1));
+    entries
+}
+
 /// The same derived service fact used by the golden runner. Service entries
 /// have no terminating stdout golden because they serve until stopped.
 fn example_serves_until_stopped(path: &Path) -> bool {
@@ -411,81 +494,36 @@ fn every_feature_example_has_expected_output() {
 
     let web_build = fs::read_to_string(root.join("tests/web_build.rs")).unwrap();
 
-    for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
-        let topic_path = topic_entry.path();
-        if !topic_path.is_dir() {
-            continue;
-        }
-        let topic = topic_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        if topic == "expected" {
-            continue;
-        }
-        let expected_topic_dir = expected_dir.join(&topic);
-
-        for entry in fs::read_dir(&topic_path).unwrap().flatten() {
-            let path = entry.path();
-            let ext = path.extension().and_then(|e| e.to_str());
-
-            if ext == Some("jet") {
-                if path.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
-                    continue;
-                }
-                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-                let stem = format!("{}/{}", topic, name);
-                let out = expected_topic_dir.join(format!("{}.out", name));
-                let errout = expected_topic_dir.join(format!("{}.err.out", name));
-                let stderrout = expected_topic_dir.join(format!("{}.stderr.out", name));
-                let webout = expected_topic_dir.join(format!("{}.web.out", name));
-                let harnessout = expected_topic_dir.join(format!("{}.harness.out", name));
-                let source = fs::read_to_string(&path).unwrap();
-                let is_service = example_serves_until_stopped(&path);
-                let is_web_harness = topic == "web"
-                    && name == "web_compute_webgpu"
-                    && source.contains("#Target(JS)")
-                    && web_build.contains(
-                        "include_str!(\"../examples/features/web/web_compute_webgpu.jet\")",
-                    );
-                if !out.is_file()
-                    && !errout.is_file()
-                    && !stderrout.is_file()
-                    && !webout.is_file()
-                    && !harnessout.is_file()
-                    && !is_service
-                    && !is_web_harness
-                {
-                    missing.push(format!(
-                        "examples/features/{}.jet → missing expected output or canonical harness proof",
-                        stem
-                    ));
-                }
-            } else if path.is_dir() {
-                let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                let stem = format!("{}/{}", topic, name);
-                let run = path.join("run.jet");
-                if run.is_file() {
-                    let out = expected_topic_dir.join(format!("{}.out", name));
-                    let errout = expected_topic_dir.join(format!("{}.err.out", name));
-                    let stderrout = expected_topic_dir.join(format!("{}.stderr.out", name));
-                    let webout = expected_topic_dir.join(format!("{}.web.out", name));
-                    let harnessout = expected_topic_dir.join(format!("{}.harness.out", name));
-                    if !out.is_file()
-                        && !errout.is_file()
-                        && !stderrout.is_file()
-                        && !webout.is_file()
-                        && !harnessout.is_file()
-                        && !example_serves_until_stopped(&run)
-                    {
-                        missing.push(format!(
-                            "examples/features/{}/run.jet → missing expected output or service proof",
-                            stem
-                        ));
-                    }
-                }
-            }
+    for (path, stem) in collect_feature_golden_sources(&ex_dir) {
+        let source = fs::read_to_string(&path).unwrap();
+        let out = expected_dir.join(format!("{stem}.out"));
+        let errout = expected_dir.join(format!("{stem}.err.out"));
+        let stderrout = expected_dir.join(format!("{stem}.stderr.out"));
+        let webout = expected_dir.join(format!("{stem}.web.out"));
+        let harnessout = expected_dir.join(format!("{stem}.harness.out"));
+        let is_service = example_serves_until_stopped(&path);
+        let is_web_harness = stem == "web/web_compute_webgpu"
+            && source.contains("#Target(JS)")
+            && web_build.contains(
+                "include_str!(\"../examples/features/web/web_compute_webgpu.jet\")",
+            );
+        if !out.is_file()
+            && !errout.is_file()
+            && !stderrout.is_file()
+            && !webout.is_file()
+            && !harnessout.is_file()
+            && !is_service
+            && !is_web_harness
+        {
+            let source_name = if path.file_name().and_then(|name| name.to_str()) == Some("run.jet")
+            {
+                format!("examples/features/{stem}/run.jet")
+            } else {
+                format!("examples/features/{stem}.jet")
+            };
+            missing.push(format!(
+                "{source_name} → missing expected output or canonical harness proof"
+            ));
         }
     }
 

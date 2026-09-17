@@ -324,11 +324,36 @@ pub fn build_dimension_info(dimension: &Dimension) -> CtValue {
     )
 }
 
-pub fn build_range_info(start: i64, end: i64) -> CtValue {
+fn build_range_value(start: CtValue, end: CtValue) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_RANGE,
-        &[("start", CtValue::Int(start)), ("end", CtValue::Int(end))],
+        &[("start", start), ("end", end)],
     )
+}
+
+pub fn build_range_info(start: i64, end: i64) -> CtValue {
+    build_range_value(CtValue::Int(start), CtValue::Int(end))
+}
+
+/// Keep reflected interval bounds exact when they exceed the small `Int`
+/// carrier. A conversion failure leaves the enclosing optional range absent
+/// so malformed metadata becomes an ordinary source-level failure, not an ICE.
+fn reflected_integer(value: i128) -> Option<CtValue> {
+    i64::try_from(value)
+        .ok()
+        .map(CtValue::Int)
+        .or_else(|| {
+            jet_foundation::Numeric::CtBigInt::from_str(&value.to_string())
+                .ok()
+                .map(CtValue::BigInt)
+        })
+}
+
+fn reflected_range_info(start: i128, end: i128) -> Option<CtValue> {
+    Some(build_range_value(
+        reflected_integer(start)?,
+        reflected_integer(end)?,
+    ))
 }
 
 fn measure_info(measure: &Measure) -> CtValue {
@@ -667,10 +692,7 @@ fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
             kind,
             "range",
             std::iter::empty::<String>(),
-            Some(build_range_info(
-                i64::try_from(*lo).expect("reflected interval lower bound fits Int"),
-                i64::try_from(*hi).expect("reflected interval upper bound fits Int"),
-            )),
+            reflected_range_info(*lo, *hi),
             None,
         ),
         KnowledgeFact::Dimension(dimension) => fact_value(
@@ -1068,7 +1090,9 @@ fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue
                 })
                 .collect(),
         ),
-        crate::AST::Expr::Int(value, ..) => CtValue::Int(*value),
+        crate::AST::Expr::Int(value, _, _, raw) => {
+            crate::Comptime::exact_integer_ct_value(*value, raw.as_deref())
+        }
         crate::AST::Expr::Bool(value, _) => CtValue::Bool(*value),
         crate::AST::Expr::Char(value, _) => CtValue::Char(*value),
         _ => CtValue::Unit,
@@ -3534,6 +3558,30 @@ mod tests {
                 (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
             )
         }));
+    }
+
+    #[test]
+    fn reflected_interval_bounds_preserve_wide_exact_ints() {
+        let magnitude = i128::from(i64::MAX) + 1;
+        let value = knowledge_fact_value(
+            "Range",
+            &crate::AST::KnowledgeFact::Interval {
+                lo: -magnitude,
+                hi: magnitude,
+            },
+        );
+        let range = struct_field(struct_field(&value, "value"), "range");
+        let CtValue::Present(range) = range else {
+            panic!("wide interval must carry a present Range");
+        };
+        assert!(matches!(
+            struct_field(range, "start"),
+            CtValue::BigInt(value) if value.try_i128() == Some(-magnitude)
+        ));
+        assert!(matches!(
+            struct_field(range, "end"),
+            CtValue::BigInt(value) if value.try_i128() == Some(magnitude)
+        ));
     }
 
     #[test]

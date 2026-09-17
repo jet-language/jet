@@ -1,8 +1,17 @@
 const JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
 fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
+    jet_std_process_cmd_owned(cmd.clone())
+}
+
+/// Construct a process spec without cloning an already-owned argv.
+///
+/// The AOT Core call receives a borrowed list, while resident callers have
+/// already copied the heap list into an owned `Vec<String>`. Keep both paths
+/// on the same defaults but let the resident path move its argv directly.
+fn jet_std_process_cmd_owned(cmd: Vec<String>) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
-        cmd: cmd.clone(),
+        cmd,
         cwd: None,
         env_clear: false,
         env_set: Vec::new(),

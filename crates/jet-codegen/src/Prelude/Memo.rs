@@ -2,8 +2,9 @@
 // function results and retained computed-field results. Function entries use
 // an argument key and the ratified bound; field entries use one reserved slot.
 // Engines only marshal keys, results, bounds, and invalidation calls here.
-use std::hash::{Hash, Hasher};
-use std::sync::Mutex as JetMemoMutex;
+use std::collections::HashMap as JetMemoHashMap;
+use std::hash::{Hash as JetMemoHash, Hasher as JetMemoHasher};
+use std::sync::{LazyLock as JetMemoLazyLock, Mutex as JetMemoMutex};
 
 #[derive(Clone)]
 struct JetLru<K, V> {
@@ -81,6 +82,9 @@ pub struct JetMemoStats {
 pub struct JetMemo<K, V = K> {
     state: JetMemoMutex<JetMemoState<K, V>>,
 }
+
+static JET_MEMO_STATS: JetMemoLazyLock<JetMemoMutex<JetMemoHashMap<String, JetMemo<Vec<i64>, i64>>>> =
+    JetMemoLazyLock::new(|| JetMemoMutex::new(JetMemoHashMap::new()));
 
 impl<K, V> JetMemo<K, V> {
     pub fn new() -> Self {
@@ -166,6 +170,20 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
     }
 }
 
+/// Return process-local statistics for a named top-level memo.
+///
+/// AOT memo call sites and the resident JIT use the same named store contract;
+/// a store is created lazily when a statistics projection is reached.
+pub fn jet_memo_stats(name: String, bound: i64) -> JetMemoStats {
+    let bound = usize::try_from(bound).ok();
+    JET_MEMO_STATS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(name)
+        .or_insert_with(|| JetMemo::with_bound(bound))
+        .stats()
+}
+
 impl<K, V> Default for JetMemo<K, V> {
     fn default() -> Self {
         Self::new()
@@ -199,8 +217,8 @@ impl<K, V> PartialEq for JetMemo<K, V> {
 
 impl<K, V> Eq for JetMemo<K, V> {}
 
-impl<K, V> Hash for JetMemo<K, V> {
-    fn hash<H: Hasher>(&self, _state: &mut H) {}
+impl<K, V> JetMemoHash for JetMemo<K, V> {
+    fn hash<H: JetMemoHasher>(&self, _state: &mut H) {}
 }
 
 pub fn jet_memo_call<K, V, F>(

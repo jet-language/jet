@@ -3,8 +3,8 @@ Error [E0507]: While the loop is reading `nums`, nothing may change it
     |
   5 |             nums.push(0)
     |             ^^^^
- Why: A `loop` borrows the whole collection until the body finishes
- Fix: Collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+ Why: The loop reads `nums` across its body, so `nums.push()` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `nums` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
 More: jet-lang.dev/e/E0507
 
 Error [E0507]: While the loop is reading `nums`, nothing may change it
@@ -12,8 +12,8 @@ Error [E0507]: While the loop is reading `nums`, nothing may change it
     |
   5 |             nums.push(0)
     |             ^^^^
- Why: A `loop` borrows the whole collection until the body finishes
- Fix: Collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+ Why: The loop reads `nums` across its body, so `nums.push()` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `nums` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
 More: jet-lang.dev/e/E0507
 
 Error [E0204]: `nums` is already shared in this call, so it can't be changed here too

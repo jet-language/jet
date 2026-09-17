@@ -11,7 +11,6 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 
-#[allow(dead_code, unused_imports)]
 pub(crate) mod web_rt {
     /// The active resident runtime is the only policy carrier. Querying it at
     /// the Prelude hook keeps the policy invocation-local and avoids a stale
@@ -50,6 +49,7 @@ pub(crate) mod web_rt {
     // projections App.rs names live with the resident reactive host, which
     // includes the one LiveQuery.rs / WebQuery.rs source.
     pub(crate) use crate::Reactive::{
+        jet_live_publish_transport,
         jet_app_invalidate_key, jet_app_live_keyed, jet_web_query_dev_panel,
         jet_web_query_facts_json,
     };
@@ -77,6 +77,26 @@ pub(crate) mod web_rt {
         JetDecimal, JetLocalTime,
     };
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs");
+    const MAX_SYNC_TEXT: usize = 1024 * 1024;
+    const MAX_SYNC_REPLICAS: usize = 4096;
+    const MAX_SYNC_ENTRIES: usize = 100_000;
+    const MAX_SYNC_SESSION: usize = 256;
+    const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
+    fn jet_sync_counter_total(counts: &[(String, u64, u64)]) -> Option<i64> {
+        let mut total = 0i128;
+        for (_, positive, negative) in counts {
+            total = total
+                .checked_add(i128::from(*positive))?
+                .checked_sub(i128::from(*negative))?;
+        }
+        i64::try_from(total).ok()
+    }
+    pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
+        !value.trim().is_empty()
+            && value.len() <= MAX_SYNC_TEXT
+            && !value.chars().any(char::is_control)
+    }
+    include!("../../jet-codegen/src/Prelude/CoreLib/SyncPublish.rs");
     mod jet_app_middleware {
         include!("../../jet-foundation/src/AppMiddleware.rs");
     }
@@ -616,6 +636,16 @@ fn jet_jit_web_app_method(
         rt.web.apps.push(next);
         rt.web.apps.len() as i64
     })
+}
+fn jet_jit_app_sync(doc_show: i64, session_id: i64) -> i64 {
+    let (doc_show, session_id) = with_rt(|rt| {
+        (
+            rt.heap.clone_string(doc_show).unwrap_or_default(),
+            rt.heap.clone_string(session_id).unwrap_or_default(),
+        )
+    });
+    let shown = web_rt::jet_app_sync(doc_show, session_id);
+    with_rt(|rt| rt.heap.alloc_string(shown))
 }
 
 
@@ -2105,6 +2135,13 @@ fn jet_jit_web_forms_input_replace(input: i64, name: i64, field: i64) -> i64 {
     )
 }
 
+fn jet_jit_web_form(input: i64, action: i64) -> i64 {
+    let input = web_form_input(input);
+    let action = with_rt(|rt| rt.heap.clone_string(action).expect("checked form action"));
+    let form = web_rt::jet_web_form(&input, action);
+    with_rt(|rt| web_typed_form_handle(rt, form))
+}
+
 fn jet_jit_web_forms_typed(input: i64, action: i64) -> i64 {
     let input = web_form_input(input);
     let action = with_rt(|rt| rt.heap.clone_string(action).expect("checked form action"));
@@ -3234,6 +3271,7 @@ host_fns! {
     // `jet_jit_*` spellings above stay for Core rows projected through
     // `CoreCallRecord::jit_symbol_candidates`.
     row_app: "jet_app" => jet_jit_web_app: nullary;
+    app_sync: "jet_app_sync" => jet_jit_app_sync: binary;
     row_page: "jet_web_page" => jet_jit_web_page: binary;
     row_storage_get: "jet_web_storage_get" => jet_jit_web_storage_get: unary;
     row_storage_remove: "jet_web_storage_remove" => jet_jit_web_storage_remove: unary_void;
@@ -3270,6 +3308,7 @@ host_fns! {
     web_query_mutate: "jet_web_query_mutate" => jet_jit_web_query_mutate: fourary;
     web_query_mutate_with_invalidations: "jet_web_query_mutate_with_invalidations" => jet_jit_web_query_mutate_with_invalidations: penta;
     web_query_retry: "jet_web_query_retry" => jet_jit_web_query_retry: binary;
+    web_form: "jet_web_form" => jet_jit_web_form: binary;
     web_forms_new: "jet_web_forms_new" => jet_jit_web_forms_new: unary;
     web_forms_field: "jet_web_forms_field" => jet_jit_web_forms_field: fourary;
     web_forms_set: "jet_web_forms_set" => jet_jit_web_forms_set: ternary;

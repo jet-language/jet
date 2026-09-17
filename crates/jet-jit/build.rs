@@ -533,6 +533,9 @@ pub fn jet_observe_event(_event: JetObserveEvent) {}
 struct JetTaskState<T: Send + 'static> {
     handle: std::sync::Mutex<Option<super::JetSchedulerJoin<T>>>,
     control: std::sync::Arc<super::JetTaskControl>,
+    // AsyncEvent converts an inherited deadline into its typed dispatch
+    // report; joining must not replace that report with a parent E3003.
+    skip_join_deadline: bool,
 }
 
 pub(crate) struct JetTask<T: Send + 'static> {
@@ -560,6 +563,7 @@ impl<T: Send + 'static> JetTask<T> {
             state: std::sync::Arc::new(JetTaskState {
                 handle: std::sync::Mutex::new(Some(handle)),
                 control,
+                skip_join_deadline: true,
             }),
         }
     }
@@ -570,21 +574,29 @@ impl<T: Send + 'static> JetTask<T> {
 
     pub(crate) fn join(self) -> Result<T, super::JetTaskFailure> {
         let state = self.state;
-        super::jet_task_join_deadline_check();
+        let skip_join_deadline = state.skip_join_deadline;
+        if !skip_join_deadline {
+            super::jet_task_join_deadline_check();
+        }
         let mut handle = state
             .handle
             .lock()
             .unwrap()
             .take()
             .expect("task already joined");
-        let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.join())) {
+        super::jet_scheduler_blocking_wait_enter();
+        let joined = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle.join()));
+        super::jet_scheduler_blocking_wait_leave();
+        let result = match joined {
             Ok(result) => result,
             Err(payload) => {
                 state.control.cancel();
                 std::panic::resume_unwind(payload);
             }
         };
-        super::jet_task_join_deadline_check();
+        if !skip_join_deadline {
+            super::jet_task_join_deadline_check();
+        }
         result
     }
 }

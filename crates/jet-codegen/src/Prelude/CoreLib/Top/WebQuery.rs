@@ -476,7 +476,7 @@ pub(crate) fn jet_web_query_dev_panel() -> String {
                 let stored = registry.queries.get(&live.id)?;
                 Some((
                     stored.lifecycle.generation,
-                    stored.sinks.len(),
+                    if stored.sink.is_some() { 1 } else { 0 },
                     jet_live_age_ms(stored.lifecycle.fresh_at_ms),
                     stored.lifecycle.invalidation_cause.clone(),
                 ))

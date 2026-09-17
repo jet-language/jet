@@ -1214,6 +1214,7 @@ pub enum RuleResolution {
 pub enum RuleArgType {
     Any,
     String,
+    Path,
     Ident,
     Bool,
     Int,
@@ -1373,6 +1374,7 @@ impl RuleArgType {
         match self {
             Self::Any => "Value",
             Self::String => "String",
+            Self::Path => "Path",
             Self::Ident => "Ident",
             Self::Bool => "Bool",
             Self::Int => "Int",

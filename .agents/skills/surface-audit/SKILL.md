@@ -1,58 +1,37 @@
 ---
 name: surface-audit
 description: >-
-  Audit Jet language shape, uniformity, and consistency. Find outliers and gaps
-  in syntax and structure; say what to do next.
+  Audit a declared Jet surface for shape, consistency, and repairable next steps.
+  Use when reviewing reachable syntax or API outliers, not implementation status.
 ---
 
-# Surface Audit
+# Surface audit
 
-Find outliers and gaps in language shape, uniformity, and consistency. Compose
-output quality from `docs/spec/philosophy.md` and
-`docs/spec/syntax-decisions.md`. End with concrete next actions (ballot
-titles or card ids only — do not create cards unless asked).
+Find outliers and gaps in the declared Jet surface. Judge them against `docs/spec/philosophy.md` and `docs/spec/syntax-decisions.md`. End with concrete next actions as ballot titles or card IDs; do not create them unless the owner authorizes that work.
 
-Search live specs, examples, stdlib, and CLI surfaces. Prefer
-`scripts/agent/jet-env` and `rg` over memory.
+Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns the surface question, ten-category accounting, evidence, actionability, and finite closeout.
 
-Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
-shared publication, workflow-boundary, and disposition mechanics; this method
-still owns the surface question, evidence, micro sweep, and stopping rule.
+## Scope and evidence
 
-## The standing lens
+At activation, record the target surface and its reachable corpus. Search live specs, examples, stdlib, CLI/tooling, and direct analogues that explain the target. Include dependencies needed to understand it, not unrelated Jet. Prefer `scripts/agent/jet-env` and repository search over memory. Use the standing-lens sections relevant to this scope and probe the running binary when a claim is executable.
 
+## Ten-category sweep
 
-Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
-five agent-optimality quantities, the micro sweep, probe the running binary, and
-the honesty rules. The owner never has to ask for any of it.
+Within the declared target, account for all ten categories below. Record each as a finding, clean result, or reasoned `not-applicable`; never silently skip a category:
 
-## Method: the micro sweep is this skill
+1. syntax
+2. ergonomics
+3. surfaces
+4. APIs, types, and methods
+5. defaults
+6. naming
+7. error text
+8. UX and DX
+9. tooling and CLI shape
+10. ceremony versus control
 
-"Shape, uniformity, and consistency" is measured category by category, not by
-impression. Walk every category in the shared lens's micro sweep — syntax,
-ergonomics, surfaces, APIs and types and methods, defaults, naming, error text,
-UX and DX, tooling and CLI shape, ceremony versus control — and report each one
-even when it is clean. A category with no finding is a result worth printing; a
-category you skipped is a hole in the audit.
+For each outlier, use exactly one kind: **inconsistent** (same idea, two spellings), **absent** (implied shape missing), **ceremonial** (required text buys nothing), or **asymmetric** (beginner and expert roads disagree). Judge human readability, verdict actionability, and repair determinism. A clean category is a result worth printing.
 
-For each outlier, say which of the four it is:
+## Completion and output
 
-- **Inconsistent** — the same idea spelled two ways. Name both and pick one.
-- **Absent** — a shape the language implies but does not offer.
-- **Ceremonial** — required text that buys the reader nothing.
-- **Asymmetric** — the beginner road and the expert road disagree about the
-  same concept.
-
-Judge each finding against verdict actionability and repair determinism as well
-as human readability. A surface with one obvious spelling is cheaper for an
-agent to drive, which is the machine-facing half of I8.
-
-## Output
-
-This is a report-only method. Write one markdown report under `docs/audits/`
-through the project-approved non-serve CLI. Do not create Tower work or
-implementation edits unless the owner explicitly asks. Read
-`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
-publication rules and the required finding-disposition table. Keep this
-method's concrete next actions as ballot titles or card IDs; do not create them
-in this run.
+Stop when every reachable source and direct analogue is accounted for, all ten category rows are recorded, every finding has evidence and a concrete action or an honest `unknown`, and the disposition marker is complete. A report-only run writes one report under `docs/audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion remains separate from implementation completion.

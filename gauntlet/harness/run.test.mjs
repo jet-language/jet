@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { promises as fs, chmodSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { probeAxisTools, stageEntry } from "./run.mjs";
 
 const scratchRoot = path.join(os.homedir(), ".cache", "jet-test-scratch");
+const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const parallelGrepDir = path.join(repoRoot, "gauntlet", "entries", "parallel-grep", "jet");
+const envRunner = path.join(repoRoot, "scripts", "agent", "jet-env");
 const stagedEntryTestOptions = { timeout: 120_000 };
 
 async function withScratch(name, callback) {
@@ -219,5 +226,23 @@ test("Zig axis probe uses the rail's version subcommand", async () => {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
     }
+  });
+});
+
+test("parallel-grep para_map probe preserves byte-exact output", stagedEntryTestOptions, async () => {
+  await withScratch("parallel-grep-contract", async (root) => {
+    const fixture = path.join(root, "files");
+    await fs.mkdir(fixture, { recursive: true });
+    await fs.writeFile(path.join(fixture, "a.txt"), "needle-7f needle-7f\n");
+    await fs.writeFile(path.join(fixture, "b.txt"), "none\n");
+    await fs.writeFile(path.join(fixture, "ignored.md"), "needle-7f\n");
+    const expected = `${path.join(fixture, "a.txt")}:2\nfiles 1/2 total 2\n`;
+    const result = await execFileAsync(
+      envRunner,
+      ["jet", "run", "run.jet", "--", fixture, "needle-7f"],
+      { cwd: parallelGrepDir, timeout: 120_000 },
+    );
+    assert.equal(result.stdout, expected);
+    assert.doesNotMatch(result.stderr, /E0405|pair\.b/);
   });
 });

@@ -6,18 +6,14 @@ fn run() {
     spec :: process.cmd(["printf", "agent-safe"])
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
-            receipt :: spec.run()
-            if receipt == {
-                .Ok(value) -> {
-                    print(value.output)
-                    print(plan.policy_digest == value.policy_digest)
-                    print(value.redacted)
-                }
-                .Err(_) -> print("unsupported")
-            }
+            receipt :: spec.run() ?? panic("agent receipt")
+            print(receipt.output)
+            print(plan.policy_digest == receipt.policy_digest)
+            print(receipt.redacted)
         }
         .Err(_) -> print("unsupported")
     }

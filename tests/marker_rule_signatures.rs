@@ -573,6 +573,36 @@ fn run() {}
 }
 
 #[test]
+fn html_marker_uses_typed_path_signature() {
+    let source = "#HTML(Path{\"index.html\"})\nfn run() {}";
+    let (bundle, valid_diagnostics) = checked(source, jet::Sema::CompileMode::Check);
+    assert!(
+        !valid_diagnostics.iter().any(|code| code == "E0930"),
+        "{valid_diagnostics:?}"
+    );
+    assert_eq!(
+        bundle.modules[bundle.entry].html_path.as_deref(),
+        Some("index.html")
+    );
+
+    let parser_diagnostics = parse_diagnostics("#HTML(\"index.html\")\nfn run() {}");
+    assert!(
+        !parser_diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930"),
+        "{parser_diagnostics:?}"
+    );
+    let invalid = diagnostics("#HTML(\"index.html\")\nfn run() {}");
+    let errors: Vec<_> = invalid
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0930")
+        .collect();
+    assert_eq!(errors.len(), 1, "{invalid:?}");
+    assert_eq!(
+        errors[0].what,
+        "`#HTML` arguments do not match `HTML(page: Path)`"
+    );
+}
+
+#[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
         "@value :: 42\n#HTML(@value)\nfn run() {}",

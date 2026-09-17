@@ -8,12 +8,13 @@
 //! `#Inline(Always)` promise already held, E0917/E0918/E0919 would have fired
 //! otherwise).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
-use jet::AST::{Binding, Expr, Item, ProgramBundle, Stmt};
+use jet::AST::{Binding, Expr, Item, ProgramBundle, Stmt, Type};
 use jet_foundation::Layout::{TargetLayout, TargetLayoutEngine};
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
@@ -839,49 +840,131 @@ struct OriginRow {
     origin: jet::CtValue,
 }
 
+fn origin_value_is_option(value: &jet::CtValue) -> bool {
+    matches!(
+        value.jet_type(),
+        Type::Option(inner)
+            if matches!(inner.as_ref(), Type::Named(name) if name == "OriginInfo")
+    )
+}
+
+fn origin_receiver_from_source(source: &str, span: jet::Diagnostics::Span) -> String {
+    let text = source.get(span.start..span.end).map(str::trim);
+    if let Some(receiver) = text.and_then(|text| text.strip_suffix(".@origin")) {
+        if !receiver.trim().is_empty() {
+            return receiver.trim().to_string();
+        }
+    }
+    if text == Some("@origin") {
+        if let Some(receiver) = source
+            .get(..span.start)
+            .and_then(|prefix| prefix.split_whitespace().last())
+        {
+            let receiver = receiver.trim_end_matches('.');
+            if !receiver.is_empty() {
+                return receiver.to_string();
+            }
+        }
+    }
+    "value".to_string()
+}
+
+fn origin_expr(expr: &Expr) -> &Expr {
+    let mut expr = expr.without_parens();
+    loop {
+        match expr {
+            Expr::Copy(inner, _) | Expr::Place(inner, _, _) => {
+                expr = inner.without_parens();
+            }
+            _ => return expr,
+        }
+    }
+}
+
 fn collect_origin_binding(
     module: &str,
     source: &str,
     binding: &Binding,
+    tracked: &HashMap<String, (usize, usize)>,
     rows: &mut Vec<OriginRow>,
 ) {
     if !binding.is_comptime {
         return;
     }
-    let Expr::Field(inner, field, span) = binding.init.without_parens() else {
-        return;
-    };
-    if field != jet::Syntax::COMPILER_FACT_ORIGIN {
-        return;
-    }
-    let receiver = match inner.without_parens() {
-        Expr::Ident(name, _) if !name.is_empty() => name.clone(),
-        _ => "value".to_string(),
-    };
-    let Some(origin) = binding.ct.clone() else {
-        return;
+    let init = origin_expr(&binding.init);
+    let (receiver, span, origin) = match init {
+        Expr::Field(inner, field, span) if field == jet::Syntax::COMPILER_FACT_ORIGIN => {
+            let receiver = match inner.without_parens() {
+                Expr::Ident(name, _) if !name.is_empty() => name.clone(),
+                _ => "value".to_string(),
+            };
+            let origin = binding.ct.clone().or_else(|| {
+                let (line, column) = tracked.get(&receiver).copied()?;
+                Some(jet::Comptime::build_origin_option(Some((
+                    true,
+                    Some(receiver.as_str()),
+                    Some(line),
+                    Some(column),
+                    false,
+                ))))
+            });
+            let Some(origin) = origin else {
+                return;
+            };
+            (receiver, *span, origin)
+        }
+        Expr::ComptimeName { span, value, .. } => {
+            let Some(origin) = binding.ct.as_ref().or(value.as_ref()) else {
+                return;
+            };
+            if !origin_value_is_option(origin) {
+                return;
+            }
+            (
+                origin_receiver_from_source(source, *span),
+                *span,
+                origin.clone(),
+            )
+        }
+        _ => return,
     };
     rows.push(OriginRow {
         module: module.to_string(),
         source: source.to_string(),
         receiver,
-        span: *span,
+        span,
         origin,
     });
 }
+
 
 fn collect_origin_stmts(
     module: &str,
     source: &str,
     statements: &[Stmt],
+    tracked: &mut HashMap<String, (usize, usize)>,
     rows: &mut Vec<OriginRow>,
 ) {
     for statement in statements {
         match statement {
-            Stmt::Val(binding) => collect_origin_binding(module, source, binding, rows),
+            Stmt::Val(binding) => {
+                if binding.track() && !binding.name.is_empty() {
+                    tracked.insert(
+                        binding.name.clone(),
+                        jet::Diagnostics::span_line_col(source, binding.name_span.start),
+                    );
+                }
+                collect_origin_binding(module, source, binding, tracked, rows);
+            }
             Stmt::CountedLoop { init, body, .. } => {
-                collect_origin_binding(module, source, init, rows);
-                collect_origin_stmts(module, source, body, rows);
+                if init.track() && !init.name.is_empty() {
+                    tracked.insert(
+                        init.name.clone(),
+                        jet::Diagnostics::span_line_col(source, init.name_span.start),
+                    );
+                }
+                collect_origin_binding(module, source, init, tracked, rows);
+                collect_origin_stmts(module, source, body, tracked, rows);
             }
             Stmt::While { body, .. }
             | Stmt::Loop { body, .. }
@@ -900,8 +983,10 @@ fn collect_origin_stmts(
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::ScopeMember { body, .. } => collect_origin_stmts(module, source, body, rows),
-            Stmt::For { body, .. } => collect_origin_stmts(module, source, body, rows),
+            | Stmt::ScopeMember { body, .. } => {
+                collect_origin_stmts(module, source, body, tracked, rows)
+            }
+            Stmt::For { body, .. } => collect_origin_stmts(module, source, body, tracked, rows),
             Stmt::Switch {
                 arms, else_body, ..
             }
@@ -909,10 +994,10 @@ fn collect_origin_stmts(
                 arms, else_body, ..
             } => {
                 for arm in arms {
-                    collect_origin_stmts(module, source, &arm.body, rows);
+                    collect_origin_stmts(module, source, &arm.body, tracked, rows);
                 }
                 if let Some(body) = else_body {
-                    collect_origin_stmts(module, source, body, rows);
+                    collect_origin_stmts(module, source, body, tracked, rows);
                 }
             }
             Stmt::ComptimeIf {
@@ -920,71 +1005,88 @@ fn collect_origin_stmts(
                 else_body,
                 ..
             } => {
-                collect_origin_stmts(module, source, then_body, rows);
+                collect_origin_stmts(module, source, then_body, tracked, rows);
                 if let Some(body) = else_body {
-                    collect_origin_stmts(module, source, body, rows);
+                    collect_origin_stmts(module, source, body, tracked, rows);
                 }
             }
             _ => {}
         }
     }
 }
+
 
 fn collect_origin_func(
     module: &str,
     source: &str,
     function: &jet::AST::Func,
+    tracked: &mut HashMap<String, (usize, usize)>,
     rows: &mut Vec<OriginRow>,
 ) {
-    collect_origin_stmts(module, source, &function.body, rows);
+    collect_origin_stmts(module, source, &function.body, tracked, rows);
 }
 
-fn collect_origin_items(module: &str, source: &str, items: &[Item], rows: &mut Vec<OriginRow>) {
+
+fn collect_origin_items(
+    module: &str,
+    source: &str,
+    items: &[Item],
+    tracked: &mut HashMap<String, (usize, usize)>,
+    rows: &mut Vec<OriginRow>,
+) {
     for item in items {
         match item {
-            Item::Func(function) => collect_origin_func(module, source, function, rows),
+            Item::Func(function) => collect_origin_func(module, source, function, tracked, rows),
             Item::Impl(definition) => {
                 for function in &definition.methods {
-                    collect_origin_func(module, source, function, rows);
+                    collect_origin_func(module, source, function, tracked, rows);
                 }
             }
             Item::Struct(definition) => {
                 for function in &definition.methods {
-                    collect_origin_func(module, source, function, rows);
+                    collect_origin_func(module, source, function, tracked, rows);
                 }
                 for implementation in &definition.trait_impls {
                     for function in &implementation.methods {
-                        collect_origin_func(module, source, function, rows);
+                        collect_origin_func(module, source, function, tracked, rows);
                     }
                 }
             }
             Item::Enum(definition) => {
                 for function in &definition.methods {
-                    collect_origin_func(module, source, function, rows);
+                    collect_origin_func(module, source, function, tracked, rows);
                 }
                 for implementation in &definition.trait_impls {
                     for function in &implementation.methods {
-                        collect_origin_func(module, source, function, rows);
+                        collect_origin_func(module, source, function, tracked, rows);
                     }
                 }
             }
             Item::CodeModule(definition) => {
                 if let Some(body) = &definition.body {
-                    collect_origin_items(module, source, body, rows);
+                    collect_origin_items(module, source, body, tracked, rows);
                 }
             }
             Item::GenericModule(definition) => {
-                collect_origin_items(module, source, &definition.body, rows);
+                collect_origin_items(module, source, &definition.body, tracked, rows);
             }
             _ => {}
         }
     }
 }
 
+
 fn collect_origin_rows(bundle: &ProgramBundle) -> Vec<OriginRow> {
     let mut rows = Vec::new();
     for module in &bundle.modules {
-        collect_origin_items(&module.display, &module.source, &module.items, &mut rows);
+        let mut tracked = HashMap::new();
+        collect_origin_items(
+            &module.display,
+            &module.source,
+            &module.items,
+            &mut tracked,
+            &mut rows,
+        );
     }
     rows.sort_by(|a, b| {
         a.module
@@ -1380,7 +1482,7 @@ fn callable_parameter_text(parameter: &jet_semindex::CallableParameterFact) -> S
         "read" => "".to_string(),
         other => format!("{other} "),
     };
-    let label = if parameter.label.is_empty() {
+    let label = if parameter.label.is_empty() || parameter.label == parameter.name {
         parameter.name.clone()
     } else {
         format!("{}: {}", parameter.label, parameter.name)

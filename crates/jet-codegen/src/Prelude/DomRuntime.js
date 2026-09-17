@@ -2407,6 +2407,16 @@ export function makeSignal(initial) {
   };
 }
 
+// Web Prelude adapters preserve JetSignal's checked method routes while
+// keeping the cell representation private to this runtime.
+export function signalGet(signal) {
+  return signal.get();
+}
+
+export function signalSet(signal, value) {
+  signal.set(value);
+}
+
 /**
  * D-RENDERTGT2=A: `ui.reactive_render(() => { ... })` — run `body` now, and
  * again whenever a signal it read changes. Mirrors `jet_reactive_effect`.
@@ -2466,7 +2476,6 @@ export async function instantiateWasm(wasmPath, imports = {}) {
   if (typeof WebAssembly === "undefined") {
     throw new JetHostWasmError("WebAssembly is not available in this runtime");
   }
-  const source = await loadBytes(wasmPath);
   const memory = { current: null };
   const wasmImports = {
     jet_web_print(ptr, len) {
@@ -2480,7 +2489,38 @@ export async function instantiateWasm(wasmPath, imports = {}) {
     },
     ...imports,
   };
-  const { instance } = await WebAssembly.instantiate(source, { env: wasmImports });
+  const importObject = { env: wasmImports };
+  let instance;
+  const inNode = typeof process !== "undefined" && process.versions?.node;
+  if (!inNode && typeof fetch === "function") {
+    const response = await fetch(wasmPath);
+    if (!response.ok) {
+      throw new JetHostWasmError(`failed to load wasm module: ${wasmPath}`);
+    }
+    const contentType = response.headers?.get?.("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      ?.toLowerCase();
+    if (contentType === "application/wasm" && typeof WebAssembly.instantiateStreaming === "function") {
+      let fallback = null;
+      try {
+        fallback = response.clone?.() ?? null;
+      } catch (_) {}
+      if (fallback) {
+        try {
+          ({ instance } = await WebAssembly.instantiateStreaming(response, importObject));
+        } catch (_) {
+          ({ instance } = await WebAssembly.instantiate(await fallback.arrayBuffer(), importObject));
+        }
+      } else {
+        ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), importObject));
+      }
+    } else {
+      ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), importObject));
+    }
+  } else {
+    ({ instance } = await WebAssembly.instantiate(await loadBytes(wasmPath), importObject));
+  }
   memory.current = instance.exports.memory ?? null;
   return instance;
 }

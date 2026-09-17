@@ -566,18 +566,30 @@ pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
     count
 }
 
-pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, String)> {
-    s.find(sep).map(|at| (
-        s[..at].to_string(),
-        s[at + sep.len()..].to_string(),
-    ))
+pub fn jet_unicode_split_once(
+    s: &String,
+    sep: &String,
+) -> jet_foundation::Outcome::JetOutcome<
+    (String, String),
+    jet_foundation::Outcome::JetAbsent,
+> {
+    match s.find(sep) {
+        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
+        None => Err(jet_foundation::Outcome::JetAbsent),
+    }
 }
 
-pub fn jet_unicode_cut_last(s: &String, sep: &String) -> Option<(String, String)> {
-    s.rfind(sep).map(|at| (
-        s[..at].to_string(),
-        s[at + sep.len()..].to_string(),
-    ))
+pub fn jet_unicode_cut_last(
+    s: &String,
+    sep: &String,
+) -> jet_foundation::Outcome::JetOutcome<
+    (String, String),
+    jet_foundation::Outcome::JetAbsent,
+> {
+    match s.rfind(sep) {
+        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
+        None => Err(jet_foundation::Outcome::JetAbsent),
+    }
 }
 `;
 

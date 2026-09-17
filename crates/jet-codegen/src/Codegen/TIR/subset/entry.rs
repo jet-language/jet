@@ -8,7 +8,7 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_is_generic;
 use crate::Syntax;
-use crate::AST::{Func, Stmt, Type};
+use crate::AST::{Func, Param, Stmt, Type};
 use std::collections::HashSet;
 
 /// Conservative structural test: `true` only if `f` is a top-level plain
@@ -80,13 +80,13 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
         .all(|statement| stmt_in_subset(statement, cx, &mut locals))
 }
 
-/// c109: is a `#Test` block body fully inside the TIR subset? A test body is a bare
-/// statement list (no params, unit context), emitted at indent 1 inside the generated
-/// `fn jet_test_N() -> Result<(), String>`. No param/return-type gates apply (the wrapper
-/// signature is fixed by `emit_*_tests`); only the body statements must be in-subset.
-pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
+/// c109: is a `#Test` body fully inside the TIR subset? The block and property
+/// forms share this body gate; property parameters seed the local-name set.
+/// Parameter type validation remains sema's responsibility, while identifiers
+/// must still resolve as locals/params rather than program-level names.
+pub(crate) fn tir_covers_test_body(body: &[Stmt], params: &[Param], cx: &Cx) -> bool {
     refusal::begin();
-    let mut locals: HashSet<String> = HashSet::new();
+    let mut locals: HashSet<String> = params.iter().map(|p| p.name.clone()).collect();
     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 

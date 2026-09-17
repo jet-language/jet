@@ -538,6 +538,23 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             return struct_field_type(cx, &args[0], field);
         }
     }
+    // D-PATCH1: sema synthesizes `T.Patch` outside the source shape table.
+    // Reconstruct each patch field from its concrete base field; falling
+    // through to the old integer sentinel would erase `?T` at every patch
+    // projection and make the resident carrier read a result handle as `T`.
+    if let Type::Named(name) = recv_ty {
+        if let Some(base_name) = name.strip_suffix(".Patch") {
+            return cx
+                .struct_fields
+                .get(base_name)
+                .and_then(|fields| {
+                    fields
+                        .iter()
+                        .find(|(candidate, _)| candidate == field)
+                        .map(|(_, ty)| Type::Option(Box::new(ty.clone())))
+                });
+        }
+    }
     // D-SHAREDGUARD2=A: `SharedGuard.value` is a compiler-known place rather
     // than a stored public field. Keep the TIR projection in sync with sema,
     // including the hidden read/edit tag carried by guard values.
@@ -689,6 +706,9 @@ pub(crate) fn lower_comptime_scalar(
                 Some(Type::IntN { signed, bits }) => Some((*signed, *bits)),
                 _ => None,
             },
+        )),
+        crate::AST::CtValue::BigInt(value) => Some(TExprKind::CtLit(
+            crate::AST::CtValue::BigInt(value.clone()),
         )),
         crate::AST::CtValue::Float(float) => Some(TExprKind::FloatLit(float.as_f64())),
         crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),

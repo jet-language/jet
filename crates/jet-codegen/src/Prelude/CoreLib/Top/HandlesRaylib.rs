@@ -44,6 +44,28 @@ struct JetDbConnection {
 struct JetPlugin {
     handle: u64,
 }
+// The FFI bridge keeps wasmtime-specific state out of generated Jet values. A
+// generated invocation expands `jet_plugin_bridge!(bridge_crate)` after the
+// cached core block, where it can convert the bridge's wire result into the
+// typed handle expected by CoreCall lowering. The authority argument has
+// already crossed the checked boundary as its canonical wire string.
+macro_rules! jet_plugin_bridge {
+    ($bridge:ident) => {
+        fn jet_plugin_load(path: &String, authority_wire: &String) -> JetPlugin {
+            let wire = $bridge::jet_plugin_load(path, authority_wire);
+            match wire
+                .strip_prefix("O:")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                Some(handle) if handle != 0 => JetPlugin { handle },
+                _ => {
+                    let message = wire.strip_prefix("E:").unwrap_or("plugin load failed");
+                    jet_runtime_stop("E3001", "", 0, message)
+                }
+            }
+        }
+    };
+}
 
 // jet:raylib-begin
 // -- core.game.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------

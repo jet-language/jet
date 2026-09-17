@@ -254,6 +254,31 @@ mod jet_devserver_impl {
         eprintln!(" fix: free one of those ports, or pick one explicitly with `.port(n)`");
         std::process::exit(1);
     }
+    /// Carry the host `jet dev` profile and CLI setting contributions into
+    /// each web rebuild. The values arrive as indexed environment entries so
+    /// arbitrary keys/values (including `=` and newlines) need no lossy
+    /// delimiter encoding.
+    fn jet_devserver_forward_build_profile_and_settings(command: &mut Command) {
+        if let Ok(profile) = std::env::var("JET_DEV_PROFILE") {
+            if !profile.is_empty() {
+                command.arg(format!("--profile={profile}"));
+            }
+        }
+        if std::env::var_os("JET_DEV_SMALL").is_some() {
+            command.arg("--small");
+        }
+        let count = std::env::var("JET_DEV_SETTING_COUNT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        for index in 0..count {
+            let key = std::env::var(format!("JET_DEV_SETTING_{index}_KEY")).ok();
+            let value = std::env::var(format!("JET_DEV_SETTING_{index}_VALUE")).ok();
+            if let (Some(key), Some(value)) = (key, value) {
+                command.arg(format!("--set={key}={value}"));
+            }
+        }
+    }
 
     /// Compile `app_file` for the web target by shelling out to the real
     /// `jet` binary, and on success atomically replace `build/*` with the
@@ -332,6 +357,7 @@ mod jet_devserver_impl {
         let jet_bin = std::env::var("JET_BIN").unwrap_or_else(|_| "jet".to_string());
         let mut command = Command::new(&jet_bin);
         command.args(["build", "--target=web"]).arg(&abs_file);
+        jet_devserver_forward_build_profile_and_settings(&mut command);
         let command_guard = match jet_devserver_prepare_build_command(&mut command, &staging) {
             Ok(guard) => guard,
             Err(e) => {

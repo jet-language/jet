@@ -15,6 +15,42 @@ fn jet_std_math_sin(x: f64) -> f64 {
 fn jet_std_math_cos(x: f64) -> f64 {
     x.cos()
 }
+fn jet_std_math_tan(x: f64) -> f64 {
+    x.tan()
+}
+fn jet_std_math_asin(x: f64) -> f64 {
+    x.asin()
+}
+fn jet_std_math_acos(x: f64) -> f64 {
+    x.acos()
+}
+fn jet_std_math_atan(x: f64) -> f64 {
+    x.atan()
+}
+fn jet_std_math_sinh(x: f64) -> f64 {
+    x.sinh()
+}
+fn jet_std_math_cosh(x: f64) -> f64 {
+    x.cosh()
+}
+fn jet_std_math_tanh(x: f64) -> f64 {
+    x.tanh()
+}
+fn jet_std_math_ln(x: f64) -> f64 {
+    x.ln()
+}
+fn jet_std_math_log10(x: f64) -> f64 {
+    x.log10()
+}
+fn jet_std_math_log2(x: f64) -> f64 {
+    x.log2()
+}
+fn jet_std_math_trunc(x: f64) -> f64 {
+    x.trunc()
+}
+fn jet_std_math_fract(x: f64) -> f64 {
+    x.fract()
+}
 fn jet_std_math_atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
 }

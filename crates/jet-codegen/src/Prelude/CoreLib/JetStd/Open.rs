@@ -107,17 +107,20 @@ mod jet_std {
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct ProcessReceipt {
-        pub code: i64,
+        // Exact Jet `Int` fields use the owned numeric representation so AOT
+        // field lowering and the shared Prelude type agree on one ABI.
+        pub code: jet_foundation::Numeric::JetInt,
         pub output: String,
         pub errors: String,
         pub success: bool,
         // D-FAIL-CARRIER1=A: sema declares `ProcessResult.signal` an
-        // `Option<Int>`, and the one Rust spelling of a Jet `?T` is
-        // `JetOutcome<T, JetAbsent>` (Codegen/Context.rs `rust_type`). A raw
-        // `Option<i64>` here was a SECOND optional representation, so a
-        // `.Val`/`.None` pattern on the field emitted the carrier's `Ok`/`Err`
-        // arms against a Rust `Option` and rustc rejected generated code.
-        pub signal: JetOutcome<i64, JetAbsent>,
+        // `Option<Int>`. The owned representation for `Int` is `JetInt`, and
+        // the one Rust spelling of a Jet `?T` is
+        // `JetOutcome<T, JetAbsent>`. A raw `Option<i64>` here was a SECOND
+        // optional representation, so a `.Val`/`.None` pattern on the field
+        // emitted the carrier's `Ok`/`Err` arms against a Rust `Option` and
+        // rustc rejected generated code.
+        pub signal: JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
         pub timed_out: bool,
         // D-AGENT-EXEC2: a receipt is the result plus the facts bound to the
         // launch transaction. These fields are deliberately ordinary data so
@@ -133,7 +136,7 @@ mod jet_std {
         pub limits: Vec<String>,
         pub outputs: Vec<String>,
         pub redacted: bool,
-        pub pid: i64,
+        pub pid: jet_foundation::Numeric::JetInt,
         pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
     }
 

@@ -9,7 +9,7 @@ use jet_foundation::Layout::TargetLayout;
 use jet_foundation::MIR::{
     MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
     MirBinaryOp, MirBinaryPatternPart, MirCallee, MirCaptureOperand, MirConstant, MirConstKey,
-    MirConstReport, MirCoreClosureKind, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
+    MirConstReport, MirCoreClosureKind, MirCliDefault, MirCliEntry, MirCliInputShape, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
     MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,
     MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirSemanticOp, MirSelectKind,
     MirStringPart, MirSymbol, MirTaskGroupKind, MirTerminator, MirTextHoleKind, MirTextPatternPart,
@@ -465,6 +465,7 @@ fn check_operation_types(
             | MirSemanticOp::LayoutCompare { .. }
             | MirSemanticOp::LayoutLiteral { .. }
             | MirSemanticOp::StructLiteral { .. }
+            | MirSemanticOp::ReflectOf { .. }
             | MirSemanticOp::CellGuardProject { .. }
             | MirSemanticOp::SharedGuardMap { .. }
             | MirSemanticOp::SharedGuardSplit { .. }
@@ -496,6 +497,8 @@ fn check_operation_types(
             | MirSemanticOp::DataEntriesToMap { .. }
             | MirSemanticOp::TextPatternMatch { .. }
             | MirSemanticOp::BinaryPatternMatch { .. }
+            | MirSemanticOp::CursorTakePattern { .. }
+            | MirSemanticOp::ReaderTakePattern { .. }
             | MirSemanticOp::HttpRouterRegister { .. } => {}
             MirSemanticOp::CCallback { .. } => {}
         },
@@ -1340,10 +1343,11 @@ fn emit_js_print_type_facts(out: &mut String, program: &MirProgram) {
                     }
                     write!(
                         out,
-                        "{{ key: {}, name: {}, computed: {} }}",
+                        "{{ key: {}, name: {}, computed: {}, redacted: {} }}",
                         js_string(&field.name),
                         js_string(web_source_name(&field.name)),
                         field.computed,
+                        field.redact,
                     )
                     .unwrap();
                 }
@@ -1375,10 +1379,11 @@ fn emit_js_print_type_facts(out: &mut String, program: &MirProgram) {
                                 }
                                 write!(
                                     out,
-                                    "{{ key: {}, name: {}, computed: {} }}",
+                                    "{{ key: {}, name: {}, computed: {}, redacted: {} }}",
                                     js_string(&field.name),
                                     js_string(web_source_name(&field.name)),
                                     field.computed,
+                                    field.redact,
                                 )
                                 .unwrap();
                             }
@@ -1405,6 +1410,83 @@ fn emit_js_print_type_facts(out: &mut String, program: &MirProgram) {
         out.push_str("},\n");
     }
     out.push_str("});\n");
+}
+
+fn js_cli_type_default(program: &MirProgram, ty: &MirType) -> Result<String, MirWebError> {
+    let constant = match ty.kind() {
+        MirTypeKind::Int => MirConstant::Int {
+            value: 0,
+            width: None,
+            spelling: None,
+        },
+        MirTypeKind::IntN { signed, bits } => MirConstant::Int {
+            value: 0,
+            width: Some((*signed, *bits)),
+            spelling: None,
+        },
+        MirTypeKind::Float => MirConstant::Float {
+            value: 0.0,
+            f32: false,
+            spelling: None,
+        },
+        MirTypeKind::Float32 => MirConstant::Float {
+            value: 0.0,
+            f32: true,
+            spelling: None,
+        },
+        MirTypeKind::Bool => MirConstant::Bool(false),
+        MirTypeKind::String => MirConstant::String(String::new()),
+        MirTypeKind::Char => MirConstant::Char('\0'),
+        MirTypeKind::InlineRange { base, .. } | MirTypeKind::Tagged { inner: base, .. } => {
+            return js_cli_type_default(program, base);
+        }
+        MirTypeKind::Option(_) => MirConstant::Unit,
+        _ => return Ok("undefined".to_string()),
+    };
+    js_constant_expression(program, &constant)
+}
+
+fn js_web_cli_entry_argument(
+    program: &MirProgram,
+    function: &MirFunction,
+    cli: Option<&MirCliEntry>,
+) -> Result<Option<String>, MirWebError> {
+    let Some(cli) = cli.filter(|cli| cli.record_inputs) else {
+        return Ok(None);
+    };
+    if function.params.len() != 1 {
+        return Err(MirWebError::InvalidMir {
+            message: format!(
+                "Web CLI record entry {} expects one parameter, found {}",
+                function.id.0,
+                function.params.len()
+            ),
+        });
+    }
+    let mut fields = Vec::with_capacity(cli.inputs.len());
+    for input in &cli.inputs {
+        let default = match &input.shape {
+            MirCliInputShape::Flag => "false".to_string(),
+            MirCliInputShape::Value { default, .. } => match default {
+                Some(MirCliDefault::Value(value)) => js_constant_expression(program, value)?,
+                Some(MirCliDefault::TypeDefault) => js_cli_type_default(program, &input.ty)?,
+                None => "undefined".to_string(),
+            },
+        };
+        fields.push(format!("{}: {}", js_string(&input.name), default));
+    }
+    let defaults = format!("{{ {} }}", fields.join(", "));
+    let defaults = function.params[0].ty.identity.map_or(defaults.clone(), |type_id| {
+        format!(
+            "Object.defineProperty({}, \"__jet_type\", {{ value: {}, enumerable: false }})",
+            defaults,
+            js_string(&type_id.0.to_string())
+        )
+    });
+    Ok(Some(format!(
+        "[Object.assign({}, (args.length === 1 && args[0] !== null && typeof args[0] === \"object\" && !Array.isArray(args[0])) ? args[0] : {{}})]",
+        defaults
+    )))
 }
 
 fn emit_js_app(
@@ -1533,6 +1615,16 @@ fn emit_js_app(
         None
     };
     let entry_function = entry_row.filter(|function| function_in_bucket(function, WebBucket::JS));
+    let entry_cli_argument = entry_function
+        .map(|function| {
+            js_web_cli_entry_argument(
+                program,
+                function,
+                artifact.entry.as_ref().and_then(|entry| entry.cli.as_ref()),
+            )
+        })
+        .transpose()?
+        .flatten();
     let entry_wasm = entry_row.filter(|function| function_in_bucket(function, WebBucket::Wasm));
     let main_keyword = if entry_function.is_some_and(|function| function.generator.is_some()) {
         "export function*"
@@ -1542,18 +1634,28 @@ fn emit_js_app(
     writeln!(out, "\n{} jet_main(...args) {{", main_keyword).unwrap();
     out.push_str("  try {\n");
     if let Some(function) = entry_function {
+        if let Some(argument) = &entry_cli_argument {
+            writeln!(out, "    const __jet_entry_args = {argument};").unwrap();
+        }
+        let entry_arguments = if entry_cli_argument.is_some() {
+            "__jet_entry_args"
+        } else {
+            "args"
+        };
         if function.generator.is_some() {
             writeln!(
                 out,
-                "    const __jet_edge_result = yield* jet_fn_{}([], args);",
-                function.id.0
+                "    const __jet_edge_result = yield* jet_fn_{}([], {});",
+                function.id.0,
+                entry_arguments
             )
             .unwrap();
         } else {
             writeln!(
                 out,
-                "    const __jet_edge_result = await jet_fn_{}([], args);",
-                function.id.0
+                "    const __jet_edge_result = await jet_fn_{}([], {});",
+                function.id.0,
+                entry_arguments
             )
             .unwrap();
         }
@@ -2433,7 +2535,7 @@ fn js_operation_expression(
             "[{}].join(\"\")",
             parts.iter().map(js_string_part).collect::<Vec<_>>().join(", ")
         ),
-        MirOperation::BuildList { values: ids } => format!(
+        MirOperation::BuildList { values: ids, .. } => format!(
             "[{}]",
             ids.iter()
                 .map(|id| js_move_value_expression(*id))
@@ -3310,15 +3412,27 @@ fn js_gc_edit_expression(
 
 fn js_typed_text_interp_expression(
     program: &MirProgram,
-    function: &MirFunction,
     call: MirPreludeCallId,
     kind: jet_foundation::Syntax::TypedHeadKind,
     literals: &[String],
     holes: &[jet_foundation::MIR::MirValueId],
+    trusted_html: &[bool],
 ) -> Result<String, MirWebError> {
     if literals.len() != holes.len().saturating_add(1) {
         return Err(MirWebError::InvalidMir {
             message: "MIR typed text interpolation literal/hole arity is inconsistent".to_string(),
+        });
+    }
+    if trusted_html.len() != holes.len() {
+        return Err(MirWebError::InvalidMir {
+            message: "MIR typed text interpolation trust metadata is inconsistent".to_string(),
+        });
+    }
+    if !matches!(kind, jet_foundation::Syntax::TypedHeadKind::HTML)
+        && trusted_html.iter().any(|trusted| *trusted)
+    {
+        return Err(MirWebError::InvalidMir {
+            message: "non-HTML typed text interpolation carries HTML trust metadata".to_string(),
         });
     }
     let literal_values = format!(
@@ -3334,13 +3448,10 @@ fn js_typed_text_interp_expression(
             .join(", ")
     );
     let args = if matches!(kind, jet_foundation::Syntax::TypedHeadKind::HTML) {
-        let trusted = holes
+        let trusted = trusted_html
             .iter()
-            .map(|id| {
-                let ty = mir_function_value_type(function, *id)?;
-                Ok((ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_HTML)).to_string())
-            })
-            .collect::<Result<Vec<_>, MirWebError>>()?;
+            .map(|trusted| trusted.to_string())
+            .collect::<Vec<_>>();
         vec![literal_values, hole_values, format!("[{}]", trusted.join(", "))]
     } else {
         vec![literal_values, hole_values]
@@ -3645,6 +3756,33 @@ fn js_semantic_expression(
                 js_string(&type_id.0.to_string())
             )
         }
+        MirSemanticOp::ReflectOf {
+            type_name,
+            path,
+            display,
+            fields,
+        } => {
+            let fields = fields
+                .iter()
+                .map(|field| {
+                    format!(
+                        "{{ name: {}, value: {{ type_name: {}, path: {}, display: jet_show({}), fields: [] }} }}",
+                        js_string(&field.name),
+                        js_string(&field.type_name),
+                        js_string(&field.path),
+                        value(field.value),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{{ type_name: {}, path: {}, display: {}, fields: [{}] }}",
+                js_string(type_name),
+                js_string(path),
+                value(*display),
+                fields,
+            )
+        }
         MirSemanticOp::CellGuardProject {
             map_call,
             split_call,
@@ -3826,6 +3964,32 @@ fn js_semantic_expression(
             *call,
             vec![value(*subject), js_binary_pattern_parts(program, parts)?],
         )?,
+        MirSemanticOp::CursorTakePattern {
+            receiver_place,
+            parts,
+            ..
+        } => {
+            let result_type = result_type.ok_or_else(|| MirWebError::InvalidMir {
+                message: "MIR Cursor.take_pattern has no result type".to_string(),
+            })?;
+            let (ok, _) = result_type.result_parts().ok_or_else(|| MirWebError::InvalidMir {
+                message: "MIR Cursor.take_pattern result is not a Result".to_string(),
+            })?;
+            let fields = ok.tuple_fields().ok_or_else(|| MirWebError::InvalidMir {
+                message: "MIR Cursor.take_pattern result is not a typed tuple".to_string(),
+            })?;
+            let cell = js_place_cell_expression(program, function, *receiver_place)?;
+            let pattern = js_text_pattern_parts(program, parts)?;
+            let fields = fields
+                .iter()
+                .map(|(name, _)| js_string(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("jet_cursor_take_pattern(({cell}).value, {pattern}, [{fields}])")
+        }
+        MirSemanticOp::ReaderTakePattern { .. } => {
+            unreachable!("Reader.take_pattern is not Web-applicable")
+        }
         MirSemanticOp::NumericMethod { call, receiver } => {
             prelude(*call, vec![value(*receiver)])?
         }
@@ -3866,6 +4030,31 @@ fn js_semantic_expression(
             let Some(route) = program.prelude_calls.iter().find(|row| row.id == *call) else {
                 return Err(MirWebError::MissingPreludeCall { call: call.0 });
             };
+            if route.family == MirPreludeFamily::HandleMethod
+                && route.module == "core.reflect"
+            {
+                if !args.is_empty() {
+                    return Err(MirWebError::InvalidMir {
+                        message: "MIR reflection handle method has arguments".to_string(),
+                    });
+                }
+                let receiver = value(*receiver);
+                return Ok(match route.member.as_str() {
+                    "value.type_name" => format!("({receiver}).type_name"),
+                    "value.path" => format!("({receiver}).path"),
+                    "value.display" => format!("({receiver}).display"),
+                    "value.fields" => format!("({receiver}).fields"),
+                    "field.name" => format!("({receiver}).name"),
+                    "field.value" => format!("({receiver}).value"),
+                    member => {
+                        return Err(MirWebError::InvalidMir {
+                            message: format!(
+                                "unknown MIR reflection handle method `{member}`"
+                            ),
+                        });
+                    }
+                });
+            }
             if web_task_join_call(program, *call) {
                 if !args.is_empty() {
                     return Err(MirWebError::InvalidMir {
@@ -3892,6 +4081,16 @@ fn js_semantic_expression(
                 let mut rendered = vec![value(*receiver)];
                 rendered.extend(values(args));
                 js_datatree_handle_expression(route, &rendered)?
+            } else if route.family == MirPreludeFamily::HandleMethod
+                && route.module == "core.handle"
+                && route.member == "duration.ns_value"
+            {
+                if !args.is_empty() {
+                    return Err(MirWebError::InvalidMir {
+                        message: "MIR Duration nanosecond projection has arguments".to_string(),
+                    });
+                }
+                format!("jet_web_duration_ns({})", value(*receiver))
             } else if route.family == MirPreludeFamily::HandleMethod
                 && route.module == "core.time"
                 && route
@@ -4024,7 +4223,15 @@ fn js_semantic_expression(
             kind,
             literals,
             holes,
-        } => js_typed_text_interp_expression(program, function, *call, *kind, literals, holes)?,
+            trusted_html,
+        } => js_typed_text_interp_expression(
+            program,
+            *call,
+            *kind,
+            literals,
+            holes,
+            trusted_html,
+        )?,
         MirSemanticOp::HttpRouterRegister {
             call,
             receiver,
@@ -5880,6 +6087,12 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_data_json_reader", "jet_data_json_reader"),
     ("jet_fmt_display", "jet_display"),
     ("jet_fmt_debug", "jet_debug"),
+    ("jet_text_pattern_match", "jet_text_pattern_match"),
+    ("jet_binary_pattern_match", "jet_binary_pattern_match"),
+    ("jet_cursor_over", "jet_cursor_over"),
+    ("jet_cursor_take_until", "jet_cursor_take_until"),
+    ("jet_cursor_skip_ws", "jet_cursor_skip_ws"),
+    ("jet_cursor_take_pattern", "jet_cursor_take_pattern"),
     ("jet_term_write_stdout_line", "jetDom.print"),
     ("jet_std::jet_typed_url_literal", "jet_typed_url_literal"),
     ("jet_std::jet_int_abs", "jet_int_abs"),
@@ -5901,6 +6114,16 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_std::jet_select_wait_tagged", "jet_scheduler_select"),
     ("jet_std::jet_select_try_wait_tagged", "jet_scheduler_try_select"),
     ("jet_std::JetShared::new", "jet_shared_new"),
+    // Web adapters for the canonical reactive/UI Prelude routes.  The
+    // generated app imports these from the one DOM runtime rather than
+    // allowing namespaced Prelude symbols to become ambient JavaScript.
+    ("jet_std::JetSignal::new", "jetDom.makeSignal"),
+    ("jet_std::JetSignal::get", "jetDom.signalGet"),
+    ("jet_std::JetSignal::set", "jetDom.signalSet"),
+    ("jet_ui_reactive_render", "jetDom.reactiveRender"),
+    ("jet_ui_null", "jetDom.createBackend"),
+    ("JetNullBackend::mount_node", "jetDom.mount"),
+    ("JetNullBackend::paint_commands", "jetDom.commands"),
     ("::jet_std::JetShared::new", "jet_shared_new"),
     ("JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
     ("::JetUiShortcut::cmd", "jet_ui_shortcut_cmd"),
@@ -6108,6 +6331,7 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_float_display", "jet_float_display"),
     ("jet_show", "jet_show"),
     ("jet_fmt_decimal", "jet_fmt_decimal"),
+    ("jet_fmt_quantity", "jet_fmt_quantity"),
     ("jet_fmt_fixed_even", "jet_fmt_fixed_even"),
     ("jet_fmt_grouped", "jet_fmt_grouped"),
     ("jet_fmt_decimal_int", "jet_fmt_decimal_int"),
@@ -6141,6 +6365,7 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_typed_path_interpolate", "jet_typed_path_interpolate"),
     ("jet_typed_path_literal", "jet_typed_path_literal"),
     ("jet_typed_datetime_interpolate", "jet_typed_datetime_interpolate"),
+    ("jet_typed_datetime_literal", "jet_typed_datetime_literal"),
     ("jet_typed_url_literal", "jet_typed_url_literal"),
     ("jet_expiring_now", "jet_expiring_now"),
     ("jet_expiring_new", "jet_expiring_new"),
@@ -7270,11 +7495,12 @@ fn json_entry_spec(entry: Option<&MirEntrySpec>, program: &MirProgram) -> Result
                 .collect::<Result<Vec<_>, MirWebError>>()?
                 .join(",");
             format!(
-                "{{\"description\":{},\"inputs\":{},\"commands\":[{}],\"standard\":{}}}",
+                "{{\"description\":{},\"record_inputs\":{},\"inputs\":{},\"commands\":[{}],\"standard\":{}}}",
                 cli.description
                     .as_ref()
                     .map(|value| json_string(value))
                     .unwrap_or_else(|| "null".to_string()),
+                cli.record_inputs,
                 json_cli_inputs(&cli.inputs),
                 commands,
                 cli.standard

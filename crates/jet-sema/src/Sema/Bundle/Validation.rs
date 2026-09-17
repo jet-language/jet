@@ -39,124 +39,18 @@ pub(crate) fn uses_raw_protocol_return(
         )
     }) || implementation_generated && function_generated
 }
-
-fn shift_span(span: Span, delta: isize) -> Span {
-    Span::new(
-        (span.start as isize + delta).max(0) as usize,
-        (span.end as isize + delta).max(0) as usize,
-    )
+pub(crate) fn uses_raw_protocol_function_return(
+    trait_name: Option<&str>,
+    implementation_generated: bool,
+    function: &crate::AST::Func,
+) -> bool {
+    uses_raw_protocol_return(
+        trait_name,
+        implementation_generated,
+        function.compiler_generated,
+    ) || (function.compiler_generated && function.state_transition.is_some())
 }
 
-/// Replay a cached function onto the current parse. Sibling body-length
-/// edits shift later functions without changing their relative shape, so the
-/// cache key still hits; identity spans must come from this parse or
-/// liveness treats `run` as a non-root private function (L0104).
-pub(super) fn rebase_cached_function(parsed: &Func, mut cached: Func) -> Func {
-    cached.span = parsed.span;
-    cached.name_span = parsed.name_span;
-    cached.return_type_span = parsed.return_type_span;
-    for (cached_param, parsed_param) in cached.params.iter_mut().zip(&parsed.params) {
-        if cached_param.name == parsed_param.name {
-            cached_param.name_span = parsed_param.name_span;
-            cached_param.ty_span = parsed_param.ty_span;
-        }
-    }
-    cached
-}
-
-pub(super) fn shift_diagnostics(diagnostics: &mut [Diagnostic], delta: isize) {
-    if delta == 0 {
-        return;
-    }
-    for diagnostic in diagnostics {
-        if let Some(span) = &mut diagnostic.span {
-            *span = shift_span(*span, delta);
-        }
-        if let Some(edit) = &mut diagnostic.edit {
-            edit.span = shift_span(edit.span, delta);
-        }
-        for cause in &mut diagnostic.cause {
-            if let Some(span) = &mut cause.span {
-                *span = shift_span(*span, delta);
-            }
-        }
-    }
-}
-
-pub(super) fn shift_pending_diagnostics(
-    pending: &mut [PendingFunctionDiagnostic],
-    delta: isize,
-) {
-    if delta == 0 {
-        return;
-    }
-    for item in pending {
-        item.function_span = shift_span(item.function_span, delta);
-        shift_diagnostics(std::slice::from_mut(&mut item.diagnostic), delta);
-    }
-}
-
-pub(super) fn function_cache_debug(function: &Func) -> String {
-    relativize_debug_spans(&format!("{function:?}"), function.span.start)
-}
-
-fn relativize_debug_spans(input: &str, origin: usize) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut copy_from = 0usize;
-    let mut i = 0usize;
-    const MARK: &[u8] = b"Span { start: ";
-    const END_MARK: &[u8] = b", end: ";
-    while i < bytes.len() {
-        match bytes[i] {
-            q @ (b'"' | b'\'') => {
-                i += 1;
-                while i < bytes.len() {
-                    let c = bytes[i];
-                    if c == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    if c == q {
-                        break;
-                    }
-                }
-            }
-            b'S' if bytes[i..].starts_with(MARK) => {
-                out.push_str(&input[copy_from..i]);
-                i += MARK.len();
-                let start_from = i;
-                while i < bytes.len() && bytes[i].is_ascii_digit() {
-                    i += 1;
-                }
-                let start: usize = input[start_from..i].parse().unwrap_or(0);
-                if !bytes[i..].starts_with(END_MARK) {
-                    copy_from = start_from;
-                    continue;
-                }
-                i += END_MARK.len();
-                let end_from = i;
-                while i < bytes.len() && bytes[i].is_ascii_digit() {
-                    i += 1;
-                }
-                let end: usize = input[end_from..i].parse().unwrap_or(0);
-                if i < bytes.len() && bytes[i] == b'}' {
-                    i += 1;
-                }
-                out.push_str(&format!(
-                    "Span {{ start: {}, end: {} }}",
-                    start.saturating_sub(origin),
-                    end.saturating_sub(origin)
-                ));
-                copy_from = i;
-            }
-            _ => i += 1,
-        }
-    }
-    out.push_str(&input[copy_from..]);
-    out
-}
 
 pub(super) fn qualified_effect_facts(
     modules: &[(String, HashMap<String, EffectSummary>)],
@@ -671,25 +565,20 @@ fn check_func_body_incremental(
     // this recursive Debug form only when the caller can actually use the
     // cache: deep fluent expressions can exceed the ordinary test-thread stack,
     // and disabled-cache checks have no fingerprint consumer.
-    let mut input = function_cache_debug(function).into_bytes();
+    let mut input = format!("{function:?}").into_bytes();
     input.push(if raw_protocol_return { 1 } else { 0 });
     if let Some(hit) = cache.get(&key, &input) {
         if hit.uses_exact_int {
             states[module_idx].exact_int_reachable.set(true);
         }
-        let delta = function.span.start as isize - hit.function.span.start as isize;
-        *function = rebase_cached_function(function, hit.function);
+        *function = hit.function;
         summaries.extend(hit.summaries);
         embed_inputs_out.extend(hit.comptime_inputs);
         global_addr_taken.extend(hit.address_taken);
         name_ledger.merge_references(&hit.name_ledger);
         name_ledger.merge_structure_facts(&hit.name_ledger);
-        let mut pending = hit.pending_diagnostics;
-        shift_pending_diagnostics(&mut pending, delta);
-        pending_diagnostics_out.extend(pending);
-        let mut diagnostics = hit.diagnostics;
-        shift_diagnostics(&mut diagnostics, delta);
-        return diagnostics;
+        pending_diagnostics_out.extend(hit.pending_diagnostics);
+        return hit.diagnostics;
     }
 
     let mut local_summaries = HashMap::new();
@@ -1016,10 +905,10 @@ fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob> {
                         insert(
                             format!("{}::{}", definition.name, function.name),
                             Some(definition.name.clone()),
-                            uses_raw_protocol_return(
+                            uses_raw_protocol_function_return(
                                 Some(&implementation.trait_name),
                                 implementation.compiler_generated,
-                                function.compiler_generated,
+                                function,
                             ),
                             function,
                         );
@@ -1040,10 +929,10 @@ fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob> {
                         insert(
                             format!("{}::{}", definition.name, function.name),
                             Some(definition.name.clone()),
-                            uses_raw_protocol_return(
+                            uses_raw_protocol_function_return(
                                 Some(&implementation.trait_name),
                                 implementation.compiler_generated,
-                                function.compiler_generated,
+                                function,
                             ),
                             function,
                         );
@@ -1055,10 +944,10 @@ fn comptime_stage_jobs(items: &[Item]) -> HashMap<String, ComptimeStageJob> {
                     insert(
                         format!("{}::{}", implementation.type_name, function.name),
                         Some(implementation.type_name.clone()),
-                        uses_raw_protocol_return(
+                        uses_raw_protocol_function_return(
                             implementation.trait_name.as_deref(),
                             false,
-                            function.compiler_generated,
+                            function,
                         ),
                         function,
                     );
@@ -1321,10 +1210,10 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
-                            raw_protocol_return: uses_raw_protocol_return(
+                            raw_protocol_return: uses_raw_protocol_function_return(
                                 Some(implementation.trait_name.as_str()),
                                 implementation.compiler_generated,
-                                function.compiler_generated,
+                                function,
                             ),
                             function: function.clone(),
                         });
@@ -1350,10 +1239,10 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
-                            raw_protocol_return: uses_raw_protocol_return(
+                            raw_protocol_return: uses_raw_protocol_function_return(
                                 Some(implementation.trait_name.as_str()),
                                 implementation.compiler_generated,
-                                function.compiler_generated,
+                                function,
                             ),
                             function: function.clone(),
                         });
@@ -1371,10 +1260,10 @@ pub(crate) fn check_module_bodies(
                         ),
                         owner: Some(implementation.type_name.clone()),
                         trait_name: implementation.trait_name.clone(),
-                        raw_protocol_return: uses_raw_protocol_return(
+                        raw_protocol_return: uses_raw_protocol_function_return(
                             implementation.trait_name.as_deref(),
                             false,
-                            function.compiler_generated,
+                            function,
                         ),
                         function: function.clone(),
                     });
@@ -1643,10 +1532,10 @@ pub(crate) fn check_module_bodies(
                                 devtools_registry,
                                 effect_facts,
                                 Some(&s.name),
-                                uses_raw_protocol_return(
+                                uses_raw_protocol_function_return(
                                     Some(&block.trait_name),
                                     block.compiler_generated,
-                                    m.compiler_generated,
+                                    m,
                                 ),
                                 &ct_funcs,
                                 &checked_ct_funcs,
@@ -1739,10 +1628,10 @@ pub(crate) fn check_module_bodies(
                                 devtools_registry,
                                 effect_facts,
                                 Some(&e.name),
-                                uses_raw_protocol_return(
+                                uses_raw_protocol_function_return(
                                     Some(&block.trait_name),
                                     block.compiler_generated,
-                                    m.compiler_generated,
+                                    m,
                                 ),
                                 &ct_funcs,
                                 &checked_ct_funcs,
@@ -1813,10 +1702,10 @@ pub(crate) fn check_module_bodies(
                         devtools_registry,
                         effect_facts,
                         Some(&i.type_name),
-                        uses_raw_protocol_return(
+                        uses_raw_protocol_function_return(
                             i.trait_name.as_deref(),
                             false,
-                            m.compiler_generated,
+                            m,
                         ),
                         &ct_funcs,
                         &checked_ct_funcs,

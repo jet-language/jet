@@ -480,6 +480,42 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
+/// Core UI runtime carriers are generated at the crate root from the shared
+/// `CoreModuleExports` registry. Result aliases intentionally stay on their
+/// dedicated `JetUiServiceResult<...>` projections below.
+pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
+    const RESULT_ALIASES: &[&str] = &[
+        "UiServiceResult",
+        "UiFileFilterResult",
+        "UiFsGrantResult",
+        "UiShortcutResult",
+        "UiShortcutBindingResult",
+        "UiAccessibilityResult",
+        "UiFileDialogResult",
+        "UiClipboardTextResult",
+        "UiClipboardWriteResult",
+        "UiImeResult",
+        "UiDragResult",
+        "UiShortcutDispatchResult",
+        "UiAccessibilityNodeResult",
+        "UiAccessibilityAttachResult",
+        "UiAccessibilityProjectionResult",
+    ];
+    if RESULT_ALIASES.contains(&name) {
+        return None;
+    }
+    jet_foundation::CoreModuleExports::core_modules()
+        .iter()
+        .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
+        .any(|entry| {
+            entry
+                .type_exports
+                .iter()
+                .any(|&(type_name, _)| type_name == name)
+        })
+        .then_some(name)
+}
+
 /// Prelude values emitted at the generated crate root rather than under
 /// `jet_std`. Keep this separate from `core_rust_type_name`: that table's caller
 /// always inserts `jet_std::`.
@@ -489,7 +525,8 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
-        "AllocError" => Some("AllocError"),
+        "Transaction" => Some("JetTransaction"),
+        "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
         "Point" => Some("JetPoint"),
@@ -508,6 +545,11 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TuiBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
+        // D-APPROX1=A: native sketch carriers are Prelude-root values.
+        "HyperLogLog" => Some("JetHyperLogLog"),
+        "TDigest" => Some("JetTDigest"),
+        "CountMinSketch" => Some("JetCountMinSketch"),
+        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod"
         | "JetZone" | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -694,9 +736,22 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "DataGroupedQuery" => Some("DataGroupedQuery"),
         "Group" => Some("GroupValue"),
         "DataJoin" => Some("DataJoin"),
+        n if n == Syntax::TYPE_SHARED_GUARD => Some("JetSharedGuard"),
         "Signal" => Some("JetSignal"),
         "Derived" => Some("JetDerived"),
         "AsyncPolicy" => Some("JetAsyncPolicy"),
+        "Event" => Some("JetEvent"),
+        "AsyncEvent" => Some("JetAsyncEvent"),
+        "Hook" => Some("JetHook"),
+        "DecisionHook" => Some("JetDecisionHook"),
+        "HookDecision" => Some("JetHookDecision"),
+        "HookOutcome" => Some("JetHookOutcome"),
+        "Subscription" => Some("JetSubscription"),
+        "EventScope" => Some("JetEventScope"),
+        "EventPolicy" => Some("JetEventPolicy"),
+        "EventTrace" => Some("JetEventTrace"),
+        "DispatchReport" => Some("JetDispatchReport"),
+        "DispatchFailure" => Some("JetDispatchFailure"),
         "Overflow" => Some("JetEventOverflow"),
         "FailurePolicy" => Some("JetFailurePolicy"),
         "DispatchState" => Some("JetDispatchState"),
@@ -871,16 +926,23 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
 }
 
 /// Core email types are emitted by the `jet_email` Prelude module, not by
-/// `jet_std`. MIR canonicalization preserves the `email.<Type>` owner prefix,
-/// so keep this mapping qualified and do not let a user nominal named
-/// `Address` acquire the Core spelling by leaf coincidence.
+/// `jet_std`. Qualified Core spellings retain their `core.email` owner, while
+/// compiler-owned declaration rows use the bare leaf. Keep both forms on the
+/// same Rust spelling and do not let arbitrary qualified user names acquire
+/// the Core email carrier by leaf coincidence.
 pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
-    let (prefix, leaf) = name
+    let leaf = match name
         .rsplit_once("::")
-        .or_else(|| name.rsplit_once('.'))?;
-    if !matches!(prefix, "email" | "core.email" | "core::email") {
-        return None;
-    }
+        .or_else(|| name.rsplit_once('.'))
+    {
+        Some((prefix, leaf))
+            if matches!(prefix, "email" | "core.email" | "core::email") =>
+        {
+            leaf
+        }
+        Some(_) => return None,
+        None => name,
+    };
     match leaf {
         "Address" => Some("Address"),
         "Message" => Some("Message"),
@@ -890,7 +952,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "RecipientPolicy" => Some("RecipientPolicy"),
         "RecipientReport" => Some("RecipientReport"),
         "SendReport" => Some("SendReport"),
-        "EmailError" => Some("EmailError"),
+        "EmailError" => Some("Error"),
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
@@ -978,13 +1040,13 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
         "StdinHandle" => Some("JetStdinReader"),
         "StdinLines" => Some("()"),
-        // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` handle markers — the real
-        // Rust value comes straight off the `ProcessChild` struct field; these
-        // Jet-level types never appear as a standalone Rust type.
-        // `ProcessLines` is the `.lines()` loop-only marker.
-        "ProcessStdin" => Some("()"),
-        "ProcessStdoutStream" => Some("()"),
-        "ProcessStderrStream" => Some("()"),
+        // D-PROCESS1=A: these markers project the concrete shared handles on
+        // ProcessChild. Keep their native storage types in generated Rust so
+        // method receivers match the process prelude helpers.
+        "ProcessStdin" => Some("jet_std::ProcessStdinHandle"),
+        "ProcessStdoutStream" => Some("jet_std::ProcessStdoutStreamHandle"),
+        "ProcessStderrStream" => Some("jet_std::ProcessStderrStreamHandle"),
+        // ProcessLines is the `.lines()` loop-only marker.
         "ProcessLines" => Some("()"),
         // D-COREIO1=A: standard stream handles.
         "Stdout" => Some("JetStdout"),
@@ -1125,6 +1187,10 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HTTPServer" => Some("JetHTTPServer"),
         "HTTPShutdownReport" => Some("JetHTTPShutdownReport"),
         "HTTPServerTls" => Some("JetHTTPServerTls"),
+        // D-WS1=B: WebSocket values are Prelude-owned runtime carriers.
+        "WsConn" => Some("JetWsConn"),
+        "WsError" => Some("JetWsError"),
+        "WsMessage" => Some("JetWsMessage"),
         _ => None,
     }
 }
@@ -1145,16 +1211,6 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
-    /// Module key every TFunc lowered under this context is owned by.  This is
-    /// the checked module identity; a context built without a bundle (tests,
-    /// fragments) falls back to the source file so keys stay unique.
-    pub(crate) fn tir_module(&self) -> String {
-        if self.module_identity.is_empty() {
-            self.file.clone()
-        } else {
-            self.module_identity.clone()
-        }
-    }
 
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
@@ -2445,61 +2501,9 @@ impl Cx {
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
             // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
-            // D-FOUND-PLATFORM1=A: Core host/font values are shared Prelude
-            // records.  Backends only marshal them; they do not re-define them.
             Type::Named(name)
-                if matches!(
-                    name.as_str(),
-                    "UiCapability"
-                        | "UiCapabilityFact"
-                        | "UiCapabilityFacts"
-                        | "UiCancellation"
-                        | "UiHostError"
-                        | "UiFileDialogKind"
-                        | "UiFsAccess"
-                        | "UiFsRights"
-                        | "UiFsGrant"
-                        | "UiGrantedPath"
-                        | "UiFileFilter"
-                        | "UiFileDialogRequest"
-                        | "UiFileDialogSelection"
-                        | "UiClipboardText"
-                        | "UiClipboardWrite"
-                        | "UiTextRange"
-                        | "UiImeMode"
-                        | "UiImePhase"
-                        | "UiImeComposition"
-                        | "UiImeEvent"
-                        | "UiDragOperation"
-                        | "UiDropItem"
-                        | "UiDragPhase"
-                        | "UiDragEvent"
-                        | "UiShortcutModifier"
-                        | "UiShortcutModifiers"
-                        | "UiShortcut"
-                        | "UiShortcutBinding"
-                        | "UiShortcutDispatch"
-                        | "UiAccessibilityState"
-                        | "UiAccessibility"
-                        | "UiNodeId"
-                        | "UiAccessibilityProjection"
-                        | "UiPreview"
-                        | "UiPlayground"
-                        | "UiPreviewAccessibility"
-                        | "UiPreviewAuthority"
-                        | "UiPreviewContext"
-                        | "UiPreviewDevice"
-                        | "UiPreviewEffect"
-                        | "UiPreviewInputOverride"
-                        | "UiPreviewInputValue"
-                        | "UiPreviewKind"
-                        | "UiPreviewLifecycle"
-                        | "UiPreviewRegistry"
-                        | "UiPreviewSource"
-                        | "UiPreviewTheme"
-                        | "UiPreviewTraits"
-                        | "UiPreviewViewport"
-                ) && !self.type_names.contains(name) =>
+                if core_ui_rust_type_name(name).is_some()
+                    && !self.type_names.contains(name) =>
             {
                 format!("{}Jet{}", self.root_prefix, name)
             }
@@ -3977,8 +3981,6 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
     // Bundle construction assigns the module identity after `build_cx_items`;
-    // refresh canonical TFunc keys with that checked identity.
-    collect_iterable_hooks(cx, &bundle.modules[module_idx].items);
     cx.devtools_registry = bundle.devtools_registry.clone();
     if let Some(module) = bundle.name_ledger.module(module_idx) {
         cx.devtools_package = module.package.clone();
@@ -6137,7 +6139,19 @@ fn register_core_event_enums(cx: &mut Cx) {
             .or_insert_with(|| {
                 variants
                     .iter()
-                    .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
+                    .map(|variant| {
+                        let payload = match (*enum_name, *variant) {
+                            ("HookOutcome", "Continue" | "Fail")
+                            | ("HookDecision", "Transform" | "Fail") => {
+                                VariantPayload::Single(
+                                    Type::Named("Unknown".to_string()),
+                                    Span::new(0, 0),
+                                )
+                            }
+                            _ => VariantPayload::Unit,
+                        };
+                        ((*variant).to_string(), payload)
+                    })
                     .collect()
             });
         for variant in *variants {
@@ -6242,7 +6256,7 @@ fn trait_impl_assoc_method(
     None
 }
 
-fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
+pub(crate) fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
     let mut iterable_pairs: Vec<(String, String)> = Vec::new();
     for item in items {
         let coll_type = match item {
@@ -6267,7 +6281,6 @@ fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
         }
     }
 
-    let module = cx.tir_module();
     for (coll_type, iter_type) in iterable_pairs {
         let Some(item_type) = trait_impl_assoc_method(
             items,
@@ -6278,12 +6291,14 @@ fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
         ) else {
             continue;
         };
+        let coll_identity = crate::Codegen::TIR::canonical_enum_owner(cx, &coll_type);
+        let iter_identity = crate::Codegen::TIR::canonical_enum_owner(cx, &iter_type);
         let iter_symbol = format!(
-            "{module}::{coll_type}::{}::iter",
+            "{coll_identity}::{}::iter",
             Syntax::TRAIT_ITERABLE
         );
         let next_symbol = format!(
-            "{module}::{iter_type}::{}::next",
+            "{iter_identity}::{}::next",
             Syntax::TRAIT_ITERATOR
         );
         cx.iterable_hooks.insert(

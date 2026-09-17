@@ -2,6 +2,10 @@
 // adapters. The AOT wrapper adds its failure rail; adapters only marshal the
 // callback and values into this kernel.
 const JET_PARA_CHUNK_ITEMS: usize = 64;
+// D-PARA-GATE1=A: do not pay worker setup for the cheap explicit-parallel
+// domain. Larger calls retain the existing bounded chunk scheduler; the
+// measured caller-side gate can still reject them without changing chunks.
+const JET_PARA_STATIC_FLOOR_ITEMS: usize = 1024;
 
 #[inline]
 pub(crate) fn jet_list_para_chunks_serial_kernel<R, E, F>(
@@ -61,6 +65,9 @@ where
     if chunk_count == 0 {
         return Vec::new();
     }
+    if len <= JET_PARA_STATIC_FLOOR_ITEMS {
+        return jet_list_para_chunks_serial_kernel(len, f);
+    }
     let worker_count = worker_cap.min(worker_limit.max(1)).min(chunk_count);
     if worker_count == 1 {
         return jet_list_para_chunks_serial_kernel(len, f);
@@ -70,7 +77,7 @@ where
         let f = &f;
         for worker in 0..worker_count {
             handles.push(scope.spawn(move || {
-                let mut out = Vec::new();
+                let mut out = Vec::with_capacity(chunk_count.div_ceil(worker_count));
                 for chunk in (worker..chunk_count).step_by(worker_count) {
                     let start = chunk * JET_PARA_CHUNK_ITEMS;
                     let end = (start + JET_PARA_CHUNK_ITEMS).min(len);

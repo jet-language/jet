@@ -18,10 +18,11 @@ pub use core_calls::{
     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
     apply_core_pure_call, apply_core_pure_method,
     apply_core_call_without_ambient_with_type_args_and_history_schema,
-    apply_data_line_call, apply_impure_core_call, apply_impure_core_call_with_type,
-    apply_impure_core_call_with_type_args, apply_raylib_ambient_core_call, data_status_rows,
-    history_callback_fingerprint, history_command_schema_from_mir, HistoryCommandSchema,
-    sketch_add, with_world_rng_provider,
+    apply_data_line_call, apply_history_rng_method, apply_impure_core_call,
+    apply_impure_core_call_with_type, apply_impure_core_call_with_type_args,
+    apply_raylib_ambient_core_call, data_status_rows, history_callback_fingerprint,
+    history_command_schema_from_mir, set_trace_id, sketch_add, with_world_rng_provider,
+    HistoryCommandSchema,
 };
 pub(crate) use core_calls::eval_data_describe;
 pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
@@ -38,7 +39,6 @@ pub(crate) use core_calls::{
 };
 /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
-pub use core_calls::apply_history_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
 pub(super) use dispatch::{

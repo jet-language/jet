@@ -107,6 +107,10 @@ function jet_typed_datetime_interpolate(literals, holes) {
   }
   return output.join("");
 }
+function jet_typed_datetime_literal(literals, holes) {
+  return jet_time_parse_rfc3339(jet_typed_datetime_interpolate(literals, holes));
+}
+
 
 function jet_typed_url_literal(literals, holes) {
   const source = Array.isArray(literals) ? literals : [];

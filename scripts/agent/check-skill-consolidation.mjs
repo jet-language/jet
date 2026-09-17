@@ -17,6 +17,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const HOME = homedir();
 const ROUTER = join(ROOT, ".agents", "skills", "JetSkillsRouter.md");
+const INVENTORY = join(ROOT, ".agents", "skills", "_shared", "skill-sources.md");
 const OWNER_GUIDANCE = join(ROOT, "AGENTS.md");
 const ORCHESTRATION = join(ROOT, ".agents", "skills", "orchestration", "SKILL.md");
 const SKILLS_LOCK = join(ROOT, "skills-lock.json");
@@ -24,7 +25,6 @@ const LANE_DISPATCH = join(ROOT, "scripts", "agent", "lane-dispatch.mjs");
 const LANE_KEEPER = join(ROOT, "scripts", "agent", "lane-keeper.sh");
 const LANE_CHECK = join(ROOT, "scripts", "agent", "lane-check.sh");
 const MANAGED = process.env.JET_MANAGED_SKILLS || join(HOME, ".omp", "agent", "managed-skills");
-const DISABLED = new Set(["jet-fast-burndown", "milestone-burndown", "unslop", "unslop-caveman"]);
 const RETIRED = new Set(["burndown", "ask-matt", "grill-me", "setup-matt-pocock-skills"]);
 
 function fail(message) {
@@ -84,7 +84,7 @@ function inventorySources() {
 
 function routerRows() {
   const rows = new Map();
-  for (const line of text(ROUTER).split("\n")) {
+  for (const line of text(INVENTORY).split("\n")) {
     if (!line.startsWith("|")) continue;
     const columns = line.split("|").slice(1, -1).map((column) => column.trim());
     const name = columns[2]?.match(/^`([^`]+)`$/)?.[1];
@@ -99,7 +99,7 @@ function routerRows() {
 
 function checkMap() {
   const rows = routerRows();
-  assert(text(ROUTER).includes("Managed duplicate source actions"), "managed duplicate source policy is missing from the disposition map");
+  assert(existsSync(INVENTORY), "skill source inventory is missing");
   assert(!/via a Luna max subagent|via a Sol .*subagent/i.test(text(ROUTER)), "router selects a model outside owner guidance");
 
   const discovered = [];
@@ -207,7 +207,7 @@ function driftLockSources() {
   return [
     { name: "repo", root: join(ROOT, ".agents", "skills"), readOnly: false },
     { name: "managed", root: MANAGED, readOnly: true },
-    { name: "plugin", root: join(ROOT, "plugins", "tower", "skills"), readOnly: true },
+    { name: "plugin", root: join(ROOT, "plugins", "tower", "skills"), readOnly: false },
     { name: "vendor", root: process.env.JET_VENDOR_SKILLS || join(ROOT, "vendor", "skills"), readOnly: true },
     { name: "cache", root: process.env.JET_SKILL_CACHE_ROOT || join(HOME, ".codex", "plugins", "cache"), readOnly: true },
   ];
@@ -216,7 +216,6 @@ function driftLockSources() {
 function makeDriftLock() {
   return {
     schema: "jet.agent-skill-drift.v1",
-    precedence: ["project", "plugin", "managed", "vendor", "cache"],
     sources: driftLockSources().map((source) => ({
       name: source.name,
       root: source.root,
@@ -253,87 +252,13 @@ function checkDriftLock() {
   });
 }
 
-function checkColdExercise() {
-  return withScratch("skill-cold-", (scratch) => {
-    const roots = [
-      { name: "project", rank: 50, writable: true, root: join(scratch, "project", "skills") },
-      { name: "project-shadow", rank: 50, writable: true, root: join(scratch, "project-shadow", "skills") },
-      { name: "plugin", rank: 40, writable: false, root: join(scratch, "plugin", "skills") },
-      { name: "managed", rank: 30, writable: false, root: join(scratch, "managed", "skills") },
-      { name: "vendor", rank: 20, writable: false, root: join(scratch, "vendor", "skills") },
-      { name: "cache", rank: 10, writable: false, root: join(scratch, "cache", "skills") },
-    ];
-    const put = (source, name, value) => {
-      const directory = join(source.root, name);
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, "SKILL.md"), value);
-    };
-    const byName = Object.fromEntries(roots.map((source) => [source.name, source]));
-    put(byName.project, "answer", "project\n");
-    put(byName.plugin, "plugin-wins", "plugin\n");
-    put(byName.managed, "plugin-wins", "managed\n");
-    put(byName.managed, "managed-wins", "managed\n");
-    put(byName.vendor, "managed-wins", "vendor\n");
-    put(byName.vendor, "vendor-wins", "vendor\n");
-    put(byName.cache, "vendor-wins", "cache\n");
-    put(byName.project, "same-rank", "project\n");
-    put(byName["project-shadow"], "same-rank", "shadow\n");
-    put(byName.managed, "jet-fast-burndown", "disabled\n");
-
-    const resolveSkill = (name) => {
-      if (DISABLED.has(name)) fail(`disabled Jet skill cannot resolve: ${name}`);
-      const candidates = roots
-        .map((source) => ({ source, path: join(source.root, name, "SKILL.md") }))
-        .filter((candidate) => existsSync(candidate.path))
-        .sort((a, b) => b.source.rank - a.source.rank);
-      if (candidates.length === 0) fail(`skill is not installed: ${name}`);
-      if (candidates.length > 1 && candidates[0].source.rank === candidates[1].source.rank) {
-        fail(`conflicting equal-precedence skills: ${name}`);
-      }
-      return candidates[0];
-    };
-    assert(resolveSkill("answer").source.name === "project", "project did not win precedence");
-    assert(resolveSkill("plugin-wins").source.name === "plugin", "plugin did not beat managed");
-    assert(resolveSkill("managed-wins").source.name === "managed", "managed did not beat vendor");
-    assert(resolveSkill("vendor-wins").source.name === "vendor", "vendor did not beat cache");
-    for (const name of ["same-rank", "jet-fast-burndown"]) {
-      let rejected = false;
-      try { resolveSkill(name); } catch { rejected = true; }
-      assert(rejected, `resolver did not fail closed for ${name}`);
-    }
-
-    const snapshot = () => roots.flatMap((source) => recursiveSkillFiles(source.root).map((path) => ({
-      path: relative(scratch, path),
-      sha256: sha256(readFileSync(path)),
-    })));
-    const before = snapshot();
-    const writes = [];
-    const guardedWrite = (source, name, value) => {
-      assert(source.name === "project" && source.writable, `read-only source write rejected: ${source.name}`);
-      const path = join(source.root, name, "SKILL.md");
-      writes.push(path);
-      writeFileSync(path, value);
-    };
-    guardedWrite(byName.project, "answer", "candidate\n");
-    assert(resolveSkill("answer").source.name === "project", "project candidate did not resolve");
-    for (const source of [byName.plugin, byName.vendor]) {
-      let rejected = false;
-      try { guardedWrite(source, "answer", "must not write\n"); } catch { rejected = true; }
-      assert(rejected, `rollback guard allowed ${source.name} write`);
-    }
-    guardedWrite(byName.project, "answer", "project\n");
-    assert(writes.every((path) => path.startsWith(`${byName.project.root}/`)), "rollback wrote outside project source");
-    assert(JSON.stringify(snapshot()) === JSON.stringify(before), "rollback did not restore the source snapshot");
-    return { sourceCount: roots.length, writes: writes.length };
-  });
-}
 
 function main() {
-  const cold = process.argv.includes("--cold-exercise");
   if (process.argv.includes("--help")) {
-    console.log("usage: node scripts/agent/check-skill-consolidation.mjs [--cold-exercise]");
+    console.log("usage: node scripts/agent/check-skill-consolidation.mjs");
     return;
   }
+  assert(process.argv.length === 2, "unsupported argument; this command checks sources, not host behavior");
   const map = checkMap();
   checkAdapters();
   checkConflicts();
@@ -341,12 +266,6 @@ function main() {
   console.log(`skill index: ${map.rows.size} disposition rows (${map.filesystemCount} filesystem-backed) cover ${map.discovered.size} checked Jet source names; triggers and unique rules are present`);
   console.log(`skill source constraints: passed; generated drift lock covered ${lockedFiles} SKILL.md inputs`);
   console.log("Policy meaning and active-host behavior are not verified by this source check.");
-  if (cold) {
-    const result = checkColdExercise();
-    console.log(`fixture-only precedence/write model: passed (${result.sourceCount} fixture roots, ${result.writes} guarded writes); not a host preflight or workflow exercise`);
-  } else {
-    console.log("Fixture-only model not run; --cold-exercise does not test the active host.");
-  }
   console.log("SKILL CHECK OK");
 }
 

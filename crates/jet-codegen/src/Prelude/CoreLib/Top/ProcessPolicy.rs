@@ -233,13 +233,14 @@ fn jet_process_policy_sandbox_scope(
     })
 }
 
-/// Authority-bound launch must use a host-supplied, absolute working
-/// directory. An absent or relative value would silently reintroduce the
-/// launcher's ambient current directory.
+/// Authority-bound path grants must use a host-supplied, absolute working
+/// directory. An effect-only authority has no host path to expose, so it uses
+/// the private sandbox root instead of inheriting the launcher's directory.
 fn jet_process_policy_authority_cwd(
     spec: &jet_std::ProcessSpec,
-) -> Result<&str, jet_std::IOError> {
-    let Some(cwd) = spec.cwd.as_deref() else {
+) -> Result<Option<&str>, jet_std::IOError> {
+    let rights = jet_process_policy_rights(spec);
+    if spec.cwd.is_none() && rights.iter().any(|right| right.starts_with("FS.")) {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
             jet_std::IOOperation::Resolve,
             Some("cwd".to_string()),
@@ -249,6 +250,9 @@ fn jet_process_policy_authority_cwd(
                     .to_string(),
             ),
         )));
+    }
+    let Some(cwd) = spec.cwd.as_deref() else {
+        return Ok(None);
     };
     if cwd.is_empty() || !std::path::Path::new(cwd).is_absolute() {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
@@ -261,7 +265,7 @@ fn jet_process_policy_authority_cwd(
             ),
         )));
     }
-    Ok(cwd)
+    Ok(Some(cwd))
 }
 
 
@@ -274,6 +278,9 @@ fn jet_process_policy_check(spec: &jet_std::ProcessSpec) -> Result<(), jet_std::
         let supported = right == "FS.Read:repo"
             || right == "FS.Write:.jet/build"
             || right == "Net"
+            || right == "Exec"
+            || right == "IO"
+            || right == "Time.Wait"
             || right
                 .strip_prefix("Exec:")
                 .is_some_and(|executable| !executable.is_empty());

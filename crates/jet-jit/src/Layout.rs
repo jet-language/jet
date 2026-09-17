@@ -283,7 +283,9 @@ host_fns! {
     eq: "jet_jit_layout_eq" => jet_jit_layout_eq: binary;
     eq_canonical: "jet_layout::eq_" => jet_jit_layout_eq: binary;
     add: "jet_jit_layout_add" => jet_jit_layout_add: binary;
+    add_canonical: "jet_layout::add" => jet_jit_layout_add: binary;
     sub: "jet_jit_layout_sub" => jet_jit_layout_sub: binary;
+    sub_canonical: "jet_layout::sub" => jet_jit_layout_sub: binary;
     h: "jet_jit_layout_h" => jet_jit_layout_h: ternary;
     h_canonical: "jet_layout::Handle::h" => jet_jit_layout_h: ternary;
     v: "jet_jit_layout_v" => jet_jit_layout_v: ternary;

@@ -2167,6 +2167,8 @@ const GAUNTLET_VERDICTS = Object.freeze(new Set(['win', 'parity', 'loss', 'unmea
 const gauntletVerdict = (value) => GAUNTLET_VERDICTS.has(value) ? value : 'unmeasured';
 const gauntletCount = (value) => Number.isFinite(value) ? value : 0;
 const gauntletRowLabel = (row) => row.kind === 'axis' ? `axis · ${String(row.mode).replaceAll('_', ' ')}` : row.id;
+const GAUNTLET_PEER_LABELS = { js: 'JS', nodemon: 'Node', 'entr+cc': 'C build · reference' };
+const gauntletPeerLabel = (peer) => GAUNTLET_PEER_LABELS[peer] ?? peer;
 
 function gauntletBadge(value) {
   const verdict = gauntletVerdict(value);
@@ -2174,24 +2176,27 @@ function gauntletBadge(value) {
   return `<span class="critrow__badge critrow__badge--${modifier}">${verdict}</span>`;
 }
 
-// A cell: ratio on top in the verdict colour, Jet's number left and the peer's
-// right beneath it. The colour carries the verdict; no word repeats it.
+// Run and dev stay separate so a measured run cannot hide a missing dev sample.
 function gauntletCell(row, peerName, details) {
   const missing = row.kind === 'axis' || row.peerNames?.length ? 'n/a' : 'unmeasured';
   const peer = row.peers?.[peerName] || {
     peer: peerName, verdict: missing, ratio: null, values: {},
     detail: { cell: row.cell, axis: row.axis, peer: { peer: peerName }, metric: row.primary_metric, values: {}, verdict: missing },
   };
-  const state = gauntletVerdict(peer.verdict);
-  const key = details.length;
-  details.push(peer.detail || {});
-  const pair = formatPair(row.primary_metric, peer.values?.jet, peer.values?.peer);
-  const measured = state !== 'n/a' && (Number.isFinite(peer.values?.jet) || Number.isFinite(peer.values?.peer));
-  const label = `${gauntletRowLabel(row)} versus ${peerName}: ${state}${Number.isFinite(peer.ratio) ? `, ${formatRatio(peer.ratio)}` : ''}`;
-  return `<td><button type="button" class="gcell gcell--${state === 'n/a' ? 'na' : state}" data-gauntlet-key="${key}" aria-label="${esc(label)}">
-      <b>${esc(formatRatio(peer.ratio))}</b>
+  const peerLabel = gauntletPeerLabel(peerName);
+  return `<td>${(peer.samples ?? [peer]).map((sample) => {
+    const state = gauntletVerdict(sample.verdict);
+    const key = details.length;
+    details.push(sample.detail || {});
+    const pair = formatPair(row.primary_metric, sample.values?.jet, sample.values?.peer);
+    const measured = state !== 'n/a' && (Number.isFinite(sample.values?.jet) || Number.isFinite(sample.values?.peer));
+    const tier = peer.samples?.length > 1 ? sample.tier : null;
+    const label = `${gauntletRowLabel(row)} versus ${peerLabel}${sample.tier ? ` (${sample.tier})` : ''}: ${state}${Number.isFinite(sample.ratio) ? `, ${formatRatio(sample.ratio)}` : ''}`;
+    return `<button type="button" class="gcell gcell--${state === 'n/a' ? 'na' : state}" data-gauntlet-key="${key}" aria-label="${esc(label)}">
+      <b>${tier ? `<em>${esc(tier)}</em>` : ''}${esc(formatRatio(sample.ratio))}</b>
       ${measured ? `<span><i>${esc(pair.jet)}</i><i>${esc(pair.peer)}</i></span>` : ''}
-    </button></td>`;
+    </button>`;
+  }).join('')}</td>`;
 }
 
 function gauntletRow(row, columns, width, details) {
@@ -2205,7 +2210,7 @@ function gauntletRow(row, columns, width, details) {
 
 function gauntletHeader(label, columns, width) {
   const filler = width > columns.length ? `<th class="gauntlet__blank" colspan="${width - columns.length}"></th>` : '';
-  return `<tr><th scope="col">${esc(label)}</th>${columns.map((peer) => `<th scope="col">${esc(peer)}</th>`).join('')}${filler}</tr>`;
+  return `<tr><th scope="col">${esc(label)}</th>${columns.map((peer) => `<th scope="col">${esc(gauntletPeerLabel(peer))}</th>`).join('')}${filler}</tr>`;
 }
 
 function gauntletMeasuredRange(matrix) {
@@ -2300,23 +2305,28 @@ async function viewGauntlet() {
     }
   }
   const status = gauntletCache || {};
-  const summary = status.summary || {};
   const matrix = projectGauntletMatrix(status);
+  const summary = matrix.summary;
   const summaryPills = [['win', summary.win], ['parity', summary.parity], ['loss', summary.loss], ['unmeasured', summary.unmeasured]]
     .map(([value, count]) => `<span class="gauntlet__pill">${gauntletBadge(value)} <b>${esc(gauntletCount(count))}</b></span>`)
     .join('');
   const details = [];
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · ratio is Jet / peer, worst required tier</span>
+      <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · ratio is Jet / peer · shown primary metrics</span>
       <div class="gauntlet__summary" aria-label="Gauntlet summary">${summaryPills}</div>
-    </div>`;
+    </div>
+    <p class="gauntlet__policy">AOT vs Rust, C, Zig, Go. Run and dev vs Python and JS. Web development vs Node, Bun, Vite.
+      <span>Recorded samples, not a fresh full-gate result. Cross-group measurements remain in the details as non-blocking references.</span></p>`;
   const width = Math.max(matrix.columns.length, matrix.axisColumns.length);
   const axisBand = matrix.axisRows.length ? `<tbody class="gauntlet__axes">
-      ${gauntletHeader('axis', matrix.axisColumns, width)}
+      ${gauntletHeader('Web dev / tools', matrix.axisColumns, width)}
       ${matrix.axisRows.map((row) => gauntletRow(row, matrix.axisColumns, width, details)).join('')}
     </tbody>` : '';
   v.innerHTML += `<div class="gauntlet__matrix" aria-label="Gauntlet status matrix">${matrix.rows.length ? `<table class="gauntlet__table">
-      <thead>${gauntletHeader('cell', matrix.columns, width)}</thead>
+      <thead><tr class="gauntlet__groups"><th scope="col">Comparison</th>
+        ${matrix.groups.map((group) => `<th scope="colgroup" colspan="${group.columns.length}">${esc(group.label)}</th>`).join('')}
+        ${width > matrix.columns.length ? `<th class="gauntlet__blank" colspan="${width - matrix.columns.length}"></th>` : ''}
+      </tr>${gauntletHeader('cell', matrix.columns, width)}</thead>
       <tbody>${matrix.cellRows.map((row) => gauntletRow(row, matrix.columns, width, details)).join('')}</tbody>${axisBand}
     </table>` : '<div class="empty">No Gauntlet cells.</div>'}</div>`;
   const root = $('.gauntlet__matrix', v);

@@ -1,176 +1,30 @@
 ---
 name: simple
 description: >-
-  Clear controlled prose for Jet (ASD-STE100-inspired + Orwell). Use on hosts
-  that support the trigger when writing user-visible text: docs, specs, ballots,
-  Tower card plans/logs, commit/PR bodies, and owner-facing reports. Also use
-  when the user invokes simple / ste / STE / STE100. Do not use for
-  agent-to-agent caveman chatter.
+  Write clear controlled prose for a governed Jet artifact such as a doc, spec,
+  ballot, Tower card, report, commit, or PR, or when the user explicitly asks
+  for simple, STE, or STE100. Preserve meaning, exact technical tokens, frozen
+  copy, and safety. Do not trigger for ordinary prose or agent status chatter.
 ---
 
-# Simple writing (user-visible prose)
+# Simple
 
-## Contract
+Use `simple` to transform new user-facing prose. It owns the wording, not the artifact's meaning or the calling workflow. Return the prose without opening a review, ballot, plan, or implementation workflow.
 
-- **Requested outcome:** Clear, controlled prose for the human-facing artifact named by the caller.
-- **Supplied inputs:** The source prose, audience, exact technical tokens, governing authority, and the requested format.
-- **Allowed child result:** None. Linked style references are passive guidance; this skill does not start a review, ballot, plan, or implementation workflow.
-- **Completion owner:** `simple` owns the prose transformation; the calling workflow owns the artifact's meaning and final acceptance.
-- **Return point:** Return the edited prose to the caller without opening a new agenda.
-- **Stopping condition:** Stop when the prose passes the checklist and preserves technical meaning, caveats, order, and safety conditions.
+## Core rules
 
-The description and any automatic trigger are host-dependent routing hints.
-When the host does not support automatic application, apply this skill only
-when the caller or user explicitly requests it.
+1. **Be clear.** State the result first. Use concrete words, short sentences, active voice, and one idea per sentence.
+2. **Keep meaning.** Preserve facts, caveats, uncertainty, order, scope, and safety conditions. Cut ceremony, not information.
+3. **Keep exact tokens.** Never rewrite code, identifiers, paths, commands, Jet syntax, error strings, decision IDs, diagnostic codes, or quoted text.
+4. **Keep frozen copy.** Do not restyle registered diagnostics, UI snapshots, ratified Tower or syntax-decision wording, or user-supplied quotes unless the caller asks.
+5. **Keep grammar.** Do not drop required articles, subjects, or verbs to sound terse. When clarity and style conflict, clarity wins.
 
-**Apply** whenever you newly write text a human owner or user will read. A
-host that supports automatic triggers may apply this skill automatically:
+Apply these rules to new docs, specs, comments meant for people, Tower ballots and card text, owner-facing reports, commit messages, PR bodies, and product or UI copy when that artifact is in scope. Apply them when the user invokes `simple`, `ste`, `STE`, `STE100`, or `ASD-STE100`. Do not restyle agent-to-agent status chatter.
 
-- docs, specs, comments meant for humans
-- Tower ballots, card plans/bodies, owner-facing logs and reports
-- commit messages and PR bodies you draft
-- product/UI copy you newly author
+This skill is an agent working subset, not a claim of full ASD-STE100 compliance. The calling workflow owns the artifact's final acceptance.
 
-Also apply when the user invokes `simple` / `ste` / `STE` / `STE100` /
-`ASD-STE100`.
+## Contextual references
 
-**Do not** restyle agent-to-agent status chatter that **caveman** owns.
-**Never rewrite these into “simple English” synonyms:** code, identifiers, paths,
-commands, Jet syntax, error strings, decision IDs, diagnostic codes.
-
-## Honesty bound
-
-This is an **agent working subset**, not a certified ASD-STE100 checker. Jet does
-not ship the official dictionary. When unsure:
-
-1. Prefer short common words from the tables below.
-2. Prefer one short sentence over a clever one.
-3. Do not invent fake “approved word” claims.
-
-Official STE (copyright ASD): https://www.asd-ste100.org/
-
-## Do not touch unless the task says so
-
-- Registered diagnostic **what/why/fix** text and UI snapshots (I4)
-- Ratified Tower / syntax-decision wording already in-tree
-- User-supplied quotes and error paste-backs
-
-Explain in new prose. Do not silently restyle frozen product copy.
-
-## Authority order (prose)
-
-1. Exact technical tokens (code, IDs, paths, errors)
-2. Orwell #6 — do not write barbarous or misleading text
-3. STE grammar completeness (articles, subject, verb present)
-4. STE length / one-idea rules
-5. Orwell 1–5 (clichés, short words, cut dead weight, active, no decorative jargon)
-6. Everyday word table in this skill
-
-Full conflict notes: [priority.md](priority.md). Orwell detail: [orwell.md](orwell.md).
-
-## Orwell’s rules
-
-From “Politics and the English Language” (1946):
-
-1. No stale metaphor / printed figure of speech.
-2. Short word over long word.
-3. Cut a needless word.
-4. Active over passive.
-5. Everyday word over decorative jargon.
-6. Break a lesser rule sooner than write anything barbarous.
-
-**With this skill:** #3 does **not** remove required articles/subjects/verbs.
-#5 does **not** rename Jet/API terms. Prefer active (#4); unknown-agent
-description may stay passive.
-
-## Quality writing
-
-Use four tests:
-
-1. **Clear:** Lead with the result. Use concrete words. Keep the subject, verb, and object close.
-2. **Simple:** Prefer short, familiar words. Remove needless rules, jargon, and forced persona.
-3. **Brief:** Say each fact once. Cut preambles, repetition, and sign-offs. Compress ceremony, not facts, caveats, evidence, order, or safety conditions.
-4. **Human:** Write for the reader, not a detector. Use specific detail and honest limits. Do not invent experience or emotion.
-
-Restore full grammar when nuance, risk, or multi-step order matters.
-
-## STE hard requirements
-
-1. One everyday word → one meaning → one part of speech. No synonym stacking.
-2. Active voice (unknown agent in a description may be passive).
-3. Procedures ≤ 20 words/sentence. Descriptions ≤ 25.
-4. One instruction per sentence. One topic per paragraph. ≤ 6 sentences/paragraph.
-5. Noun clusters ≤ 3 words (else use `of` / `for` / `that`).
-6. Verb forms: infinitive, imperative, simple present/past/future; past participle
-   only as adjective. Avoid heavy auxiliary stacks.
-7. No `-ing` as the main verb in running prose (ok in technical nouns).
-8. Do not drop articles, subjects, or verbs.
-9. Use vertical lists for steps and complex items.
-10. Prefer concrete verbs: `set`, `remove`, `install`, `make sure`, `do`, `stop`,
-    `start`, `show`, `give`, `put`, `get`.
-
-## Jet technical terms
-
-Allowed as technical nouns/verbs even if absent from everyday tables:
-
-- Compiler/language terms (`struct`, `sema`, `codegen`, `JIT`, …)
-- Decision IDs, diagnostic codes, crate/file/CLI names
-- API method names as written in code
-
-Glue words around them stay simple.
-
-## Everyday word table
-
-| Prefer | Avoid in prose |
-|--------|----------------|
-| start | begin, commence, initiate |
-| stop | terminate, cease (unless API name) |
-| make sure | ensure; “verify that” in casual prose (`verify` ok as Jet skill/command) |
-| show | display, exhibit, illustrate |
-| give | provide, supply |
-| get | obtain, acquire, retrieve (prose) |
-| put | place, position |
-| remove | eliminate (prose); `delete` ok as API |
-| set | configure (prose); `config` ok as technical noun |
-| do | perform, execute, carry out |
-| use | utilize, employ, leverage |
-| help | facilitate, assist |
-| change | modify, alter, mutate (prose) |
-| because | due to the fact that |
-| also | furthermore, moreover, additionally |
-| but | however, nevertheless |
-| must | should (when the rule is mandatory) |
-| can | is able to, is capable of |
-
-## Procedures vs descriptions
-
-- **Procedure:** imperative steps, one action each, list form.
-- **Description:** simple present, one topic per paragraph.
-
-## Commits and PRs
-
-- Subject: short imperative (Conventional Commit type ok: `fix:`, `docs:`).
-- Body: this skill’s prose rules.
-- Do not “simplify” code fences or file paths in the PR.
-
-## Checklist
-
-- [ ] Tokens exact (code/IDs/paths/errors)
-- [ ] Orwell 1–6; #6 clarity wins over style theater
-- [ ] STE length / active / articles kept
-- [ ] No clichés or synonym stacking
-- [ ] No silent rewrite of diagnostics or ratified law
-- [ ] Meaning preserved
-
-## Family
-
-| Skill | Adds |
-|-------|------|
-| `simple` | Prose law (this file) |
-| `simple-caveman` | Anti-filler talk |
-| `simple-ponytail` | Lazy code ladder |
-| `simple-ponytail-caveman` | Code ladder + anti-filler talk |
-
-## More
-
-- [priority.md](priority.md) · [orwell.md](orwell.md) · [reference.md](reference.md) · [examples.md](examples.md)
+- For an explicit `STE` / `STE100` request, or an artifact contract that requires controlled language, read [reference.md](reference.md) and [orwell.md](orwell.md). They hold the strict sentence, grammar, length, word, and precedence rules.
+- Read [priority.md](priority.md) only when a real rule conflict needs its precedence stack.
+- Read [examples.md](examples.md) when a before/after pattern helps. Do not copy an example when it changes the source meaning.

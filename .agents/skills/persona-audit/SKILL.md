@@ -1,89 +1,32 @@
 ---
 name: persona-audit
 description: >-
-  Persona-based status checks for Jet: practical use, push and pull factors,
-  feel for development state.
+  Measure Jet through a finite matrix of fresh users and jobs. Use when the owner
+  needs practical status, push/pull factors, or first-session evidence.
 ---
 
-# Persona Audit
+# Persona audit
 
-Generate fresh personas (beginner through expert, distinct domains). For each,
-define a concrete project and its core loop, run representative examples with
-`scripts/agent/jet-env`, and report push/pull factors plus a clear verdict
-(`ship-ready` / `usable-with-friction` / `blocked`).
+Run fresh personas through real Jet project loops and report whether they could finish, what pulled them forward, and what pushed them away. Use the same verdicts for every row: `ship-ready`, `usable-with-friction`, or `blocked`. This is not a substitute for a focused implementation or spec audit.
 
-Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
-shared publication, workflow-boundary, and disposition mechanics; this method
-still owns persona selection, live project loops, first-session measurements,
-and verdicts.
+Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns the persona matrix, live project loops, first-session measurements, push/pull evidence, and verdicts.
 
+## Declare the matrix
 
-## The standing lens
+At activation, freeze a finite matrix with `persona × domain × job × window target`. Include fresh beginner-through-expert personas in distinct domains, plus an unattended coding agent. If the owner declares one domain, record that narrower scope. Do not add rows during the run; record a needed row as an explicit coverage gap for the owner.
 
-Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
-five agent-optimality quantities, the micro sweep, probe the running binary, and
-the honesty rules. The owner never has to ask for any of it.
+For every row, define a concrete project and core loop, run representative examples with `scripts/agent/jet-env`, and record evidence, push factors, pull factors, and one verdict. Keep the first useful visual check separate from the later project loop. Window checks are conditional on the row's declared window target; their exact gates are in [`references/first-session.md`](references/first-session.md).
 
-## First-session delight lens
+## Coding-agent facet
 
-Measure the first useful visual result separately from the later project loop.
-For every persona, record both checks in the report, even when the result is
-not applicable. Keep these rows separate from the later project loop:
+The unattended agent is always present because it is one of Jet's three readers. Give it a real project and the same loop as any other row: read context, edit, run the checker, read the verdict, repeat, and stop when clean. Grade its push and pull factors with the five quantities: verdict fidelity, verdict latency, verdict actionability, context economy, and repair determinism. Do not soften `blocked` because the surrounding tooling is young.
 
-| check | measure | honest result |
-| --- | --- | --- |
-| `time-to-first-window` | elapsed time from the first command to a usable first-party window | record milliseconds, backend, and input; use `not-applicable` until a windowed backend exists |
-| `first-pixel` | elapsed time from window creation to the first visible rendered pixel | record milliseconds, backend, and frame evidence; never infer it from a window handle |
+Walk the relevant UX/DX slice for every row: where it waited, what surprised it, what it had to say twice, what it had to know before starting, and which error text left it stuck. Record one verbatim reaction such as “this reads nicely” or “this made me sigh.” A preference remark is evidence about the surface even when it is not evidence about the technology.
 
-Gate these measurements on the complete `#820-#825` backend chain, in order:
-`#820` → `#821` → `#822` → `#823` → `#824` → `#825`. The current
-`core.game` default is headless/no-op. It is not evidence of a usable window or
-a first pixel. Until the chain is complete and a real run exposes window and
-frame receipts, record an honest non-result.
+## Standing lens
 
-Keep `not-applicable`, `not-proven`, and `blocked` distinct. Use
-`not-applicable` when the persona's project has no window target, `not-proven`
-when a target exists but the run or evidence is missing, and `blocked` when the
-persona cannot complete the first-session loop. A missing windowed backend
-blocks the measurement. It does not justify an invented zero or a ship-ready
-verdict.
+Apply only the standing-lens sections relevant to the declared matrix. Use runtime probes and the UX/DX micro-sweep slice where the row needs them; do not force unrelated comparisons or window work. Report missing or unavailable evidence as `not-proven` or `blocked` with the reason, never as an invented success.
 
-For a measured result, record elapsed milliseconds, backend, input, and frame
-evidence where applicable. For an honest non-result, name the missing target,
-run, or evidence in the cell; never leave a blank or infer a pixel from a
-window handle.
+## Completion and output
 
-## One persona is always a coding agent
-
-Include an unattended agent among the personas every run. It is the reader Jet
-is ultimately built for, and it has a core loop like any other persona: read
-context, edit, run the checker, read the verdict, repeat, and stop when clean.
-
-Give it a real project and run it. Its push and pull factors are the five
-quantities — whether the checker caught the mistake, how long the verdict took,
-whether the report could be acted on without guessing, how many tokens the loop
-burned, and whether one error admitted one obvious repair or several. Its
-verdict uses the same three words as any other persona.
-
-Do not soften a `blocked` verdict here because the tooling around it is young.
-An agent that cannot finish the loop is blocked.
-
-## Report the feel, not only the outcome
-
-Verdicts capture whether a persona finished. Push and pull factors capture
-whether they wanted to. Both matter, and the second is the one usually lost.
-
-Walk the UX and DX slice of the micro sweep for each persona: where they waited,
-where the tool surprised them, what they had to say twice, what they had to know
-before they could start, and which error text left them stuck. Record a
-throwaway "this reads nicely" or "this made me sigh" verbatim. A preference
-remark is evidence about the surface even when it is not evidence about the
-technology.
-## Output
-
-This is a report-only method. Write one markdown report under `docs/audits/`
-through the project-approved non-serve CLI. Do not create Tower work or
-implementation edits unless the owner explicitly asks. Read
-`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
-publication rules and the required finding-disposition table. Keep persona
-verdicts, first-session non-results, and implementation completion distinct.
+Stop when every frozen row has a project loop, representative evidence, push/pull factors, and a verdict; every row has a first-session result or an honest conditional `not-applicable`, `not-proven`, or `blocked`; and the report's disposition marker is complete. A report-only run writes one report under `docs/audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no board or implementation work unless the owner explicitly changes the boundary. Report completion and implementation completion remain separate.

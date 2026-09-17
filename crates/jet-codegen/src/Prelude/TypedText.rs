@@ -11,7 +11,9 @@ pub fn jet_typed_sql_interpolate<T>(
     literals: &[&str],
     holes: Vec<T>,
 ) -> (String, Vec<T>) {
-    let mut template = String::new();
+    let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+        + holes.len();
+    let mut template = String::with_capacity(capacity);
     for (index, literal) in literals.iter().enumerate() {
         template.push_str(literal);
         if index < holes.len() {
@@ -60,13 +62,14 @@ pub fn jet_typed_html_interpolate(
     let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
         + holes.iter().map(String::len).sum::<usize>();
     let mut out = String::with_capacity(capacity);
+    let mut holes = holes.into_iter();
     for (index, literal) in literals.iter().enumerate() {
         out.push_str(literal);
-        if let Some(hole) = holes.get(index) {
+        if let Some(hole) = holes.next() {
             if trusted_html.get(index).copied().unwrap_or(false) {
-                out.push_str(hole);
+                out.push_str(&hole);
             } else {
-                out.push_str(&jet_typed_html_escape(hole));
+                out.push_str(&jet_typed_html_escape(&hole));
             }
         }
     }
@@ -78,11 +81,12 @@ pub fn jet_typed_sh_raw(value: String) -> Vec<String> {
 }
 
 pub fn jet_typed_sh_interpolate(literals: &[&str], holes: Vec<String>) -> Vec<String> {
-    let mut argv = Vec::new();
-    for (index, literal) in literals.iter().enumerate() {
+    let mut argv = Vec::with_capacity(holes.len());
+    let mut holes = holes.into_iter();
+    for literal in literals {
         argv.extend(literal.split_whitespace().map(str::to_string));
-        if let Some(hole) = holes.get(index) {
-            argv.push(hole.clone());
+        if let Some(hole) = holes.next() {
+            argv.push(hole);
         }
     }
     argv
@@ -113,7 +117,9 @@ fn interpolate_typed_head(
     holes: &[String],
     encode_hole: impl Fn(&str) -> String,
 ) -> String {
-    let mut out = String::new();
+    let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+        + holes.iter().map(String::len).sum::<usize>();
+    let mut out = String::with_capacity(capacity);
     for (index, literal) in literals.iter().enumerate() {
         out.push_str(literal);
         if let Some(hole) = holes.get(index) {

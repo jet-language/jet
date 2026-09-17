@@ -88,10 +88,15 @@ pub(super) fn loop_route_bundle() -> TLoopRouteBundle {
 }
 
 pub(super) fn zip_closure_route(mode: super::TZipMode) -> TPreludeRoute {
-    let (member, symbol, arity) = match mode {
-        super::TZipMode::Short => ("zip", "jet_iter_zip", 3),
-        super::TZipMode::Strict => ("zip_strict", "jet_iter_zip_strict", 3),
-        super::TZipMode::Pad => ("zip_pad", "jet_iter_zip_pad", 5),
+    let (member, symbol, arity, borrow_mask) = match mode {
+        super::TZipMode::Short => ("zip", "jet_iter_zip", 3, vec![false; 3]),
+        super::TZipMode::Strict => (
+            "zip_strict",
+            "jet_iter_zip_strict",
+            10,
+            vec![false; 10],
+        ),
+        super::TZipMode::Pad => ("zip_pad", "jet_iter_zip_pad", 5, vec![false; 5]),
     };
     TPreludeRoute {
         family: MirPreludeFamily::ClosureMethod,
@@ -101,7 +106,7 @@ pub(super) fn zip_closure_route(mode: super::TZipMode) -> TPreludeRoute {
         signature: MirCallSignature {
             arity,
             max_arity: arity,
-            borrow_mask: vec![false; arity],
+            borrow_mask,
         },
         effect: None,
         fallibility: TFailureCarrier::Infallible,
@@ -312,8 +317,8 @@ impl TClosureOp {
             ),
             EachRef => prelude(
                 MirPreludeFamily::ClosureMethod,
-                "core.list",
-                "each",
+                "core.collections",
+                "each_ref",
                 "jet_list_each_ref",
                 2,
                 2,
@@ -683,7 +688,7 @@ impl TClosureOp {
                 3,
                 3,
                 &[true, false, false],
-                None,
+                Some(Effect::Mem),
                 carrier,
                 MirPreludeAbi::Value,
             ),
@@ -991,6 +996,134 @@ fn task_route(
         MirPreludeAbi::Value,
     ))
 }
+fn http_client_request_route(
+    kind: &str,
+    method: &str,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) =
+        match (kind, method) {
+            ("HTTPRequest" | "HTTPClient", "send") => (
+                "http.request_send",
+                "jet_http_client_request_send",
+                1,
+                &[false],
+            ),
+            ("HTTPBody", "bytes") => (
+                "http.body_bytes",
+                "jet_http_body_bytes",
+                2,
+                &[true, false],
+            ),
+            ("HTTPBody", "chunks") => (
+                "http.body_chunks",
+                "jet_http_body_chunks",
+                2,
+                &[true, false],
+            ),
+            ("HTTPRequest", "body") => (
+                "http.request_body",
+                "jet_http_client_request_body",
+                2,
+                &[false, true],
+            ),
+            ("HTTPRequest", "header") => (
+                "http.request_header",
+                "jet_http_client_request_header",
+                3,
+                &[false, true, true],
+            ),
+            ("HTTPRequest", "timeout") => (
+                "http.request_timeout",
+                "jet_http_client_request_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "connect_timeout") => (
+                "http.request_connect_timeout",
+                "jet_http_client_request_connect_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "read_timeout") => (
+                "http.request_read_timeout",
+                "jet_http_client_request_read_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "total_timeout") => (
+                "http.request_total_timeout",
+                "jet_http_client_request_total_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "dns_timeout") => (
+                "http.request_dns_timeout",
+                "jet_http_client_request_dns_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "tls_timeout") => (
+                "http.request_tls_timeout",
+                "jet_http_client_request_tls_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "write_timeout") => (
+                "http.request_write_timeout",
+                "jet_http_client_request_write_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "first_byte_timeout") => (
+                "http.request_first_byte_timeout",
+                "jet_http_client_request_first_byte_timeout",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "redirects") => (
+                "http.request_redirects",
+                "jet_http_client_request_redirects",
+                2,
+                &[false, false],
+            ),
+            ("HTTPRequest", "proxy") => (
+                "http.request_proxy",
+                "jet_http_client_request_proxy",
+                2,
+                &[false, true],
+            ),
+            ("HTTPRequest", "cookie") => (
+                "http.request_cookie",
+                "jet_http_client_request_cookie",
+                3,
+                &[false, true, true],
+            ),
+            ("HTTPRequest", "form") => (
+                "http.request_form",
+                "jet_http_client_request_form",
+                3,
+                &[false, true, true],
+            ),
+            ("HTTPRequest", "multipart_text") => (
+                "http.request_multipart_text",
+                "jet_http_client_request_multipart_text",
+                3,
+                &[false, true, true],
+            ),
+            _ => return Err(route_error(format!("unhandled HTTP client method `{kind}.{method}`"))),
+        };
+    Ok(h(
+        member,
+        symbol,
+        arity,
+        arity,
+        borrow_mask,
+        Some(Effect::Net),
+        carrier,
+    ))
+}
+
 
 
 
@@ -1163,20 +1296,21 @@ impl THandleOp {
             DurationTotalIn => h("duration.total_in", "jet_duration_total_in", 2, 2, &[true, true], None, carrier),
             DurationRound => h("duration.round", "jet_duration_round", 4, 4, &[true, true, true, true], None, carrier),
             DurationSecondsValue => h("duration.seconds_value", "jet_duration_seconds_value", 1, 1, &[true], None, carrier),
+            DurationNsValue => h("duration.ns_value", "jet_duration_ns_value", 1, 1, &[true], None, carrier),
             DurationScale => h("duration.scale", "jet_duration_scale", 2, 2, &[true, true], None, carrier),
             DurationDivide => h("duration.divide", "jet_duration_divide", 2, 2, &[true, true], None, carrier),
-            TcpListenerAccept => h("tcp_listener.accept", "jet_net_tcp_accept", 1, 2, &[true, true], Some(Effect::Net), carrier),
+            TcpListenerAccept => h("tcp_listener.accept", "jet_net_tcp_accept", 1, 2, &[true], Some(Effect::Net), carrier),
             TcpListenerLocalAddr => h("tcp_listener.local_addr", "jet_net_listener_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamRead => h("tcp_stream.read", "jet_net_tcp_read", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamWrite => h("tcp_stream.write", "jet_net_tcp_write", 2, 2, &[true, true], Some(Effect::Net), carrier),
             TcpStreamPeerAddr => h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamLocalAddr => h("tcp_stream.local_addr", "jet_net_tcp_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamClose => h("tcp_stream.close", "jet_net_tcp_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamReadBytes => h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TcpStreamReadText => h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TcpStreamWriteBytes => h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteAllBytes => h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteText => h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 3, &[true, true, true], Some(Effect::Net), carrier),
+            TcpStreamReadBytes => h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 3, &[true, false], Some(Effect::Net), carrier),
+            TcpStreamReadText => h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 3, &[true, false], Some(Effect::Net), carrier),
+            TcpStreamWriteBytes => h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 3, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteAllBytes => h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 3, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteText => h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 3, &[true, true], Some(Effect::Net), carrier),
             TcpStreamShutdown => h("tcp_stream.shutdown", "jet_net_tcp_shutdown", 2, 2, &[true, false], Some(Effect::Net), carrier),
             TcpStreamReady => h("tcp_stream.ready", "jet_net_tcp_ready_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
             UdpSocketReady => h("udp_socket.ready", "jet_net_udp_ready", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
@@ -1246,7 +1380,8 @@ impl THandleOp {
                 "shutdown" => h("http_server.shutdown", "jet_http_server_shutdown", 2, 2, &[true, true], Some(Effect::Net), carrier),
                 _ => primitive(),
             },
-            HTTPServerMethod { .. } | HTTPClientMethod { .. } | EmailMethod { .. } => primitive(),
+            HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
+            HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
             UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
             SketchMethod { sketch, method } => {
@@ -1259,17 +1394,188 @@ impl THandleOp {
                 h(&format!("{sketch}.{method}"), &format!("Jet{sketch}::{method}"), arity, arity, borrow_mask, None, carrier)
             }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
-            ProcessSpecMethod { method } => match method.as_str() {
-                "stdin" => h(
+            ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
+                ("cwd", 1) => h(
+                    "process.spec.cwd",
+                    "jet_process_spec_cwd",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("env", 2) => h(
+                    "process.spec.env",
+                    "jet_process_spec_env",
+                    3,
+                    3,
+                    &[false, true, true],
+                    None,
+                    carrier,
+                ),
+                ("env_remove", 1) => h(
+                    "process.spec.env_remove",
+                    "jet_process_spec_env_remove",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("env_clear", 0) => h(
+                    "process.spec.env_clear",
+                    "jet_process_spec_env_clear",
+                    1,
+                    1,
+                    &[false],
+                    None,
+                    carrier,
+                ),
+                ("stdin", 1) => h(
                     "process.spec.stdin",
                     "jet_process_spec_stdin",
                     2,
                     2,
-                    &[true, true],
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("stdout", 1) => h(
+                    "process.spec.stdout",
+                    "jet_process_spec_stdout",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("stderr", 1) => h(
+                    "process.spec.stderr",
+                    "jet_process_spec_stderr",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("timeout", 1) => h(
+                    "process.spec.timeout",
+                    "jet_process_spec_timeout",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("output_limit", 1) => h(
+                    "process.spec.output_limit",
+                    "jet_process_spec_output_limit",
+                    2,
+                    2,
+                    &[false, false],
+                    None,
+                    carrier,
+                ),
+                ("cpu_time_limit", 1) => h(
+                    "process.spec.cpu_time_limit",
+                    "jet_process_spec_cpu_time_limit",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("memory_limit", 1) => h(
+                    "process.spec.memory_limit",
+                    "jet_process_spec_memory_limit",
+                    2,
+                    2,
+                    &[false, false],
+                    None,
+                    carrier,
+                ),
+                ("open_file_limit", 1) => h(
+                    "process.spec.open_file_limit",
+                    "jet_process_spec_open_file_limit",
+                    2,
+                    2,
+                    &[false, false],
+                    None,
+                    carrier,
+                ),
+                ("detached", 0) => h(
+                    "process.spec.detached",
+                    "jet_process_spec_detached",
+                    1,
+                    1,
+                    &[false],
+                    None,
+                    carrier,
+                ),
+                ("terminal", 0) => h(
+                    "process.spec.terminal",
+                    "jet_process_spec_terminal",
+                    1,
+                    1,
+                    &[false],
+                    None,
+                    carrier,
+                ),
+                ("terminal", 1) => h(
+                    "process.spec.terminal_with_policy",
+                    "jet_process_spec_terminal_with_policy",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("abilities", 0) => h(
+                    "process.spec.abilities",
+                    "jet_process_spec_abilities",
+                    1,
+                    1,
+                    &[true],
+                    None,
+                    carrier,
+                ),
+                ("under", 1) => h(
+                    "process.spec.under",
+                    "jet_std_process_spec_under",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("plan", 0) => h(
+                    "process.spec.plan",
+                    "jet_process_spec_plan",
+                    1,
+                    1,
+                    &[true],
+                    None,
+                    carrier,
+                ),
+                ("run", 0) => h(
+                    "process.spec.run",
+                    "jet_process_spec_run",
+                    1,
+                    1,
+                    &[true],
                     Some(Effect::Exec),
                     carrier,
                 ),
-                "spawn" => h(
+                ("run_checked", 0) => h(
+                    "process.spec.run_checked",
+                    "jet_process_spec_run_checked",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                ("spawn", 0) => h(
                     "process.spec.spawn",
                     "jet_process_spec_spawn",
                     1,
@@ -1278,18 +1584,69 @@ impl THandleOp {
                     Some(Effect::Exec),
                     carrier,
                 ),
-                _ => primitive(),
+                _ => {
+                    return Err(route_error(format!(
+                        "unknown checked ProcessSpec method `{method}` with {args_len} argument(s)"
+                    )))
+                }
             },
-            ProcessChildMethod { method } if method == "wait" => h(
-                "process.child.wait",
-                "jet_process_child_wait",
-                1,
-                1,
-                &[true],
-                Some(Effect::Exec),
-                carrier,
-            ),
-            ProcessChildMethod { .. } => primitive(),
+            ProcessChildMethod { method } => match method.as_str() {
+                "id" => h(
+                    "process.child.id",
+                    "jet_process_child_id",
+                    1,
+                    1,
+                    &[true],
+                    None,
+                    carrier,
+                ),
+                "wait" => h(
+                    "process.child.wait",
+                    "jet_process_child_wait",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                "exited" => h(
+                    "process.child.exited",
+                    "jet_process_child_exited",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                "kill" => h(
+                    "process.child.kill",
+                    "jet_process_child_kill",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                "terminate" => h(
+                    "process.child.terminate",
+                    "jet_process_child_terminate",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                "interrupt" => h(
+                    "process.child.interrupt",
+                    "jet_process_child_interrupt",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Exec),
+                    carrier,
+                ),
+                _ => return Err(route_error(format!("unknown checked ProcessChild method `{method}`"))),
+            },
             PathFrom => h("path.from", "jet_path_from", 1, 1, &[true], None, carrier),
             PathToString => h("path.to_string", "jet_path_to_string", 1, 1, &[true], None, carrier),
             PathHome => h("path.home", "jet_path_home", 0, 0, &[], Some(Effect::FS), carrier),
@@ -1445,17 +1802,131 @@ impl THandleOp {
             TaskPause => h("task.pause", "jet_std::JetTask::pause", 1, 1, &[true], None, carrier),
             TaskResume => h("task.resume", "jet_std::JetTask::resume", 1, 1, &[true], None, carrier),
             TaskCancel => h("task.cancel", "jet_std::JetTask::cancel", 1, 1, &[true], None, carrier),
+            ReflectValueTypeName => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "value.type_name",
+                "jet_jit_reflect_type_name",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ReflectValuePath => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "value.path",
+                "jet_jit_reflect_path",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ReflectValueDisplay => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "value.display",
+                "jet_jit_reflect_display",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ReflectValueFields => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "value.fields",
+                "jet_jit_reflect_fields",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ReflectFieldName => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "field.name",
+                "jet_jit_reflect_field_name",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ReflectFieldValue => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.reflect",
+                "field.value",
+                "jet_jit_reflect_field_value",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
             HTTPReqField(_) | HTTPRespField(_) | HTTPRespHeader
             | ArgsSpecHelp | WatchMethod { .. }
-            | ReflectValueTypeName
-            | ReflectValuePath | ReflectValueDisplay | ReflectValueFields | ReflectFieldName
-            | ReflectFieldValue | DataTreeField | DataTreeAt | DataTreeInt | DataTreeText
+            | DataTreeField | DataTreeAt | DataTreeInt | DataTreeText
             | DataTreeBool | DataTreeFloat | DataTreeToText | DataTreeEqualUnordered
             | DataTreeDecode(_) | SerdeEncode | JSONField | JSONAt | JSONInt | JSONText
             | JSONBool | JSONFloat | JSONToText | JSONEqualUnordered
-            | DBWithPolicy | DBBegin | DBCommit | DBRollback | DBClose | DBValueInt
-            | DBValueFloat | DBValueText | DBValueBool | DBValueBlob | DBValueIsNull
+            | DBValueInt | DBValueFloat | DBValueText | DBValueBool | DBValueBlob | DBValueIsNull
             | ModOnTick => primitive(),
+            DBWithPolicy => h(
+                "db.with_policy",
+                "jet_db_with_policy",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBBegin => h(
+                "db.begin",
+                "jet_db_begin",
+                1,
+                1,
+                &[false],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBCommit => h(
+                "db.commit",
+                "jet_db_commit",
+                1,
+                1,
+                &[false],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBRollback => h(
+                "db.rollback",
+                "jet_db_rollback",
+                1,
+                1,
+                &[false],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBClose => h(
+                "db.close",
+                "jet_db_close",
+                1,
+                1,
+                &[false],
+                Some(Effect::DB),
+                carrier,
+            ),
             MeasurementMethod { method } => measurement_route(method, carrier)?,
             WebVirtualWindowFacts => prelude(
                 MirPreludeFamily::HandleMethod,
@@ -1580,7 +2051,13 @@ impl THandleOp {
         receiver: &Type,
         carrier: &TFailureCarrier,
     ) -> Result<TPreludeRoute, LowerError> {
-        as_prelude(self.route_plan(receiver, carrier)?, "handle method")
+        as_prelude(
+            self.route_plan(receiver, carrier)?,
+            &format!(
+                "handle method variant {:?}",
+                std::mem::discriminant(self)
+            ),
+        )
     }
 }
 
@@ -1999,6 +2476,8 @@ fn ui_backend_method_route(
         "on_event" => ("dispatch_event", &[true, false]),
         "mount_default" => ("mount_node_default", &[true, false]),
         "mount" => ("mount_node", &[true, false, false]),
+        "set_focus_group" => ("set_focus_group", &[true, false]),
+        "focused_label" => ("focused_label", &[true]),
         "commands" if name == "NullBackend" => ("paint_commands", &[true]),
         "frame_lines" | "render_count" if name == "TuiBackend" => (method, &[true]),
         _ => return Err(route_error(format!("checked UI backend method `{name}.{method}` has no Prelude route"))),
@@ -2091,6 +2570,15 @@ fn builtin_collection_route(
         (TBuiltinOp::Contains, Type::List(_) | Type::FixedList { .. }) => {
             row("contains", "jet_list_contains", 2, &[true, true])
         }
+        (TBuiltinOp::Contains, Type::Apply { name, .. }) if name == "Set" => {
+            row("contains", "jet_set_has", 2, &[true, true])
+        }
+        (TBuiltinOp::Max { float: false, .. }, Type::Apply { name, .. }) if name == "Set" => {
+            row("max", "jet_set_max", 1, &[true])
+        }
+        (TBuiltinOp::SetShuffle, Type::Apply { name, .. }) if name == "Set" => {
+            row("shuffle", "jet_set_shuffle", 1, &[true])
+        }
         (TBuiltinOp::Contains, Type::Apply { name, .. })
             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
         {
@@ -2141,6 +2629,9 @@ fn builtin_collection_route(
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
             row("len", "jet_set_len", 1, &[true])
+        }
+        (TBuiltinOp::SetCapacity, Type::Apply { name, .. }) if name == "Set" => {
+            row("capacity", "jet_set_capacity", 1, &[true])
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
             row("len", "jet_sorted_set_len", 1, &[true])
@@ -2358,6 +2849,11 @@ impl TBuiltinOp {
             InsertList => b("list_insert", "jet_list_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
+            SetToList => b("set_to_list", "jet_set_to_list", 1, 1, &[true], None, carrier),
+            SetSort => b("set_sort", "jet_set_sort", 1, 1, &[true], None, carrier),
+            SetShuffle => b("set_shuffle", "jet_set_shuffle", 1, 1, &[true], None, carrier),
+            SetEqual => b("set_equal", "jet_set_equal", 2, 2, &[true, true], None, carrier),
+            SetFirst => b("set_first", "jet_set_first", 1, 1, &[true], None, carrier),
             SortedSetFrom => b("sorted_set_from", "jet_sorted_set_from", 1, 1, &[false], None, carrier),
             SortedSetToList => b("sorted_set_to_list", "jet_sorted_set_to_list", 1, 1, &[true], None, carrier),
             RemoveList { mode, .. } => match mode {
@@ -2424,7 +2920,7 @@ impl TBuiltinOp {
             SetIsSubset => b("set_is_subset", "jet_set_is_subset", 2, 2, &[true, true], None, carrier),
             SetIsSuperset => b("set_is_superset", "jet_set_is_superset", 2, 2, &[true, true], None, carrier),
             SetIsDisjoint => b("set_is_disjoint", "jet_set_is_disjoint", 2, 2, &[true, true], None, carrier),
-            SetValues => b("set_values", "jet_iter_from_vec", 1, 1, &[true], None, carrier),
+            SetValues => b("set_values", "jet_set_values", 1, 1, &[true], None, carrier),
             SetPop => b("set_pop", "jet_set_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             SetInsert => b("set_insert", "jet_set_insert", 2, 2, &[true, false], Some(Effect::Mem), carrier),
             SetRemove => b("set_remove", "jet_set_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
@@ -2578,11 +3074,10 @@ impl TBuiltinOp {
             | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
             | IterCompare | ListCopy
             | ListUnion | ListIntersection | ListDifference | ListRandom
+            | SetCopy | SetCapacity
             | MapCopy
             | MapNew
             | Zip { .. } | OptionZip { .. }
-            | SetToList | SetCopy | SetEqual | SetCapacity | SetFirst | SetSort
-            | SetShuffle
             | LruCapacity
             | BitSetNew | ByteBufferNew
             | BagLen => primitive(),
@@ -2632,6 +3127,12 @@ impl TBuiltinOp {
                     if matches!(self, TBuiltinOp::StartsWith) { "jet_list_starts_with" } else { "jet_list_ends_with" },
                     2, 2, &[true, true], None, carrier,
                 ),
+                TBuiltinOp::Max { float: false, .. }
+                    if matches!(receiver, Type::Apply { name, .. } if name == "Set") =>
+                {
+                    builtin_collection_route(self, receiver, carrier)?
+                },
+                TBuiltinOp::SetShuffle => builtin_collection_route(self, receiver, carrier)?,
                 TBuiltinOp::Contains
                     if matches!(
                         receiver,
@@ -2654,6 +3155,7 @@ impl TBuiltinOp {
                 | TBuiltinOp::ContainsKey
                 | TBuiltinOp::IsEmpty
                 | TBuiltinOp::DequeCapacity
+                | TBuiltinOp::SetCapacity
                 | TBuiltinOp::GetMap
                 | TBuiltinOp::GetList
                 | TBuiltinOp::First
@@ -2845,6 +3347,7 @@ pub(super) fn string_method_route(
     }
     let (member, symbol, arity) = match method {
         "copy" => ("copy", "jet_string_copy", 1),
+        "replace" => ("replace", "jet_string_replace", 3),
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
         "last_index_of" => ("last_index_of", "jet_unicode_last_index_of", 2),
         "is_lower" => ("is_lower", "jet_text_is_lower", 1),
@@ -2857,8 +3360,8 @@ pub(super) fn string_method_route(
         "reverse" => ("reverse", "jet_text_reverse", 1),
         "normalize" => ("normalize", "jet_text_normalize_nfc", 1),
         "rsplit" => ("rsplit", "jet_iter_string_rsplit", 2),
-        "matches" => ("matches", "jet_std::jet_regex_compile", 2),
-        "match" => ("match", "jet_std::jet_regex_compile", 2),
+        "matches" => ("matches", "jet_std::jet_string_matches", 2),
+        "match" => ("match", "jet_std::jet_string_match", 2),
         _ => return Err(route_error(format!("unknown checked String method `{method}`"))),
     };
     let _ = result;
@@ -3088,6 +3591,12 @@ pub(super) fn binary_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
+    if matches!(op, BinOp::Add | BinOp::Sub)
+        && (matches!(input, Type::Named(name) if crate::Sema::is_layout_axis_type(name))
+            || matches!(rhs, Type::Named(name) if crate::Sema::is_layout_axis_type(name)))
+    {
+        return layout_binary_route(op, result, carrier);
+    }
     if let Some(route) = math_binary_route(op, input, rhs, result, carrier)? {
         return Ok(route);
     }
@@ -3468,6 +3977,32 @@ pub(super) fn civil_time_route(
     ))
 }
 
+
+fn layout_binary_route(
+    op: BinOp,
+    _result: &Type,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let (member, symbol) = match op {
+        BinOp::Add => ("add", "jet_layout::add"),
+        BinOp::Sub => ("sub", "jet_layout::sub"),
+        _ => return Err(route_error("non-arithmetic layout operation")),
+    };
+    prelude_route_row(
+        MirPreludeFamily::StaticPrelude,
+        "core.layout",
+        member,
+        symbol,
+        2,
+        2,
+        &[false, false],
+        None,
+        carrier,
+        MirPreludeAbi::Value,
+        "layout arithmetic",
+    )
+    .map(TRoutePlan::Prelude)
+}
 
 pub(super) fn layout_compare_route(
     op: MirLayoutCompareOp,
@@ -3852,6 +4387,27 @@ pub(super) fn helper_route(
         "clock helper",
     )
 }
+
+pub(super) fn memo_stats_route(
+    result: &Type,
+    carrier: &TFailureCarrier,
+) -> Result<TPreludeRoute, LowerError> {
+    let _ = result;
+    prelude_route_row(
+        MirPreludeFamily::StaticPrelude,
+        "core.memo",
+        "stats",
+        "jet_memo_stats",
+        2,
+        2,
+        &[false, false],
+        None,
+        carrier,
+        MirPreludeAbi::Value,
+        "memo statistics",
+    )
+}
+
 
 /// Route a task-local Cell guard projection. The field/path descriptors stay
 /// in the structured MIR operation; this row carries only the selected kernel
@@ -4624,6 +5180,26 @@ pub(super) fn string_format_route(
     )
 }
 
+pub(super) fn quantity_format_route(
+    result: &Type,
+    carrier: &TFailureCarrier,
+) -> Result<TPreludeRoute, LowerError> {
+    let _ = result;
+    prelude_route_row(
+        MirPreludeFamily::StaticPrelude,
+        "core.text.fmt",
+        "quantity",
+        "jet_fmt_quantity",
+        1,
+        1,
+        &[false],
+        None,
+        carrier,
+        MirPreludeAbi::Value,
+        "quantity magnitude formatting",
+    )
+}
+
 
 pub(super) fn static_prelude_route(
     module: &str,
@@ -4635,10 +5211,15 @@ pub(super) fn static_prelude_route(
     let _ = result;
     let effect = (module == "::JetAtomic" && member == "try_new").then_some(Effect::Mem);
     let arity = borrow_mask.len();
-    let symbol = if let Some(rooted_module) = module.strip_prefix("::") {
-        format!("{rooted_module}::{member}")
-    } else {
-        format!("{module}::{member}")
+    let symbol = match (module, member) {
+        ("::JetAuthority", "from_rights") => "jet_authority_from_rights".to_string(),
+        ("::JetAuthority", "workspace") => "jet_authority_workspace".to_string(),
+        ("::JetAuthority", "with") => "jet_authority_with".to_string(),
+        ("::JetAuthority", "without") => "jet_authority_without".to_string(),
+        _ if let Some(rooted_module) = module.strip_prefix("::") => {
+            format!("{rooted_module}::{member}")
+        }
+        _ => format!("{module}::{member}"),
     };
     let plan = if module.starts_with("::") {
         prelude(

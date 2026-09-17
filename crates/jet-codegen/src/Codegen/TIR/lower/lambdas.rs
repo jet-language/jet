@@ -250,6 +250,10 @@ fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
     })
 }
 
+fn is_default_error_type(ty: &Type) -> bool {
+    matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+}
+
 fn lambda_carrier_return_type(body_ty: &Type, carrier: &Type) -> Type {
     match (body_ty, carrier) {
         (
@@ -258,6 +262,19 @@ fn lambda_carrier_return_type(body_ty: &Type, carrier: &Type) -> Type {
             },
             Type::Result { err, .. },
         ) if body_error == err => body_ty.clone(),
+        (
+            Type::Result {
+                ok: body_ok,
+                err: body_error,
+            },
+            Type::Result {
+                ok: carrier_ok,
+                err,
+            },
+        ) if is_default_error_type(body_error) && body_ok == carrier_ok => Type::Result {
+            ok: carrier_ok.clone(),
+            err: err.clone(),
+        },
         (Type::Option(_), Type::Option(_)) => body_ty.clone(),
         (
             _,
@@ -272,6 +289,30 @@ fn lambda_carrier_return_type(body_ty: &Type, carrier: &Type) -> Type {
         (body_ty, Type::Option(_)) => Type::Option(Box::new(body_ty.clone())),
         (_, other) => other.clone(),
     }
+}
+
+fn rehome_default_result_carrier(mut value: TExpr, carrier: Option<&Type>) -> TExpr {
+    let Some(Type::Result {
+        ok: carrier_ok,
+        err: carrier_err,
+    }) = carrier
+    else {
+        return value;
+    };
+    let Type::Result {
+        ok: value_ok,
+        err: value_err,
+    } = &value.ty
+    else {
+        return value;
+    };
+    if is_default_error_type(value_err) && value_ok == carrier_ok {
+        value.ty = Type::Result {
+            ok: carrier_ok.clone(),
+            err: carrier_err.clone(),
+        };
+    }
+    value
 }
 
 fn lower_lambda_expecting_with_host_borrow(
@@ -520,6 +561,8 @@ fn lower_lambda_expecting_with_host_borrow(
         frame_schedule_derivation: lam.meta.frame_schedule_derivation.clone(),
         capture_facts,
         effects: crate::Codegen::TIR::lambda_effect_facts(lam),
+        host_param_conventions: (by_value && host_borrow.is_none())
+            .then(|| vec![crate::AST::AccessConvention::Move; param_types.len()]),
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         jit_name: lambda_jit_name(lam.span.start, lam.span.end),
         param_types,
@@ -581,6 +624,7 @@ fn fallible_lambda_value(
     {
         return value;
     }
+    let value = rehome_default_result_carrier(value, carrier);
     match carrier {
         Some(Type::Result { err, .. }) if !matches!(&value.ty, Type::Result { .. }) => TExpr {
             ty: Type::Result {
@@ -761,6 +805,10 @@ fn lowered_block_return_ty(body: &[TStmt]) -> Type {
     match body.last() {
         Some(TStmt::ExprStmt(expr)) => expr.ty.clone(),
         Some(TStmt::Return(Some(expr))) => expr.ty.clone(),
+        // `lower_return_value` keeps the value alive across a lexical temp
+        // before emitting `return`, so a tail expression commonly finishes as
+        // an inline `[let; return]` block rather than a bare `Return`.
+        Some(TStmt::Inline(body)) | Some(TStmt::DebugOnly(body)) => lowered_block_return_ty(body),
         _ => unit_type(),
     }
 }

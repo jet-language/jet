@@ -2010,6 +2010,15 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       continue;
     }
     const artifact = build.artifact;
+    const webArtifactBytes = webMode ? await artifactBytes(stagedSource) : null;
+    if (webMode) {
+      row.metrics = {
+        ...row.metrics,
+        ...buildMetrics(row.build),
+        binary_bytes: webArtifactBytes,
+        artifactBytes: webArtifactBytes,
+      };
+    }
 
     if (entry.mode === "batch-steps") {
       const steps = entry.spec?.steps ?? [];
@@ -2097,9 +2106,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         ...row.metrics,
         ...runtimeMetrics(row.runtime),
         ...buildMetrics(row.build),
-        binary_bytes: await artifactBytes(stagedSource),
+        binary_bytes: webArtifactBytes,
         firstResultSeconds: row.runtime.median.time_to_first_stdout_seconds,
-        artifactBytes: row.metrics.binary_bytes,
+        artifactBytes: webArtifactBytes,
       };
       continue;
     }

@@ -266,6 +266,9 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         }
 
         ("core.prelude", "keep") => Ok(args.first().cloned().unwrap_or(CtValue::Unit)),
+        ("core.builtin", "len_string") => {
+            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
+        }
         ("jet.unit", "magnitude") => Ok(CtValue::Str(as_float(one(0)?, span)?.to_string())),
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
         // tier-0. No native bridge, Boundary classification, or AOT fallback.
@@ -1718,6 +1721,10 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
         }
+        ("core.text.fmt", "quantity") => {
+            let value = as_float(one(0)?, span)?;
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_quantity(value)))
+        }
         ("core.text.fmt", "decimal" | "grouped") => {
             let value = one(0)?;
             let precision = match one(1)? {
@@ -2123,7 +2130,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.reactive", "signal" | "derived" | "computed" | "effect") => {
             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
         }
-        ("core.web", "openapi" | "page") => {
+        ("core.web", "openapi" | "page" | "form") => {
             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
         }
         // D-DX-SUITE1=C / I9: every first-party web module crosses the same

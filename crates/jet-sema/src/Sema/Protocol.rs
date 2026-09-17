@@ -21,10 +21,10 @@ pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic
                 continue;
             }
         };
-        items.remove(i);
         let fragment = generate_protocol_source(&decl);
         match lex_parse_fragment(&fragment) {
-            Ok(parsed) => {
+            Ok(mut parsed) => {
+                mark_generated_protocol_items(&mut parsed);
                 for item in parsed {
                     items.insert(i, item);
                     i += 1;
@@ -44,6 +44,25 @@ pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic
                         .to_string(),
                     Some(decl.name_span),
                 ));
+            }
+        }
+        i += 1;
+    }
+}
+
+fn mark_generated_protocol_items(items: &mut [Item]) {
+    for item in items {
+        let methods = match item {
+            Item::Impl(definition) => Some(&mut definition.methods),
+            Item::Struct(definition) => Some(&mut definition.methods),
+            Item::Enum(definition) => Some(&mut definition.methods),
+            _ => None,
+        };
+        if let Some(methods) = methods {
+            for method in methods {
+                if method.state_transition.is_some() {
+                    method.compiler_generated = true;
+                }
             }
         }
     }

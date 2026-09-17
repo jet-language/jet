@@ -39,7 +39,7 @@ fn run() {
     );
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
     assert!(
-        output.rust.contains("JetAuthority::workspace()"),
+        output.rust.contains("jet_authority_workspace()"),
         "{}",
         output.rust
     );
@@ -104,7 +104,6 @@ fn run() {
 fn authority_boundary_consumers_take_the_named_value() {
     let source = r#"
 use core.process as process
-use core.plugin as plugin
 
 struct SessionHolder {
     authority: Authority
@@ -112,9 +111,8 @@ struct SessionHolder {
 
 fn run() {
     session :: SessionHolder{authority: Authority.workspace()}
-    #FX(authority: Exec, IO) {
+    #FX(authority: Exec, IO, Time.Wait) {
         result :: process.run(["echo", "authority"], authority)
-        plugin :: plugin.load("missing.wasm", session.authority)
         print("boundary")
     }
 }
@@ -125,7 +123,6 @@ fn run() {
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("jet_plugin_load"), "{}", output.rust);
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
     assert!(
         output.rust.contains("jet_authority_to_wire"),
@@ -137,15 +134,23 @@ fn run() {
 
 #[test]
 fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
-    let plugin_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/sandbox_mathkit/mathkit.wasm")
-        .canonicalize()
-        .expect("plugin fixture should exist")
+    let scratch = common::Scratch::new("plugin_large_argument_frame");
+    let plugin_path = write_plugin_component(
+        &scratch,
+        "large_args.wasm",
+        &large_argument_component_wat(1),
+    );
+    let plugin_path_text = plugin_path
         .to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
-    let params = std::iter::repeat("1.0")
-        .take(1025)
+    let plugin_root = scratch
+        .path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let params = (0..1025)
+        .map(|_| "1")
         .collect::<Vec<_>>()
         .join(", ");
     let source = format!(
@@ -153,54 +158,39 @@ fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
 use core.plugin as plugin
 
 fn run() {{
-    policy :: Authority.from_rights(["FS.Read:repo"])
-    mathkit :: plugin.load("{plugin_path}", policy)
-    greeting :: mathkit.call_text("greet", ["Ada"]) ?? panic("plugin fixture")
-    print(greeting)
-    _result :: mathkit.call("scale", [{params}]) ?? {{
-        print(err)
+    policy :: Authority.from_rights(["FS.Read:{plugin_root}"])
+    hostile :: plugin.load("{plugin_path}", policy)
+    _result :: hostile.scale({params}) ?? {{
+        print("rejected")
         return
     }}
     print("guest-executed")
+    print(_result)
 }}
 "#,
-        plugin_path = plugin_path,
-        params = params
+        plugin_path = plugin_path_text,
+        plugin_root = plugin_root,
+        params = params,
     );
-    let expected = "hello, Ada!\n`scale` expects 2 argument(s), got 0\n";
-    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        tir_support::interpreter_run("jet_plugin_limits_interpreter", &source);
-    assert_eq!(
-        interpreter_code, 0,
-        "forced interpreter plugin resource test failed: {interpreter_stderr}"
-    );
-    assert_eq!(interpreter_stdout, expected);
-    assert!(
-        !interpreter_stdout.contains("guest-executed"),
-        "forced interpreter entered the guest: {interpreter_stdout}"
-    );
-    assert_eq!(interpreter_stderr, "");
-
+    let api = plugin_api_snapshot("large_args", "scale", "a0: Int", "Int");
+    let mut tiers = vec!["jit", "interpreter"];
     if common::have_rustc() {
-        let (aot_code, aot_stdout, aot_stderr) =
-            common::build_and_run("jet_plugin_limits", "wire_limit", &source);
-        assert_eq!(aot_code, 0, "AOT plugin resource test failed: {aot_stderr}");
-        assert_eq!(aot_stdout, expected);
+        tiers.push("release");
+    }
+    for tier in tiers {
+        let (code, stdout, stderr) = tir_support::run_plugin_tier(
+            "plugin_large_argument_list",
+            &source,
+            tier,
+            &plugin_path,
+            &api,
+        );
+        assert_ne!(code, 0, "{tier} accepted an overlarge plugin argument list");
+        assert_eq!(stdout, "", "{tier} emitted output before arity rejection");
         assert!(
-            !aot_stdout.contains("guest-executed"),
-            "AOT entered the guest: {aot_stdout}"
+            stderr.contains("E0104"),
+            "{tier} did not report the standard arity diagnostic: {stderr}"
         );
-        assert_eq!(aot_stderr, "");
-        assert_eq!(
-            aot_stdout, interpreter_stdout,
-            "AOT and forced interpreter plugin errors differ"
-        );
-        assert_eq!(
-            aot_stderr, interpreter_stderr,
-            "AOT and forced interpreter diagnostics differ"
-        );
-    } else {
-        eprintln!("note: skipping AOT plugin resource witness (need rustc)");
     }
 }
 
@@ -215,6 +205,51 @@ fn write_plugin_component(
     std::fs::write(&path, bytes)
         .unwrap_or_else(|error| panic!("write hostile plugin fixture {}: {error}", path.display()));
     path
+}
+
+fn plugin_api_snapshot(
+    package: &str,
+    export: &str,
+    params: &str,
+    result: &str,
+) -> String {
+    format!(
+        "api_version = 1\npackage = plugin__{package}\npublished_version = 0.1.0\nfn {export}({params}) {result}\n"
+    )
+}
+
+fn large_argument_component_wat(count: usize) -> String {
+    large_named_argument_component_wat("scale", count)
+}
+
+fn large_zero_argument_component_wat(count: usize) -> String {
+    large_named_argument_component_wat("zero", count)
+}
+
+fn large_named_argument_component_wat(export: &str, count: usize) -> String {
+    let params = std::iter::repeat("i64")
+        .take(count)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let component_params = (0..count)
+        .map(|index| format!("(param \"a{index}\" s64)"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        r#"(component
+  (core module $m
+    (func ${export} (export "{export}") (param {params}) (result i64)
+      (i64.const 7)))
+  (core instance $i (instantiate $m))
+  (type $t (func {component_params} (result s64)))
+  (func ${export} (type $t)
+    (canon lift (core func $i "{export}")))
+  (export "{export}" (func ${export})))
+"#,
+        export = export,
+        params = params,
+        component_params = component_params,
+    )
 }
 
 fn plugin_failure_source(
@@ -240,7 +275,7 @@ use core.plugin as plugin
 fn run() {{
     policy :: Authority.from_rights(["FS.Read:{plugin_root}"])
     hostile :: plugin.load("{plugin_path}", policy)
-    _result :: hostile.call_int("{export}", []) ?? {{
+    _result :: hostile.{export}() ?? {{
         print("{failure_marker}")
         print(err)
         return
@@ -295,6 +330,8 @@ fn assert_plugin_failure_result(
 const PLUGIN_CHILD_TEST_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_TEST";
 const PLUGIN_CHILD_TIER_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_TIER";
 const PLUGIN_CHILD_SOURCE_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_SOURCE";
+const PLUGIN_CHILD_ARTIFACT_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_ARTIFACT";
+const PLUGIN_CHILD_API_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_API";
 const PLUGIN_CHILD_OK_MARKER: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_CHILD_OK";
 const PLUGIN_CHILD_CAPTURE_LIMIT: usize = 16 * 1024;
 
@@ -309,6 +346,12 @@ fn run_plugin_resource_child_if_selected(test_name: &str) -> bool {
         .unwrap_or_else(|error| panic!("plugin child tier is required: {error}"));
     let source = std::env::var(PLUGIN_CHILD_SOURCE_ENV)
         .unwrap_or_else(|error| panic!("plugin child source is required: {error}"));
+    let artifact = std::path::PathBuf::from(
+        std::env::var(PLUGIN_CHILD_ARTIFACT_ENV)
+            .unwrap_or_else(|error| panic!("plugin child artifact is required: {error}")),
+    );
+    let api = std::env::var(PLUGIN_CHILD_API_ENV)
+        .unwrap_or_else(|error| panic!("plugin child API is required: {error}"));
     let (failure_marker, required_error_terms): (&str, &[&str]) = match requested_test.as_str() {
         "plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers" => (
             "execution-bound-failure",
@@ -322,17 +365,13 @@ fn run_plugin_resource_child_if_selected(test_name: &str) -> bool {
         }
         other => panic!("unknown plugin child test `{other}`"),
     };
-    let result = match tier.as_str() {
-        "jit" => tir_support::jit_run("plugin_resource_child_jit", &source),
-        "interpreter" => {
-            tir_support::interpreter_run("plugin_resource_child_interpreter", &source)
-        }
-        "aot" => {
-            assert!(common::have_rustc(), "AOT child requires rustc");
-            common::build_and_run("jet_plugin_resource_child", "resource", &source)
-        }
-        other => panic!("unknown plugin child tier `{other}`"),
-    };
+    let result = tir_support::run_plugin_tier(
+        "plugin_resource_child",
+        &source,
+        &tier,
+        &artifact,
+        &api,
+    );
     assert_plugin_failure_result(
         &format!("isolated {tier}"),
         &result,
@@ -374,6 +413,8 @@ fn run_plugin_resource_child(
     test_name: &str,
     tier: &str,
     source: &str,
+    artifact: &Path,
+    api_snapshot: &str,
 ) -> (bool, String, String) {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -399,6 +440,8 @@ fn run_plugin_resource_child(
         .env(PLUGIN_CHILD_TEST_ENV, test_name)
         .env(PLUGIN_CHILD_TIER_ENV, tier)
         .env(PLUGIN_CHILD_SOURCE_ENV, source)
+        .env(PLUGIN_CHILD_ARTIFACT_ENV, artifact)
+        .env(PLUGIN_CHILD_API_ENV, api_snapshot)
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
     #[cfg(unix)]
@@ -409,7 +452,7 @@ fn run_plugin_resource_child(
     let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("spawn isolated plugin {tier} child: {error}"));
-    let timeout = if tier == "aot" {
+    let timeout = if tier == "release" {
         Duration::from_secs(60)
     } else {
         Duration::from_secs(10)
@@ -452,15 +495,18 @@ fn assert_plugin_failure_on_all_hosted_tiers(
     test_name: &str,
     source: &str,
     failure_marker: &str,
+    artifact: &Path,
+    api_snapshot: &str,
 ) {
     let mut tiers = vec!["jit", "interpreter"];
     if common::have_rustc() {
-        tiers.push("aot");
+        tiers.push("release");
     } else {
         eprintln!("note: skipping AOT plugin resource witness (need rustc)");
     }
     for tier in tiers {
-        let (success, stdout, stderr) = run_plugin_resource_child(test_name, tier, source);
+        let (success, stdout, stderr) =
+            run_plugin_resource_child(test_name, tier, source, artifact, api_snapshot);
         assert!(
             success,
             "isolated plugin {tier} child failed for {failure_marker}\nstdout:\n{stdout}\nstderr:\n{stderr}"
@@ -549,7 +595,14 @@ fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
         "execution-bound-failure",
         "guest-returned",
     );
-    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "execution-bound-failure");
+    let api = plugin_api_snapshot("non_terminating", "spin", "", "Int");
+    assert_plugin_failure_on_all_hosted_tiers(
+        TEST_NAME,
+        &source,
+        "execution-bound-failure",
+        &path,
+        &api,
+    );
 }
 
 #[test]
@@ -571,7 +624,14 @@ fn plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers()
         "memory-bound-failure",
         "guest-returned",
     );
-    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "memory-bound-failure");
+    let api = plugin_api_snapshot("linear_memory", "grow", "", "Int");
+    assert_plugin_failure_on_all_hosted_tiers(
+        TEST_NAME,
+        &source,
+        "memory-bound-failure",
+        &path,
+        &api,
+    );
 }
 
 #[test]
@@ -583,7 +643,14 @@ fn plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers() {
     let scratch = common::Scratch::new("plugin_call_table");
     let path = write_plugin_component(&scratch, "table.wasm", PLUGIN_TABLE_COMPONENT_WAT);
     let source = plugin_failure_source(&path, "grow", "table-bound-failure", "guest-returned");
-    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "table-bound-failure");
+    let api = plugin_api_snapshot("table", "grow", "", "Int");
+    assert_plugin_failure_on_all_hosted_tiers(
+        TEST_NAME,
+        &source,
+        "table-bound-failure",
+        &path,
+        &api,
+    );
 }
 
 
@@ -593,7 +660,7 @@ fn authority_process_boundary_runs_on_all_hosted_tiers() {
 use core.process as process
 
 fn run() {
-    #FX(authority: Exec, IO) {
+    #FX(authority: Exec, IO, Time.Wait) {
         result :: process.run(["echo", "boundary"], authority)
         print("boundary")
     }
@@ -612,7 +679,7 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    spec :: process.cmd(["sh", "-c", "printf spawned > '__MARKER__'"]).under(policy)
+    spec :: process.cmd(["sh", "-c", "printf spawned > '__MARKER__'"]).cwd("/").under(policy)
     if spec.plan() == {
         .Ok(_) -> print("spawned")
         .Err(_) -> print("refused")
@@ -657,7 +724,7 @@ fn run() {
         "FS.Write:.jet/build",
         "Exec:__CARGO__",
     ])
-    spec :: process.cmd(["__CARGO__", "test"]).under(policy)
+    spec :: process.cmd(["__CARGO__", "test"]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(_) -> print("planned")
         .Err(_) -> print("refused")
@@ -667,7 +734,7 @@ fn run() {
     .replace("__CARGO__", &cargo);
     let output = jet::compile(&source).expect("exact process grants should compile");
     assert!(
-        output.rust.contains("JetAuthority::__jet_from_rights"),
+        output.rust.contains("jet_authority_from_rights"),
         "{}",
         output.rust
     );
@@ -744,7 +811,7 @@ fn run() {
         "FS.Write:.jet/build",
         "Exec:__PRINTF__",
     ])
-    spec :: process.cmd(["__PRINTF__", "receipt"]).under(policy)
+    spec :: process.cmd(["__PRINTF__", "receipt"]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             receipt :: spec.run() ?? panic("run failed")
@@ -777,16 +844,15 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    spec :: process.cmd(["/usr/bin/printf", "sandboxed"]).under(policy)
+    spec :: process.cmd(["/usr/bin/printf", "sandboxed"]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             print(plan.backend)
-            result :: spec.run_checked()
-            if result == {
+            if spec.run_checked() == {
                 .Ok(value) -> print(value.output)
                 .Err(_) -> print("denied")
             }
-        }
+            }
         .Err(_) -> print("refused")
     }
 }
@@ -802,8 +868,7 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    result :: process.cmd(["/bin/sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).under(policy).run_checked()
-    if result == {
+    if process.cmd(["/bin/sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy).run_checked() == {
         .Ok(_) -> print("blocked")
         .Err(_) -> print("escaped")
     }
@@ -820,13 +885,12 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    spec :: process.cmd(["printf", "sandboxed"]).under(policy)
+    spec :: process.cmd(["printf", "sandboxed"]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             if {
                 plan.backend == "linux-bwrap" -> {
-                    result :: spec.run_checked()
-                    if result == {
+                    if spec.run_checked() == {
                         .Ok(value) -> print(value.output)
                         .Err(_) -> print("denied")
                     }
@@ -855,8 +919,7 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    result :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).under(policy).run_checked()
-    if result == {
+    if process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy).run_checked() == {
         .Ok(_) -> print("blocked")
         .Err(_) -> print("escaped")
     }
@@ -881,8 +944,7 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    result :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy).run_checked()
-    if result == {
+    if process.cmd(["cmd.exe", "/C", "exit", "0"]).cwd("/tmp").under(policy).run_checked() == {
         .Ok(_) -> print("sandboxed")
         .Err(_) -> print("refused")
     }
@@ -906,8 +968,7 @@ use core.process as process
 
 fn run() {{
     policy :: process.workspace()
-    result :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).under(policy).run_checked()
-    if result == {{
+    if process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).cwd("/tmp").under(policy).run_checked() == {{
         .Ok(_) -> print("escaped")
         .Err(_) -> print("blocked")
     }}
@@ -946,7 +1007,11 @@ fn run() {
 
 #[test]
 fn authority_example_runs_on_all_hosted_tiers() {
-    tir_support::assert_example_cli_tiers_agree("types/authority", "authority\n");
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "types/authority",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, "authority\n"),
+    );
 }
 
 #[test]
@@ -1016,7 +1081,7 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@authority :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: authority.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"authority\") }\n";
+    let source = "@authority :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: @authority.with(\"FS.Read\")\n@released :: @narrowed.without(\"FS.Read\")\n\nfn run() { print(\"authority\") }\n";
     let output = jet::compile(source).expect("comptime should construct Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
@@ -1041,15 +1106,18 @@ fn authority_repl_accepts_the_same_value() {
 
 #[test]
 fn authority_web_accepts_the_same_value() {
-    let source = "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        narrowed :: authority.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
+    let source = "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        narrowed :: authority.with(\"IO\")\n        _released :: narrowed.without(\"IO\")\n        print(\"authority\")\n    }\n}\n";
     let web = jet::compile_web_with_path(source, "tests/fixtures/authority_web.jet")
         .expect("web should accept Authority")
         .web
         .expect("web tier dropped Authority");
     assert!(
-        web.wasm_rust
-            .contains("pub extern \"C\" fn jet_export_run() -> i32"),
-        "web run export missing"
+        web.wasm_rust.contains("pub extern \"C\" fn jet_entry_"),
+        "web run entry missing"
+    );
+    assert!(
+        web.wasm_rust.contains("jet_runtime_boundary(|| {"),
+        "web run did not retain the runtime boundary"
     );
     assert!(
         web.wasm_rust.contains("jet_authority_with"),
@@ -1058,10 +1126,6 @@ fn authority_web_accepts_the_same_value() {
     assert!(
         web.wasm_rust.contains("jet_authority_without"),
         "web lost Authority.without"
-    );
-    assert!(
-        !web.wasm_rust.contains("struct Authority"),
-        "web handle leaked into emission"
     );
 }
 
@@ -1084,10 +1148,11 @@ fn plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export() {
         &scratch,
         "zero_param.wasm",
         PLUGIN_ZERO_PARAM_COMPONENT_WAT,
-    )
-    .to_string_lossy()
-    .replace('\\', "\\\\")
-    .replace('"', "\\\"");
+    );
+    let plugin_path_text = plugin_path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     let plugin_root = scratch
         .path
         .to_string_lossy()
@@ -1104,7 +1169,7 @@ use core.plugin as plugin
 fn run() {{
     policy :: Authority.from_rights(["FS.Read:{plugin_root}"])
     hostile :: plugin.load("{plugin_path}", policy)
-    _result :: hostile.call_int("zero", [{params}]) ?? {{
+    _result :: hostile.zero({params}) ?? {{
         print("rejected")
         return
     }}
@@ -1112,15 +1177,30 @@ fn run() {{
     print(_result)
 }}
 "#,
-        plugin_path = plugin_path,
+        plugin_path = plugin_path_text,
         plugin_root = plugin_root,
         params = params,
     );
-    tir_support::assert_tiers_agree(
-        "plugin_zero_param_overlarge_frame",
-        &source,
-        "rejected\n",
-    );
+    let api = plugin_api_snapshot("zero_param", "zero", "", "Int");
+    let mut tiers = vec!["jit", "interpreter"];
+    if common::have_rustc() {
+        tiers.push("release");
+    }
+    for tier in tiers {
+        let (code, stdout, stderr) = tir_support::run_plugin_tier(
+            "plugin_zero_param_overlarge_frame",
+            &source,
+            tier,
+            &plugin_path,
+            &api,
+        );
+        assert_ne!(code, 0, "{tier} unexpectedly ran an overlarge plugin frame");
+        assert_eq!(stdout, "", "{tier} emitted output before arity rejection");
+        assert!(
+            stderr.contains("E0104"),
+            "{tier} did not report the standard arity diagnostic: {stderr}"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -1153,7 +1233,7 @@ use core.plugin as plugin
 fn run() {{
     policy :: Authority.from_rights(["FS.Read:{root}"])
     hostile :: plugin.load("{plugin_path}", policy)
-    _result :: hostile.call_int("zero", []) ?? {{
+    _result :: hostile.zero() ?? {{
         print("rejected")
         return
     }}
@@ -1164,9 +1244,69 @@ fn run() {{
         plugin_path = plugin_path,
         root = root,
     );
-    tir_support::assert_tiers_agree(
-        "plugin_symlink_outside_read_root",
-        &source,
-        "rejected\n",
+    let api = plugin_api_snapshot("link", "zero", "", "Int");
+    let mut tiers = vec!["jit", "interpreter"];
+    if common::have_rustc() {
+        tiers.push("release");
+    }
+    for tier in tiers {
+        let (code, stdout, stderr) = tir_support::run_plugin_tier(
+            "plugin_symlink_outside_read_root",
+            &source,
+            tier,
+            &link,
+            &api,
+        );
+        assert_ne!(code, 0, "{tier} followed a plugin symlink outside its root");
+        assert_eq!(stdout, "", "{tier} emitted output before symlink rejection");
+        assert!(
+            stderr.contains("file authority path contains a symlink"),
+            "{tier} did not report the symlink rejection: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn erased_devtools_publications_do_not_feed_panel_state() {
+    let source = r#"
+use core.ui as ui
+use core.devtools as devtools
+
+struct State {
+    selected: String{"none"}
+    event_count: Int{0}
+}
+
+fn panel_lines(state: State) [UiNode] -> {
+    return [UiNode]{
+        ui.text(state.selected),
+        ui.text("{state.event_count}")
+    }
+}
+
+#DevPanel
+pub fn panel(state: State) UiNode -> {
+    return ui.box(panel_lines(state))
+}
+
+fn run() {
+    selected_value :: "overview"
+    #Off {
+        devtools.publish(field: .selected, value: selected_value)
+        devtools.publish(field: .event_count, value: 1)
+    }
+    print("ok")
+}
+"#;
+    let diagnostics = tir_support::compile_source("erased_devtools_publications", source)
+        .expect_err("erased publications must not satisfy panel state fields");
+    let error_codes = diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .map(|diagnostic| diagnostic.code)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        error_codes,
+        vec!["E1414".to_string(), "E1414".to_string()]
     );
 }

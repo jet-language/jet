@@ -778,12 +778,10 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            // D-FOUND-PLATFORM1=A: font enum values are canonical Core values
-            // carried by the shared Prelude. Sema represents shorthand `.Body`
-            // (and its qualified equivalent) as `EnumLit`, while the lowerer
-            // emits the same ordinary unit enum construction as the `Field`
-            // spelling. These enums have no user `Cx` variant row.
-            if matches!(resolved_type, "FontStyle" | "GlyphShaper") {
+            // Shared Prelude unit enums lower through their registered variant names.
+            if matches!(resolved_type,
+                "FontStyle" | "GlyphShaper" | "WebFormValueType" | "WebFormControl")
+            {
                 return args.is_empty()
                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_type)
                         .is_some_and(|variants| variants.contains(&variant.as_str()));

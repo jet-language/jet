@@ -960,7 +960,9 @@ pub fn apply_impure_core_call_with_type_args(
         }
         // `core.text.fmt` is pure text rendering; at runtime it carries the
         // shared Display route every `"{value}"` and `print(value)` lowers to.
-        ("core.time", _)
+        ("core.builtin", "len_string")
+        | ("core.reactive.loadable", _)
+        | ("core.time", _)
         | ("core.math", _)
         | ("core.testing", _)
         | ("core.data", _)

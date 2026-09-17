@@ -13,6 +13,7 @@ use super::Completion::{
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
+use jet_semindex::SymRef;
 use jetpack::Discovery::{Index as DiscoveryIndex, OptionField, PackageRecord};
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
@@ -776,10 +777,10 @@ fn checked_reference_in_span<'a>(
     let mut identity = None;
     for reference in candidates {
         let Some(target) = reference.target.as_ref() else {
-            return Err(());
+            continue;
         };
         let Some(candidate) = checked_anchor_identity(db, target) else {
-            return Err(());
+            continue;
         };
         if identity
             .as_ref()
@@ -789,6 +790,9 @@ fn checked_reference_in_span<'a>(
         }
         identity = Some(candidate);
         selected.get_or_insert(reference);
+    }
+    if selected.is_none() {
+        return Err(());
     }
     Ok(selected)
 }
@@ -931,40 +935,209 @@ fn token_span_at(tokens: &[Token], offset: usize) -> Option<Span> {
 }
 
 
-/// Resolve a call into one declaration owned by the canonical build graph.
-/// Generated modules are not a second symbol database: their source and path
-/// come from the selected BuildPlan, and the lexer identifies the declaration
-/// span. Multiple selected modules with the same leaf are ambiguous.
-pub(crate) fn compute_generated_definition(
+/// A checked declaration projected from the canonical BuildPlan source.
+///
+/// The BuildPlan owns the generated artifact, module identity, and source. The
+/// LSP keeps only this fact while resolving a request; declaration and origin
+/// responses are projections of it rather than a second generated-symbol DB.
+#[derive(Debug, Clone)]
+pub(crate) struct GeneratedDeclarationFact {
+    pub(crate) identity: String,
+    pub(crate) name: String,
+    pub(crate) module_name: String,
+    pub(crate) module_path: String,
+    pub(crate) source: String,
+    pub(crate) span: Span,
+    pub(crate) plugin: Option<String>,
+}
+
+fn generated_declarations(
     plan: &crate::Comptime::Build::BuildPlan,
-    tokens: &[Token],
-    offset: usize,
-) -> Option<(String, String, Span)> {
-    let name = find_ident_at(tokens, offset)?;
-    let modules = plan.selected_generated_modules().ok()?;
-    let mut candidate = None;
+) -> Vec<GeneratedDeclarationFact> {
+    let Ok(modules) = plan.selected_generated_modules() else {
+        return Vec::new();
+    };
+    let mut declarations = Vec::new();
     for module in modules {
-        let (generated_tokens, errors) = crate::Lexer::lex(&module.source);
+        let (tokens, errors) = crate::Lexer::lex_generated(&module.source);
         if !errors.is_empty() {
             continue;
         }
-        for pair in generated_tokens.windows(2) {
-            if !matches!(pair[0].kind, TokKind::KwFn)
-                || !matches!(&pair[1].kind, TokKind::Ident(candidate) if candidate == name)
-            {
+        let tokens = crate::Lexer::without_comments(&tokens);
+        for pair in tokens.windows(2) {
+            let TokKind::Ident(name) = &pair[1].kind else {
+                continue;
+            };
+            if !matches!(pair[0].kind, TokKind::KwFn) {
                 continue;
             }
-            if candidate.is_some() {
-                return None;
-            }
-            candidate = Some((
-                module.path.as_str().to_string(),
-                module.source.clone(),
-                pair[1].span,
-            ));
+            declarations.push(GeneratedDeclarationFact {
+                identity: format!("fn:module:{}::{name}", module.name),
+                name: name.clone(),
+                module_name: module.name.clone(),
+                module_path: module.path.as_str().to_string(),
+                source: module.source.clone(),
+                span: pair[1].span,
+                plugin: module.plugin.and_then(|handle| {
+                    plan.plugins()
+                        .iter()
+                        .find(|plugin| plugin.id == handle.id())
+                        .map(|plugin| plugin.name.clone())
+                }),
+            });
         }
     }
-    candidate
+    declarations.sort_by(|left, right| {
+        left.identity
+            .cmp(&right.identity)
+            .then(left.module_path.cmp(&right.module_path))
+            .then(left.span.start.cmp(&right.span.start))
+    });
+    declarations
+}
+
+fn generated_qualifier<'a>(tokens: &'a [Token], index: usize) -> Option<&'a str> {
+    let previous = tokens.get(index.checked_sub(1)?)?;
+    if !matches!(previous.kind, TokKind::Dot | TokKind::QuestionDot) {
+        return None;
+    }
+    match &tokens.get(index.checked_sub(2)?)?.kind {
+        TokKind::Ident(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn generated_module_matches(declaration: &GeneratedDeclarationFact, qualifier: &str) -> bool {
+    declaration.module_name == qualifier
+}
+
+/// Register checked generated declarations and their call-site anchors in the
+/// existing semantic index. An unqualified call is registered only when one
+/// generated declaration owns that leaf; a qualifier selects the matching
+/// BuildPlan module identity. This makes iteration order irrelevant and keeps
+/// ambiguity unresolved instead of guessing by display name.
+pub(crate) fn register_generated_declarations(
+    db: &mut SymbolDB,
+    plan: &crate::Comptime::Build::BuildPlan,
+    source_path: &str,
+    tokens: &[Token],
+) -> Vec<GeneratedDeclarationFact> {
+    let declarations = generated_declarations(plan);
+    for declaration in &declarations {
+        if db.defs.iter().any(|definition| {
+            definition.identity == declaration.identity
+                && definition.module_path == declaration.module_path
+                && definition.def_span == declaration.span
+        }) {
+            continue;
+        }
+        db.defs.push(jet_semindex::SymDef {
+            identity: declaration.identity.clone(),
+            name: declaration.name.clone(),
+            def_span: declaration.span,
+            module_path: declaration.module_path.clone(),
+            kind: SymKind::Function {
+                params: Vec::new(),
+                param_contract: Vec::new(),
+                param_variadic: Vec::new(),
+                ret: None,
+                failure_contract: "unknown".to_string(),
+                failure_source: "generated BuildPlan declaration".to_string(),
+                effects: None,
+                effect_via: None,
+                param_access: Vec::new(),
+                param_defaults: Vec::new(),
+                policies: Vec::new(),
+            },
+        });
+    }
+
+    let tokens = crate::Lexer::without_comments(tokens);
+    for (index, token) in tokens.iter().enumerate() {
+        let TokKind::Ident(name) = &token.kind else {
+            continue;
+        };
+        let Some(next) = tokens.get(index + 1) else {
+            continue;
+        };
+        if !matches!(next.kind, TokKind::LParen) {
+            continue;
+        }
+        let qualifier = generated_qualifier(&tokens, index);
+        let matches = declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.name == name.as_str()
+                    && qualifier
+                        .is_none_or(|qualifier| generated_module_matches(declaration, qualifier))
+            })
+            .collect::<Vec<_>>();
+        let Some(declaration) = (matches.len() == 1).then_some(matches[0]) else {
+            continue;
+        };
+        let anchor = jet_semindex::DefinitionAnchor {
+            module_path: declaration.module_path.clone(),
+            kind: "function".to_string(),
+            def_span: declaration.span.into(),
+            semantic_identity: Some(declaration.identity.clone()),
+        };
+        let existing = db
+            .refs
+            .iter()
+            .enumerate()
+            .filter(|(_, reference)| {
+                reference.module_path == source_path && reference.span == token.span
+            })
+            .map(|(index, reference)| {
+                let Some(target) = reference.target.as_ref() else {
+                    return (index, true, false);
+                };
+                let generated_target = declarations.iter().any(|candidate| {
+                    candidate.name == name.as_str()
+                        && candidate.module_path == target.module_path
+                        && candidate.span == target.def_span.into()
+                });
+                let known_target = db.defs.iter().any(|definition| {
+                    definition.module_path == target.module_path
+                        && definition.def_span == target.def_span.into()
+                });
+                (index, generated_target, known_target)
+            })
+            .collect::<Vec<_>>();
+        let has_checked_non_generated_target = existing
+            .iter()
+            .any(|(_, generated_target, known_target)| *known_target && !*generated_target);
+        if has_checked_non_generated_target {
+            continue;
+        }
+        if existing.is_empty() {
+            db.refs.push(SymRef {
+                name: name.clone(),
+                span: token.span,
+                module_path: source_path.to_string(),
+                scope_identity: None,
+                target: Some(anchor),
+                fact: None,
+            });
+        } else {
+            for (index, _, _) in existing {
+                db.refs[index].target = Some(anchor.clone());
+            }
+        }
+    }
+    declarations
+}
+
+/// Resolve a registered generated fact by its exact artifact and declaration
+/// span. This is the sole origin lookup used by LSP definition responses.
+pub(crate) fn generated_declaration_at<'a>(
+    declarations: &'a [GeneratedDeclarationFact],
+    module_path: &str,
+    span: Span,
+) -> Option<&'a GeneratedDeclarationFact> {
+    declarations.iter().find(|declaration| {
+        declaration.module_path == module_path && declaration.span == span
+    })
 }
 
 // ── Go-to-definition ──────────────────────────────────────────────────────────
@@ -977,13 +1150,6 @@ pub(crate) fn compute_definition(
     offset: usize,
 ) -> Option<(String, Span)> {
     let identity = checked_semantic_identity_at(db, tokens, path, offset)?;
-    if let Ok(Some(reference)) = checked_reference_in_span(db, path, offset, offset) {
-        if let Some(target) = reference.target.as_ref() {
-            if checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()) {
-                return Some((target.module_path.clone(), target.def_span.into()));
-            }
-        }
-    }
     let mut definition = None;
     for candidate in db.defs.iter().filter(|candidate| candidate.identity == identity) {
         if definition.is_some_and(|existing: &jet_semindex::SymDef| {

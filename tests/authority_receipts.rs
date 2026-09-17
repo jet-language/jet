@@ -24,6 +24,7 @@ fn run() {
         .env("SECRET_TOKEN", "authority-success-secret")
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
@@ -65,6 +66,7 @@ fn run() {
         .env("SECRET_TOKEN", "authority-failure-secret")
         .stdout(.Capture)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.plan() == {
         .Ok(_) -> {
@@ -103,6 +105,7 @@ fn run() {
         .env("SECRET_TOKEN", "stream-secret")
         .stdout(.Stream)
         .stderr(.Capture)
+        .cwd("/tmp")
         .under(policy)
     if spec.run() == {
         .Ok(_) -> print("accepted")
@@ -127,6 +130,7 @@ fn run() {
     policy :: process.workspace()
     spec :: process.cmd(["/bin/sh", "-c", "printf terminal-secret"])
         .terminal()
+        .cwd("/tmp")
         .under(policy)
     if spec.plan() == {
         .Ok(_) -> print("accepted")

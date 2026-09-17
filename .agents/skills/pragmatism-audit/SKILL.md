@@ -1,184 +1,40 @@
 ---
 name: pragmatism-audit
 description: >-
-  Audit Jet for getting real work done across domains and workloads. Find places
-  where the language forces ceremony instead of shipping the obvious default,
-  while still preserving expert reject/override. Draft skill — use for
-  pragmatism audits, “does this help me finish the job?”, and domain-workload
-  friction reviews.
+  Audit Jet's ability to ship useful work across a declared domain set. Use when
+  checking pragmatic friction, defaults, and expert escape paths.
 ---
 
-# Pragmatism Audit (draft)
+# Pragmatism audit
 
-Score Jet on **shipping useful work**, not elegance alone. Cover many domains
-and workloads. Every finding asks: would a competent person trying to finish a
-real job hit friction that Jet could have absorbed by default?
+Score Jet on shipping useful work, not elegance alone. Ask whether a competent person finishing a real job meets friction Jet could absorb by default. This is a draft method; keep its findings concrete and record method improvements in the run report.
 
-This is a **draft** skill. Prefer clear method and concrete findings over
-framework polish. When a run exposes a missing lens, record the proposed method
-improvement in that run's report. Do not edit this skill during an audit; apply
-skill edits only in an explicitly authorized skill-maintenance task.
+Do not edit this skill during an audit. Apply method changes only in a separately authorized skill-maintenance task.
 
-## What this is (and is not)
+Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-dispositions.md) and [`_shared/standing-lens.md`](../_shared/standing-lens.md). They own shared permissions, scope depth, evidence rules, publication, and finding dispositions. This method owns domain selection, live job probes, friction taxonomy, dual-facet findings, and finite closeout.
 
-| This audit | Not this |
-| --- | --- |
-| “Can I finish the job without fighting the language?” | Mission/philosophy scorecard alone (`mission-audit`) |
-| Domain workloads: games, UI, science, CLI, net, embed, data, tooling | Surface uniformity cosmetics (`surface-audit`) |
-| Beginner magic **with** expert reject + override | Peer leave/stay competition (`gauntlet`) |
-| Defaults that match the most likely use case | Spec text vs code only (`spec-compliance-audit`) |
+## Declare breadth
 
-Authority order: owner instruction → ratified Tower verdicts and acceptance
-terms → the relevant domain spec (`docs/spec/philosophy.md`) → `AGENTS.md`
-invariants and owner gates → this skill.
+At activation, freeze the target outcome, risks, and finite domain/workload rows. A named narrower slice from the owner is allowed. Without one, the broad default covers at least six distinct workloads from the full pool: CLI tools, web/UI, games, scientific/numeric work, networking, embedded/systems, data/serde, packaging/build, scripting/automation, and text/parsing. A narrower request may reduce that breadth only explicitly; never silently reduce or expand the declared set.
 
-Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
-shared publication, workflow-boundary, and disposition mechanics; this method
-still owns domain selection, happy-path probes, friction taxonomy, and
-dual-facet findings.
+Read [`references/method.md`](references/method.md) for the evidence obligations, friction taxonomy, calibration cases, and report shape. Select domains that cover the requested risks, then keep the frozen set through the run.
 
-Code shows implementation state, not design law.
+## Three facets on every finding
 
-## Dual-facet pragmatism bar
+Every finding carries all three paths:
 
-Both required on every finding:
+1. **Beginner/default.** The common useful behavior works without ceremony. Footguns stay opt-in. Printing, derives, conversions, units, formats, and obvious APIs work by default.
+2. **Expert/control.** The same mechanism lets an expert reject the default, override it, or take a fully manual path. Do not add a parallel mechanism, hidden rustc, or safety carve-out without `#Unsafe`.
+3. **Agent.** An unattended agent can finish from compiler output: the checker catches the mistake, the verdict arrives quickly, the report is actionable, the loop does not burn tokens on repeated error reading, and one error has one obvious repair.
 
-1. **Beginner / default path.** The most common useful behavior happens without
-   ceremony. Footguns stay opt-in. Printing, derives, conversions, units,
-   formats, and “obvious” APIs Just Work for the common case.
-2. **Expert / control path.** The same mechanism lets experts **reject** the
-   default, **override** it, or take a fully manual path. No second parallel
-   mechanism (I8). No hidden rustc. No safety carve-out without `#Unsafe`.
+Grade the five agent quantities per finding: verdict fidelity, verdict latency, verdict actionability, context economy, and repair determinism. Getting the job done beats theoretical purity; ceremony is justified only when it buys safety, clarity, or expert control that cannot live behind opt-in.
 
-Conflict rule: **getting the job done beats theoretical purity**. Ceremony
-wins only when it buys safety, clarity, or expert control that cannot live
-behind opt-in.
+## Evidence and standing lens
 
-## The standing lens
+Search live specs, examples, stdlib, CLI, and package surfaces. Use the standing-lens sections relevant to the frozen domain set, including runtime probes and the micro sweep where they bear on the target. Do not force unrelated comparative work. Use `scripts/agent/jet-env` for representative jobs; cite paths, examples, commands, and output. Missing evidence is `unknown`, not permission to widen the run.
 
-Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
-five agent-optimality quantities, the micro sweep, probe the running binary, and
-the honesty rules. The owner never has to ask for any of it.
+## Completion and output
 
-## Third facet: the agent has to finish the job too
+Stop when every frozen domain row has a concrete job and evidence or an honest `unknown`; every finding has beginner, expert, and agent paths; the friction taxonomy, defaults map, celebrated pragmatism, and required report sections are complete; and the disposition marker is ready. A clean domain or zero losses is valid when declared coverage is complete.
 
-The dual-facet bar above covers the beginner and the expert. Most Jet code will
-be written by an agent driving the same surface, and "does this help me finish
-the job?" is exactly the right question to ask on its behalf.
-
-Add a third requirement to every finding:
-
-3. **Agent path.** An unattended agent can complete the job from the compiler's
-   own output: the checker catches the mistake rather than production, the
-   verdict arrives fast enough to sit in a loop, the report can be acted on
-   without guessing, the loop does not burn tokens re-reading long errors, and
-   the error admits one obvious repair rather than four plausible ones.
-
-Those are the five quantities in the shared lens. Grade them per finding, not
-once per report. Ceremony that a human tolerates once per file is paid on every
-iteration by an agent, so friction that looks minor to a reader can be the
-dominant cost in a loop — weigh it that way.
-
-## Method
-
-Search live specs, examples, stdlib, CLI, and package surfaces. Prefer
-`scripts/agent/jet-env` and `rg` over memory. Invent fresh domain personas when
-useful; do not recycle the same three toy apps every run.
-
-1. **Pick domains.** Cover at least six distinct workloads in one run unless
-   the owner names a narrower slice. Suggested pool: CLI tools, web/UI, games,
-   scientific/numeric, networking, embedded/systems, data/serde, packaging/
-   build, scripting/automation, text/parsing.
-2. **Name a concrete job** per domain (one paragraph): what the person builds,
-   what “done” looks like, which Jet surfaces they touch.
-3. **Walk the happy path** with real examples or a minimal repro under
-   `scripts/agent/jet-env`. Note every place they must write ceremony the
-   compiler or stdlib already knows.
-4. **Classify each friction** (see taxonomy below).
-5. **Propose the smallest complete fix**: default magic → optional reject →
-   optional override. Kill slices that break invariants, duplicate mechanisms,
-   or hide expert control.
-6. **Owner gates** (new syntax, new stdlib external dep, invariant carve-out,
-   taste): ballot titles only unless asked to raise cards.
-
-### Friction taxonomy
-
-Use exactly these kinds:
-
-| Kind | Meaning |
-| --- | --- |
-| `missing-default` | Compiler/stdlib already knows the answer; user must still opt in |
-| `dead-end-magic` | Feature exists but fails at the last mile (e.g. units check, bare print) |
-| `no-reject` | Default cannot be turned off for a type/package/project |
-| `no-override` | Default cannot be replaced with a hand-written path |
-| `wrong-default` | Default matches a rare case; common case pays tax |
-| `domain-blind` | Surface ignores a whole workload’s obvious needs |
-| `keep` | Default + reject + override already lined up — celebrate |
-
-### Calibration examples (seed; find more each run)
-
-These are known pragmatism pressures. Re-verify against the tree; do not treat
-as settled law until ratified.
-
-1. **Auto derives (S55 family).** Built-in traits often auto-derive when
-   fields qualify, and hand impls can override. Ask: is the default “everything
-   useful derives”? Can a user **reject** auto-derive for a type or package?
-   Can they **override** selectively? Prefer default-on + reject + override
-   over opt-in ceremony for the common case.
-2. **Dimensional / unit printing** (`examples/features/types/dimensional_quantities.jet`).
-   Algebra and dimension checks exist; `print(recovered)` still feels bare if
-   units do not appear (`12 meter`, `4 meter/second`, `766 px`). Ask: does
-   the last mile of the feature finish the job a scientist/UI author expects?
-
-## Output
-
-This is a report-only method. Write one markdown report under `docs/audits/`
-through the project-approved non-serve CLI. Do not create Tower work or
-implementation edits unless the owner explicitly asks. Read
-`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
-publication rules and the required finding-disposition table. Keep the domain
-scorecard, friction taxonomy, defaults map, and celebrated pragmatism sections
-below; report completion does not implement a proposed fix.
-
-Record any proposed improvement to this draft method in the report. Do not edit
-this skill during the audit; apply skill edits only in an explicitly authorized
-skill-maintenance task.
-
-### Required report sections
-
-```markdown
-# Pragmatism audit — YYYY-MM-DD
-
-## Thesis
-One short paragraph: where Jet helps finish jobs vs where it stops short.
-
-## Domain scorecard
-| Domain / workload | Job | Grade (ships / friction / blocked) | Top friction kind | Evidence |
-
-## Findings
-Ranked. Each: kind, domain, evidence (file/example/command), beginner impact,
-expert reject/override status, agent-path grade (which of the five quantities it
-costs), smallest fix, owner-gate? (yes/no + ballot title).
-
-## Defaults map
-Table of “most likely use case → today’s default → reject path → override path”.
-Mark holes.
-
-## Celebrated pragmatism
-Defaults that already ship the job — preserve these.
-
-## Next actions
-Ballot titles or card ids only — do not create cards unless asked.
-```
-
-## Anti-goals
-
-- Not “add every Rust derive marker”
-- Not peer popularity or trust (`gauntlet`)
-- Not ontology unity for its own sake (`isomorphic-ontology-audit`)
-- Not inventing parallel mechanisms for one semantic job (I8)
-- Not lowering safety to look pragmatic (I1)
-
-Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
-required marker table. Keep next actions as ballot titles or card IDs and do
-not create them in this report-only run.
+This is report-only by default. Write one report under `docs/audits/` through the project-approved non-serve CLI, cite Tower read-only, and create no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion does not implement a proposed fix.

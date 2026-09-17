@@ -286,13 +286,25 @@ mod text_kernel {
         jet_text_rsplitn(&s.to_string(), &pattern.to_string(), count)
     }
     pub(super) fn pad_start(s: &str, width: i64, fill: &str) -> String {
-        jet_text_pad_start(&s.to_string(), width, &fill.to_string())
+        jet_text_pad_start(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(super) fn pad_end(s: &str, width: i64, fill: &str) -> String {
-        jet_text_pad_end(&s.to_string(), width, &fill.to_string())
+        jet_text_pad_end(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(super) fn center(s: &str, width: i64, fill: &str) -> String {
-        jet_text_center(&s.to_string(), width, &fill.to_string())
+        jet_text_center(
+            &s.to_string(),
+            jet_foundation::Numeric::JetInt::from_i64(width),
+            &fill.to_string(),
+        )
     }
     pub(super) fn starts_any(s: &str, prefixes: &[String]) -> bool {
         jet_text_starts_any(&s.to_string(), &prefixes.to_vec())

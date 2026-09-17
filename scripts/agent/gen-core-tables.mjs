@@ -255,7 +255,6 @@ function ensureCoreNames() {
   if (core.modules.some((entry) => entry.module === "core.task")) {
     fail(`${CORE_SOURCE_PATH}: retired core.task alias is still declared`);
   }
-  validatePublicDispatcher(core, publicDispatcherRows());
   return core;
 }
 
@@ -302,6 +301,7 @@ function check() {
   const source = read(EFFECT_SOURCE_PATH);
   const facts = parseEffects(source);
   const core = ensureCoreNames();
+  validatePublicDispatcher(core, publicDispatcherRows());
   checkEffects(source, facts);
   const coreSource = read(CORE_SOURCE_PATH);
   validateGeneratedViews(coreSource, core);
@@ -311,11 +311,12 @@ function check() {
 function write() {
   const source = read(EFFECT_SOURCE_PATH);
   const facts = parseEffects(source);
-  ensureCoreNames();
+  const core = ensureCoreNames();
   writeEffects(source, facts);
   // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
   // this coordinator never reimplements that schema.
   writeCoreViews();
+  validatePublicDispatcher(core, publicDispatcherRows());
   process.stdout.write("wrote effect and Core generated views\n");
 }
 

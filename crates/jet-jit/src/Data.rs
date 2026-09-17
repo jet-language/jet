@@ -4412,8 +4412,8 @@ fn query_group_rows(
                     }
                 },
                 QUERY_REDUCER_MEAN => {
-                    let value = query_callback(value_callback, row.word, operation)?;
-                    let value = f64::from_bits(value as u64);
+                    let raw_value = query_callback(value_callback, row.word, operation)?;
+                    let value = f64::from_bits(raw_value as u64);
                     if !value.is_finite() {
                         return Err(err(
                             DataErrorKind::NonFinite,
@@ -4457,8 +4457,8 @@ fn query_group_rows(
                     }
                 },
                 QUERY_REDUCER_MEAN => {
-                    let value = query_callback(value_callback, row.word, operation)?;
-                    let value = f64::from_bits(value as u64);
+                    let raw_value = query_callback(value_callback, row.word, operation)?;
+                    let value = f64::from_bits(raw_value as u64);
                     if !value.is_finite() {
                         return Err(err(
                             DataErrorKind::NonFinite,
@@ -4500,12 +4500,12 @@ fn query_group_rows(
                         }
                         _ => 0,
                     };
-                    let value_descriptor = match reducer {
-                        QUERY_REDUCER_COUNT => None,
-                        QUERY_REDUCER_SUM | QUERY_REDUCER_MEAN => value_descriptor,
-                        _ => None,
-                    };
-                    if let Some(descriptor) = value_descriptor {
+                    if reducer == QUERY_REDUCER_MEAN {
+                        let mean = f64::from_bits(value as u64);
+                        rt.heap.record_set_float(record, 1, mean).ok_or_else(|| {
+                            data_decode_error(operation, "mean result value is not a float")
+                        })?;
+                    } else if let Some(descriptor) = value_descriptor {
                         query_store_field(rt, record, 1, value, descriptor)?;
                     } else {
                         let _ = rt.heap.record_set_int(record, 1, value);

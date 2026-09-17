@@ -4386,6 +4386,15 @@ pub(crate) fn run_dev_entry(
         }
     };
     let bin = bin_path(file);
+    let dev_profile_name = match &profile {
+        BuildProfile::Named { name, .. } => Some(name.clone()),
+        BuildProfile::Release => Some("release".to_string()),
+        BuildProfile::Hardened => Some("hardened".to_string()),
+        BuildProfile::Debug => Some("debug".to_string()),
+        BuildProfile::Ci => Some("ci".to_string()),
+        BuildProfile::Default | BuildProfile::Fast | BuildProfile::Small | BuildProfile::NoOs => None,
+    };
+    let dev_small_profile = matches!(profile, BuildProfile::Small);
     build(
         file,
         &out.rust,
@@ -4421,15 +4430,31 @@ pub(crate) fn run_dev_entry(
     let jet_bin = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| jet::Syntax::BINARY_NAME.to_string());
-    let status = Command::new(&bin)
+    let mut command = Command::new(&bin);
+    command
         .args(program_args)
         .env("JET_DEV_FILE", &dev_file)
         .env("JET_BIN", &jet_bin)
-        .status()
-        .unwrap_or_else(|e| {
-            crate::cli_error!("E2105", "couldn't run the built program: {}", e);
-            exit(ExitCodes::USER_ERROR);
-        });
+        .env("JET_DEV_SETTING_COUNT", setting_overrides.len().to_string());
+    if let Some(profile) = dev_profile_name {
+        command.env("JET_DEV_PROFILE", profile);
+    } else {
+        command.env_remove("JET_DEV_PROFILE");
+    }
+    if dev_small_profile {
+        command.env("JET_DEV_SMALL", "1");
+    } else {
+        command.env_remove("JET_DEV_SMALL");
+    }
+    for (index, (key, value)) in setting_overrides.iter().enumerate() {
+        command
+            .env(format!("JET_DEV_SETTING_{index}_KEY"), key)
+            .env(format!("JET_DEV_SETTING_{index}_VALUE"), value);
+    }
+    let status = command.status().unwrap_or_else(|e| {
+        crate::cli_error!("E2105", "couldn't run the built program: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    });
     let exit_code = child_exit_code(status);
     finish_recorded_artifacts(
         record.as_ref(),
@@ -4448,7 +4473,7 @@ pub(crate) fn run_web_app_dev_entry(
     file: &str,
     mode: OutputMode,
     port: Option<u16>,
-    profile: Option<&str>,
+    profile: &BuildProfile,
     setting_overrides: &BTreeMap<String, String>,
     record_name: Option<&str>,
     passthrough: &[&String],
@@ -4464,7 +4489,7 @@ pub(crate) fn run_web_app_dev_entry(
         crate::ProveReplay::begin_named_capture(
             file,
             name,
-            profile.unwrap_or("dev"),
+            profile.budget_name(),
             setting_overrides,
             mode.json,
         )
@@ -4479,8 +4504,15 @@ pub(crate) fn run_web_app_dev_entry(
     });
     let mut command = Command::new(jet_bin);
     command.arg("run").arg(file);
-    if let Some(profile) = profile {
-        command.arg(format!("--profile={profile}"));
+    match profile {
+        BuildProfile::Default | BuildProfile::Fast => {}
+        BuildProfile::Small => {
+            command.arg("--small");
+        }
+        BuildProfile::NoOs => {}
+        _ => {
+            command.arg(format!("--profile={}", profile.budget_name()));
+        }
     }
     for (key, value) in setting_overrides {
         command.arg(format!("--set={key}={value}"));
@@ -5168,7 +5200,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     }
 
     let run_src = if web {
-        "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\", on_click: () -> {\n                count.set(count.get() + 1)\n            })\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
+        "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {\n                count.set(count.get() + 1)\n            }\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
     } else {
         "#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) String -> \"hello, {name}\"\n\nfn run(args: GreetingArgs) { print(greeting(args.name)) }\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n"
     };
@@ -5688,6 +5720,21 @@ struct HarnessTestCase {
     message: String,
 }
 
+/// Convert the harness's normalized result into the evidence state.
+///
+/// The harness reports an expected failure as `ok: true` and an unexpected
+/// pass as `ok: false`; evidence deliberately records the underlying
+/// assertion outcome so the expectation marker can classify it canonically.
+fn harness_test_state(case: &HarnessTestCase) -> u8 {
+    if case.skipped {
+        2
+    } else if case.ok == case.expected_failure {
+        1
+    } else {
+        0
+    }
+}
+
 fn host_target_triple() -> String {
     format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
 }
@@ -5845,6 +5892,7 @@ fn append_harness_test_evidence(
     revision: &jet_foundation::Evidence::EvidenceRevision,
     child_ok: bool,
 ) -> Result<(), String> {
+    canonicalize_test_report_identity(report, report_id);
     let cases = harness_test_cases(stdout)?;
     let Some(cases) = cases else {
         if child_ok {
@@ -5869,22 +5917,24 @@ fn append_harness_test_evidence(
         return Ok(());
     };
     for case in cases {
-        if report
-            .records
-            .iter()
-            .any(|record| record.identity.claim_id == case.name)
-        {
+        // A report may already contain the terminal property/doctest record
+        // emitted by the child.  Runtime observations are deliberately not
+        // terminal test outcomes: a runtime stop with the same claim must
+        // not suppress the harness outcome (or an ordinary failure can
+        // disappear from the aggregate).
+        if report.records.iter().any(|record| {
+            matches!(
+                record.kind,
+                jet_foundation::Evidence::EvidenceKind::Unit
+                    | jet_foundation::Evidence::EvidenceKind::Property
+                    | jet_foundation::Evidence::EvidenceKind::Doctest
+            ) && record.identity.claim_id == case.name
+        }) {
             continue;
         }
         let mut record = jet_foundation::Evidence::EvidenceRecord::from_test_codes(
             0,
-            if case.skipped {
-                2
-            } else if case.ok != case.expected_failure {
-                0
-            } else {
-                1
-            },
+            harness_test_state(&case),
             &case.name,
             &case.message,
             file,
@@ -5908,6 +5958,21 @@ fn append_harness_test_evidence(
     Ok(())
 }
 
+fn canonicalize_test_report_identity(
+    report: &mut jet_foundation::Evidence::EvidenceReport,
+    report_id: &str,
+) {
+    // EvidenceReport::read reconstructs report identity from the first
+    // append-only record.  A test harness report is an aggregate, however:
+    // runtime observations and one terminal outcome may have different
+    // claims, and a multi-test run has many terminal claims.  Keep only the
+    // stable report identity at this boundary; per-record identities remain
+    // authoritative.
+    report.identity.report_id = report_id.to_string();
+    report.identity.claim_id.clear();
+    report.identity.evidence_id.clear();
+}
+
 fn read_or_create_test_evidence_report(
     path: &Path,
     report_id: &str,
@@ -5919,9 +5984,9 @@ fn read_or_create_test_evidence_report(
     build_revision: &str,
     revision: &str,
 ) -> Result<jet_foundation::Evidence::EvidenceReport, String> {
-    match jet_foundation::Evidence::EvidenceReport::read(path) {
-        Ok(report) => Ok(report),
-        Err(_error) if !path.exists() => Ok(jet_foundation::Evidence::EvidenceReport::new(
+    let mut report = match jet_foundation::Evidence::EvidenceReport::read(path) {
+        Ok(report) => report,
+        Err(_error) if !path.exists() => jet_foundation::Evidence::EvidenceReport::new(
             report_id,
             jet_foundation::Evidence::EvidenceProducerKind::Test,
             jet_foundation::Evidence::EvidenceSource::new(file, 0, 1),
@@ -5931,12 +5996,16 @@ fn read_or_create_test_evidence_report(
                 build_revision,
                 revision,
             ),
-        )),
-        Err(error) => Err(format!(
-            "could not read test evidence report `{}`: {error}",
-            path.display()
-        )),
-    }
+        ),
+        Err(error) => {
+            return Err(format!(
+                "could not read test evidence report `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    canonicalize_test_report_identity(&mut report, report_id);
+    Ok(report)
 }
 
 fn write_test_evidence_bytes(path: &Path, bytes: &[u8]) -> Result<u64, String> {
@@ -6312,6 +6381,14 @@ pub(crate) struct TestRunOpts {
     pub(crate) shuffle_seed: Option<u64>,
     /// `--serial`: run one test at a time instead of the parallel default.
     pub(crate) serial: bool,
+    /// `--grade=generated` selects the standalone generated property runner.
+    pub(crate) grade_generated: bool,
+    /// Optional generated-property target name.
+    pub(crate) generated_test_name: Option<String>,
+    pub(crate) generated_iterations: Option<u64>,
+    pub(crate) generated_time_budget_ms: Option<u64>,
+    pub(crate) generated_seed: Option<u64>,
+    pub(crate) generated_corpus: Option<String>,
     /// `--measure`: run only `.measure` claims through the measurement harness.
     pub(crate) measure: bool,
     /// `--record=NAME`: write the shared safe replay envelope for this target.
@@ -6358,12 +6435,52 @@ impl TestRunOpts {
                 "--show-default" => opts.show_default = true,
                 "--watch" => opts.watch = !matches!(inline, Some("off" | "false" | "0")),
                 "--fresh" => opts.fresh = true,
-                "--docs" => opts.docs = true,
                 "--update-snapshots" | "-u" => opts.update_snapshots = true,
                 "--coverage" => opts.coverage = true,
                 "--release" => opts.release = true,
                 "--trace-tiers" => opts.trace_tiers = true,
                 "--serial" => opts.serial = true,
+                "--grade" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    if value != "generated" {
+                        invalid_test_run_option(format!(
+                            "`--grade={value}` is not supported by `jet test`"
+                        ));
+                    }
+                    opts.grade_generated = true;
+                }
+                "--iterations" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    opts.generated_iterations = Some(value.parse::<u64>().unwrap_or_else(|_| {
+                        invalid_test_run_option(format!("`--iterations={value}` isn't a number"))
+                    }));
+                }
+                "--time" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    opts.generated_time_budget_ms = Some(
+                        value
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                            .map(|seconds| (seconds * 1000.0) as u64)
+                            .unwrap_or_else(|| {
+                                invalid_test_run_option(format!(
+                                    "`--time={value}` must be a non-negative number"
+                                ))
+                            }),
+                    );
+                }
+                "--seed" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    opts.generated_seed = Some(value.parse::<u64>().unwrap_or_else(|_| {
+                        invalid_test_run_option(format!("`--seed={value}` isn't a number"))
+                    }));
+                }
+                "--corpus" => {
+                    opts.generated_corpus =
+                        Some(test_run_option_value(argv, &mut index, name, inline));
+                }
+                "--docs" => opts.docs = true,
                 "--measure" => opts.measure = true,
                 "--browser-ui" => opts.browser_ui = !matches!(inline, Some("off" | "false" | "0")),
                 "--browser-visual" => {
@@ -6458,7 +6575,9 @@ impl TestRunOpts {
                 positionals.len()
             ));
         }
-        if let Some(filter) = positionals.get(1) {
+        if opts.grade_generated {
+            opts.generated_test_name = positionals.get(1).cloned();
+        } else if let Some(filter) = positionals.get(1) {
             merge_test_filter(&mut opts.filter, filter.clone());
         }
         // `--release` is sugar for the named release profile and therefore
@@ -6513,6 +6632,112 @@ fn invalid_test_run_option(message: String) -> ! {
     );
     exit(ExitCodes::USAGE);
 }
+/// Run one selected property test with the generated-test grade. This keeps
+/// generated execution separate from ordinary evidence aggregation: the
+/// generated binary owns its corpus and iteration policy, while `jet test`
+/// still owns target selection and compiler diagnostics.
+fn run_generated_test(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
+    let source_path = Path::new(path);
+    if !source_path.is_file() {
+        crate::cli_error!("E2105", "can't find `{}`", path);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let source = match fs::read_to_string(source_path) {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read `{}`: {}", path, error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let (rust_code, ffi_link) =
+        match jet::compile_fuzz_with_path(path, opts.generated_test_name.as_deref()) {
+            Ok(output) => output,
+            Err(jet::FuzzCompileError::Diagnostics(diags)) => {
+                report_problems(mode, path, &source, &diags);
+                exit(ExitCodes::USER_ERROR);
+            }
+            Err(jet::FuzzCompileError::Target(message)) => {
+                crate::cli_error!(
+                    @fix "E2104",
+                    message,
+                    "name one property test with `jet test --grade=generated <file> <name>`"
+                );
+                exit(ExitCodes::USAGE);
+            }
+        };
+    let profile = if let Some(name) = opts.profile.as_deref() {
+        resolve_named_profile(name, path, mode)
+    } else if opts.release {
+        BuildProfile::Release
+    } else {
+        BuildProfile::Default
+    };
+    let bin = fuzz_bin_path(source_path);
+    build(
+        path,
+        &rust_code,
+        None,
+        bin.clone(),
+        profile,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        None,
+        None,
+        mode,
+        false,
+        None,
+    );
+    let corpus = opts.generated_corpus.unwrap_or_else(|| {
+        let corpus_name = opts
+            .generated_test_name
+            .as_deref()
+            .map(|name| {
+                name.chars()
+                    .map(|ch| {
+                        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                            ch
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| stem(path));
+        format!(".jet/fuzz/{corpus_name}")
+    });
+    let mut command = Command::new(&bin);
+    command
+        .env("JET_FUZZ_CORPUS", &corpus)
+        .env(
+            "JET_FUZZ_ITERATIONS",
+            opts.generated_iterations.unwrap_or(1000).to_string(),
+        )
+        .env(
+            "JET_FUZZ_TIME_MS",
+            opts.generated_time_budget_ms.unwrap_or(0).to_string(),
+        )
+        .env(
+            "JET_FUZZ_SEED",
+            opts.generated_seed
+                .unwrap_or(0x5EED_1234_ABCD_0001)
+                .to_string(),
+        );
+    let status = command.status().unwrap_or_else(|error| {
+        let _ = fs::remove_file(&bin);
+        crate::cli_error!("E2105", "couldn't run generated tests in `{}`: {}", path, error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let _ = fs::remove_file(&bin);
+    exit(if status.success() {
+        ExitCodes::OK
+    } else {
+        child_exit_code(status)
+    });
+}
+
 
 /// `jet test [--watch] [--fresh] [--docs] [--where=<expr>]
 /// [--capture=<failed|all|none>] [--release] [--trace-tiers] [--coverage]
@@ -6526,6 +6751,9 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     if !p.exists() {
         crate::cli_error!("E2105", "can't find `{}`", path);
         exit(ExitCodes::USER_ERROR);
+    }
+    if opts.grade_generated {
+        run_generated_test(path, opts, mode);
     }
     if let Some(expression) = opts.where_expr.as_deref() {
         if let Err(error) = parse_test_where(expression) {
@@ -9590,6 +9818,14 @@ fn test_bin_path(path: &Path) -> PathBuf {
     ))
 }
 
+fn fuzz_bin_path(path: &Path) -> PathBuf {
+    PathBuf::from("build").join(format!(
+        ".fuzz_{}.{}",
+        stem(&path.to_string_lossy()),
+        std::process::id()
+    ))
+}
+
 /// `jet fuzz` options are retained only so older dispatch code can emit the
 /// migration diagnostic. The harness itself is retired; `jet test` owns
 /// generated-assertion execution.
@@ -10639,6 +10875,7 @@ pub(crate) struct WebBuildPaths {
 /// compiler error, but only the caller knows whether that should abort the
 /// process (`jet build`) or just be reported while the previous good build
 /// keeps serving (`jet dev --target=web`).
+
 fn jet_rt_rlib(target: Option<&str>, release: bool) -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("JET_RT_RLIB").map(PathBuf::from) {
         let metadata = fs::symlink_metadata(&path)
@@ -14972,3 +15209,4 @@ mod web_output_boundary_tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 }
+

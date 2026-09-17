@@ -320,9 +320,9 @@ pub struct CacheLease {
     /// canonical Hangar object. Shell consumers use this only inside a rootless
     /// namespace.
     nix_store_projection: Vec<(String, PathBuf)>,
-    /// Verified output roots accepted by `stable_path`. Linux Nix substitutions
-    /// lease the immutable CAS object by open directory handle; other outputs
-    /// use a private snapshot.
+    /// Verified output roots accepted by `stable_path`. Linux canonical Nix
+    /// and native `jetpackage` outputs are leased by open directory handle;
+    /// other outputs use a private snapshot.
     leased_output_roots: Vec<(PathBuf, PathBuf)>,
     bin_output_root: Option<PathBuf>,
     projected_bin_root: Option<PathBuf>,
@@ -397,6 +397,78 @@ impl CacheLease {
         }
         self.projected_bin_root.as_ref().map(|root| root.join(bin))
     }
+    /// Return the verified, durable package bin directory for a parent shell.
+    ///
+    /// Child commands use fd-backed paths (or private wrapper snapshots) so a
+    /// cache entry cannot be replaced while it is running. A prompt hook
+    /// cannot keep those process-local leases alive after `jet env export`
+    /// exits, so it may use the canonical Hangar object only when its sealed
+    /// object and bin directory are still immutable.
+    pub(crate) fn parent_shell_bin_dir(&self) -> Option<PathBuf> {
+        let bin = self.bin_relative.as_ref()?;
+        if bin.is_absolute()
+            || bin
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        if !matches!(&self.status, ConsumptionStatus::Consumable)
+            || self.expected_digest.is_empty()
+            || self.expected_digest.contains('/')
+            || self.expected_digest.contains('\\')
+        {
+            return None;
+        }
+        let expected = self
+            .store_root
+            .join("hangar")
+            .join(OBJECTS_DIR)
+            .join(&self.expected_digest);
+        if self.out != expected {
+            return None;
+        }
+        let metadata = fs::symlink_metadata(&expected).ok()?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if metadata.permissions().mode() & 0o222 != 0 {
+                return None;
+            }
+        }
+        let seal = self
+            .store_root
+            .join("hangar")
+            .join(SEALS_DIR)
+            .join(&self.expected_digest);
+        if check_seal(&expected, &self.store_root.join("hangar"))
+            .ok()
+            .flatten()
+            .is_none_or(|digest| digest != self.expected_digest)
+            || !fs::symlink_metadata(&seal)
+                .ok()
+                .is_some_and(|metadata| metadata.is_file())
+        {
+            return None;
+        }
+        let bin = expected.join(bin);
+        let metadata = fs::symlink_metadata(&bin).ok()?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if metadata.permissions().mode() & 0o222 != 0 {
+                return None;
+            }
+        }
+        Some(bin)
+    }
+
 
     pub(crate) fn nix_store_projection(&self) -> &[(String, PathBuf)] {
         &self.nix_store_projection
@@ -1134,6 +1206,121 @@ pub(crate) fn find_verified_user_profile_by_reference(
     }))
 }
 
+/// Reuse a complete set of user-profile entries with one Hangar lock, graph
+/// load, and metadata listing. A partial or invalid set returns `None` so the
+/// caller can use the ordinary per-reference path and preserve its exact
+/// acquisition and diagnostic behavior.
+pub(crate) fn reuse_verified_user_profile_batch(
+    roots: &Roots,
+    references: &[String],
+    local_nix_catalog: bool,
+) -> Option<Vec<VerifiedRealization>> {
+    if references.is_empty() {
+        return None;
+    }
+    // Avoid taking the Hangar lock on an obvious partial/cold set. This is
+    // only a candidate probe; the locked listing and verification below remain
+    // authoritative before any lease is published.
+    let candidates = list_read_only(roots);
+    if references
+        .iter()
+        .any(|reference| !candidates.iter().any(|entry| entry.reference == reference.as_str()))
+    {
+        return None;
+    }
+    let result = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let graph = Closure::closure_graph_structure_unlocked(roots)?;
+        let entries = list_unlocked(roots)?;
+        let mut selected = Vec::with_capacity(references.len());
+        for reference in references {
+            let Some(candidate) = entries
+                .iter()
+                .filter(|entry| entry.reference == reference.as_str())
+                .max_by_key(|entry| entry.last_used_at)
+            else {
+                return Ok(None);
+            };
+            let expectation = CacheExpectation {
+                identity: candidate.cache_identity.clone(),
+                owned_output: None,
+                allow_unsigned_local: true,
+            };
+            let Some(entry) = entries
+                .iter()
+                .filter(|entry| entry.reference == reference.as_str())
+                .filter(|entry| {
+                    verify_cache_entry_with_graph(
+                        roots,
+                        entry,
+                        reference,
+                        &expectation,
+                        Some(&graph),
+                    )
+                    .trusted()
+                })
+                .max_by_key(|entry| entry.last_used_at)
+            else {
+                return Ok(None);
+            };
+            if !nix_catalog_cache_entry_matches(entry, local_nix_catalog) {
+                return Ok(None);
+            }
+            selected.push(entry.clone());
+        }
+        let projection_index = NixProjectionIndex::from_entries(&entries)?;
+        let leases = selected
+            .iter()
+            .map(|entry| snapshot_lease_unlocked(roots, entry, Some(&projection_index), true))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        if leases
+            .iter()
+            .any(|lease| !matches!(lease.status(), ConsumptionStatus::Consumable))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "a user-profile output disappeared while leasing",
+            ));
+        }
+        Ok(Some(
+            selected
+                .into_iter()
+                .zip(leases)
+                .map(|(entry, lease)| VerifiedRealization {
+                    entry,
+                    source_state: crate::Provider::SourceState::Cached,
+                    lease,
+                })
+                .collect(),
+        ))
+    });
+    result.ok().flatten()
+}
+
+fn nix_catalog_cache_entry_matches(entry: &StoreEntry, local: bool) -> bool {
+    let expected = if local {
+        "local-unofficial"
+    } else {
+        "official-signed"
+    };
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return false;
+    };
+    let relevant = producer.provider == "nix"
+        || (local
+            && producer.provider == "jetpackage"
+            && producer
+                .facts
+                .get("source.kind")
+                .is_some_and(|kind| kind == "local-unofficial-catalog"));
+    if !relevant {
+        return true;
+    }
+    producer
+        .facts
+        .get("nix.index.tier")
+        .is_some_and(|tier| tier == expected)
+}
+
 pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         snapshot_lease_unlocked(roots, entry, None, true)
@@ -1192,13 +1379,18 @@ pub(crate) fn snapshot_leases_with_entries_unlocked(
     Ok(leases)
 }
 
+/// On Linux, canonical Hangar outputs from Nix and the native `jetpackage`
+/// provider are immutable CAS objects. Keep a directory handle to those
+/// objects instead of copying a private snapshot for every child command.
 #[cfg(target_os = "linux")]
 fn direct_cas_candidate(roots: &Roots, entry: &StoreEntry) -> bool {
     let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
         return false;
     };
-    producer.provider == "nix"
+    matches!(producer.provider.as_str(), "nix" | "jetpackage")
         && !entry.envelope.output_hash.is_empty()
+        && !entry.envelope.output_hash.contains('/')
+        && !entry.envelope.output_hash.contains('\\')
         && Path::new(&entry.out)
             == roots
                 .hangar_dir()
@@ -1230,7 +1422,7 @@ fn direct_cas_entry(roots: &Roots, entry: &StoreEntry) -> bool {
     };
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
-    producer.provider == "nix"
+    matches!(producer.provider.as_str(), "nix" | "jetpackage")
         && Path::new(&entry.out) == expected
         && !entry.envelope.output_hash.is_empty()
         && metadata.is_dir()

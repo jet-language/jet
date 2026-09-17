@@ -53,6 +53,33 @@ fn with_decimal<R>(handle: i64, f: impl FnOnce(&CtDecimal) -> R) -> Option<R> {
         rt.decimal_values.get(idx).and_then(|s| s.as_ref()).map(f)
     })
 }
+fn push_decimal_in_runtime(rt: &mut JitRuntime, value: CtDecimal) -> i64 {
+    rt.decimal_values.push(Some(value));
+    rt.decimal_values.len() as i64
+}
+
+fn decimal_binary(
+    left: i64,
+    right: i64,
+    operation: fn(&CtDecimal, &CtDecimal) -> CtDecimal,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .decimal_values
+            .get(left.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        let right = rt
+            .decimal_values
+            .get(right.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        let value = match (left, right) {
+            (Some(left), Some(right)) => operation(left, right),
+            _ => CtDecimal::from_int(0),
+        };
+        push_decimal_in_runtime(rt, value)
+    })
+}
+
 
 fn push_fraction(f: CtFraction) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -624,7 +651,6 @@ fn jet_jit_int_int_pow(left: i64, right: i64) -> i64 {
 fn jet_jit_int_gcd(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_gcd(left, right))
 }
-
 fn jet_jit_int_lcm(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_lcm(left, right))
 }
@@ -639,6 +665,7 @@ fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
     })
 }
 
+
 fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_rem(left, right) {
         Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
@@ -650,32 +677,27 @@ fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
 }
 
 fn jet_jit_decimal_from_str(str_id: i64) -> i64 {
-    let s = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(str_id).unwrap_or_default());
-    match CtDecimal::from_str(&s) {
-        Ok(d) => push_decimal(d),
-        Err(_) => {
-            trap_decimal("invalid Decimal string");
-            0
+    Concurrency::with_runtime_mut(|rt| {
+        let parsed = rt.heap.get_string(str_id).map(CtDecimal::from_str);
+        match parsed {
+            Some(Ok(value)) => push_decimal_in_runtime(rt, value),
+            Some(Err(_)) | None => {
+                rt.set_trap("invalid Decimal string");
+                0
+            }
         }
-    }
+    })
 }
-
 fn jet_jit_decimal_add(a: i64, b: i64) -> i64 {
-    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    push_decimal(left.add(&right))
+    decimal_binary(a, b, CtDecimal::add)
 }
 
 fn jet_jit_decimal_sub(a: i64, b: i64) -> i64 {
-    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    push_decimal(left.sub(&right))
+    decimal_binary(a, b, CtDecimal::sub)
 }
 
 fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
-    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
-    push_decimal(left.mul(&right))
+    decimal_binary(a, b, CtDecimal::mul)
 }
 
 fn jet_jit_decimal_equal(a: i64, b: i64) -> i8 {
@@ -811,7 +833,7 @@ fn jet_jit_fraction_to_string(a: i64) -> i64 {
 // exact carriers cross at the irrational-result math functions, so the JIT
 // needs Decimal here for the same reason it needs Fraction.
 fn jet_jit_decimal_to_float(a: i64) -> f64 {
-    with_decimal(a, |d| d.to_string_rep().parse::<f64>().unwrap_or(f64::NAN)).unwrap_or(f64::NAN)
+    with_decimal(a, CtDecimal::to_f64).unwrap_or(f64::NAN)
 }
 
 fn jet_jit_fraction_to_float(a: i64) -> f64 {

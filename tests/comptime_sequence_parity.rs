@@ -7,7 +7,6 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::REPL::run_transcript;
 
 mod common;
-
 #[test]
 fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
     let source = r#"fn run() {

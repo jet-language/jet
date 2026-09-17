@@ -162,6 +162,11 @@ pub(crate) fn service_display_runtime(value: &MirRuntimeValue) -> Option<String>
     {
         return Some(rendered);
     }
+    if let Some(rendered) =
+        jet_codegen::Comptime::ServicesLite::service_show_value_runtime(value)
+    {
+        return Some(rendered);
+    }
     let value = jet_codegen::Comptime::ServicesLite::runtime_to_ct_value(value).ok()?;
     jet_codegen::Comptime::SyncLite::sync_show_value(&value)
         .or_else(|| jet_codegen::Comptime::display_core_pure_value(&value))

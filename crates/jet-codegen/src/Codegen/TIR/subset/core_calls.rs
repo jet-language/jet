@@ -133,12 +133,6 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.units" && method == "from" {
         return true;
     }
-    // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
-    if module == "core.reactive.loadable"
-        && matches!(method, "idle" | "loading" | "loaded" | "failed")
-    {
-        return true;
-    }
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
     if matches!(
         module,
@@ -332,13 +326,25 @@ pub(super) fn core_call_args_in_subset(
             label_ok && expr_in_subset(&a.expr, cx, locals)
         });
     }
-    if module == "core.game" && method == "run" && matches!(args.len(), 1 | 4) {
+    if module == "core.game" && method == "run" && matches!(args.len(), 1..=4) {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = match idx {
                 0 => a.label.is_none(),
-                1 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("replay"),
-                2 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("backend"),
-                3 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("frames"),
+                1 => {
+                    matches!(&a.expr, Expr::Absent(_))
+                        || a.label.is_none()
+                        || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("replay")
+                }
+                2 => {
+                    matches!(&a.expr, Expr::Absent(_))
+                        || a.label.is_none()
+                        || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("backend")
+                }
+                3 => {
+                    matches!(&a.expr, Expr::Absent(_))
+                        || a.label.is_none()
+                        || a.label.as_ref().map(|(label, _)| label.as_str()) == Some("frames")
+                }
                 _ => false,
             };
             label_ok && expr_in_subset(&a.expr, cx, locals)

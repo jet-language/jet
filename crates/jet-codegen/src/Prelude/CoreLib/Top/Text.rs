@@ -285,7 +285,7 @@ fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
 fn jet_text_casefold(s: &String) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match jet_text_fold_lookup(c as u32) {
             Some(seq) => {
@@ -923,12 +923,19 @@ fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: 
     Ok(1)
 }
 fn jet_text_display_width_default(s: &String) -> i64 {
-    jet_text_graphemes(s).iter().map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0)).sum()
+    jet_text_grapheme_views(s.as_str())
+        .into_iter()
+        .map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0))
+        .sum()
 }
-fn jet_text_display_width_policy(s: &String, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
+fn jet_text_display_width_policy(
+    s: &String,
+    ambiguous_wide: bool,
+    controls_reject: bool,
+) -> Result<i64, String> {
     let mut total = 0i64;
-    for g in jet_text_graphemes(s) {
-        total += jet_text_cluster_width(&g, ambiguous_wide, controls_reject)?;
+    for g in jet_text_grapheme_views(s.as_str()) {
+        total += jet_text_cluster_width(g, ambiguous_wide, controls_reject)?;
     }
     Ok(total)
 }
@@ -944,12 +951,18 @@ fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|
 // #1476: cased-char predicates (Python islower/isupper shape — at least one
 // cased scalar, every cased scalar has the named case). Uses pinned case maps.
 fn jet_text_char_is_lower(c: char) -> bool {
-    jet_unicode_contains(UNICODE_CASED, c as u32)
-        && jet_unicode_upper(&c.to_string()) != c.to_string()
+    if !jet_unicode_contains(UNICODE_CASED, c as u32) {
+        return false;
+    }
+    let one = c.to_string();
+    jet_unicode_upper(&one) != one
 }
 fn jet_text_char_is_upper(c: char) -> bool {
-    jet_unicode_contains(UNICODE_CASED, c as u32)
-        && jet_unicode_lower(&c.to_string()) != c.to_string()
+    if !jet_unicode_contains(UNICODE_CASED, c as u32) {
+        return false;
+    }
+    let one = c.to_string();
+    jet_unicode_lower(&one) != one
 }
 fn jet_text_is_lower(s: &String) -> bool {
     let mut saw = false;
@@ -989,10 +1002,19 @@ fn jet_text_capitalize(s: &String) -> String {
 fn jet_text_swapcase(s: &String) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if jet_text_char_is_lower(c) {
-            out.push_str(&jet_unicode_upper(&c.to_string()));
-        } else if jet_text_char_is_upper(c) {
-            out.push_str(&jet_unicode_lower(&c.to_string()));
+        if !jet_unicode_contains(UNICODE_CASED, c as u32) {
+            out.push(c);
+            continue;
+        }
+        let one = c.to_string();
+        let upper = jet_unicode_upper(&one);
+        if upper != one {
+            out.push_str(&upper);
+            continue;
+        }
+        let lower = jet_unicode_lower(&one);
+        if lower != one {
+            out.push_str(&lower);
         } else {
             out.push(c);
         }
@@ -1028,34 +1050,72 @@ fn jet_text_trim_start(s: &String) -> String { jet_unicode_trim_start(s) }
 fn jet_text_trim_end(s: &String) -> String { jet_unicode_trim_end(s) }
 fn jet_text_trim(s: &String) -> String { jet_unicode_trim(s) }
 fn jet_text_splitn(s: &String, pat: &String, n: i64) -> Vec<String> {
-    s.splitn(n.max(0) as usize, pat).map(|x| x.to_string()).collect()
+    let limit = n.max(0) as usize;
+    let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
+    out.extend(s.splitn(limit, pat).map(|x| x.to_string()));
+    out
 }
 fn jet_text_rsplitn(s: &String, pat: &String, n: i64) -> Vec<String> {
-    s.rsplitn(n.max(0) as usize, pat).map(|x| x.to_string()).collect()
+    let limit = n.max(0) as usize;
+    let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
+    out.extend(s.rsplitn(limit, pat).map(|x| x.to_string()));
+    out
 }
 fn jet_text_fill_columns(fill: &String, columns: i64) -> String {
-    let Some(unit) = jet_text_graphemes(fill).into_iter().next() else {
+    let Some(unit) = jet_text_grapheme_views(fill.as_str()).into_iter().next() else {
         return " ".repeat(columns.max(0) as usize);
     };
-    let width = jet_text_display_width_default(&unit);
+    let width = jet_text_cluster_width(unit, false, false).unwrap_or(0);
     if width <= 0 || width > columns {
         return " ".repeat(columns.max(0) as usize);
     }
     let repeats = columns / width;
     let remainder = columns % width;
-    format!("{}{}", unit.repeat(repeats as usize), " ".repeat(remainder as usize))
+    let repeats = repeats as usize;
+    let remainder = remainder as usize;
+    let mut out = String::with_capacity(
+        unit.len()
+            .saturating_mul(repeats)
+            .saturating_add(remainder),
+    );
+    for _ in 0..repeats {
+        out.push_str(unit);
+    }
+    out.extend(std::iter::repeat(' ').take(remainder));
+    out
 }
-fn jet_text_pad_start(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_pad_start(
+    s: &String,
+    width: jet_foundation::Numeric::JetInt,
+    fill: &String,
+) -> String {
+    let width = width
+        .to_i64()
+        .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
     let mut out = jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0));
     out.push_str(s);
     out
 }
-fn jet_text_pad_end(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_pad_end(
+    s: &String,
+    width: jet_foundation::Numeric::JetInt,
+    fill: &String,
+) -> String {
+    let width = width
+        .to_i64()
+        .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
     let mut out = s.clone();
     out.push_str(&jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0)));
     out
 }
-fn jet_text_center(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_center(
+    s: &String,
+    width: jet_foundation::Numeric::JetInt,
+    fill: &String,
+) -> String {
+    let width = width
+        .to_i64()
+        .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
     let gap = (width - jet_text_display_width_default(s)).max(0);
     let left = gap / 2;
     let right = gap - left;
@@ -1394,7 +1454,11 @@ pub extern "C" fn jet_text_wasm_pad_start(
 ) {
     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
     let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
-    jet_text_wasm_output_set(jet_text_pad_start(&subject, width, &fill));
+    jet_text_wasm_output_set(jet_text_pad_start(
+        &subject,
+        jet_foundation::Numeric::JetInt::from_i64(width),
+        &fill,
+    ));
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1408,7 +1472,11 @@ pub extern "C" fn jet_text_wasm_pad_end(
 ) {
     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
     let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
-    jet_text_wasm_output_set(jet_text_pad_end(&subject, width, &fill));
+    jet_text_wasm_output_set(jet_text_pad_end(
+        &subject,
+        jet_foundation::Numeric::JetInt::from_i64(width),
+        &fill,
+    ));
 }
 
 #[cfg(target_arch = "wasm32")]

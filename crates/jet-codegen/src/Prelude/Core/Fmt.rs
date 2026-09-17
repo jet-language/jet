@@ -9,6 +9,16 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
     format!("{:.*}", precision, value)
 }
 
+/// D-QUANTITY-PRINT1: quantity display trims only the incidental `.0` from
+/// ordinary Float spelling; fractional magnitudes retain their digits.
+pub(crate) fn jet_fmt_quantity(value: f64) -> String {
+    let mut text = format!("{:?}", value);
+    if text.ends_with(".0") {
+        text.truncate(text.len() - 2);
+    }
+    text
+}
+
 /// D-FMT-PLAIN1=A: explicit human grouping keeps the former decimal display.
 pub(crate) fn jet_fmt_grouped(value: f64, precision: i64) -> String {
     let precision = precision.max(0) as usize;

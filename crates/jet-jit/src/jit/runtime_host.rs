@@ -392,6 +392,17 @@ mod string_bytes_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/StringBytes.rs");
 }
 
+#[derive(Clone, Debug)]
+struct JitTestingFailure {
+    message: String,
+    detail: String,
+}
+
+thread_local! {
+    static JIT_TESTING_FAILURE: std::cell::RefCell<Option<JitTestingFailure>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -433,6 +444,34 @@ thread_local! {
     static SILENCED_JIT_PANIC: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
 }
+
+fn jit_testing_record_failure(error: &jet_codegen::Codegen::test_report::TestEvidenceError) {
+    let (message, detail) = error.report_parts();
+    JIT_TESTING_FAILURE.with(|slot| {
+        *slot.borrow_mut() = Some(JitTestingFailure { message, detail });
+    });
+}
+
+fn jit_testing_take_failure() -> Option<JitTestingFailure> {
+    JIT_TESTING_FAILURE.with(|slot| slot.borrow_mut().take())
+}
+
+fn jit_testing_clear_failure() {
+    JIT_TESTING_FAILURE.with(|slot| {
+        slot.borrow_mut().take();
+    });
+}
+
+fn jit_testing_failure_handles(
+    rt: &mut JitRuntime,
+) -> Option<(i64, i64)> {
+    let failure = jit_testing_take_failure()?;
+    Some((
+        rt.heap.alloc_string(failure.message),
+        rt.heap.alloc_string(failure.detail),
+    ))
+}
+
 
 /// Whether the panicking thread is inside a [`catch_jit_panic`] window.
 ///
@@ -584,14 +623,15 @@ pub(crate) struct JitHistoryCallableTarget {
 
 #[derive(Clone, Copy)]
 pub(crate) struct JitCallableSlot {
+    /// Stable callable handle passed to universal callback thunks.
+    pub handle: i64,
     pub fn_ptr: i64,
     pub env: i64,
-    pub has_env: bool,
-    /// Whether closure capture places were copied into the environment
-    /// (`true`) or retained as addresses (`false`). The compiler supplies
-    /// this checked fact after binding; unknown means the slot is not safe to
-    /// use for capture provenance.
     pub history_captures_owned: Option<bool>,
+    pub has_env: bool,
+    /// Universal thunk context: wrapper slots use their wrapped callable
+    /// handle; direct closure slots use their own handle.
+    pub raw_context: i64,
     /// Typed pointers for generated universal callback thunks. Exactly one of
     /// these fields is set for a slot bound at a callback site. Arity zero and
     /// arities wider than two use `raw_many`, whose second argument points at
@@ -599,6 +639,14 @@ pub(crate) struct JitCallableSlot {
     pub raw_unary: Option<unsafe extern "C" fn(i64, i64) -> i64>,
     pub raw_pair: Option<unsafe extern "C" fn(i64, i64, i64) -> i64>,
     pub raw_many: Option<unsafe extern "C" fn(i64, *const i64) -> i64>,
+}
+/// Resident transaction state. The compiler still owns transaction scope and
+/// commit placement; this arena only carries the checked callback slots across
+/// the scalar JIT ABI.
+pub(crate) struct JitTransactionState {
+    pub(crate) hooks: Vec<JitCallableSlot>,
+    pub(crate) undo: Vec<JitCallableSlot>,
+    pub(crate) committed: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum JitZipMode {
@@ -669,6 +717,13 @@ pub(crate) enum JitLazyIter {
         mode: JitZipMode,
         left_fill: Option<i64>,
         right_fill: Option<i64>,
+        policy: i64,
+        file: i64,
+        line: u32,
+        fn_name: i64,
+        source_line: i64,
+        col: u32,
+        caret_len: u32,
     },
 
 }
@@ -861,6 +916,13 @@ impl JitLazyIter {
                 mode,
                 left_fill,
                 right_fill,
+                policy,
+                file,
+                line,
+                fn_name,
+                source_line,
+                col,
+                caret_len,
             } => {
                 let pair = match *mode {
                     JitZipMode::Short => Collections::collection_semantics::jet_zip_short_step(
@@ -874,12 +936,20 @@ impl JitLazyIter {
                         ) {
                             Ok(pair) => pair,
                             Err(()) => {
-                                rt.set_runtime_stop_at(
-                                    "E3001",
-                                    "<core.collections>",
-                                    0,
-                                    Collections::collection_semantics::
-                                        jet_zip_length_mismatch_message(),
+                                let policy = rt.heap.clone_string(*policy).unwrap_or_default();
+                                let file = rt.heap.clone_string(*file).unwrap_or_default();
+                                let fn_name = rt.heap.clone_string(*fn_name).unwrap_or_default();
+                                let source_line =
+                                    rt.heap.clone_string(*source_line).unwrap_or_default();
+                                rt.set_runtime_stop_with_context(
+                                    "E0128",
+                                    &file,
+                                    *line,
+                                    &fn_name,
+                                    &source_line,
+                                    *col,
+                                    *caret_len,
+                                    &policy,
                                 );
                                 return None;
                             }
@@ -901,14 +971,11 @@ impl JitLazyIter {
                 let Some((left, right)) = pair else {
                     return None;
                 };
-                let mapped = invoke_universal_pair(*callback, left, right);
+                let result = invoke_universal_pair(*callback, left, right);
                 if runtime_stop_pending(rt) {
                     return None;
                 }
-                if mapped.is_none() {
-                    rt.set_host_fault("lazy iterator zip callback has no pair universal thunk");
-                }
-                mapped
+                result
             }
         }
     }
@@ -996,6 +1063,7 @@ pub(crate) struct RuntimeFieldDescriptor {
     pub(crate) skip: bool,
     pub(crate) computed: bool,
     pub(crate) has_default: bool,
+    pub(crate) redacted: bool,
     pub(crate) type_id: u64,
 }
 
@@ -1155,9 +1223,263 @@ fn runtime_field_descriptor(
         skip: field.skip,
         computed: field.computed,
         has_default: field.has_default,
+        redacted: field.redact,
         type_id: runtime_type_id(&field.ty)?,
     })
 }
+fn runtime_type_id_for_program(program: &MirProgram, ty: &MirType) -> Option<u64> {
+    if let Some(identity) = ty.identity {
+        return Some(identity.0);
+    }
+    if let Some(instance) = program
+        .type_instances
+        .iter()
+        .find(|instance| instance.canonical_key() == ty.canonical_key())
+    {
+        return runtime_type_id(instance);
+    }
+    if let MirTypeKind::Apply { name, args } = &ty.kind {
+        if args.is_empty() {
+            if let Some(definition) = program.types.iter().find(|definition| {
+                definition.id == name.id
+                    || definition.key == name.name
+                    || definition.name == name.name
+            }) {
+                return Some(definition.id.0);
+            }
+        }
+    }
+    runtime_type_id(ty)
+}
+
+pub(crate) fn substitute_generic_type(
+    ty: &MirType,
+    substitutions: &HashMap<String, MirType>,
+) -> MirType {
+    let kind = match &ty.kind {
+        MirTypeKind::Apply { name, args } if args.is_empty() => {
+            return substitutions
+                .get(&name.name)
+                .cloned()
+                .unwrap_or_else(|| ty.clone());
+        }
+        MirTypeKind::List(inner) => {
+            MirTypeKind::List(Box::new(substitute_generic_type(inner, substitutions)))
+        }
+        MirTypeKind::Map { key, value } => MirTypeKind::Map {
+            key: Box::new(substitute_generic_type(key, substitutions)),
+            value: Box::new(substitute_generic_type(value, substitutions)),
+        },
+        MirTypeKind::Shared(inner) => {
+            MirTypeKind::Shared(Box::new(substitute_generic_type(inner, substitutions)))
+        }
+        MirTypeKind::Option(inner) => {
+            MirTypeKind::Option(Box::new(substitute_generic_type(inner, substitutions)))
+        }
+        MirTypeKind::Result { ok, err } => MirTypeKind::Result {
+            ok: Box::new(substitute_generic_type(ok, substitutions)),
+            err: Box::new(substitute_generic_type(err, substitutions)),
+        },
+        MirTypeKind::Apply { name, args } => MirTypeKind::Apply {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| substitute_generic_type(arg, substitutions))
+                .collect(),
+        },
+        MirTypeKind::Tuple(fields) => MirTypeKind::Tuple(
+            fields
+                .iter()
+                .map(|(name, field)| {
+                    (name.clone(), substitute_generic_type(field, substitutions))
+                })
+                .collect(),
+        ),
+        MirTypeKind::FixedList { elem, len } => MirTypeKind::FixedList {
+            elem: Box::new(substitute_generic_type(elem, substitutions)),
+            len: len.clone(),
+        },
+        MirTypeKind::InlineRange { base, lo, hi } => MirTypeKind::InlineRange {
+            base: Box::new(substitute_generic_type(base, substitutions)),
+            lo: *lo,
+            hi: *hi,
+        },
+        MirTypeKind::Tagged { marker, inner } => MirTypeKind::Tagged {
+            marker: marker.clone(),
+            inner: Box::new(substitute_generic_type(inner, substitutions)),
+        },
+        MirTypeKind::Union(members) => MirTypeKind::Union(
+            members
+                .iter()
+                .map(|member| substitute_generic_type(member, substitutions))
+                .collect(),
+        ),
+        MirTypeKind::Quantity { base, dimension } => MirTypeKind::Quantity {
+            base: Box::new(substitute_generic_type(base, substitutions)),
+            dimension: dimension.clone(),
+        },
+        MirTypeKind::Fn(_)
+        | MirTypeKind::SendFn { .. }
+        | MirTypeKind::TraitObject(_)
+        | MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => return ty.clone(),
+    };
+    MirType::from_kind(kind)
+}
+
+fn runtime_field_descriptor_for_program(
+    program: &MirProgram,
+    index: usize,
+    field: &jet_foundation::MIR::MirField,
+) -> Option<RuntimeFieldDescriptor> {
+    Some(RuntimeFieldDescriptor {
+        index,
+        source_name: field.name.clone(),
+        shape_names: field.shape_names.clone(),
+        skip: field.skip,
+        computed: field.computed,
+        has_default: field.has_default,
+        redacted: field.redact,
+        type_id: runtime_type_id_for_program(program, &field.ty)?,
+    })
+}
+
+fn specialize_generic_runtime_descriptor(
+    program: &MirProgram,
+    ty: &MirType,
+    definition: &MirTypeDef,
+    mut descriptor: RuntimeTypeDescriptor,
+) -> Option<RuntimeTypeDescriptor> {
+    let MirTypeKind::Apply { args, .. } = &ty.kind else {
+        return None;
+    };
+    if definition.generic_params.len() != args.len() {
+        return None;
+    }
+    let substitutions = definition
+        .generic_params
+        .iter()
+        .zip(args)
+        .map(|(parameter, argument)| (parameter.name.clone(), argument.clone()))
+        .collect::<HashMap<_, _>>();
+    descriptor.id = runtime_type_id(ty)?;
+    descriptor.name = definition.name.clone();
+    descriptor.canonical = ty.identity_key();
+    match &definition.kind {
+        MirTypeDefKind::Struct { fields, .. } => {
+            descriptor.kind = RuntimeValueKind::Record;
+            descriptor.abi = RuntimeValueAbi::Handle;
+            descriptor.fields = fields
+                .iter()
+                .enumerate()
+                .filter_map(|(index, field)| {
+                    let mut field = field.clone();
+                    field.ty = substitute_generic_type(&field.ty, &substitutions);
+                    runtime_field_descriptor_for_program(program, index, &field)
+                })
+                .collect();
+            descriptor.variants.clear();
+        }
+        MirTypeDefKind::Enum { variants, .. } => {
+            descriptor.kind = RuntimeValueKind::Enum;
+            descriptor.abi = RuntimeValueAbi::Handle;
+            descriptor.variants = variants
+                .iter()
+                .enumerate()
+                .map(|(index, variant)| {
+                    let fields = match &variant.payload {
+                        MirVariantPayload::Unit => Vec::new(),
+                        MirVariantPayload::Single(field_ty) => {
+                            let field_ty =
+                                substitute_generic_type(field_ty, &substitutions);
+                            runtime_type_id_for_program(program, &field_ty)
+                                .map(|type_id| {
+                                    vec![RuntimeFieldDescriptor {
+                                        index: 0,
+                                        source_name: "value".to_string(),
+                                        shape_names: ShapeFieldNames::from_source("value"),
+                                        skip: false,
+                                        computed: false,
+                                        has_default: false,
+                                        redacted: false,
+                                        type_id,
+                                    }]
+                                })
+                                .unwrap_or_default()
+                        }
+                        MirVariantPayload::Named(fields) => fields
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(field_index, field)| {
+                                let mut field = field.clone();
+                                field.ty =
+                                    substitute_generic_type(&field.ty, &substitutions);
+                                runtime_field_descriptor_for_program(
+                                    program,
+                                    field_index,
+                                    &field,
+                                )
+                            })
+                            .collect(),
+                    };
+                    RuntimeVariantDescriptor {
+                        name: variant.name.clone(),
+                        wire_name: variant.wire_name.clone(),
+                        discriminant: variant.discriminant.unwrap_or(index as i64),
+                        fields,
+                    }
+                })
+                .collect();
+            descriptor.fields.clear();
+        }
+        MirTypeDefKind::Distinct { base, range } => {
+            let base = substitute_generic_type(base, &substitutions);
+            descriptor.kind = runtime_value_kind(&base.kind);
+            descriptor.abi = runtime_value_abi(&base);
+            descriptor.integer_width = runtime_integer_width(&base.kind);
+            descriptor.integer_range = range
+                .map(|(lo, hi)| (i128::from(lo), i128::from(hi)))
+                .or_else(|| runtime_integer_range(&base.kind));
+            descriptor.element = match &base.kind {
+                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                    runtime_type_id_for_program(program, inner)
+                }
+                _ => None,
+            };
+            descriptor.fields.clear();
+            descriptor.variants.clear();
+        }
+        MirTypeDefKind::Alias { target } => {
+            let target = substitute_generic_type(target, &substitutions);
+            descriptor.kind = runtime_value_kind(&target.kind);
+            descriptor.abi = runtime_value_abi(&target);
+            descriptor.integer_width = runtime_integer_width(&target.kind);
+            descriptor.integer_range = runtime_integer_range(&target.kind);
+            descriptor.element = match &target.kind {
+                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                    runtime_type_id_for_program(program, inner)
+                }
+                _ => None,
+            };
+            descriptor.fields.clear();
+            descriptor.variants.clear();
+        }
+        MirTypeDefKind::UnitFamily { .. } => {
+            descriptor.kind = RuntimeValueKind::Unit;
+            descriptor.abi = RuntimeValueAbi::Unit;
+            descriptor.fields.clear();
+            descriptor.variants.clear();
+        }
+    }
+    Some(descriptor)
+}
+
 
 fn runtime_type_descriptor(ty: &MirType) -> Option<RuntimeTypeDescriptor> {
     let id = runtime_type_id(ty)?;
@@ -1206,6 +1528,7 @@ fn runtime_type_descriptor(ty: &MirType) -> Option<RuntimeTypeDescriptor> {
                     skip: false,
                     computed: false,
                     has_default: false,
+                    redacted: false,
                     type_id: runtime_type_id(field_ty)?,
                 })
             })
@@ -1315,6 +1638,7 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
                                         skip: false,
                                         computed: false,
                                         has_default: false,
+                                        redacted: false,
                                         type_id,
                                     }]
                                 })
@@ -1366,6 +1690,33 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
             }
         }
     }
+    for instance in &program.type_instances {
+        let MirTypeKind::Apply { name, args } = &instance.kind else {
+            continue;
+        };
+        if args.is_empty() {
+            continue;
+        }
+        let Some(definition) = program.types.iter().find(|definition| {
+            definition.id == name.id
+                || definition.key == name.name
+                || definition.name == name.name
+        }) else {
+            continue;
+        };
+        if definition.generic_params.is_empty() {
+            continue;
+        }
+        let Some(base) = descriptors.get(&definition.id.0).cloned() else {
+            continue;
+        };
+        if let Some(specialized) =
+            specialize_generic_runtime_descriptor(program, instance, definition, base)
+        {
+            descriptors.insert(specialized.id, specialized);
+        }
+    }
+
     let mut descriptors = descriptors.into_values().collect::<Vec<_>>();
     descriptors.sort_by_key(|descriptor| descriptor.id);
     descriptors
@@ -2051,6 +2402,13 @@ pub(crate) fn lazy_iter_zip(
     mode: JitZipMode,
     left_fill: Option<i64>,
     right_fill: Option<i64>,
+    policy: i64,
+    file: i64,
+    line: u32,
+    fn_name: i64,
+    source_line: i64,
+    col: u32,
+    caret_len: u32,
 ) -> i64 {
     if !lazy_source_valid(rt, left) || !lazy_source_valid(rt, right) {
         rt.set_host_fault("lazy iterator zip source is not a sequence handle");
@@ -2065,6 +2423,13 @@ pub(crate) fn lazy_iter_zip(
             mode,
             left_fill,
             right_fill,
+            policy,
+            file,
+            line,
+            fn_name,
+            source_line,
+            col,
+            caret_len,
         },
     )
 }
@@ -2119,6 +2484,7 @@ fn view_len_in_runtime(rt: &JitRuntime, index: usize) -> Option<usize> {
 pub(crate) fn sequence_len(rt: &JitRuntime, source: i64) -> Option<usize> {
     sequence_len_in_runtime(rt, source)
 }
+
 
 pub(crate) fn sequence_get_int(
     rt: &JitRuntime,
@@ -2227,7 +2593,10 @@ pub(crate) fn sequence_get_raw(
     if let Some(value) = sequence_get_float(rt, source, index) {
         return Some(value.to_bits() as i64);
     }
-    sequence_get_string(rt, source, index)
+    if let Some(value) = sequence_get_string(rt, source, index) {
+        return Some(value);
+    }
+    rt.heap.list_get_raw(source, i64::try_from(index).ok()?)
 }
 
 
@@ -2568,11 +2937,20 @@ pub(crate) struct JitRuntime {
     /// minted by `bind_jit_callable`; a raw Cranelift address is not a callable
     /// and is refused at the call boundary (`jet_jit_callable_normalize`).
     pub(crate) jit_callables: Vec<JitCallableSlot>,
+    /// Scope-bound guard callback slots. Handles are one-based and each slot
+    /// is consumed once by the generated `ScopeGuard` drop operation.
+    pub(crate) scope_guards: Vec<Option<JitCallableSlot>>,
+    /// Lexical `#Transact` callback stacks. Handles are one-based and valid
+    /// until the current resident run is reset.
+    pub(crate) transactions: Vec<Option<JitTransactionState>>,
     /// Process-edge callbacks. The resident adapter invokes these after all
     /// generated scope cleanup and before it returns the run outcome.
     pub(crate) atexit_handlers: Vec<JitCallableSlot>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    /// Typed task slots (such as AsyncEvent dispatch) own their deadline
+    /// result; joining them must not replace it with a parent E3003 check.
+    pub(crate) task_skip_join_deadline: Vec<bool>,
     pub(crate) task_groups: Vec<Option<super::Concurrency::JitTaskGroup>>,
     /// D-LOCALCELL1=A: one-thread canonical Cell values and guards.
     pub(crate) cells: LocalCell::CellState,
@@ -2676,6 +3054,13 @@ pub(crate) struct JitRuntime {
     pub(crate) raylib_atlases: Vec<crate::Raylib::RaylibTextureAtlasState>,
     pub(crate) raylib_draw_calls: Vec<crate::Raylib::JetRaylibSpriteDrawCall>,
     pub(crate) time_values: Vec<Option<Time::TimeValue>>,
+    /// Active deterministic testing world and its provider scope. The world
+    /// itself remains the canonical Prelude scheduler carrier; the JIT stores
+    /// only the scoped owner needed across the callback call.
+    pub(crate) deterministic_world:
+        Option<jet_codegen::scheduler::JetDeterministicWorld>,
+    pub(crate) deterministic_world_scope:
+        Option<jet_codegen::scheduler::JetWorldScope>,
     /// Fixed-rate realtime streams keyed by 1-based handles.
     pub(crate) realtime_values: Vec<Option<Time::time_rt::JetRealtimeStream>>,
     /// Regex / Match handles for core.regex (#1219).
@@ -3371,6 +3756,43 @@ impl JitRuntime {
         self.store_trap(message);
     }
 
+    pub(crate) fn set_runtime_stop_with_context(
+        &mut self,
+        code: &'static str,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        source_line: &str,
+        col: u32,
+        caret_len: u32,
+        message: &str,
+    ) {
+        if Concurrency::in_scheduler_task() {
+            self.set_child_runtime_stop(code, file, line, fn_name, source_line, message);
+            return;
+        }
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        let report = contract_kernel::jet_runtime_stop_report(
+            code,
+            file,
+            line,
+            fn_name,
+            source_line,
+            col,
+            caret_len,
+            message,
+            "",
+        );
+        let _ = jet_codegen::development_receipt::jet_production_failure_receipt_write(
+            code, file, line, fn_name,
+        );
+        self.stderr.push_str(&report.rendered);
+        self.exit_code = Some(report.exit_code);
+        self.store_trap(message);
+    }
+
     /// Same renderer, with a source line captured at the TIR stop site. A host
     /// can otherwise fall back to the enclosing function's prologue line when
     /// its run-level source text is unavailable (the Pool stale-id path is the
@@ -3661,6 +4083,25 @@ pub(crate) const INTN_MODE_WRAPPING: i64 = fixed_arithmetic_kernel::JET_FIXED_MO
 pub(crate) const INTN_MODE_SATURATING: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_SATURATING;
 pub(crate) const INTN_MODE_CHECKED: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_CHECKED;
 
+pub(crate) fn set_sentry_fault(
+    rt: &mut JitRuntime,
+    fault: jet_foundation::MemSentry::JetSentryFault,
+) {
+    let report = jet_foundation::Outcome::jet_render_runtime_sentry_with_context(
+        fault.code,
+        &fault.file,
+        fault.line,
+        &fault.gate,
+        &fault.operation,
+        &fault.obligation,
+        &fault.detail,
+        fault.obligation_status.as_str(),
+        fault.foreign_component.as_deref(),
+        fault.foreign_fenced,
+    );
+    rt.set_rendered_runtime_stop(report.rendered, report.exit_code);
+}
+
 pub(crate) fn runtime_stop_pending(rt: &JitRuntime) -> bool {
     rt.trap_pending()
         || Concurrency::local_rich_panic_pending()
@@ -3670,10 +4111,12 @@ pub(crate) fn runtime_stop_pending(rt: &JitRuntime) -> bool {
 
 /// Reads the native stop state. `1` branches to the epilogue; `0` keeps going.
 fn jet_jit_is_trapped() -> i64 {
-    if Concurrency::jet_jit_pending_exit_status() != 0 || Concurrency::local_rich_panic_pending() {
-        1
+    let trapped = if Concurrency::jet_jit_pending_exit_status() != 0
+        || Concurrency::local_rich_panic_pending()
+    {
+        true
     } else if Concurrency::in_scheduler_task() {
-        i64::from(Concurrency::task_trap_pending())
+        Concurrency::task_trap_pending()
     } else {
         Concurrency::active_runtime_ptr()
             .and_then(|ptr| {
@@ -3682,8 +4125,12 @@ fn jet_jit_is_trapped() -> i64 {
                 // does not race the guarded payload mutation.
                 unsafe { ptr.as_ref().map(|rt| rt.trap_pending()) }
             })
-            .map_or(0, i64::from)
+            .unwrap_or(false)
+    };
+    if trapped {
+        Memory::reset_jit_sentry_state();
     }
+    i64::from(trapped)
 }
 
 fn jet_jit_stack_enter(file: i64, line: i64, fn_name: i64, src_line: i64) -> i64 {
@@ -5114,9 +5561,15 @@ fn debug_nominal_handle(
     type_id: u64,
     depth: usize,
 ) -> Option<String> {
-    let descriptor = rt.runtime_type_descriptor(type_id)?.clone();
+    let descriptor = match rt.runtime_type_descriptor(type_id) {
+        Some(descriptor) => descriptor.clone(),
+        None => return None,
+    };
     let mut state = PersistDecodeState::for_debug();
-    let value = persist_decode_raw(rt, handle, &descriptor, &mut state, depth).ok()?;
+    let value = match persist_decode_raw(rt, handle, &descriptor, &mut state, depth) {
+        Ok(value) => value,
+        Err(_) => return None,
+    };
     structural_debug_value(rt, &value, &descriptor, depth)
 }
 
@@ -5125,15 +5578,6 @@ fn runtime_source_name(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-fn structural_debug_field_redacted(type_name: &str, field_name: &str) -> bool {
-    jet_foundation::StructuralDebug::jet_debug_field_metadata(runtime_source_name(type_name))
-        .and_then(|metadata| {
-            metadata
-                .iter()
-                .find(|(name, _)| *name == runtime_source_name(field_name))
-        })
-        .is_some_and(|(_, redacted)| *redacted)
-}
 
 fn nominal_handle_text(
     rt: &JitRuntime,
@@ -5145,7 +5589,10 @@ fn nominal_handle_text(
     if depth > 64 {
         return Some("...".to_string());
     }
-    let descriptor = rt.runtime_type_descriptor(type_id)?.clone();
+    let descriptor = match rt.runtime_type_descriptor(type_id) {
+        Some(descriptor) => descriptor.clone(),
+        None => return None,
+    };
     match descriptor.kind {
         RuntimeValueKind::Enum => {
             let slots = rt.heap.clone_record_values(handle)?;
@@ -5191,10 +5638,7 @@ fn nominal_handle_text(
                         name: runtime_source_name(&field.source_name).to_string(),
                         value: rendered,
                         storage_index: field.index,
-                        redacted: structural_debug_field_redacted(
-                            &descriptor.name,
-                            &field.source_name,
-                        ),
+                        redacted: field.redacted,
                     });
                 } else {
                     parts.push(format!("{}: {}", field.source_name, rendered));
@@ -5234,10 +5678,7 @@ fn nominal_handle_text(
                         name: runtime_source_name(&field.source_name).to_string(),
                         value: rendered,
                         storage_index: field.index,
-                        redacted: structural_debug_field_redacted(
-                            &descriptor.name,
-                            &field.source_name,
-                        ),
+                        redacted: field.redacted,
                     });
                 } else {
                     parts.push(format!("{}: {}", field.source_name, rendered));
@@ -5473,10 +5914,7 @@ fn structural_debug_value(
                         name: runtime_source_name(&field.source_name).to_string(),
                         value: structural_debug_value(rt, value, &child, depth + 1)?,
                         storage_index: field.index,
-                        redacted: structural_debug_field_redacted(
-                            &descriptor.name,
-                            &field.source_name,
-                        ),
+                        redacted: field.redacted,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -5539,10 +5977,7 @@ fn structural_debug_value(
                         name: runtime_source_name(&field.source_name).to_string(),
                         value: structural_debug_value(rt, value, &child, depth + 1)?,
                         storage_index: field.index,
-                        redacted: structural_debug_field_redacted(
-                            &descriptor.name,
-                            &field.source_name,
-                        ),
+                        redacted: field.redacted,
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -5663,6 +6098,13 @@ pub(crate) fn runtime_clone_with_descriptor(
     value: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<i64, String> {
+    // D-TERM1: the resident terminal host packs `Key` into one scalar word,
+    // while enum literals may still use the ordinary immutable record carrier.
+    // Neither representation contains mutable state, so copying a Key never
+    // needs to interpret the word as a heap enum.
+    if descriptor.name == "Key" {
+        return Ok(value);
+    }
     match descriptor.kind {
         RuntimeValueKind::Named | RuntimeValueKind::Handle
             if descriptor.name == "Clock" =>
@@ -6869,10 +7311,16 @@ fn jet_jit_require(
     locals: i64,
 ) -> i64 {
     if condition != 0 {
+        jit_testing_clear_failure();
         return 0;
     }
+    let (msg, locals) = Concurrency::with_runtime_mut(|rt| {
+        jit_testing_failure_handles(rt)
+            .map_or((msg, locals), |handles| handles)
+    });
     jet_jit_rich_panic(file, line, fn_name, src_line, col, caret, msg, locals)
 }
+
 fn jet_jit_require_eq(
     condition: i64,
     left_debug: i64,
@@ -6886,7 +7334,13 @@ fn jet_jit_require_eq(
     locals: i64,
 ) -> i64 {
     if condition != 0 {
+        jit_testing_clear_failure();
         return 0;
+    }
+    if let Some((msg, locals)) =
+        Concurrency::with_runtime_mut(jit_testing_failure_handles)
+    {
+        return jet_jit_rich_panic(file, line, fn_name, src_line, col, caret, msg, locals);
     }
     let msg = Concurrency::with_runtime_mut(|rt| {
         let Some(left) = rt.heap.clone_string(left_debug) else {
@@ -6903,6 +7357,7 @@ fn jet_jit_require_eq(
     jet_jit_rich_panic(file, line, fn_name, src_line, col, caret, msg, locals)
 }
 
+
 fn jet_jit_test_require_eq(
     condition: i64,
     left_debug: i64,
@@ -6916,6 +7371,7 @@ fn jet_jit_test_require_eq(
     locals: i64,
 ) -> i64 {
     if condition != 0 {
+        jit_testing_clear_failure();
         return jet_jit_result_new_i64(1, 0);
     }
     let msg = Concurrency::with_runtime_mut(|rt| {
@@ -6946,17 +7402,27 @@ fn jet_jit_test_failure_result(
     locals: i64,
 ) -> i64 {
     let rendered = Concurrency::with_runtime_mut(|rt| {
-        let file = rt.heap.clone_string(file).unwrap_or_default();
-        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
-        let msg = rt.heap.clone_string(msg).unwrap_or_default();
-        let locals = rt.heap.clone_string(locals).unwrap_or_default();
+        let (msg, locals) = jit_testing_failure_handles(rt)
+            .map_or_else(
+                || {
+                    (
+                        rt.heap.clone_string(msg).unwrap_or_default(),
+                        rt.heap.clone_string(locals).unwrap_or_default(),
+                    )
+                },
+                |handles| {
+                    (
+                        rt.heap.clone_string(handles.0).unwrap_or_default(),
+                        rt.heap.clone_string(handles.1).unwrap_or_default(),
+                    )
+                },
+            );
         contract_kernel::jet_runtime_stop_report(
             "E3001",
-            &file,
+            &rt.heap.clone_string(file).unwrap_or_default(),
             line.max(0) as u32,
-            &fn_name,
-            &src_line,
+            &rt.heap.clone_string(fn_name).unwrap_or_default(),
+            &rt.heap.clone_string(src_line).unwrap_or_default(),
             col.max(1) as u32,
             caret.max(1) as u32,
             &msg,
@@ -6967,6 +7433,7 @@ fn jet_jit_test_failure_result(
     let rendered = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered));
     jet_jit_result_new_i64(0, rendered)
 }
+
 
 fn jet_jit_test_require(
     condition: i64,
@@ -6980,11 +7447,13 @@ fn jet_jit_test_require(
     locals: i64,
 ) -> i64 {
     if condition != 0 {
+        jit_testing_clear_failure();
         jet_jit_result_new_i64(1, 0)
     } else {
         jet_jit_test_failure_result(file, line, fn_name, src_line, col, caret, msg, locals)
     }
 }
+
 
 
 fn jet_jit_debug_i64(value: i64) -> i64 {
@@ -7063,9 +7532,17 @@ fn jet_jit_trap_panic(_unused: i64) -> i64 {
     })
 }
 
-fn jet_jit_index_miss(line: i64) -> i64 {
+fn jet_jit_index_miss(file: i64, line: i64, msg: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.set_runtime_stop("E3001", line.max(0) as u32, "index miss");
+        let file = rt
+            .heap
+            .clone_string(file)
+            .unwrap_or_else(|| "<core.index>".to_string());
+        let message = rt
+            .heap
+            .clone_string(msg)
+            .unwrap_or_else(|| "index miss".to_string());
+        rt.set_runtime_stop_at("E3001", &file, line.max(0) as u32, &message);
         0
     })
 }
@@ -7360,15 +7837,20 @@ fn jet_jit_struct_assign(dst: i64, src: i64) {
 
 fn jet_jit_struct_get_i64(h: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
+        let value = rt
+            .heap
             .record_get_int(h, idx)
             .or_else(|| rt.heap.record_get_string(h, idx))
-            .unwrap_or(0)
+            .unwrap_or(0);
+        value
     })
 }
 
 fn jet_jit_struct_get_f64(h: i64, idx: i64) -> f64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_float(h, idx).unwrap_or(0.0))
+    Concurrency::with_runtime_mut(|rt| {
+        let value = rt.heap.record_get_float(h, idx).unwrap_or(0.0);
+        value
+    })
 }
 
 fn jet_jit_struct_get_bool(h: i64, idx: i64) -> i8 {
@@ -7932,7 +8414,7 @@ fn jet_jit_pattern_binary_match(subject: i64, descriptor: i64) -> i64 {
 }
 
 
-fn alloc_pattern_capture(rt: &mut JitRuntime, capture: JetPatternCapture) -> i64 {
+pub(crate) fn alloc_pattern_capture(rt: &mut JitRuntime, capture: JetPatternCapture) -> i64 {
     let record = rt.heap.alloc_record(2);
     let _ = rt.heap.record_set_int(record, 0, 0);
     match capture {
@@ -8087,6 +8569,8 @@ mod service_adapter {
                 "set_restart" if index == 0 => Some(ArgKind::Slot),
                 "set_restart" if index == 1 => Some(ArgKind::Restart),
                 "set_delivery" if index == 0 => Some(ArgKind::Slot),
+                "worker" if index == 0 => Some(ArgKind::Slot),
+                "worker" if index == 1 => Some(ArgKind::String),
                 "worker" if index == 2 => Some(ArgKind::Int),
                 "worker" if index == 3 => Some(ArgKind::String),
                 "worker" if index == 4 => Some(ArgKind::Int),
@@ -9794,6 +10278,9 @@ mod service_adapter {
             ("ServiceRestart", 2) => "RestForOne",
             ("ServiceDelivery", 0) => "AtMostOnce",
             ("ServiceDelivery", 1) => "DurableAtLeastOnce",
+            ("TaskStatus", 0) => "Running",
+            ("TaskStatus", 1) => "Paused",
+            ("TaskStatus", 2) => "CancelRequested",
             _ => {
                 rt.set_trap("the JIT received an invalid service enum value");
                 return 0;
@@ -9812,7 +10299,7 @@ mod service_adapter {
     }
 }
 
-fn invoke_jit_callable_zero(handler: &JitCallableSlot) {
+pub(crate) fn invoke_jit_callable_zero(handler: &JitCallableSlot) {
     // Zero-input callbacks are invoked only from host code, after the runtime
     // borrow has ended.  Captured closures prepend their checked environment.
     unsafe {
@@ -9826,6 +10313,88 @@ fn invoke_jit_callable_zero(handler: &JitCallableSlot) {
             function();
         }
     }
+}
+/// Allocate the scalar carrier for one lexical transaction.
+fn jet_jit_transaction_new() -> i64 {
+    with_runtime_result(0, |rt| {
+        let index = rt.transactions.len();
+        if index >= i64::MAX as usize - 1 {
+            rt.set_host_fault("too many resident transaction values");
+            return 0;
+        }
+        rt.transactions.push(Some(JitTransactionState {
+            hooks: Vec::new(),
+            undo: Vec::new(),
+            committed: false,
+        }));
+        index as i64 + 1
+    })
+}
+
+
+fn transaction_index(handle: i64) -> Option<usize> {
+    handle
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+}
+
+fn jet_jit_transaction_on_commit(transaction: i64, callback: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let Some(index) = transaction_index(transaction) else {
+            rt.set_host_fault("resident transaction callback received an invalid transaction");
+            return 0;
+        };
+        let Some(slot) = jit_callable_slot(rt, callback) else {
+            rt.set_host_fault("resident transaction callback received an invalid callable");
+            return 0;
+        };
+        let Some(Some(state)) = rt.transactions.get_mut(index) else {
+            rt.set_host_fault("resident transaction callback received an unknown transaction");
+            return 0;
+        };
+        state.hooks.push(slot);
+        0
+    })
+}
+
+fn jet_jit_transaction_on_rollback(transaction: i64, callback: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let Some(index) = transaction_index(transaction) else {
+            rt.set_host_fault("resident transaction rollback received an invalid transaction");
+            return 0;
+        };
+        let Some(slot) = jit_callable_slot(rt, callback) else {
+            rt.set_host_fault("resident transaction rollback received an invalid callable");
+            return 0;
+        };
+        let Some(Some(state)) = rt.transactions.get_mut(index) else {
+            rt.set_host_fault("resident transaction rollback received an unknown transaction");
+            return 0;
+        };
+        state.undo.push(slot);
+        0
+    })
+}
+
+/// Mark a transaction committed, then invoke hooks after releasing the mutable
+/// runtime borrow so callbacks can safely call other resident hosts.
+fn jet_jit_transaction_commit(transaction: i64) -> i64 {
+    let hooks = with_runtime_result(Vec::new(), |rt| {
+        let Some(index) = transaction_index(transaction) else {
+            rt.set_host_fault("resident transaction commit received an invalid transaction");
+            return Vec::new();
+        };
+        let Some(Some(state)) = rt.transactions.get_mut(index) else {
+            rt.set_host_fault("resident transaction commit received an unknown transaction");
+            return Vec::new();
+        };
+        state.committed = true;
+        std::mem::take(&mut state.hooks)
+    });
+    for hook in hooks.into_iter().rev() {
+        invoke_jit_callable_zero(&hook);
+    }
+    0
 }
 
 
@@ -9887,6 +10456,10 @@ fn jet_jit_service_restart_show(value: i64) -> i64 {
 fn jet_jit_service_delivery_show(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| service_adapter::show_enum(rt, "ServiceDelivery", value))
 }
+fn jet_jit_service_task_status_show(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| service_adapter::show_enum(rt, "TaskStatus", value))
+}
+
 
 pub(crate) fn alloc_io_error_result(
     rt: &mut JitRuntime,
@@ -10058,6 +10631,10 @@ fn jet_jit_duration_total_seconds(value: i64) -> i64 {
 
 fn jet_jit_duration_seconds_value(value: i64) -> f64 {
     duration_kernel::jet_duration_kernel_seconds_value(value)
+}
+
+fn jet_jit_duration_ns_value(value: i64) -> i64 {
+    value
 }
 
 fn jet_jit_duration_add(left: i64, right: i64) -> i64 {
@@ -10235,16 +10812,19 @@ fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) 
         rt.set_trap("too many resident callable values");
         return 0;
     }
+    let handle = -(index as i64) - 1;
     rt.jit_callables.push(JitCallableSlot {
+        handle,
         fn_ptr,
         env,
         history_captures_owned: None,
         has_env,
+        raw_context: handle,
         raw_unary: None,
         raw_pair: None,
         raw_many: None,
     });
-    -(index as i64) - 1
+    handle
 }
 
 fn bind_jit_callable_history_capture_mode(
@@ -10313,6 +10893,17 @@ fn bind_jit_callable_raw(
         callable_defect(rt, "universal callable slot already has a thunk");
         return false;
     }
+    let thunk_ptr = if unary_ptr != 0 { unary_ptr } else { pair_ptr };
+    // `bind_universal_callback` wraps the original callable in a slot whose
+    // function pointer is the thunk and whose environment is that callable.
+    // Direct closure slots retain their own handle as thunk context. CSV
+    // adapters also use a zero environment, so zero never selects the wrapper
+    // path.
+    slot.raw_context = if slot.fn_ptr == thunk_ptr && slot.env != 0 {
+        slot.env
+    } else {
+        handle
+    };
     if unary_ptr != 0 {
         // SAFETY: MIR lowering emits the thunk with the exact env-first unary
         // ABI before calling this binder.
@@ -10332,7 +10923,6 @@ fn bind_jit_callable_raw(
     }
     true
 }
-
 fn bind_jit_callable_raw_many(rt: &mut JitRuntime, handle: i64, thunk_ptr: i64) -> bool {
     if thunk_ptr == 0 {
         callable_defect(
@@ -10353,6 +10943,14 @@ fn bind_jit_callable_raw_many(rt: &mut JitRuntime, handle: i64, thunk_ptr: i64) 
         callable_defect(rt, "universal callable slot already has a thunk");
         return false;
     }
+    // `bind_universal_callback` wraps the original callable in a slot whose
+    // function pointer is the thunk and whose environment is that callable.
+    // Direct closure slots retain their own handle as thunk context.
+    slot.raw_context = if slot.fn_ptr == thunk_ptr && slot.env != 0 {
+        slot.env
+    } else {
+        handle
+    };
     // SAFETY: MIR lowering emits the thunk with the exact env-first
     // `(i64, pointer-to-i64-array) -> i64` ABI before calling this binder.
     slot.raw_many = Some(unsafe {
@@ -10367,7 +10965,7 @@ pub(crate) fn invoke_universal_unary(slot: JitCallableSlot, value: i64) -> Optio
     match (slot.raw_unary, slot.raw_pair, slot.raw_many) {
         (Some(callback), None, None) => {
             // SAFETY: `bind_jit_callable_raw` installs only the exact thunk ABI.
-            Some(unsafe { callback(slot.env, value) })
+            Some(unsafe { callback(slot.raw_context, value) })
         }
         _ => None,
     }
@@ -10381,7 +10979,7 @@ pub(crate) fn invoke_universal_pair(
     match (slot.raw_unary, slot.raw_pair, slot.raw_many) {
         (None, Some(callback), None) => {
             // SAFETY: `bind_jit_callable_raw` installs only the exact thunk ABI.
-            Some(unsafe { callback(slot.env, left, right) })
+            Some(unsafe { callback(slot.raw_context, left, right) })
         }
         _ => None,
     }
@@ -10393,7 +10991,8 @@ pub(crate) fn invoke_universal_many(slot: JitCallableSlot, values: &[i64]) -> Op
             // SAFETY: `bind_jit_callable_raw_many` installs only the exact
             // env-first pointer thunk ABI, and `values` remains borrowed for
             // the duration of this synchronous callback.
-            Some(unsafe { callback(slot.env, values.as_ptr()) })
+            let result = unsafe { callback(slot.raw_context, values.as_ptr()) };
+            Some(result)
         }
         _ => None,
     }
@@ -10504,13 +11103,33 @@ fn jet_jit_callable_fn(handle: i64) -> i64 {
 
 fn jet_jit_callable_env(handle: i64) -> i64 {
     with_runtime_result(0, |rt| {
-        jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.env)
+        let slot = jit_callable_or_trap(rt, handle);
+        let value = slot.map_or(0, |slot| slot.env);
+        value
     })
 }
 
 fn jet_jit_callable_has_env(handle: i64) -> i8 {
     with_runtime_result(0, |rt| {
-        jit_callable_or_trap(rt, handle).map_or(0, |slot| i8::from(slot.has_env))
+        let slot = jit_callable_or_trap(rt, handle);
+        let value = slot.map_or(0, |slot| i8::from(slot.has_env));
+        value
+    })
+}
+
+fn jet_jit_callable_capture_count(handle: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let Some(slot) = jit_callable_or_trap(rt, handle) else {
+            return 0;
+        };
+        if !slot.has_env {
+            return 0;
+        }
+        let Some(count) = rt.heap.record_len(slot.env) else {
+            callable_defect(rt, "resident callable environment is not a capture record");
+            return 0;
+        };
+        count
     })
 }
 
@@ -10740,12 +11359,15 @@ fn jet_jit_result_new_i32(ok: i8, value: i32) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u32 as u64))
 }
 
+
 fn jet_jit_result_is_ok(handle: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| i8::from(jit_result(rt, handle).is_some_and(|r| r.ok)))
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(jit_result(rt, handle).is_some_and(|result| result.ok))
+    })
 }
 
 fn jet_jit_result_get_i64(handle: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |r| r.bits as i64))
+    Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |result| result.bits as i64))
 }
 
 fn jet_jit_result_get_f64(handle: i64) -> f64 {
@@ -10834,11 +11456,11 @@ pub(crate) fn declare_host_fns_for_module<M: Module>(module: &mut M) -> Result<H
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
-    // Keep the resident JIT unoptimized until #2919's cross-tier corpus gate
-    // proves that enabling speed preserves the canonical MIR contract.
+    // Keep the resident JIT at Cranelift's optimized speed level so hot
+    // loops use the same cross-tier performance contract as debug AOT.
     let mut builder = JITBuilder::with_flags(
         &[
-            ("opt_level", "none"),
+            ("opt_level", "speed"),
             ("use_colocated_libcalls", "false"),
             ("is_pic", "true"),
         ],
@@ -11086,22 +11708,39 @@ fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
     })
 }
 
+/// The checked surface keeps the Bool carrier for missing/unreadable/mismatched
+/// goldens; a failed helper records report detail for a following assertion.
 fn jet_jit_testing_golden(path: i64, actual: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let path = rt.heap.clone_string(path).unwrap_or_default();
         let actual = rt.heap.clone_string(actual).unwrap_or_default();
-        i8::from(testing_evidence_or_trap(
-            rt,
-            crate::testing_shared::jet_testing_golden(&path, &actual),
-        ))
+        match crate::testing_shared::jet_testing_golden_result(&path, &actual) {
+            Ok(value) => {
+                jit_testing_clear_failure();
+                i8::from(value)
+            }
+            Err(error) => {
+                jit_testing_record_failure(&error);
+                0
+            }
+        }
     })
 }
+
 
 fn jet_jit_testing_fixture(path: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let path = rt.heap.clone_string(path).unwrap_or_default();
-        let contents =
-            testing_evidence_or_trap(rt, crate::testing_shared::jet_testing_fixture(&path));
+        let contents = match crate::testing_shared::jet_testing_fixture_result(&path) {
+            Ok(contents) => {
+                jit_testing_clear_failure();
+                contents
+            }
+            Err(error) => {
+                jit_testing_record_failure(&error);
+                String::new()
+            }
+        };
         rt.heap.alloc_string(contents)
     })
 }
@@ -11843,10 +12482,12 @@ impl jet_foundation::TestingHistory::HistoryStrategyBehavior<JitHistoryCommand>
 
 fn empty_jit_callable_slot() -> JitCallableSlot {
     JitCallableSlot {
+        handle: 0,
         history_captures_owned: None,
         fn_ptr: 0,
         env: 0,
         has_env: false,
+        raw_context: 0,
         raw_unary: None,
         raw_pair: None,
         raw_many: None,
@@ -14293,6 +14934,7 @@ host_fns! {
     str_push_char: "jet_jit_str_push_char" => jet_jit_str_push_char: sig_str_push_char;
     str_push_str: "jet_jit_str_push_str" => jet_jit_str_push_str: sig_str_push_lit;
     str_eq: "jet_jit_str_eq" => jet_jit_str_eq: sig_str_eq;
+    eq: "jet_eq" => jet_jit_str_eq: sig_str_eq;
     clock_clone: "jet_jit_clock_clone" => jet_jit_clock_clone: sig_clock_clone;
     typed_clone: "jet_jit_typed_clone" => jet_jit_typed_clone: sig_typed_clone;
     typed_eq: "jet_jit_typed_eq" => jet_jit_typed_eq: sig_typed_eq;
@@ -14302,6 +14944,7 @@ host_fns! {
     checked_string_copy: "jet_string_copy" => jet_jit_str_clone: sig_str_unary_i64;
     checked_string_ends_with: "jet_string_ends_with" => jet_jit_str_ends_with: sig_str_eq;
     string_repeat: "jet_string_repeat" => jet_jit_str_repeat: sig_i64_i64_i64;
+    checked_string_replace: "jet_string_replace" => jet_jit_str_replace: sig_str_replace;
 
     pattern_binary_match: "jet_binary_pattern_match" => jet_jit_pattern_binary_match: sig_i64_i64_i64;
     str_contains: "jet_jit_str_contains" => jet_jit_str_contains: sig_str_eq;
@@ -14324,6 +14967,7 @@ host_fns! {
     str_lines: "jet_jit_str_lines" => jet_jit_str_lines: sig_str_unary_i64;
     str_split: "jet_jit_str_split" => jet_jit_str_split: sig_str_binary_i64;
     str_rsplit: "jet_jit_str_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
+    checked_str_rsplit: "jet_iter_string_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
     str_chars: "jet_jit_str_chars" => jet_jit_str_chars: sig_str_unary_i64;
     str_bytes: "jet_string_bytes" => jet_jit_str_bytes: sig_str_unary_i64;
     str_from_bytes: "jet_jit_str_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;
@@ -14395,7 +15039,7 @@ host_fns! {
     memo_put: "jet_jit_memo_put" => jet_jit_memo_put: sig_struct_set_i64;
     memo_clear: "jet_jit_memo_clear" => jet_jit_memo_clear: sig_i64;
     memo_clear_slot: "jet_jit_memo_clear_slot" => jet_jit_memo_clear_slot: sig_i64_i64;
-    memo_stats: "jet_jit_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
+    memo_stats: "jet_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
     err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
     err_from_message: "jet_err_from_message" => jet_jit_err_from_message: sig_str_unary_i64;
     err_with_context_frame: "jet_err_with_context_frame" => jet_jit_err_with_context_frame: sig_err_with_context_frame;
@@ -14415,6 +15059,7 @@ host_fns! {
     measurement_add: "jet_std::JetMeasurement::add" => jet_jit_measurement_add: sig_measurement_binary;
     measurement_sub: "jet_std::JetMeasurement::sub" => jet_jit_measurement_sub: sig_measurement_binary;
     measurement_mul: "jet_std::JetMeasurement::mul" => jet_jit_measurement_mul: sig_measurement_binary;
+    callable_capture_count: "jet_jit_callable_capture_count" => jet_jit_callable_capture_count: sig_callable_word;
     measurement_div: "jet_std::JetMeasurement::div" => jet_jit_measurement_div: sig_measurement_binary;
     measurement_sqrt: "jet_std::JetMeasurement::sqrt" => jet_jit_measurement_sqrt: sig_measurement_unary;
     result_new_i64: "jet_jit_result_new_i64" => jet_jit_result_new_i64: sig_result_new_i64;
@@ -14434,6 +15079,10 @@ host_fns! {
     unit_convert_exact: "jet_unit_conversion_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
     unit_convert_rounded: "jet_unit_conversion_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
     unit_convert_exact_measurement: "jet_std::jet_unit_conversion_exact_measurement" => jet_jit_unit_convert_exact_measurement: sig_unit_convert_exact_measurement;
+    transaction_new: "jet_jit_transaction_new" => jet_jit_transaction_new: sig_str_begin;
+    transaction_on_commit: "jet_transaction_on_commit" => jet_jit_transaction_on_commit: sig_str_binary_i64;
+    transaction_on_rollback: "jet_transaction_on_rollback" => jet_jit_transaction_on_rollback: sig_str_binary_i64;
+    transaction_commit: "jet_transaction_commit" => jet_jit_transaction_commit: sig_str_unary_i64;
     unit_convert_rounded_measurement: "jet_std::jet_unit_conversion_rounded_measurement" => jet_jit_unit_convert_rounded_measurement: sig_unit_convert_rounded_measurement;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
     result_is_ok: "jet_jit_result_is_ok" => jet_jit_result_is_ok: sig_result_query_i8;
@@ -14454,6 +15103,7 @@ host_fns! {
     debug_string: "jet_jit_debug_string" => jet_jit_debug_string: sig_debug_string;
     debug_local_append: "jet_jit_debug_local_append" => jet_jit_debug_local_append: sig_debug_local_append;
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
+    index_miss: "jet_panic" => jet_jit_index_miss: sig_i64_i64_i64_i64;
     todo_stop: "jet_jit_todo_stop" => jet_jit_todo_stop: sig_todo_stop;
     contract_check: "jet_jit_contract_check" => jet_jit_contract_check: sig_contract_check;
     contract_fail: "jet_jit_contract_fail" => jet_jit_contract_fail: sig_contract_fail;
@@ -14473,6 +15123,8 @@ host_fns! {
     duration_total_seconds_exact: "jet_duration_total_seconds" => jet_jit_duration_total_seconds: sig_result_query_i64;
     duration_seconds_value: "jet_jit_duration_seconds_value" => jet_jit_duration_seconds_value: sig_result_query_f64;
     duration_seconds_value_exact: "jet_duration_seconds_value" => jet_jit_duration_seconds_value: sig_result_query_f64;
+    duration_ns_value: "jet_jit_duration_ns_value" => jet_jit_duration_ns_value: sig_result_query_i64;
+    duration_ns_value_exact: "jet_duration_ns_value" => jet_jit_duration_ns_value: sig_result_query_i64;
     duration_add: "jet_jit_duration_add" => jet_jit_duration_add: sig_duration_int;
     duration_sub: "jet_jit_duration_sub" => jet_jit_duration_sub: sig_duration_int;
     duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
@@ -14497,6 +15149,7 @@ host_fns! {
     perf_override_fidelity: "jet_jit_perf_override_fidelity" => jet_jit_perf_override_fidelity: sig_perf_override;
     perf_reset_fidelity: "jet_jit_perf_reset_fidelity" => jet_jit_perf_reset_fidelity: sig_noarg;
     service_call: "jet_jit_service_call" => jet_jit_service_call: sig_service_call;
+    service_task_status_show: "jet_jit_service_task_status_show" => jet_jit_service_task_status_show: sig_str_unary_i64;
     service_call_bool: "jet_jit_service_call_bool" => jet_jit_service_call_bool: sig_service_call_bool;
     service_show: "jet_jit_service_show" => jet_jit_service_show: sig_str_unary_i64;
     service_restart_show: "jet_jit_service_restart_show" => jet_jit_service_restart_show: sig_str_unary_i64;

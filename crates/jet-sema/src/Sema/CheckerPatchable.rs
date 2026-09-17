@@ -17,6 +17,7 @@ fn has_patchable(s: &StructDef) -> bool {
 /// Append synthetic `T.Patch` struct items (Codable via Encode+Decode) before registration.
 pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     let mut to_add = Vec::new();
+    let mut generated_base_methods = Vec::new();
     for item in items.iter() {
         let Item::Struct(s) = item else { continue };
         if !has_patchable(s) {
@@ -28,8 +29,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
         }
         let patch_name = patch_type_name(&s.name);
         // D-FIELDPOL1: a computed field can't hold an "unchanged" sentinel —
-        // it never appears in `T.Patch`, and `apply`/`diff`/`merge` skip it
-        // (codegen in `emit_struct_patchable` filters the same way).
+        // it never appears in `T.Patch`, and `apply`/`diff`/`merge` skip it.
         let fields: Vec<Field> = s
             .fields
             .iter()
@@ -48,16 +48,17 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
                 default_ct: None,
             })
             .collect();
+        let (base_methods, patch_methods) = generated_patchable_methods(s);
         to_add.push(Item::Struct(StructDef {
             span: s.span,
             is_pub: s.is_pub,
             is_package_pub: s.is_package_pub,
-            name: patch_name,
+            name: patch_name.clone(),
             name_span: s.name_span,
             type_params: Vec::new(),
             fields,
             state: None,
-            methods: Vec::new(),
+            methods: patch_methods,
             cli_bindings: Vec::new(),
             trait_impls: Vec::new(),
             derives: Vec::new(),
@@ -77,9 +78,96 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             validate_block: Vec::new(),
             validate_span: None,
         }));
+        generated_base_methods.push((s.name.clone(), base_methods));
+    }
+    for (name, methods) in generated_base_methods {
+        if let Some(Item::Struct(s)) = items.iter_mut().find(|item| {
+            matches!(item, Item::Struct(definition) if definition.name == name)
+        }) {
+            s.methods.extend(methods);
+        }
     }
     items.extend(to_add);
 }
+
+fn generated_patchable_methods(
+    s: &StructDef,
+) -> (Vec<crate::AST::Func>, Vec<crate::AST::Func>) {
+    let base = s.name.as_str();
+    let patch = patch_type_name(base);
+    let fields = s
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_none())
+        .map(|field| field.name.clone())
+        .collect::<Vec<_>>();
+    let mut source = format!("struct __JetPatchableMethods {{\n");
+    source.push_str(&format!(
+        "    fn apply(self, patch: {patch}) {base} -> {{\n        return {base}{{\n"
+    ));
+    for (index, field) in fields.iter().enumerate() {
+        if index != 0 {
+            source.push_str(",\n");
+        }
+        source.push_str(&format!(
+            "            {field}: patch.{field} ?? self.{field}"
+        ));
+    }
+    source.push_str("\n        }\n    }\n\n");
+    source.push_str(&format!(
+        "    fn diff(^new: {base}, ^old: {base}) {patch} -> {{\n        return {patch}{{\n"
+    ));
+    for (index, field) in fields.iter().enumerate() {
+        if index != 0 {
+            source.push_str(",\n");
+        }
+        source.push_str(&format!(
+            "            {field}: if new.{field} == old.{field} -> None else -> Val(new.{field})"
+        ));
+    }
+    source.push_str("\n        }\n    }\n}\n\n");
+    source.push_str("struct __JetPatchablePatchMethods {\n");
+    source.push_str(&format!(
+        "    fn merge(self, ^other: {patch}) {patch} -> {{\n        return {patch}{{\n"
+    ));
+    for (index, field) in fields.iter().enumerate() {
+        if index != 0 {
+            source.push_str(",\n");
+        }
+        source.push_str(&format!(
+            "            {field}: if self.{field} == None -> other.{field} else -> self.{field}"
+        ));
+    }
+    source.push_str("\n        }\n    }\n}\n");
+
+    let (tokens, lex_diagnostics) = crate::Lexer::lex_generated(&source);
+    if !lex_diagnostics.is_empty() {
+        panic!("invalid generated Patchable methods: {lex_diagnostics:?}");
+    }
+    let mut program = crate::Parser::parse(&tokens)
+        .unwrap_or_else(|diagnostics| panic!("invalid generated Patchable methods: {diagnostics:?}"));
+    let mut base_methods = Vec::new();
+    let mut patch_methods = Vec::new();
+    for item in &mut program.items {
+        let Item::Struct(definition) = item else {
+            continue;
+        };
+        for method in &mut definition.methods {
+            method.span = s.span;
+            method.name_span = s.name_span;
+            method.compiler_generated = true;
+        }
+        if definition.name == "__JetPatchableMethods" {
+            base_methods = std::mem::take(&mut definition.methods);
+        } else if definition.name == "__JetPatchablePatchMethods" {
+            patch_methods = std::mem::take(&mut definition.methods);
+        }
+    }
+    (base_methods, patch_methods)
+}
+
+
+
 
 fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
     if !s.type_params.is_empty() {
@@ -124,6 +212,31 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
             continue;
         }
         let base = s.name.clone();
+        let generated = items.iter().any(|item| {
+            matches!(
+                item,
+                Item::Struct(definition)
+                    if definition.name == base
+                        && definition.methods.iter().any(|method| {
+                            method.compiler_generated && method.name == "apply"
+                        })
+                        && definition.methods.iter().any(|method| {
+                            method.compiler_generated && method.name == "diff"
+                        })
+            )
+        }) && items.iter().any(|item| {
+            matches!(
+                item,
+                Item::Struct(definition)
+                    if definition.name == patch
+                        && definition.methods.iter().any(|method| {
+                            method.compiler_generated && method.name == "merge"
+                        })
+            )
+        });
+        if generated {
+            continue;
+        }
         let base_ty = Type::Named(base.clone());
         let patch_ty = Type::Named(patch.clone());
 

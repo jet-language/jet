@@ -1427,7 +1427,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E0065", "right-only", "Tower #2093"),
     ("E0066", "right-only", "Tower #2093"),
     ("E0067", "right-only", "Tower #2093"),
-    ("E0128", "right-only", "Tower #2093"),
     ("E0146", "right-only", "Tower #2093"),
     ("E0214", "right-only", "Tower #2093"),
     ("E0341", "right-only", "Tower #2093"),
@@ -1465,7 +1464,7 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E3530", "right-only", "Tower #2093"),
 ];
 
-const DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING: usize = 153;
+const DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING: usize = 152;
 
 /// All exclusions combined.
 fn all_exclusions() -> BTreeSet<String> {

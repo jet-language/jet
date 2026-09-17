@@ -605,6 +605,19 @@ struct JetHTTPShutdownReport {
     user_cancelled: i64,
 }
 
+fn jet_http_shutdown_report_field(
+    report: &JetHTTPShutdownReport,
+    field: i64,
+) -> i64 {
+    match field {
+        0 => report.user_accepted,
+        1 => report.user_overloaded,
+        2 => report.user_completed,
+        3 => report.user_cancelled,
+        _ => 0,
+    }
+}
+
 #[derive(Clone)]
 struct JetHTTPServer {
     inner: std::sync::Arc<JetHTTPServerState>,
@@ -1852,14 +1865,19 @@ fn jet_http_mux_serve(
     mux: JetHTTPMux,
     tls: Option<JetHTTPServerTls>,
     deadline: Option<jet_std::Duration>,
-) -> Result<(), String> {
+) -> Result<(), JetHTTPError> {
     if tls.is_some() {
-        return Err("TLS server requires the native TLS adapter".to_string());
+        return Err(JetHTTPError::IO {
+            operation: "TLS server requires the native TLS adapter".to_string(),
+        });
     }
     let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
-    jet_http_mux_validate(&mux)?;
-    let listener = std::net::TcpListener::bind(addr.as_str())
-        .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
+    jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
+    let listener = std::net::TcpListener::bind(addr.as_str()).map_err(|error| {
+        JetHTTPError::IO {
+            operation: format!("bind on `{addr}` failed: {error}"),
+        }
+    })?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     jet_http_server_run_listener(
         listener,
@@ -1871,6 +1889,7 @@ fn jet_http_mux_serve(
         None,
     )
     .map(|_| ())
+    .map_err(|operation| JetHTTPError::IO { operation })
 }
 
 fn jet_http_server_bind(
@@ -1878,13 +1897,16 @@ fn jet_http_server_bind(
     mux: JetHTTPMux,
     tls: Option<JetHTTPServerTls>,
     deadline: Option<jet_std::Duration>,
-) -> Result<JetHTTPServer, String> {
+) -> Result<JetHTTPServer, JetHTTPError> {
     if tls.is_some() {
-        return Err("TLS server requires the native TLS adapter".to_string());
+        return Err(JetHTTPError::IO {
+            operation: "TLS server requires the native TLS adapter".to_string(),
+        });
     }
     let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
     jet_http_server_bind_with_tls(addr, mux, None)
 }
+
 /// Bind the beginner HTTP server on the safe loopback address and install the
 /// canonical per-request deadline middleware before any request is accepted.
 fn jet_http_server_default(
@@ -1900,7 +1922,7 @@ fn jet_http_server_default(
 /// `HTTPServer.wait()` is the blocking lifecycle operation. Keeping the
 /// implementation on the existing serve kernel makes signal cancellation and
 /// request draining identical for the explicit and beginner surfaces.
-fn jet_http_server_wait(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, String> {
+fn jet_http_server_wait(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, JetHTTPError> {
     jet_http_server_serve(server)
 }
 
@@ -1909,7 +1931,7 @@ fn jet_http_server_bind_with_tls(
     addr: &String,
     mux: JetHTTPMux,
     tls_conn: Option<JetHTTPTlsConn>,
-) -> Result<JetHTTPServer, String> {
+) -> Result<JetHTTPServer, JetHTTPError> {
     // D-HTTP-UNSUPPORTED1=A: refuse before bind I/O on unsupported targets.
     #[cfg(not(any(
         target_os = "linux",
@@ -1924,7 +1946,9 @@ fn jet_http_server_bind_with_tls(
     )))]
     {
         let _ = (addr, mux, tls_conn);
-        return Err("unsupported-target:server-bind".to_string());
+        return Err(JetHTTPError::UnsupportedTarget {
+            operation: JetHTTPOperation::ServerBind,
+        });
     }
     #[cfg(any(
         target_os = "linux",
@@ -1938,39 +1962,48 @@ fn jet_http_server_bind_with_tls(
         all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
     ))]
     {
-    jet_http_mux_validate(&mux)?;
-    let listener = std::net::TcpListener::bind(addr.as_str())
-        .map_err(|error| format!("bind on `{addr}` failed: {error}"))?;
-    let local_addr = listener
-        .local_addr()
-        .map_err(|error| format!("local address failed: {error}"))?
-        .to_string();
-    Ok(JetHTTPServer {
-        inner: std::sync::Arc::new(JetHTTPServerState {
-            listener: std::sync::Mutex::new(Some(listener)),
-            mux,
-            local_addr,
-            shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            shutdown_called: std::sync::atomic::AtomicBool::new(false),
-            grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
-            drain_deadline_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            lifecycle: std::sync::atomic::AtomicU8::new(0),
-            report: std::sync::Mutex::new(None),
-            report_ready: std::sync::Condvar::new(),
-            tls_conn,
-        }),
-    })
+        jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
+        let listener = std::net::TcpListener::bind(addr.as_str()).map_err(|error| {
+            JetHTTPError::IO {
+                operation: format!("bind on `{addr}` failed: {error}"),
+            }
+        })?;
+        let local_addr = listener.local_addr().map_err(|error| JetHTTPError::IO {
+            operation: format!("local address failed: {error}"),
+        })?.to_string();
+        Ok(JetHTTPServer {
+            inner: std::sync::Arc::new(JetHTTPServerState {
+                listener: std::sync::Mutex::new(Some(listener)),
+                mux,
+                local_addr,
+                shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                shutdown_called: std::sync::atomic::AtomicBool::new(false),
+                grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
+                drain_deadline_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                lifecycle: std::sync::atomic::AtomicU8::new(0),
+                report: std::sync::Mutex::new(None),
+                report_ready: std::sync::Condvar::new(),
+                tls_conn,
+            }),
+        })
     }
 }
 
-fn jet_http_server_local_addr(server: &JetHTTPServer) -> Result<String, String> { Ok(server.inner.local_addr.clone()) }
+fn jet_http_server_local_addr(server: &JetHTTPServer) -> Result<String, JetHTTPError> {
+    Ok(server.inner.local_addr.clone())
+}
 
-fn jet_http_server_serve(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, String> {
+fn jet_http_server_serve(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, JetHTTPError> {
     use std::sync::atomic::Ordering;
     server.inner.lifecycle.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-        .map_err(|_| "HTTP server can only be served once".to_string())?;
-    let listener = server.inner.listener.lock().unwrap().take()
-        .ok_or_else(|| "HTTP server listener was already consumed".to_string())?;
+        .map_err(|_| JetHTTPError::IO {
+            operation: "HTTP server can only be served once".to_string(),
+        })?;
+    let listener = server.inner.listener.lock().unwrap().take().ok_or_else(|| {
+        JetHTTPError::IO {
+            operation: "HTTP server listener was already consumed".to_string(),
+        }
+    })?;
     let result = jet_http_server_run_listener(
         listener,
         server.inner.mux.clone(),
@@ -1979,35 +2012,54 @@ fn jet_http_server_serve(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport
         Some(server.inner.grace_ms.clone()),
         Some(server.inner.drain_deadline_ms.clone()),
         server.inner.tls_conn.clone(),
-    );
+    )
+    .map_err(|operation| JetHTTPError::IO { operation });
     server.inner.lifecycle.store(2, Ordering::Release);
     if let Ok(report) = result {
         *server.inner.report.lock().unwrap() = Some(report);
         server.inner.report_ready.notify_all();
         Ok(report)
-    } else { server.inner.report_ready.notify_all(); result }
+    } else {
+        server.inner.report_ready.notify_all();
+        result
+    }
 }
 
-fn jet_http_server_wait_for_report(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, String> {
+fn jet_http_server_wait_for_report(
+    server: &JetHTTPServer,
+) -> Result<JetHTTPShutdownReport, JetHTTPError> {
     use std::sync::atomic::Ordering;
     let mut report = server.inner.report.lock().unwrap();
     while report.is_none() && server.inner.lifecycle.load(Ordering::Acquire) == 1 {
         report = server.inner.report_ready.wait(report).unwrap();
     }
-    (*report).ok_or_else(|| "HTTP server stopped without a shutdown report".to_string())
+    (*report).ok_or_else(|| JetHTTPError::IO {
+        operation: "HTTP server stopped without a shutdown report".to_string(),
+    })
 }
 
-fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -> Result<JetHTTPShutdownReport, String> {
+fn jet_http_server_shutdown(
+    server: &JetHTTPServer,
+    grace: &jet_std::Duration,
+) -> Result<JetHTTPShutdownReport, JetHTTPError> {
     use std::sync::atomic::Ordering;
     let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);
-    if already_requested { return jet_http_server_wait_for_report(server); }
+    if already_requested {
+        return jet_http_server_wait_for_report(server);
+    }
     // Claim the terminal state for an unserved server. Otherwise teardown can
     // clear the JIT handles while a racing `serve` still wins the 0 -> 1 CAS
     // and starts a worker with callbacks from the old resident image.
     if server.inner.lifecycle.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-        return Err("HTTP server is not serving".to_string());
+        return Err(JetHTTPError::IO {
+            operation: "HTTP server is not serving".to_string(),
+        });
     }
-    if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
+    if server.inner.lifecycle.load(Ordering::Acquire) != 1 {
+        return Err(JetHTTPError::IO {
+            operation: "HTTP server is not serving".to_string(),
+        });
+    }
     let grace_ms = grace.as_millis().max(0) as u64;
     // Publish the absolute drain deadline before the shutdown flag so H2 and the
     // accept loop share one clock instead of each computing now+grace.
@@ -2017,6 +2069,7 @@ fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -
     server.inner.shutdown.store(true, Ordering::Release);
     jet_http_server_wait_for_report(server)
 }
+
 
 /// Run every native HTTP listener under the same root task-control scope that
 /// `process.on_signal` cancels. Existing task scopes remain unchanged because
@@ -2104,24 +2157,26 @@ fn jet_http_server_run_listener_inner(
             } else {
                 let peer = stream.peer_addr().ok();
                 if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
-                if let Some(tls) = worker_tls.as_ref() {
-                    let _ = tls(
-                        stream,
-                        worker_shutdown.clone(),
-                        worker_options.clone(),
-                        worker_grace.clone(),
-                        worker_deadline.clone(),
-                    );
-                } else {
-                    jet_http_server_handle_stream(
-                        &mut stream,
-                        &worker_mux,
-                        &worker_options,
-                        &worker_shutdown,
-                        worker_grace.as_deref(),
-                        Some(worker_deadline.as_ref()),
-                    );
-                }
+                jet_scheduler_with_root_control(|| {
+                    if let Some(tls) = worker_tls.as_ref() {
+                        let _ = tls(
+                            stream,
+                            worker_shutdown.clone(),
+                            worker_options.clone(),
+                            worker_grace.clone(),
+                            worker_deadline.clone(),
+                        );
+                    } else {
+                        jet_http_server_handle_stream(
+                            &mut stream,
+                            &worker_mux,
+                            &worker_options,
+                            &worker_shutdown,
+                            worker_grace.as_deref(),
+                            Some(worker_deadline.as_ref()),
+                        );
+                    }
+                });
                 worker_completed.fetch_add(1, Ordering::Relaxed);
                 worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != peer);
             }
@@ -4086,8 +4141,10 @@ fn jet_http_mux_serve_once_listener_raw(
             return Ok(());
         }
     };
-    let resp = jet_http_mux_dispatch_cached(mux, req, &route_cache)
-        .unwrap_or_else(jet_http_srv_error_response);
+    let resp = jet_scheduler_with_root_control(|| {
+        jet_http_mux_dispatch_cached(mux, req, &route_cache)
+    })
+    .unwrap_or_else(jet_http_srv_error_response);
     jet_http_srv_write_response(&mut stream, &resp, &version, true)
         .map_err(|error| error.to_string())
 }
@@ -4971,7 +5028,7 @@ fn jet_http_server_bind_tls<V, S>(
     tls: JetHTTPServerTls,
     validate: V,
     session: S,
-) -> Result<JetHTTPServer, String>
+) -> Result<JetHTTPServer, JetHTTPError>
 where
     V: Fn(&String, &String) -> Result<(), String>,
     S: Fn(
@@ -4987,7 +5044,7 @@ where
         + Sync
         + 'static,
 {
-    validate(&tls.cert_pem, &tls.key_pem)?;
+    validate(&tls.cert_pem, &tls.key_pem).map_err(|operation| JetHTTPError::IO { operation })?;
     let tls_conn = jet_http_tls_conn_handler(mux.clone(), tls, session);
     jet_http_server_bind_with_tls(addr, mux, Some(tls_conn))
 }
@@ -6817,7 +6874,7 @@ where
                     return;
                 }
             };
-            let resp = h(req);
+            let resp = jet_scheduler_with_root_control(|| h(req));
             let _ = jet_http_srv_write_response(&mut stream, &resp, "HTTP/1.1", true);
         });
     }

@@ -106,14 +106,6 @@ impl Env {
             }
         }
         for dir in &self.bin_dirs {
-            let candidate = Path::new(dir);
-            if self
-                .cache_leases
-                .iter()
-                .any(|lease| candidate.starts_with(lease.original_output()))
-            {
-                continue;
-            }
             if seen.insert(dir.as_str()) {
                 parts.push(dir);
             }
@@ -125,6 +117,42 @@ impl Env {
             }
         }
         parts.join(&sep.to_string())
+    }
+    /// Compose a PATH that can be evaluated by a parent shell after this
+    /// process exits. Lease fds and private wrappers are process-local, so
+    /// replace them with sealed canonical Hangar bin directories.
+    pub(crate) fn composed_path_for_parent(&self, base_path: &str) -> Option<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut lease_paths = std::collections::BTreeSet::new();
+        let mut lease_bin_dirs = Vec::new();
+        for lease in &self.cache_leases {
+            if let Some(path) = lease.projected_bin_dir() {
+                lease_paths.insert(path.to_string_lossy().into_owned());
+                lease_bin_dirs.push(lease.parent_shell_bin_dir()?.to_string_lossy().into_owned());
+            }
+            if let Some(wrapper) = lease.wrapper_dir() {
+                lease_paths.insert(wrapper.to_string_lossy().into_owned());
+            }
+        }
+        let mut parts: Vec<String> = Vec::new();
+        let mut add = |dir: &str| {
+            if seen.insert(dir.to_string()) {
+                parts.push(dir.to_string());
+            }
+        };
+        for dir in lease_bin_dirs {
+            add(&dir);
+        }
+        for dir in &self.bin_dirs {
+            if !lease_paths.contains(dir) {
+                add(dir);
+            }
+        }
+        let sep = super::Platform::path_separator();
+        for dir in base_path.split(sep).filter(|s| !s.is_empty()) {
+            add(dir);
+        }
+        Some(parts.join(&sep.to_string()))
     }
 
     pub(crate) fn apply_to(&self, cmd: &mut Command) {

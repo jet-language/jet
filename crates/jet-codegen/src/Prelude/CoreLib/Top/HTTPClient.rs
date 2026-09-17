@@ -257,6 +257,12 @@ fn jet_http_client_request_multipart_text(
 fn jet_http_client_response_status(resp: &JetHTTPResponse) -> i64 {
     resp.status
 }
+fn jet_http_client_response_status_value(
+    resp: &JetHTTPResponse,
+) -> jet_foundation::Numeric::JetInt {
+    jet_foundation::Numeric::JetInt::from_i64(jet_http_client_response_status(resp))
+}
+
 
 fn jet_http_client_response_new(
     status: i64,

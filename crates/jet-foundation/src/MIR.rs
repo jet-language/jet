@@ -554,6 +554,15 @@ impl MirFunctionSignature {
         signature
     }
 
+    fn effective_conventions(&self) -> impl Iterator<Item = MirAccess> + '_ {
+        (0..self.params.len()).map(|index| {
+            self.call_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.conventions.get(index))
+                .copied()
+                .unwrap_or(MirAccess::Read)
+        })
+    }
 
     fn same_identity(&self, other: &Self) -> bool {
         self.params.len() == other.params.len()
@@ -569,6 +578,9 @@ impl MirFunctionSignature {
             }
             && self.param_contract == other.param_contract
             && self
+                .effective_conventions()
+                .eq(other.effective_conventions())
+            && self
                 .call_metadata
                 .as_ref()
                 .map(|metadata| metadata.is_variadic())
@@ -576,16 +588,16 @@ impl MirFunctionSignature {
                     .call_metadata
                     .as_ref()
                     .map(|metadata| metadata.is_variadic())
-                && self
+            && self
+                .call_metadata
+                .as_ref()
+                .filter(|metadata| metadata.is_variadic())
+                .map(|metadata| &metadata.variadic)
+                == other
                     .call_metadata
                     .as_ref()
                     .filter(|metadata| metadata.is_variadic())
                     .map(|metadata| &metadata.variadic)
-                    == other
-                        .call_metadata
-                        .as_ref()
-                        .filter(|metadata| metadata.is_variadic())
-                        .map(|metadata| &metadata.variadic)
     }
 }
 
@@ -742,6 +754,14 @@ impl MirTypeKind {
                             .join(",")
                     })
                     .unwrap_or_default();
+                let conventions = signature
+                    .effective_conventions()
+                    .map(|convention| match convention {
+                        MirAccess::Read => 'R',
+                        MirAccess::Write => 'W',
+                        MirAccess::Move => 'M',
+                    })
+                    .collect::<String>();
                 let variadic = signature
                     .call_metadata
                     .as_ref()
@@ -754,7 +774,9 @@ impl MirTypeKind {
                             .collect::<String>()
                     })
                     .unwrap_or_default();
-                format!("Fn({params})->{ret};contract={contract};variadic={variadic}")
+                format!(
+                    "Fn({params})->{ret};contract={contract};conventions={conventions};variadic={variadic}"
+                )
             }
             Self::SendFn { params, ret } => {
                 let params = params
@@ -1532,6 +1554,8 @@ pub struct MirField {
     pub package_public: bool,
     pub computed: bool,
     pub has_default: bool,
+    /// True when Debug output replaces the field value with `[redacted]`.
+    pub redact: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3381,6 +3405,10 @@ pub struct MirOptimizationFacts {
     pub loop_facts: Vec<MirLoopFact>,
     pub bounds_facts: Vec<MirBoundsFact>,
     pub vector_facts: Vec<MirVectorFact>,
+    /// Checked loop proofs carried from TIR until canonical vector facts are
+    /// derived.  The rows use the same typed vocabulary as `vector_facts`;
+    /// they are source evidence, not a second backend-specific schema.
+    pub checked_vector_facts: Vec<MirVectorFact>,
     pub fusion_facts: Vec<MirFusionFact>,
     pub acceleration_facts: Vec<MirAccelerationFact>,
 }
@@ -3435,6 +3463,8 @@ pub struct MirScope {
     pub kind: MirScopeKind,
     pub span: Span,
     pub name: Option<String>,
+    /// Checked `#Context(deadline: …)` operand, if this scope installs one.
+    pub deadline: Option<MirValueId>,
     pub facts: BTreeMap<String, String>,
 }
 
@@ -4372,6 +4402,14 @@ pub enum MirHardwareSetup {
 }
 
 #[derive(Debug, Clone)]
+pub struct MirReflectField {
+    pub name: String,
+    pub type_name: String,
+    pub path: String,
+    pub value: MirValueId,
+}
+
+#[derive(Debug, Clone)]
 pub enum MirSemanticOp {
     DataEntriesToMap {
         call: MirPreludeCallId,
@@ -4410,6 +4448,13 @@ pub enum MirSemanticOp {
         op: MirLayoutCompareOp,
         left: MirValueId,
         right: MirValueId,
+    },
+    /// Construct the checked reflection carrier for one concrete value.
+    ReflectOf {
+        type_name: String,
+        path: String,
+        display: MirValueId,
+        fields: Vec<MirReflectField>,
     },
     LayoutLiteral { inner: MirValueId },
     StructLiteral {
@@ -4529,6 +4574,22 @@ pub enum MirSemanticOp {
         subject: MirValueId,
         parts: Vec<MirBinaryPatternPart>,
     },
+    /// Match the remaining Cursor text and consume the matched prefix through
+    /// the checked mutable receiver place. The operation has no Prelude route:
+    /// each execution tier shares the same scan/advance contract.
+    CursorTakePattern {
+        receiver: MirValueId,
+        receiver_place: MirPlaceId,
+        parts: Vec<MirTextPatternPart>,
+    },
+    /// Match the remaining Reader bytes and consume the matched prefix through
+    /// the checked mutable receiver place. The operation has no Prelude route:
+    /// each execution tier shares the same scan/advance contract.
+    ReaderTakePattern {
+        receiver: MirValueId,
+        receiver_place: MirPlaceId,
+        parts: Vec<MirBinaryPatternPart>,
+    },
     NumericMethod {
         call: MirPreludeCallId,
         receiver: MirValueId,
@@ -4621,6 +4682,8 @@ pub enum MirSemanticOp {
         kind: crate::Syntax::TypedHeadKind,
         literals: Vec<String>,
         holes: Vec<MirValueId>,
+        /// Per-hole checked HTML proof; non-HTML typed heads carry only false.
+        trusted_html: Vec<bool>,
     },
     CCallback {
         call: MirPreludeCallId,
@@ -4651,6 +4714,9 @@ impl MirSemanticOp {
                 .chain(values.iter().copied())
                 .collect(),
             Self::LayoutCompare { left, right, .. } => vec![*left, *right],
+            Self::ReflectOf { display, fields, .. } => std::iter::once(*display)
+                .chain(fields.iter().map(|field| field.value))
+                .collect(),
             Self::OptionLift2 {
                 function,
                 left,
@@ -4693,6 +4759,8 @@ impl MirSemanticOp {
             } => vec![*receiver, *path, *handler],
             Self::TextPatternMatch { subject, .. }
             | Self::BinaryPatternMatch { subject, .. } => vec![*subject],
+            Self::CursorTakePattern { receiver, .. }
+            | Self::ReaderTakePattern { receiver, .. } => vec![*receiver],
             Self::ClosureMethod { receiver, args, .. } => {
                 std::iter::once(*receiver)
                     .chain(args.iter().map(|arg| arg.value))
@@ -4846,14 +4914,16 @@ impl MirSemanticOp {
             Self::HostBorrowCallback { params, .. } => {
                 params.iter().filter_map(|ty| ty.identity).collect()
             }
-            Self::TextPatternMatch { parts, .. } => parts
+            Self::TextPatternMatch { parts, .. }
+            | Self::CursorTakePattern { parts, .. } => parts
                 .iter()
                 .filter_map(|part| match part {
                     MirTextPatternPart::Hole { ty, .. } => Some(*ty),
                     MirTextPatternPart::Literal(_) => None,
                 })
                 .collect(),
-            Self::BinaryPatternMatch { parts, .. } => parts
+            Self::BinaryPatternMatch { parts, .. }
+            | Self::ReaderTakePattern { parts, .. } => parts
                 .iter()
                 .filter_map(|part| match part {
                     MirBinaryPatternPart::Bits { ty, .. }
@@ -5114,6 +5184,8 @@ pub enum MirOperation {
     },
     BuildList {
         values: Vec<MirValueId>,
+        /// Target trait-object element type for checked concrete list coercion.
+        trait_coercion: Option<MirTypeId>,
     },
     BuildMap {
         entries: Vec<(MirValueId, MirValueId)>,
@@ -5275,7 +5347,7 @@ impl MirOperation {
                 out.push(*left);
                 out.push(*right);
             }
-            Self::BuildList { values } => out.extend(values.iter().copied()),
+            Self::BuildList { values, .. } => out.extend(values.iter().copied()),
             Self::EnumIs { subject, .. }
             | Self::EnumPayload { subject, .. }
             | Self::OptionIsSome { subject }
@@ -5662,6 +5734,9 @@ pub struct MirCliCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirCliEntry {
+    /// The root CLI schema decodes a record when this is true; otherwise
+    /// inputs map one-to-one onto the entry function parameters.
+    pub record_inputs: bool,
     pub description: Option<String>,
     pub inputs: Vec<MirCliInput>,
     pub commands: Vec<MirCliCommand>,
@@ -6226,6 +6301,8 @@ pub struct MirForeign {
     pub symbol: String,
     pub path: String,
     pub params: Vec<MirParam>,
+    /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
+    pub raw_scalar_abi: bool,
     pub return_type: Option<MirType>,
     pub foreign_abi: MirForeignAbi,
     pub foreign_language: MirForeignLanguage,
@@ -7862,6 +7939,14 @@ fn validate_function(
                 kind: "scope",
                 id: scope.id.0,
             });
+        }
+        if let Some(deadline) = scope.deadline {
+            if !declared_values.contains_key(&deadline) {
+                return Err(MirValidationError::MissingValue {
+                    function: function.id,
+                    value: deadline,
+                });
+            }
         }
     }
     let mut values: HashMap<MirValueId, (MirBlockId, usize)> = HashMap::new();

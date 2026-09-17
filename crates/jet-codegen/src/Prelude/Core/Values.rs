@@ -307,6 +307,22 @@ impl JetDebug for AllocError {
         self.jet_show()
     }
 }
+impl JetShow for JetErr {
+    fn jet_show(&self) -> String {
+        jet_err_message(self)
+    }
+}
+impl JetDisplay for JetErr {
+    fn jet_display(&self) -> String {
+        jet_err_message(self)
+    }
+}
+impl JetDebug for JetErr {
+    fn jet_debug(&self) -> String {
+        jet_err_message(self)
+    }
+}
+
 impl __jet_Equatable for AllocError {
     fn equal(&self, rhs: &Self) -> bool {
         self == rhs
@@ -455,6 +471,20 @@ enum JetLoadable<T: Clone, E: Clone> {
     Loading,
     Loaded(T),
     Failed(E),
+}
+// D-PENDING1=B: constructors share the checked Loadable carriers with AOT and
+// interpreter dispatch; JIT supplies the packed ABI adapters.
+fn jet_loadable_idle() -> JetLoadable<(), ()> {
+    JetLoadable::Idle
+}
+fn jet_loadable_loading() -> JetLoadable<(), ()> {
+    JetLoadable::Loading
+}
+fn jet_loadable_loaded<T: Clone>(value: T) -> JetLoadable<T, ()> {
+    JetLoadable::Loaded(value)
+}
+fn jet_loadable_failed<E: Clone>(error: E) -> JetLoadable<(), E> {
+    JetLoadable::Failed(error)
 }
 impl<T: Clone, E: Clone> JetLoadable<T, E> {
     fn loadable_tag(&self) -> u8 {

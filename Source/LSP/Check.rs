@@ -65,7 +65,20 @@ pub struct Fix {
 /// Collect every machine-projected fix for a document, in diagnostic order.
 /// The CLI and LSP share this projection; CLI policy filters it by grade.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
-    collect_fixes_from_diagnostics(check_document(path, text), text)
+    let mut diagnostics = check_document(path, text);
+    retain_document_diagnostics(&mut diagnostics, path, text);
+    collect_fixes_from_diagnostics(diagnostics, text)
+}
+
+pub(super) fn retain_document_diagnostics(
+    diagnostics: &mut Vec<Diagnostic>,
+    path: &str,
+    text: &str,
+) {
+    let path = canonical_path(path);
+    diagnostics.retain(|diagnostic| diagnostic.origin.as_ref().is_none_or(|origin| {
+        Path::new(&origin.path) == path && origin.source == text
+    }));
 }
 
 /// Select the edits the unattended CLI is allowed to apply. The LSP keeps

@@ -18,6 +18,50 @@ use std::path::Path;
 /// The compiler's version string for E1208 toolchain checks.
 pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The package version is deliberately independent from the current release
+/// channel. A development build may carry the next SemVer while the owner
+/// keeps the 1.0 compatibility policy future-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReleaseStatus {
+    channel: &'static str,
+    readiness: &'static str,
+    policy: &'static str,
+    policy_active: bool,
+}
+
+impl ReleaseStatus {
+    pub const fn channel(self) -> &'static str {
+        self.channel
+    }
+
+    pub const fn readiness(self) -> &'static str {
+        self.readiness
+    }
+
+    pub const fn policy(self) -> &'static str {
+        self.policy
+    }
+
+    pub const fn policy_active(self) -> bool {
+        self.policy_active
+    }
+}
+
+const CURRENT_RELEASE_CHANNEL: &str = "prerelease";
+const CURRENT_RELEASE_READINESS: &str = "not-ready";
+const RELEASE_COMPATIBILITY_POLICY: &str = "future-1.0";
+const RELEASE_COMPATIBILITY_POLICY_ACTIVE: bool = false;
+
+/// One executable source for the current release/readiness projection.
+pub const fn current_release_status() -> ReleaseStatus {
+    ReleaseStatus {
+        channel: CURRENT_RELEASE_CHANNEL,
+        readiness: CURRENT_RELEASE_READINESS,
+        policy: RELEASE_COMPATIBILITY_POLICY,
+        policy_active: RELEASE_COMPATIBILITY_POLICY_ACTIVE,
+    }
+}
+
 // ──────────────────────────────────────────────
 // Editions & release policy (E2-M2, D-REL1…D-REL5)
 // ──────────────────────────────────────────────
@@ -101,14 +145,26 @@ pub fn e2001(requested: &str) -> Diagnostic {
 }
 
 /// The `jet --version` banner (E2-D1). Deterministic and golden-testable: it
-/// states the compiler SemVer, the supported epoch/edition range, the newest
-/// stable edition, and the registry-protocol compatibility.
+/// states the compiler SemVer, current prerelease/readiness state, the
+/// future-only 1.0 compatibility policy, the supported edition range, and
+/// registry-protocol compatibility. The package SemVer remains independent
+/// from the current release channel.
 pub fn version_banner() -> String {
     let editions = SUPPORTED_EDITIONS.join(", ");
+    let release = current_release_status();
+    let policy_state = if release.policy_active() {
+        "active"
+    } else {
+        "not active"
+    };
     format!(
-        "{lang} {ver}\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
+        "{lang} {ver}\nrelease status: {channel}\nrelease readiness: {readiness}\n1.0 compatibility policy: {policy} ({policy_state})\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
         lang = Syntax::LANG_NAME,
         ver = COMPILER_VERSION,
+        channel = release.channel(),
+        readiness = release.readiness(),
+        policy = release.policy(),
+        policy_state = policy_state,
         editions = editions,
         latest = latest_edition(),
         registry = REGISTRY_COMPAT,
@@ -117,15 +173,20 @@ pub fn version_banner() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{edition_is_supported, latest_edition, parse, version_banner, SUPPORTED_EDITIONS};
+    use super::{parse, version_banner};
     use crate::Package::PackageParseError;
     use std::path::Path;
 
     #[test]
-    fn latest_edition_is_last_supported_and_drives_banner() {
-        assert_eq!(SUPPORTED_EDITIONS.last().copied(), Some(latest_edition()));
-        assert!(edition_is_supported(latest_edition()));
-        assert!(version_banner().contains(&format!("newest: {}", latest_edition())));
+    fn current_release_status_is_separate_from_package_semver() {
+        let status = super::current_release_status();
+        assert_eq!(status.channel(), "prerelease");
+        assert_eq!(status.readiness(), "not-ready");
+        assert_eq!(status.policy(), "future-1.0");
+        assert!(!status.policy_active());
+        assert!(version_banner().contains("release status: prerelease"));
+        assert!(version_banner().contains("release readiness: not-ready"));
+        assert!(version_banner().contains("1.0 compatibility policy: future-1.0 (not active)"));
     }
 
     #[test]

@@ -35,8 +35,9 @@ pub(super) fn lower_cursor_take_pattern(
     parts: &[crate::AST::StrMatchPart],
     cx: &Cx,
     env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
 ) -> TExpr {
-    let recv_t = lower_expr(receiver, cx, env);
+    let recv_t = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
     let mut canonical = Vec::new();
     for part in parts {
         let crate::AST::StrMatchPart::Hole { name, ty, span } = part else {
@@ -97,9 +98,10 @@ pub(super) fn lower_reader_take_pattern(
     parts: &[crate::AST::BinMatchPart],
     cx: &Cx,
     env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
 ) -> TExpr {
     use crate::AST::{BinMatchPart, BinSpec};
-    let recv_t = lower_expr(receiver, cx, env);
+    let recv_t = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
     let canonical: Vec<(String, Type)> = parts
         .iter()
         .filter_map(|p| match p {

@@ -8,6 +8,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 
 struct Running {
     child: Child,
@@ -29,7 +31,11 @@ fn spawn_observed(tag: &str, source: &str) -> Option<Running> {
         return None;
     }
     let dir = common::unique_tmp(&format!("jet_event_observe_{tag}"));
-    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: {\n        allow: [IO, Panic, Time, Time.Wait]\n    }\n}\n",
+    )
+    .unwrap();
     let source_path = dir.join("main.jet");
     fs::write(&source_path, source).unwrap();
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -229,7 +235,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn fail_async(n: Int) !String {
+fn fail_async(n: Int) !Err {
     return Err("ASYNC_FAILURE_SECRET")
 }
 
@@ -459,5 +465,36 @@ fn run() {
     assert!(
         sequences.windows(2).all(|pair| pair[0] < pair[1]),
         "concurrent observation order diverged from sequence order"
+    );
+}
+
+#[test]
+fn async_event_jit_callback_result_contract_matches_other_tiers() {
+    let source = r#"
+use core.event as event
+
+fn fail(_n: Int) !Err {
+    return Err("explicit callback failure")
+}
+
+fn run() {
+    scope :: event.scope()
+    async_event :: event.async_result<Int, String>(
+        AsyncPolicy{ capacity: 2, overflow: .Block },
+        .Collect
+    ) ?? panic("policy")
+    async_event.on(scope, (n: Int) -> {})
+    async_event.on(scope, (n: Int) -> fail(n))
+
+    report :: async_event.emit_async(1).join() ?? panic("dispatch")
+    print(report.state() == .HandlerFailed)
+    print(report.delivered_handlers())
+    print(report.failures().len())
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "async_event_jit_callback_result_contract",
+        source,
+        "true\n2\n1\n",
     );
 }

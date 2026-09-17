@@ -3500,9 +3500,9 @@ host_fns! {
     execute: "jet_jit_db_execute" => jet_jit_db_execute: binary;
     query: "jet_jit_db_query" => jet_jit_db_query: binary;
     query_one: "jet_jit_db_query_one" => jet_jit_db_query_one: binary;
-    execute_with_metadata: "jet_jit_db_execute_with_metadata" => jet_jit_db_execute_with_metadata: ternary;
-    query_with_metadata: "jet_jit_db_query_with_metadata" => jet_jit_db_query_with_metadata: ternary;
-    query_one_with_metadata: "jet_jit_db_query_one_with_metadata" => jet_jit_db_query_one_with_metadata: ternary;
+    execute_with_metadata: "jet_db_scope_execute_with_metadata" => jet_jit_db_execute_with_metadata: ternary;
+    query_with_metadata: "jet_db_scope_query_with_metadata" => jet_jit_db_query_with_metadata: ternary;
+    query_one_with_metadata: "jet_db_scope_query_one_with_metadata" => jet_jit_db_query_one_with_metadata: ternary;
     migrate: "jet_jit_db_migrate" => jet_jit_db_migrate: ternary;
     transaction: "jet_jit_db_transaction" => jet_jit_db_transaction: ternary;
     migrate_canonical: "jet_db_scope_migrate" => jet_jit_db_migrate: ternary;

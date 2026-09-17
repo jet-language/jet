@@ -143,4 +143,4 @@ else
   mkdir -p "$cache_dir"
   shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
 fi
-exec nix develop "${shell_args[@]}" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_test_stack); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_test_stack; exec $joined"
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_test_stack); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_test_stack; exec $joined"

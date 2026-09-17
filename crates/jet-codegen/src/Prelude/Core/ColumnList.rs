@@ -35,6 +35,33 @@ pub struct JetColumnList<S: JetRow> {
     columns: JetColumns<S::Cell>,
 }
 
+pub struct JetColumnListIntoRows<C> {
+    columns: Vec<std::vec::IntoIter<C>>,
+    remaining: usize,
+}
+
+impl<C> Iterator for JetColumnListIntoRows<C> {
+    type Item = Vec<C>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        Some(
+            self.columns
+                .iter_mut()
+                .map(|column| {
+                    column
+                        .next()
+                        .expect("columnar store columns have inconsistent lengths")
+                })
+                .collect(),
+        )
+    }
+}
+
+
 impl<S: JetRow> JetColumnList<S> {
     /// An empty columnar list — one empty column per stored field.
     pub fn new() -> Self {
@@ -82,6 +109,12 @@ impl<S: JetRow> JetColumnList<S> {
         self.columns.column(field)
     }
 
+    /// Borrow the canonical column view used by the shared gather kernels.
+    pub fn views(&self) -> Vec<&[S::Cell]> {
+        self.columns.views()
+    }
+
+
     /// Build the columns from records in order — what a columnar list literal
     /// lowers to.
     pub fn from_aos(values: Vec<S>) -> Self {
@@ -102,6 +135,28 @@ impl<S: JetRow> JetColumnList<S> {
         self.columns.rows().map(S::jet_row_join)
     }
 }
+
+impl<S: JetRow> IntoIterator for JetColumnList<S> {
+    type Item = S;
+    type IntoIter =
+        std::iter::Map<JetColumnListIntoRows<S::Cell>, fn(Vec<S::Cell>) -> S>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut columns = self
+            .columns
+            .cols
+            .into_iter()
+            .map(Vec::into_iter)
+            .collect::<Vec<_>>();
+        let remaining = columns.first_mut().map_or(0, |column| column.len());
+        JetColumnListIntoRows {
+            columns,
+            remaining,
+        }
+        .map(S::jet_row_join)
+    }
+}
+
 
 impl<S: JetRow> Default for JetColumnList<S> {
     fn default() -> Self {
@@ -134,5 +189,86 @@ where
 impl<S: JetRow + JetShow> JetShow for JetColumnList<S> {
     fn jet_show(&self) -> String {
         self.to_aos().jet_show()
+    }
+}
+impl<S: JetRow> JetListSurface for JetColumnList<S> {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        self.len() as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+impl<S: JetRow> JetListPushSurface for JetColumnList<S> {
+    type Item = S;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+impl<S> JetLoopSource for JetColumnList<S>
+where
+    S: JetRow + 'static,
+    S::Cell: 'static,
+{
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                Box::new(
+                    self.into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+impl<S> JetLoopSource for &mut JetColumnList<S>
+where
+    S: JetRow + 'static,
+    S::Cell: 'static,
+{
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = (*self).clone();
+                Box::new(
+                    values
+                        .into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
     }
 }

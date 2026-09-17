@@ -10,12 +10,78 @@
 
 mod common;
 
+use common::Scratch;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+const NEST_P001_FORM: &str = include_str!("fixtures/nest_p001_form.jet");
+const NEST_P001_INPUT_SHA256: &str =
+    "72facb9077dbb3168de2278f426ef4ae4df4b48dd19ee03931b829463984772e";
+
+fn assert_nest_p001_form_stages() {
+    assert_eq!(NEST_P001_FORM.len(), 294);
+    assert_eq!(
+        jet::SHA256::sha256_hex(NEST_P001_FORM.as_bytes()),
+        NEST_P001_INPUT_SHA256
+    );
+
+    let scratch = Scratch::new("nest-p001-form");
+    fs::write(scratch.join("run.jet"), NEST_P001_FORM).expect("write NEST-P001 fixture");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"nest-p001\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n",
+    )
+    .expect("write NEST-P001 authority");
+    let stages: &[(&str, &[&str])] = &[
+        ("default", &["run", "run.jet"]),
+        ("interpreter", &["run", "--interpret", "run.jet"]),
+        ("profile-debug", &["run", "--profile=debug", "run.jet"]),
+    ];
+    for (stage, args) in stages {
+        let output = Command::new(jet_bin())
+            .current_dir(&scratch.path)
+            .args(*args)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("run NEST-P001 {stage} stage: {error}"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "NEST-P001 {stage} stage failed:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(
+            stdout.contains("name=Ada"),
+            "NEST-P001 {stage} stage did not execute the typed field:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(
+                r#"<form method="post" action="/actions/save" aria-busy="false">"#
+            ),
+            "NEST-P001 {stage} stage lost the generated form action:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(
+                r#"<input name="name" id="Input-name" type="text" aria-label="name" aria-invalid="false" required value="Ada">"#
+            ),
+            "NEST-P001 {stage} stage lost the generated typed field:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(r#"<button type="submit">Submit</button>"#),
+            "NEST-P001 {stage} stage lost the generated submit control:\n{stdout}"
+        );
+        let combined = format!("{stdout}{stderr}");
+        assert!(
+            !combined.contains("source bytes 0..0")
+                && !combined.contains("selected entry is not a top-level function"),
+            "NEST-P001 {stage} stage regressed to the old source-less lowering ICE:\n{combined}"
+        );
+    }
+}
 
 fn have_tool(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
@@ -332,6 +398,7 @@ fn tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions() {
         eprintln!("note: skipping TanStack reference browser loop (need rustc)");
         return;
     }
+    assert_nest_p001_form_stages();
     let Some((chromium, node)) = web_tools() else {
         eprintln!("note: skipping TanStack reference browser loop (need chromium + node)");
         return;

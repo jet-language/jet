@@ -1434,10 +1434,16 @@ pub fn decode_report_bytes(
 }
 
 
+static EVIDENCE_REPORT_APPEND_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 fn append_frame(path: &std::path::Path, frame: &[u8]) -> Result<(), String> {
     if frame.len() > MAX_REPORT_BYTES {
         return Err("evidence record exceeds the 16 MiB limit".into());
     }
+    let _guard = EVIDENCE_REPORT_APPEND_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut options = std::fs::OpenOptions::new();
     options.write(true).append(true).create(true);
     let mut report = options.open(path).map_err(|error| error.to_string())?;

@@ -207,6 +207,8 @@ pub(super) struct TirForeignFact {
     pub symbol: String,
     pub path: String,
     pub params: Vec<TirParamFact>,
+    /// Inline C scalar bodies consume Jet's raw one-word scalar representation.
+    pub raw_scalar_abi: bool,
     pub return_type: Option<Type>,
     pub abi: String,
     pub language: String,
@@ -1141,6 +1143,7 @@ fn lower_foreign(
         symbol: function_key,
         path: function.rust_path.clone(),
         params: lower_params(&function.params),
+        raw_scalar_abi: false,
         return_type: function.return_type.clone(),
         abi: function
             .abi
@@ -1207,6 +1210,7 @@ fn lower_c_foreign(
         symbol: function.rust_path.clone(),
         path: function.rust_path.clone(),
         params: lower_params(&function.params),
+        raw_scalar_abi: false,
         return_type: function.return_type.clone(),
         abi: function
             .abi
@@ -1235,7 +1239,8 @@ fn lower_c_foreign(
 /// Lower a top-level `#FFI(c)` function to the native bridge symbol emitted
 /// by the prepared FFI crate. The call expression retains the wrapper identity
 /// (`jet_ffi_<name>`); MIR uses this row to resolve that identity to the
-/// checked C symbol (`jet_inline_jet_ffi_<name>`).
+/// checked C symbol (`jet_inline_jet_ffi_<name>`). Assembly stays out of this
+/// table until MIRRust has a target-aware lowering for its Rust wrapper.
 fn lower_inline_c_foreign(
     function: &Func,
     module: &str,
@@ -1254,6 +1259,7 @@ fn lower_inline_c_foreign(
         symbol: format!("jet_inline_{wrapper}"),
         path: wrapper,
         params: lower_params(&function.params),
+        raw_scalar_abi: true,
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
         language: "c".to_string(),
@@ -1792,6 +1798,7 @@ pub(super) fn lower_tir_artifact_facts_for_request(
         mode,
         name,
     } = request;
+    let selected_name = name.clone();
     let mut facts = lower_tir_artifact_facts_for_target(bundle, target, contract_rows);
     facts.build_mode = mode;
     if let Some(name) = name {
@@ -1813,6 +1820,13 @@ pub(super) fn lower_tir_artifact_facts_for_request(
     if mode == MirArtifactBuildMode::Fuzz {
         if let Some(harness) = facts.harnesses.first_mut() {
             harness.kind = TirHarnessKind::Fuzz;
+            harness.selected_test = selected_name.as_deref().and_then(|name| {
+                facts
+                    .tests
+                    .iter()
+                    .find(|test| test.name == name)
+                    .map(|test| test.key.clone())
+            });
             harness.key = format!("{}::harness::{:?}", facts.package_identity, harness.kind);
         }
         if let Some(plan) = facts.artifacts.first_mut() {

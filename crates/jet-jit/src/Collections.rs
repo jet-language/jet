@@ -143,6 +143,58 @@ pub(crate) mod collection_semantics {
     fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
         crate::runtime_host::runtime_stop_unwind_at("E3001", file, line, msg)
     }
+    // Collections.rs is also embedded in the resident JIT host, which owns
+    // its report boundary in JitRuntime rather than Core.rs.
+    #[allow(dead_code)]
+    fn jet_panic_rich_code(
+        code: &'static str,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        source_line: &str,
+        col: u32,
+        caret_len: u32,
+        message: &str,
+        _locals: &str,
+    ) -> ! {
+        crate::Concurrency::with_runtime_mut(|rt| {
+            rt.set_runtime_stop_with_context(
+                code,
+                file,
+                line,
+                fn_name,
+                source_line,
+                col,
+                caret_len,
+                message,
+            );
+        });
+        std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+    }
+
+    #[allow(dead_code)]
+    fn jet_panic_rich(
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        source_line: &str,
+        col: u32,
+        caret_len: u32,
+        message: &str,
+        locals: &str,
+    ) -> ! {
+        jet_panic_rich_code(
+            "E3001",
+            file,
+            line,
+            fn_name,
+            source_line,
+            col,
+            caret_len,
+            message,
+            locals,
+        )
+    }
 
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
@@ -159,6 +211,9 @@ pub(crate) mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
+    pub(super) fn list_sort<T: Ord>(xs: &mut Vec<T>) {
+        jet_list_sort(xs);
+    }
     pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
         jet_list_sort_desc(xs);
     }
@@ -395,9 +450,6 @@ pub(crate) mod collection_semantics {
         jet_zip_rows(lengths, mode, read, fill)
     }
 
-    pub(super) fn zip_length_mismatch_message() -> &'static str {
-        jet_zip_length_mismatch_message()
-    }
 
     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
         jet_list_try_new()
@@ -816,6 +868,10 @@ pub(crate) mod collection_semantics {
         jet_list_count_kernel(values, value)
     }
 
+    pub(super) fn list_contains<T: PartialEq>(values: &[T], value: &T) -> bool {
+        jet_list_contains(values, value)
+    }
+
     pub(super) fn list_counts_i64(values: Vec<String>) -> Vec<(String, i64)> {
         let map = jet_list_counts(values);
         jet_map_entries_kernel(&map)
@@ -1075,7 +1131,7 @@ pub(crate) enum JetLoopItem {
 
 fn loop_item_from_value(rt: &mut crate::JitRuntime, value: jet_rt::JetVal) -> JetLoopItem {
     match value {
-        jet_rt::JetVal::Int(value) => JetLoopItem::Int(value),
+        jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value) => JetLoopItem::Int(value),
         jet_rt::JetVal::Float(value) => JetLoopItem::FloatBits(value.to_bits() as i64),
         jet_rt::JetVal::Bool(value) => JetLoopItem::Int(i64::from(value)),
         jet_rt::JetVal::Char(value) => JetLoopItem::Int(i64::from(u32::from(value))),
@@ -1250,16 +1306,16 @@ fn loop_encoding_next(reader_type: &str, reader: i64) -> Result<Option<i64>, Str
 }
 fn invoke_iterable_slot(slot: i64, payload: i64) -> Result<i64, String> {
     if slot == 0 {
-        return Err("MIR iterable hook has a null thunk pointer".to_string());
+        return Err("MIR iterable hook has a null function pointer".to_string());
     }
-    // SAFETY: the Cranelift compiler installs only env-first universal
-    // iterable thunks with this exact ABI and keeps their code pages live for
-    // the resident run.
+    // SAFETY: the Cranelift compiler installs only finalized MIR iterable
+    // functions with the exact `(env, raw) -> raw` ABI and keeps their code
+    // pages live for the resident run.
     let callback: unsafe extern "C" fn(i64, i64) -> i64 =
         unsafe { std::mem::transmute(slot as usize) };
-    Ok(unsafe { callback(0, payload) })
+    let result = unsafe { callback(0, payload) };
+    Ok(result)
 }
-
 fn loop_iterable_next(next_slot: Option<i64>, iterator: i64) -> Result<Option<i64>, String> {
     let Some(next_slot) = next_slot else {
         return Ok(Concurrency::with_runtime_mut(|rt| {
@@ -1507,8 +1563,7 @@ pub(crate) fn jet_jit_loop_iter_init(
     if by_value == 0
         && matches!(
             source_kind,
-            jet_foundation::MIR::MirLoopSourceKind::Chars
-                | jet_foundation::MIR::MirLoopSourceKind::LinesFile
+            jet_foundation::MIR::MirLoopSourceKind::LinesFile
                 | jet_foundation::MIR::MirLoopSourceKind::LinesStdin
                 | jet_foundation::MIR::MirLoopSourceKind::LinesProcessStream
                 | jet_foundation::MIR::MirLoopSourceKind::ChannelReceiver
@@ -2380,7 +2435,7 @@ fn view_descriptors(
 }
 
 fn view_payloads(
-    rt: &crate::runtime_host::JitRuntime,
+    rt: &mut crate::runtime_host::JitRuntime,
     source: i64,
     descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
 ) -> Option<Vec<i64>> {
@@ -2395,7 +2450,7 @@ fn view_payloads(
                 crate::runtime_host::sequence_get_float(rt, source, index)
                     .map(|value| i64::from(f32::to_bits(value as f32)))
             }
-            _ => crate::runtime_host::sequence_get_int(rt, source, index),
+            _ => crate::runtime_host::sequence_get_raw(rt, source, index),
         })
         .collect()
 }
@@ -2891,6 +2946,7 @@ fn checked_sequence_values(source: i64) -> Option<Vec<i64>> {
         }
     })
 }
+
 
 fn checked_list_map_typed(
     list: i64,
@@ -3394,9 +3450,34 @@ fn checked_iter_zip_family_typed(
     mode: crate::runtime_host::JitZipMode,
     left_fill: Option<i64>,
     right_fill: Option<i64>,
+    metadata: Option<(i64, i64, i64, i64, i64, i64, i64)>,
 ) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
+    };
+    let (policy, file, line, fn_name, source_line, col, caret_len) = match metadata {
+        Some((policy, file, line, fn_name, source_line, col, caret_len)) => {
+            let Ok(line) = u32::try_from(line) else {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_host_fault("JIT strict zip line metadata is invalid")
+                });
+                return 0;
+            };
+            let Ok(col) = u32::try_from(col) else {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_host_fault("JIT strict zip column metadata is invalid")
+                });
+                return 0;
+            };
+            let Ok(caret_len) = u32::try_from(caret_len) else {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_host_fault("JIT strict zip caret metadata is invalid")
+                });
+                return 0;
+            };
+            (policy, file, line, fn_name, source_line, col, caret_len)
+        }
+        None => (0, 0, 0, 0, 0, 0, 0),
     };
     Concurrency::with_runtime_mut(|rt| {
         let left = lazy_source_for(rt, left);
@@ -3407,7 +3488,22 @@ fn checked_iter_zip_family_typed(
         if right == 0 {
             return 0;
         }
-        crate::runtime_host::lazy_iter_zip(rt, left, right, slot, mode, left_fill, right_fill)
+        crate::runtime_host::lazy_iter_zip(
+            rt,
+            left,
+            right,
+            slot,
+            mode,
+            left_fill,
+            right_fill,
+            policy,
+            file,
+            line,
+            fn_name,
+            source_line,
+            col,
+            caret_len,
+        )
     })
 }
 
@@ -3419,10 +3515,22 @@ fn checked_iter_zip_typed(left: i64, right: i64, callback: i64) -> i64 {
         crate::runtime_host::JitZipMode::Short,
         None,
         None,
+        None,
     )
 }
 
-fn checked_iter_zip_strict_typed(left: i64, right: i64, callback: i64) -> i64 {
+fn checked_iter_zip_strict_typed(
+    left: i64,
+    right: i64,
+    callback: i64,
+    policy: i64,
+    file: i64,
+    line: i64,
+    fn_name: i64,
+    source_line: i64,
+    col: i64,
+    caret_len: i64,
+) -> i64 {
     checked_iter_zip_family_typed(
         left,
         right,
@@ -3430,6 +3538,7 @@ fn checked_iter_zip_strict_typed(left: i64, right: i64, callback: i64) -> i64 {
         crate::runtime_host::JitZipMode::Strict,
         None,
         None,
+        Some((policy, file, line, fn_name, source_line, col, caret_len)),
     )
 }
 
@@ -3447,6 +3556,7 @@ fn checked_iter_zip_pad_typed(
         crate::runtime_host::JitZipMode::Pad,
         Some(left_fill),
         Some(right_fill),
+        None,
     )
 }
 
@@ -4076,21 +4186,27 @@ fn jet_jit_list_closure_each_mut(list: i64, callback: i64) -> i8 {
     list_closure_each(list, callback, true)
 }
 
-fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let needle = rt.heap.clone_string(needle).unwrap_or_default();
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        for i in 0..len {
-            let Some(sid) = rt.heap.list_get_int(list, i) else {
-                continue;
-            };
-            if rt.heap.clone_string(sid).as_deref() == Some(needle.as_str()) {
-                return 1;
-            }
-        }
-        0
-    })
+/// Canonical `List.contains` route for integer-like list carriers.
+fn jet_jit_list_contains(list: i64, needle: i64) -> i8 {
+    let needle = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(needle) };
+    let values = clone_list_ints(list)
+        .into_iter()
+        .map(|value| unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) })
+        .collect::<Vec<_>>();
+    collection_semantics::list_contains(&values, &needle) as i8
 }
+
+fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
+    let needle = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_string(needle)
+            .or_else(|| crate::runtime_host::view_string(rt, needle))
+            .unwrap_or_default()
+    });
+    collection_semantics::list_contains(&clone_list_strings(list), &needle) as i8
+}
+
+
 
 /// Element-wise list equality for `[T]` / fixed lists (int/byte elements).
 fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
@@ -4271,7 +4387,7 @@ fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
             );
             return 0;
         }
-        let Some(value) = crate::runtime_host::sequence_get_int(rt, list, index) else {
+        let Some(value) = crate::runtime_host::sequence_get_raw(rt, list, index) else {
             rt.set_host_fault("jit list get: sequence element has the wrong ABI");
             return 0;
         };
@@ -4357,27 +4473,42 @@ fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
 /// D-SOA-TIER1=A / D-SOA1: THE read that pulls one record out of a
 /// `#Layout(columnar)` list on the Cranelift tier.
 ///
-/// The tier holds a columnar list as its logical rows (D-SOA-TIER1=A), so this
-/// host marshals those rows into the shared Prelude column store and reads them
-/// with the Prelude's own `jet_columns_gather` — the same source AOT compiles
-/// and the same store the interpreter ambient builds. Nothing about the layout,
-/// the row bookkeeping, the bounds selection or the wording is decided here: a
-/// Cranelift host marshals, it does not re-encode policy (I9).
+/// The tier holds a columnar list as its canonical logical rows. The arena owns
+/// that row representation, so this host reads the selected row directly
+/// instead of rebuilding a transient `JetColumns` store for every access. The
+/// shared fixed-list helper still owns bounds selection and wording; this host
+/// only maps its typed result onto the resident stop and record handle (I9).
 ///
-/// The gathered cells come back in column order, which is the declared
-/// stored-field order the arena already lays a record of that struct out in, so
-/// the row is rebuilt slot-for-slot and the fused field read can index it with
-/// the very column number the store was built with (I8: one numbering).
+/// The cells remain in stored-field order, which is the same order the arena
+/// uses for the record slots. A gathered row is therefore allocated slot for
+/// slot, preserving the handle-generation and ownership behavior of the
+/// previous column-store adapter (I8: one numbering).
+///
+/// The canonical row invariant is equal, non-zero width for a non-empty
+/// columnar record. Zero-width records retain the shared store's zero-row
+/// bounds behavior.
+///
+/// This is deliberately a read-only view over the arena rows: mutations update
+/// those rows, and the next gather observes them without a second cache.
 fn jet_jit_columnar_gather(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(rows) = rt.heap.record_rows(list) else {
             jet_foundation::ice!(None, "jit columnar gather: bad handle");
         };
-        // Every row has one cell per stored field, so row 0 sizes the store; an
-        // empty list has no row and therefore no column, which is exactly the
-        // zero-row store the shared bounds stop reports against.
         let width = rows.first().map_or(0, Vec::len);
-        match jet_codegen::columns::JetColumns::from_rows(width, rows).gather(idx) {
+        debug_assert!(
+            rows.iter().all(|row| row.len() == width),
+            "columnar rows must have one cell per stored field"
+        );
+        // A transient column store used to rebuild every column on each read.
+        // The arena already owns the canonical row order, so keep the read on
+        // that representation and apply the shared fixed-list bounds policy
+        // directly. A zero-width record has no backing column and therefore
+        // retains the old zero-row bounds semantics.
+        let len = if width == 0 { 0 } else { rows.len() };
+        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |row| {
+            rows[row][..width].to_vec()
+        }) {
             Ok(cells) => rt.heap.alloc_record_cells(cells),
             Err(error) => {
                 rt.set_runtime_stop("E3010", line, &error.message());
@@ -5759,8 +5890,6 @@ fn jet_jit_map_values(map: i64) -> i64 {
 }
 
 /// Materialize a sequence only when an eager operation or terminal requires it.
-/// Iterator handles are consumed through their resident pull carrier; ordinary
-/// lists and views retain their checked scalar representation.
 fn clone_list_ints_with_runtime(rt: &mut crate::runtime_host::JitRuntime, list: i64) -> Vec<i64> {
     if let Some(values) = crate::runtime_host::lazy_iter_collect(rt, list) {
         return values;
@@ -6130,12 +6259,19 @@ fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
 }
 
 fn jet_jit_list_sum_i64(list: i64) -> i64 {
-    let values = clone_list_ints(list);
-    collection_semantics::list_sum_i64(values)
+    Concurrency::with_runtime_mut(|rt| {
+        clone_list_ints_with_runtime(rt, list)
+            .into_iter()
+            .fold(rt.heap.int_from_i64(0), |acc, value| rt.heap.int_add(acc, value))
+    })
 }
 
 fn jet_jit_list_product_i64(list: i64) -> i64 {
-    collection_semantics::list_product_i64(clone_list_ints(list))
+    Concurrency::with_runtime_mut(|rt| {
+        clone_list_ints_with_runtime(rt, list)
+            .into_iter()
+            .fold(rt.heap.int_from_i64(1), |acc, value| rt.heap.int_mul(acc, value))
+    })
 }
 
 fn jet_jit_list_min_i64(list: i64) -> i64 {
@@ -6403,12 +6539,7 @@ fn zip_family_rows(plan_id: i64, column_handles: i64, common_fill: i64, column_f
                 )
             },
         ) else {
-            rt.set_runtime_stop_at(
-                "E3001",
-                "<core.collections>",
-                0,
-                collection_semantics::zip_length_mismatch_message(),
-            );
+            rt.set_runtime_stop_at("E0128", "<core.collections>", 0, "strict");
             return out;
         };
         for values in rows {
@@ -7163,6 +7294,90 @@ fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
         }
     });
 }
+/// Stable sort `list` by parallel DateTime handles.
+fn jet_jit_list_sort_by_datetime_keys(list: i64, keys: i64) {
+    jet_jit_list_sort_by_datetime_keys_impl(list, keys, false);
+}
+
+fn jet_jit_list_sort_by_datetime_keys_desc(list: i64, keys: i64) {
+    jet_jit_list_sort_by_datetime_keys_impl(list, keys, true);
+}
+
+fn jet_jit_list_sort_by_datetime_keys_impl(list: i64, keys: i64, descending: bool) {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = clone_list_ints_with_runtime(rt, list);
+        let key_ids = clone_list_ints_with_runtime(rt, keys);
+        debug_assert_eq!(values.len(), key_ids.len());
+        let Some(mut pairs) = key_ids
+            .into_iter()
+            .zip(values)
+            .map(|(key, value)| {
+                let index = usize::try_from(key.checked_sub(1)?).ok()?;
+                let key = match rt.time_values.get(index)?.as_ref()? {
+                    crate::Time::TimeValue::DateTime(key) => key.clone(),
+                    _ => return None,
+                };
+                Some((key, value))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        if descending {
+            collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+        } else {
+            collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+        }
+        for (index, (_, value)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, value)
+                .expect("jit sort_by_datetime: set");
+        }
+    });
+}
+
+/// Stable sort `list` by parallel Date handles.
+fn jet_jit_list_sort_by_date_keys(list: i64, keys: i64) {
+    jet_jit_list_sort_by_date_keys_impl(list, keys, false);
+}
+
+fn jet_jit_list_sort_by_date_keys_desc(list: i64, keys: i64) {
+    jet_jit_list_sort_by_date_keys_impl(list, keys, true);
+}
+
+fn jet_jit_list_sort_by_date_keys_impl(list: i64, keys: i64, descending: bool) {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = clone_list_ints_with_runtime(rt, list);
+        let key_ids = clone_list_ints_with_runtime(rt, keys);
+        debug_assert_eq!(values.len(), key_ids.len());
+        let Some(mut pairs) = key_ids
+            .into_iter()
+            .zip(values)
+            .map(|(key, value)| {
+                let index = usize::try_from(key.checked_sub(1)?).ok()?;
+                let key = match rt.time_values.get(index)?.as_ref()? {
+                    crate::Time::TimeValue::Date(key) => key.clone(),
+                    _ => return None,
+                };
+                Some((key, value))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        if descending {
+            collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+        } else {
+            collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+        }
+        for (index, (_, value)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, value)
+                .expect("jit sort_by_date: set");
+        }
+    });
+}
+
 
 fn list_i64_value(rt: &crate::JitRuntime, value: i64) -> i64 {
     rt.heap.int_to_i64(value).unwrap_or(value)
@@ -7989,6 +8204,67 @@ fn jet_jit_set_to_list(set: i64) -> i64 {
             .map(|s| s.iter().copied().collect())
             .unwrap_or_default();
         rt.heap.alloc_int_list(xs)
+    })
+}
+fn jet_jit_set_values(set: i64) -> i64 {
+    jet_jit_list_lazy(jet_jit_set_to_list(set))
+}
+
+
+fn jet_jit_set_max(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let value = if set_is_string(rt, set) {
+            values
+                .into_iter()
+                .filter_map(|id| rt.heap.clone_string(id).map(|text| (text, id)))
+                .max_by(|left, right| left.0.cmp(&right.0))
+                .map(|(_, id)| id)
+        } else {
+            values.into_iter().max()
+        };
+        option_i64(rt, value)
+    })
+}
+
+fn jet_jit_set_sort(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let values = if set_is_string(rt, set) {
+            let mut pairs = values
+                .into_iter()
+                .filter_map(|id| rt.heap.clone_string(id).map(|text| (text, id)))
+                .collect::<Vec<_>>();
+            collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+            pairs.into_iter().map(|(_, id)| id).collect()
+        } else {
+            let mut values = values.into_iter().collect::<Vec<_>>();
+            collection_semantics::list_sort(&mut values);
+            values
+        };
+        rt.heap.alloc_int_list(values)
+    })
+}
+
+fn jet_jit_set_shuffle(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        rt.heap
+            .alloc_int_list(collection_semantics::iter_shuffle(
+                values.into_iter().collect(),
+            ))
     })
 }
 
@@ -9966,6 +10242,11 @@ host_fns! {
         let mut sig_iter_zip = Signature::new(cc);
         sig_iter_zip.params.extend([AbiParam::new(types::I64); 3]);
         sig_iter_zip.returns.push(AbiParam::new(types::I64));
+        let mut sig_iter_zip_strict = Signature::new(cc);
+        sig_iter_zip_strict
+            .params
+            .extend([AbiParam::new(types::I64); 10]);
+        sig_iter_zip_strict.returns.push(AbiParam::new(types::I64));
         let mut sig_iter_zip_pad = Signature::new(cc);
         sig_iter_zip_pad
             .params
@@ -10255,6 +10536,7 @@ host_fns! {
     view_try_map: "jet_jit_view_try_map" => jet_jit_view_try_map: sig_view_map;
     view_try_filter: "jet_jit_view_try_filter" => jet_jit_view_try_filter: sig_view_map;
     list_lazy: "jet_iter_from_vec" => jet_jit_list_lazy: sig_len;
+    set_values: "jet_set_values" => jet_jit_set_values: sig_len;
     list_take: "jet_list_take" => jet_jit_list_take: sig_get_opt;
     list_skip: "jet_list_skip" => jet_jit_list_skip: sig_get_opt;
     iter_to_list: "jet_iter_to_list" => jet_jit_iter_to_list: sig_iter_to_list;
@@ -10268,7 +10550,7 @@ host_fns! {
     checked_iter_map_typed: "jet_jit_checked_iter_map" => checked_iter_map_typed: sig_closure_value;
     checked_iter_enumerate: "jet_iter_enumerate" => checked_iter_enumerate: sig_closure_value;
     checked_iter_zip_typed: "jet_jit_checked_iter_zip" => checked_iter_zip_typed: sig_iter_zip;
-    checked_iter_zip_strict_typed: "jet_jit_checked_iter_zip_strict" => checked_iter_zip_strict_typed: sig_iter_zip;
+    checked_iter_zip_strict_typed: "jet_jit_checked_iter_zip_strict" => checked_iter_zip_strict_typed: sig_iter_zip_strict;
     checked_iter_zip_pad_typed: "jet_jit_checked_iter_zip_pad" => checked_iter_zip_pad_typed: sig_iter_zip_pad;
     checked_iter_filter_typed: "jet_jit_checked_iter_filter" => checked_iter_filter_typed: sig_closure_value;
     checked_iter_filter_map_typed: "jet_jit_checked_iter_filter_map" => checked_iter_filter_map_typed: sig_closure_value;
@@ -10397,6 +10679,7 @@ host_fns! {
     list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_predicate;
     list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;
     list_order_date: "jet_jit_list_order_date" => jet_jit_list_order_date: sig_list_eq;
+    list_contains: "jet_list_contains" => jet_jit_list_contains: sig_list_eq;
     list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
     list_eq_nested: "jet_jit_list_eq_nested" => jet_jit_list_eq_nested: sig_list_eq;
@@ -10491,7 +10774,16 @@ host_fns! {
     checked_builtin_map_is_empty: "jet_map_is_empty" => jet_jit_map_is_empty: sig_bool;
     checked_builtin_map_get_opt: "jet_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
     checked_builtin_set_len: "jet_set_len" => jet_jit_set_len: sig_len;
+    checked_builtin_set_has: "jet_set_has" => jet_jit_set_has: sig_list_eq;
+    checked_builtin_set_to_list: "jet_set_to_list" => jet_jit_set_to_list: sig_len;
+    checked_builtin_set_equal: "jet_set_equal" => jet_jit_set_equal: sig_list_eq;
+    checked_builtin_set_first: "jet_set_first" => jet_jit_set_first: sig_len;
+    checked_builtin_set_capacity: "jet_set_capacity" => jet_jit_set_capacity: sig_len;
     checked_builtin_set_is_empty: "jet_set_is_empty" => jet_jit_set_is_empty: sig_bool;
+    checked_builtin_set_max: "jet_set_max" => jet_jit_set_max: sig_len;
+    checked_builtin_set_shuffle: "jet_set_shuffle" => jet_jit_set_shuffle: sig_len;
+
+    checked_builtin_set_sort: "jet_set_sort" => jet_jit_set_sort: sig_len;
     checked_builtin_deque_len: "jet_deque_len" => jet_jit_deque_len: sig_len;
     checked_builtin_deque_capacity: "jet_deque_capacity" => jet_jit_deque_capacity: sig_len;
     checked_builtin_deque_is_empty: "jet_deque_is_empty" => jet_jit_deque_is_empty: sig_bool;
@@ -10590,6 +10882,10 @@ host_fns! {
     list_sort_by_i64_keys_desc: "jet_jit_list_sort_by_i64_keys_desc" => jet_jit_list_sort_by_i64_keys_desc: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
     list_sort_by_str_keys_desc: "jet_jit_list_sort_by_str_keys_desc" => jet_jit_list_sort_by_str_keys_desc: sig_sort_by_keys;
+    list_sort_by_datetime_keys: "jet_jit_list_sort_by_datetime_keys" => jet_jit_list_sort_by_datetime_keys: sig_sort_by_keys;
+    list_sort_by_datetime_keys_desc: "jet_jit_list_sort_by_datetime_keys_desc" => jet_jit_list_sort_by_datetime_keys_desc: sig_sort_by_keys;
+    list_sort_by_date_keys: "jet_jit_list_sort_by_date_keys" => jet_jit_list_sort_by_date_keys: sig_sort_by_keys;
+    list_sort_by_date_keys_desc: "jet_jit_list_sort_by_date_keys_desc" => jet_jit_list_sort_by_date_keys_desc: sig_sort_by_keys;
     list_sort_by_compare: "jet_list_sort_by_compare" => jet_jit_list_sort_by_compare: sig_sort_by_compare;
     io_error_show: "jet_jit_io_error_show" => jet_jit_io_error_show: sig_len;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
@@ -10609,6 +10905,7 @@ host_fns! {
     checked_set_from: "jet_set_from" => jet_jit_set_from_list_int: sig_len;
 
     set_new: "jet_jit_set_new" => jet_jit_set_new: sig_sorted_set_new;
+    checked_set_new: "std::collections::HashSet::new" => jet_jit_set_new: sig_sorted_set_new;
     set_insert: "jet_jit_set_insert" => jet_jit_set_insert: sig_list_eq;
     set_remove: "jet_jit_set_remove" => jet_jit_set_remove: sig_push;
     set_has: "jet_jit_set_has" => jet_jit_set_has: sig_list_eq;
@@ -10618,6 +10915,9 @@ host_fns! {
     set_equal: "jet_jit_set_equal" => jet_jit_set_equal: sig_list_eq;
     set_capacity: "jet_jit_set_capacity" => jet_jit_set_capacity: sig_len;
     set_first: "jet_jit_set_first" => jet_jit_set_first: sig_len;
+    set_shuffle: "jet_jit_set_shuffle" => jet_jit_set_shuffle: sig_len;
+    set_max: "jet_jit_set_max" => jet_jit_set_max: sig_len;
+    set_sort: "jet_jit_set_sort" => jet_jit_set_sort: sig_len;
     set_pop: "jet_jit_set_pop" => jet_jit_set_pop: sig_get_opt;
     set_union: "jet_jit_set_union" => jet_jit_set_union: sig_get_opt;
     set_intersection: "jet_jit_set_intersection" => jet_jit_set_intersection: sig_get_opt;
@@ -10667,7 +10967,9 @@ host_fns! {
 
     bag_len: "jet_jit_bag_len" => jet_jit_bag_len: sig_len;
     sorted_set_new: "jet_jit_sorted_set_new" => jet_jit_sorted_set_new: sig_sorted_set_new;
+    checked_sorted_set_new: "std::collections::BTreeSet::new" => jet_jit_sorted_set_new: sig_sorted_set_new;
     authority_workspace: "jet_jit_authority_workspace" => jet_jit_authority_workspace: sig_new;
+    authority_workspace_shared: "jet_std_process_workspace" => jet_jit_authority_workspace: sig_new;
     authority_from_rights: "jet_jit_authority_from_rights" => jet_jit_authority_from_rights: sig_len;
     authority_with: "jet_jit_authority_with" => jet_jit_authority_with: sig_get_opt;
     authority_without: "jet_jit_authority_without" => jet_jit_authority_without: sig_get_opt;

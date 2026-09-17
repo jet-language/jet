@@ -703,7 +703,10 @@ fn e0109_live_diagnostic_matches_explanation_page() {
             .map(jet_foundation::Outcome::jet_sentence_case_line),
         Some(live.fix.clone())
     );
-
+    assert!(live.edit.is_none());
+    assert_eq!(live.applicability, None);
+    assert_eq!(live.safety, None);
+    assert!(live.no_fix_reason.is_some());
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["explain", "E0109"])
         .env("NO_COLOR", "1")
@@ -712,6 +715,110 @@ fn e0109_live_diagnostic_matches_explanation_page() {
     assert!(output.status.success(), "explain E0109 failed: {output:?}");
     let rendered = String::from_utf8(output.stdout).expect("E0109 explanation is UTF-8");
     assert_eq!(rendered, jet::Explain::render(&explanation, false));
+}
+
+#[test]
+fn e0109_simple_names_carry_source_derived_code_action() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/ui/string_plus.jet");
+    let source = fs::read_to_string(&path).expect("string-plus fixture");
+    let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+        .expect_err("simple text addition must be rejected");
+    let live = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0109")
+        .expect("string-plus fixture must produce E0109");
+
+    assert_eq!(
+        live.what,
+        "Text values `first` and `last` aren't joined with `+`"
+    );
+    assert_eq!(
+        live.fix,
+        "Write the pieces inside one string: \"{first}{last}\""
+    );
+    assert_eq!(
+        live.applicability,
+        Some(jet_foundation::Diagnostics::FixApplicability::Suggested)
+    );
+    assert_eq!(
+        live.safety,
+        Some(jet_foundation::Diagnostics::FixSafety::NeedsReview)
+    );
+    assert!(live.no_fix_reason.is_none());
+
+    let edits = live.all_edits();
+    assert_eq!(edits.len(), 1, "simple text addition must have one code action");
+    assert_eq!(edits[0].new_text, "\"{first}{last}\"");
+    assert_eq!(edits[0].span, live.span.expect("E0109 source span"));
+    let report = jet::render_all_json(
+        &jet::Diagnostics::ReportPath::from_process("string_plus.jet"),
+        &source,
+        &diagnostics,
+    );
+    assert!(
+        report.contains("\"new_text\":\"\\\"{first}{last}\\\"\""),
+        "the machine report must carry the source-specific replacement: {report}"
+    );
+}
+
+#[test]
+fn e0507_unknown_traversal_intent_stays_explanatory() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/ui/list_loop_mutate.jet");
+    let source = fs::read_to_string(&path).expect("collection-mutation fixture");
+    let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+        .expect_err("collection mutation during traversal must be rejected");
+    let live = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0507")
+        .expect("collection-mutation fixture must produce E0507");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--interpret"])
+        .arg(&path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run collection-mutation fixture");
+    assert!(
+        !output.status.success(),
+        "a collection mutation must make `jet run` fail"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("E0507 stderr is UTF-8");
+    assert!(stderr.contains("Error [E0507]"), "{stderr}");
+    assert!(stderr.contains("visited domain, element order, or termination"), "{stderr}");
+    assert!(live.all_edits().is_empty());
+    assert_eq!(live.applicability, None);
+    assert_eq!(
+        live.no_fix_reason.as_ref().map(|reason| reason.kind.as_str()),
+        Some("ambiguous")
+    );
+    assert!(live.fix.contains("separate result"));
+    assert!(live.fix.contains("fixed original set"));
+    assert!(live.fix.contains("explicit work queue"));
+}
+
+#[test]
+fn loop_grammar_history_stays_distinct_from_collection_mutation() {
+    let path = PathBuf::from("foreign_for.jet");
+    let source = r#"
+fn run() {
+    for x in xs { print(x) }
+    while c { print(c) }
+    continue
+    do { print("done") }
+}
+"#;
+    let diagnostics = jet::compile_with_path(source, &path.to_string_lossy())
+        .expect_err("retired loop spellings must be rejected");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+        "foreign loop spelling must retain E0003: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.code != "E0507"),
+        "grammar mismatch must not be relabeled E0507: {diagnostics:?}"
+    );
 }
 
 fn run_retired_gate_flag_snapshot(file: &str) -> String {

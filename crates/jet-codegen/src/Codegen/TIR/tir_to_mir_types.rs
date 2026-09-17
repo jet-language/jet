@@ -324,6 +324,9 @@ pub(super) struct TirConstantDef {
     pub span: Span,
     pub visibility: TirVisibility,
     pub ty: Type,
+    /// Compile-time bindings are folded at use sites and have no runtime
+    /// representation in the target artifact.
+    pub is_comptime: bool,
     pub value: CtValue,
 }
 
@@ -362,6 +365,7 @@ pub(super) struct TirField {
     pub package_public: bool,
     pub computed: bool,
     pub has_default: bool,
+    pub redact: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -468,6 +472,12 @@ fn lower_type_kind(ty: &Type) -> jet_foundation::MIR::MirTypeKind {
             call_metadata: call_metadata.as_ref().map(lower_call_metadata),
             return_view_provenance: return_view_provenance.as_ref().map(lower_view_provenance),
         }),
+        Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => {
+            lower_type_kind(
+                &crate::AST::numeric_type_from_name(name)
+                    .expect("numeric type name was checked"),
+            )
+        }
         Type::Named(name) => MirTypeKind::Apply {
             name: MirNominalRef {
                 id: MirTypeId(stable_id("mir-type", name)),
@@ -843,6 +853,7 @@ fn lower_field(
         package_public: field.is_package_pub,
         computed: field.computed.is_some(),
         has_default: field.default.is_some(),
+        redact: field.redact,
     }
 }
 
@@ -865,6 +876,7 @@ fn lower_variant_field(
         package_public: false,
         computed: false,
         has_default: false,
+        redact: false,
     }
 }
 
@@ -947,11 +959,13 @@ fn lower_mir_field_for_owner(
         package_public: field.package_public,
         computed: field.computed,
         has_default: field.has_default,
+        redact: field.redact,
     }
 }
 
 fn lower_type_cli_entry(entry: &super::artifact_plan::TirCliEntry) -> MirCliEntry {
     MirCliEntry {
+        record_inputs: entry.record_inputs,
         description: entry.description.clone(),
         inputs: entry
             .inputs
@@ -1846,11 +1860,29 @@ fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
             .clone()
             .or_else(|| definition.ct.as_ref().map(|value| value.jet_type()))
             .unwrap_or(Type::Named("Unit".into())),
+        is_comptime: definition.is_comptime,
         value: definition.ct.clone().unwrap_or(CtValue::Unit),
     }
 }
 
 const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
+    ("Overflow", &["Block", "DropNewest", "DropOldest"]),
+    ("FailurePolicy", &["StopFirst", "Collect", "Log", "Ignore"]),
+    ("HookPolicy", &["FirstCancelElseTransform"]),
+    ("HookOutcome", &["Continue", "Cancel", "Fail"]),
+    ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
+    (
+        "DispatchState",
+        &[
+            "Delivered",
+            "HandlerFailed",
+            "DroppedNewest",
+            "DroppedOldest",
+            "Closed",
+            "Cancelled",
+            "DeadlineExceeded",
+        ],
+    ),
     (
         crate::Syntax::TYPE_ORDERING,
         crate::Syntax::ORDERING_VARIANTS,
@@ -1868,12 +1900,18 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "TaskOutcome",
+        &["Finished", "Panicked", "Cancelled", "DeadlineBlown"],
+    ),
+    ("TaskStatus", &["Running", "Paused", "CancelRequested"]),
+    (
         crate::Syntax::TYPE_IO_ERROR,
         crate::Syntax::IO_ERROR_VARIANTS,
     ),
     (
         crate::Syntax::TYPE_KEY,
         &[
+            "Char",
             "Enter",
             "Escape",
             "Backspace",
@@ -1883,10 +1921,9 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Down",
             "Left",
             "Right",
-            "Unknown",
-            "Char",
-            "Ctrl",
             "F",
+            "Ctrl",
+            "Unknown",
         ],
     ),
     (
@@ -1898,11 +1935,21 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         crate::Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS,
     ),
     (
+        "ProcessStreamMode",
+        &["Stream", "Inherit", "Capture"],
+    ),
+    (
+        crate::Syntax::TYPE_TERMINAL_MODE,
+        &["Raw", "Cooked"],
+    ),
+    (
         crate::Syntax::DURATION_UNIT_TYPE,
         crate::Syntax::DURATION_UNITS,
     ),
     ("FontStyle", &["Body", "Title", "Monospace"]),
     ("GlyphShaper", &["HarfBuzz", "HeadlessFallback"]),
+    ("WebFormValueType", &["String", "Int", "Bool", "Float"]),
+    ("WebFormControl", &["Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden"]),
     (
         "DataTree",
         &[
@@ -1919,6 +1966,42 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
+    (
+        "EmailError",
+        &[
+            "Configuration",
+            "DNS",
+            "Connect",
+            "TLS",
+            "Auth",
+            "Protocol",
+            "Rejected",
+            "Transient",
+            "TimedOut",
+            "Cancelled",
+            "DeliveryUnknown",
+        ],
+    ),
+
+
+    ("SMTPSecurity", &["StartTls", "TLS"]),
+    ("RecipientPolicy", &["RequireAll", "DeliverAccepted"]),
+    ("SMTPAuth", &["None", "Password"]),
+    ("TLSTrust", &["System", "SystemPlusCa"]),
+    (
+        "WsError",
+        &[
+            "InvalidUrl",
+            "InvalidHandshake",
+            "Protocol",
+            "Timeout",
+            "Closed",
+            "Cancelled",
+            "UnsupportedTarget",
+            "MessageTooLarge",
+            "IO",
+        ],
+    ),
 
 ];
 // Compiler-owned Core records are checked values, not user declarations. Keep
@@ -1931,9 +2014,117 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,
     ),
+    ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
+    ("WebFormFieldSpec", &["name", "value_type", "required", "default", "label", "control", "group", "wire_name"]),
+    (
+        crate::Syntax::TYPE_MEMO_STATS,
+        &["hits", "misses", "size", "bound"],
+    ),
+    ("GameScene", &["assets", "input"]),
+    ("GameFrame", &["index", "input"]),
+    ("GameAssets", &[]),
+    ("GameInputMap", &[]),
+    ("GameInputSnapshot", &[]),
+    ("GameBackend", &[]),
+    ("GameReplay", &[]),
+    ("GameImage", &[]),
+    ("GameSound", &[]),
     ("TestSuite", &["iteration", "result"]),
+    (
+        "ProcessReceipt",
+        &[
+            "code",
+            "output",
+            "errors",
+            "success",
+            "signal",
+            "timed_out",
+            "executable_identity",
+            "argv",
+            "input_digest",
+            "policy_digest",
+            "backend",
+            "authority",
+            "descendants",
+            "limits",
+            "outputs",
+            "redacted",
+            "pid",
+            "limit_hit",
+        ],
+    ),
+    (
+        "ProcessPlan",
+        &[
+            "executable_identity",
+            "argv",
+            "input_digest",
+            "policy_digest",
+            "backend",
+            "authority",
+            "descendants",
+            "limits",
+            "outputs",
+        ],
+    ),
+    (
+        "ProcessChild",
+        &["stdin", "stdout", "stderr", "terminal"],
+    ),
+    (
+        crate::Syntax::TYPE_TERMINAL_SIZE,
+        &["cols", "rows"],
+    ),
+    (
+        crate::Syntax::TYPE_TERMINAL_POLICY,
+        &["size", "mode"],
+    ),
+    ("Address", &[]),
+    ("Message", &[]),
+    ("Attachment", &[]),
+    ("RecipientReport", &["address", "accepted", "code", "message"]),
+    (
+        "SendReport",
+        &[
+            "server",
+            "accepted",
+            "rejected",
+            "response_code",
+            "response",
+            "accepted_at",
+        ],
+    ),
+    (
+        "Limits",
+        &[
+            "max_reply_line_bytes",
+            "max_reply_lines",
+            "max_capabilities",
+            "max_recipients",
+            "max_message_bytes",
+            "max_auth_challenge_bytes",
+        ],
+    ),
+    ("Mailer", &[]),
     ("Envelope", &["from", "recipients"]),
+    (
+        "DkimConfig",
+        &["domain", "selector", "private_key", "signed_headers"],
+    ),
+    (
+        "SMTPConfig",
+        &[
+            "host",
+            "port",
+            "security",
+            "auth",
+            "recipient_policy",
+            "trust",
+            "limits",
+            "dkim",
+        ],
+    ),
     (
         "XMLCanonical",
         &["mode", "comments", "inclusive_prefixes"],
@@ -1984,6 +2175,36 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "approximate",
         ],
     ),
+    // D-FOUND-PLATFORM1=A: Core UI host records share their runtime carriers
+    // with every backend; keep their checked field vocabulary in the nominal
+    // declaration registry so field projections have MIR owner rows.
+    ("UiFileFilter", &["label", "extensions", "mime_types"]),
+    ("UiFsGrant", &["root", "rights"]),
+    ("UiGrantedPath", &["path", "grant_root", "access"]),
+    (
+        "UiFileDialogRequest",
+        &[
+            "kind",
+            "title",
+            "grant",
+            "initial_directory",
+            "filters",
+            "allow_multiple",
+        ],
+    ),
+    ("UiFileDialogSelection", &["files"]),
+    ("UiClipboardText", &["text", "selection"]),
+    ("UiClipboardWrite", &["characters"]),
+    ("UiTextRange", &["start", "end"]),
+    (
+        "UiImeComposition",
+        &["text", "selection", "marked"],
+    ),
+    ("UiImeEvent", &["target", "phase", "composition"]),
+    ("UiDragEvent", &["target", "phase", "operation", "items"]),
+    ("UiShortcut", &["key", "modifiers"]),
+    ("UiShortcutBinding", &["shortcut", "action", "node"]),
+    ("UiAccessibility", &["name", "description"]),
     (
         crate::Syntax::TYPE_TYPE_INFO,
         &[
@@ -2160,6 +2381,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         || COMPILER_OWNED_MATH_RECORDS
             .iter()
             .any(|(owned, _)| *owned == name)
+        || crate::Codegen::core_email_rust_type_name(name).is_some()
         || name == crate::Syntax::TYPE_ERR
         || matches!(
             name,
@@ -2174,13 +2396,14 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         )
 }
 
-
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
     COMPILER_OWNED_ENUMS
         .iter()
         .find(|(owned, _)| *owned == name)
         .map(|(_, variants)| *variants)
 }
+
+
 
 fn compiler_owned_default_err(module: &str) -> TirTypeDef {
     let span = Span::new(0, 0);
@@ -2194,6 +2417,7 @@ fn compiler_owned_default_err(module: &str) -> TirTypeDef {
         package_public: false,
         computed: false,
         has_default: false,
+        redact: false,
     };
     TirTypeDef {
         module: module.to_string(),
@@ -2269,6 +2493,7 @@ fn compiler_owned_record(
                     package_public: false,
                     computed: false,
                     has_default: false,
+                    redact: false,
                 })
                 .collect(),
             methods: Vec::new(),
@@ -2308,6 +2533,7 @@ fn compiler_owned_vjp_run(module: &str) -> TirTypeDef {
         package_public: false,
         computed: false,
         has_default: false,
+        redact: false,
     };
     TirTypeDef {
         module: module.to_string(),
@@ -2387,6 +2613,8 @@ fn compiler_owned_parse_error(module: &str) -> TirTypeDef {
     row
 }
 
+
+
 fn compiler_owned_type_defs(
     module: &str,
     seed_parse_error: bool,
@@ -2401,7 +2629,16 @@ fn compiler_owned_type_defs(
             span,
             public: true,
             package_public: false,
-            generic_params: Vec::new(),
+            generic_params: match *name {
+                "HookDecision" | "HookOutcome" => ["T", "E"]
+                    .into_iter()
+                    .map(|name| super::TGenericParam {
+                        name: name.to_string(),
+                        bounds: Vec::new(),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
             derives: Vec::new(),
             auto_derive_default: false,
             auto_printable: false,
@@ -2431,6 +2668,56 @@ fn compiler_owned_type_defs(
                             } else {
                                 TirVariantPayload::Unit
                             }
+                        } else if *name == "TaskOutcome" && *variant == "Panicked" {
+                            TirVariantPayload::Single(Type::String)
+                        } else if *name == "HookDecision" {
+                            match *variant {
+                                "Transform" => {
+                                    TirVariantPayload::Single(Type::Named("T".to_string()))
+                                }
+                                "Fail" => {
+                                    TirVariantPayload::Single(Type::Named("E".to_string()))
+                                }
+                                _ => TirVariantPayload::Unit,
+                            }
+                        } else if *name == "HookOutcome" {
+                            match *variant {
+                                "Continue" => {
+                                    TirVariantPayload::Single(Type::Named("T".to_string()))
+                                }
+                                "Fail" => {
+                                    TirVariantPayload::Single(Type::Named("E".to_string()))
+                                }
+                                _ => TirVariantPayload::Unit,
+                            }
+                        } else if *name == "WsError" {
+                            match *variant {
+                                "MessageTooLarge" => TirVariantPayload::Named(vec![TirField {
+                                    name: "limit".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("limit"),
+                                    skip: false,
+                                    ty: Type::Int,
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                }]),
+                                "IO" => TirVariantPayload::Named(vec![TirField {
+                                    name: "operation".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("operation"),
+                                    skip: false,
+                                    ty: Type::String,
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                }]),
+                                _ => TirVariantPayload::Unit,
+                            }
                         } else if *name == crate::Syntax::TYPE_IO_ERROR {
                             if *variant == "ResourceLimit" {
                                 TirVariantPayload::Single(Type::Named(
@@ -2447,6 +2734,100 @@ fn compiler_owned_type_defs(
                                 "F" => TirVariantPayload::Single(Type::Int),
                                 _ => TirVariantPayload::Unit,
                             }
+                        } else if *name == "EmailError" {
+                            TirVariantPayload::Named(vec![
+                                TirField {
+                                    name: "operation".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("operation"),
+                                    skip: false,
+                                    ty: Type::String,
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                                TirField {
+                                    name: "server".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("server"),
+                                    skip: false,
+                                    ty: Type::Option(Box::new(Type::String)),
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                                TirField {
+                                    name: "code".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("code"),
+                                    skip: false,
+                                    ty: Type::Option(Box::new(Type::Int)),
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                                TirField {
+                                    name: "reason".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("reason"),
+                                    skip: false,
+                                    ty: Type::String,
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                            ])
+                        } else if *name == "SMTPAuth" && *variant == "Password" {
+                            TirVariantPayload::Named(vec![
+                                TirField {
+                                    name: "username".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("username"),
+                                    skip: false,
+                                    ty: Type::String,
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                                TirField {
+                                    name: "password".to_string(),
+                                    shape_names: ShapeFieldNames::from_source("password"),
+                                    skip: false,
+                                    ty: Type::Named("Secret".to_string()),
+                                    span,
+                                    public: true,
+                                    package_public: false,
+                                    computed: false,
+                                    has_default: false,
+                                    redact: false,
+                                },
+                            ])
+                        } else if *name == "TLSTrust" && *variant == "SystemPlusCa" {
+                            TirVariantPayload::Named(vec![TirField {
+                                name: "pem".to_string(),
+                                shape_names: ShapeFieldNames::from_source("pem"),
+                                skip: false,
+                                ty: Type::List(Box::new(Type::IntN {
+                                    signed: false,
+                                    bits: 8,
+                                })),
+                                span,
+                                public: true,
+                                package_public: false,
+                                computed: false,
+                                has_default: false,
+                                redact: false,
+                            }])
                         } else if *name == "DataTree" {
                             match *variant {
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
@@ -2608,5 +2989,6 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::SUB
             | crate::Generics::MUL
             | crate::Generics::DIV
+            | crate::Syntax::TRAIT_ROLLBACK
     )
 }

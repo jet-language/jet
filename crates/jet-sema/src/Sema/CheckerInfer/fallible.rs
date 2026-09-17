@@ -724,7 +724,13 @@ impl<'a> Checker<'a> {
         let mut value = value;
         mark_value_loop_route_attached(&mut value);
         let value_ty = match self.infer(&mut value) {
-            Some(ty) => ty,
+            Some(ty) => {
+                let ty = self.resolve_type(ty).erased_carrier();
+                match ty {
+                    Type::Result { ok, .. } | Type::Option(ok) => ok.erased_carrier(),
+                    other => other,
+                }
+            }
             None => {
                 *expr = *value;
                 return None;
@@ -745,12 +751,18 @@ impl<'a> Checker<'a> {
         match fallback {
             OrFallback::Value(mut fallback_expr) => {
                 let fallback_span = fallback_expr.span();
-                let saved = self.expected_type.clone();
-                self.expected_type = Some(value_ty.clone());
-                let fallback_ty = self.infer(&mut fallback_expr);
-                self.expected_type = saved;
+                let fallback_ty =
+                    self.infer_with_expected(&mut fallback_expr, &value_ty);
                 if let Some(fallback_ty) = fallback_ty {
-                    if fallback_ty != value_ty {
+                    let fallback_ty = self.widen_numeric_argument(
+                        &mut fallback_expr,
+                        fallback_ty,
+                        &value_ty,
+                        crate::AST::AccessConvention::Read,
+                    );
+                    let reported =
+                        self.check_type_assignable(&value_ty, &fallback_ty, fallback_span);
+                    if fallback_ty != value_ty && !reported {
                         self.diags.push(Diagnostic::error(
                             "E0405",
                             format!(

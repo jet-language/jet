@@ -1188,16 +1188,49 @@ fn jet_jit_io_binread(path: i64) -> i64 {
 }
 
 /// A resident callable is the JIT carrier for the generic Prelude guard.
-/// Preserve that carrier; scope exit owns when it is invoked.
+/// Preserve that callback in a per-guard slot; the slot is consumed exactly
+/// once when MIR moves the `ScopeGuard` value at scope exit.
 fn jet_jit_scope_guard(callback: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        if runtime_host::jit_callable_parts(rt, callback).is_some() {
-            callback
-        } else {
+        let Some(callback) = runtime_host::jit_callable_parts(rt, callback) else {
             rt.set_host_fault("MIR scope guard closure has an invalid callable handle");
-            0
-        }
+            return 0;
+        };
+        let Some(handle) = rt
+            .scope_guards
+            .len()
+            .checked_add(1)
+            .and_then(|index| i64::try_from(index).ok())
+        else {
+            rt.set_host_fault("MIR scope guard arena is full");
+            return 0;
+        };
+        rt.scope_guards.push(Some(callback));
+        handle
     })
+}
+
+/// Invoke one resident scope guard and consume its callback slot. The runtime
+/// borrow ends before entering generated code so callbacks may call hosts.
+fn jet_jit_scope_guard_drop(guard: i64) -> i64 {
+    let callback = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = guard
+            .checked_sub(1)
+            .and_then(|index| usize::try_from(index).ok())
+        else {
+            rt.set_host_fault("MIR scope guard has an invalid handle");
+            return None;
+        };
+        let Some(slot) = rt.scope_guards.get_mut(index) else {
+            rt.set_host_fault("MIR scope guard has an unknown handle");
+            return None;
+        };
+        slot.take()
+    });
+    if let Some(callback) = callback {
+        runtime_host::invoke_jit_callable_zero(&callback);
+    }
+    0
 }
 
 
@@ -1357,7 +1390,8 @@ fn jet_jit_term_read_key() -> i64 {
     else {
         jet_foundation::ice!(None, "jit read_key: Key variant metadata");
     };
-    (payload << 8) | disc
+    let packed = (payload << 8) | disc;
+    packed
 }
 
 host_fns! {
@@ -1451,6 +1485,7 @@ host_fns! {
     input_secret: "jet_jit_io_input_secret" => jet_jit_io_input_secret: unary;
     binread: "jet_std_io_binread" => jet_jit_io_binread: unary;
     scope_guard: "jet_scope_guard" => jet_jit_scope_guard: unary;
+    scope_guard_drop: "jet_scope_guard_drop" => jet_jit_scope_guard_drop: unary;
     take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
     read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
     input: "jet_std_io_input" => io_line_stream::jet_jit_io_input: unary;

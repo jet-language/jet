@@ -4189,12 +4189,12 @@ fn main() {
             if jet_argv.iter().any(|arg| arg == "--show-default") && !mode.quiet {
                 write_status(profile, "jet dev: using stock default\n");
             }
-            let dev_profile = if no_os {
+            let dev_profile = if let Some(profile) = named_profile.as_deref() {
+                resolve_named_profile(profile, &file, mode)
+            } else if no_os {
                 BuildProfile::NoOs
             } else if small {
                 BuildProfile::Small
-            } else if let Some(profile) = named_profile.as_deref() {
-                resolve_named_profile(profile, &file, mode)
             } else {
                 BuildProfile::default_for_command("dev")
             };
@@ -4241,7 +4241,7 @@ fn main() {
                         gates,
                         mode,
                         true,
-                        named_profile.as_deref().unwrap_or("dev"),
+                        dev_profile.budget_name(),
                         &setting_overrides,
                         &passthrough,
                         record_name.as_deref(),
@@ -4254,7 +4254,7 @@ fn main() {
                     &file,
                     mode,
                     dev_port,
-                    named_profile.as_deref(),
+                    &dev_profile,
                     &setting_overrides,
                     record_name.as_deref(),
                     &passthrough,
@@ -4291,7 +4291,7 @@ fn main() {
                 gates,
                 mode,
                 use_interpreter,
-                named_profile.as_deref().unwrap_or("dev"),
+                dev_profile.budget_name(),
                 &setting_overrides,
                 &passthrough,
                 record_name.as_deref(),
@@ -4535,6 +4535,15 @@ fn main() {
                                 requested_target.as_deref(),
                             )
                         });
+                        let dev_profile = if let Some(profile) = named_profile.as_deref() {
+                            resolve_named_profile(profile, &entry_str, mode)
+                        } else if no_os {
+                            BuildProfile::NoOs
+                        } else if small {
+                            BuildProfile::Small
+                        } else {
+                            BuildProfile::default_for_command("dev")
+                        };
                         run_dev(
                             &entry_str,
                             entry.callable.as_deref(),
@@ -4543,7 +4552,7 @@ fn main() {
                             gates,
                             mode,
                             use_interpreter,
-                            named_profile.as_deref().unwrap_or("dev"),
+                            dev_profile.budget_name(),
                             &setting_overrides,
                             &passthrough,
                             record_name.as_deref(),
@@ -4570,6 +4579,15 @@ fn main() {
                             prepare_project_environment("run", Path::new(&entry_str), mode);
                             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
                             let use_interpreter = raw.iter().any(|a| a == "--interpret");
+                            let run_profile = if let Some(profile) = named_profile.as_deref() {
+                                resolve_named_profile(profile, &entry_str, mode)
+                            } else if no_os {
+                                BuildProfile::NoOs
+                            } else if small {
+                                BuildProfile::Small
+                            } else {
+                                BuildProfile::default_for_command("run")
+                            };
                             run_dev(
                                 &entry_str,
                                 entry.callable.as_deref(),
@@ -4578,7 +4596,7 @@ fn main() {
                                 gates,
                                 mode,
                                 use_interpreter,
-                                named_profile.as_deref().unwrap_or("dev"),
+                                run_profile.budget_name(),
                                 &setting_overrides,
                                 &program_args,
                                 record_name.as_deref(),
@@ -4894,6 +4912,15 @@ fn main() {
                     prepare_project_environment("run", Path::new(&resolved_path), mode);
                     let try_anyway = raw.iter().any(|a| a == "--try-anyway");
                     let use_interpreter = raw.iter().any(|a| a == "--interpret");
+                    let run_profile = if let Some(profile) = named_profile.as_deref() {
+                        resolve_named_profile(profile, &resolved_path, mode)
+                    } else if no_os {
+                        BuildProfile::NoOs
+                    } else if small {
+                        BuildProfile::Small
+                    } else {
+                        BuildProfile::default_for_command("run")
+                    };
                     run_dev(
                         &resolved_path,
                         resolved.callable.as_deref(),
@@ -4902,7 +4929,7 @@ fn main() {
                         gates,
                         mode,
                         use_interpreter,
-                        named_profile.as_deref().unwrap_or("dev"),
+                        run_profile.budget_name(),
                         &setting_overrides,
                         &program_args,
                         record_name.as_deref(),

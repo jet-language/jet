@@ -4,6 +4,10 @@
 
 fn jet_add(a: Int, b: Int) Int -> (a + b)
 
+#[Unsafe("the scalar ABI contract deliberately returns a mismatched result"), FFI(c)] fn wrong_add(a: Int, b: Int) Int -> {
+    """int64_t wrong_add(int64_t a, int64_t b) { return a + b + 1; }"""
+}
+
 fn run() {
     #Unsafe("call the audited inline C contract") {
         print(add(20, 22))
@@ -11,11 +15,15 @@ fn run() {
 }
 
 #Test("inline C Int comparisons") {
-    #Unsafe("call the audited inline C contract") {
-        assert_eq(add(20, 22), jet_add(20, 22))
-        assert((add(20, 22) == jet_add(20, 22)))
-        .expect_fail {
-            assert_eq(add(20, 22), jet_add(20, 23))
+    loop n in -100..100 {
+        #Unsafe("call the audited inline C contract with bounded Int values") {
+            assert_eq(add(n, 22), jet_add(n, 22))
+            assert((add(n, 22) == jet_add(n, 22)))
+        }
+    }
+    .expect_fail {
+        #Unsafe("call the audited inline C contract with a deliberately wrong C result") {
+            assert_eq(wrong_add(20, 22), jet_add(20, 22))
         }
     }
 }
