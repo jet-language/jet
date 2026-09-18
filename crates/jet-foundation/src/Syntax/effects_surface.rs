@@ -52,7 +52,9 @@ pub const BUILTIN_EFFECT_LEAVES: &[&str] = &[
     "FFI.Php",
     "FFI.R",
     "FFI.Com",
+    "FFI.C",
     "FFI.Cpp",
+    "FFI.Asm",
     "FFI.Py",
     "FFI.Octave",
 ];

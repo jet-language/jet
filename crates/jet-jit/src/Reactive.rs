@@ -946,8 +946,8 @@ fn jet_jit_subscription_active(sub: i64) -> i64 {
             .subscriptions
             .get(sub.saturating_sub(1) as usize)
             .map(|sub| sub.active() as i64)
-            .unwrap_or(0)
     })
+    .unwrap_or_else(|| crate::Watcher::subscription_is_active(sub))
 }
 
 fn jet_jit_hook_new(name: i64) -> i64 {
@@ -1620,8 +1620,8 @@ host_fns! {
     decision_hook_once_aot: "jet_std::JetDecisionHook::once" => jet_jit_decision_hook_once: listener;
     decision_hook_on_priority: "jet_jit_decision_hook_on_priority" => jet_jit_decision_hook_on_priority: listener_priority;
     decision_hook_on_priority_aot: "jet_std::JetDecisionHook::on_priority" => jet_jit_decision_hook_on_priority: listener_priority;
-    decision_hook_run: "jet_jit_decision_hook_run" => jet_jit_decision_hook_run: unary;
-    decision_hook_run_aot: "jet_std::JetDecisionHook::run" => jet_jit_decision_hook_run: unary;
+    decision_hook_run: "jet_jit_decision_hook_run" => jet_jit_decision_hook_run: binary;
+    decision_hook_run_aot: "jet_std::JetDecisionHook::run" => jet_jit_decision_hook_run: binary;
     decision_hook_listener_count: "jet_jit_decision_hook_listener_count" => jet_jit_decision_hook_listener_count: unary;
     decision_hook_listener_count_aot: "jet_std::JetDecisionHook::listener_count" => jet_jit_decision_hook_listener_count: unary;
     async_event_new: "jet_jit_async_event_new" => jet_jit_async_event_new: binary;

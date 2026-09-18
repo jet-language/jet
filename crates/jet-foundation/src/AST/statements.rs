@@ -362,8 +362,9 @@ pub enum Stmt {
     /// at compile time via the tree-walking comptime interpreter; erases
     /// entirely (no runtime Rust emitted, I3).
     /// Purity-checked (E3401, D-META-EFFECT1 c3) then tree-walked
-    /// (E0953/E0956); effect tiers per D-CTEFFECT1. Bindings inside do not
-    /// leak to the enclosing scope. `@name` splice (piece 1) deferred to c155.
+    /// (E0953/E0956); effect tiers per D-CTEFFECT1. Bindings declared inside
+    /// are the same compile-time names outside the block (S57): sema folds
+    /// them from the interpreter scope, and codegen never sees the block.
     ComptimeBlock {
         body: Vec<Stmt>,
         /// Internal derive-template marker: `@loop` in a provider function is

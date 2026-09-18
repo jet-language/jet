@@ -221,6 +221,17 @@ impl LowerEnv {
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
     }
+    /// Locals with a known type, in name order. Comptime fragment blocks use
+    /// this to export `@ { … }` bindings so later reads fold (S57).
+    pub(crate) fn typed_locals(&self) -> Vec<(String, Type)> {
+        let mut rows = self
+            .locals
+            .iter()
+            .filter_map(|(name, (_, ty))| Some((name.clone(), ty.clone()?)))
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
     pub(super) fn mark_dma_transfer(&mut self, name: &str, channel: String) {
         self.dma_transfers.insert(name.to_string(), channel);
     }

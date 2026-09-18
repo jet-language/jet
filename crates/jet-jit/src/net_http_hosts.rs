@@ -792,6 +792,18 @@ fn jet_jit_net_tcp_read_bytes(stream: i64, limit: i64) -> i64 {
     }
 }
 
+fn jet_jit_net_tcp_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp read", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_read_bytes_deadline(&mut guard, limit, &deadline) {
+        Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+        Err(error) => net_err(error),
+    }
+}
+
 fn jet_jit_net_tcp_write_bytes(stream: i64, data: i64) -> i64 {
     let data = clone_bytes(data);
     let Some(stream) = tcp_stream(stream) else {
@@ -804,6 +816,19 @@ fn jet_jit_net_tcp_write_bytes(stream: i64, data: i64) -> i64 {
     }
 }
 
+fn jet_jit_net_tcp_write_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+    let data = clone_bytes(data);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp write", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_write_bytes_deadline(&mut guard, &data, &deadline) {
+        Ok(count) => result_ok(count as u64),
+        Err(error) => net_err(error),
+    }
+}
+
 fn jet_jit_net_tcp_write_text(stream: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let Some(stream) = tcp_stream(stream) else {
@@ -811,6 +836,16 @@ fn jet_jit_net_tcp_write_text(stream: i64, text: i64) -> i64 {
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_write_text(&mut guard, &text))
+}
+
+fn jet_jit_net_tcp_write_text_deadline(stream: i64, text: i64, deadline: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp write", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_tcp_write_text_deadline(&mut guard, &text, &deadline))
 }
 
 fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
@@ -880,6 +915,27 @@ fn jet_jit_net_set_write_timeout(stream: i64, ms: i64) -> i64 {
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_set_write_timeout(&mut guard, ms))
+}
+
+fn jet_jit_net_dns_a(name: i64, ms: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_a(&name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_dns_a_at(server: i64, name: i64, ms: i64) -> i64 {
+    let server = clone_string(server);
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_a_at(&server, &name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_handles(
+            rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+        )),
+        Err(error) => net_err(error),
+    }
 }
 
 fn jet_jit_net_dns_aaaa(name: i64, ms: i64) -> i64 {
@@ -1470,6 +1526,19 @@ fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
     }
 }
 
+fn jet_jit_tcp_listener_accept_deadline(listener: i64, deadline: i64) -> i64 {
+    let Some(listener) = tcp_listener(listener) else {
+        return net_invalid("tcp accept", "TcpListener");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_tcp_accept_deadline(&listener, &deadline) {
+        Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(
+            s,
+        ))))),
+        Err(e) => net_err(e),
+    }
+}
+
 fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
         return net_invalid("tcp local address", "TcpListener");
@@ -1491,6 +1560,18 @@ fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
     }
 }
 
+fn jet_jit_tcp_stream_read_text_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp read", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_read_text_deadline(&mut guard, limit, &deadline) {
+        Ok(s) => result_ok_handle(alloc_string(s)),
+        Err(e) => net_err(e),
+    }
+}
+
 fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(stream) = tcp_stream(stream) else {
@@ -1498,6 +1579,20 @@ fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
     };
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_write_all_bytes(&mut guard, &bytes))
+}
+
+fn jet_jit_tcp_stream_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+    let bytes = clone_bytes(data);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("write_all", "TcpStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_tcp_write_all_bytes_deadline(
+        &mut guard,
+        &bytes,
+        &deadline,
+    ))
 }
 fn jet_jit_tcp_stream_shutdown(stream: i64, how: i64) -> i64 {
     let Some(how) = (match how {
@@ -1602,12 +1697,14 @@ fn tls_peer_identity_handle(identity: JetTLSPeerIdentity) -> i64 {
     let cipher_suite = alloc_string(identity.cipher_suite);
     let tls_version = tls_version_bits(identity.tls_version);
     Concurrency::with_runtime_mut(|rt| {
+        let version = rt.heap.alloc_record(1);
+        let _ = rt.heap.record_set_int(version, 0, tls_version);
         let record = rt.heap.alloc_record(5);
         let _ = rt.heap.record_set_string(record, 0, server_name);
         let _ = rt.heap.record_set_int(record, 1, leaf);
         let _ = rt.heap.record_set_int(record, 2, chain);
         let _ = rt.heap.record_set_string(record, 3, cipher_suite);
-        let _ = rt.heap.record_set_int(record, 4, tls_version);
+        let _ = rt.heap.record_set_int(record, 4, version);
         record
     })
 }
@@ -3547,6 +3644,7 @@ host_fns! {
     socket_to_string: "jet_jit_net_socket_to_string" => jet_jit_net_socket_to_string: sig1;
     socket_host: "jet_jit_net_socket_host" => jet_jit_net_socket_host: sig1;
     socket_port_typed: "jet_jit_net_socket_port_typed" => jet_jit_net_socket_port_typed: sig1;
+    socket_port: "jet_net_socket_port" => jet_jit_net_socket_port_typed: sig1;
     tcp_listen_str: "jet_net_tcp_listen" => jet_jit_net_tcp_listen_str: sig1;
     tcp_listen_addr: "jet_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
     tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
@@ -3557,6 +3655,8 @@ host_fns! {
     tcp_stream_peer_socket_addr: "jet_jit_net_tcp_stream_peer_socket_addr" => jet_jit_net_tcp_stream_peer_socket_addr: sig1;
     set_read_timeout: "jet_jit_net_set_read_timeout" => jet_jit_net_set_read_timeout: sig2;
     set_write_timeout: "jet_jit_net_set_write_timeout" => jet_jit_net_set_write_timeout: sig2;
+    dns_a: "jet_jit_net_dns_a" => jet_jit_net_dns_a: sig2;
+    dns_a_at: "jet_jit_net_dns_a_at" => jet_jit_net_dns_a_at: sig3;
     dns_aaaa: "jet_jit_net_dns_aaaa" => jet_jit_net_dns_aaaa: sig2;
     dns_aaaa_at: "jet_jit_net_dns_aaaa_at" => jet_jit_net_dns_aaaa_at: sig3;
     dns_srv: "jet_jit_net_dns_srv" => jet_jit_net_dns_srv: sig2;
@@ -3565,7 +3665,7 @@ host_fns! {
     dns_srv_port: "jet_jit_net_dns_srv_port" => jet_jit_net_dns_srv_port: sig1;
     dns_srv_priority: "jet_jit_net_dns_srv_priority" => jet_jit_net_dns_srv_priority: sig1;
     dns_srv_weight: "jet_jit_net_dns_srv_weight" => jet_jit_net_dns_srv_weight: sig1;
-    listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr2" => jet_jit_net_listener_local_socket_addr: sig1;
+    listener_local_socket_addr: "jet_net_listener_local_socket_addr" => jet_jit_net_listener_local_socket_addr: sig1;
     set_timeout: "jet_jit_net_set_timeout" => jet_jit_net_set_timeout: sig2;
     nodelay: "jet_jit_net_nodelay" => jet_jit_net_nodelay: sig1;
     set_nodelay: "jet_jit_net_set_nodelay" => jet_jit_net_set_nodelay: sig2;
@@ -3603,13 +3703,20 @@ host_fns! {
     tcp_read: "jet_net_tcp_read" => jet_jit_net_tcp_read: sig1;
     tcp_write: "jet_net_tcp_write" => jet_jit_net_tcp_write: sig2;
     tcp_read_bytes: "jet_net_tcp_read_bytes" => jet_jit_net_tcp_read_bytes: sig2;
+    tcp_read_bytes_deadline: "jet_net_tcp_read_bytes_deadline" => jet_jit_net_tcp_read_bytes_deadline: sig3;
     tcp_write_bytes: "jet_net_tcp_write_bytes" => jet_jit_net_tcp_write_bytes: sig2;
+    tcp_write_bytes_deadline: "jet_net_tcp_write_bytes_deadline" => jet_jit_net_tcp_write_bytes_deadline: sig3;
     tcp_write_text: "jet_net_tcp_write_text" => jet_jit_net_tcp_write_text: sig2;
+    tcp_write_text_deadline: "jet_net_tcp_write_text_deadline" => jet_jit_net_tcp_write_text_deadline: sig3;
     tcp_accept: "jet_net_tcp_accept" => jet_jit_tcp_listener_accept: sig1;
+    tcp_accept_deadline: "jet_net_tcp_accept_deadline" => jet_jit_tcp_listener_accept_deadline: sig2;
+    tcp_accept_deadline_jit: "jet_jit_tcp_listener_accept_deadline" => jet_jit_tcp_listener_accept_deadline: sig2;
     tcp_local_addr: "jet_jit_tcp_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
     tcp_local_addr_prelude: "jet_net_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
     tcp_read_text: "jet_net_tcp_read_text" => jet_jit_tcp_stream_read_text: sig2;
+    tcp_read_text_deadline: "jet_net_tcp_read_text_deadline" => jet_jit_tcp_stream_read_text_deadline: sig3;
     tcp_write_all_bytes: "jet_net_tcp_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
+    tcp_write_all_bytes_deadline: "jet_net_tcp_write_all_bytes_deadline" => jet_jit_tcp_stream_write_all_bytes_deadline: sig3;
     tcp_shutdown: "jet_net_tcp_shutdown" => jet_jit_tcp_stream_shutdown: sig2;
     tcp_close: "jet_net_tcp_close" => jet_jit_tcp_stream_close: sig1;
     tcp_ready: "jet_net_tcp_ready_deadline" => jet_jit_tcp_stream_ready: sig3;
@@ -3632,9 +3739,11 @@ host_fns! {
     tls_write_all_bytes_deadline: "jet_jit_tls_write_all_bytes_deadline" => jet_jit_tls_write_all_bytes_deadline: sig3;
     tls_write_text: "jet_jit_tls_write_text" => jet_jit_tls_write_text: sig2;
     tls_close: "jet_jit_tls_close" => jet_jit_tls_close: sig1;
+    tls_close_prelude: "jet_net_tls_close" => jet_jit_tls_close: sig1;
     tls_close_write: "jet_jit_tls_close_write" => jet_jit_tls_close_write: sig2;
     tls_ready: "jet_jit_tls_ready" => jet_jit_tls_ready: sig3;
     tls_peer_identity: "jet_jit_tls_peer_identity" => jet_jit_tls_peer_identity: sig1;
+    tls_peer_identity_prelude: "jet_net_tls_peer_identity" => jet_jit_tls_peer_identity: sig1;
     udp_ready: "jet_jit_udp_socket_ready" => jet_jit_udp_socket_ready: sig3;
     udp_close: "jet_jit_udp_socket_close" => jet_jit_udp_socket_close: sig1;
     http_openapi: "jet_web_openapi" => jet_jit_http_openapi: sig1;
@@ -3719,7 +3828,9 @@ host_fns! {
     http_mux_middleware: "jet_jit_http_mux_middleware" => jet_jit_http_mux_middleware: sig2;
     http_request_id: "jet_jit_http_request_id" => jet_jit_http_request_id: sig1;
     http_req_trailers: "jet_jit_http_req_trailers" => jet_jit_http_req_trailers: sig1;
+    http_req_trailers_prelude: "jet_http_srv_req_trailers" => jet_jit_http_req_trailers: sig1;
     http_resp_trailers: "jet_jit_http_resp_trailers" => jet_jit_http_resp_trailers: sig2;
+    http_resp_trailers_prelude: "jet_http_srv_response_trailers" => jet_jit_http_resp_trailers: sig2;
     http_req_body_len: "jet_jit_http_req_body_len" => jet_jit_http_req_body_len: sig1;
     http_req_under_limit: "jet_jit_http_req_under_limit" => jet_jit_http_req_under_limit: sig2;
     http_sse: "jet_jit_http_sse" => jet_jit_http_sse: sig1;

@@ -1171,6 +1171,23 @@ fn run() {
     assert_tiers_agree("tir_card_2845_stored_mutating_closure", src, "1\n0\n");
 }
 
+/// Nested unannotated lambdas inside `fn run()` must return their body value,
+/// not inherit run's Result<Unit> carrier (closure_capture_snapshot).
+#[test]
+fn nested_unannotated_lambda_returns_int() {
+    let src = r#"
+fn run() {
+    x := 2
+    outer :: (y: Int) -> {
+        inner :: (z: Int) -> x + y + z
+        inner(4)
+    }
+    print(outer(3))
+}
+"#;
+    assert_tiers_agree("tir_nested_unannotated_lambda_returns_int", src, "9\n");
+}
+
 /// Hardening finding lane-7/lambda-call-aot-ice (card #2842): tier-parity regression fixture.
 #[test]
 fn card_2842_function_value_call_tier_parity() {

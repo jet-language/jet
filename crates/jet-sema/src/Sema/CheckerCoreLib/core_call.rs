@@ -4908,7 +4908,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                return None;
+                return Some(Type::Named("Unit".to_string()));
             }
             // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — the runtime reflection
             // floor. Legal wherever `x` is interpolatable (`"{x}"`) — the SAME

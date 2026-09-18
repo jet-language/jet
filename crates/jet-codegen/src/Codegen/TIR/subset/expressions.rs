@@ -105,6 +105,13 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         {
             expr_in_subset(subject, cx, locals)
         }
+        // D-BINPAT1 / D-PARSESTR1: `bytes == [U8]{"JGB1"}` and string-pattern
+        // tests in value position are PatternTest, not MethodCall equal.
+        Expr::PatternTest {
+            subject,
+            pattern: Pattern::BinMatch { .. } | Pattern::StrMatch { .. },
+            ..
+        } => expr_in_subset(subject, cx, locals),
         // D-FACT-ENUM-TIR: generated fact reads are typed comptime enum values.
         // The shared TIR fold turns the closed comparison into a Bool before
         // either value reaches an engine or the Rust/Web emitter.
@@ -1009,6 +1016,10 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // D-CAP2 (D-MEM1/S4): `copy x` — in-subset whenever `x` is.
         Expr::Copy(inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Place(inner, _, _) => expr_in_subset(inner, cx, locals),
+        // D-BINPAT1 / D-SHIFT1: take_pattern literals are compile-time pattern
+        // trees. The handle-method gate matches them; covering the leaves here
+        // keeps helper uses and any future call shape from dropping `run`.
+        Expr::BinMatchLit(..) | Expr::StrMatchLit(..) => true,
         // Everything else (tuples, …) is out.
         _ => false,
     }

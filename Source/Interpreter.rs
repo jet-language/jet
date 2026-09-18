@@ -45,6 +45,14 @@ pub struct ConsoleBoot {
 struct CheckedSnapshot {
     snapshot: crate::CheckedMirSnapshot,
     lints: Vec<Diagnostic>,
+    ffi_cdylib: Option<std::path::PathBuf>,
+}
+
+fn with_ffi_cdylib<R>(path: Option<std::path::PathBuf>, work: impl FnOnce() -> R) -> R {
+    jet_jit::set_bridge_cdylib(path);
+    let result = work();
+    jet_jit::set_bridge_cdylib(None);
+    result
 }
 
 /// c77 (D-DEVMODE1=A): how `jet dev` should react to a save.
@@ -498,6 +506,14 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                     diags,
                     extension_diags,
                 )?;
+                let ffi = if crate::FFI::collect_externs(&bundle).is_empty() {
+                    None
+                } else {
+                    match crate::FFI::prepare(&bundle) {
+                        Ok(link) => link,
+                        Err(diags) => return Err(diags),
+                    }
+                };
                 let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(
                     &bundle,
                     artifact_request_for(&bundle, artifact_target, profile),
@@ -510,6 +526,7 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                         artifact,
                     },
                     lints,
+                    ffi_cdylib: ffi.map(|link| link.cdylib_path),
                 })
             }
             Err(diags) => Err(diags),
@@ -741,7 +758,7 @@ pub fn boot_console_with_source_closure(
         .iter()
         .map(|(path, source)| (path.as_path(), source.as_str()))
         .collect::<Vec<_>>();
-    let CheckedSnapshot { snapshot, lints } =
+    let CheckedSnapshot { snapshot, lints, ffi_cdylib } =
         checked_snapshot_with_application_authority_and_entry_with_overlays(
             file,
             gates,
@@ -764,17 +781,18 @@ pub fn boot_console_with_source_closure(
     if let Some(diagnostic) = authority.policy_diagnostic() {
         return Err(vec![diagnostic]);
     }
-    let lease = jet_jit::resident_boot_console(&mir, artifact, &release_devtools_policy).map_err(
-        |error| {
-            vec![Diagnostic::error(
-                "E2105",
-                "console application initialization failed".to_string(),
-                format!("the resident JIT entry could not stay attached: {error}"),
-                "repair the application entry and run the console again".to_string(),
-                None,
-            )]
-        },
-    )?;
+    let lease = with_ffi_cdylib(ffi_cdylib, || {
+        jet_jit::resident_boot_console(&mir, artifact, &release_devtools_policy)
+    })
+    .map_err(|error| {
+        vec![Diagnostic::error(
+            "E2105",
+            "console application initialization failed".to_string(),
+            format!("the resident JIT entry could not stay attached: {error}"),
+            "repair the application entry and run the console again".to_string(),
+            None,
+        )]
+    })?;
     Ok(ConsoleBoot { lease, lints })
 }
 
@@ -912,7 +930,7 @@ fn run_jit_once_on_compiler_stack_with_overlays(
         jet_foundation::MIR::MirArtifactTarget::Cranelift,
     ) {
         Ok(checked) => {
-            let CheckedSnapshot { snapshot, lints } = checked;
+            let CheckedSnapshot { snapshot, lints, ffi_cdylib } = checked;
             let bundle = &snapshot.bundle;
             let mir = &snapshot.mir;
             let selected = selected_job(bundle, requested);
@@ -948,9 +966,11 @@ fn run_jit_once_on_compiler_stack_with_overlays(
             args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
             args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
             let outcome = jet_jit::with_program_args(&args, || {
-                use crate::JitBackend::JitBackend;
-                let mut backend = jet_jit::CraneliftBackend::new();
-                backend.run(mir, snapshot.artifact, false, &release_devtools_policy)
+                with_ffi_cdylib(ffi_cdylib.clone(), || {
+                    use crate::JitBackend::JitBackend;
+                    let mut backend = jet_jit::CraneliftBackend::new();
+                    backend.run(mir, snapshot.artifact, false, &release_devtools_policy)
+                })
             });
             if overlays.is_empty()
                 && entry_fn.is_none()
@@ -1117,6 +1137,7 @@ pub fn run_interpreter_once_with_source_closure(
     entry_fn: Option<&str>,
     invocation: InterpreterInvocation,
 ) -> RunWithLints {
+    jet_jit::install_job_queue_provider();
     crate::RunCache::reset_phases();
     if let Some(result) = job_help_if_requested(
         file,
@@ -1145,7 +1166,7 @@ pub fn run_interpreter_once_with_source_closure(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
         ) {
             Ok(checked) => {
-                let CheckedSnapshot { snapshot, lints } = checked;
+                let CheckedSnapshot { snapshot, lints, ffi_cdylib } = checked;
                 let bundle = &snapshot.bundle;
                 let release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
                 let selected = selected_job(bundle, requested);
@@ -1160,13 +1181,15 @@ pub fn run_interpreter_once_with_source_closure(
                 );
                 args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
                 let outcome = jet_jit::with_program_args(&args, || {
-                    dev_run_snapshot(
-                        &snapshot.mir,
-                        snapshot.artifact,
-                        false,
-                        invocation,
-                        &release_devtools_policy,
-                    )
+                    with_ffi_cdylib(ffi_cdylib.clone(), || {
+                        dev_run_snapshot(
+                            &snapshot.mir,
+                            snapshot.artifact,
+                            false,
+                            invocation,
+                            &release_devtools_policy,
+                        )
+                    })
                 });
                 RunWithLints {
                     outcome,
@@ -1311,7 +1334,7 @@ pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_ent
             },
         ) {
             Ok(checked) => {
-                let CheckedSnapshot { snapshot, lints } = checked;
+                let CheckedSnapshot { snapshot, lints, ffi_cdylib } = checked;
                 let release_devtools_policy =
                     release_devtools_policy_for_bundle(&snapshot.bundle, profile);
                 let selected = selected_job(&snapshot.bundle, requested);
@@ -1331,13 +1354,15 @@ pub fn dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_ent
                     InterpreterInvocation::DevDefault
                 };
                 let outcome = jet_jit::with_program_args(&args, || {
-                    dev_run_snapshot(
-                        &snapshot.mir,
-                        snapshot.artifact,
-                        try_anyway,
-                        invocation,
-                        &release_devtools_policy,
-                    )
+                    with_ffi_cdylib(ffi_cdylib.clone(), || {
+                        dev_run_snapshot(
+                            &snapshot.mir,
+                            snapshot.artifact,
+                            try_anyway,
+                            invocation,
+                            &release_devtools_policy,
+                        )
+                    })
                 });
                 RunWithLints {
                     outcome,
@@ -1365,7 +1390,7 @@ fn job_help_if_requested(
         return None;
     }
     match checked_snapshot(file, gates, setting_overrides, artifact_target) {
-        Ok(CheckedSnapshot { snapshot, lints }) => {
+        Ok(CheckedSnapshot { snapshot, lints, ffi_cdylib: _ }) => {
             let bundle = snapshot.bundle;
             let specs = job_specs(&bundle);
             if !jet_jit::Job::jet_job_has_visible(&specs) {

@@ -1028,6 +1028,12 @@ pub(crate) fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool 
     matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
 }
 
+/// Plain success `T` passed where `T !E` is expected. A fallible slot can
+/// store an infallible value of the same success type (implicit `Ok`).
+pub(crate) fn plain_used_where_result_expected(want: &Type, got: &Type) -> bool {
+    matches!(want, Type::Result { ok, .. } if got.unwrap_result().is_none() && **ok == *got)
+}
+
 pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
     match payload {
         VariantPayload::Unit => Vec::new(),
@@ -1499,6 +1505,9 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "DataTracked"
             | "DataWatch"
             | "DataWatchStatus"
+            | "DBValue"
+            | "DbLease"
+            | "DbPoolReceipt"
     ) || is_core_error_family_type(name)
 }
 

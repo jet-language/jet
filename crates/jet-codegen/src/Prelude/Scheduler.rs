@@ -11,6 +11,16 @@ use std::time::{Duration, Instant};
 
 struct Job { run:Box<dyn FnOnce()+Send>,blocking:bool }
 
+fn spawn_scheduler_worker(name: String, work: impl FnOnce() + Send + 'static) {
+    thread::Builder::new()
+        .name(name.clone())
+        .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
+        .spawn(work)
+        .unwrap_or_else(|error| {
+            jet_scheduler_fatal(&format!("could not start {name}: {error}"))
+        });
+}
+
 
 thread_local! {
     static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
@@ -3416,7 +3426,11 @@ impl Scheduler {
 
     fn blocking_wait_enter(self:&Arc<Self>){
         let spawn={let mut state=self.blocking_wait.lock().unwrap();state.waits+=1;let ordinary=state.threads-usize::from(state.reserve);let reserve=if ordinary<state.waits.min(JET_BLOCKING_COMPENSATION_LIMIT){false}else if state.waits>JET_BLOCKING_COMPENSATION_LIMIT&&!state.reserve{state.reserve=true;true}else{return};state.threads+=1;state.peak=state.peak.max(state.threads);Some(reserve)};
-        if let Some(reserve)=spawn { let sched=self.clone();thread::Builder::new().name(if reserve{"jet-blocking-reserve"}else{"jet-blocking-compensation"}.into()).spawn(move||sched.compensation_loop(reserve)).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker")); }
+        if let Some(reserve)=spawn {
+            let sched=self.clone();
+            let name=if reserve{"jet-blocking-reserve"}else{"jet-blocking-compensation"};
+            spawn_scheduler_worker(name.into(), move||sched.compensation_loop(reserve));
+        }
     }
 
     fn blocking_wait_leave(&self){let mut state=self.blocking_wait.lock().unwrap();state.waits-=1;drop(state);self.notify.notify_all();}
@@ -3479,7 +3493,7 @@ fn scheduler() -> Arc<Scheduler> {
             });
             for id in 0..n {
                 let s = sched.clone();
-                thread::spawn(move || s.worker_loop(id));
+                spawn_scheduler_worker(format!("jet-scheduler-{id}"), move || s.worker_loop(id));
             }
             sched
         })

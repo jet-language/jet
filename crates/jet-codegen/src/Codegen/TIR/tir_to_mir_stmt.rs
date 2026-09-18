@@ -82,7 +82,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::Guard { .. },
                 }
-            );
+            ) || matches!(init.ty, Type::Named(ref name) if name == "EventScope");
             let alias_place = match &init.kind {
                 TExprKind::Borrow {
                     place,
@@ -767,6 +767,10 @@ fn lower_refutable_bind(
     });
 
     ctx.switch_to(success);
+    // D-CHOOSE-TEST1=A: captures belong to the surrounding scope after the
+    // miss route diverges. Bind them on the success path so later statements
+    // in the join can read the payload locals.
+    ctx.bind_success_pattern(subject, &pattern)?;
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
     }
@@ -1198,14 +1202,20 @@ fn lower_if(
     lower_cond(ctx, cond, then_block, else_block)?;
 
     ctx.switch_to(then_block);
-    lower_stmts(ctx, then_body)?;
+    {
+        let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
+        lower_stmts(ctx, then_body)?;
+        ctx.exit_scope(scope)?;
+    }
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
     }
 
     ctx.switch_to(else_block);
     if let Some(body) = else_body {
+        let scope = ctx.enter_scope(MirScopeKind::Live, ctx.span(), None)?;
         lower_stmts(ctx, body)?;
+        ctx.exit_scope(scope)?;
     }
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });

@@ -2473,6 +2473,14 @@ fn jet_jit_volatile_write(address: i64, value: i64) {
     unsafe { std::ptr::write_volatile(address as *mut i64, value) };
 }
 
+fn jet_jit_shared_edit_txn(handle: i64, _stm: i64, callback: i64) -> i64 {
+    jet_jit_shared_edit(handle, callback)
+}
+
+fn jet_jit_shared_read_txn(handle: i64, _stm: i64, callback: i64) -> i64 {
+    jet_jit_shared_read(handle, callback)
+}
+
 host_fns! {
     struct MemoryHostFns;
     register: register_memory_symbols;
@@ -2587,6 +2595,8 @@ host_fns! {
     shared_replace: "jet_shared_replace" => jet_jit_shared_replace: binary;
     shared_read: "jet_shared_read" => jet_jit_shared_read: binary;
     shared_edit: "jet_shared_edit" => jet_jit_shared_edit: binary;
+    shared_edit_txn: "jet_shared_edit_txn" => jet_jit_shared_edit_txn: ternary;
+    shared_read_txn: "jet_shared_read_txn" => jet_jit_shared_read_txn: ternary;
     shared_capture: "jet_shared_capture" => jet_jit_shared_capture: unary;
     shared_capture_with: "jet_shared_capture_with" => jet_jit_shared_capture_with: binary;
     shared_capture_txn_plain: "jet_shared_capture_txn_plain" => jet_jit_shared_capture_txn_plain: binary;
@@ -2604,6 +2614,7 @@ host_fns! {
     shared_strong_count: "jet_jit_shared_strong_count" => jet_jit_shared_strong_count: unary;
     shared_weak_upgrade: "jet_jit_shared_weak_upgrade" => jet_jit_shared_weak_upgrade: unary;
     condition_new: "jet_jit_condition_new" => jet_jit_condition_new: noarg_i64;
+    condition_new_prelude: "jet_std::JetCondition::new" => jet_jit_condition_new: noarg_i64;
     condition_notify_one: "jet_jit_condition_notify_one" => jet_jit_condition_notify_one: unary_void;
     condition_notify_all: "jet_jit_condition_notify_all" => jet_jit_condition_notify_all: unary_void;
     shared_guard_read: "jet_shared_guard_read" => jet_jit_shared_guard_read: unary;

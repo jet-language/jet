@@ -400,6 +400,20 @@ fn build_spec(
     if let Some(description) = description {
         spec = runtime::description(spec, description);
     }
+    if standard {
+        spec = flag_short(spec, "verbose", "v", "print extra detail");
+        spec = flag_short(spec, "quiet", "q", "suppress normal output");
+        spec = runtime::option_choice(
+            spec,
+            "color",
+            "control terminal color",
+            "MODE",
+            "auto,always,never",
+        );
+        if let Some(version) = version {
+            spec = runtime::version(spec, version);
+        }
+    }
     for input in inputs {
         let flag_name = input.name.clone();
         let help = input.help.clone();
@@ -439,20 +453,6 @@ fn build_spec(
                     spec = positional(spec, &flag_name, &help);
                 }
             }
-        }
-    }
-    if standard {
-        spec = flag_short(spec, "verbose", "v", "print extra detail");
-        spec = flag_short(spec, "quiet", "q", "suppress normal output");
-        spec = runtime::option_choice(
-            spec,
-            "color",
-            "control terminal color",
-            "MODE",
-            "auto,always,never",
-        );
-        if let Some(version) = version {
-            spec = runtime::version(spec, version);
         }
     }
     Ok(spec)

@@ -64,6 +64,7 @@ impl JetDebug for JetDbPoolReceipt {
     }
 }
 
+
 pub struct JetDbPoolHooks<D> {
     pub open: Box<dyn Fn(&str) -> Result<D, jet_std::DBError> + Send + Sync>,
     pub health: Box<dyn Fn(&mut D) -> bool + Send + Sync>,

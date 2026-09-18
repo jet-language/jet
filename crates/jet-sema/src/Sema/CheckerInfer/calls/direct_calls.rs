@@ -1196,6 +1196,39 @@ impl<'a> Checker<'a> {
             return Some(Some(Type::List(Box::new(Type::String))));
         }
 
+        if matches!(
+            call.name.as_str(),
+            Syntax::BUILTIN_EMBED_FILE | Syntax::BUILTIN_EMBED_BYTES
+        ) && self.in_comptime
+            && self.funcs.get(&call.name).is_none()
+            && self.lookup(&call.name).is_none()
+        {
+            let builtin = call.name.clone();
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{builtin}` needs exactly one path"),
+                    format!("`{builtin}(path)` bakes one file into the binary at compile time"),
+                    format!("write `{builtin}(\"motd.txt\")`"),
+                    Some(call.name_span),
+                ));
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
+            self.expect_core_arg(&builtin, 0, &Type::String, &mut call.args[0]);
+            let ty = if builtin == Syntax::BUILTIN_EMBED_BYTES {
+                Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                }))
+            } else {
+                Type::String
+            };
+            return Some(Some(ty));
+        }
+
         // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
         // value by moving it to nowhere — its `Drop` runs. The blessed use is to
         // satisfy a `#SingleUse` value's consume duty when there is genuinely no

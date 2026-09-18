@@ -26,8 +26,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::{exact_integer_literal, IntegerInterval};
 use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, expr_root_ident, is_printable, suggest_method_for_receiver,
-    type_is_copy, MethodSuggestion,
+    builtin_type_from_ident, expr_root_ident, is_debuggable, is_printable,
+    suggest_method_for_receiver, type_is_copy, MethodSuggestion,
 };
 
 
@@ -1748,6 +1748,46 @@ impl<'a> Checker<'a> {
                             *resolved_ret_out = ret.clone();
                             return ret;
                         }
+                        // Module-qualified payload constructors such as
+                        // `encoding.DataEvent.Key("name")` rewrite to a type
+                        // ident above, then parse as method calls. Resolve them
+                        // as enum literals before the static-method fallback.
+                        {
+                            let has_variant = self
+                                .resolve_enum_variants_cloned(&type_name)
+                                .map(|v| v.contains_key(method))
+                                .unwrap_or(false);
+                            if has_variant {
+                                let saved: Vec<Expr> = args
+                                    .iter_mut()
+                                    .map(|a| {
+                                        std::mem::replace(
+                                            &mut a.expr,
+                                            Expr::Int(0, a.span, None, None),
+                                        )
+                                    })
+                                    .collect();
+                                let mut enum_args: Vec<EnumLitArg> =
+                                    saved.into_iter().map(EnumLitArg::Positional).collect();
+                                let ty = self.check_enum_lit(
+                                    &type_name,
+                                    method,
+                                    &mut enum_args,
+                                    span,
+                                    Some(span),
+                                );
+                                for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+                                    if let EnumLitArg::Positional(expr) = enum_arg {
+                                        arg.expr = expr;
+                                    }
+                                }
+                                // Leave recv_type unset. TIR lowers
+                                // `DataEvent.Key(...)` only when the receiver
+                                // is a type ident and recv_type is None.
+                                **receiver = Expr::Ident(type_name.clone(), span);
+                                return Some(ty);
+                            }
+                        }
                         return self.check_static_method(
                             &type_name,
                             method,
@@ -1809,30 +1849,6 @@ impl<'a> Checker<'a> {
                             type_args,
                             args,
                         );
-                    }
-                    if ns == "core.encoding" && leaf == "DataEvent" {
-                        let saved: Vec<Expr> = args
-                            .iter_mut()
-                            .map(|a| {
-                                std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None))
-                            })
-                            .collect();
-                        let mut enum_args: Vec<EnumLitArg> =
-                            saved.into_iter().map(EnumLitArg::Positional).collect();
-                        let ty = self.check_enum_lit(
-                            "DataEvent",
-                            method,
-                            &mut enum_args,
-                            span,
-                            Some(span),
-                        );
-                        for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
-                            if let EnumLitArg::Positional(expr) = enum_arg {
-                                arg.expr = expr;
-                            }
-                        }
-                        **receiver = Expr::Ident("DataEvent".to_string(), span);
-                        return Some(ty);
                     }
                     if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
                     {
@@ -3566,6 +3582,15 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        // D-AUTODERIVE1: `.debug()` is the Debug protocol method. Auto-derived
+        // and handwritten impls share this spelling; TIR lowers it through the
+        // same Debug text path `{value:Debug}` uses.
+        if method == "debug" && args.is_empty() && type_args.is_empty() {
+            if is_debuggable(&recv_ty, self.registry, self.trait_reg) {
+                *recv_type_out = Some("__Debug__".to_string());
+                return Some(Type::String);
+            }
+        }
         // D-SERDE2=A: Encode is one public protocol for hand and generated impls.
         if method == "encode" {
             if args.is_empty() && type_args.is_empty() && self.is_encodable(&recv_ty) {
@@ -3911,6 +3936,13 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
+            if handle_ty == "DbLease" {
+                if let Some(ret) = self.check_db_lease_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+            }
             if handle_ty == "ServiceTree" {
                 if let Some(ret) = self.check_service_tree_method(method, args, span) {
                     if matches!(
@@ -3964,6 +3996,13 @@ impl<'a> Checker<'a> {
             }
             if handle_ty == "ServiceRuntime" {
                 if let Some(ret) = self.check_service_runtime_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+            }
+            if handle_ty == "DeliveryState" {
+                if let Some(ret) = self.check_service_delivery_state_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
                     *resolved_ret_out = ret.clone();
                     return ret;
@@ -7568,15 +7607,36 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(name) = nominal_recv {
-                if name == "Atomic" {
-                    *recv_type_out = Some(name.to_string());
-                }
-                if name == crate::Syntax::TYPE_CONDITION {
-                    *recv_type_out = Some(name.to_string());
-                }
+                // ProgramInfo / TypeInfo / compiler-API / crypto host methods
+                // need the owner on the call so fragment and subset lowering
+                // can dispatch them. Collection builtins, Ordering combinators,
+                // and BuildContext must stay unset: their lowering key is
+                // `recv_type.is_none()`.
                 if matches!(
                     name,
-                    "SigningKey"
+                    crate::Syntax::TYPE_PROGRAM_INFO
+                        | crate::Syntax::TYPE_TYPE_INFO
+                        | "FieldInfo"
+                        | "MethodInfo"
+                        | "CompilerLexed"
+                        | "CompilerSyntaxTree"
+                        | "CompilerChecked"
+                        | "CompilerSourceMap"
+                        | "CompilerPackageError"
+                        | "CompilerDependency"
+                        | "CompilerPackageTarget"
+                        | "CompilerPackageOutput"
+                        | "CompilerBuildProfile"
+                        | "CompilerManifest"
+                        | "CompilerPackage"
+                        | "CompilerLockedPackage"
+                        | "CompilerLock"
+                        | "CompilerKeyValue"
+                        | "CompilerProfile"
+                        | "CompilerProfileSet"
+                        | "Digest256"
+                        | "Digest512"
+                        | "SigningKey"
                         | "X25519SecretKey"
                         | "VerifyKey"
                         | "X25519PublicKey"
@@ -7584,10 +7644,9 @@ impl<'a> Checker<'a> {
                         | "Sealed"
                         | "WrappedKey"
                         | "WrappedVaultKey"
-                        | "Digest256"
-                        | "Digest512"
                         | "PasswordHash"
                         | "Hasher"
+                        | "Secret"
                 ) {
                     *recv_type_out = Some(name.to_string());
                 }

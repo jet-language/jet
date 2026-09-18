@@ -558,7 +558,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                 }
                 Item::Impl(i) => {
-                    if !i.type_name.contains('.') && !st.registry.contains(&i.type_name) {
+                    if !i.type_name.contains('.')
+                        && !st.registry.contains(&i.type_name)
+                        && !super::opmix_allows_builtin_impl(i, &module.items)
+                    {
                         diags.push(e0301_impl_target(i));
                     }
                 }

@@ -57,13 +57,13 @@ fn service_probe() String -> {
 fn run() {
     tree := service.tree("app")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    temp := testing.temp_dir("service-runtime")
+    temp :: testing.temp_dir("service-runtime")
     state_store :: Path.from(temp).join("state.log").to_string()
     telemetry_path :: Path.from(temp).join("service.jsonl").to_string()
     store :: service.state_store(state_store) ?? panic("state store")
     tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
     a :: tree.worker("a", worker_a, capacity: 2) ?? panic("a")
-    b :: tree.worker("b", worker_b, capacity: 2) ?? panic("b")
+    _b :: tree.worker("b", worker_b, capacity: 2) ?? panic("b")
     tree.set_restart(service.restart_rest_for_one()) ?? panic("restart")
     tree.start() ?? panic("start")
 
@@ -96,21 +96,18 @@ fn run() {
     resolved :: tree.directory_resolve("front") ?? panic("resolve")
     print(resolved.show())
     tree.drain_worker(a) ?? panic("drain")
-    late :: a.send("late")
-    if late == {
+    if a.send("late") == {
         .Ok(_) -> { print("drain_send:accepted") }
         .Err(_) -> { print("drain_send:rejected") }
     }
     gen :: tree.handoff_generation() ?? panic("handoff")
     print("gen:{gen}")
     print(tree.upgrade_receipt() ?? panic("upgrade receipt"))
-    stale :: a.send("stale")
-    if stale == {
+    if a.send("stale") == {
         .Ok(_) -> { print("stale_send:accepted") }
         .Err(_) -> { print("stale_send:rejected") }
     }
-    blocked :: tree.receive(a)
-    if blocked == {
+    if tree.receive(a) == {
         .Ok(_) -> { print("handoff_receive:accepted") }
         .Err(_) -> { print("handoff_receive:rejected") }
     }

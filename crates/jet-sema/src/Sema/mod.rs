@@ -893,7 +893,7 @@ pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
         foreign_effect_root: f
             .inline_foreign
             .as_ref()
-            .map(|foreign| format!("FFI.{}", foreign.lang)),
+            .map(|foreign| inline_foreign_effect_root(&foreign.lang)),
         undo: f.undo.as_ref().map(|(name, _)| name.clone()),
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
@@ -907,6 +907,15 @@ pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
             .map(|p| p.declared_view_from_names.clone())
             .collect(),
         callable_policies,
+    }
+}
+
+fn inline_foreign_effect_root(lang: &str) -> String {
+    match lang {
+        "c" => "FFI.C".to_string(),
+        "asm" => "FFI.Asm".to_string(),
+        "cpp" => "FFI.Cpp".to_string(),
+        other => format!("FFI.{other}"),
     }
 }
 

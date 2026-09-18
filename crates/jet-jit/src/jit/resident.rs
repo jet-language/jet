@@ -386,6 +386,16 @@ pub(crate) fn resident_teardown() {
     Concurrency::clear_http_shared_runtime();
 }
 
+
+fn install_program_source(runtime: &mut JitRuntime, program: &MirProgram) {
+    // ponytail: one source buffer. Feature examples are single-file; split if
+    // multi-file runtime stops start reporting the wrong snippet.
+    if let Some(source) = program.source_files.first() {
+        runtime.source_file = source.path.clone();
+        runtime.source_text = source.source.clone();
+    }
+}
+
 pub(crate) fn ensure_resident_module(
     program: &MirProgram,
     artifact: MirArtifactId,
@@ -410,6 +420,7 @@ pub(crate) fn ensure_resident_module(
         install_cli_function_pointers(&module, &compiled)?;
         install_finalized_iterable_hooks(&module, &mut runtime, &compiled)?;
         runtime.snapshot_compile_strings();
+        install_program_source(&mut runtime, program);
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
         RESIDENT_MODULE.with(|slot| {
             *slot.borrow_mut() = Some(ResidentModule {
@@ -442,6 +453,7 @@ pub(crate) fn ensure_resident_module(
             install_cli_function_pointers(&resident.module, &compiled)?;
             install_finalized_iterable_hooks(&resident.module, runtime, &compiled)?;
             runtime.snapshot_compile_strings();
+            install_program_source(runtime, program);
             resident.main_id = compiled.entry_id;
             resident.main_returns_result = main_returns_result;
             resident.main_returns_app = main_returns_app;

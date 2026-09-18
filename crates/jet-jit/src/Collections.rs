@@ -415,6 +415,16 @@ pub(crate) mod collection_semantics {
             .collect()
     }
 
+    pub(super) fn list_group_by_int<F>(xs: Vec<i64>, f: F) -> Vec<(i64, Vec<i64>)>
+    where
+        F: FnMut(&i64) -> i64,
+    {
+        jet_list_group_by(xs, f)
+            .iter()
+            .map(|(key, values)| (*key, values.clone()))
+            .collect()
+    }
+
     pub(super) fn list_clear<T>(xs: &mut Vec<T>) {
         jet_list_clear(xs);
     }
@@ -2892,6 +2902,36 @@ fn jet_jit_list_group_by(list: i64, callback: i64) -> i64 {
             rt.heap
                 .map_insert(map, key_id, value_id)
                 .expect("jit list group_by: map insert");
+        }
+        map
+    })
+}
+
+fn jet_jit_list_group_by_int(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let groups = collection_semantics::list_group_by_int(values, |value| {
+        if closure_trapped() {
+            return 0;
+        }
+        let key = invoke_closure_i64(slot, *value);
+        if closure_trapped() {
+            return 0;
+        }
+        key
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        for (key, values) in groups {
+            let value_id = rt.heap.alloc_int_list(values);
+            rt.heap
+                .map_insert_int(map, key, value_id)
+                .expect("jit list group_by_int: map insert");
         }
         map
     })
@@ -5611,28 +5651,34 @@ fn jet_jit_index_map_set(map: i64, key: i64, value: i64) {
     jet_jit_map_insert(map, key, value);
 }
 
-fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
+fn jet_jit_map_insert(map: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        let previous = rt.heap.map_get(map, key);
         rt.heap
             .map_insert(map, key, value)
             .expect("jit map insert: bad handle");
-    });
+        option_i64(rt, previous)
+    })
 }
 
-fn jet_jit_map_insert_composite(map: i64, key: i64, value: i64) {
+fn jet_jit_map_insert_composite(map: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        let previous = rt.heap.map_get_composite(map, key);
         rt.heap
             .map_insert_composite(map, key, value)
             .expect("jit composite map insert: bad handle or key");
-    });
+        option_i64(rt, previous)
+    })
 }
 
-fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) {
+fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        let previous = rt.heap.map_get_int(map, key);
         rt.heap
             .map_insert_int(map, key, value)
             .expect("jit Int map insert: bad handle");
-    });
+        option_i64(rt, previous)
+    })
 }
 fn jet_jit_map_add_new(map: i64, key: i64, value: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
@@ -10605,6 +10651,7 @@ host_fns! {
     checked_list_skip_iter: "jet_list_skip_while_iter" => checked_list_skip: sig_closure_value;
     list_fold: "jet_jit_list_fold" => jet_jit_list_fold: sig_closure_fold;
     list_group_by: "jet_jit_list_group_by" => jet_jit_list_group_by: sig_closure_value;
+    list_group_by_int: "jet_jit_list_group_by_int" => jet_jit_list_group_by_int: sig_closure_value;
 
     list_get_range_end: "jet_jit_list_get_range_end" => jet_jit_list_get_range_end: sig_get_range_scalar;
     list_get_range_exclusive: "jet_jit_list_get_range_exclusive" => jet_jit_list_get_range_exclusive: sig_get_range_exclusive;
@@ -10751,9 +10798,9 @@ host_fns! {
 
     map_clear: "jet_jit_map_clear" => jet_jit_map_clear: sig_sort;
 
-    map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
-    map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_map_insert_composite;
-    map_insert_int: "jet_jit_map_insert_int" => jet_jit_map_insert_int: sig_map_insert;
+    map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_three_ret;
+    map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_three_ret;
+    map_insert_int: "jet_jit_map_insert_int" => jet_jit_map_insert_int: sig_three_ret;
     map_add_new: "jet_jit_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
     map_add_new_composite: "jet_jit_map_add_new_composite" => jet_jit_map_add_new_composite: sig_map_add_new;
     map_add_new_int: "jet_jit_map_add_new_int" => jet_jit_map_add_new_int: sig_map_add_new;
@@ -11125,7 +11172,7 @@ host_fns! {
     canonical_list_remove_value: "jet_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;
     canonical_list_remove_slot: "jet_list_remove_slot" => jet_jit_list_remove_slot_generic: sig_get_opt;
     canonical_list_push: "jet_list_push" => jet_jit_list_push: sig_push;
-    canonical_map_insert: "jet_map_insert" => jet_jit_map_insert: sig_map_insert;
+    canonical_map_insert: "jet_map_insert" => jet_jit_map_insert: sig_three_ret;
     canonical_map_add_new: "jet_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
     canonical_list_extend: "jet_list_extend" => jet_jit_list_extend: sig_push;
     canonical_list_reverse: "jet_list_reverse" => jet_jit_list_reverse: sig_sort;

@@ -378,6 +378,10 @@ fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
     result_f64(r)
 }
 
+fn jet_jit_data_mean(values: i64) -> i64 {
+    jet_jit_data_stat(values, 0)
+}
+
 fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
     let vals = float_list(values);
     let q = f64::from_bits(q_bits as u64);
@@ -5012,6 +5016,8 @@ host_fns! {
     status: "jet_jit_data_status" => jet_jit_data_status: sig_void;
     require_bridge: "jet_jit_data_require_bridge" => jet_jit_data_require_bridge: sig_unary;
     stat: "jet_jit_data_stat" => jet_jit_data_stat: sig_binary;
+    mean: "jet_jit_data_mean" => jet_jit_data_mean: sig_unary;
+    mean_checked: "jet_data_mean_checked" => jet_jit_data_mean: sig_unary;
     quantile: "jet_jit_data_quantile" => jet_jit_data_quantile: sig_binary;
     describe: "jet_jit_data_describe" => jet_jit_data_describe: sig_unary;
     bar_text: "jet_jit_data_bar_text" => jet_jit_data_bar_text: sig_unary;

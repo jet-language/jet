@@ -214,11 +214,22 @@ pub(crate) fn tir_covers_trait_method(
         return false;
     }
     // The owning type must be a covered struct, enum, or distinct type.
+    // D-OPMIX1: `impl Int.Mul(Price)` is a user operator hook on a builtin
+    // scalar. Admit it so mixed arithmetic lowers instead of vanishing from
+    // the TIR function table.
     let owner_ty = Type::Named(type_name.to_string());
+    let operator_on_builtin = matches!(
+        trait_name,
+        crate::Syntax::TRAIT_ADD
+            | crate::Syntax::TRAIT_SUB
+            | crate::Syntax::TRAIT_MUL
+            | crate::Syntax::TRAIT_DIV
+    ) && crate::AST::numeric_type_from_name(type_name).is_some();
     if !serde_generic_owner
         && !is_covered_struct_ty(&owner_ty, cx)
         && !is_covered_enum_ty(&owner_ty, cx)
         && !cx.distinct_types.contains_key(type_name)
+        && !operator_on_builtin
     {
         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
         return false;

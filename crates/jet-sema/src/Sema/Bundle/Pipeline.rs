@@ -122,6 +122,61 @@ fn e0301_impl_target(i: &crate::AST::ImplDef) -> Diagnostic {
     )
 }
 
+fn impl_target_is_builtin(type_name: &str) -> bool {
+    let (leaf_ns, leaf) = type_name
+        .rsplit_once('.')
+        .map_or((None, type_name), |(ns, leaf)| (Some(ns), leaf));
+    leaf_ns.is_none()
+        && (crate::Sema::Diagnostics::builtin_type_from_ident(leaf).is_some()
+            || crate::Sema::CheckerCoreLib::core_type_known(leaf)
+            || crate::Sema::CheckerCoreLib::is_math_type(leaf)
+            || crate::Collections::is_reserved_type(leaf))
+}
+
+fn is_operator_trait_name(name: &str) -> bool {
+    matches!(
+        name,
+        crate::Syntax::TRAIT_ADD
+            | crate::Syntax::TRAIT_SUB
+            | crate::Syntax::TRAIT_MUL
+            | crate::Syntax::TRAIT_DIV
+            | crate::Syntax::TRAIT_EQUATABLE
+            | crate::Syntax::TRAIT_COMPARABLE
+    )
+}
+
+fn module_declares_named_type(items: &[Item], name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(definition) => definition.name == name,
+        Item::Enum(definition) => definition.name == name,
+        Item::Distinct(definition) => definition.name == name,
+        Item::TypeAlias(definition) => definition.name == name,
+        _ => false,
+    })
+}
+
+/// D-OPMIX1: an operator hook on a built-in type belongs to the package that
+/// declares the other operand. `impl Int.Mul(Price)` is legal when `Price` is
+/// a type this module declares.
+fn opmix_allows_builtin_impl(implementation: &crate::AST::ImplDef, items: &[Item]) -> bool {
+    if !impl_target_is_builtin(&implementation.type_name) {
+        return false;
+    }
+    if !implementation
+        .trait_name
+        .as_deref()
+        .is_some_and(is_operator_trait_name)
+    {
+        return false;
+    }
+    match &implementation.operator_rhs {
+        Some(Type::Named(rhs)) => {
+            rhs != &implementation.type_name && module_declares_named_type(items, rhs)
+        }
+        _ => false,
+    }
+}
+
 /// Register one test after a template expansion has materialized its static
 /// name. Root loops reach the ordinary item pass directly; marker and derive
 /// bodies use this helper when their generated items are appended later.

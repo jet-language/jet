@@ -4932,7 +4932,9 @@ host_fns! {
     frame_lines: "jet_jit_ui_frame_lines" => jet_jit_ui_frame_lines: unary;
     render_count: "jet_jit_ui_render_count" => jet_jit_ui_render_count: unary;
     set_focus_group: "jet_jit_ui_set_focus_group" => jet_jit_ui_set_focus_group: binary_void;
+    set_focus_group_null: "JetNullBackend::set_focus_group" => jet_jit_ui_set_focus_group: binary_void;
     focused_label: "jet_jit_ui_focused_label" => jet_jit_ui_focused_label: unary;
+    focused_label_null: "JetNullBackend::focused_label" => jet_jit_ui_focused_label: unary;
     gtk_button: "jet_jit_ui_gtk_button" => jet_jit_ui_gtk_button: binary;
     gtk_on_click: "jet_jit_ui_gtk_on_click" => jet_jit_ui_gtk_on_click: gtk_click;
     gtk_present: "jet_jit_ui_gtk_present" => jet_jit_ui_gtk_present: binary_void;

@@ -231,6 +231,20 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
 }
 
 impl<'a> Checker<'a> {
+    fn check_switch_arm_body(
+        &mut self,
+        body: &mut Vec<Stmt>,
+        new_scope: bool,
+        span: Span,
+        value_expected: Option<&Type>,
+    ) {
+        if let Some(expected) = value_expected {
+            self.check_value_block(body, expected, new_scope, span);
+        } else {
+            self.check_block(body, new_scope);
+        }
+    }
+
     /// D-FLOWTYPE1=A: immutable local/param of type `T?` may refine to `T`.
     pub(crate) fn flow_narrowable_optional_inner(&self, name: &str) -> Option<Type> {
         let info = self.lookup(name)?;
@@ -825,6 +839,7 @@ impl<'a> Checker<'a> {
         arms: &mut [crate::AST::SwitchArm],
         else_body: &mut Option<Vec<Stmt>>,
         span: Span,
+        value_expected: Option<&Type>,
     ) {
         let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
         if subjectless_guard
@@ -974,7 +989,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     self.record_pattern_view_bindings(subject, &pattern);
-                    self.check_block(&mut arm.body, false);
+                    self.check_switch_arm_body(&mut arm.body, false, arm.span, value_expected);
                     self.pop_scope();
                     for (name, at) in restore_moved {
                         self.flow.moved.set(&name, at);
@@ -985,7 +1000,7 @@ impl<'a> Checker<'a> {
             }
             let bindings = self.check_condition_with_bindings(&mut arm.cond);
             if bindings.is_empty() {
-                self.check_block(&mut arm.body, true);
+                self.check_switch_arm_body(&mut arm.body, true, arm.span, value_expected);
             } else {
                 self.push_scope();
                 let mut restore_moved = Vec::new();
@@ -997,7 +1012,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.record_condition_view_bindings(&arm.cond);
-                self.check_block(&mut arm.body, false);
+                self.check_switch_arm_body(&mut arm.body, false, arm.span, value_expected);
                 self.pop_scope();
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
@@ -1142,13 +1157,13 @@ impl<'a> Checker<'a> {
                         restore_moved.push(restored);
                     }
                 }
-                self.check_block(body, true);
+                self.check_switch_arm_body(body, true, span, value_expected);
                 self.pop_scope();
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
                 }
             } else {
-                self.check_block(body, true);
+                self.check_switch_arm_body(body, true, span, value_expected);
             }
             paths.push(self.flow.clone());
         } else if can_skip_every_arm {

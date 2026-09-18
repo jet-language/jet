@@ -6942,7 +6942,6 @@ fn normalize_fixed_reduction_loop(
                 && matches!(&instruction.operation, MirOperation::LoopRangeInit { .. })
         })?;
     let MirOperation::LoopRangeInit {
-        call: range_call,
         start,
         step,
         exclusive: true,
@@ -6951,6 +6950,17 @@ fn normalize_fixed_reduction_loop(
     else {
         return None;
     };
+    let range_value_call = function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .find_map(|instruction| match &instruction.operation {
+            MirOperation::LoopRangeValue {
+                call,
+                cursor: value_cursor,
+            } if *value_cursor == cursor => Some(*call),
+            _ => None,
+        })?;
     if let Some(step) = step {
         let constants = collect_scalar_constants(function);
         if !matches!(constants.get(&step), Some(MirConstant::Int { value: 1, .. })) {
@@ -7039,8 +7049,7 @@ fn normalize_fixed_reduction_loop(
     ) {
         return None;
     }
-    let cursor_ty = value_type(cursor)?;
-    let int_ty = cursor_ty.clone();
+    let int_ty = value_type(start)?;
     let bool_value = header.instructions.iter().find_map(|instruction| {
         if matches!(&instruction.operation, MirOperation::LoopRangeHasNext { .. }) {
             instruction.result
@@ -7115,9 +7124,9 @@ fn normalize_fixed_reduction_loop(
     let seed_value = seed_read.value?;
     let lane_index = ni!(
         "dispatch-index",
-        Some(cursor_ty),
+        Some(int_ty.clone()),
         MirOperation::LoopRangeValue {
-            call: range_call,
+            call: range_value_call,
             cursor,
         }
     );

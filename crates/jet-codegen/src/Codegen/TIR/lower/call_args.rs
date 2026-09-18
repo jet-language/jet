@@ -3,6 +3,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower_lambda_expecting_callable;
 use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
@@ -948,6 +949,15 @@ pub(crate) fn lambda_body_ty_expecting(
     fn bind_params(lam: &Lambda, env: &LowerEnv, expected_params: Option<&[Type]>) -> LowerEnv {
         let mut lam_env = clone_env(env);
         lam_env.fallback_subject = false;
+        // A type probe must not inherit `fn run()`'s Result<Unit> carrier.
+        // Wrapping `inner(4)` as Ok during the probe makes an Int block look
+        // like a Unit-success Result and poisons the executable ABI.
+        if lam.result_type.is_none()
+            && lam.error_type.is_none()
+            && lam.meta.fallible_carrier.is_none()
+        {
+            lam_env.ret_ty = None;
+        }
         for (i, p) in lam.params.iter().enumerate() {
             let ty =
                 p.ty.clone()
@@ -973,8 +983,13 @@ pub(crate) fn lambda_body_ty_expecting(
             lower_expr(e, cx, &mut lam_env).ty
         }
         LambdaBody::Block(stmts) => {
-            if let Some((_, tail)) = lambda_block_tail(stmts) {
-                let mut lam_env = bind_params(lam, env, expected_params);
+            // A tail such as `inner(4)` is only typed once the prefix has
+            // bound `inner`. Probing the tail in an empty env makes an Int
+            // block look like Unit, and the executable pass then compiles
+            // the lambda as a Unit-success Result.
+            let mut lam_env = bind_params(lam, env, expected_params);
+            if let Some((prefix, tail)) = lambda_block_tail(stmts) {
+                let _ = lower_stmts(prefix, cx, &mut lam_env);
                 match tail {
                     Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
                     _ => unit_type(),
@@ -1485,6 +1500,10 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
         }
         Expr::Ident(name, _) => env.ty_of(name).map(builtin_dispatch_ty),
+        Expr::ComptimeName { name, value, .. } => env
+            .ty_of(name)
+            .or_else(|| value.as_ref().map(crate::AST::CtValue::jet_type))
+            .map(builtin_dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
         Expr::TupleLit(_, _, Some(ty)) => Some(builtin_dispatch_ty(ty.clone())),

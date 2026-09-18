@@ -92,8 +92,8 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_jit_symbol("jet_jit_archive_adler32"),
     CoreCallRecord::new(
-        "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true, true],
-    ).with_jit_symbol("jet_jit_json_canonical_checked"),
+        "core.encoding.json", "canonical", "jet_enc_json_canonical", true, &[true],
+    ).with_max_arity(2).with_jit_symbol("jet_jit_json_canonical"),
     CoreCallRecord::new(
         "core.encoding.xml", "expanded_name", "jet_std_xml_expanded_name", true, &[true],
     ).with_jit_symbol("jet_jit_xml_expanded_name"),
@@ -200,6 +200,10 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     ).with_jit_symbol("jet_jit_crypto_x25519")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
+        "core.crypto.expert", "x25519_raw", "jet_crypto_expert_x25519_impl", false, &[true, true],
+    ).with_jit_symbol("jet_jit_crypto_expert_x25519_raw")
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
         "core.crypto", "wrap", "jet_crypto_wrap_typed_impl", false, &[true, false],
     ).with_jit_symbol("jet_jit_crypto_wrap")
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -248,6 +252,114 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "core.web.storage.local", "set", "jet_web_storage_set", true, &[true, true],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
         .without_direct_aot().without_direct_jit(),
+    CoreCallRecord::new(
+        "core.net", "dns_ptr", "jet_net_dns_ptr", true, &[true, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .with_jit_symbol("jet_jit_net_dns_ptr"),
+    CoreCallRecord::new(
+        "core.net", "dns_txt", "jet_net_dns_txt", true, &[true, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .with_jit_symbol("jet_jit_net_dns_txt"),
+    CoreCallRecord::new(
+        "core.net", "dns_srv", "jet_net_dns_srv", true, &[true, false],
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .with_jit_symbol("jet_jit_net_dns_srv"),
+    CoreCallRecord::new(
+        "core.crypto", "__secret_from_bytes", "jet_crypto_secret_from_bytes_impl", false, &[true],
+    )
+    .with_jit_symbol("jet_jit_crypto_secret_from_bytes")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto.expert", "open_v1", "jet_crypto_expert_open_v1_impl", false, &[true, true],
+    )
+    .with_jit_symbol("jet_jit_crypto_expert_open_v1")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto.vault", "get", "jet_vault_get_impl", false, &[true],
+    )
+    .with_jit_symbol("jet_jit_vault_get")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot(),
+    CoreCallRecord::new(
+        "app", "auth", "jet_app_auth", true, &[true],
+    )
+    .with_jit_symbol("jet_jit_app_auth")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "app", "auth_oauth", "jet_app_auth_oauth", true, &[true, true],
+    )
+    .with_jit_symbol("jet_jit_app_auth_oauth")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.encoding.json", "writer", "jet_jit_json_writer", true, &[false, false],
+    )
+    .with_max_arity(3)
+    .with_jit_symbol("jet_jit_json_writer")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.encoding.json", "reader", "jet_jit_json_reader", true, &[false],
+    )
+    .with_max_arity(2)
+    .with_jit_symbol("jet_jit_json_reader")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.compiler", "lex", "jet_compiler_lex", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "parse", "jet_compiler_parse", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "check", "jet_compiler_check", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "source_map", "jet_compiler_source_map", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "manifest", "jet_compiler_manifest", true, &[])
+        .with_max_arity(1)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "package", "jet_compiler_package", true, &[])
+        .with_max_arity(1)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "lock", "jet_compiler_lock", true, &[])
+        .with_max_arity(1)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new("core.compiler", "profiles", "jet_compiler_profiles", true, &[])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+        .without_direct_aot()
+        .without_direct_jit(),
+    CoreCallRecord::new(
+        "core.crypto.expert", "migrate_v1", "jet_crypto_expert_migrate_v1_impl", false, &[true, true, true, true],
+    )
+    .with_jit_symbol("jet_jit_crypto_expert_migrate_v1")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "__password_text", "jet_crypto_password_text_impl", false, &[true],
+    )
+    .with_jit_symbol("jet_jit_crypto_password_text")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "file_open", "jet_crypto_file_open_impl", false, &[true, true, true],
+    )
+    .with_jit_symbol("jet_jit_crypto_file_open")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new(
+        "core.crypto", "file_seal", "jet_crypto_file_seal_impl", false, &[true, true, true],
+    )
+    .with_jit_symbol("jet_jit_crypto_file_seal")
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 
 pub(crate) fn tir_core_call_records() -> &'static [CoreCallRecord] {
@@ -1324,6 +1436,7 @@ pub(crate) fn service_method_route(handle: &str, method: &str) -> Option<(&'stat
         ("ServiceEndpoint", "send") => ("endpoint_send", false),
         ("ServiceEndpoint", "receive") => ("endpoint_receive", false),
         ("ServiceEndpoint", "show") => ("endpoint_show", false),
+        ("DeliveryState", "show") => ("delivery_state_show", false),
         _ => return None,
     };
     Some(route)
@@ -3397,6 +3510,158 @@ fn lower_game_handle_receiver(
     })
 }
 
+fn infer_comptime_host_owner(receiver: &Expr, method: &str) -> Option<&'static str> {
+    let comptime_recv = match receiver {
+        Expr::ComptimeName { .. } => true,
+        Expr::Ident(name, _) => crate::Syntax::is_comptime_name(name),
+        _ => false,
+    };
+    match method {
+        "tokens" => Some("CompilerLexed"),
+        "items" => Some("CompilerSyntaxTree"),
+        "functions" | "effects" | "semantic_index" | "syntax" => Some("CompilerChecked"),
+        "generated_lines" | "sources" => Some("CompilerSourceMap"),
+        "outputs" | "build_profiles" | "dependencies" if comptime_recv => Some("CompilerManifest"),
+        "version" | "schema_version" | "root_dependencies" if comptime_recv => Some("CompilerLock"),
+        "packages" if comptime_recv => Some("CompilerLock"),
+        "profiles" if comptime_recv => Some("CompilerProfileSet"),
+        _ => None,
+    }
+}
+
+fn host_named_type(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Named(name) | Type::Apply { name, .. } => Some(name.clone()),
+        Type::Option(inner) | Type::Tagged { inner, .. } => host_named_type(inner),
+        Type::Result { ok, .. } => host_named_type(ok),
+        _ => None,
+    }
+}
+
+fn lower_build_generate(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    resolved_ret: Option<&Type>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
+) -> Option<TExpr> {
+    if method != "generate" {
+        return None;
+    }
+    let template = args
+        .iter()
+        .find_map(|arg| arg.flags.template_items.as_deref())?;
+    let source = match crate::Comptime::format_template_body(
+        template,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        std::path::Path::new("."),
+    ) {
+        Ok(source) => source,
+        Err(diag) => {
+            return Some(invariant_method_expr(
+                args.last()
+                    .map(|arg| arg.span)
+                    .unwrap_or_else(|| receiver.span()),
+                diag.what,
+            ));
+        }
+    };
+    let name_arg = args.iter().find(|arg| arg.flags.template_items.is_none())?;
+    Some(in_own_frame(|| {
+        let recv = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+        let name = lower_expr(&name_arg.expr, cx, env);
+        let source_expr = TExpr {
+            ty: Type::String,
+            kind: TExprKind::StrLit(vec![TStrPart::Lit(source)]),
+        };
+        let ty = match resolved_ret {
+            Some(ty @ Type::Result { .. }) => ty.clone(),
+            _ => crate::Collections::builtin_method_return(
+                &Type::Named(Syntax::TYPE_BUILD_CONTEXT.to_string()),
+                "generate",
+                2,
+                false,
+            )
+            .flatten()
+            .unwrap_or_else(unit_type),
+        };
+        TExpr {
+            ty,
+            kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                recv: Box::new(recv),
+                method: "generate".to_string(),
+                args: vec![name, source_expr],
+            })),
+        }
+    }))
+}
+
+fn lower_comptime_host_method(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    resolved_ret: Option<&Type>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
+) -> Option<TExpr> {
+    if method == "generate" {
+        return None;
+    }
+    let ty_name = recv_type
+        .clone()
+        .or_else(|| match tir_recv_jet_ty(receiver, env) {
+            Some(ty) => host_named_type(&ty),
+            None => None,
+        })
+        .or_else(|| infer_comptime_host_owner(receiver, method).map(str::to_string))?;
+    if comptime_host_type_leaf(&ty_name) == Syntax::TYPE_BUILD_CONTEXT {
+        return None;
+    }
+    if !is_comptime_host_method(&ty_name, method) {
+        return None;
+    }
+    let recv = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+    if let Some(actual) = host_named_type(&recv.ty) {
+        if !is_comptime_host_method(&actual, method) {
+            return None;
+        }
+    }
+    let owner = host_named_type(&recv.ty)
+        .filter(|name| is_comptime_host_method(name, method))
+        .unwrap_or(ty_name);
+    Some(in_own_frame(|| {
+        let targs = args
+            .iter()
+            .map(|arg| lower_expr(&arg.expr, cx, env))
+            .collect();
+        let ty = resolved_ret
+            .cloned()
+            .or_else(|| {
+                crate::Collections::builtin_method_return(
+                    &Type::Named(comptime_host_type_leaf(&owner).to_string()),
+                    method,
+                    args.len(),
+                    false,
+                )
+                .flatten()
+            })
+            .unwrap_or_else(unit_type);
+        TExpr {
+            ty,
+            kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                recv: Box::new(recv),
+                method: method.to_string(),
+                args: targs,
+            })),
+        }
+    }))
+}
+
 fn lower_method_call_impl(
     receiver: &Expr,
     method: &str,
@@ -3413,6 +3678,29 @@ fn lower_method_call_impl(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    if let Some(expr) = lower_build_generate(
+        receiver,
+        method,
+        args,
+        resolved_ret,
+        cx,
+        env,
+        lowered_receiver.clone(),
+    ) {
+        return expr;
+    }
+    if let Some(expr) = lower_comptime_host_method(
+        receiver,
+        method,
+        args,
+        recv_type,
+        resolved_ret,
+        cx,
+        env,
+        lowered_receiver.clone(),
+    ) {
+        return expr;
+    }
     match hardware_method_op(receiver, method, args, recv_type, cx, env) {
         Ok(Some(op)) => {
             return in_own_frame(|| {
@@ -3502,6 +3790,8 @@ fn lower_method_call_impl(
 
     // D-CALLVALUE1=B: sema proved this `.call(...)` receiver is a function
     // value. Lower it through the same TIR function-value node as `Expr::CallValue`.
+    // `bind_arg_temporaries` keys temps by `site`; the receiver span is the
+    // nested callee's start and would rebind `.call`'s args onto that call.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
         return in_own_frame(|| {
             let callee = lowered_receiver
@@ -3510,7 +3800,7 @@ fn lower_method_call_impl(
                 Some(receiver),
                 callee,
                 args,
-                receiver.span().start as u32,
+                method_span.start as u32,
                 cx,
                 env,
             );
@@ -5349,7 +5639,38 @@ fn lower_method_call_impl(
         }
         if let Some(op) = tls_static_op(receiver, method, cx, &locals) {
             return in_own_frame(|| {
-                let Some(ty) = resolved_ret.cloned() else {
+                let ty = resolved_ret.cloned().or_else(|| match &op {
+                    THandleOp::TLSClientConfigDefault => {
+                        Some(Type::Named("TLSClientConfig".to_string()))
+                    }
+                    THandleOp::TLSRootCertificatesFromPem => Some(Type::Result {
+                        ok: Box::new(Type::Named("TLSRootCertificates".to_string())),
+                        err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                    }),
+                    THandleOp::TLSClientIdentityFromPem => Some(Type::Result {
+                        ok: Box::new(Type::Named("TLSClientIdentity".to_string())),
+                        err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                    }),
+                    THandleOp::TLSClientConfigWithAlpn
+                    | THandleOp::TLSClientConfigWithTrust
+                    | THandleOp::TLSClientConfigWithIdentity
+                    | THandleOp::TLSClientConfigWithVersionBounds => {
+                        Some(Type::Named("TLSClientConfig".to_string()))
+                    }
+                    _ => match (method, args.len()) {
+                        ("default", 0) => Some(Type::Named("TLSClientConfig".to_string())),
+                        ("from_pem", 1) => Some(Type::Result {
+                            ok: Box::new(Type::Named("TLSRootCertificates".to_string())),
+                            err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                        }),
+                        ("from_pem", 2) => Some(Type::Result {
+                            ok: Box::new(Type::Named("TLSClientIdentity".to_string())),
+                            err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                        }),
+                        _ => None,
+                    },
+                });
+                let Some(ty) = ty else {
                     return invariant_method_expr(
                         method_span,
                         "TLS constructor without a resolved return type",
@@ -5598,19 +5919,14 @@ fn lower_method_call_impl(
                     // `core.term.eprint` keeps its stderr CoreCall adapter;
                     // preserve its existing newline join until that adapter
                     // grows the same typed Print operation.
-                    if module == "core.term" && method == "eprint" && args.len() > 1 {
+                    if module == "core.term" && method == "eprint" && !args.is_empty() {
                         let joined = crate::Codegen::TIR::lower::join_print_args(args, cx, env);
                         let record =
                             match checked_core_record(module.as_str(), method, 1, method_span) {
                                 Ok(record) => record,
                                 Err(expr) => return expr,
                             };
-                        let Some(ty) = resolved_ret.cloned() else {
-                            return invariant_method_expr(
-                                method_span,
-                                "variadic terminal call without a resolved return type",
-                            );
-                        };
+                        let ty = resolved_ret.cloned().unwrap_or_else(unit_type);
                         return TExpr {
                             ty: ty.clone(),
                             kind: TExprKind::CoreCall {
@@ -5780,14 +6096,18 @@ fn lower_method_call_impl(
                         env.note_stack_address();
                     }
                     let widen_to_vec = core_widen_to_vec(&module, method, &targs);
-                    let Some(ty) = resolved_ret.cloned().or_else(|| {
+                    let ty = match resolved_ret.cloned().or_else(|| {
                         crate::Sema::core_call_semantic_signature(&module, method)
                             .map(|(_, ret)| ret)
-                    }) else {
-                        return invariant_method_expr(
-                            method_span,
-                            format!("Core call `{module}.{method}` has no resolved return type"),
-                        );
+                    }) {
+                        Some(ty) => ty,
+                        None if module == "core.term" && method == "eprint" => unit_type(),
+                        None => {
+                            return invariant_method_expr(
+                                method_span,
+                                format!("Core call `{module}.{method}` has no resolved return type"),
+                            )
+                        }
                     };
                     let record =
                         match checked_core_record(&module, method, targs.len(), method_span) {
@@ -6431,6 +6751,14 @@ fn lower_method_call_impl(
             recv_type.as_deref(),
             Some("Set") | Some(crate::Syntax::TYPE_RANK)
         )
+        || recv_type.as_deref().is_some_and(|name| {
+            let leaf = name.rsplit('.').next().unwrap_or(name);
+            matches!(
+                leaf,
+                crate::Syntax::TYPE_BYTES | crate::Syntax::TYPE_LIST | "Equatable" | "FixedList"
+            ) || leaf.starts_with('[')
+        })
+        || (matches!(method, "equal" | "compare") && args.len() == 1)
     {
         let mut builtin_receiver_ty = tir_recv_jet_ty(receiver, env);
         if builtin_receiver_ty.is_none() {
@@ -9395,6 +9723,9 @@ fn lower_method_call_impl(
             let recv = lower_expr(receiver, cx, env);
             return lower_serde_encode_node(recv, cx);
         }
+        if handle == "__Debug__" && method == "debug" && args.is_empty() {
+            return lower_debug_text(lower_expr(receiver, cx, env));
+        }
         if handle == Syntax::TYPE_DATA
             && method == Syntax::METHOD_DATATREE_DECODE
             && args.is_empty()
@@ -11822,19 +12153,44 @@ fn lower_method_call_impl(
         }
     }
     return in_own_frame(|| {
-        // BuildContext's programmable-build methods are evaluated by the
-        // comptime bridge.  Sema leaves their receiver fact unset because the
-        // typed template call is not a user method, but the fragment lowering
-        // environment still carries the canonical nominal receiver type.
-        let build_context_receiver = recv_type.is_none()
-            && matches!(method, "generate" | "add_executable" | "plan")
-            && matches!(
-                tir_recv_jet_ty(receiver, env),
-                Some(Type::Named(name)) if name == Syntax::TYPE_BUILD_CONTEXT
-            );
-        let Some(ty_name) = recv_type.clone().or_else(|| {
-            build_context_receiver.then(|| Syntax::TYPE_BUILD_CONTEXT.to_string())
-        }) else {
+        // D-BUILDENTRY1 / D-METAREFLECT1: BuildContext, ProgramInfo, and TypeInfo
+        // methods are compiler-host operations. Lower them as HostCall so MIR
+        // eval can reach `eval_program_build_method` / `Builtins::apply_method`
+        // without synthesizing missing user methods or field IDs.
+        let ty_name = recv_type.clone().or_else(|| match tir_recv_jet_ty(receiver, env) {
+            Some(Type::Named(name) | Type::Apply { name, .. }) => Some(name),
+            _ => None,
+        });
+        if let Some(ty_name) = ty_name.as_deref() {
+            if method != "generate" && is_comptime_host_method(ty_name, method) {
+                let recv = lower_expr(receiver, cx, env);
+                let targs = args
+                    .iter()
+                    .map(|arg| lower_expr(&arg.expr, cx, env))
+                    .collect();
+                let ty = resolved_ret
+                    .cloned()
+                    .or_else(|| {
+                        crate::Collections::builtin_method_return(
+                            &Type::Named(ty_name.to_string()),
+                            method,
+                            args.len(),
+                            false,
+                        )
+                        .flatten()
+                    })
+                    .unwrap_or_else(unit_type);
+                return TExpr {
+                    ty,
+                    kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                        recv: Box::new(recv),
+                        method: method.to_string(),
+                        args: targs,
+                    })),
+                };
+            }
+        }
+        let Some(ty_name) = ty_name else {
             return invariant_method_expr(method_span, format!("method `{method}` receiver type"));
         };
         // Imported method metadata is keyed by the declaration's canonical nominal
@@ -12032,6 +12388,58 @@ fn lower_method_call_impl(
             },
         }
     });
+}
+
+fn comptime_host_type_leaf(name: &str) -> &str {
+    name.rsplit("::").next().unwrap_or(name).rsplit('.').next().unwrap_or(name)
+}
+
+fn is_comptime_host_method(ty_name: &str, method: &str) -> bool {
+    match comptime_host_type_leaf(ty_name) {
+        Syntax::TYPE_BUILD_CONTEXT => matches!(
+            method,
+            "generate"
+                | "find"
+                | "embed"
+                | "fetch"
+                | "plugin"
+                | "action"
+                | "legacy"
+                | "add_executable"
+                | "add_library"
+                | "add_test"
+                | "add_asset_bundle"
+                | "add_doc"
+                | "add_install"
+                | "add_package"
+                | "add_publish"
+                | "toolchain"
+                | "signing"
+                | "probe"
+                | "error"
+                | "plan"
+                | "contribute"
+        ),
+        Syntax::TYPE_PROGRAM_INFO => matches!(
+            method,
+            "types"
+                | "functions"
+                | "packages"
+                | "definitions"
+                | "references"
+                | "call_edges"
+                | "structural_nodes"
+        ),
+        Syntax::TYPE_TYPE_INFO | "FieldInfo" | "MethodInfo" => {
+            matches!(method, "has_marker" | "implements" | "has_method")
+        }
+        "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap"
+        | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget"
+        | "CompilerPackageOutput" | "CompilerBuildProfile" | "CompilerManifest"
+        | "CompilerPackage" | "CompilerLockedPackage" | "CompilerLock"
+        | "CompilerKeyValue" | "CompilerProfile" | "CompilerProfileSet" => true,
+        _ => false,
+    }
 }
 
 pub(crate) fn instantiate_method_sig(

@@ -324,7 +324,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "Delivery"
-        | "DeliveryReceipt" | "DeliveryEvent"
+        | "DeliveryState" | "DeliveryReceipt" | "DeliveryEvent"
         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
@@ -1945,6 +1945,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
+        ("TempDir" | "TempFile" | "FileLock", "path") => Some(Type::String),
+        ("WatchEvent", "path") => Some(Type::String),
+        ("WatchEvent", "domain") => Some(Type::Named("WatchDomain".to_string())),
+        ("WatchEvent", "kind") => Some(Type::Named("WatchKind".to_string())),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         ("Point", "x" | "y") => Some(Type::Float),
         ("Size", "width" | "height") => Some(Type::Float),

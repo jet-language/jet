@@ -797,6 +797,83 @@ impl TNumericOp {
     }
 }
 
+
+fn watch_receiver_kind(receiver: &Type) -> Option<&str> {
+    match receiver {
+        Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
+            watch_receiver_kind(inner)
+        }
+        Type::Named(name) if matches!(name.as_str(), "WatchHandle" | "WatchSet") => {
+            Some(name.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn watch_route(
+    receiver: &Type,
+    method: &str,
+    carrier: &TFailureCarrier,
+) -> Result<TRoutePlan, LowerError> {
+    let kind = watch_receiver_kind(receiver).ok_or_else(|| {
+        route_error(format!(
+            "checked watch method `{method}` has an unsupported receiver type"
+        ))
+    })?;
+    Ok(match (kind, method) {
+        ("WatchHandle", "poll" | "events") => {
+            h("watch.poll", "jet_jit_watch_poll", 1, 1, &[true], Some(Effect::IO), carrier)
+        }
+        ("WatchHandle", "cancel") => {
+            h("watch.cancel", "jet_jit_watch_cancel", 1, 1, &[true], Some(Effect::IO), carrier)
+        }
+        ("WatchHandle", "is_active") => {
+            h("watch.is_active", "jet_jit_watch_is_active", 1, 1, &[true], None, carrier)
+        }
+        ("WatchHandle", "summary") => {
+            h("watch.summary", "jet_jit_watch_summary", 1, 1, &[true], None, carrier)
+        }
+        ("WatchHandle", "on") => prelude(
+            MirPreludeFamily::ClosureMethod,
+            "core.watcher",
+            "on",
+            "jet_jit_watch_on",
+            3,
+            3,
+            &[true, true, false],
+            Some(Effect::IO),
+            carrier,
+            MirPreludeAbi::Value,
+        ),
+        ("WatchHandle", "once") => prelude(
+            MirPreludeFamily::ClosureMethod,
+            "core.watcher",
+            "once",
+            "jet_jit_watch_once",
+            3,
+            3,
+            &[true, true, false],
+            Some(Effect::IO),
+            carrier,
+            MirPreludeAbi::Value,
+        ),
+        ("WatchSet", "add") => {
+            h("watchset.add", "jet_jit_watchset_add", 2, 2, &[true, true], Some(Effect::IO), carrier)
+        }
+        ("WatchSet", "poll" | "events") => {
+            h("watchset.poll", "jet_jit_watchset_poll", 1, 1, &[true], Some(Effect::IO), carrier)
+        }
+        ("WatchSet", "summary") => {
+            h("watchset.summary", "jet_jit_watchset_summary", 1, 1, &[true], None, carrier)
+        }
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked watch method `{kind}.{method}`"
+            )))
+        }
+    })
+}
+
 fn event_receiver_kind(receiver: &Type) -> Option<&str> {
     match receiver {
         Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
@@ -1299,18 +1376,24 @@ impl THandleOp {
             DurationNsValue => h("duration.ns_value", "jet_duration_ns_value", 1, 1, &[true], None, carrier),
             DurationScale => h("duration.scale", "jet_duration_scale", 2, 2, &[true, true], None, carrier),
             DurationDivide => h("duration.divide", "jet_duration_divide", 2, 2, &[true, true], None, carrier),
-            TcpListenerAccept => h("tcp_listener.accept", "jet_net_tcp_accept", 1, 2, &[true], Some(Effect::Net), carrier),
+            TcpListenerAccept => h("tcp_listener.accept", "jet_net_tcp_accept", 1, 1, &[true], Some(Effect::Net), carrier),
+            TcpListenerAcceptDeadline => h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", 2, 2, &[true, true], Some(Effect::Net), carrier),
             TcpListenerLocalAddr => h("tcp_listener.local_addr", "jet_net_listener_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamRead => h("tcp_stream.read", "jet_net_tcp_read", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamWrite => h("tcp_stream.write", "jet_net_tcp_write", 2, 2, &[true, true], Some(Effect::Net), carrier),
             TcpStreamPeerAddr => h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamLocalAddr => h("tcp_stream.local_addr", "jet_net_tcp_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
             TcpStreamClose => h("tcp_stream.close", "jet_net_tcp_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamReadBytes => h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 3, &[true, false], Some(Effect::Net), carrier),
-            TcpStreamReadText => h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 3, &[true, false], Some(Effect::Net), carrier),
-            TcpStreamWriteBytes => h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 3, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteAllBytes => h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 3, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteText => h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 3, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamReadBytes => h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 2, &[true, false], Some(Effect::Net), carrier),
+            TcpStreamReadBytesDeadline => h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
+            TcpStreamReadText => h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 2, &[true, false], Some(Effect::Net), carrier),
+            TcpStreamReadTextDeadline => h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
+            TcpStreamWriteBytes => h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 2, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteBytesDeadline => h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteAllBytes => h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 2, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteAllBytesDeadline => h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteText => h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 2, &[true, true], Some(Effect::Net), carrier),
+            TcpStreamWriteTextDeadline => h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
             TcpStreamShutdown => h("tcp_stream.shutdown", "jet_net_tcp_shutdown", 2, 2, &[true, false], Some(Effect::Net), carrier),
             TcpStreamReady => h("tcp_stream.ready", "jet_net_tcp_ready_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
             UdpSocketReady => h("udp_socket.ready", "jet_net_udp_ready", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
@@ -1732,6 +1815,7 @@ impl THandleOp {
             // receiver/FFI policy not represented by this operation alone. Their
             // checked TIR projection must expand them before MIR.
             EventMethod { method } => event_route(receiver, method, carrier)?,
+            WatchMethod { method, .. } => watch_route(receiver, method, carrier)?,
             PreciseMethod { type_name, method } => {
                 let arity = match method.as_str() {
                     "add" | "sub" | "mul" | "div" | "equal" => 2,
@@ -1875,7 +1959,7 @@ impl THandleOp {
                 MirPreludeAbi::Value,
             ),
             HTTPReqField(_) | HTTPRespField(_) | HTTPRespHeader
-            | ArgsSpecHelp | WatchMethod { .. }
+            | ArgsSpecHelp
             | DataTreeField | DataTreeAt | DataTreeInt | DataTreeText
             | DataTreeBool | DataTreeFloat | DataTreeToText | DataTreeEqualUnordered
             | DataTreeDecode(_) | SerdeEncode | JSONField | JSONAt | JSONInt | JSONText
@@ -3513,6 +3597,14 @@ fn math_type_name(ty: &Type) -> Option<&str> {
     }
 }
 
+fn math_binary_operand_name(ty: &Type) -> Option<&str> {
+    math_type_name(ty).or_else(|| match ty {
+        Type::Float => Some("Float"),
+        Type::Tagged { inner, .. } => math_binary_operand_name(inner),
+        _ => None,
+    })
+}
+
 fn math_binary_route(
     op: BinOp,
     input: &Type,
@@ -3520,13 +3612,18 @@ fn math_binary_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<Option<TRoutePlan>, LowerError> {
-    let Some(left_name) = math_type_name(input) else {
+    let left_math = math_type_name(input);
+    let right_math = math_type_name(rhs);
+    if left_math.is_none() && right_math.is_none() {
+        return Ok(None);
+    }
+    let Some(left_name) = left_math.or_else(|| math_binary_operand_name(input)) else {
         return Ok(None);
     };
-    let Some(right_name) = math_type_name(rhs) else {
+    let Some(right_name) = right_math.or_else(|| math_binary_operand_name(rhs)) else {
         return Ok(None);
     };
-    let Some(result_name) = math_type_name(result) else {
+    let Some(result_name) = math_type_name(result).or_else(|| math_binary_operand_name(result)) else {
         return Ok(None);
     };
     let Some(op_name) = (match op {
@@ -3564,9 +3661,22 @@ fn math_binary_route(
         BinOp::Mul if left_name == "Mat4" && right_name == "Vec4" && result_name == "Vec4" => {
             "jet_math_Mat4_transform".to_string()
         }
+        BinOp::Mul if left_name == "Vec3" && right_name == "Float" && result_name == "Vec3" => {
+            "jet_math_Vec3_mul".to_string()
+        }
+        BinOp::Mul if left_name == "Float" && right_name == "Vec3" && result_name == "Vec3" => {
+            "jet_math_Float_mul_Vec3".to_string()
+        }
+        BinOp::Div if left_name == "Vec3" && right_name == "Float" && result_name == "Vec3" => {
+            "jet_math_Vec3_div".to_string()
+        }
+        BinOp::Div if left_name == "Float" && right_name == "Vec3" && result_name == "Vec3" => {
+            "jet_math_Float_div_Vec3".to_string()
+        }
         _ => return Ok(None),
     };
     let member = format!("binary.{left_name}.{op_name}");
+    let borrow_mask = [left_math.is_some(), right_math.is_some()];
     let route = prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         "core.math",
@@ -3574,7 +3684,7 @@ fn math_binary_route(
         &symbol,
         2,
         2,
-        &[true, false],
+        &borrow_mask,
         None,
         carrier,
         MirPreludeAbi::Value,
@@ -4812,6 +4922,19 @@ pub(super) fn slice_route(
             MirPreludeAbi::Value,
             "list slice",
         ),
+        ty if ty.is_compute_tensor_family() && has_range => prelude_route_row(
+            MirPreludeFamily::StaticPrelude,
+            "core.compute",
+            "slice_range",
+            "jet_compute_slice_range",
+            4,
+            4,
+            &[true, true, false, false],
+            None,
+            carrier,
+            MirPreludeAbi::Value,
+            "tensor range slice",
+        ),
         _ => Err(route_error(format!(
             "checked slice base `{}` has no canonical slice route",
             base.name()
@@ -5094,7 +5217,18 @@ pub(super) fn string_format_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    let integer = matches!(value_ty, Type::Int | Type::IntN { .. });
+    let integer = {
+        fn is_int(ty: &Type) -> bool {
+            match ty.without_user_tags() {
+                Type::Int | Type::IntN { .. } => true,
+                Type::InlineRange { base, .. } => is_int(base),
+                Type::Named(name) if name == "Int" => true,
+                Type::Tagged { inner, .. } => is_int(inner),
+                _ => false,
+            }
+        }
+        is_int(value_ty)
+    };
     let (member, symbol, arity, borrow_mask) = match format {
         crate::AST::StrFormat::Display => ("display", "jet_fmt_display", 1, vec![true]),
         crate::AST::StrFormat::Debug => ("debug", "jet_fmt_debug", 1, vec![true]),
@@ -5112,7 +5246,11 @@ pub(super) fn string_format_route(
                 "jet_fmt_decimal"
             },
             2,
-            vec![true, false],
+            if integer {
+                vec![true, false]
+            } else {
+                vec![false, false]
+            },
         ),
         crate::AST::StrFormat::Grouped(_) => (
             "grouped",
@@ -5122,7 +5260,11 @@ pub(super) fn string_format_route(
                 "jet_fmt_grouped"
             },
             2,
-            vec![true, false],
+            if integer {
+                vec![true, false]
+            } else {
+                vec![false, false]
+            },
         ),
         crate::AST::StrFormat::Hex(_) => (
             "hex",
@@ -5132,7 +5274,11 @@ pub(super) fn string_format_route(
                 "jet_fmt_hex_decimal"
             },
             2,
-            vec![true, false],
+            if integer {
+                vec![true, false]
+            } else {
+                vec![false, false]
+            },
         ),
         crate::AST::StrFormat::Pad { .. } => {
             ("pad", "jet_fmt_pad", 3, vec![true, false, true])
@@ -5140,10 +5286,26 @@ pub(super) fn string_format_route(
         crate::AST::StrFormat::PadLeft { .. } => {
             ("pad_left", "jet_fmt_pad_left", 3, vec![true, false, true])
         }
-        crate::AST::StrFormat::Sci(_) => ("sci", "jet_fmt_sci", 2, vec![true, false]),
-        crate::AST::StrFormat::Percent(_) => {
-            ("percent", "jet_fmt_percent", 2, vec![true, false])
-        }
+        crate::AST::StrFormat::Sci(_) => (
+            "sci",
+            "jet_fmt_sci",
+            2,
+            if integer {
+                vec![true, false]
+            } else {
+                vec![false, false]
+            },
+        ),
+        crate::AST::StrFormat::Percent(_) => (
+            "percent",
+            "jet_fmt_percent",
+            2,
+            if integer {
+                vec![true, false]
+            } else {
+                vec![false, false]
+            },
+        ),
         crate::AST::StrFormat::Bin => (
             "bin",
             if integer {
@@ -6005,6 +6167,29 @@ pub(super) fn pattern_match_route(
 /// explicit STM handle as argument one; the lowerer supplies that value from the
 /// checked transaction local before the user closure. No receiver/type strings
 /// cross the MIR boundary.
+
+fn host_recv_borrow_mask(arity: usize) -> &'static [bool] {
+    match arity {
+        0 => &[],
+        1 => &[true],
+        2 => &[true, false],
+        3 => &[true, false, false],
+        4 => &[true, false, false, false],
+        5 => &[true, false, false, false, false],
+        6 => &[true, false, false, false, false, false],
+        7 => &[true, false, false, false, false, false, false],
+        8 => &[true, false, false, false, false, false, false, false],
+        9 => &[true, false, false, false, false, false, false, false, false],
+        10 => &[true, false, false, false, false, false, false, false, false, false],
+        11 => &[true, false, false, false, false, false, false, false, false, false, false],
+        12 => &[true, false, false, false, false, false, false, false, false, false, false, false],
+        13 => &[true, false, false, false, false, false, false, false, false, false, false, false, false],
+        14 => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false],
+        15 => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+        _ => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+    }
+}
+
 pub(super) fn host_method_route(
     recv: &Type,
     method: &str,
@@ -6016,6 +6201,49 @@ pub(super) fn host_method_route(
     let mut shape = recv;
     while let Type::Tagged { inner, .. } = shape {
         shape = inner;
+    }
+    if let Type::Named(name) = shape {
+        let name = name.rsplit("::").next().unwrap_or(name.as_str()).rsplit('.').next().unwrap_or(name.as_str());
+        if matches!(
+            name,
+            crate::Syntax::TYPE_BUILD_CONTEXT
+                | crate::Syntax::TYPE_PROGRAM_INFO
+                | crate::Syntax::TYPE_TYPE_INFO
+                | "FieldInfo"
+                | "MethodInfo"
+                | "CompilerLexed"
+                | "CompilerSyntaxTree"
+                | "CompilerChecked"
+                | "CompilerSourceMap"
+                | "CompilerPackageError"
+                | "CompilerDependency"
+                | "CompilerPackageTarget"
+                | "CompilerPackageOutput"
+                | "CompilerBuildProfile"
+                | "CompilerManifest"
+                | "CompilerPackage"
+                | "CompilerLockedPackage"
+                | "CompilerLock"
+                | "CompilerKeyValue"
+                | "CompilerProfile"
+                | "CompilerProfileSet"
+        ) {
+            let member = format!("{name}.{method}");
+            let arity = arg_count.saturating_add(1);
+            return prelude_route_row(
+                MirPreludeFamily::StaticPrelude,
+                "core.host",
+                &member,
+                "jet_comptime_host_method",
+                arity,
+                arity,
+                host_recv_borrow_mask(arity),
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+                "comptime host method",
+            );
+        }
     }
     let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) = match shape {
         Type::Apply { name, .. } if name == "Pool" => match method {

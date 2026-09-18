@@ -7,14 +7,14 @@ fn run() {
     // A gzip stream is always longer than 5 bytes (header alone is 10).
     print(compressed.len() > 5)
     // Round-trip: decompress must recover the original bytes exactly.
-    restored :: gz.decompress(compressed) ?? return Err("bad gzip")
+    restored :: gz.decompress(compressed) ?? panic("bad gzip")
     print(restored.len() == original.len())
     print(restored == original)
     // Decompress failure path: corrupt input returns err.
     bad :: [U8]{1, 2, 3, 4, 5}
-    result :: gz.decompress(bad)
-    if result == {
-        .Ok(_) -> { print(false) }
-        .Err(_) -> { print(true) }
+    _ :: gz.decompress(bad) ?? {
+        print(true)
+        return
     }
+    print(false)
 }

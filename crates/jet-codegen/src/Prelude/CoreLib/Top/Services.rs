@@ -3099,6 +3099,10 @@ fn jet_services_endpoint_show(endpoint: &JetServiceEndpoint) -> String {
     endpoint.jet_show()
 }
 
+fn jet_services_delivery_state_show(state: &JetDeliveryState) -> String {
+    state.jet_show()
+}
+
 fn jet_services_tree_show(tree: &JetServiceTree) -> String {
     tree.jet_show()
 }

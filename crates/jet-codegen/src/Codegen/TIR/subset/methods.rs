@@ -66,6 +66,13 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
+    // Equatable `==` is rewritten to `.equal(rhs)` for every type that
+    // implements the trait, including `[U8]` / list / bytes. Exclusive
+    // handle gates below (Shared/Cell/…) must not swallow that operator.
+    if matches!(method, "equal" | "compare") && args.len() == 1 {
+        return expr_in_subset(receiver, cx, locals)
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
     if crate::Codegen::TIR::web_receiver_projection(recv_type.as_deref(), method, args.len())
         .is_some()
     {
@@ -699,7 +706,7 @@ pub(crate) fn method_call_in_subset(
     // `expr_jet_ty`, incl. its `None` → default-branch partiality), never re-derived
     // in emit. Tried BEFORE the static/instance shapes (both keyed on the same
     // `recv_type`) to claim builtins first.
-    if matches!(recv_type.as_deref(), None | Some("String"))
+    if is_builtin_collection_recv(recv_type.as_deref())
         && is_covered_builtin_name(method, args.len())
     {
         // D-MAP-MERGE1=E: optional second arg may be named `conflict:`.
@@ -1149,6 +1156,7 @@ pub(crate) fn method_call_in_subset(
     }
     if let Some(handle) = recv_type {
         if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty())
+            || (handle == "__Debug__" && method == "debug" && args.is_empty())
             || (handle == Syntax::TYPE_DATA
                 && method == Syntax::METHOD_DATATREE_DECODE
                 && args.is_empty())
@@ -1176,7 +1184,8 @@ pub(crate) fn method_call_in_subset(
         if handle == "Reader"
             && method == Syntax::METHOD_TAKE_PATTERN
             && args.len() == 1
-            && matches!(args[0].expr, Expr::BinMatchLit(_, _))
+            && (matches!(args[0].expr, Expr::BinMatchLit(_, _))
+                || expr_in_subset(&args[0].expr, cx, locals))
         {
             return expr_in_subset(receiver, cx, locals);
         }
@@ -1298,9 +1307,14 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         return false;
     }
-    let recv_type_leaf = recv_type
-        .as_deref()
-        .map(|name| name.rsplit('.').next().unwrap_or(name));
+    let recv_type_leaf = recv_type.as_deref().map(|name| {
+        name.rsplit("::")
+            .next()
+            .unwrap_or(name)
+            .rsplit('.')
+            .next()
+            .unwrap_or(name)
+    });
     // D-CRYPTO-SUBSET1: Core crypto constructors carry a nominal receiver
     // marker in some checked paths even though lowering uses the static helper
     // route. Reuse the existing constructor admission table for that shape.
@@ -1416,10 +1430,16 @@ pub(crate) fn method_call_in_subset(
     // The receiver type must be a covered struct or enum (so the receiver place
     // emits exactly as the AST path does, and the method is a plain user method).
     let recv_ty = Type::Named(ty.clone());
+    // D-OPMIX1: `impl Int.Mul(Price)` is a user method on a builtin. Admit it
+    // when method_sigs has the hook, so mixed arithmetic stays in TIR.
+    let operator_hook = sig.is_some()
+        && matches!(method, "add" | "sub" | "mul" | "div")
+        && args.len() == 1;
     if !is_covered_struct_ty(&recv_ty, cx)
         && !is_covered_enum_ty(&recv_ty, cx)
         && !is_covered_foreign_value_ty(&recv_ty, cx)
         && !distinct_trait_method
+        && !operator_hook
     {
         return false;
     }
@@ -1900,6 +1920,24 @@ pub(crate) fn closure_method_in_subset(
         _ => {
             args.len() == 1
                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+        }
+    }
+}
+
+fn is_builtin_collection_recv(recv_type: Option<&str>) -> bool {
+    match recv_type {
+        None | Some("String" | "Option" | "SQL") => true,
+        Some(name) => {
+            let leaf = name.rsplit('.').next().unwrap_or(name);
+            matches!(
+                leaf,
+                crate::Syntax::TYPE_BYTES
+                    | crate::Syntax::TYPE_LIST
+                    | "Equatable"
+                    | "FixedList"
+                    | "Set"
+                    | "Map"
+            ) || leaf.starts_with('[')
         }
     }
 }

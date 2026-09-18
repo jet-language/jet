@@ -746,6 +746,21 @@ impl<'a> Checker<'a> {
             _ => None,
         }
     }
+
+    pub(crate) fn check_service_delivery_state_method(
+        &mut self,
+        method: &str,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "show" => {
+                self.service_method_arity("DeliveryState.show", args, 0, span);
+                Some(Some(Type::String))
+            }
+            _ => None,
+        }
+    }
 }
 
 pub fn service_runtime_method_return_ty(method: &str) -> Option<Type> {

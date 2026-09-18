@@ -2264,6 +2264,12 @@ impl<'a> Checker<'a> {
                 if let Some(result) = math_binop_result(op, &lname, &rname) {
                     return Some(result);
                 }
+                if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
+                    return Some(result);
+                }
+                if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
+                    return Some(result);
+                }
                 // A math operand with an unsupported operator/operand pairing.
                 // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
                 // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.

@@ -2053,6 +2053,10 @@ fn jet_jit_math_float_div_vec3(scalar: f64, value: i64) -> i64 {
     pack_handle(push_val(value))
 }
 
+fn jet_jit_math_float_mul_vec3(scalar: f64, value: i64) -> i64 {
+    jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Mul)
+}
+
 fn jet_jit_math_result_is_float(packed: i64) -> i8 {
     i8::from(is_float_pack(packed))
 }
@@ -3037,6 +3041,7 @@ host_fns! {
     vec3_mul_scalar: "jet_math_Vec3_mul" => jet_jit_math_vec3_mul_scalar: sig_handle_float;
     vec3_div_scalar: "jet_math_Vec3_div" => jet_jit_math_vec3_div_scalar: sig_handle_float;
     float_div_vec3: "jet_math_Float_div_Vec3" => jet_jit_math_float_div_vec3: sig_float_handle;
+    float_mul_vec3: "jet_math_Float_mul_Vec3" => jet_jit_math_float_mul_vec3: sig_float_handle;
     vec4_new: "jet_math_Vec4_new" => jet_jit_math_vec4_new: sig_f64x4;
     vec4_splat: "jet_math_Vec4_splat" => jet_jit_math_vec4_splat: sig_f64_i64;
     vec4_from_array: "jet_math_Vec4_from_array" => jet_jit_math_vec4_from_array: sig_unary;

@@ -16,7 +16,8 @@ use std::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
-use std::path::Path;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::ptr::{self, NonNull};
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
@@ -32,6 +33,16 @@ unsafe extern "C" {
 
 #[cfg(unix)]
 const RTLD_NOW: c_int = 2;
+
+thread_local! {
+    static BRIDGE_CDYLIB: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Install the prepared bridge cdylib for the next resident bind.
+/// Interpreter sets this instead of mutating optimized MIR link artifacts.
+pub fn set_bridge_cdylib(path: Option<PathBuf>) {
+    BRIDGE_CDYLIB.with(|slot| *slot.borrow_mut() = path);
+}
 
 /// The bridge's panic reporter, as a plain Rust `fn`.
 ///
@@ -872,6 +883,9 @@ fn bridge_path(
     program: &MirProgram,
     artifact: &jet_foundation::MIR::MirArtifactPlan,
 ) -> Option<std::path::PathBuf> {
+    if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
+        return Some(path);
+    }
     artifact.links.iter().find_map(|link_id| {
         program
             .links
@@ -1191,12 +1205,22 @@ pub(crate) fn bind_mir_ffi(
         .runtime_parts
         .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
     let path = bridge_path(program, artifact);
-    if entries.is_empty() && !needs_data_provider {
-        return Ok(());
+    // `core.db` marks Data for AOT Arrow/sqlite preludes, but JIT sqlite is
+    // in-process rusqlite. A Data-only program with no foreign entries must not
+    // ICE for a missing cdylib. Load the Arrow provider only when a bridge exists.
+    if entries.is_empty() {
+        let Some(path) = path else {
+            return Ok(());
+        };
+        if !needs_data_provider {
+            return Ok(());
+        }
+        let records = record_descriptors(program)?;
+        return load_cdylib(&path, &entries, records, true).map_err(BindError::Message);
     }
     let path = path.ok_or_else(|| {
         BindError::Message(format!(
-            "jit ffi: artifact `{}` needs a bridge for foreign calls or data, but has no dynamic link",
+            "jit ffi: artifact `{}` needs a bridge for foreign calls, but has no dynamic link",
             artifact.name
         ))
     })?;

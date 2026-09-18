@@ -1091,6 +1091,10 @@ fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_zero: i64) 
     }
 }
 
+fn jet_jit_crypto_expert_x25519_raw(secret: i64, public: i64) -> i64 {
+    jet_jit_crypto_expert_x25519(secret, public, 1)
+}
+
 fn jet_jit_crypto_expert_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
     match runtime::jet_crypto_expert_hkdf_sha256_impl(
         &clone_bytes(ikm),
@@ -3867,6 +3871,8 @@ host_fns! {
     expert_open_v1: "jet_jit_crypto_expert_open_v1" => jet_jit_crypto_expert_open_v1: binary;
     expert_migrate_v1: "jet_jit_crypto_expert_migrate_v1" => jet_jit_crypto_expert_migrate_v1: quaternary;
     expert_x25519: "jet_jit_crypto_expert_x25519" => jet_jit_crypto_expert_x25519: ternary;
+    expert_x25519_raw: "jet_jit_crypto_expert_x25519_raw" => jet_jit_crypto_expert_x25519_raw: binary;
+    row_expert_x25519: "jet_crypto_expert_x25519_impl" => jet_jit_crypto_expert_x25519_raw: binary;
     expert_hkdf_sha256: "jet_jit_crypto_expert_hkdf_sha256" => jet_jit_crypto_expert_hkdf_sha256: quaternary;
     expert_secret_bytes: "jet_jit_crypto_expert_secret_bytes" => jet_jit_crypto_expert_secret_bytes: unary;
     verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: senary;
@@ -3891,9 +3897,17 @@ host_fns! {
     // Core rows projected through `CoreCallRecord::jit_symbol_candidates`.
     row_app_auth_routes: "jet_app_auth_routes" => jet_jit_app_auth_routes: unary;
     row_app_auth_show: "jet_app_auth_show" => jet_jit_app_auth_show: unary;
+    row_app_auth: "jet_app_auth" => jet_jit_app_auth: unary;
+    row_app_auth_oauth: "jet_app_auth_oauth" => jet_jit_app_auth_oauth: binary;
     vault_get: "jet_jit_vault_get" => jet_jit_vault_get: unary;
+    row_vault_get: "jet_vault_get_impl" => jet_jit_vault_get: unary;
+    row_secret_from_bytes: "jet_crypto_secret_from_bytes_impl" => jet_jit_crypto_secret_from_bytes: unary;
+    row_expert_open_v1: "jet_crypto_expert_open_v1_impl" => jet_jit_crypto_expert_open_v1: binary;
+    row_expert_migrate_v1: "jet_crypto_expert_migrate_v1_impl" => jet_jit_crypto_expert_migrate_v1: quaternary;
+    row_password_text: "jet_crypto_password_text_impl" => jet_jit_crypto_password_text: unary;
     vault_key_ref_show: "jet_jit_vault_key_ref_show" => jet_jit_vault_key_ref_show: unary;
     vault_current: "jet_jit_vault_current" => jet_jit_vault_current: binary;
+    row_vault_current: "jet_vault_current_impl" => jet_jit_vault_current: binary;
     vault_prepare_generate: "jet_jit_vault_prepare_generate" => jet_jit_vault_prepare_generate: binary;
     vault_prepare_rotate: "jet_jit_vault_prepare_rotate" => jet_jit_vault_prepare_rotate: binary;
     vault_prepare_store: "jet_jit_vault_prepare_store" => jet_jit_vault_prepare_store: ternary;

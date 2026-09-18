@@ -29,6 +29,98 @@ thread_local! {
         std::cell::RefCell<Vec<(String, Vec<u8>, MirRuntimeValue)>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
+thread_local! {
+    static SERVICE_TREES: std::cell::RefCell<Vec<MirRuntimeValue>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+const SERVICE_TREE_SLOT: &str = "__slot";
+
+fn is_service_tree(value: &MirRuntimeValue) -> bool {
+    matches!(value, MirRuntimeValue::Struct { type_name, .. } if type_name == "ServiceTree")
+}
+
+pub fn intern_slot(value: &MirRuntimeValue) -> Option<usize> {
+    let MirRuntimeValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "ServiceTree" {
+        return None;
+    }
+    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        (SERVICE_TREE_SLOT, MirRuntimeValue::Int(slot)) if *slot >= 0 => {
+            usize::try_from(*slot).ok()
+        }
+        _ => None,
+    })
+}
+
+fn tag_tree_slot(value: MirRuntimeValue, slot: usize) -> MirRuntimeValue {
+    let MirRuntimeValue::Struct { type_name, mut fields } = value else {
+        return value;
+    };
+    if type_name != "ServiceTree" {
+        return MirRuntimeValue::Struct { type_name, fields };
+    }
+    fields.retain(|(name, _)| name != SERVICE_TREE_SLOT);
+    fields.push((
+        SERVICE_TREE_SLOT.to_string(),
+        MirRuntimeValue::Int(slot as i64),
+    ));
+    MirRuntimeValue::Struct { type_name, fields }
+}
+
+fn intern_new_tree(tree: MirRuntimeValue) -> MirRuntimeValue {
+    SERVICE_TREES.with(|trees| {
+        let mut trees = trees.borrow_mut();
+        let slot = trees.len();
+        let tagged = tag_tree_slot(tree, slot);
+        trees.push(tagged.clone());
+        tagged
+    })
+}
+
+pub fn intern_resolve(value: MirRuntimeValue) -> MirRuntimeValue {
+    let Some(slot) = intern_slot(&value) else {
+        return value;
+    };
+    SERVICE_TREES.with(|trees| trees.borrow().get(slot).cloned().unwrap_or(value))
+}
+
+fn intern_store(slot: Option<usize>, tree: MirRuntimeValue) {
+    if matches!(tree, MirRuntimeValue::Unit) || !is_service_tree(&tree) {
+        return;
+    }
+    SERVICE_TREES.with(|trees| {
+        let mut trees = trees.borrow_mut();
+        if let Some(slot) = slot.filter(|slot| *slot < trees.len()) {
+            trees[slot] = tag_tree_slot(tree, slot);
+            return;
+        }
+        let slot = trees.len();
+        trees.push(tag_tree_slot(tree, slot));
+    });
+}
+
+fn intern_tree_value(value: MirRuntimeValue) -> MirRuntimeValue {
+    match value {
+        MirRuntimeValue::Present(inner) if is_service_tree(&inner) && intern_slot(&inner).is_none() => {
+            MirRuntimeValue::Present(Box::new(intern_new_tree(*inner)))
+        }
+        value if is_service_tree(&value) && intern_slot(&value).is_none() => intern_new_tree(value),
+        value => value,
+    }
+}
+
+pub fn intern_commit(slot: Option<usize>, value: MirRuntimeValue) -> MirRuntimeValue {
+    match take_mut_runtime(value) {
+        Ok((tree, result)) => {
+            intern_store(slot.or_else(|| intern_slot(&tree)), tree);
+            intern_tree_value(result)
+        }
+        Err(value) => intern_tree_value(value),
+    }
+}
 
 pub struct JobPayloadScope(usize);
 
@@ -2622,6 +2714,9 @@ pub fn apply_runtime(
             one(0)?,
             span,
         )?))),
+        "delivery_state_show" => Ok(MirRuntimeValue::String(jet_services_delivery_state_show(
+            &runtime_to_delivery_state(one(0)?, span)?,
+        ))),
         "tree_show" => Ok(MirRuntimeValue::String(jet_services_tree_show(&runtime_to_tree(
             one(0)?,
             span,
@@ -3187,11 +3282,22 @@ pub fn apply(
     args: &[CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let args = args
+    let mut args = args
         .iter()
-        .map(ct_to_runtime_value)
+        .map(|value| match (method, value) {
+            // Engines keep the callback in `service_callbacks`. The kernel
+            // only needs arity plus the handler identity at args[3].
+            ("worker", CtValue::Closure(_)) => Ok(MirRuntimeValue::Unit),
+            _ => ct_to_runtime_value(value),
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    apply_runtime(method, &args, span).and_then(|value| runtime_to_ct_value(&value))
+    if let Some(tree) = args.first_mut() {
+        *tree = intern_resolve(std::mem::replace(tree, MirRuntimeValue::Unit));
+    }
+    let slot = args.first().and_then(intern_slot);
+    apply_runtime(method, &args, span)
+        .map(|value| intern_commit(slot, value))
+        .and_then(|value| runtime_to_ct_value(&value))
 }
 
 fn queue_failed(error: JetServiceError) -> MirRuntimeValue {

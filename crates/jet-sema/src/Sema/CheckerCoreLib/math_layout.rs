@@ -294,6 +294,28 @@ pub fn math_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Ty
     }
 }
 
+fn math_scalar_operand(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int | Type::Float | Type::Float32 | Type::InlineRange { .. }
+    ) || matches!(ty, Type::Named(name) if name == "Decimal" || name == "F64")
+}
+
+/// D-LINALG1 / D-SIMD2: a lane or vector times a scalar splat.
+pub fn math_scalar_binop_result(op: crate::AST::BinOp, math_name: &str, scalar: &Type) -> Option<Type> {
+    use crate::AST::BinOp;
+    if !is_math_type(math_name) {
+        return None;
+    }
+    if !matches!(op, BinOp::Mul | BinOp::Div) {
+        return None;
+    }
+    if !math_scalar_operand(scalar) {
+        return None;
+    }
+    Some(Type::Named(math_name.to_string()))
+}
+
 /// D-LAYOUT1 / D-LAYOUT-GATES1: is `name` an axis-typed layout variable
 /// (`HVar`/`VVar`/`LengthVar`)? `LengthVar` is axis-neutral: it combines with
 /// either `HVar` or `VVar` without a mismatch, and is what a bare numeric

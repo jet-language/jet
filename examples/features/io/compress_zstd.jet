@@ -7,14 +7,14 @@ fn run() {
     // A zstd frame carries a magic number + header; expect at least a few bytes.
     print(compressed.len() > 0)
     // Round-trip: decompress must recover the original bytes exactly.
-    restored :: zs.decompress(compressed) ?? return Err("bad zstd")
+    restored :: zs.decompress(compressed) ?? panic("bad zstd")
     print(restored.len() == original.len())
     print(restored == original)
     // Decompress failure path: corrupt input returns err.
     bad :: [U8]{1, 2, 3, 4, 5}
-    result :: zs.decompress(bad)
-    if result == {
-        .Ok(_) -> { print(false) }
-        .Err(_) -> { print(true) }
+    _ :: zs.decompress(bad) ?? {
+        print(true)
+        return
     }
+    print(false)
 }

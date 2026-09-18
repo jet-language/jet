@@ -1200,6 +1200,13 @@ fn comptime_builtin_fixed_return_type(
         Expr::Call(call) if call.name == Syntax::BUILTIN_FIND => {
             Some(Type::List(Box::new(Type::String)))
         }
+        Expr::Call(call) if call.name == Syntax::BUILTIN_EMBED_FILE => Some(Type::String),
+        Expr::Call(call) if call.name == Syntax::BUILTIN_EMBED_BYTES => Some(Type::List(
+            Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }),
+        )),
         Expr::MethodCall {
             receiver, method, ..
         } if matches!(receiver.as_ref(), Expr::Ident(alias, _)

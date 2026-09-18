@@ -346,6 +346,10 @@ fn jet_math_Vec3_div(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
 fn jet_math_Float_div_Vec3(s: f64, v: &jet_std::Vec3) -> jet_std::Vec3 {
     jet_std::Vec3([s / v.0[0], s / v.0[1], s / v.0[2]])
 }
+#[inline(always)]
+fn jet_math_Float_mul_Vec3(s: f64, v: &jet_std::Vec3) -> jet_std::Vec3 {
+    jet_math_Vec3_mul(v, s)
+}
 
 
 fn jet_math_Vec2_dot(v: &jet_std::Vec2, o: jet_std::Vec2) -> f64 {

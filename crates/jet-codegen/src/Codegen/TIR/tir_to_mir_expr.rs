@@ -28,14 +28,23 @@ use jet_foundation::CanonicalPass;
 
 use crate::AST::{BinOp, Type};
 use super::mir::{LowerCtx, LowerError};
+fn shared_guard_type_name(name: &str) -> bool {
+    let leaf = name
+        .rsplit("::")
+        .next()
+        .and_then(|part| part.rsplit('.').next())
+        .unwrap_or(name);
+    leaf == crate::Syntax::TYPE_SHARED_GUARD
+}
+
 fn shared_guard_value_type(ty: &Type) -> Option<Type> {
     match ty {
-        Type::Apply { name, args }
-            if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
-        {
+        Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
             Some(args[0].clone())
         }
         Type::Tagged { inner, .. } => shared_guard_value_type(inner),
+        Type::Shared(inner) | Type::Option(inner) => shared_guard_value_type(inner),
+        Type::Result { ok, .. } => shared_guard_value_type(ok),
         _ => None,
     }
 }
@@ -2608,19 +2617,20 @@ pub(super) fn lower_expr(
                     .into_iter()
                     .filter(|field| !field.computed)
                     .map(|field| {
+                        let stored_ty = ctx.checked_field_type(&arg.ty, &field.name)?;
+                        let stored_mir = ctx.mir_type(&stored_ty)?;
                         let field_value = ctx.emit_mir_type(
                             "reflect-field",
-                            Some(field.ty.clone()),
+                            Some(stored_mir.clone()),
                             MirOperation::Field {
                                 base: value,
                                 field: field.id,
                             },
                         )?;
-                        let field_type_identity = field
-                            .ty
+                        let field_type_identity = stored_mir
                             .nominal_name()
                             .map(str::to_owned)
-                            .unwrap_or_else(|| field.ty.display_name());
+                            .unwrap_or_else(|| stored_mir.display_name());
                         let source_path = ctx
                             .reflect_paths
                             .get(&field_type_identity)
@@ -2718,6 +2728,15 @@ pub(super) fn lower_expr(
                 .map(|plan| lower_data_plan(ctx, plan))
                 .transpose()?;
             let call = MirCoreCall::from_record(record).id;
+            fn fmt_exact_int(ty: &Type) -> bool {
+                match ty.without_user_tags() {
+                    Type::Int | Type::IntN { .. } => true,
+                    Type::InlineRange { base, .. } => fmt_exact_int(base),
+                    Type::Named(name) if name == "Int" => true,
+                    Type::Tagged { inner, .. } => fmt_exact_int(inner),
+                    _ => false,
+                }
+            }
             // Core decimal/grouped signatures accept both Float and exact Int,
             // but their legacy CoreCall route is Float-only. Keep the checked
             // source type at this seam and reuse the canonical format route so
@@ -2725,9 +2744,7 @@ pub(super) fn lower_expr(
             // JetInt operand.
             let route = if record.module == "core.text.fmt"
                 && matches!(record.member, "decimal" | "grouped")
-                && args
-                    .first()
-                    .is_some_and(|arg| matches!(arg.ty.without_user_tags(), Type::Int))
+                && args.first().is_some_and(|arg| fmt_exact_int(&arg.ty))
             {
                 let format = if record.member == "decimal" {
                     crate::AST::StrFormat::Fixed(0)
@@ -2847,6 +2864,25 @@ pub(super) fn lower_expr(
 
             if record.module == "core.sys" && record.member == "stop" {
                 ctx.emit_explicit_stop_cleanups()?;
+            }
+            // Exact Int uses the typed format ABI (`jet_fmt_decimal_int` /
+            // `jet_fmt_grouped_int`). That row is not the Float CoreCall
+            // record, so project it as a Prelude call instead of pairing the
+            // two signatures on one CoreCall instruction.
+            if record.module == "core.text.fmt"
+                && matches!(record.member, "decimal" | "grouped")
+                && args.first().is_some_and(|arg| fmt_exact_int(&arg.ty))
+            {
+                return ctx.emit(
+                    "core-call-fmt-int",
+                    Some(expr.ty.clone()),
+                    MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call: route,
+                        args: lowered,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
+                    }),
+                );
             }
             ctx.emit("core-call", 
                 Some(expr.ty.clone()),
@@ -3196,7 +3232,13 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::HandleMethod { recv, op, args } => {
-            if let super::THandleOp::EventMethod { .. } = op {
+            if matches!(op, super::THandleOp::EventMethod { .. })
+                || matches!(
+                    op,
+                    super::THandleOp::WatchMethod { method, .. }
+                        if matches!(method.as_str(), "on" | "once")
+                )
+            {
                 let route = op.prelude_route(&recv.ty, &carrier)?;
                 let operand_count = args.len() + 1;
                 if operand_count < route.signature.arity
@@ -3502,6 +3544,29 @@ pub(super) fn lower_expr(
                         args: Vec::new(),
                         frame_schedule: None,
                         frame_schedule_derivation: None,
+                    }),
+                );
+            }
+            if matches!(
+                op,
+                THandleOp::TLSClientConfigDefault
+                    | THandleOp::TLSRootCertificatesFromPem
+                    | THandleOp::TLSClientIdentityFromPem
+                    | THandleOp::HTTPClientNew
+            ) {
+                let args = lower_handle_method_args(ctx, args)?
+                    .into_iter()
+                    .map(|value| mir_value_arg(ctx, value))
+                    .collect();
+                let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
+                return ctx.emit(
+                    "static-handle-constructor",
+                    Some(expr.ty.clone()),
+                    MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call,
+                        args,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
                     }),
                 );
             }
@@ -4256,6 +4321,20 @@ fn lower_inline_block(
         super::TStmt::ExprStmt(value) => ctx.lower_child(value),
         super::TStmt::Loop { label, body } => {
             super::tir_to_mir_stmt::lower_loop_value(ctx, label.as_deref(), body, result_ty)
+        }
+        super::TStmt::Return(_)
+        | super::TStmt::Break(_)
+        | super::TStmt::BreakValue { .. }
+        | super::TStmt::Continue(_) => {
+            ctx.lower_nested_stmts(std::slice::from_ref(tail))?;
+            if ctx.is_terminated() {
+                return ctx.emit(
+                    "inline-block-divergent",
+                    Some(result_ty.clone()),
+                    MirOperation::Constant(MirConstant::Unit),
+                );
+            }
+            unsupported_expr(ctx, "TExprKind::InlineBlock (divergent tail did not terminate)")
         }
         _ => unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)"),
     }
@@ -5060,6 +5139,10 @@ fn lower_or_fallback_expr(
         crate::AST::Type::Option(_) => (false, false),
         _ => unreachable!("OrFallback carrier was checked above"),
     };
+    // D-FAILURE-FOUNDATION1=A: TIR already nests two `??` peels for
+    // `Result<Option<T>, E>` (Result → Option, then Option → T). Peel one
+    // carrier here; a second MIR flatten would unwrap the row and leave the
+    // outer Option `??` probing a map handle.
     let success_block = ctx.new_block(ctx.span(), "or-fallback-success")?;
     let failure_block = ctx.new_block(ctx.span(), "or-fallback-failure")?;
     let join = ctx.new_block(ctx.span(), "or-fallback-join")?;
@@ -5610,7 +5693,7 @@ fn lower_prelude_conversion(
     carrier: &super::TFailureCarrier,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let call = ctx.intern_prelude_route(route)?;
-    let line = ctx.current_line.unwrap_or(ctx.function.line as u32) as usize;
+    let line = ctx.source_line() as usize;
     let location = panic_location(ctx, line);
     let fallibility = ctx.lower_call_fallibility(carrier)?;
     let target_type = ctx.mir_type(target)?;
@@ -7619,7 +7702,7 @@ fn lower_builtin_native_int(
         host_kind,
         dst_rust,
         dst_spelling,
-        line: ctx.current_line.unwrap_or(ctx.function.line as u32),
+        line: ctx.source_line(),
     };
     let route = super::distinct_conversion_route("", source, &op, None, &target, &carrier)?;
     let kind = lower_conversion_int(ctx, host_kind)?;
@@ -8155,6 +8238,12 @@ fn datatree_access_route(
         THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => {
             ("equal_unordered", "jet_datatree_equal_unordered", 2, vec![true, true])
         }
+        THandleOp::DBValueInt => ("int", "jet_jit_dbvalue_int", 1, vec![true]),
+        THandleOp::DBValueFloat => ("float", "jet_jit_dbvalue_float", 1, vec![true]),
+        THandleOp::DBValueText => ("text", "jet_jit_dbvalue_text", 1, vec![true]),
+        THandleOp::DBValueBool => ("bool", "jet_jit_dbvalue_bool", 1, vec![true]),
+        THandleOp::DBValueBlob => ("blob", "jet_jit_dbvalue_blob", 1, vec![true]),
+        THandleOp::DBValueIsNull => ("is_null", "jet_jit_dbvalue_is_null", 1, vec![true]),
         _ => return None,
     };
     Some(TPreludeRoute {

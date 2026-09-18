@@ -4346,6 +4346,16 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn set_line_marker(&mut self, line: u32) {
         self.current_line = Some(line);
     }
+    pub(super) fn source_line(&self) -> u32 {
+        if let Some(line) = self.current_line {
+            return line;
+        }
+        // LineMarker is debug-only; SourceSpan is always present for jet run.
+        if let Some(src) = self.source_texts.get(&self.function.source_file) {
+            return crate::Diagnostics::span_line_col(src, self.current_span.start).0 as u32;
+        }
+        self.function.line as u32
+    }
     pub(super) fn with_switch_subject<R>(
         &mut self,
         subject: MirValueId,
@@ -4681,7 +4691,8 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn field_id_for_type(&self, ty: &Type, key: &str) -> Result<MirFieldId, LowerError> {
-        let ty = field_owner_type(ty);
+        let normalized = self.normalize_contextual_type(ty);
+        let ty = field_owner_type(&normalized);
         if let Type::Tuple(fields) = ty {
             if let Some(field_name) = tuple_field_name(fields, key) {
                 let identity =
@@ -5074,11 +5085,18 @@ impl<'a> LowerCtx<'a> {
         let Some(row) = self.places.iter_mut().find(|candidate| candidate.id == place) else {
             return Err(self.error(self.span(), "scope guard cleanup targets an unavailable place"));
         };
-        if row.ty.nominal_name() != Some("ScopeGuard") {
+        if !matches!(
+            row.ty.nominal_name(),
+            Some("ScopeGuard") | Some("EventScope")
+        ) {
             return Err(self.error(self.span(), "scope guard cleanup targets a non-guard place"));
         }
+        let event_scope = row.ty.nominal_name() == Some("EventScope");
         retain_place_access(row, MirAccess::Move);
         let Some(frame) = self.defer_stack.last_mut() else {
+            if event_scope {
+                return Ok(());
+            }
             return Err(self.error(self.span(), "scope guard registered without lexical scope"));
         };
         frame.actions.push(DeferredCleanup::Guard(place));
@@ -5312,7 +5330,7 @@ impl<'a> LowerCtx<'a> {
         let carrier = TFailureCarrier::from_checked_type(result_ty);
         let call =
             self.intern_prelude_route(super::index_route(kind, access, result_ty, &carrier)?)?;
-        let line = self.current_line.unwrap_or(self.function.line as u32);
+        let line = self.source_line();
         let location = self.panic_location_at(line);
         let context = self.panic_context_at(line, None);
         self.emit(
@@ -5401,7 +5419,7 @@ impl<'a> LowerCtx<'a> {
         } else {
             None
         };
-        let line = self.current_line.unwrap_or(self.function.line as u32);
+        let line = self.source_line();
         let location = self.panic_location_at(line);
         let context = matches!(kind, MirIndexKind::Pool | MirIndexKind::Map)
             .then(|| self.panic_context_at(line, None));
@@ -6126,6 +6144,108 @@ impl<'a> LowerCtx<'a> {
         };
         self.emit_checked("pattern", None, MirOperation::WritePlace { place, value })?;
         Ok(())
+    }
+
+    pub(super) fn bind_success_pattern(
+        &mut self,
+        subject: MirValueId,
+        pattern: &jet_foundation::MIR::MirPattern,
+    ) -> Result<(), LowerError> {
+        let subject_ty = self.value_source_type(subject)?;
+        self.bind_success_shape(
+            subject,
+            &subject_ty,
+            pattern.owner,
+            &pattern.shape,
+            pattern.mutable,
+        )
+    }
+
+    fn bind_success_shape(
+        &mut self,
+        subject: MirValueId,
+        subject_ty: &Type,
+        owner: Option<jet_foundation::MIR::MirTypeId>,
+        shape: &jet_foundation::MIR::MirPatternShape,
+        mutable: bool,
+    ) -> Result<(), LowerError> {
+        use jet_foundation::MIR::{MirOperation, MirPatternBinding, MirPatternShape};
+        match shape {
+            MirPatternShape::Variant {
+                variant, bindings, ..
+            } => {
+                let Some(owner) = owner else {
+                    return Ok(());
+                };
+                for (index, binding) in bindings.iter().enumerate() {
+                    let MirPatternBinding::Bind { name, .. } = binding else {
+                        continue;
+                    };
+                    let ty = self.variant_payload_type(owner, variant, index)?;
+                    let value = self.emit_checked(
+                        "pattern",
+                        Some(&ty),
+                        MirOperation::EnumPayload {
+                            subject,
+                            owner,
+                            variant: variant.clone(),
+                            index,
+                        },
+                    )?;
+                    self.bind_pattern_value(name, ty, value, mutable, false)?;
+                }
+                Ok(())
+            }
+            MirPatternShape::Present { binding, .. } => {
+                if binding.is_empty() || binding == "_" {
+                    return Ok(());
+                }
+                let inner = match subject_ty {
+                    Type::Option(inner) => (**inner).clone(),
+                    _ => {
+                        return Err(self.error(
+                            self.span(),
+                            "checked present pattern has a non-optional subject",
+                        ))
+                    }
+                };
+                let value = self.emit_checked(
+                    "pattern",
+                    Some(&inner),
+                    MirOperation::OptionValue { subject },
+                )?;
+                self.bind_pattern_value(binding, inner, value, mutable, false)
+            }
+            MirPatternShape::Ok { binding, .. } | MirPatternShape::Err { binding, .. } => {
+                if binding.is_empty() || binding == "_" {
+                    return Ok(());
+                }
+                let ok = matches!(shape, MirPatternShape::Ok { .. });
+                let (success, error) = match subject_ty {
+                    Type::Result { ok, err } => ((**ok).clone(), (**err).clone()),
+                    _ => {
+                        return Err(self.error(
+                            self.span(),
+                            "checked result pattern has a non-result subject",
+                        ))
+                    }
+                };
+                let value_ty = if ok { success } else { error };
+                let value = self.emit_checked(
+                    "pattern",
+                    Some(&value_ty),
+                    MirOperation::ResultValue { subject, ok },
+                )?;
+                self.bind_pattern_value(binding, value_ty, value, mutable, false)
+            }
+            MirPatternShape::Or { alternatives, .. } => {
+                for alt in alternatives {
+                    self.bind_success_shape(subject, subject_ty, owner, alt, mutable)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
     }
 
     fn write_local_id(&mut self, local: MirLocalId, value: MirValueId) -> Result<(), LowerError> {

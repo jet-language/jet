@@ -536,10 +536,7 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
         || (same_text(type_name, "DBConnection")
             && one_of(method, &["with_policy", "begin", "commit", "rollback", "close"]))
         || (same_text(type_name, "DBScope")
-            && one_of(
-                method,
-                &["query", "query_one", "execute", "live", "begin", "commit", "rollback", "close"],
-            ))
+            && one_of(method, &["begin", "commit", "rollback", "close"]))
         || (same_text(type_name, "DbPool")
             && one_of(method, &["acquire", "ready", "drain"]))
         || (same_text(type_name, "ServiceTree")
@@ -1264,7 +1261,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: ff34cae9f8bde523fddf6a8095ff3e6daf64e808173032bb77cd388c0b79dd9a
+// Source SHA-256: a504a14f75b600e306171e3b28aac493f8bcfabf6b47c44cf6041210dc0b1174
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.uuid", "v7"),
@@ -1329,6 +1326,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.service", "endpoint_send"),
     ("core.service", "endpoint_receive"),
     ("core.service", "endpoint_show"),
+    ("core.service", "delivery_state_show"),
     ("core.service", "delivery_status"),
     ("core.devtools", "publish"),
     ("core.ui", "gtk_backend"),
@@ -2046,6 +2044,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "endpoint_send", "jet_services_endpoint_send", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_receive", "jet_services_endpoint_receive", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "endpoint_show", "jet_services_endpoint_show", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.service", "delivery_state_show", "jet_services_delivery_state_show", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "delivery_status", "jet_services_delivery_status", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "append_event", "jet_services_append_event", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "chaos_fail", "jet_services_chaos_fail", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3057,6 +3056,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.archive", "tar_names_json", "jet_foundation::CoreArchive::jet_archive_tar_names_json", false, &[true]).with_jit_symbol("jet_jit_tar_names_json"),
     CoreCallRecord::new("core.archive", "crc32", "jet_foundation::CoreArchive::jet_archive_crc32", false, &[true]).with_jit_symbol("jet_jit_archive_crc32"),
     CoreCallRecord::new("core.archive", "adler32", "jet_foundation::CoreArchive::jet_archive_adler32", false, &[true]).with_jit_symbol("jet_jit_archive_adler32"),
+    CoreCallRecord::new("core.archive.gzip", "compress", "jet_foundation::GzipKernel::jet_compress_gzip_compress", false, &[true]).with_jit_symbol("jet_jit_gzip_compress"),
+    CoreCallRecord::new("core.archive.gzip", "decompress", "jet_compress_gzip_decompress", true, &[true]).with_jit_symbol("jet_jit_gzip_decompress"),
+    CoreCallRecord::new("core.archive.zstd", "compress", "jet_compress_zstd_compress", true, &[true]).with_jit_symbol("jet_jit_zstd_compress"),
+    CoreCallRecord::new("core.archive.zstd", "decompress", "jet_compress_zstd_decompress", true, &[true]).with_jit_symbol("jet_jit_zstd_decompress"),
     CoreCallRecord::new("core.crypto", "password_hash", "jet_crypto_password_hash_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_hash"),
     CoreCallRecord::new("core.crypto", "password_verify", "jet_crypto_password_verify_typed_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_verify"),
     CoreCallRecord::new("core.crypto", "__secret_from_text", "jet_crypto_secret_from_text_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_secret_from_text"),

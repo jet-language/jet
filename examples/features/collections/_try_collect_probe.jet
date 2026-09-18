@@ -1,0 +1,14 @@
+fn parse_int(s: String) Int -> {
+    n :: Int.parse(s) ?? return Err("not a number: {s}")
+    return Ok(n)
+}
+
+fn run() {
+    bad_results :: [Int !Err]{parse_int("1"), parse_int("oops"), parse_int("3")}
+    collected :: bad_results.try_collect()
+    print(collected)
+    if collected == {
+        .Ok(vs) -> print("ok {vs}")
+        .Err(e) -> print("err {e}")
+    }
+}
