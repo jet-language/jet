@@ -1261,7 +1261,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: a504a14f75b600e306171e3b28aac493f8bcfabf6b47c44cf6041210dc0b1174
+// Source SHA-256: 9ce6fa02af8be90096ef88185c4e760f5659da9a5237c98902000027a40989b7
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.uuid", "v7"),
@@ -1688,6 +1688,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.args", "spec", "jet_args_spec", true, &[]),
     CoreCallRecord::new("core.term", "confirm", "jet_std_io_confirm", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "choose", "jet_std_io_choose", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.term", "eprint", "jet_std_io_eprint", true, &[true]) .with_jit_symbol("jet_jit_eprint_str"),
+    CoreCallRecord::new("core.term", "input", "jet_std_io_input", true, &[]) .with_max_arity(1),
     CoreCallRecord::new( "core.term", "input_secret", "jet_std_io_input_secret", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "read_all_input", "jet_std_io_read_all_input", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "readline", "jet_std_io_readline", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2418,6 +2420,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.math.random", "pick", "jet_std_random_pick", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math.random", "weighted_pick", "jet_std_random_weighted_pick", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math.random", "sample", "jet_std_random_sample", true, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.math.random", "shuffle", "jet_std_random_shuffle", true, &[true], ) .with_jit_symbol("jet_jit_random_shuffle"),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
     CoreCallRecord::new("core.perf", "fidelity", "jet_perf_fidelity", false, &[]),
     CoreCallRecord::new( "core.perf", "default_fidelity", "jet_perf_default_fidelity", false, &[], ),
