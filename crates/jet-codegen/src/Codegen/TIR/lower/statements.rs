@@ -3239,11 +3239,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // owner/range for the shared Prelude window setter. It must stay
                         // inferred; the source-facing ViewMut spelling is a sema type,
                         // not the generated Rust carrier.
-                        let ty = if matches!(&init.ty, Type::Tuple(_)) {
+                        let ty = if matches!(
+                            &init.ty,
+                            Type::Tuple(_) | Type::Map { .. } | Type::Fn { .. }
+                        ) {
                             // Sema records tuple bindings through their display spelling
-                            // (`Type::Named("(x: T, …)")`). TIR already carries the
-                            // structural `Type::Tuple`, which resident record layout and
-                            // interpolation require.
+                            // (`Type::Named("(x: T, …)")`) and map annotations as
+                            // `[K:fn(...) T]`. TIR already carries structural Map/Tuple
+                            // types and the callable ABI (named functions and map-extracted
+                            // handlers use the Result carrier; lambdas keep a payload return).
                             init.ty.clone()
                         } else if allocator_carrier
                             || spawn_carrier

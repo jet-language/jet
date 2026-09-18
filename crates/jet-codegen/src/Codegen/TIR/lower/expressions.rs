@@ -268,18 +268,31 @@ pub(crate) fn lower_fn_value_call(
         Type::Fn { .. } => callee_t.ty.with_effective_fn_returns(),
         _ => callee_t.ty.clone(),
     };
-    // Source `fn(...) T` omits the implicit Result spelling; compiled
-    // callables already return that carrier (`func_to_sig` /
-    // `with_effective_fn_returns`). Type the call as the effective
-    // Result/Option. Wrapping `Ok(call())` would double-box a Result
-    // handle into another Result and later print as an interned string.
-    let effective_ret_ty = match &effective_callee_ty {
-        Type::Fn {
-            ret: Some(effective_ret),
-            ..
-        } => (**effective_ret).clone(),
-        _ => unit_type(),
-    };
+    let (source_ret_ty, effective_ret_ty, needs_carrier) =
+        match (&callee_t.ty, &effective_callee_ty) {
+            (
+                Type::Fn {
+                    ret: Some(source_ret),
+                    ..
+                },
+                Type::Fn {
+                    ret: Some(effective_ret),
+                    ..
+                },
+            ) => {
+                let source_ret = (**source_ret).clone();
+                let effective_ret = (**effective_ret).clone();
+                let source_is_carrier =
+                    matches!(&source_ret, Type::Result { .. } | Type::Option(_))
+                        || matches!(
+                            &source_ret,
+                            Type::Named(name) if name == Syntax::TYPE_NEVER
+                        );
+                let needs_carrier = !source_is_carrier && source_ret != effective_ret;
+                (source_ret, effective_ret, needs_carrier)
+            }
+            _ => (unit_type(), unit_type(), false),
+        };
     let effective_params = match &effective_callee_ty {
         Type::Fn { params, .. } => Some(params.as_slice()),
         _ => None,
@@ -328,7 +341,7 @@ pub(crate) fn lower_fn_value_call(
         })
         .collect();
     let call = TExpr {
-        ty: effective_ret_ty.clone(),
+        ty: source_ret_ty,
         kind: TExprKind::FnValue {
             kind: TFnValueKind::Call {
                 callee: Box::new(callee_t),
@@ -340,9 +353,16 @@ pub(crate) fn lower_fn_value_call(
         Some(order) => preserve_source_arg_order(call, &order, args.len(), site),
         None => call,
     };
-    TExpr {
-        ty: effective_ret_ty,
-        kind: call.kind,
+    if needs_carrier {
+        TExpr {
+            ty: effective_ret_ty,
+            kind: TExprKind::Ok(Box::new(call)),
+        }
+    } else {
+        TExpr {
+            ty: effective_ret_ty,
+            kind: call.kind,
+        }
     }
 }
 
@@ -8135,6 +8155,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 in_own_frame(|| {
                     let mut t = lower_expr(&rewritten, cx, env);
                     // Prefer the typed head when the rewritten form under-specifies (empty list/map).
+                    // Function types in that head keep source spelling (`fn(...) T`);
+                    // stored callables use the effective Result carrier.
                     if matches!(
                         head,
                         Type::List(_)
@@ -8148,7 +8170,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             | Type::Float
                             | Type::Float32
                     ) {
-                        t.ty = head.clone();
+                        t.ty = head.with_effective_fn_returns();
                     }
                     // D-SG9: retag list-element IntLits from a `[U8]`/`[I32]`/… head so
                     // emit uses the right Rust suffix even if sema left width unset.

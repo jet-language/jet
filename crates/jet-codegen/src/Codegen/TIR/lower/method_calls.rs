@@ -4066,6 +4066,11 @@ fn lower_method_call_impl(
                     "or_err call without a resolved return type",
                 );
             };
+            // Map.get (and similar) keep source `fn(...) T` in sema; stored
+            // named functions already return the Result carrier. Carry that
+            // ABI through `.or_err` so the binding is callable without a
+            // second Ok wrap.
+            let ty = ty.with_effective_fn_returns();
             let recv = lower_expr(receiver, cx, env);
             let why = lower_one_call_arg(&args[0], None, env, cx);
             let receiver = TCallArg {
@@ -6859,6 +6864,7 @@ fn lower_method_call_impl(
                         "builtin method without a resolved return type",
                     );
                 };
+                let result_ty = result_ty.with_effective_fn_returns();
                 if matches!(
                     op,
                     TBuiltinOp::ListCopy | TBuiltinOp::MapCopy | TBuiltinOp::SetCopy
