@@ -397,6 +397,9 @@ pub(crate) fn ensure_resident_module(
     let main_error_is_packed = main_error_is_packed(program, artifact);
     let main_returns_app = main_returns_app(program, artifact);
     crate::CLI::prepare_cli_from_mir(program, artifact);
+    crate::Ffi::bind_mir_ffi(program, artifact).map_err(|err| match err {
+        crate::Ffi::BindError::Message(message) => message,
+    })?;
     let need_create = RESIDENT_MODULE.with(|slot| slot.borrow().is_none());
     if need_create {
         let (mut module, host) = new_jit_module()?;
@@ -485,7 +488,10 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             let _ = crate::CLI::jet_jit_cli_main();
         } else if main_returns_result || main_returns_app {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
-            let _ = entry();
+            let handle = entry();
+            if main_returns_result {
+                super::runtime_host::report_unhandled_entry_result(handle);
+            }
         } else {
             let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };
             entry();

@@ -5593,6 +5593,9 @@ fn nominal_handle_text(
         Some(descriptor) => descriptor.clone(),
         None => return None,
     };
+    if let Some(rendered) = crate::DB::display_named_db_value(handle, &descriptor.name) {
+        return Some(rendered);
+    }
     match descriptor.kind {
         RuntimeValueKind::Enum => {
             let slots = rt.heap.clone_record_values(handle)?;
@@ -5993,6 +5996,24 @@ fn structural_debug_value(
     }
 }
 
+fn jet_jit_db_type_display(handle: i64, type_name: &str) -> i64 {
+    let rendered = crate::DB::display_named_db_value(handle, type_name)
+        .unwrap_or_else(|| "<invalid>".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+fn jet_jit_dbvalue_display(handle: i64) -> i64 {
+    jet_jit_db_type_display(handle, "DBValue")
+}
+
+fn jet_jit_dblease_display(handle: i64) -> i64 {
+    jet_jit_db_type_display(handle, "DbLease")
+}
+
+fn jet_jit_dbreceipt_display(handle: i64) -> i64 {
+    jet_jit_db_type_display(handle, "DbPoolReceipt")
+}
+
 fn jet_jit_display_nominal(handle: i64, type_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let rendered = display_nominal_handle(rt, handle, type_id as u64, 0)
@@ -6248,11 +6269,66 @@ fn runtime_clone_record(
     Ok(runtime.heap.alloc_record_values(fields))
 }
 
+fn packed_scalar_enum_name(name: &str) -> bool {
+    let leaf = name
+        .rsplit_once("::")
+        .map(|(_, leaf)| leaf)
+        .or_else(|| name.rsplit_once('.').map(|(_, leaf)| leaf))
+        .unwrap_or(name);
+    let leaf = leaf.strip_suffix("<>").unwrap_or(leaf);
+    match leaf {
+        "DeliveryState"
+        | "ServiceError"
+        | "TaskOutcome"
+        | "TaskStatus"
+        | "ServiceRestart"
+        | "ServiceDelivery"
+        | "ServiceStateAdapter"
+        | "NetReadyInterest"
+        | "NetShutdown"
+        | "TLSVersion"
+        | "Key"
+        | "IoError"
+        | "Ordering" => true,
+        _ => false,
+    }
+}
+
+fn runtime_clone_packed_enum(
+    runtime: &mut JitRuntime,
+    value: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<i64, String> {
+    if descriptor.variants.is_empty() {
+        return Ok(value);
+    }
+    let discriminant = value & 0xff;
+    let variant = descriptor
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == discriminant)
+        .ok_or_else(|| format!("JIT copy `{}` value is not an enum", descriptor.name))?;
+    if variant.fields.is_empty() {
+        return Ok(value);
+    }
+    if variant.fields.len() == 1 {
+        let payload = runtime_clone_value(runtime, value >> 8, variant.fields[0].type_id)?;
+        return Ok(payload.wrapping_shl(8) | discriminant);
+    }
+    Err(format!(
+        "JIT copy `{}` packed enum has more than one payload field",
+        descriptor.name
+    ))
+}
+
 fn runtime_clone_enum(
     runtime: &mut JitRuntime,
     value: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<i64, String> {
+    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+        return runtime_clone_packed_enum(runtime, value, descriptor);
+    }
     let fields = runtime
         .heap
         .clone_record_values(value)
@@ -6666,12 +6742,51 @@ fn runtime_eq_record_slots(
     runtime_eq_record_handles(runtime, left, right, descriptor)
 }
 
+fn runtime_eq_packed_enum(
+    runtime: &JitRuntime,
+    left: i64,
+    right: i64,
+    descriptor: &RuntimeTypeDescriptor,
+) -> Result<bool, String> {
+    if descriptor.variants.is_empty() {
+        return Ok(left == right);
+    }
+    let left_discriminant = left & 0xff;
+    let right_discriminant = right & 0xff;
+    if left_discriminant != right_discriminant {
+        return Ok(false);
+    }
+    let variant = descriptor
+        .variants
+        .iter()
+        .find(|variant| variant.discriminant == left_discriminant)
+        .ok_or_else(|| format!("JIT equality `{}` enum discriminant is unknown", descriptor.name))?;
+    if variant.fields.is_empty() {
+        return Ok(true);
+    }
+    if variant.fields.len() != 1 {
+        return Err(format!(
+            "JIT equality `{}` packed enum has more than one payload field",
+            descriptor.name
+        ));
+    }
+    runtime_eq_slots(
+        runtime,
+        RuntimeEqSlot::Raw(left >> 8),
+        RuntimeEqSlot::Raw(right >> 8),
+        variant.fields[0].type_id,
+    )
+}
+
 fn runtime_eq_enum_handles(
     runtime: &JitRuntime,
     left: i64,
     right: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<bool, String> {
+    if packed_scalar_enum_name(&descriptor.name) || packed_scalar_enum_name(&descriptor.canonical) {
+        return runtime_eq_packed_enum(runtime, left, right, descriptor);
+    }
     let left_discriminant = runtime
         .heap
         .record_get_int(left, 0)
@@ -6792,10 +6907,16 @@ fn runtime_eq_slots(
         RuntimeValueKind::List => runtime_eq_list_slots(runtime, left, right, descriptor),
         RuntimeValueKind::Record => runtime_eq_record_slots(runtime, left, right, descriptor),
         RuntimeValueKind::Enum => runtime_eq_enum_slots(runtime, left, right, descriptor),
-        RuntimeValueKind::Named => Err(format!(
-            "JIT equality `{}` has no resolved structural descriptor",
-            descriptor.name
-        )),
+        RuntimeValueKind::Named => {
+            if descriptor.name.starts_with("RangeCursor") {
+                runtime_eq_int(left, right, descriptor.integer_width)
+            } else {
+                Err(format!(
+                    "JIT equality `{}` has no resolved structural descriptor",
+                    descriptor.name
+                ))
+            }
+        }
         kind => Err(format!("JIT equality does not support {kind:?} values")),
     }
 }
@@ -8112,6 +8233,18 @@ fn jet_jit_entry_error_exit(handle: i64) {
     });
 }
 
+/// AOT `main` matches `run()`'s Result and calls `jet_entry_error_exit_jet`.
+/// Resident JIT must do the same with the returned result handle, or an
+/// unhandled `Err` from `fn run` is discarded and the process exits 0.
+pub(crate) fn report_unhandled_entry_result(handle: i64) {
+    let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| jit_result_parts(rt, handle)) else {
+        return;
+    };
+    if !ok {
+        jet_jit_entry_error_exit(bits as i64);
+    }
+}
+
 /// Apply a declared error conversion to the existing shared carrier. The JIT
 /// owns only handle/string marshalling; the Prelude preserves every existing
 /// structured field and adds the crossing identity/history.
@@ -8569,6 +8702,7 @@ mod service_adapter {
                 "set_restart" if index == 0 => Some(ArgKind::Slot),
                 "set_restart" if index == 1 => Some(ArgKind::Restart),
                 "set_delivery" if index == 0 => Some(ArgKind::Slot),
+                "set_delivery" if index == 1 => Some(ArgKind::Delivery),
                 "worker" if index == 0 => Some(ArgKind::Slot),
                 "worker" if index == 1 => Some(ArgKind::String),
                 "worker" if index == 2 => Some(ArgKind::Int),
@@ -8588,6 +8722,7 @@ mod service_adapter {
                     Some(ArgKind::Slot)
                 }
                 "endpoint_send" | "endpoint_receive" | "endpoint_show"
+                | "delivery_state_show"
                 | "tree_show"
                 | "dead_letter_count"
                 | "drain_dead_letters"
@@ -8738,6 +8873,7 @@ mod service_adapter {
     pub(super) fn start(tree_handle: i64) -> i64 {
         use jet_codegen::Comptime::ServicesLite::JetServiceError;
 
+        crate::DB::jit_job_queue_install_provider();
         let tree = super::Concurrency::with_runtime_mut(|rt| service_value(rt, tree_handle));
         let Some(tree) = tree else {
             super::Concurrency::with_runtime_mut(|rt| {
@@ -14925,6 +15061,9 @@ host_fns! {
     eprint_str: "jet_jit_eprint_str" => jet_jit_eprint_str: sig_i64;
     str_begin: "jet_jit_str_begin" => jet_jit_str_begin: sig_str_begin;
     display_nominal: "jet_jit_display_nominal" => jet_jit_display_nominal: sig_str_binary_i64;
+    dbvalue_display: "jet_jit_dbvalue_display" => jet_jit_dbvalue_display: sig_str_unary_i64;
+    dblease_display: "jet_jit_dblease_display" => jet_jit_dblease_display: sig_str_unary_i64;
+    dbreceipt_display: "jet_jit_dbreceipt_display" => jet_jit_dbreceipt_display: sig_str_unary_i64;
     debug_nominal: "jet_jit_debug_nominal" => jet_jit_debug_nominal: sig_str_binary_i64;
     str_push_lit: "jet_jit_str_push_lit" => jet_jit_str_push_lit: sig_str_push_lit;
     str_push_i64: "jet_jit_str_push_i64" => jet_jit_str_push_i64: sig_str_push_i64;
