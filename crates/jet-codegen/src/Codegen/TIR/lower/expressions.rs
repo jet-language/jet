@@ -1205,6 +1205,12 @@ pub(super) fn lower_or_fallback(
         value_t
     };
     suppress_module_call_target_return(&mut value_t);
+    // Void module calls (for example `time.sleep`) have no Result/Option
+    // carrier. Sema still accepts `sleep(...) ?? return` as a local handler;
+    // MIR cannot switch on Unit, so keep the effectful call and drop `??`.
+    if !matches!(&value_t.ty, Type::Option(_) | Type::Result { .. }) {
+        return value_t;
+    }
     // D-NEVER2=B: a `Result<Never, E>` has no success branch. Lower a value
     // fallback as the expression's real type instead of manufacturing a
     // `Never` merge that would reject `f() ?? x` in Rust.

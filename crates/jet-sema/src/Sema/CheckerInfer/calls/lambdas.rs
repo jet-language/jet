@@ -810,17 +810,27 @@ impl<'a> Checker<'a> {
                         }));
                     }
                     let mut last_ret = None;
-                    for s in stmts.iter_mut().rev() {
-                        match s {
-                            Stmt::Return(Some(e), _) => {
-                                last_ret = self.infer(e);
-                                break;
+                    // Unit callbacks already statement-checked the tail.
+                    // Re-inferring it would see `.join()` consume the same
+                    // handle twice (E0121 at one span). Open/inferred
+                    // returns still need the tail type; rewind those moves
+                    // first so the second walk is a value check, not a reuse.
+                    let need_tail_value = effective_ret.is_none() || infer_failure_carrier;
+                    if need_tail_value {
+                        for s in stmts.iter_mut().rev() {
+                            match s {
+                                Stmt::Return(Some(e), _) => {
+                                    self.rewind_moves_in_span(e.span());
+                                    last_ret = self.infer(e);
+                                    break;
+                                }
+                                Stmt::Expr(e) => {
+                                    self.rewind_moves_in_span(e.span());
+                                    last_ret = self.infer_fallible_stmt(e);
+                                    break;
+                                }
+                                _ => {}
                             }
-                            Stmt::Expr(e) => {
-                                last_ret = self.infer_fallible_stmt(e);
-                                break;
-                            }
-                            _ => {}
                         }
                     }
                     last_ret

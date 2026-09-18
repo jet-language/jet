@@ -788,6 +788,7 @@ struct JetWorldState {
 #[derive(Clone)]
 pub struct JetDeterministicWorld {
     state: Arc<Mutex<JetWorldState>>,
+    waiters: Arc<Condvar>,
 }
 
 impl JetDeterministicWorld {
@@ -806,6 +807,7 @@ impl JetDeterministicWorld {
                 timers: Vec::new(),
                 history: Vec::new(),
             })),
+            waiters: Arc::new(Condvar::new()),
         }
     }
 
@@ -833,6 +835,10 @@ impl JetDeterministicWorld {
                 jet_scheduler_fatal("deterministic world clock exhausted its supported range")
             })
         };
+        // Spawned tasks register virtual timers only after they reach a wait
+        // point. Wait until those tasks park (or finish) so `advance` cannot
+        // skip timers and leave `join` waiting on a clock that already moved.
+        self.wait_until_idle_or_timer();
         loop {
             let due = {
                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -858,6 +864,7 @@ impl JetDeterministicWorld {
                 timer.slot
             };
             due.wake();
+            self.waiters.notify_all();
             // One due timer is released at a time. This is the stable
             // sequence tie-break even when the host has many workers.
             self.wait_idle();
@@ -865,27 +872,44 @@ impl JetDeterministicWorld {
         self.now()
     }
 
-    pub fn wait_idle(&self) {
-        let budget = self
-            .state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .budget;
+    fn wait_until_idle_or_timer(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let budget = state.budget;
         for _ in 0..budget {
-            let idle = self
-                .state
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .runnable_tasks
-                == 0;
-            if idle {
+            if state.runnable_tasks == 0 || !state.timers.is_empty() {
                 return;
             }
-            thread::yield_now();
+            let (next, _) = self
+                .waiters
+                .wait_timeout(state, Duration::from_micros(50))
+                .unwrap_or_else(|error| error.into_inner());
+            state = next;
+        }
+    }
+
+    fn wait_world_predicate(&self, ready: impl Fn(&JetWorldState) -> bool) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let budget = state.budget;
+        for _ in 0..budget {
+            if ready(&state) {
+                return;
+            }
+            let (next, _) = self
+                .waiters
+                .wait_timeout(state, Duration::from_micros(50))
+                .unwrap_or_else(|error| error.into_inner());
+            state = next;
+        }
+        if ready(&state) {
+            return;
         }
         jet_scheduler_fatal(
             "deterministic world execution budget exhausted while waiting for idle",
         );
+    }
+
+    pub fn wait_idle(&self) {
+        self.wait_world_predicate(|state| state.runnable_tasks == 0);
     }
 
     pub fn ensure_closed(&self) {
@@ -906,6 +930,7 @@ impl JetDeterministicWorld {
         state.live_tasks = state.live_tasks.saturating_add(1);
         state.runnable_tasks = state.runnable_tasks.saturating_add(1);
         state.history.push("task:spawn".to_string());
+        self.waiters.notify_all();
     }
 
     fn task_finished(&self, waiting: bool, slot: Option<&Arc<ParkSlot>>) {
@@ -929,6 +954,7 @@ impl JetDeterministicWorld {
         }
         state.live_tasks = state.live_tasks.saturating_sub(1);
         state.history.push("task:finish".to_string());
+        self.waiters.notify_all();
     }
 
     fn park(&self, duration_ns: i64, slot: Arc<ParkSlot>) {
@@ -946,6 +972,7 @@ impl JetDeterministicWorld {
             slot,
         });
         state.history.push(format!("timer:register:{deadline_ns}:{sequence}"));
+        self.waiters.notify_all();
     }
 
     fn finish_park(&self, slot: &Arc<ParkSlot>) -> bool {
@@ -957,6 +984,7 @@ impl JetDeterministicWorld {
         if let Some(index) = removed {
             state.timers.swap_remove(index);
             state.runnable_tasks = state.runnable_tasks.saturating_add(1);
+            self.waiters.notify_all();
             true
         } else {
             false
@@ -1134,6 +1162,7 @@ fn jet_scheduler_world_begin_wait(world: &JetDeterministicWorld, slot: Arc<ParkS
     let mut state = world.state.lock().unwrap_or_else(|error| error.into_inner());
     state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
     drop(state);
+    world.waiters.notify_all();
     JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(true));
     JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = Some(slot));
 }

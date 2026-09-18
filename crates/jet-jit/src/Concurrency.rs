@@ -2209,15 +2209,20 @@ fn jet_jit_testing_world_begin() -> i64 {
 }
 
 fn jet_jit_testing_world_end(handle: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    let world = with_runtime_mut(|rt| {
         if handle != 1 || rt.deterministic_world.is_none() {
             rt.set_host_fault("jit testing.world: invalid deterministic world handle");
-            return 0;
+            return None;
         }
-        if let Some(world) = rt.deterministic_world.as_ref() {
-            world.wait_idle();
-            world.ensure_closed();
-        }
+        rt.deterministic_world.clone()
+    });
+    if let Some(world) = world {
+        // Wait outside RUNTIME_ACCESS so parked workers can enter host
+        // seams, finish, and drop the runnable count.
+        world.wait_idle();
+        world.ensure_closed();
+    }
+    with_runtime_mut(|rt| {
         rt.deterministic_world_scope.take();
         rt.deterministic_world.take();
         0
@@ -2241,34 +2246,39 @@ fn jet_world_now(world: i64) -> i64 {
 }
 
 fn jet_world_advance(world: i64, duration_ns: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    let active = with_runtime_mut(|rt| {
         if world != 1 {
             rt.set_host_fault("jit deterministic_world.advance: invalid world handle");
-            return 0;
+            return None;
         }
-        rt.deterministic_world
-            .as_ref()
-            .map(|world| world.advance_ns(duration_ns))
-            .unwrap_or_else(|| {
-                rt.set_host_fault("jit deterministic_world.advance: world is not active");
-                0
-            })
-    })
+        let Some(active) = rt.deterministic_world.clone() else {
+            rt.set_host_fault("jit deterministic_world.advance: world is not active");
+            return None;
+        };
+        Some(active)
+    });
+    match active {
+        Some(world) => world.advance_ns(duration_ns),
+        None => 0,
+    }
 }
 
 fn jet_world_wait_idle(world: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    let active = with_runtime_mut(|rt| {
         if world != 1 {
             rt.set_host_fault("jit deterministic_world.wait_idle: invalid world handle");
-            return 0;
+            return None;
         }
-        if let Some(active) = rt.deterministic_world.as_ref() {
-            active.wait_idle();
-        } else {
+        let Some(active) = rt.deterministic_world.clone() else {
             rt.set_host_fault("jit deterministic_world.wait_idle: world is not active");
-        }
-        0
-    })
+            return None;
+        };
+        Some(active)
+    });
+    if let Some(world) = active {
+        world.wait_idle();
+    }
+    0
 }
 
 fn jet_world_history(world: i64) -> i64 {
