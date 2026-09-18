@@ -268,31 +268,18 @@ pub(crate) fn lower_fn_value_call(
         Type::Fn { .. } => callee_t.ty.with_effective_fn_returns(),
         _ => callee_t.ty.clone(),
     };
-    let (source_ret_ty, effective_ret_ty, needs_carrier) =
-        match (&callee_t.ty, &effective_callee_ty) {
-            (
-                Type::Fn {
-                    ret: Some(source_ret),
-                    ..
-                },
-                Type::Fn {
-                    ret: Some(effective_ret),
-                    ..
-                },
-            ) => {
-                let source_ret = (**source_ret).clone();
-                let effective_ret = (**effective_ret).clone();
-                let source_is_carrier =
-                    matches!(&source_ret, Type::Result { .. } | Type::Option(_))
-                        || matches!(
-                            &source_ret,
-                            Type::Named(name) if name == Syntax::TYPE_NEVER
-                        );
-                let needs_carrier = !source_is_carrier && source_ret != effective_ret;
-                (source_ret, effective_ret, needs_carrier)
-            }
-            _ => (unit_type(), unit_type(), false),
-        };
+    // Source `fn(...) T` omits the implicit Result spelling; compiled
+    // callables already return that carrier (`func_to_sig` /
+    // `with_effective_fn_returns`). Type the call as the effective
+    // Result/Option. Wrapping `Ok(call())` would double-box a Result
+    // handle into another Result and later print as an interned string.
+    let effective_ret_ty = match &effective_callee_ty {
+        Type::Fn {
+            ret: Some(effective_ret),
+            ..
+        } => (**effective_ret).clone(),
+        _ => unit_type(),
+    };
     let effective_params = match &effective_callee_ty {
         Type::Fn { params, .. } => Some(params.as_slice()),
         _ => None,
@@ -341,7 +328,7 @@ pub(crate) fn lower_fn_value_call(
         })
         .collect();
     let call = TExpr {
-        ty: source_ret_ty,
+        ty: effective_ret_ty.clone(),
         kind: TExprKind::FnValue {
             kind: TFnValueKind::Call {
                 callee: Box::new(callee_t),
@@ -353,16 +340,9 @@ pub(crate) fn lower_fn_value_call(
         Some(order) => preserve_source_arg_order(call, &order, args.len(), site),
         None => call,
     };
-    if needs_carrier {
-        TExpr {
-            ty: effective_ret_ty,
-            kind: TExprKind::Ok(Box::new(call)),
-        }
-    } else {
-        TExpr {
-            ty: effective_ret_ty,
-            kind: call.kind,
-        }
+    TExpr {
+        ty: effective_ret_ty,
+        kind: call.kind,
     }
 }
 

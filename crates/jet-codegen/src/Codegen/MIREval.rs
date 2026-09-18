@@ -15779,9 +15779,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             Some((_, current)) => {
                                 let order = mir_compare(&key, current, span)?;
                                 if maximum {
-                                    order.is_gt()
+                                    !order.is_lt()
                                 } else {
-                                    order.is_lt()
+                                    !order.is_gt()
                                 }
                             }
                         };

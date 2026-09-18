@@ -13380,6 +13380,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
 
         let member = row.member.as_str();
+        if matches!(member, "equal" | "list_equal") && row.symbol.name() == "jet_list_equal" {
+            let [other] = args else {
+                return Err("MIR List.equal expects one value argument".to_string());
+            };
+            let receiver_ty = self.mir_value_type(receiver)?;
+            if comparison_sequence_element_type(&receiver_ty).is_none() {
+                return Ok(None);
+            }
+            let left = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let right = self.cast(builder, self.value(*other)?, types::I64)?;
+            let value = self.list_equal_recursive(builder, &receiver_ty, left, right)?;
+            return expected
+                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                .map(Some);
+        }
         if member == "contains" && row.symbol.name() == "jet_list_contains" {
             let [needle] = args else {
                 return Err("MIR List.contains expects one value argument".to_string());
@@ -14294,12 +14309,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .brif(is_some, present_block, &[], absent_block, &[]);
 
             builder.switch_to_block(present_block);
+            // Same arena as Result: Ok(payload). Callers that unwrap
+            // `JetOutcome<T, JetErr>` extract the payload; do not unwrap here.
             builder.ins().jump(merge_block, &[optional]);
 
             builder.switch_to_block(absent_block);
+            let err = self
+                .call_host(builder, self.host.err_from_message, &[why])?
+                .first()
+                .copied()
+                .ok_or_else(|| {
+                    "MIR optional or_err message constructor returned no value".to_string()
+                })?;
             let not_ok = builder.ins().iconst(types::I8, 0);
             let error = self
-                .call_host(builder, self.host.result_new_i64, &[not_ok, why])?
+                .call_host(builder, self.host.result_new_i64, &[not_ok, err])?
                 .first()
                 .copied()
                 .ok_or_else(|| "MIR optional or_err error constructor returned no value".to_string())?;
