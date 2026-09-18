@@ -4278,6 +4278,15 @@ impl<'a> Checker<'a> {
             .retain(|moved, _| !Self::contains_place(&place, moved));
     }
 
+    /// Drop moves whose origin sits inside `span`. A unit callback body is
+    /// statement-checked first, then its tail may be inferred again as a
+    /// value; the first walk already consumed those places.
+    pub(crate) fn rewind_moves_in_span(&mut self, span: Span) {
+        self.flow.moved.retain(|_, origin| {
+            origin.span.start < span.start || origin.span.end > span.end
+        });
+    }
+
     fn moved_use_diagnostic(
         &self,
         moved_place: &str,
