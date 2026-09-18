@@ -582,9 +582,15 @@ pub fn builtin_method_return(
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_TYPE_INFO => match (method, arg_count) {
-            ("implements" | "has_method", 1) => Some(Some(Type::Bool)),
+            ("implements" | "has_method" | "has_marker", 1) => Some(Some(Type::Bool)),
             _ => None,
         },
+        Type::Named(n) if matches!(n.as_str(), "FieldInfo" | "MethodInfo") => {
+            match (method, arg_count) {
+                ("has_marker", 1) => Some(Some(Type::Bool)),
+                _ => None,
+            }
+        }
         Type::Named(n) if n == "CompilerLexed" => match (method, arg_count) {
             ("source", 0) => Some(Some(Type::String)),
             ("tokens", 0) => Some(Some(Type::List(Box::new(Type::Named(
@@ -3024,7 +3030,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
         Type::Named(n)
-            if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") =>
+            if n == Syntax::TYPE_TYPE_INFO
+                && matches!(method, "implements" | "has_method" | "has_marker") =>
+        {
+            Some(vec![Type::String])
+        }
+        Type::Named(n)
+            if matches!(n.as_str(), "FieldInfo" | "MethodInfo") && method == "has_marker" =>
         {
             Some(vec![Type::String])
         }

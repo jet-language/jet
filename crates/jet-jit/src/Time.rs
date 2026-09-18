@@ -1353,6 +1353,7 @@ host_fns! {
     clock_wait: "jet_clock_wait" => jet_clock_wait: binary;
     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+    date_today_prelude: "jet_time_today" => jet_jit_date_today: nullary;
     date_equal: "jet_jit_date_equal" => jet_jit_date_equal: binary_i8;
     date_compare: "jet_jit_date_compare" => jet_jit_date_compare: binary;
     display: "jet_jit_time_display" => jet_jit_time_display: unary;

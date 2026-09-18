@@ -10,6 +10,15 @@ example directly:
 jet run examples/features/basics/hello.jet
 ```
 
+Walk every executable under `features/` with `jet run` and report passed,
+failed, and output mismatches:
+
+```
+scripts/agent/run-feature-examples.mjs
+```
+
+A path substring selects a subset: `scripts/agent/run-feature-examples.mjs basics`.
+
 The [executable lease recovery example](jetpack/executable-lease-recovery.md)
 shows the read-only audit and explicit Hangar recovery boundary for a stale
 process-tree lease.

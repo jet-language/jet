@@ -1012,6 +1012,16 @@ fn trap(runtime: &mut JitRuntime, message: &str) -> i64 {
     0
 }
 
+fn range_window(runtime: &JitRuntime, range: i64) -> Option<(i64, i64, i8)> {
+    let start = runtime.heap.record_get_int(range, 0)?;
+    let end = runtime.heap.record_get_int(range, 1)?;
+    let exclusive = runtime
+        .heap
+        .record_get_bool(range, 2)
+        .or_else(|| runtime.heap.record_get_int(range, 2).map(|value| value != 0))?;
+    Some((start, end, i8::from(exclusive)))
+}
+
 fn read_float_list(runtime: &JitRuntime, handle: i64) -> Option<Vec<f64>> {
     let len = runtime.heap.list_len(handle)?;
     (0..len)
@@ -2379,6 +2389,39 @@ fn jet_jit_compute_view_mut(tensor: i64, start: i64, end: i64, exclusive: i8) ->
     })
 }
 
+fn jet_jit_compute_slice_range(tensor: i64, range: i64, _file: i64, _line: i32) -> i64 {
+    let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+    let Some((start, end, exclusive)) = window else {
+        return Concurrency::with_runtime_mut(|runtime| {
+            trap(runtime, "core.compute slice received an invalid range handle")
+        });
+    };
+    jet_jit_compute_slice(tensor, start, end, exclusive)
+}
+
+fn jet_jit_compute_view_range(tensor: i64, range: i64) -> i64 {
+    let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+    let Some((start, end, exclusive)) = window else {
+        return Concurrency::with_runtime_mut(|runtime| {
+            trap(runtime, "core.compute view received an invalid range handle")
+        });
+    };
+    jet_jit_compute_view(tensor, start, end, exclusive)
+}
+
+fn jet_jit_compute_view_mut_range(tensor: i64, range: i64) -> i64 {
+    let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+    let Some((start, end, exclusive)) = window else {
+        return Concurrency::with_runtime_mut(|runtime| {
+            trap(
+                runtime,
+                "core.compute mutable view received an invalid range handle",
+            )
+        });
+    };
+    jet_jit_compute_view_mut(tensor, start, end, exclusive)
+}
+
 /// Ordinary JIT list writes are the marshalling edge for a compute ViewMut.
 /// Keep them on the canonical Prelude setter; ordinary list views continue
 /// through Collections' existing list setter below this hook.
@@ -2388,6 +2431,26 @@ pub(crate) fn try_set_list_f64(
     index: i64,
     value: f64,
 ) -> bool {
+    let list = match runtime
+        .compute
+        .windows
+        .iter()
+        .find(|window| window.list == list)
+    {
+        Some(_) => list,
+        None => match runtime.heap.record_get_int(list, 0) {
+            Some(inner)
+                if runtime
+                    .compute
+                    .windows
+                    .iter()
+                    .any(|window| window.list == inner) =>
+            {
+                inner
+            }
+            _ => return false,
+        },
+    };
     let Some(window_index) = runtime
         .compute
         .windows
@@ -2594,6 +2657,24 @@ host_fns! {
             .push(cranelift_codegen::ir::AbiParam::new(
                 cranelift_codegen::ir::types::I64,
             ));
+        let mut sig_slice_range = cranelift_codegen::ir::Signature::new(cc);
+        for _ in 0..3 {
+            sig_slice_range
+                .params
+                .push(cranelift_codegen::ir::AbiParam::new(
+                    cranelift_codegen::ir::types::I64,
+                ));
+        }
+        sig_slice_range
+            .params
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I32,
+            ));
+        sig_slice_range
+            .returns
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
     }
     from_list: "jet_compute_from_list" => jet_jit_compute_from_list: sig_one;
     matrix: "jet_compute_matrix" => jet_jit_compute_matrix: sig_three_f64;
@@ -2661,8 +2742,11 @@ host_fns! {
     drop_window: "jet_jit_compute_drop_window" => jet_jit_compute_drop_window: sig_one;
     tensor_to_list: "jet_compute_tensor_to_list" => jet_jit_compute_tensor_to_list: sig_one;
     slice: "jet_jit_compute_slice" => jet_jit_compute_slice: sig_window;
+    slice_range: "jet_compute_slice_range" => jet_jit_compute_slice_range: sig_slice_range;
     view: "jet_jit_compute_view" => jet_jit_compute_view: sig_window;
+    view_range: "jet_compute_view" => jet_jit_compute_view_range: sig_two;
     view_mut: "jet_jit_compute_view_mut" => jet_jit_compute_view_mut: sig_window;
+    view_mut_range: "jet_compute_view_mut" => jet_jit_compute_view_mut_range: sig_two;
     transform: "jet_compute_transform" => jet_jit_compute_transform: sig_transform;
     curried_new: "jet_compute_curried_new" => jet_jit_compute_curried_new: sig_curried_new;
     call_curried: "jet_compute_call_curried" => jet_jit_compute_call_curried: sig_two;

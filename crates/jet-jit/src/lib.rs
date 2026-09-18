@@ -211,6 +211,11 @@ mod Concurrency;
 mod CoreHost;
 mod Crypto;
 mod DB;
+
+pub fn install_job_queue_provider() {
+    DB::jit_job_queue_install_provider();
+}
+
 mod Receipt;
 mod Plugin;
 /// The JIT always supplies checked authority-needs metadata through its
@@ -470,6 +475,7 @@ pub use api_debug::{
     try_compile_debug_aot, try_compile_program, DebugAotObject, ResidentJitSafety,
 };
 pub use backend::CraneliftBackend;
+pub use Ffi::set_bridge_cdylib;
 pub use resident::{
     apply_hot_swap, apply_hot_swap_with_program, discard_hot_swap_plan, resident_boot_console,
     ConsoleServiceBinding, ResidentConsoleLease,

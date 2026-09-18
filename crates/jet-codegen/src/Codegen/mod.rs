@@ -612,6 +612,10 @@ const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
     ("Numeric", FoundationPlacement::Module("jet_foundation_numeric")),
     ("Facts", FoundationPlacement::Module("Facts")),
     ("ResourceSchedule", FoundationPlacement::Module("ResourceSchedule")),
+    (
+        "CompilerStack",
+        FoundationPlacement::Module("CompilerStack"),
+    ),
 ];
 fn foundation_placement(module: &str) -> Option<&'static FoundationPlacement> {
     FOUNDATION_PLACEMENTS
@@ -624,7 +628,13 @@ fn foundation_placement(module: &str) -> Option<&'static FoundationPlacement> {
 /// module re-exported under its host-crate path. Root-flat modules re-export
 /// the crate root itself, so an item keeps the visibility Foundation gave it.
 /// Arrow entries are conditional because their modules are demand-driven.
+/// `CompilerStack` is compiler infrastructure; generated programs only receive
+/// the stack-size constant Prelude scheduler workers share with the host.
 fn push_foundation_facade(out: &mut String, include_arrow: bool) {
+    out.push_str(&format!(
+        "\n#[allow(non_snake_case, dead_code)]\npub(crate) mod CompilerStack {{\n    pub const COMPILER_STACK_SIZE: usize = {};\n}}\n",
+        jet_foundation::CompilerStack::COMPILER_STACK_SIZE,
+    ));
     out.push_str("\n#[allow(non_snake_case, unused_imports)]\nmod jet_foundation {\n");
     for (module, placement) in FOUNDATION_PLACEMENTS {
         if !include_arrow && matches!(*module, "ArrowData" | "ArrowFileReader") {

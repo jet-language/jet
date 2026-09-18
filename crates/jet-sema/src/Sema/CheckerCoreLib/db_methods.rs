@@ -138,6 +138,31 @@ impl<'a> Checker<'a> {
             _ => None,
         }
     }
+
+    pub(crate) fn check_db_lease_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "close" => {
+                if !args.is_empty() {
+                    self.diags
+                        .push(wrong_core_arity("close", 0, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                }
+                self.record_effect(Effect::DB.name(), span);
+                Some(Some(result_ty(
+                    Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                    db_error_ty(),
+                )))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl<'a> Checker<'a> {

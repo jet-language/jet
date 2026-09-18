@@ -168,6 +168,10 @@ fn jet_std_io_prompt_read() -> Result<JetTermRead, jet_std::IOError> {
 }
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
+fn jet_std_io_eprint(text: &String) {
+    let _ = jet_term_write_stderr_line(text, false);
+}
+
 fn jet_std_io_confirm(prompt: &String) -> bool {
     jet_term_confirm_with_io(
         prompt,

@@ -1573,79 +1573,7 @@ fn jet_jit_email_smtp(config: i64) -> i64 {
     }
 }
 
-// Minimal TCP listen/local-addr/port for watcher demos (#1219) and http loopbacks.
-use std::cell::RefCell;
-use std::net::{SocketAddr, TcpListener};
-
-thread_local! {
-    static LISTENERS: RefCell<Vec<Option<TcpListener>>> = const { RefCell::new(Vec::new()) };
-    static ADDRS: RefCell<Vec<Option<SocketAddr>>> = const { RefCell::new(Vec::new()) };
-}
-
-fn push_listener(listener: TcpListener) -> i64 {
-    LISTENERS.with(|slot| {
-        let mut v = slot.borrow_mut();
-        v.push(Some(listener));
-        v.len() as i64
-    })
-}
-
-fn push_addr(addr: SocketAddr) -> i64 {
-    ADDRS.with(|slot| {
-        let mut v = slot.borrow_mut();
-        v.push(Some(addr));
-        v.len() as i64
-    })
-}
-
-pub(crate) fn clear_net_state() {
-    LISTENERS.with(|s| s.borrow_mut().clear());
-    ADDRS.with(|s| s.borrow_mut().clear());
-}
-
-fn jet_jit_net_tcp_listen(addr: i64) -> i64 {
-    let addr = clone_string(addr);
-    match TcpListener::bind(addr.as_str()) {
-        Ok(listener) => {
-            if let Err(e) = listener.set_nonblocking(true) {
-                return result_err(e.to_string());
-            }
-            result_ok(push_listener(listener) as u64)
-        }
-        Err(e) => result_err(e.to_string()),
-    }
-}
-
-fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
-    if listener <= 0 {
-        return result_err("invalid TcpListener".into());
-    }
-    let idx = (listener as usize).saturating_sub(1);
-    let addr = LISTENERS.with(|slot| {
-        slot.borrow()
-            .get(idx)
-            .and_then(|l| l.as_ref())
-            .and_then(|l| l.local_addr().ok())
-    });
-    match addr {
-        Some(addr) => result_ok(push_addr(addr) as u64),
-        None => result_err("tcp listener local address failed".into()),
-    }
-}
-
-fn jet_jit_net_socket_port(addr: i64) -> i64 {
-    if addr <= 0 {
-        return 0;
-    }
-    let idx = (addr as usize).saturating_sub(1);
-    ADDRS.with(|slot| {
-        slot.borrow()
-            .get(idx)
-            .and_then(|a| a.as_ref())
-            .map(|a| i64::from(a.port()))
-            .unwrap_or(0)
-    })
-}
+pub(crate) fn clear_net_state() {}
 
 host_fns! {
     struct NetHostFns;
@@ -1680,9 +1608,6 @@ host_fns! {
 
 
     }
-    tcp_listen: "jet_jit_net_tcp_listen" => jet_jit_net_tcp_listen: sig1;
-    listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr" => jet_jit_net_listener_local_socket_addr: sig1;
-    socket_port: "jet_jit_net_socket_port" => jet_jit_net_socket_port: sig1;
     url_parse: "jet_jit_url_parse" => jet_jit_url_parse: sig1;
     url_from_parts: "jet_jit_url_from_parts" => jet_jit_url_from_parts: sig5;
     url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;

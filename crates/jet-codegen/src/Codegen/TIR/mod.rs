@@ -2525,6 +2525,26 @@ pub fn lower_mir_fragment_block(
     )
 }
 
+fn fragment_host_field_type(owner: &str, field: &str) -> crate::AST::Type {
+    match (owner, field) {
+        (crate::Syntax::TYPE_BUILD_CONTEXT, "program") => {
+            crate::AST::Type::Named(crate::Syntax::TYPE_PROGRAM_INFO.to_string())
+        }
+        (crate::Syntax::TYPE_BUILD_CONTEXT, "__session") => crate::AST::Type::Int,
+        (crate::Syntax::TYPE_PROGRAM_INFO, "types") => crate::AST::Type::List(Box::new(
+            crate::AST::Type::Named(crate::Syntax::TYPE_TYPE_INFO.to_string()),
+        )),
+        (crate::Syntax::TYPE_TYPE_INFO, "span") => {
+            crate::AST::Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())
+        }
+        (crate::Syntax::TYPE_TYPE_INFO, "markers" | "expanded_markers" | "implements") => {
+            crate::AST::Type::List(Box::new(crate::AST::Type::String))
+        }
+        (crate::Syntax::TYPE_SOURCE_SPAN, "start" | "end") => crate::AST::Type::Int,
+        _ => crate::AST::Type::String,
+    }
+}
+
 fn lower_mir_fragment(
     expr: &crate::AST::Expr,
     stmts: &[crate::AST::Stmt],
@@ -2688,6 +2708,50 @@ fn lower_mir_fragment(
         for stmt in stmts {
             stmt.for_each_expr(&mut collect);
         }
+        struct_fields
+            .entry(crate::Syntax::TYPE_PROGRAM_INFO.to_string())
+            .or_default()
+            .extend(
+                [
+                    "packages",
+                    "types",
+                    "functions",
+                    "definitions",
+                    "references",
+                    "call_edges",
+                    "structural_nodes",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
+        struct_fields
+            .entry(crate::Syntax::TYPE_TYPE_INFO.to_string())
+            .or_default()
+            .extend(
+                [
+                    "name",
+                    "path",
+                    "layout",
+                    "span",
+                    "fields",
+                    "methods",
+                    "type_params",
+                    "markers",
+                    "expanded_markers",
+                    "states",
+                    "transitions",
+                    "facts",
+                    "dimensions",
+                    "implements",
+                    "trait_contracts",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
+        struct_fields
+            .entry(crate::Syntax::TYPE_BUILD_CONTEXT.to_string())
+            .or_default()
+            .insert("program".to_string());
         let empty_span = crate::Diagnostics::Span::new(0, 0);
         for (name, variants) in enum_variants {
             struct_fields.remove(&name);
@@ -2727,7 +2791,7 @@ fn lower_mir_fragment(
                 span: empty_span,
                 is_pub: false,
                 is_package_pub: false,
-                name,
+                name: name.clone(),
                 name_span: empty_span,
                 type_params: Vec::new(),
                 fields: fields
@@ -2735,9 +2799,9 @@ fn lower_mir_fragment(
                     .map(|field_name| crate::AST::Field {
                         is_pub: false,
                         is_package_pub: false,
-                        name: field_name,
+                        name: field_name.clone(),
                         name_span: empty_span,
-                        ty: crate::AST::Type::String,
+                        ty: fragment_host_field_type(&name, &field_name),
                         ty_span: empty_span,
                         serde_markers: Vec::new(),
                         redact: false,
@@ -2996,9 +3060,22 @@ fn lower_mir_fragment(
         lower::lower_expr(expr, &cx, &mut env)
     } else {
         let body = lower::lower_stmts(stmts, &cx, &mut env);
+        // S57 / D-META-STAGE1=B: `@ { … }` bindings are the same compile-time
+        // names outside the block. Incoming fragment params round-trip; names
+        // the block bound are exported with them so sema can fold later reads.
+        let incoming: std::collections::HashSet<&str> =
+            params.iter().map(|(binding, _, _)| binding.as_str()).collect();
+        let extras = env
+            .typed_locals()
+            .into_iter()
+            .filter(|(binding, _)| {
+                !incoming.contains(binding.as_str()) && binding.starts_with('@')
+            })
+            .collect::<Vec<_>>();
         let tuple_shape = params
             .iter()
             .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
+            .chain(extras)
             .collect::<Vec<_>>();
         let tuple_ty = crate::AST::Type::Tuple(
             tuple_shape
@@ -3006,9 +3083,9 @@ fn lower_mir_fragment(
                 .map(|(binding, ty)| (binding.clone(), Box::new(ty.clone())))
                 .collect(),
         );
-        let fields = params
+        let fields = tuple_shape
             .iter()
-            .map(|(binding, ty, _)| {
+            .map(|(binding, ty)| {
                 (
                     binding.clone(),
                     TExpr {
@@ -3087,6 +3164,7 @@ fn lower_mir_fragment(
         context,
     )
 }
+
 
 fn lower_mir_fragment_program(
     module: String,
@@ -3980,6 +4058,7 @@ fn lower_checked_tir_program_on_stack(
         let mut http_route_handlers = std::collections::HashSet::new();
         collect_http_route_handlers(&module.items, &mut http_route_handlers);
         let mut contract_rows = artifact_plan::ContractSamplingPlan::new();
+        let mut uncovered_entry_reason = None;
         for item in &module.items {
             match item {
                 Item::Func(f) => {
@@ -3989,6 +4068,9 @@ fn lower_checked_tir_program_on_stack(
                     // outside the broad resident subset.
                     let covered = f.inline_foreign.is_none()
                         && (tir_covers(f, &cx) || http_route_handlers.contains(&f.name));
+                    if !covered && matches!(entry_name.as_deref(), Some(name) if name == f.name || name.ends_with(&format!("::{}", f.name))) {
+                        uncovered_entry_reason = Some(refusal::describe(&cx));
+                    }
                     materialize_contract_sampling(
                         f,
                         &entry_module_identity,
@@ -4724,9 +4806,11 @@ fn lower_checked_tir_program_on_stack(
             };
             if !entry_ok {
                 let reason = if entry_name == super::mangle_generated("cli_main") {
-                    CLI_ENTRY_MISSING_RUN
+                    CLI_ENTRY_MISSING_RUN.to_string()
+                } else if let Some(detail) = uncovered_entry_reason {
+                    format!("selected entry is not a top-level function ({detail})")
                 } else {
-                    "selected entry is not a top-level function"
+                    "selected entry is not a top-level function".to_string()
                 };
                 return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), reason));
             }
@@ -11693,6 +11777,8 @@ pub enum THandleOp {
     },
     /// TcpListener: `accept()` → `{root}jet_net_tcp_accept(&(recv))`.
     TcpListenerAccept,
+    /// TcpListener: `accept(deadline)` → `{root}jet_net_tcp_accept_deadline(&(recv), &(a0))`.
+    TcpListenerAcceptDeadline,
     /// TcpListener: `local_addr()` → `{root}jet_net_listener_local_addr(&(recv))`.
     TcpListenerLocalAddr,
     /// TcpStream: `read()` → `{root}jet_net_tcp_read(&mut (recv))`.
@@ -11706,10 +11792,15 @@ pub enum THandleOp {
     /// TcpStream: `close()` → `{ drop(recv); }`.
     TcpStreamClose,
     TcpStreamReadBytes,
+    TcpStreamReadBytesDeadline,
     TcpStreamReadText,
+    TcpStreamReadTextDeadline,
     TcpStreamWriteBytes,
+    TcpStreamWriteBytesDeadline,
     TcpStreamWriteAllBytes,
+    TcpStreamWriteAllBytesDeadline,
     TcpStreamWriteText,
+    TcpStreamWriteTextDeadline,
     TcpStreamShutdown,
     TcpStreamReady,
     UdpSocketReady,

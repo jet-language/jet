@@ -152,6 +152,9 @@ impl JetArgsSpec {
                         }
                         if let Some(d) = default {
                             note.push_str(&format!(" [default: {}]", d));
+                            if env.is_some() {
+                                note.push_str(" [precedence: flag > env > default]");
+                            }
                         }
                         if let Some(e) = env {
                             note.push_str(&format!(" [env: {}]", e));

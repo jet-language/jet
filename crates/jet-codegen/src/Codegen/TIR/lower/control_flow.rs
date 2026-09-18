@@ -53,6 +53,14 @@ use std::rc::Rc;
 /// the source AST as an expression; the TIR return is the one backend-neutral
 /// value boundary consumed by AOT, JIT, and the interpreter.
 pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+    if matches!(
+        stmts.last(),
+        Some(Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. })
+    ) {
+        let mut rewritten = stmts.to_vec();
+        rewrite_function_value_tails(&mut rewritten);
+        return crate::Codegen::TIR::lower_stmts(&rewritten, cx, env);
+    }
     let Some((Stmt::Expr(expr), prefix)) = stmts.split_last() else {
         return crate::Codegen::TIR::lower_stmts(stmts, cx, env);
     };
@@ -65,6 +73,28 @@ pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> 
     }
     lowered.push(lower_return_value(expr, cx, env));
     lowered
+}
+
+fn rewrite_function_value_tails(body: &mut Vec<Stmt>) {
+    if matches!(body.last(), Some(Stmt::Expr(_))) {
+        let Some(Stmt::Expr(expr)) = body.pop() else {
+            return;
+        };
+        let span = expr.span();
+        body.push(Stmt::Return(Some(expr), span));
+        return;
+    }
+    match body.last_mut() {
+        Some(Stmt::Switch { arms, else_body, .. } | Stmt::ComptimeSwitch { arms, else_body, .. }) => {
+            for arm in arms {
+                rewrite_function_value_tails(&mut arm.body);
+            }
+            if let Some(else_body) = else_body {
+                rewrite_function_value_tails(else_body);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn return_type_has_value(ty: &Type) -> bool {

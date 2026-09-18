@@ -53,6 +53,11 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_CONDITION) {
         return true;
     }
+    // D-NEVER2=B: Never is the callable success-return bottom. It has no
+    // runtime values; TIR/AOT render it as `std::convert::Infallible`.
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_NEVER) {
+        return true;
+    }
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }

@@ -73,6 +73,9 @@ impl DBValue {
     pub fn bool(&self) -> Result<bool, String> {
         match self {
             DBValue::Bool(b) => Ok(*b),
+            // SQLite BOOLEAN is INTEGER 0/1; query results keep that affinity.
+            DBValue::Int(0) => Ok(false),
+            DBValue::Int(1) => Ok(true),
             _ => Err(format!("expected a bool, got {}", render_db_value(self))),
         }
     }
@@ -2185,7 +2188,7 @@ fn db_migration_error(message: impl Into<String>) -> DBError {
 fn db_migration_insert_values(outcome: &JetMigrationOutcome, migration_key: &str) -> SQL {
     let step_ids = outcome.step_ids.join("\n");
     (
-        "INSERT INTO __jet_migrations (transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO __jet_migrations (transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             .to_string(),
         vec![
             DBValue::Text(outcome.receipt_id.clone()),
@@ -2314,7 +2317,11 @@ pub fn jet_db_migration_request<B: JetDBBackend>(
         {
             if previous.outcome.checksum == checksum {
                 if backend.commit() {
-                    return Ok(previous.outcome.clone());
+                    let mut outcome = previous.outcome.clone();
+                    // Steps applied *this call*. Idempotent replay applies none.
+                    outcome.step_count = 0;
+                    outcome.step_ids.clear();
+                    return Ok(outcome);
                 }
                 backend.rollback();
                 return Err(db_migration_error("could not commit idempotent migration read"));

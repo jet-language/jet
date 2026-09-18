@@ -2636,7 +2636,7 @@ impl<'a> Checker<'a> {
                 arms,
                 else_body,
                 span,
-            } => self.check_switch(subject, arms, else_body, *span),
+            } => self.check_switch(subject, arms, else_body, *span, None),
             Stmt::Break(span) => {
                 self.check_break_without_value(None, *span);
             }

@@ -487,7 +487,7 @@ impl JetJobQueueStoreProvider for JitJobQueueProvider {
 
 static JIT_JOB_QUEUE_PROVIDER: std::sync::Once = std::sync::Once::new();
 
-fn jit_job_queue_install_provider() {
+pub(crate) fn jit_job_queue_install_provider() {
     JIT_JOB_QUEUE_PROVIDER.call_once(|| {
         let _ = jet_job_queue_install_store_provider_if_absent(Box::new(JitJobQueueProvider));
     });
@@ -2037,20 +2037,27 @@ fn jet_jit_db_query(handle: i64, sql: i64) -> i64 {
     }
 }
 
-fn jet_jit_db_query_one(handle: i64, sql: i64) -> i64 {
-    let Some(sql) = clone_sql_value(sql) else {
-        return result_err_msg("malformed SQL value");
-    };
-    match scoped_query(handle as u64, &sql, false).map(wire::jet_db_first_row) {
+fn db_query_one_abi(
+    outcome: Result<Result<wire::JetDBRow, wire::JetAbsent>, wire::DBError>,
+) -> i64 {
+    match outcome {
         Ok(Ok(row)) => {
             let list = rows_to_list_of_maps(vec![row]);
             let map =
                 Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int(list, 0).unwrap_or(0));
-            result_ok(map.wrapping_add(1) as u64)
+            let inner = result_ok(map as u64);
+            result_ok(inner as u64)
         }
         Ok(Err(_)) => result_ok(0),
         Err(error) => result_err_msg(&error.message),
     }
+}
+
+fn jet_jit_db_query_one(handle: i64, sql: i64) -> i64 {
+    let Some(sql) = clone_sql_value(sql) else {
+        return result_err_msg("malformed SQL value");
+    };
+    db_query_one_abi(scoped_query(handle as u64, &sql, false).map(wire::jet_db_first_row))
 }
 
 fn jet_jit_db_execute_with_metadata(handle: i64, sql: i64, metadata: i64) -> i64 {
@@ -2096,19 +2103,11 @@ fn jet_jit_db_query_one_with_metadata(handle: i64, sql: i64, metadata: i64) -> i
         Err(error) => return result_err_msg(&error.message),
     };
     jit_db_remember_observed_query(handle as u64, &sql, &metadata);
-    match scoped_query_observed(handle as u64, &sql)
-        .map(|(rows, _)| rows)
-        .map(wire::jet_db_first_row)
-    {
-        Ok(Ok(row)) => {
-            let list = rows_to_list_of_maps(vec![row]);
-            let map =
-                Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int(list, 0).unwrap_or(0));
-            result_ok(map.wrapping_add(1) as u64)
-        }
-        Ok(Err(_)) => result_ok(0),
-        Err(error) => result_err_msg(&error.message),
-    }
+    db_query_one_abi(
+        scoped_query_observed(handle as u64, &sql)
+            .map(|(rows, _)| rows)
+            .map(wire::jet_db_first_row),
+    )
 }
 
 fn list_of_sql(list: i64) -> Option<Vec<wire::SQL>> {
@@ -2521,6 +2520,41 @@ fn alloc_pool_receipt(receipt: &pool::JetDbPoolReceipt) -> i64 {
         }
         record
     })
+}
+
+pub(crate) fn display_named_db_value(handle: i64, type_name: &str) -> Option<String> {
+    let leaf = type_name.rsplit('.').next().unwrap_or(type_name);
+    match leaf {
+        "DBValue" => read_dbvalue(handle).map(|value| value.jet_show()),
+        "DbLease" => Some("db.lease".to_string()),
+        "DbPoolReceipt" => Concurrency::with_runtime_mut(|rt| {
+            let lifecycle = rt.heap.record_clone_string(handle, 0)?;
+            let int = |index: i64| rt.heap.record_get_int(handle, index);
+            Some(
+                pool::JetDbPoolReceipt {
+                    lifecycle: match lifecycle.as_str() {
+                        "draining" => pool::JetDbPoolLifecycle::Draining,
+                        "drained" => pool::JetDbPoolLifecycle::Drained,
+                        _ => pool::JetDbPoolLifecycle::Open,
+                    },
+                    max: int(1)?,
+                    available: int(2)?,
+                    leased: int(3)?,
+                    opening: int(4)?,
+                    ready: int(5)? != 0,
+                    acquires: int(6)?,
+                    releases: int(7)?,
+                    timeouts: int(8)?,
+                    open_failures: int(9)?,
+                    unhealthy: int(10)?,
+                    replacements: int(11)?,
+                    replacement_failures: int(12)?,
+                }
+                .render(),
+            )
+        }),
+        _ => None,
+    }
 }
 
 fn pool_value(handle: u64) -> CtValue {
@@ -2992,7 +3026,7 @@ fn jet_jit_db_pool_receipt(handle: i64) -> i64 {
 }
 fn jet_jit_db_pool_lease_close(handle: i64) -> i64 {
     pool_lease_close(handle as u64);
-    0
+    result_ok(0)
 }
 
 fn track_connection(handle: u64) {

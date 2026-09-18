@@ -99,6 +99,72 @@ pub(crate) fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
     body()
 }
 
+/// D-LINALG1 / D-SIMD2: scalar splat `Vec3 * 2.0` / `2.0 * Vec3` is a math
+/// builtin, not primitive f64/i64 arithmetic on a handle.
+fn math_scalar_builtin(
+    op: crate::AST::BinOp,
+    left: &Type,
+    right: &Type,
+) -> Option<(String, String)> {
+    use crate::AST::BinOp;
+    let op_name = match op {
+        BinOp::Mul => "mul",
+        BinOp::Div => "div",
+        _ => return None,
+    };
+    match (left, right) {
+        (Type::Named(ln), _)
+            if crate::Sema::is_math_type(ln)
+                && crate::Sema::math_scalar_binop_result(op, ln, right).is_some() =>
+        {
+            Some((ln.clone(), op_name.to_string()))
+        }
+        (_, Type::Named(rn))
+            if crate::Sema::is_math_type(rn)
+                && crate::Sema::math_scalar_binop_result(op, rn, left).is_some() =>
+        {
+            Some(("Float".to_string(), format!("{op_name}_{rn}")))
+        }
+        _ => None,
+    }
+}
+
+fn coerce_math_scalar_to_float(scalar: TExpr, line: u32) -> TExpr {
+    match &scalar.ty {
+        Type::Float | Type::Float32 => scalar,
+        Type::Named(name)
+            if name == Syntax::TYPE_DECIMAL || name == Syntax::TYPE_FRACTION =>
+        {
+            TExpr {
+                ty: Type::Float,
+                kind: TExprKind::PreciseBuiltin {
+                    type_name: name.clone(),
+                    func: "to_float".to_string(),
+                    args: vec![scalar],
+                },
+            }
+        }
+        Type::Int | Type::IntN { .. } => {
+            let source_signed = match scalar.ty {
+                Type::IntN { signed: false, .. } => false,
+                _ => true,
+            };
+            TExpr {
+                ty: Type::Float,
+                kind: TExprKind::NumericMethod {
+                    recv: Box::new(scalar),
+                    op: TNumericOp::CheckedIntToFloat {
+                        source_signed,
+                        target_f32: false,
+                        line,
+                    },
+                },
+            }
+        }
+        _ => scalar,
+    }
+}
+
 /// D-PLACE1: sema checks an `Atomic<T>` field initializer as `T`; construct
 /// the private carrier only after that checked scalar reaches TIR.
 fn lower_atomic_initializer(value: TExpr, field_ty: &Type) -> TExpr {
@@ -357,6 +423,62 @@ pub(crate) fn resolve_unknown_index_kind(
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; indexed collections
 /// and their fields must retain a recursive place shape, while a Pool index
 /// uses its generation-checked mutable accessor instead of the read clone.
+fn shared_guard_type_name(name: &str) -> bool {
+    let leaf = name
+        .rsplit("::")
+        .next()
+        .and_then(|part| part.rsplit('.').next())
+        .unwrap_or(name);
+    leaf == Syntax::TYPE_SHARED_GUARD
+}
+
+fn shared_guard_projection(ty: &Type) -> Option<(Type, bool)> {
+    match ty.without_user_tags() {
+        Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
+            Some((args[0].clone(), false))
+        }
+        Type::Tagged { marker, inner }
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(
+                    crate::AST::InternalTag::SharedGuardRead
+                        | crate::AST::InternalTag::SharedGuardEdit
+                )
+            ) =>
+        {
+            match inner.without_user_tags() {
+                Type::Apply { name, args } if shared_guard_type_name(name) && args.len() == 1 => {
+                    Some((
+                        args[0].clone(),
+                        matches!(
+                            marker,
+                            crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)
+                        ),
+                    ))
+                }
+                _ => shared_guard_projection(inner),
+            }
+        }
+        Type::Tagged { inner, .. } => shared_guard_projection(inner),
+        Type::Shared(inner) | Type::Option(inner) => shared_guard_projection(inner),
+        _ => None,
+    }
+}
+
+fn shared_guard_value_field(recv: TExpr, member: &str) -> Option<TExpr> {
+    if member != "value" {
+        return None;
+    }
+    let (inner, editable) = shared_guard_projection(&recv.ty)?;
+    Some(TExpr {
+        ty: inner,
+        kind: TExprKind::SharedGuardValue {
+            guard: Box::new(recv),
+            editable,
+        },
+    })
+}
+
 pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     fn pool_mut_place(
         pool_expr: &Expr,
@@ -460,6 +582,9 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                 pool_mut_place(pool_expr, id_expr, *idx_span, Some(field), cx, env)
             } else {
                 let recv = lower_expr_as_mut_place(base, cx, env);
+                if let Some(guard_value) = shared_guard_value_field(recv.clone(), field) {
+                    return guard_value;
+                }
                 let field_ty = struct_field_type(cx, &recv.ty, field).unwrap_or(Type::Int);
                 let boxed = match &recv.ty {
                     Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), field.to_string())),
@@ -4941,6 +5066,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         } else {
                             lhs.ty.clone()
                         }
+                    } else if let Type::Named(ln) = &lhs.ty {
+                        if crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln) {
+                            crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty)
+                                .unwrap_or_else(|| lhs.ty.clone())
+                        } else if let Type::Named(rn) = &rhs.ty {
+                            if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                                crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
+                                    .unwrap_or_else(|| lhs.ty.clone())
+                            } else {
+                                lhs.ty.clone()
+                            }
+                        } else {
+                            lhs.ty.clone()
+                        }
+                    } else if let Type::Named(rn) = &rhs.ty {
+                        if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                            crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
+                                .unwrap_or_else(|| lhs.ty.clone())
+                        } else {
+                            lhs.ty.clone()
+                        }
                     } else {
                         lhs.ty.clone()
                     }
@@ -4988,6 +5134,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             }
                         }
                     }
+                }
+                if let Some((type_name, func)) = math_scalar_builtin(*op, &lhs.ty, &rhs.ty) {
+                    let math_on_left =
+                        matches!(&lhs.ty, Type::Named(name) if crate::Sema::is_math_type(name));
+                    let (left, right) = if math_on_left {
+                        (lhs, coerce_math_scalar_to_float(rhs, line))
+                    } else {
+                        (coerce_math_scalar_to_float(lhs, line), rhs)
+                    };
+                    return TExpr {
+                        ty,
+                        kind: TExprKind::MathBuiltin {
+                            type_name,
+                            func,
+                            args: vec![left, right],
+                        },
+                    };
                 }
                 TExpr {
                     ty,
@@ -7059,50 +7222,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     _ => recv,
                 };
-                if member == "value" {
-                    let shared_guard = match recv.ty.without_user_tags() {
-                        Type::Apply { name, args }
-                            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
-                        {
-                            Some((args[0].clone(), false))
-                        }
-                        Type::Tagged { marker, inner }
-                            if matches!(
-                                marker,
-                                crate::AST::TagMarker::Internal(
-                                    crate::AST::InternalTag::SharedGuardRead
-                                        | crate::AST::InternalTag::SharedGuardEdit
-                                )
-                            ) =>
-                        {
-                            match inner.without_user_tags() {
-                                Type::Apply { name, args }
-                                    if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
-                                {
-                                    Some((
-                                        args[0].clone(),
-                                        matches!(
-                                            marker,
-                                            crate::AST::TagMarker::Internal(
-                                                crate::AST::InternalTag::SharedGuardEdit
-                                            )
-                                        ),
-                                    ))
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    };
-                    if let Some((inner, editable)) = shared_guard {
-                        return in_own_frame(|| TExpr {
-                            ty: inner,
-                            kind: TExprKind::SharedGuardValue {
-                                guard: Box::new(recv),
-                                editable,
-                            },
-                        });
-                    }
+                if let Some(guard_value) = shared_guard_value_field(recv.clone(), member) {
+                    return in_own_frame(|| guard_value);
                 }
                 // D-FIELDPOL1: a computed field is not a Rust struct member — sema
                 // (`CheckerFieldPolicy`) already synthesized it as a getter method
@@ -8105,6 +8226,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     operand: Box::new(present),
                 },
             }
+        }
+        Expr::PatternTest {
+            subject,
+            pattern: pattern @ Pattern::BinMatch { .. },
+            ..
+        } => {
+            let subject = lower_expr(subject, cx, env);
+            super::patterns::bin_match_pattern_cond_expr(pattern, subject, cx)
+        }
+        Expr::PatternTest {
+            subject,
+            pattern: pattern @ Pattern::StrMatch { .. },
+            ..
+        } => {
+            let subject = lower_expr(subject, cx, env);
+            super::patterns::str_match_pattern_cond_expr(pattern, subject, cx)
         }
         // A PatternTest that reaches value lowering with any other pattern is
         // a condition-only shape consumed by the if-condition lowerer.

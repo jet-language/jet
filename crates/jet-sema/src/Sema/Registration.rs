@@ -541,18 +541,12 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(return_type) = &f.return_type {
-            if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_NEVER) {
-                self.diags.push(Diagnostic::from_row(
-                    "E2422",
-                    &[],
-                    Some(f.return_type_span.unwrap_or(f.name_span)),
-                ));
             // D-CONC-GROUP1=A: parameter positions admit a group; the return
             // position stays banned, and it teaches with the E1110 family
             // instead of falling through to a bare "no such type" (E0119).
             // Returning the handle would let a child outlive the scope that
             // joins it, which is the one thing the ban exists to stop.
-            } else if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+            if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
                 self.diags.push(Diagnostic::error(
                     "E1110",
                     "`Group` cannot be returned".to_string(),
@@ -564,7 +558,12 @@ impl<'a> Checker<'a> {
                 ));
             } else {
                 let return_type = self.resolve_type(return_type.clone());
-                self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
+                // D-NEVER2=B: Never is legal in the callable success-return
+                // slot (`fn f() Never`, `fn() Never`, `Never !E`).
+                self.check_declared_return_type(
+                    &return_type,
+                    f.return_type_span.unwrap_or(f.name_span),
+                );
             }
         }
         for p in &f.params {
@@ -616,7 +615,10 @@ impl<'a> Checker<'a> {
                         .get(owner)
                         .or_else(|| self.trait_reg.enum_params.get(owner));
                     let self_ty = owner_params.map_or_else(
-                        || Type::Named(owner.to_string()),
+                        || {
+                            crate::Sema::Diagnostics::builtin_type_from_ident(owner)
+                                .unwrap_or_else(|| Type::Named(owner.to_string()))
+                        },
                         |params| Type::Apply {
                             name: owner.to_string(),
                             args: params

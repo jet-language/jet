@@ -51,7 +51,6 @@ struct WatchCallback {
     scope: i64,
     once: bool,
     fn_ptr: i64,
-    caps: Vec<i64>,
     active: Rc<Cell<bool>>,
 }
 
@@ -77,22 +76,16 @@ thread_local! {
 fn event_record(ev: &WatchEvent) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let p = rt.heap.alloc_string(ev.path.clone());
-        let det = rt.heap.alloc_string(ev.detail.clone());
-        let rec = rt.heap.alloc_record(6);
-        // `domain`/`kind` are payload-free Core enums: the packed i64 ABI is the
-        // Prelude declaration-order discriminant. String fields must be
-        // JetVal::String (`record_set_string`); `struct_get_str` rejects
-        // Int-tagged string ids.
+        // MIR WatchEvent fields are path, domain, kind. domain/kind are packed
+        // payload-free Core enums (declaration-order discriminant).
+        let rec = rt.heap.alloc_record(3);
+        let _ = rt.heap.record_set_string(rec, 0, p);
         let _ = rt
             .heap
-            .record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+            .record_set_int(rec, 1, watch_disc("WatchDomain", ev.domain));
         let _ = rt
             .heap
-            .record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
-        let _ = rt.heap.record_set_string(rec, 2, p);
-        let _ = rt.heap.record_set_string(rec, 3, det);
-        let _ = rt.heap.record_set_int(rec, 4, ev.pid);
-        let _ = rt.heap.record_set_int(rec, 5, ev.port);
+            .record_set_int(rec, 2, watch_disc("WatchKind", ev.kind));
         rec
     })
 }
@@ -102,18 +95,14 @@ fn list_from_events(events: Vec<WatchEvent>) -> i64 {
         let list = rt.heap.alloc_empty_list();
         for ev in &events {
             let p = rt.heap.alloc_string(ev.path.clone());
-            let det = rt.heap.alloc_string(ev.detail.clone());
-            let rec = rt.heap.alloc_record(6);
+            let rec = rt.heap.alloc_record(3);
+            let _ = rt.heap.record_set_string(rec, 0, p);
             let _ = rt
                 .heap
-                .record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+                .record_set_int(rec, 1, watch_disc("WatchDomain", ev.domain));
             let _ = rt
                 .heap
-                .record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
-            let _ = rt.heap.record_set_string(rec, 2, p);
-            let _ = rt.heap.record_set_string(rec, 3, det);
-            let _ = rt.heap.record_set_int(rec, 4, ev.pid);
-            let _ = rt.heap.record_set_int(rec, 5, ev.port);
+                .record_set_int(rec, 2, watch_disc("WatchKind", ev.kind));
             let _ = rt.heap.list_push_int(list, rec);
         }
         list
@@ -248,30 +237,20 @@ fn invoke_callback(cb: &WatchCallback, ev: &WatchEvent) {
         return;
     }
     let event = event_record(ev);
-    let ptr = cb.fn_ptr as usize as *const u8;
-    unsafe {
-        match cb.caps.len() {
-            0 => {
-                let f: extern "C" fn(i64) = std::mem::transmute(ptr);
-                f(event);
-            }
-            1 => {
-                let f: extern "C" fn(i64, i64) = std::mem::transmute(ptr);
-                f(cb.caps[0], event);
-            }
-            2 => {
-                let f: extern "C" fn(i64, i64, i64) = std::mem::transmute(ptr);
-                f(cb.caps[0], cb.caps[1], event);
-            }
-            3 => {
-                let f: extern "C" fn(i64, i64, i64, i64) = std::mem::transmute(ptr);
-                f(cb.caps[0], cb.caps[1], cb.caps[2], event);
-            }
-            _ => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64) = std::mem::transmute(ptr);
-                f(cb.caps[0], cb.caps[1], cb.caps[2], cb.caps[3], event);
-            }
+    let callback = Concurrency::with_runtime_mut(|rt| {
+        if cb.fn_ptr >= 0 {
+            rt.set_host_fault("JIT Watch listener requires a universal callback thunk");
+            return None;
         }
+        crate::runtime_host::jit_callable_parts(rt, cb.fn_ptr)
+    });
+    let Some(callback) = callback else {
+        return;
+    };
+    if crate::runtime_host::invoke_universal_unary(callback, event).is_none() {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("JIT Watch listener callback invocation failed");
+        });
     }
     if cb.once {
         cb.active.set(false);
@@ -391,6 +370,10 @@ fn jet_jit_event_scope_frame_pop() {
     }
 }
 
+pub(crate) fn subscription_is_active(handle: i64) -> i64 {
+    i64::from(jet_jit_subscription_is_active(handle))
+}
+
 fn jet_jit_subscription_is_active(handle: i64) -> i8 {
     SUBS.with(|slot| {
         slot.borrow()
@@ -483,47 +466,21 @@ fn jet_jit_watch_summary(handle: i64) -> i64 {
     alloc_string(text)
 }
 
-fn jet_jit_watch_on(
-    watch: i64,
-    scope: i64,
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) -> i64 {
-    watch_register(watch, scope, fn_ptr, n_caps, c0, c1, c2, c3, false)
+fn jet_jit_watch_on(watch: i64, scope: i64, fn_ptr: i64) -> i64 {
+    watch_register(watch, scope, fn_ptr, false)
 }
 
-fn jet_jit_watch_once(
-    watch: i64,
-    scope: i64,
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) -> i64 {
-    watch_register(watch, scope, fn_ptr, n_caps, c0, c1, c2, c3, true)
+fn jet_jit_watch_once(watch: i64, scope: i64, fn_ptr: i64) -> i64 {
+    watch_register(watch, scope, fn_ptr, true)
 }
 
-fn watch_register(
-    watch: i64,
-    scope: i64,
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-    once: bool,
-) -> i64 {
-    let caps = [c0, c1, c2, c3]
-        .into_iter()
-        .take(n_caps.max(0) as usize)
-        .collect::<Vec<_>>();
+fn watch_register(watch: i64, scope: i64, fn_ptr: i64, once: bool) -> i64 {
+    if fn_ptr >= 0 {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("JIT Watch listener requires a universal callback thunk");
+        });
+        return 0;
+    }
     let active = Rc::new(Cell::new(true));
     SCOPES.with(|slot| {
         if let Some(Some(st)) = slot.borrow_mut().get_mut(scope.saturating_sub(1) as usize) {
@@ -540,7 +497,6 @@ fn watch_register(
                 scope,
                 once,
                 fn_ptr,
-                caps,
                 active: active.clone(),
             });
         }
@@ -612,11 +568,11 @@ host_fns! {
         let mut binary_void = Signature::new(cc);
         binary_void.params.push(AbiParam::new(types::I64));
         binary_void.params.push(AbiParam::new(types::I64));
-        let mut octonary_i64 = Signature::new(cc);
-        for _ in 0..8 {
-            octonary_i64.params.push(AbiParam::new(types::I64));
+        let mut listener = Signature::new(cc);
+        for _ in 0..3 {
+            listener.params.push(AbiParam::new(types::I64));
         }
-        octonary_i64.returns.push(AbiParam::new(types::I64));
+        listener.returns.push(AbiParam::new(types::I64));
     }
     event_scope_frame_push: "jet_jit_event_scope_frame_push" => jet_jit_event_scope_frame_push: nullary_void;
     event_scope_frame_pop: "jet_jit_event_scope_frame_pop" => jet_jit_event_scope_frame_pop: nullary_void;
@@ -629,8 +585,8 @@ host_fns! {
     watch_cancel: "jet_jit_watch_cancel" => jet_jit_watch_cancel: unary_void;
     watch_is_active: "jet_jit_watch_is_active" => jet_jit_watch_is_active: unary_i8;
     watch_summary: "jet_jit_watch_summary" => jet_jit_watch_summary: unary_i64;
-    watch_on: "jet_jit_watch_on" => jet_jit_watch_on: octonary_i64;
-    watch_once: "jet_jit_watch_once" => jet_jit_watch_once: octonary_i64;
+    watch_on: "jet_jit_watch_on" => jet_jit_watch_on: listener;
+    watch_once: "jet_jit_watch_once" => jet_jit_watch_once: listener;
     watchset_add: "jet_jit_watchset_add" => jet_jit_watchset_add: binary_void;
     watchset_poll: "jet_jit_watchset_poll" => jet_jit_watchset_poll: unary_i64;
     watchset_summary: "jet_jit_watchset_summary" => jet_jit_watchset_summary: unary_i64;

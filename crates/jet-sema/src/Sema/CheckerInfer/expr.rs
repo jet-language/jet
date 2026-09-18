@@ -7,7 +7,8 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::{
-    owned_type_for_read_view, soft_public_use, type_fix_hint, typed_text_mismatch,
+    owned_type_for_read_view, plain_used_where_result_expected, soft_public_use, type_fix_hint,
+    typed_text_mismatch,
 };
 use crate::Syntax;
 use crate::AST::{
@@ -77,6 +78,20 @@ fn is_bare_member_chain(expr: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+/// D-SHAPE3a=A: `.new(...)` is inferred construction from the expected type,
+/// not subject-shorthand for a unary callable.
+fn is_inferred_constructor(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::MethodCall {
+            method,
+            receiver,
+            ..
+        } if method == Syntax::MEM_ALLOC_NEW
+            && matches!(receiver.as_ref(), Expr::Ident(name, _) if name.is_empty())
+    )
 }
 
 /// D-FMT-PLAIN1=A: recognize only the old, fully mechanical workaround. A
@@ -3228,7 +3243,7 @@ impl<'a> Checker<'a> {
         // D-SUBJECT-CALL1=A: a lower-case bare member chain has meaning only
         // as the shorthand for a unary callable. Keep ordinary value contexts
         // distinct from `.new(...)` and uppercase variant inference.
-        if is_bare_member_chain(e) {
+        if is_bare_member_chain(e) && !is_inferred_constructor(e) {
             // The workspace is not on Rust 2024, so a `let` chain does not
             // compile here. Nest the guard instead; the meaning is unchanged.
             if let Some(expected) = self.expected_type.clone() {
@@ -6028,14 +6043,26 @@ impl<'a> Checker<'a> {
                     }
                     _ => {
                         if let Some(t) = self.infer_owned_list_element(e) {
-                            let string_view_compatible = string_view_elements
-                                && t == Type::String
-                                && (matches!(
-                                    e,
-                                    Expr::Ident(name, _) if self.is_string_view(name)
-                                ) || self.string_view_call_source(e).is_some());
-                            if !string_view_compatible {
-                                self.check_list_element_assignable(&expected_inner, &t, e.span());
+                            if plain_used_where_result_expected(&expected_inner, &t)
+                                && !matches!(e.without_parens(), Expr::Ok(..) | Expr::Err(..))
+                            {
+                                let span = e.span();
+                                let inner = std::mem::replace(e, Expr::Absent(span));
+                                *e = Expr::Ok(Box::new(inner), span);
+                            } else {
+                                let string_view_compatible = string_view_elements
+                                    && t == Type::String
+                                    && (matches!(
+                                        e,
+                                        Expr::Ident(name, _) if self.is_string_view(name)
+                                    ) || self.string_view_call_source(e).is_some());
+                                if !string_view_compatible {
+                                    self.check_list_element_assignable(
+                                        &expected_inner,
+                                        &t,
+                                        e.span(),
+                                    );
+                                }
                             }
                         }
                     }

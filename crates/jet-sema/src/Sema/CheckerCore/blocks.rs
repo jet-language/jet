@@ -137,6 +137,22 @@ impl<'a> Checker<'a> {
                 // owns both its value type and its divergence semantics.
                 self.check_stmt(stmt);
             }
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                span,
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                span,
+            } => {
+                // D-CHOOSE-HEADS1=A: a folded multi-head table is a Switch
+                // whose arms are the value of the callable.
+                self.check_switch(subject, arms, else_body, *span, Some(expected));
+            }
             _ => {
                 let span = stmt.span();
                 self.check_stmt(stmt);

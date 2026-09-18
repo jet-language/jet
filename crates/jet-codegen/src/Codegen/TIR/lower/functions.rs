@@ -1112,12 +1112,16 @@ fn lower_trait_method_inner(
         crate::Generics::DECODE => Some(SerdeCodec::Decode),
         _ => None,
     };
-    let owner_ty = match cx.struct_type_param_order.get(type_name) {
-        Some(params) if !params.is_empty() => Type::Apply {
-            name: type_name.to_string(),
-            args: params.iter().cloned().map(Type::Named).collect(),
-        },
-        _ => Type::Named(type_name.to_string()),
+    let owner_ty = if let Some(builtin) = crate::AST::numeric_type_from_name(type_name) {
+        builtin
+    } else {
+        match cx.struct_type_param_order.get(type_name) {
+            Some(params) if !params.is_empty() => Type::Apply {
+                name: type_name.to_string(),
+                args: params.iter().cloned().map(Type::Named).collect(),
+            },
+            _ => Type::Named(type_name.to_string()),
+        }
     };
     let owner_ty = canonical_owner_type(cx, &owner_ty);
     let previous_type_params = cx.current_type_params.borrow().clone();

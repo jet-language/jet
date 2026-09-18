@@ -10,20 +10,20 @@ fn run() {
     fast :: Float{19.99}
     print(fast)
 
-    fraction_third :: math.fraction(1, 3) ?? return Err("a third is a ratio")
+    fraction_third :: math.fraction(1, 3) ?? panic("a third is a ratio")
     print(fraction_third.to_string())
 
     whole :: fraction_third.add(fraction_third)
     all :: whole.add(fraction_third)
     print(all.to_string())
-    one :: math.fraction(1, 1) ?? return Err("one")
+    one :: math.fraction(1, 1) ?? panic("one")
     print(all.equal(one))
 
     // Reduced on construction, with the sign carried on top.
-    ratio :: math.fraction(6, -8) ?? return Err("ratio")
+    ratio :: math.fraction(6, -8) ?? panic("ratio")
     print(ratio.to_string())
 
-    rate :: math.fraction(44100, 48000) ?? return Err("rate")
+    rate :: math.fraction(44100, 48000) ?? panic("rate")
     print(rate.to_string())
     print(rate.numerator())
     print(rate.denominator())
@@ -31,7 +31,7 @@ fn run() {
     print(rate.is_zero())
 
     // A ratio over nothing has no value, so the fallback is taken.
-    fallback :: math.fraction(0, 1) ?? return Err("zero is a ratio")
+    fallback :: math.fraction(0, 1) ?? panic("zero is a ratio")
     refused :: math.fraction(1, 0) ?? fallback
     print(refused.to_string())
 }

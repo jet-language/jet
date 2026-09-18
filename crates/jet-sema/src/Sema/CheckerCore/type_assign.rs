@@ -7,8 +7,9 @@ use crate::Sema::CheckerCoreLib::{
     phantom_fact_menu_diag, retired_acronym_spelling_diag, retired_authority_vocabulary_diag,
 };
 use crate::Sema::Diagnostics::{
-    option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
-    suggest_field, type_fix_hint, undeclared_value_tag,
+    option_used_where_plain_expected, plain_used_where_result_expected,
+    result_used_where_plain_expected, soft_public_use, suggest_field, type_fix_hint,
+    undeclared_value_tag,
 };
 use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane, TypeDef};
 use crate::Syntax;
@@ -1182,6 +1183,11 @@ impl<'a> Checker<'a> {
         if Type::compute_tensor_compatible(want, got) {
             // The erased `Tensor` spelling is the storage boundary. A
             // shaped alias remains exact when both sides carry shape.
+            return true;
+        }
+        if plain_used_where_result_expected(want, got) {
+            // D-FAILCOMP1: `[T !E]{ok_value, …}` and other fallible slots can
+            // store a plain success `T` without an explicit `Ok` wrapper.
             return true;
         }
         if result_used_where_plain_expected(want, got) {

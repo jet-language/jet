@@ -1756,10 +1756,7 @@ fn eval_block_bridge<'a, 'debug>(
     let value = crate::Comptime::MirBridge::mir_to_ct_value(result.value, Span::new(0, 0))?;
     match value {
         CtValue::Struct { fields, .. } => {
-            let scope = names
-                .into_iter()
-                .zip(fields.into_iter().map(|(_, value)| value))
-                .collect();
+            let scope = fields.into_iter().collect();
             Ok(crate::Comptime::MirBridge::StmtOutcome::Done(scope))
         }
         value => Ok(crate::Comptime::MirBridge::StmtOutcome::Returned {
@@ -9214,6 +9211,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 {
                     return self.eval_shared_host(frame_index, &member, values, span);
                 }
+                if module == "core.host" {
+                    if let Some(value) =
+                        self.eval_comptime_host_method(&member, values.clone(), span)?
+                    {
+                        return Ok(value);
+                    }
+                }
                 self.eval_prelude_runtime_values(*call, values, result_ty, span)
             }
             MirSemanticOp::DecodeUnder {
@@ -10789,7 +10793,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     callback_span,
                 ) {
                     Some(Ok(value)) => value,
-                    Some(Err(error)) => panic!("{}: {}", error.code, error.what),
+                    Some(Err(error)) => jet_foundation::AST::CtValue::Failed(
+                        jet_foundation::AST::CtReport::Told(Box::new(
+                            jet_foundation::AST::CtValue::Str(format!(
+                                "{}: {}",
+                                error.code, error.what
+                            )),
+                        )),
+                    ),
                     None => panic!("MIR task callback has no standalone host"),
                 }
             },
@@ -11765,6 +11776,92 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             variant: variant.to_string(),
             args: payload.map_or_else(Vec::new, |value| vec![(None, value)]),
         })
+    }
+
+    fn eval_comptime_host_method(
+        &mut self,
+        member: &str,
+        args: Vec<RuntimeValue>,
+        span: Span,
+    ) -> Result<Option<RuntimeValue>, Diagnostic> {
+        let Some((type_name, method)) = member.split_once('.') else {
+            return Ok(None);
+        };
+        let type_name = type_name
+            .rsplit("::")
+            .next()
+            .unwrap_or(type_name)
+            .rsplit('.')
+            .next()
+            .unwrap_or(type_name);
+        if !matches!(
+            type_name,
+            crate::Syntax::TYPE_BUILD_CONTEXT
+                | crate::Syntax::TYPE_PROGRAM_INFO
+                | crate::Syntax::TYPE_TYPE_INFO
+                | "FieldInfo"
+                | "MethodInfo"
+                | "CompilerLexed"
+                | "CompilerSyntaxTree"
+                | "CompilerChecked"
+                | "CompilerSourceMap"
+                | "CompilerPackageError"
+                | "CompilerDependency"
+                | "CompilerPackageTarget"
+                | "CompilerPackageOutput"
+                | "CompilerBuildProfile"
+                | "CompilerManifest"
+                | "CompilerPackage"
+                | "CompilerLockedPackage"
+                | "CompilerLock"
+                | "CompilerKeyValue"
+                | "CompilerProfile"
+                | "CompilerProfileSet"
+        ) {
+            return Ok(None);
+        }
+        let mut args = args.into_iter();
+        let receiver = args.next().ok_or_else(|| {
+            mir_error_at("MIR comptime host method has no receiver", span)
+        })?;
+        let receiver = self.runtime_to_ct(receiver, span)?;
+        let argv = args
+            .map(|value| self.runtime_to_ct(value, span))
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let generated_source = if type_name == crate::Syntax::TYPE_BUILD_CONTEXT && method == "generate"
+        {
+            argv.get(1).and_then(|value| match value {
+                crate::AST::CtValue::Str(text) => Some(text.clone()),
+                crate::AST::CtValue::Present(inner) => match inner.as_ref() {
+                    crate::AST::CtValue::Str(text) => Some(text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+        } else {
+            None
+        };
+        let argv = if generated_source.is_some() {
+            argv.into_iter().take(1).collect()
+        } else {
+            argv
+        };
+        let result = if type_name == crate::Syntax::TYPE_BUILD_CONTEXT {
+            match crate::Comptime::Build::eval_program_build_method(
+                &receiver,
+                method,
+                argv.clone(),
+                generated_source.as_deref(),
+                span,
+                false,
+            ) {
+                Some(result) => result?,
+                None => crate::Comptime::Builtins::apply_method(&receiver, method, argv, span)?,
+            }
+        } else {
+            crate::Comptime::Builtins::apply_method(&receiver, method, argv, span)?
+        };
+        Ok(Some(runtime_from_ct(result, span)?))
     }
 
     fn eval_pool_host(
@@ -17290,11 +17387,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         receiver: MirEvalValue,
         span: Span,
     ) -> Result<MirEvalValue, Diagnostic> {
+        let receiver = crate::Comptime::ServicesLite::intern_resolve(receiver);
+        let slot = crate::Comptime::ServicesLite::intern_slot(&receiver);
         crate::Comptime::ServicesLite::apply_runtime_start_with_dispatcher(
             &receiver,
             span,
             |handler_name, endpoint| self.dispatch_service_worker(handler_name, endpoint, span),
         )
+        .map(|value| crate::Comptime::ServicesLite::intern_commit(slot, value))
     }
 
     fn shape_type_definition(

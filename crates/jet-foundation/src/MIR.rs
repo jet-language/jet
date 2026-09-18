@@ -2079,8 +2079,7 @@ impl MirDbQueryMetadata {
         field(&mut output, &self.source_span.start.to_string());
         field(&mut output, &self.source_span.end.to_string());
         field(&mut output, &self.statement_identity);
-        output.push_str(&self.table_facts.len().to_string());
-        output.push(':');
+        field(&mut output, &self.table_facts.len().to_string());
         for fact in &self.table_facts {
             field(&mut output, &fact.table_id);
             field(&mut output, if fact.read { "1" } else { "0" });

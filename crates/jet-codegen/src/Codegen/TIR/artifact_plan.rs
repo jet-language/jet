@@ -1247,7 +1247,8 @@ fn lower_inline_c_foreign(
     target: TirArtifactTarget,
 ) -> Option<TirForeignFact> {
     let inline = function.inline_foreign.as_ref()?;
-    if !inline.lang.eq_ignore_ascii_case("c") {
+    let language = inline.lang.to_ascii_lowercase();
+    if !matches!(language.as_str(), "c" | "asm" | "cpp") {
         return None;
     }
     let wrapper = format!("jet_ffi_{}", function.name);
@@ -1262,7 +1263,7 @@ fn lower_inline_c_foreign(
         raw_scalar_abi: true,
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
-        language: "c".to_string(),
+        language,
         applicability: target_applicability_for(target),
         effect_root: None,
         callback_transport: None,

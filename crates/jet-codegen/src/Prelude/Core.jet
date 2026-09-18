@@ -556,6 +556,7 @@ dispatcher_row plain core.service runtime | CoreCallRecord::new( "core.service",
 dispatcher_row adapter core.service endpoint_send | CoreCallRecord::new("core.service", "endpoint_send", "jet_services_endpoint_send", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.service endpoint_receive | CoreCallRecord::new("core.service", "endpoint_receive", "jet_services_endpoint_receive", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.service endpoint_show | CoreCallRecord::new("core.service", "endpoint_show", "jet_services_endpoint_show", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row adapter core.service delivery_state_show | CoreCallRecord::new("core.service", "delivery_state_show", "jet_services_delivery_state_show", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.service delivery_status | CoreCallRecord::new("core.service", "delivery_status", "jet_services_delivery_status", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.service append_event | CoreCallRecord::new("core.service", "append_event", "jet_services_append_event", true, &[true, false]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.service chaos_fail | CoreCallRecord::new("core.service", "chaos_fail", "jet_services_chaos_fail", true, &[true]).without_direct_aot().without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -1596,6 +1597,7 @@ ambient_route core.service runtime
 ambient_route core.service endpoint_send
 ambient_route core.service endpoint_receive
 ambient_route core.service endpoint_show
+ambient_route core.service delivery_state_show
 ambient_route core.service delivery_status
 ambient_route core.devtools publish
 ambient_route core.ui gtk_backend
@@ -1918,6 +1920,10 @@ dispatcher_row plain core.archive tar_get | CoreCallRecord::new("core.archive", 
 dispatcher_row plain core.archive tar_names_json | CoreCallRecord::new("core.archive", "tar_names_json", "jet_foundation::CoreArchive::jet_archive_tar_names_json", false, &[true]).with_jit_symbol("jet_jit_tar_names_json")
 dispatcher_row plain core.archive crc32 | CoreCallRecord::new("core.archive", "crc32", "jet_foundation::CoreArchive::jet_archive_crc32", false, &[true]).with_jit_symbol("jet_jit_archive_crc32")
 dispatcher_row plain core.archive adler32 | CoreCallRecord::new("core.archive", "adler32", "jet_foundation::CoreArchive::jet_archive_adler32", false, &[true]).with_jit_symbol("jet_jit_archive_adler32")
+dispatcher_row plain core.archive.gzip compress | CoreCallRecord::new("core.archive.gzip", "compress", "jet_foundation::GzipKernel::jet_compress_gzip_compress", false, &[true]).with_jit_symbol("jet_jit_gzip_compress")
+dispatcher_row plain core.archive.gzip decompress | CoreCallRecord::new("core.archive.gzip", "decompress", "jet_compress_gzip_decompress", true, &[true]).with_jit_symbol("jet_jit_gzip_decompress")
+dispatcher_row plain core.archive.zstd compress | CoreCallRecord::new("core.archive.zstd", "compress", "jet_compress_zstd_compress", true, &[true]).with_jit_symbol("jet_jit_zstd_compress")
+dispatcher_row plain core.archive.zstd decompress | CoreCallRecord::new("core.archive.zstd", "decompress", "jet_compress_zstd_decompress", true, &[true]).with_jit_symbol("jet_jit_zstd_decompress")
 dispatcher_row plain core.crypto password_hash | CoreCallRecord::new("core.crypto", "password_hash", "jet_crypto_password_hash_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_hash")
 dispatcher_row plain core.crypto password_verify | CoreCallRecord::new("core.crypto", "password_verify", "jet_crypto_password_verify_typed_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_verify")
 dispatcher_row adapter core.crypto __secret_from_text | CoreCallRecord::new("core.crypto", "__secret_from_text", "jet_crypto_secret_from_text_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_secret_from_text")

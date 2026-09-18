@@ -4054,15 +4054,29 @@ fn jet_jit_object_from_map(map: i64) -> i64 {
 /// Pattern `if tree == .Object(entries)`: ordered pair list → user-facing Map.
 fn jet_jit_object_entries_to_map(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        // Computed `DataTree.Object(map)` payloads are already maps.
+        if rt.heap.map_len(list).is_some() {
+            return list;
+        }
         let Some(len) = rt.heap.list_len(list) else {
             rt.set_trap("data object payload is not an entry list");
             return 0;
         };
         let map = rt.heap.alloc_empty_map();
         for i in 0..len {
-            let rec = rt.heap.list_get_int(list, i).unwrap_or(0);
-            let k = rt.heap.record_get_int(rec, 0).unwrap_or(0);
-            let v = rt.heap.record_get_int(rec, 1).unwrap_or(0);
+            // json.parse stores ordered pairs as `List` of `RecordRef`, not
+            // `IntList`. Keys are `JetVal::String`, values are DataTree records.
+            let rec = rt.heap.list_get_raw(list, i).unwrap_or(0);
+            let k = match rt.heap.record_get(rec, 0).cloned() {
+                Some(JetVal::String(text)) => rt.heap.alloc_string(text),
+                Some(JetVal::Int(handle) | JetVal::RecordRef(handle)) => handle,
+                _ => 0,
+            };
+            let v = match rt.heap.record_get(rec, 1).cloned() {
+                Some(JetVal::Int(handle) | JetVal::RecordRef(handle)) => handle,
+                Some(JetVal::String(text)) => rt.heap.alloc_string(text),
+                _ => 0,
+            };
             let _ = rt.heap.map_insert(map, k, v);
         }
         map

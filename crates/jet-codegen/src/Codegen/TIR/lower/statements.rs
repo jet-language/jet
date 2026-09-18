@@ -2309,12 +2309,26 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
 }
 
 fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
-    matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
+    match pattern {
+        Pattern::Ok { .. } | Pattern::Present { .. } => true,
+        Pattern::Variant {
+            variant, bindings, ..
+        } if bindings.len() == 1
+            && matches!(
+                variant.as_str(),
+                Syntax::LIT_OK | Syntax::LIT_VALUE | "value"
+            ) =>
+        {
+            true
+        }
+        _ => false,
+    }
 }
 
 fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a str> {
     match pattern {
         Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => Some(binding),
+        Pattern::Variant { bindings, .. } => bindings.first().and_then(crate::AST::PatSlot::as_bind),
         _ => None,
     }
 }

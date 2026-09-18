@@ -625,7 +625,8 @@ impl RecordIndex {
 
     /// Add or replace one `(kind, artifact_id)` row in memory.  A byte-for-byte
     /// equivalent duplicate is idempotent; a differing duplicate is rejected.
-    /// Budget eviction considers only safe, unsaved, unreferenced replay rows.
+    /// Budget eviction considers safe, unsaved, unreferenced replay, receipt,
+    /// and evidence rows.
     pub fn update(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
         let entry = entry.normalize()?;
         let mut candidate = self.clone();
@@ -881,8 +882,10 @@ impl RecordIndex {
                 .iter()
                 .enumerate()
                 .filter(|(_, entry)| {
-                    entry.kind == RecordKind::Replay
-                        && !entry.is_sensitive()
+                    matches!(
+                        entry.kind,
+                        RecordKind::Replay | RecordKind::Receipt | RecordKind::Evidence
+                    ) && !entry.is_sensitive()
                         && !entry.saved
                         && !self.is_referenced(entry)
                 })
@@ -893,7 +896,7 @@ impl RecordIndex {
                 })
             else {
                 return Err(
-                    "record budget exceeded; no unreferenced unsaved safe replay can be evicted"
+                    "record budget exceeded; no unreferenced unsaved safe record can be evicted"
                         .into(),
                 );
             };

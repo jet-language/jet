@@ -19,6 +19,7 @@ use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
 use crate::Codegen::TIR::is_data_event_variant;
+use crate::Codegen::TIR::is_hook_outcome_variant;
 use crate::Codegen::TIR::orfallback_rhs_in_subset;
 use crate::Codegen::TIR::pattern_is_variant_or_orvariant;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
@@ -592,7 +593,10 @@ pub(crate) fn if_cond_in_subset(
             // DataEvent is a prelude enum and therefore has no user-variant
             // owner entries. Its single-payload and unit patterns are still
             // fully represented by the typed if-let lowering.
-            if !cx.variant_owner.contains_key(variant) && is_data_event_variant(variant) {
+            // HookOutcome/DataEvent are prelude enums. They may also appear in
+            // `variant_owner`; the typed if-let lowering still owns both shapes.
+            if is_data_event_variant(variant) || is_hook_outcome_variant(variant) {
+
                 if bindings.is_empty() || matches!(bindings.first(), Some(PatSlot::Wildcard)) {
                     return Some(Vec::new());
                 }

@@ -190,6 +190,10 @@ pub(crate) fn is_data_event_variant(variant: &str) -> bool {
     )
 }
 
+pub(crate) fn is_hook_outcome_variant(variant: &str) -> bool {
+    matches!(variant, "Continue" | "Cancel" | "Fail")
+}
+
 /// True for a `Variant` pattern or an `Or` whose every alternative is a `Variant`.
 /// Excludes optional/result patterns (Present/Absent/Ok/Err) — out of Phase 4.
 pub(crate) fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {

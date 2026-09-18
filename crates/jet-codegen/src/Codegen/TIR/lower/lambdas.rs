@@ -351,12 +351,6 @@ fn lower_lambda_expecting_with_host_borrow(
     let lambda_ret_ty = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
         .or(explicit_failure_carrier.as_ref())
-        .or_else(|| {
-            lam.meta
-                .fallible_propagation
-                .then(|| env.ret_ty.as_ref())
-                .flatten()
-        })
         .map(|ret| lambda_carrier_return_type(&body_ty, ret))
         .unwrap_or_else(|| body_ty.clone());
     // A lambda called immediately in a fallible outer expression still needs the
@@ -534,7 +528,7 @@ fn lower_lambda_expecting_with_host_borrow(
                 } else {
                     lower_stmts(stmts, cx, &mut lam_env)
                 };
-                if lam.meta.fallible_propagation
+                if lam.meta.fallible_carrier.is_some()
                     || expected_return.is_some_and(|ty| {
                         matches!(ty, Type::Result { .. } | Type::Option(_))
                     })
@@ -574,13 +568,22 @@ fn lower_lambda_expecting_with_host_borrow(
             // default is for standalone Jet callables and would leave a
             // host `Fn() -> Unit` with a Result carrier and no return slot.
             crate::Codegen::TIR::TFailureCarrier::from_checked_type(&lambda_ret_ty)
-        } else {
+        } else if lam.result_type.is_some()
+            || lam.error_type.is_some()
+            || lam.meta.fallible_carrier.is_some()
+        {
             match crate::Codegen::TIR::lambda_failure_carrier(lam) {
                 crate::Codegen::TIR::TFailureCarrier::Infallible => {
                     crate::Codegen::TIR::TFailureCarrier::from_checked_type(&body_ty)
                 }
                 carrier => carrier,
             }
+        } else {
+            // Unannotated standalone lambda: the checked body type owns the
+            // ABI. `from_return_type(None)` would default to Result<Unit>
+            // even when the body is Int, so a nested `inner(4)` tail compiled
+            // as a Unit-success Result while callers still expected Int.
+            crate::Codegen::TIR::TFailureCarrier::from_checked_type(&body_ty)
         },
         ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit")).then_some(body_ty),
         is_move,
@@ -604,24 +607,14 @@ fn lower_lambda_expecting_with_host_borrow(
 fn fallible_lambda_value(
     value: TExpr,
     lam: &Lambda,
-    env: &LowerEnv,
+    _env: &LowerEnv,
     expected_return: Option<&Type>,
 ) -> TExpr {
     let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let carrier = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
-        .or(explicit_failure_carrier.as_ref())
-        .or_else(|| {
-            lam.meta
-                .fallible_propagation
-                .then(|| env.ret_ty.as_ref())
-                .flatten()
-        });
-    if expected_return.is_none()
-        && lam.meta.fallible_carrier.is_none()
-        && !lam.meta.fallible_propagation
-        && explicit_failure_carrier.is_none()
-    {
+        .or(explicit_failure_carrier.as_ref());
+    if carrier.is_none() {
         return value;
     }
     let value = rehome_default_result_carrier(value, carrier);

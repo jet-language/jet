@@ -2909,6 +2909,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("ServiceEndpoint".to_string()))],
             Some(Type::String),
         )),
+        ("core.service", "delivery_state_show") => Some((
+            vec![(read, Type::Named("DeliveryState".to_string()))],
+            Some(Type::String),
+        )),
         ("core.data", "quantile") => {
             let args = vec![
                 (read, Type::List(Box::new(Type::Float))),

@@ -5527,6 +5527,24 @@ fn display_handle_text_mode(
         Some(RuntimeValueKind::Bool) => {
             if handle != 0 { "true" } else { "false" }.to_string()
         }
+        Some(RuntimeValueKind::List) => {
+            let Some(element) = rt
+                .runtime_type_descriptor(type_id)
+                .and_then(|descriptor| descriptor.element)
+            else {
+                return handle.to_string();
+            };
+            match rt.heap.clone_list_values(handle) {
+                Some(slots) => {
+                    let parts = slots
+                        .iter()
+                        .map(|slot| display_slot_text(rt, slot, element, depth + 1, debug))
+                        .collect::<Vec<_>>();
+                    format!("[{}]", parts.join(", "))
+                }
+                None => "<invalid>".to_string(),
+            }
+        }
         Some(RuntimeValueKind::Enum | RuntimeValueKind::Record) => {
             nominal_handle_text(rt, handle, type_id, depth, debug)
                 .unwrap_or_else(|| "<invalid>".to_string())
@@ -6289,7 +6307,9 @@ fn packed_scalar_enum_name(name: &str) -> bool {
         | "TLSVersion"
         | "Key"
         | "IoError"
-        | "Ordering" => true,
+        | "Ordering"
+        | "WatchDomain"
+        | "WatchKind" => true,
         _ => false,
     }
 }

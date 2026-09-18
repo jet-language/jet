@@ -1905,6 +1905,17 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ),
     ("TaskStatus", &["Running", "Paused", "CancelRequested"]),
     (
+        "DeliveryState",
+        &[
+            "Pending",
+            "Accepted",
+            "Delivering",
+            "Delivered",
+            "DeadLettered",
+            "Cancelled",
+        ],
+    ),
+    (
         crate::Syntax::TYPE_IO_ERROR,
         crate::Syntax::IO_ERROR_VARIANTS,
     ),
@@ -1965,6 +1976,22 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Object",
         ],
     ),
+    (
+        "DataEvent",
+        &[
+            "Null",
+            "ArrayStart",
+            "ArrayEnd",
+            "ObjectStart",
+            "ObjectEnd",
+            "Bool",
+            "Int",
+            "Float",
+            "Text",
+            "Bytes",
+            "Key",
+        ],
+    ),
     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
     (
         "EmailError",
@@ -1988,6 +2015,15 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("RecipientPolicy", &["RequireAll", "DeliverAccepted"]),
     ("SMTPAuth", &["None", "Password"]),
     ("TLSTrust", &["System", "SystemPlusCa"]),
+    ("TLSVersion", &["Tls12", "Tls13"]),
+    (
+        "TLSClientTrust",
+        &["System", "SystemPlus", "CustomOnly"],
+    ),
+    ("NetShutdown", &["Read", "Write", "Both"]),
+    ("WatchDomain", &["File", "Process", "Port"]),
+    ("WatchKind", &["Created", "Modified", "Removed", "Error", "Exited", "Ready"]),
+    ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
     (
         "WsError",
         &[
@@ -2130,8 +2166,22 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         &["mode", "comments", "inclusive_prefixes"],
     ),
     ("Size", &["width", "height"]),
+    (
+        "UiNode",
+        &["label", "width", "height", "accessibility", "ime", "shortcut"],
+    ),
+    ("JSONWriter", &[]),
+    ("JSONReader", &[]),
+    ("JSONLWriter", &[]),
+    ("JSONLReader", &[]),
+    ("SigningKey", &[]),
+    ("VerifyKey", &[]),
     ("DirEntry", &["name", "path", "is_dir"]),
     ("WalkEntry", &["path", "relative", "is_dir", "depth"]),
+    ("TempDir", &["path"]),
+    ("TempFile", &["path"]),
+    ("FileLock", &["path"]),
+    ("WatchEvent", &["path", "domain", "kind"]),
     (
         "Stat",
         &[
@@ -2363,6 +2413,29 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ),
     ("TypeParamInfo", &["name", "bounds", "span"]),
     ("SourceSpan", &["start", "end"]),
+    (
+        "TLSPeerIdentity",
+        &[
+            "verified_server_name",
+            "leaf",
+            "certificate_chain",
+            "cipher_suite",
+            "tls_version",
+        ],
+    ),
+    (
+        "TLSCertificate",
+        &[
+            "der",
+            "sha256",
+            "spki_sha256",
+            "dns_names",
+            "valid_from_unix_ms",
+            "valid_until_unix_ms",
+            "subject",
+            "issuer",
+        ],
+    ),
 ];
 const COMPILER_OWNED_MATH_RECORDS: &[(&str, &[&str])] = &[
     ("F32x4", &["x", "y", "z", "w"]),
@@ -2392,6 +2465,10 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 | "DataSummary"
                 | "FieldError"
                 | "AllocError"
+                | "KeyRef"
+                | "MutationPlan"
+                | "VaultWrite"
+                | "Rotation"
                 | crate::Syntax::TYPE_RANGE
         )
 }
@@ -2828,6 +2905,27 @@ fn compiler_owned_type_defs(
                                 has_default: false,
                                 redact: false,
                             }])
+                        } else if *name == "TLSClientTrust" {
+                            match *variant {
+                                "SystemPlus" | "CustomOnly" => TirVariantPayload::Single(
+                                    Type::Named("TLSRootCertificates".to_string()),
+                                ),
+                                _ => TirVariantPayload::Unit,
+                            }
+                        } else if *name == "DataEvent" {
+                            match *variant {
+                                "Bool" => TirVariantPayload::Single(Type::Bool),
+                                "Int" => TirVariantPayload::Single(Type::Int),
+                                "Float" => TirVariantPayload::Single(Type::Float),
+                                "Text" | "Key" => TirVariantPayload::Single(Type::String),
+                                "Bytes" => TirVariantPayload::Single(Type::List(Box::new(
+                                    Type::IntN {
+                                        signed: false,
+                                        bits: 8,
+                                    },
+                                ))),
+                                _ => TirVariantPayload::Unit,
+                            }
                         } else if *name == "DataTree" {
                             match *variant {
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
@@ -2915,6 +3013,41 @@ fn compiler_owned_type_defs(
                 row
             }),
         )
+        .chain(
+            ["KeyRef", "MutationPlan", "VaultWrite"]
+                .into_iter()
+                .map(move |name| {
+                    let mut row = compiler_owned_record(
+                        module,
+                        name,
+                        std::iter::empty::<(&'static str, Type)>(),
+                    );
+                    row.generic_params = vec![super::TGenericParam {
+                        name: "T".to_string(),
+                        bounds: Vec::new(),
+                    }];
+                    row
+                }),
+        )
+        .chain(std::iter::once({
+            let args = [Type::Named("T".to_string())];
+            let mut row = compiler_owned_record(
+                module,
+                "Rotation",
+                ["previous", "current"].map(|field| {
+                    (
+                        field,
+                        crate::Sema::core_struct_field_type("Rotation", field, &args)
+                            .expect("canonical Rotation field"),
+                    )
+                }),
+            );
+            row.generic_params = vec![super::TGenericParam {
+                name: "T".to_string(),
+                bounds: Vec::new(),
+            }];
+            row
+        }))
         .chain(std::iter::once(compiler_owned_record(
             module,
             "DataPivotCell",
