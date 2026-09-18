@@ -4174,15 +4174,27 @@ fn checked_list_by(list: i64, callback: i64, maximum: bool) -> i64 {
         return 0;
     };
     let mut best = None;
-    let mut best_key = 0_i64;
+    let mut best_key: Option<jet_foundation::Numeric::JetInt> = None;
     for value in clone_list_ints(list) {
-        let key = invoke_closure_i64(slot, value);
+        let key_raw = invoke_closure_i64(slot, value);
         if closure_trapped() {
             return 0;
         }
-        if best.is_none() || (maximum && key > best_key) || (!maximum && key < best_key) {
+        let key = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key_raw) };
+        let replace = match best_key.as_ref() {
+            None => true,
+            Some(best_key) => {
+                let order = key.cmp(best_key);
+                if maximum {
+                    order != std::cmp::Ordering::Less
+                } else {
+                    order != std::cmp::Ordering::Greater
+                }
+            }
+        };
+        if replace {
             best = Some(value);
-            best_key = key;
+            best_key = Some(key);
         }
     }
     Concurrency::with_runtime_mut(|rt| option_i64(rt, best))

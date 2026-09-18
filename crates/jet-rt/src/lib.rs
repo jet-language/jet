@@ -90,6 +90,12 @@ mod map_key_semantics {
 }
 pub use map_key_semantics::{jet_map_key_cmp, JetMapKey, JetMapKeyEncode};
 
+fn canonical_int_map_key(key: i64) -> i64 {
+    unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key) }
+        .to_i64()
+        .unwrap_or(key)
+}
+
 #[allow(dead_code)]
 mod uninit_semantics {
     include!("../../jet-codegen/src/Prelude/Uninit.rs");
@@ -495,7 +501,7 @@ impl JetArena {
             Some(JetVal::Map(entries)) => {
                 Self::retain_exact_raw(&mut self.exact_roots, key);
                 Self::retain_exact_raw(&mut self.exact_roots, value);
-                entries.insert(JetMapKey::Int(key), (key, value));
+                entries.insert(JetMapKey::Int(canonical_int_map_key(key)), (key, value));
                 Some(())
             }
             _ => None,
@@ -505,7 +511,7 @@ impl JetArena {
     pub fn map_get_int(&self, map: i64, key: i64) -> Option<i64> {
         match self.values.get(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .get(&JetMapKey::Int(key))
+                .get(&JetMapKey::Int(canonical_int_map_key(key)))
                 .map(|(_, value)| *value),
             _ => None,
         }
@@ -514,7 +520,7 @@ impl JetArena {
     pub fn map_remove_int(&mut self, map: i64, key: i64) -> Option<i64> {
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => entries
-                .remove(&JetMapKey::Int(key))
+                .remove(&JetMapKey::Int(canonical_int_map_key(key)))
                 .map(|(_, value)| value),
             _ => None,
         }
