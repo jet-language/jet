@@ -8334,20 +8334,40 @@ fn reconcile_checked_vector_fact(
         return;
     };
 
+    // The checked row carries generic loop facts.  Reduction and conditional
+    // accumulation deliberately report their loop-carried accumulator as a
+    // cross-iteration dependency, while an early search deliberately reports
+    // its first-match exit.  Those are canonical rule semantics, not missing
+    // proofs; the structural MirVectorRule row remains the authority for the
+    // corresponding exception.
+    let rule_allows_loop_carried = matches!(
+        derived.rule,
+        MirVectorRule::ConditionalAccumulate | MirVectorRule::Reduction
+    );
+    let rule_allows_early_exit = derived.rule == MirVectorRule::EarlyExitSearch;
+    let rule_has_checked_packing_exception =
+        rule_allows_loop_carried || rule_allows_early_exit;
+    let checked_no_cross_iteration_dependencies =
+        proof.no_cross_iteration_dependencies || rule_allows_loop_carried;
+    let checked_no_early_exit = proof.no_early_exit || rule_allows_early_exit;
+
     // Merge the checked semantic guards before scope rejection so a
     // conflicting proof remains observable in the canonical row.
     derived.no_aliasing &= proof.no_aliasing;
-    derived.no_early_exit &= proof.no_early_exit;
+    derived.no_early_exit &= checked_no_early_exit;
     derived.effect_free_body &= proof.effect_free_body;
-    derived.no_cross_iteration_dependencies &= proof.no_cross_iteration_dependencies;
+    derived.no_cross_iteration_dependencies &= checked_no_cross_iteration_dependencies;
 
     // Source span is the proof origin; the identity carrier is its complete
     // validity window.  A matching header alone is insufficient after CFG or
-    // access rewriting.
+    // access rewriting.  The checked row's packed bit is a generic summary,
+    // so rule-specific rows use their canonical structural packing proof.
+    let early_int_lane_exception =
+        rule_allows_early_exit && proof.lane_width.is_none() && derived.lane_width.is_some();
     if !proof.same_checked_scope(derived)
         || proof.layout != derived.layout
-        || proof.packed != derived.packed
-        || proof.lane_width != derived.lane_width
+        || (!rule_has_checked_packing_exception && proof.packed != derived.packed)
+        || (!early_int_lane_exception && proof.lane_width != derived.lane_width)
     {
         let reason = if !derived.effect_free_body {
             MirOptimizationRejection::HasEffects
@@ -8380,11 +8400,11 @@ fn reconcile_checked_vector_fact(
     if derived.decision.is_eligible() {
         let rejection = if !proof.no_aliasing {
             Some(MirOptimizationRejection::MayAlias)
-        } else if !proof.no_early_exit {
+        } else if !checked_no_early_exit {
             Some(MirOptimizationRejection::HasEarlyExit)
         } else if !proof.effect_free_body {
             Some(MirOptimizationRejection::HasEffects)
-        } else if !proof.no_cross_iteration_dependencies {
+        } else if !checked_no_cross_iteration_dependencies {
             Some(MirOptimizationRejection::CrossIterationDependency)
         } else {
             None
