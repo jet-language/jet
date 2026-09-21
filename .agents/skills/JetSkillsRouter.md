@@ -23,7 +23,7 @@ The request defines scope and permissions. A full audit covers its declared corp
 | Peer-language lineage, regrets, and lessons | `lessons-learned` |
 | Measured public-code frequency and Jet friction | `surface-frequency-audit` |
 | Mine specified external sources for Jet lessons | `mine-for-jet` |
-| One source-backed question | `research` |
+| One source-backed question or standalone retrospective evidence-adequacy challenge | `research` |
 | One-question or frontier-round decision interview | `grilling` or `batch-grill-me` |
 | Interview plus agreed glossary/ADR record | `grill-with-docs` |
 | Domain terms or agreed model records | `domain-modeling` |

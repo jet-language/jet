@@ -23,6 +23,74 @@ The unattended agent is always present because it is one of Jet's three readers.
 
 Walk the relevant UX/DX slice for every row: where it waited, what surprised it, what it had to say twice, what it had to know before starting, and which error text left it stuck. Record one verbatim reaction such as “this reads nicely” or “this made me sigh.” A preference remark is evidence about the surface even when it is not evidence about the technology.
 
+## Optional controlled first-session branch
+
+Use this branch only when the requested outcome is a controlled cold-session,
+repair, assistance, or preference study. Ordinary persona work keeps its
+existing project loops and does not collect controlled-trial paperwork.
+
+The retained T1 fixture at
+[`docs/audits/raw/2393-r2/fixtures.json`](../../docs/audits/raw/2393-r2/fixtures.json)
+is task data, not participant evidence. Freeze its bytes, argument vectors,
+the fresh Jet binary identity, prompt, allowlisted current documentation,
+tools, time limits, and expected results before launch. The initial pilot is
+one fresh OMP `@implementation` agent on the configured Linux CLI host, with
+no model substitution; record the resolved provider, model, and settings.
+Capture or content-address every harness-delivered role, system, project,
+skill, and injected context instruction before launch. Later unapproved
+assistance changes controlled status to unavailable. This controls observable
+harness inputs, not opaque provider internals or model training.
+
+For T1, the success input is:
+
+```text
+[base]
+name = "Ada"
+role = "admin"
+[dev]
+inherits = "base"
+role = "reviewer"
+```
+
+The controller invokes the argv vectors `["records.cfg"]` and
+`["records-failure.cfg"]`; the successful stdout contract includes its final
+newline.
+
+The program receives `records.cfg` and must emit exactly:
+
+```text
+base.name=Ada
+base.role=admin
+dev.name=Ada
+dev.role=reviewer
+```
+
+The failure input contains `name = "Ada"` followed by `name = "Grace"` in
+`[base]`. It must exit non-zero, emit no stdout, and identify the duplicate
+field name and section `base`. Preserve this stronger field-name requirement
+even if the retained checker only searches for `duplicate` and `base`.
+
+Use a fresh task workspace and program artifacts under
+`~/.cache/jet-test-scratch`. The agent submits its first complete program
+before receiving compiler or run feedback; preserve the exact source and
+first result. Permit at most one repair submission, with only raw
+compiler/run results and expected-versus-actual differences as feedback, not
+suggested code. Give each submission a 15-minute limit. Keep first-attempt
+success, checker result, independent semantic output, refusal, first failure,
+repair, and post-task comments in separate records. A hardcoded fixture
+answer is not success; a green checker with wrong output or an unnamed
+duplicate is a semantic failure. A program that passes both cases needs no
+forced failure or repair.
+
+Missing profile, fresh session, required tool, or verifiable help boundary
+makes this controlled branch unavailable rather than silently changing it.
+A refusal, timeout, or unavailable run is a non-result, not a language score.
+One agent's post-task comment is a usability observation, not earned
+cross-language preference. Do not recruit people, resume the full `#2393`
+campaign, create a runner or ledger, edit product code, or issue a release
+verdict. Missing controlled setup blocks only this branch and claims that
+require it; ordinary persona observations remain available.
+
 ## Standing lens
 
 Apply only the standing-lens sections relevant to the declared matrix. Use runtime probes and the UX/DX micro-sweep slice where the row needs them; do not force unrelated comparisons or window work. Report missing or unavailable evidence as `not-proven` or `blocked` with the reason, never as an invented success.
