@@ -179,30 +179,163 @@ fn context_is_compiler_fact_access(src: &str, offset: usize) -> Option<(String, 
 /// The parser's old `when` spelling is retired.  Keep this resolver token based
 /// so strings and comments containing a similar sequence cannot manufacture a
 /// case catalog.
+fn completion_previous_code_token(tokens: &[Token], index: usize) -> Option<usize> {
+    tokens[..index]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(candidate, token)| {
+            (!matches!(
+                &token.kind,
+                TokKind::LineComment(_) | TokKind::BlockComment(_)
+            ))
+            .then_some(candidate)
+        })
+}
+
+fn completion_type_name_from_kind(kind: &SymKind) -> Option<String> {
+    match kind {
+        SymKind::Local { ty: Some(AST::Type::Named(name)), .. }
+        | SymKind::Param { ty: AST::Type::Named(name) }
+        | SymKind::Field {
+            ty: AST::Type::Named(name),
+            ..
+        }
+        | SymKind::Local {
+            ty: Some(AST::Type::Apply { name, .. }),
+            ..
+        }
+        | SymKind::Param {
+            ty: AST::Type::Apply { name, .. },
+        }
+        | SymKind::Field {
+            ty: AST::Type::Apply { name, .. },
+            ..
+        } => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn completion_method_owner_from_scope(scope: &str) -> Option<String> {
+    let scope = scope.strip_prefix("method:")?;
+    let (_, owner_and_name) = scope.rsplit_once("::")?;
+    owner_and_name
+        .rsplit_once('.')
+        .map(|(owner, _)| owner.to_string())
+}
+fn completion_checked_anchor_identity(
+    db: &SymbolDB,
+    target: &jet_semindex::DefinitionAnchor,
+) -> Option<String> {
+    if let Some(identity) = target
+        .semantic_identity
+        .as_deref()
+        .filter(|identity| !identity.is_empty())
+    {
+        return Some(identity.to_string());
+    }
+    let mut identity = None;
+    for definition in db.defs.iter().filter(|definition| {
+        definition.module_path == target.module_path
+            && definition.def_span.start == target.def_span.start
+            && definition.def_span.end == target.def_span.end
+    }) {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &String| existing != &definition.identity)
+        {
+            return None;
+        }
+        identity = Some(definition.identity.clone());
+    }
+    identity
+}
+
+
+fn completion_subject_type_name(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    subject_index: usize,
+) -> Option<String> {
+    let span = tokens.get(subject_index)?.span;
+    let reference = db
+        .refs
+        .iter()
+        .filter(|reference| {
+            reference.module_path == path
+                && reference.span.start <= span.start
+                && span.end <= reference.span.end
+        })
+        .min_by_key(|reference| {
+            reference
+                .span
+                .end
+                .saturating_sub(reference.span.start)
+        })?;
+    if let Some(identity) = reference
+        .target
+        .as_ref()
+        .and_then(|target| completion_checked_anchor_identity(db, target))
+    {
+        if let Some(definition) = db.defs.iter().find(|definition| definition.identity == identity) {
+            if let Some(type_name) = completion_type_name_from_kind(&definition.kind) {
+                return Some(type_name);
+            }
+        }
+    }
+    if matches!(&tokens[subject_index].kind, TokKind::KwSelf)
+        || reference.name == Syntax::KW_SELF
+    {
+        return completion_method_owner_from_scope(reference.scope_identity.as_deref()?);
+    }
+    None
+}
+
+fn completion_enum_definition_for_type<'a>(
+    db: &'a SymbolDB,
+    type_name: &str,
+    current_path: &str,
+    offset: usize,
+) -> Option<&'a jet_semindex::SymDef> {
+    let anchor = jet_semindex::SemanticVisibilityAnchor {
+        module_path: current_path,
+        offset: Some(offset),
+        session_top_level: false,
+    };
+    if let Some(symbol) = db.symbols.resolve_visible_at(type_name, anchor) {
+        let mut matches = db.defs.iter().filter(|definition| {
+            definition.identity == symbol.identity
+                && matches!(&definition.kind, SymKind::Enum { .. })
+        });
+        if let Some(definition) = matches.next() {
+            if matches.next().is_none() {
+                return Some(definition);
+            }
+        }
+    }
+    let leaf = type_name
+        .rsplit_once('.')
+        .map_or(type_name, |(_, leaf)| leaf);
+    let mut matches = db.defs.iter().filter(|definition| {
+        matches!(&definition.kind, SymKind::Enum { .. })
+            && (definition.name == type_name || definition.name == leaf)
+    });
+    let definition = matches.next()?;
+    matches.next().is_none().then_some(definition)
+}
+
 fn detect_switch_enum_type<'a>(
     tokens: &[Token],
     offset: usize,
     current_path: &str,
     db: &'a SymbolDB,
 ) -> Option<&'a jet_semindex::SymDef> {
-    let previous = |index: usize| {
-        tokens[..index]
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(candidate, token)| {
-                (!matches!(
-                    &token.kind,
-                    TokKind::LineComment(_) | TokKind::BlockComment(_)
-                ))
-                .then_some(candidate)
-            })
-    };
     for (brace_index, brace) in tokens.iter().enumerate().rev() {
         if !matches!(&brace.kind, TokKind::LBrace) || brace.span.start >= offset {
             continue;
         }
-        let Some(eq_index) = previous(brace_index) else {
+        let Some(eq_index) = completion_previous_code_token(tokens, brace_index) else {
             continue;
         };
         if !matches!(
@@ -211,13 +344,10 @@ fn detect_switch_enum_type<'a>(
         ) {
             continue;
         }
-        let Some(subject_index) = previous(eq_index) else {
+        let Some(subject_index) = completion_previous_code_token(tokens, eq_index) else {
             continue;
         };
-        let TokKind::Ident(subject_name) = &tokens[subject_index].kind else {
-            continue;
-        };
-        let Some(if_index) = previous(subject_index) else {
+        let Some(if_index) = completion_previous_code_token(tokens, subject_index) else {
             continue;
         };
         if !matches!(&tokens[if_index].kind, TokKind::KwIf) {
@@ -239,34 +369,9 @@ fn detect_switch_enum_type<'a>(
             continue;
         }
 
-        let binding = db
-            .defs
-            .iter()
-            .filter(|definition| {
-                definition.module_path == current_path
-                    && definition.name == *subject_name
-                    && definition.def_span.start <= offset
-            })
-            .max_by_key(|definition| definition.def_span.start)?;
-        let type_name = match &binding.kind {
-            SymKind::Local { ty: Some(AST::Type::Named(name)), .. }
-            | SymKind::Param { ty: AST::Type::Named(name) } => name,
-            SymKind::Local { ty: Some(AST::Type::Apply { name, .. }), .. }
-            | SymKind::Param { ty: AST::Type::Apply { name, .. } } => name,
-            _ => continue,
-        };
-        let leaf = type_name
-            .rsplit_once('.')
-            .map_or(type_name.as_str(), |(_, leaf)| leaf);
-        let mut enums = db.defs.iter().filter(|definition| {
-            definition.module_path == current_path
-                && matches!(&definition.kind, SymKind::Enum { .. })
-                && (definition.name == *type_name || definition.name == leaf)
-        });
-        let definition = enums.next()?;
-        if enums.next().is_none() {
-            return Some(definition);
-        }
+        let type_name =
+            completion_subject_type_name(db, tokens, current_path, subject_index)?;
+        return completion_enum_definition_for_type(db, &type_name, current_path, offset);
     }
     None
 }
@@ -569,32 +674,34 @@ pub(crate) fn compute_completions(
     {
         if let SymKind::Enum { variants, .. } = &enum_definition.kind {
             let prefix = current_identifier_prefix(src, offset);
+            let prefix_start = offset.saturating_sub(prefix.len());
+            let dot_already_typed = src
+                .get(..prefix_start)
+                .is_some_and(|before| before.ends_with('.'));
             for variant in variants {
                 if !variant.starts_with(&prefix) {
                     continue;
                 }
                 let label = format!(".{variant}");
-                let identity = db
-                    .defs
-                    .iter()
-                    .find(|definition| {
-                        definition.module_path == enum_definition.module_path
-                            && definition.name == *variant
-                            && matches!(
-                                &definition.kind,
-                                SymKind::EnumVariant { parent } if parent == &enum_definition.name
-                            )
-                    })
-                    .map(|definition| definition.identity.clone())
-                    .unwrap_or_else(|| label.clone());
-                if seen.insert(identity) {
+                let Some(variant_definition) = db.defs.iter().find(|definition| {
+                    definition.module_path == enum_definition.module_path
+                        && definition.name == *variant
+                        && matches!(
+                            &definition.kind,
+                            SymKind::EnumVariant { parent } if parent == &enum_definition.name
+                        )
+                }) else {
+                    continue;
+                };
+                if seen.insert(variant_definition.identity.clone()) {
+                    let dot = if dot_already_typed { "" } else { "." };
                     items.push(CompletionItem {
                         label,
                         kind: ck::ENUM_MEMBER,
                         detail: Some(format!("variant of {}", enum_definition.name)),
                         documentation: None,
                         insert_text: Some(format!(
-                            ".{variant} {} {{}}",
+                            "{dot}{variant} {} {{}}",
                             crate::Syntax::OP_UNIFIED_ARROW
                         )),
                         insert_text_format: 2,
