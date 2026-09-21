@@ -257,3 +257,245 @@ fn shared_busy_wait_fix_rewrites_empty_plain_field_loop() {
         String::from_utf8_lossy(&checked.stderr)
     );
 }
+
+#[test]
+fn repeated_list_head_fix_preserves_behavior() {
+    let scratch = Scratch::new("repeated_list_head_fix");
+    let path = scratch.join("main.jet");
+    let original = r#"struct LineItem {
+    label: String
+    cents: Int
+}
+
+fn run() {
+    items :: [
+        LineItem{
+            label: "coffee", // field comment stays with the first item
+            cents: 450
+        },
+        // The second item keeps its position and evaluation order.
+        LineItem{label: "tea", cents: 325}
+    ]
+    print("{items[0].label}:{items[0].cents}")
+    print("{items[1].label}:{items[1].cents}")
+}
+"#;
+    fs::write(&path, original).unwrap();
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"repeated_list_head_fix\"\n\
+         version: \"0.1.0\"\n\
+         edition: \"2026\"\n\
+         authority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
+    let shown = path.to_string_lossy().into_owned();
+
+    let lint_output = jet::compile_with_path(original, &shown).unwrap();
+    let lint = lint_output
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0523")
+        .expect("LineItem list must produce L0523");
+    assert_eq!(lint.applicability.map(|value| value.as_str()), Some("safe"));
+    assert!(
+        lint.safety.is_some_and(|value| value.auto_apply()),
+        "L0523 must carry an auto-applicable safety grade"
+    );
+    let edit = lint.edit.clone().expect("L0523 must carry its source edit");
+    let expected_fixed = jet::FixEngine::apply_edits(original, std::slice::from_ref(&edit))
+        .expect("L0523 edit must apply without overlap");
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap(), "--dry-run"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        dry_run.status.code(),
+        Some(0),
+        "L0523 dry-run failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        original,
+        "L0523 dry-run changed the source"
+    );
+
+    let before_outputs = ["default", "interpret", "release"]
+        .into_iter()
+        .map(|mode| {
+            let args: Vec<&str> = match mode {
+                "default" => vec!["run", "main.jet"],
+                "interpret" => vec!["run", "--interpret", "main.jet"],
+                "release" => vec!["run", "--release", "main.jet"],
+                _ => unreachable!(),
+            };
+            let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args(&args)
+                .current_dir(&scratch.path)
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "L0523 source failed in {mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            (mode, output.stdout)
+        })
+        .collect::<Vec<_>>();
+
+    let applied = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap()])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        applied.status.code(),
+        Some(0),
+        "L0523 fix failed: {}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected_fixed);
+    assert!(expected_fixed.contains("[LineItem]{"));
+    assert!(expected_fixed.contains("// field comment stays with the first item"));
+    assert!(expected_fixed.contains("// The second item keeps its position"));
+
+    let fixed = fs::read_to_string(&path).unwrap();
+    let checked = jet::compile_with_path(&fixed, &shown).unwrap();
+    assert!(
+        !checked.lints.iter().any(|diagnostic| diagnostic.code == "L0523"),
+        "L0523 remained after its explicit fix"
+    );
+    let second_fix = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap()])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        second_fix.status.code(),
+        Some(0),
+        "second L0523 fix failed: {}",
+        String::from_utf8_lossy(&second_fix.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        fixed,
+        "L0523 fix is not idempotent"
+    );
+
+    let after_outputs = ["default", "interpret", "release"]
+        .into_iter()
+        .map(|mode| {
+            let args: Vec<&str> = match mode {
+                "default" => vec!["run", "main.jet"],
+                "interpret" => vec!["run", "--interpret", "main.jet"],
+                "release" => vec!["run", "--release", "main.jet"],
+                _ => unreachable!(),
+            };
+            let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args(&args)
+                .current_dir(&scratch.path)
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "fixed L0523 source failed in {mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            (mode, output.stdout)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(before_outputs, after_outputs);
+
+    let fmt_path = scratch.join("fmt.jet");
+    fs::write(&fmt_path, original).unwrap();
+    let fmt = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fmt", fmt_path.to_str().unwrap()])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        fmt.status.code(),
+        Some(0),
+        "fmt failed on repeated heads: {}",
+        String::from_utf8_lossy(&fmt.stderr)
+    );
+    let formatted = fs::read_to_string(&fmt_path).unwrap();
+    assert!(
+        !formatted.contains("[LineItem]{"),
+        "ordinary fmt must not apply the L0523 source fix: {formatted}"
+    );
+    assert!(formatted.contains("// field comment stays with the first item"));
+    assert!(formatted.contains("// The second item keeps its position"));
+
+    let generic_path = scratch.join("generic.jet");
+    let generic = r#"struct Box<T> {
+    value: T
+}
+
+fn run() {
+    boxes := [Box<Int>{value: 1}, Box<Int>{value: 2}]
+    print(boxes[0].value + boxes[1].value)
+}
+"#;
+    fs::write(&generic_path, generic).unwrap();
+    let generic_output =
+        jet::compile_with_path(generic, &generic_path.to_string_lossy()).unwrap();
+    let generic_lint = generic_output
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0523")
+        .expect("generic repeated heads must produce L0523");
+    let generic_edit = generic_lint
+        .edit
+        .clone()
+        .expect("generic L0523 edit must be safe");
+    let generic_fixed =
+        jet::FixEngine::apply_edits(generic, std::slice::from_ref(&generic_edit)).unwrap();
+    assert!(generic_fixed.contains("[Box<Int>]{"));
+    fs::write(&generic_path, &generic_fixed).unwrap();
+    let generic_checked =
+        jet::compile_with_path(&generic_fixed, &generic_path.to_string_lossy()).unwrap();
+    assert!(
+        !generic_checked
+            .lints
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L0523")
+    );
+
+    let fixed_shape_path = scratch.join("fixed_shape.jet");
+    let fixed_shape = r#"struct LineItem {
+    label: String
+    cents: Int
+}
+
+fn fixed() [LineItem#2] -> {
+    [LineItem{label: "coffee", cents: 450}, LineItem{label: "tea", cents: 325}]
+}
+
+fn run() {
+    print(fixed()[0].cents)
+}
+"#;
+    fs::write(&fixed_shape_path, fixed_shape).unwrap();
+    let fixed_shape_output =
+        jet::compile_with_path(fixed_shape, &fixed_shape_path.to_string_lossy()).unwrap();
+    assert!(
+        fixed_shape_output
+            .lints
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0523")
+            .all(|diagnostic| diagnostic.edit.is_none()),
+        "L0523 must not offer a growable-list edit for a fixed-length expected type"
+    );
+}

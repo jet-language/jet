@@ -4368,6 +4368,14 @@ impl<'a> Checker<'a> {
             }
             Expr::ListLit(elems, span) => {
                 let repeated_head = repeated_struct_list_edit(self.source, elems, *span);
+                // A fixed-length expected type owns the collection shape. The
+                // spelling-only list-head edit would replace `[T#N]`'s
+                // stack shape with a growable `[T]`, so keep the lint
+                // informational and do not attach an unsafe automatic edit.
+                let repeated_head_edit_allowed = !matches!(
+                    self.expected_type.as_ref(),
+                    Some(Type::FixedList { .. })
+                );
                 // Rewrite before typing so the list sees call results, not nested `[T#N]`.
                 // #779 demo: surface-only change; engines never learn a new construct.
                 if !elems.is_empty()
@@ -4382,14 +4390,15 @@ impl<'a> Checker<'a> {
                 let inferred = self.infer_list_lit(elems, *span);
                 if inferred.is_some() {
                     if let Some((type_name, edit)) = repeated_head {
-                        self.diags.push(
-                            Diagnostic::from_row(
-                                "L0523",
-                                &[("type", type_name.as_str())],
-                                Some(*span),
-                            )
-                            .with_edit(edit),
+                        let mut diagnostic = Diagnostic::from_row(
+                            "L0523",
+                            &[("type", type_name.as_str())],
+                            Some(*span),
                         );
+                        if repeated_head_edit_allowed {
+                            diagnostic = diagnostic.with_edit(edit);
+                        }
+                        self.diags.push(diagnostic);
                     }
                 }
                 inferred
