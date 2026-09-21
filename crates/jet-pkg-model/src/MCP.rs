@@ -35,6 +35,13 @@ pub const MAX_SCHEMA_DEPTH: usize = JSON::MAX_JSON_DEPTH;
 pub const DEFAULT_MAX_CAPABILITY_ENTRIES: usize = 64;
 /// Hard maximum number of capability entries accepted by this core.
 pub const MAX_CAPABILITY_ENTRIES: usize = 256;
+/// Maximum peer revision offers accepted during negotiation.
+const MAX_PEER_VERSION_COUNT: usize = 32;
+/// Maximum wire spelling accepted for one peer revision offer.
+const MAX_REVISION_BYTES: usize = 64;
+/// Maximum implementation identity field length.
+const MAX_IMPLEMENTATION_FIELD_BYTES: usize = 256;
+
 
 /// MCP protocol revisions known to this SDK.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -154,7 +161,8 @@ impl Default for McpLimits {
 }
 
 impl McpLimits {
-    fn validate(self) -> Result<(), CodecError> {
+    /// Validate that every configured bound is useful and within the hard cap.
+    pub fn validate(self) -> Result<(), CodecError> {
         if self.max_message_bytes == 0 || self.max_message_bytes > MAX_MESSAGE_BYTES {
             return Err(CodecError::InvalidLimit {
                 name: "max_message_bytes",
@@ -169,7 +177,9 @@ impl McpLimits {
                 maximum: MAX_SCHEMA_DEPTH,
             });
         }
-        if self.max_capability_entries > MAX_CAPABILITY_ENTRIES {
+        if self.max_capability_entries == 0
+            || self.max_capability_entries > MAX_CAPABILITY_ENTRIES
+        {
             return Err(CodecError::InvalidLimit {
                 name: "max_capability_entries",
                 value: self.max_capability_entries,
@@ -256,7 +266,7 @@ impl McpCodec {
     pub fn encode(&self, message: &McpMessage, limits: McpLimits) -> Result<String, CodecError> {
         limits.validate()?;
         let value = message.to_json_value()?;
-        let text = stringify(&value, 0, limits.max_schema_depth)?;
+        let text = stringify(&value, 0, limits.max_schema_depth, limits.max_message_bytes)?;
         if text.len() > limits.max_message_bytes {
             return Err(CodecError::MessageTooLarge {
                 actual: text.len(),
@@ -485,6 +495,8 @@ impl McpMessage {
     }
 
     fn from_json_value(value: DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+        limits.validate()?;
+        ensure_depth(&value, 0, limits.max_schema_depth)?;
         let object = value
             .as_object()
             .map_err(|_| CodecError::InvalidMessage("message must be a JSON object".to_string()))?;
@@ -546,7 +558,6 @@ impl McpMessage {
                         "response cannot contain both result and error".to_string(),
                     ));
                 }
-                let _ = limits;
                 Ok(Self::Response(response))
             }
         }
@@ -584,11 +595,14 @@ impl McpCapabilities {
                 maximum: limits.max_capability_entries,
             });
         }
-        Ok(object_from_map(self.values.clone()))
+        let value = object_from_map(self.values.clone());
+        ensure_depth(&value, 0, limits.max_schema_depth)?;
+        Ok(value)
     }
 
     fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
+        ensure_depth(value, 0, limits.max_schema_depth)?;
         let values = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("capabilities must be a JSON object".to_string())
         })?;
@@ -618,22 +632,34 @@ impl McpImplementation {
             name: name.into(),
             version: version.into(),
         };
-        if implementation.name.is_empty() || implementation.version.is_empty() {
-            return Err(CodecError::InvalidMessage(
-                "implementation name and version must not be empty".to_string(),
-            ));
-        }
+        implementation.validate()?;
         Ok(implementation)
     }
 
-    fn to_json_value(&self) -> DataTree {
+    fn validate(&self) -> Result<(), CodecError> {
+        if self.name.is_empty()
+            || self.version.is_empty()
+            || self.name.len() > MAX_IMPLEMENTATION_FIELD_BYTES
+            || self.version.len() > MAX_IMPLEMENTATION_FIELD_BYTES
+            || self.name.chars().any(char::is_control)
+            || self.version.chars().any(char::is_control)
+        {
+            return Err(CodecError::InvalidMessage(
+                "implementation name and version must be non-empty bounded text".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn to_json_value(&self) -> Result<DataTree, CodecError> {
+        self.validate()?;
         let mut object = BTreeMap::new();
         object.insert("name".to_string(), DataTree::Text(self.name.clone()));
         object.insert(
             "version".to_string(),
             DataTree::Text(self.version.clone()),
         );
-        object_from_map(object)
+        Ok(object_from_map(object))
     }
 
     fn from_json_value(value: &DataTree) -> Result<Self, CodecError> {
@@ -679,27 +705,38 @@ impl InitializeParams {
 
     /// Encode this structured initialize value as JSON.
     pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
+        limits.validate()?;
+        let protocol_version = McpRevision::parse(&self.protocol_version).ok_or_else(|| {
+            CodecError::InvalidMessage("unknown initialize protocol version".to_string())
+        })?;
         let mut object = BTreeMap::new();
         object.insert(
             "capabilities".to_string(),
             self.capabilities.to_json_value(limits)?,
         );
         if let Some(client_info) = &self.client_info {
-            object.insert("clientInfo".to_string(), client_info.to_json_value());
+            object.insert("clientInfo".to_string(), client_info.to_json_value()?);
         }
         object.insert(
             "protocolVersion".to_string(),
-            DataTree::Text(self.protocol_version.clone()),
+            DataTree::Text(protocol_version.as_str().to_string()),
         );
-        Ok(object_from_map(object))
+        let value = object_from_map(object);
+        ensure_depth(&value, 0, limits.max_schema_depth)?;
+        Ok(value)
     }
 
     /// Decode a structured initialize value from JSON.
     pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+        limits.validate()?;
+        ensure_depth(value, 0, limits.max_schema_depth)?;
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("initialize params must be a JSON object".to_string())
         })?;
         let protocol_version = required_string(object, "protocolVersion")?;
+        McpRevision::parse(&protocol_version).ok_or_else(|| {
+            CodecError::InvalidMessage("unknown initialize protocol version".to_string())
+        })?;
         let capabilities = McpCapabilities::from_json_value(
             field(object, "capabilities").ok_or_else(|| {
                 CodecError::InvalidMessage("initialize params missing capabilities".to_string())
@@ -749,6 +786,7 @@ impl InitializeResult {
 
     /// Encode this structured initialize value as JSON.
     pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
+        limits.validate()?;
         let mut object = BTreeMap::new();
         object.insert(
             "capabilities".to_string(),
@@ -758,20 +796,25 @@ impl InitializeResult {
             "protocolVersion".to_string(),
             DataTree::Text(self.protocol_version.as_str().to_string()),
         );
-        object.insert("serverInfo".to_string(), self.server_info.to_json_value());
-        Ok(object_from_map(object))
+        object.insert(
+            "serverInfo".to_string(),
+            self.server_info.to_json_value()?,
+        );
+        let value = object_from_map(object);
+        ensure_depth(&value, 0, limits.max_schema_depth)?;
+        Ok(value)
     }
 
     /// Decode a structured initialize result from JSON.
     pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
+        limits.validate()?;
+        ensure_depth(value, 0, limits.max_schema_depth)?;
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("initialize result must be a JSON object".to_string())
         })?;
         let protocol_version = required_string(object, "protocolVersion")?;
         let protocol_version = McpRevision::parse(&protocol_version).ok_or_else(|| {
-            CodecError::InvalidMessage(format!(
-                "unknown initialize protocol version `{protocol_version}`"
-            ))
+            CodecError::InvalidMessage("unknown initialize protocol version".to_string())
         })?;
         let capabilities = McpCapabilities::from_json_value(
             field(object, "capabilities").ok_or_else(|| {
@@ -791,6 +834,7 @@ impl InitializeResult {
         })
     }
 }
+
 
 /// Lifecycle law selected by a negotiated revision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -827,6 +871,47 @@ pub struct NegotiatedProtocol {
     pub lifecycle: LifecycleProfile,
 }
 
+fn validate_peer_versions(peer_versions: &[&str]) -> Result<(), NegotiationError> {
+    if peer_versions.len() > MAX_PEER_VERSION_COUNT {
+        return Err(NegotiationError::PeerVersionListTooLarge {
+            actual: peer_versions.len(),
+            maximum: MAX_PEER_VERSION_COUNT,
+        });
+    }
+    if peer_versions
+        .iter()
+        .any(|version| version.len() > MAX_REVISION_BYTES)
+    {
+        return Err(NegotiationError::PeerVersionTooLong {
+            maximum: MAX_REVISION_BYTES,
+        });
+    }
+    Ok(())
+}
+
+fn redacted_peer_versions(peer_versions: &[&str]) -> Vec<String> {
+    peer_versions
+        .iter()
+        .map(|version| {
+            McpRevision::parse(version)
+                .map(|revision| revision.as_str().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        })
+        .collect()
+}
+fn redacted_revision(value: &str) -> String {
+    if let Some(revision) = McpRevision::parse(value) {
+        revision.as_str().to_string()
+    } else if value.is_empty() {
+        "<empty>".to_string()
+    } else if value.len() > MAX_REVISION_BYTES {
+        "<oversized>".to_string()
+    } else {
+        "<unknown>".to_string()
+    }
+
+}
+
 /// Negotiate one revision, preferring stable when both peers offer it.
 pub fn negotiate(
     policy: &McpPolicy,
@@ -836,6 +921,7 @@ pub fn negotiate(
         .limits
         .validate()
         .map_err(|error| NegotiationError::InvalidPolicy(error.to_string()))?;
+    validate_peer_versions(peer_versions)?;
     let peer_revisions: Vec<_> = peer_versions
         .iter()
         .filter_map(|version| McpRevision::parse(version))
@@ -869,10 +955,7 @@ pub fn negotiate(
     }
     Err(NegotiationError::NoCommonRevision {
         local: supported,
-        peer: peer_versions
-            .iter()
-            .map(|version| (*version).to_string())
-            .collect(),
+        peer: redacted_peer_versions(peer_versions),
     })
 }
 
@@ -881,6 +964,13 @@ pub fn negotiate(
 pub enum NegotiationError {
     InvalidPolicy(String),
     PreviewRequiresOptIn,
+    PeerVersionListTooLarge {
+        actual: usize,
+        maximum: usize,
+    },
+    PeerVersionTooLong {
+        maximum: usize,
+    },
     DowngradeRefused {
         requested: McpRevision,
         offered: Vec<McpRevision>,
@@ -892,6 +982,7 @@ pub enum NegotiationError {
     AlreadyNegotiated,
 }
 
+
 impl fmt::Display for NegotiationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -899,13 +990,24 @@ impl fmt::Display for NegotiationError {
             Self::PreviewRequiresOptIn => {
                 f.write_str("MCP preview revision requires explicit policy opt-in")
             }
+            Self::PeerVersionListTooLarge { actual, maximum } => write!(
+                f,
+                "MCP peer revision offer count {actual} exceeds maximum {maximum}"
+            ),
+            Self::PeerVersionTooLong { maximum } => {
+                write!(f, "MCP peer revision offer exceeds {maximum} bytes")
+            }
             Self::DowngradeRefused { requested, offered } => write!(
                 f,
-                "MCP downgrade refused: requested {requested}, peer offered {offered:?}"
+                "MCP downgrade refused for {requested}; peer offered {count} compatible revision(s)",
+                count = offered.len()
             ),
-            Self::NoCommonRevision { local, peer } => {
-                write!(f, "no common MCP revision: local {local:?}, peer {peer:?}")
-            }
+            Self::NoCommonRevision { local, peer } => write!(
+                f,
+                "no common MCP revision ({local_count} local, {peer_count} peer offer(s))",
+                local_count = local.len(),
+                peer_count = peer.len()
+            ),
             Self::AlreadyNegotiated => f.write_str("MCP peer already negotiated"),
         }
     }
@@ -922,11 +1024,13 @@ pub enum LifecycleError {
     },
     NotNegotiated,
     StatelessRevision,
+    InvalidInitialize,
     ProtocolVersionMismatch {
         expected: McpRevision,
         received: String,
     },
 }
+
 
 impl fmt::Display for LifecycleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -938,9 +1042,13 @@ impl fmt::Display for LifecycleError {
             Self::StatelessRevision => {
                 f.write_str("the negotiated MCP revision does not use session lifecycle")
             }
-            Self::ProtocolVersionMismatch { expected, received } => write!(
+            Self::InvalidInitialize => f.write_str("invalid MCP initialize value"),
+            Self::ProtocolVersionMismatch {
+                expected,
+                received: _,
+            } => write!(
                 f,
-                "initialize protocol version mismatch: expected {expected}, received `{received}`"
+                "initialize protocol version mismatch: expected {expected}"
             ),
         }
     }
@@ -1024,6 +1132,11 @@ impl Peer {
         self.state
     }
 
+    /// Return this peer's configured protocol bounds.
+    pub const fn limits(&self) -> McpLimits {
+        self.policy.limits
+    }
+
     /// Return the selected revision, if negotiation completed.
     pub const fn revision(&self) -> Option<McpRevision> {
         match self.negotiated {
@@ -1086,19 +1199,29 @@ impl Peer {
         if params.protocol_version != protocol.revision.as_str() {
             return Err(LifecycleError::ProtocolVersionMismatch {
                 expected: protocol.revision,
-                received: params.protocol_version.clone(),
+                received: redacted_revision(&params.protocol_version),
             });
         }
-        self.state = LifecycleState::Initializing;
-        Ok(InitializeResult::new(
+        if params.to_json_value(self.policy.limits).is_err() {
+            return Err(LifecycleError::InvalidInitialize);
+        }
+        let result = InitializeResult::new(
             protocol.revision,
             server_capabilities,
             server_info,
-        ))
+        );
+        if result.to_json_value(self.policy.limits).is_err() {
+            return Err(LifecycleError::InvalidInitialize);
+        }
+        self.state = LifecycleState::Initializing;
+        Ok(result)
     }
 
     /// Process the stable `initialized` notification.
     pub fn initialized(&mut self) -> Result<(), LifecycleError> {
+        if self.negotiated.is_none() {
+            return Err(LifecycleError::NotNegotiated);
+        }
         if self.state != LifecycleState::Initializing {
             return Err(LifecycleError::InvalidState {
                 operation: "initialized",
@@ -1111,7 +1234,10 @@ impl Peer {
 
     /// Process the stable `shutdown` request.
     pub fn shutdown(&mut self) -> Result<(), LifecycleError> {
-        if self.lifecycle_profile() == Some(LifecycleProfile::Stateless) {
+        let profile = self
+            .lifecycle_profile()
+            .ok_or(LifecycleError::NotNegotiated)?;
+        if profile == LifecycleProfile::Stateless {
             return Err(LifecycleError::StatelessRevision);
         }
         if self.state != LifecycleState::Ready {
@@ -1294,54 +1420,192 @@ fn ensure_depth(value: &DataTree, depth: usize, maximum: usize) -> Result<(), Co
     Ok(())
 }
 
-fn stringify(value: &DataTree, depth: usize, maximum: usize) -> Result<String, CodecError> {
-    ensure_depth(value, depth, maximum)?;
-    Ok(match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(true) => "true".to_string(),
-        DataTree::Bool(false) => "false".to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) if value.is_finite() => value.to_string(),
-        DataTree::Float(_) => {
-            return Err(CodecError::InvalidMessage(
-                "JSON numbers must be finite".to_string(),
-            ))
+fn append_fragment(
+    output: &mut String,
+    fragment: &str,
+    maximum: usize,
+) -> Result<(), CodecError> {
+    let actual = output.len().saturating_add(fragment.len());
+    if actual > maximum {
+        return Err(CodecError::MessageTooLarge { actual, maximum });
+    }
+    output.push_str(fragment);
+    Ok(())
+}
+
+fn append_json_string(
+    output: &mut String,
+    value: &str,
+    maximum: usize,
+) -> Result<(), CodecError> {
+    append_fragment(output, "\"", maximum)?;
+    for character in value.chars() {
+        let escaped = match character {
+            '"' => Some("\\\""),
+            '\\' => Some("\\\\"),
+            '\n' => Some("\\n"),
+            '\r' => Some("\\r"),
+            '\t' => Some("\\t"),
+            '\u{0008}' => Some("\\b"),
+            '\u{000c}' => Some("\\f"),
+            character if character.is_control() => {
+                let escape = format!("\\u{:04x}", character as u32);
+                append_fragment(output, &escape, maximum)?;
+                None
+            }
+            _ => None,
+        };
+        if let Some(escaped) = escaped {
+            append_fragment(output, escaped, maximum)?;
+        } else if !character.is_control() {
+            let mut encoded = [0; 4];
+            append_fragment(
+                output,
+                character.encode_utf8(&mut encoded),
+                maximum,
+            )?;
         }
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => JSON::quote(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => {
-            let mut out = String::from("[");
+    }
+    append_fragment(output, "\"", maximum)
+}
+
+fn valid_json_number(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    if bytes.get(index) == Some(&b'-') {
+        index += 1;
+    }
+    match bytes.get(index) {
+        Some(b'0') => {
+            index += 1;
+            if matches!(bytes.get(index), Some(b'0'..=b'9')) {
+                return false;
+            }
+        }
+        Some(b'1'..=b'9') => {
+            while matches!(bytes.get(index), Some(b'0'..=b'9')) {
+                index += 1;
+            }
+        }
+        _ => return false,
+    }
+    let mut floating = false;
+    if bytes.get(index) == Some(&b'.') {
+        floating = true;
+        index += 1;
+        let start = index;
+        while matches!(bytes.get(index), Some(b'0'..=b'9')) {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        floating = true;
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let start = index;
+        while matches!(bytes.get(index), Some(b'0'..=b'9')) {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+    }
+    if index != bytes.len() {
+        return false;
+    }
+    if floating {
+        value
+            .parse::<f64>()
+            .map(|number| number.is_finite())
+            .unwrap_or(false)
+    } else {
+        value.parse::<i64>().is_ok()
+    }
+}
+
+fn stringify(
+    value: &DataTree,
+    depth: usize,
+    maximum_depth: usize,
+    maximum_bytes: usize,
+) -> Result<String, CodecError> {
+    ensure_depth(value, depth, maximum_depth)?;
+    let mut output = String::with_capacity(maximum_bytes.min(4096));
+    stringify_into(value, &mut output, maximum_bytes)?;
+    Ok(output)
+}
+
+fn stringify_into(
+    value: &DataTree,
+    output: &mut String,
+    maximum: usize,
+) -> Result<(), CodecError> {
+    match value {
+        DataTree::Null => append_fragment(output, "null", maximum),
+        DataTree::Bool(true) => append_fragment(output, "true", maximum),
+        DataTree::Bool(false) => append_fragment(output, "false", maximum),
+        DataTree::Int(value) => append_fragment(output, &value.to_string(), maximum),
+        DataTree::Float(value) if value.is_finite() => {
+            append_fragment(output, &value.to_string(), maximum)
+        }
+        DataTree::Float(_) => Err(CodecError::InvalidMessage(
+            "JSON numbers must be finite".to_string(),
+        )),
+        DataTree::Number(value) => {
+            if value.len() > maximum {
+                return Err(CodecError::MessageTooLarge {
+                    actual: value.len(),
+                    maximum,
+                });
+            }
+            if !valid_json_number(value) {
+                return Err(CodecError::InvalidMessage(
+                    "JSON number is invalid".to_string(),
+                ));
+            }
+            append_fragment(output, value, maximum)
+        }
+        DataTree::TypedText(value) | DataTree::Text(value) => {
+            append_json_string(output, value, maximum)
+        }
+        DataTree::Bytes(values) => {
+            append_fragment(output, "[", maximum)?;
             for (index, value) in values.iter().enumerate() {
                 if index > 0 {
-                    out.push(',');
+                    append_fragment(output, ",", maximum)?;
                 }
-                out.push_str(&stringify(value, depth + 1, maximum)?);
+                append_fragment(output, &value.to_string(), maximum)?;
             }
-            out.push(']');
-            out
+            append_fragment(output, "]", maximum)
+        }
+        DataTree::Array(values) => {
+            append_fragment(output, "[", maximum)?;
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    append_fragment(output, ",", maximum)?;
+                }
+                stringify_into(value, output, maximum)?;
+            }
+            append_fragment(output, "]", maximum)
         }
         DataTree::Object(values) => {
-            let mut out = String::from("{");
+            append_fragment(output, "{", maximum)?;
             for (index, (key, value)) in values.iter().enumerate() {
                 if index > 0 {
-                    out.push(',');
+                    append_fragment(output, ",", maximum)?;
                 }
-                out.push_str(&JSON::quote(key));
-                out.push(':');
-                out.push_str(&stringify(value, depth + 1, maximum)?);
+                append_json_string(output, key, maximum)?;
+                append_fragment(output, ":", maximum)?;
+                stringify_into(value, output, maximum)?;
             }
-            out.push('}');
-            out
+            append_fragment(output, "}", maximum)
         }
-    })
+    }
 }
 
 fn lifecycle_name(state: LifecycleState) -> &'static str {
