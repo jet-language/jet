@@ -573,6 +573,8 @@ fn render_effects_json(
                 ("callees", expand_string_list(&effect.callees)),
                 ("inferred", expand_string_list(&effect.inferred)),
                 ("maximal", ExpandValue::Bool(effect.maximal)),
+                ("evidence", expand_string("checked_static")),
+                ("runtime_observation", expand_string("not_run")),
                 (
                     "provenance",
                     ExpandValue::Array(
@@ -1632,6 +1634,8 @@ fn render_callable_signature_json(
                 ("name", expand_string(&definition.name)),
                 ("identity", expand_string(&definition.identity)),
                 ("source", expand_string(&definition.module_path)),
+                ("evidence", expand_string("checked_static")),
+                ("runtime_observation", expand_string("not_run")),
                 (
                     "span",
                     expand_span(

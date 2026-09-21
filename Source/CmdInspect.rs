@@ -4765,6 +4765,9 @@ fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, jso
             .with("scope", scope_name(scope))
             .with("target", target)
             .with("authority", authority)
+            .with("evidence", "checked_static")
+            .with("runtime_observation", "not_run")
+            .with("provenance_scope", "checked_semantic_index")
             .with("authority_facts", StatusValue::array(authority_facts))
             .with("callables", StatusValue::array(callable_values));
         println!(
@@ -4777,6 +4780,9 @@ fn run_rights(projection: &CheckProjection, scope: CheckScope, target: &str, jso
         println!("rights");
         println!("scope: {}", scope_name(scope));
         println!("target: {target}");
+        println!("evidence: checked_static");
+        println!("runtime observation: not_run");
+        println!("provenance scope: checked_semantic_index");
         println!("authority: {}", application.authority);
         println!("granted: {}", holds_text(&application.granted_effects));
         println!("denied: {}", holds_text(&application.denied_effects));

@@ -47,6 +47,10 @@ pub struct ReverdictReceipt {
     /// This keeps the incremental proof tied to the same sema facts exposed
     /// by hover, semindex, and inspect.
     pub callable_contracts: Vec<CallableContractReceipt>,
+    /// Checked module/dependency paths used by this same query result.  This
+    /// keeps callers from presenting an impact or inspection result as a
+    /// workspace-wide fact when the checked scope was smaller.
+    pub dependency_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,6 +72,13 @@ impl ReverdictReceipt {
 
         let items = CanonicalJson::Array(
             self.reverified_items
+                .iter()
+                .cloned()
+                .map(CanonicalJson::String)
+                .collect(),
+        );
+        let dependency_paths = CanonicalJson::Array(
+            self.dependency_paths
                 .iter()
                 .cloned()
                 .map(CanonicalJson::String)
@@ -123,6 +134,17 @@ impl ReverdictReceipt {
             ),
             ("reverified_items".into(), items.clone()),
             ("callable_contracts".into(), callable_contracts),
+            (
+                "dependency_scope".into(),
+                CanonicalJson::object([
+                    (
+                        "kind".into(),
+                        CanonicalJson::String("checked_semantic".into()),
+                    ),
+                    ("paths".into(), dependency_paths),
+                ])
+                .expect("fixed receipt dependency scope"),
+            ),
             (
                 "blast_radius".into(),
                 CanonicalJson::object([
@@ -375,6 +397,13 @@ impl CompilerQueries {
         let mut reverified_items = after.recomputed_items.clone();
         reverified_items.sort();
         reverified_items.dedup();
+        let mut dependency_paths = checked
+            .dependencies
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        dependency_paths.sort();
+        dependency_paths.dedup();
         let receipt = ReverdictReceipt {
             source_path: root.to_string_lossy().into_owned(),
             source_bytes: text.len(),
@@ -390,6 +419,7 @@ impl CompilerQueries {
                 .as_deref()
                 .map(callable_contracts)
                 .unwrap_or_default(),
+            dependency_paths,
         };
         (checked, receipt)
     }
@@ -1379,6 +1409,13 @@ fn run() {{ print(protect() ?? 0) }}
             &content["callable_contracts"],
             CanonicalJson::Array(values) if !values.is_empty()
         ));
+        let CanonicalJson::Object(dependency_scope) = &content["dependency_scope"] else {
+            panic!("re-verdict dependency scope")
+        };
+        assert_eq!(
+            dependency_scope["kind"],
+            CanonicalJson::String("checked_semantic".into())
+        );
         let CanonicalJson::Object(blast_radius) = &content["blast_radius"] else {
             panic!("re-verdict blast radius")
         };

@@ -16,12 +16,13 @@ use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
     checked_rename_span_at, checked_semantic_identity_at, compute_definition,
-    compute_discovery_hover, compute_hover, compute_refactor_actions, compute_references,
-    compute_rename, encode_semantic_tokens_in_span_with_arithmetic,
-    encode_semantic_tokens_with_arithmetic, format_inlay_hints, generated_declaration_at,
-    generated_definition_for_reference, reasoning_inlay_hints, reasoning_view_json,
-    register_generated_declarations, semantic_symbol_at, semantic_symbol_at_span,
-    semantic_symbol_metadata_json, RefactorAction,
+    compute_discovery_hover, compute_hover, compute_refactor_actions,
+    compute_references, compute_rename, compute_signature_change_preview,
+    encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
+    format_inlay_hints, generated_declaration_at, generated_definition_for_reference,
+    reasoning_inlay_hints, reasoning_view_json, register_generated_declarations,
+    semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json,
+    RefactorAction, SignatureChangeEdit,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -602,7 +603,7 @@ fn initialize_response(id: &DataTree) -> String {
       }
     },
     "executeCommandProvider": {
-      "commands": ["jet.impact", "jet.budgetReports", "jet.reasoning"]
+      "commands": ["jet.impact", "jet.budgetReports", "jet.reasoning", "jet.changeSignature"]
     },
     "resources": {
       "subscribe": false,
@@ -2325,6 +2326,9 @@ fn execute_command_response(
             &reasoning_view_json(&db, &doc.path, selection, expanded),
         ));
     }
+    if command == "jet.changeSignature" {
+        return Some(signature_change_response(server, params, id));
+    }
     if command == "jet.budgetReports" {
         let args = match json_get(params, "arguments") {
             Some(DataTree::Array(args)) => args,
@@ -2432,9 +2436,335 @@ fn execute_command_response(
         }
     };
 
+    let short_definition_count = db
+        .index
+        .definitions()
+        .iter()
+        .filter(|definition| definition.name == symbol)
+        .count();
+    if !symbol.contains("::") && short_definition_count > 1 {
+        let ambiguous = format!(
+            "{{\"symbol\":\"{}\",\"found\":false,\"scope\":\"ambiguous\",\"unknown\":true,\"reason\":\"multiple checked definitions share this spelling\",\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\"}}",
+            json_escape(symbol),
+        );
+        return Some(response(id, &ambiguous));
+    }
     let report = jet_impact::ImpactReport::analyze(&db.index, symbol, depth);
-    Some(response(id, &report.to_json()))
+    Some(response(id, &impact_report_json_with_provenance(&report.to_json())))
 }
+
+fn signature_change_response(
+    server: &Server,
+    params: &DataTree,
+    id: &DataTree,
+) -> String {
+    let Some(args) = json_get(params, "arguments").and_then(|value| match value {
+        DataTree::Array(args) => Some(args),
+        _ => None,
+    }) else {
+        return error_response(
+            id,
+            -32602,
+            "jet.changeSignature expects arguments [uri, identity, {name, type, values}]",
+        );
+    };
+    let Some(uri) = args.first().and_then(data_tree_text) else {
+        return error_response(
+            id,
+            -32602,
+            "jet.changeSignature expects arguments [uri, identity, {name, type, values}]",
+        );
+    };
+    let Some(identity) = args.get(1).and_then(data_tree_text) else {
+        return error_response(
+            id,
+            -32602,
+            "jet.changeSignature expects arguments [uri, identity, {name, type, values}]",
+        );
+    };
+    let Some(spec) = args.get(2).and_then(|value| match value {
+        DataTree::Object(spec) => Some(spec),
+        _ => None,
+    }) else {
+        return error_response(
+            id,
+            -32602,
+            "jet.changeSignature requires an explicit parameter object",
+        );
+    };
+    let parameter = object_get(spec, "parameter")
+        .and_then(|value| match value {
+            DataTree::Object(parameter) => Some(parameter),
+            _ => None,
+        })
+        .unwrap_or(spec);
+    let Some(parameter_name) = object_get(parameter, "name").and_then(data_tree_text) else {
+        return error_response(id, -32602, "jet.changeSignature requires parameter.name");
+    };
+    let Some(parameter_type) = object_get(parameter, "type")
+        .or_else(|| object_get(parameter, "ty"))
+        .and_then(data_tree_text)
+    else {
+        return error_response(id, -32602, "jet.changeSignature requires parameter.type");
+    };
+    let mut caller_values = BTreeMap::new();
+    if let Some(DataTree::Object(values)) = object_get(parameter, "values")
+        .or_else(|| object_get(spec, "caller_values"))
+    {
+        for (caller, value) in values {
+            if let Some(value) = data_tree_text(value) {
+                caller_values.insert(caller.clone(), value.to_string());
+            }
+        }
+    }
+
+    let Some(doc) = server.docs.get(uri) else {
+        return error_response(id, -32602, "document not open in LSP session");
+    };
+    let checked = server.check_with_bundle(doc);
+    let Some(bundle) = checked.bundle.clone() else {
+        return error_response(id, -32603, "document did not check cleanly");
+    };
+    let db = build_symbol_db(&bundle, &checked.facts);
+    let mut sources = BTreeMap::new();
+    for module in &bundle.modules {
+        let path = module.path.to_string_lossy().into_owned();
+        sources.insert(module.display.clone(), module.source.clone());
+        sources.entry(path).or_insert_with(|| module.source.clone());
+    }
+    let mut preview = match compute_signature_change_preview(
+        &db,
+        &sources,
+        identity,
+        parameter_name,
+        parameter_type,
+        &caller_values,
+    ) {
+        Ok(preview) => preview,
+        Err(reason) => {
+            return response(
+                id,
+                &format!(
+                    "{{\"kind\":\"jet.signature-change-preview/v1\",\"status\":\"unavailable\",\"identity\":\"{}\",\"reason\":\"{}\",\"source_scope\":\"checked_static\",\"runtime_observation\":\"not_run\"}}",
+                    json_escape(identity),
+                    json_escape(&reason),
+                ),
+            );
+        }
+    };
+
+    let mut staged_sources = BTreeMap::new();
+    for module in &bundle.modules {
+        staged_sources.insert(
+            module.path.to_string_lossy().into_owned(),
+            module.source.clone(),
+        );
+    }
+    let mut edit_groups = BTreeMap::<String, Vec<SignatureChangeEdit>>::new();
+    for edit in &preview.edits {
+        let Some(path) = signature_module_path(&bundle, &edit.path) else {
+            preview
+                .unknown
+                .push(format!("unavailable_edit_source:{}", edit.path));
+            continue;
+        };
+        edit_groups
+            .entry(path)
+            .or_default()
+            .push(edit.clone());
+    }
+    for path in edit_groups.keys() {
+        let Some(identity) = canonical_source_uri(path, Some(&bundle.project_root)) else {
+            preview
+                .unknown
+                .push(format!("unversioned_source:{path}"));
+            continue;
+        };
+        if !checked.checked_versions.contains_key(&identity) {
+            preview
+                .unknown
+                .push(format!("unopened_or_unversioned_source:{path}"));
+        }
+    }
+    for (path, edits) in &edit_groups {
+        let Some(source) = staged_sources.get_mut(path) else {
+            preview
+                .unknown
+                .push(format!("unavailable_edit_source:{path}"));
+            continue;
+        };
+        if !apply_signature_edits(source, edits) {
+            preview
+                .unknown
+                .push(format!("invalid_checked_edit_span:{path}"));
+        }
+    }
+    preview.unknown.sort();
+    preview.unknown.dedup();
+
+    let mut staged_status = "not_run";
+    let mut staged_diagnostics = 0usize;
+    if preview.can_apply() {
+        let root_path = bundle
+            .modules
+            .iter()
+            .find(|module| source_paths_equal(&module.path.to_string_lossy(), &doc.path))
+            .map(|module| module.path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| doc.path.clone());
+        let root_text = staged_sources
+            .get(&root_path)
+            .cloned()
+            .unwrap_or_else(|| doc.text.clone());
+        let mut staged_queries = CompilerQueries::new();
+        for (path, source) in &staged_sources {
+            staged_queries.set_document(path, source);
+        }
+        let staged = staged_queries.check_text(&root_path, &root_text, true);
+        staged_diagnostics = staged.diagnostics.len();
+        staged_status = if staged.bundle.is_some() && staged.diagnostics.is_empty() {
+            "passed"
+        } else {
+            "failed"
+        };
+    }
+
+    let mut caller_rows = Vec::new();
+    for caller in &preview.callers {
+        let range = sources
+            .get(&caller.path)
+            .and_then(|source| checked_byte_span_to_range(source, caller.span))
+            .map(range_json)
+            .unwrap_or_else(|| "null".to_string());
+        let value = caller
+            .value
+            .as_deref()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .unwrap_or_else(|| "null".to_string());
+        caller_rows.push(format!(
+            "{{\"identity\":\"{}\",\"source\":\"{}\",\"range\":{},\"value\":{},\"status\":\"{}\"}}",
+            json_escape(&caller.identity),
+            json_escape(&caller.path),
+            range,
+            value,
+            caller.status,
+        ));
+    }
+    let mut edit_rows = Vec::new();
+    for edit in &preview.edits {
+        let Some(source) = sources.get(&edit.path) else {
+            continue;
+        };
+        let Some(range) = checked_byte_span_to_range(source, edit.span) else {
+            continue;
+        };
+        let Some(path) = signature_module_path(&bundle, &edit.path) else {
+            continue;
+        };
+        let version = checked
+            .checked_versions
+            .get(&path_to_uri(&path))
+            .map_or_else(|| "null".to_string(), |version| version.to_string());
+        edit_rows.push(format!(
+            "{{\"uri\":\"{}\",\"version\":{},\"range\":{},\"newText\":\"{}\"}}",
+            json_escape(&path_to_uri(&path)),
+            version,
+            range_json(range),
+            json_escape(&edit.new_text),
+        ));
+    }
+    let mut version_rows = checked
+        .checked_versions
+        .iter()
+        .map(|(path, version)| {
+            format!(
+                "\"{}\":{}",
+                json_escape(path),
+                version
+            )
+        })
+        .collect::<Vec<_>>();
+    version_rows.sort();
+    let mut unknown_rows = preview
+        .unknown
+        .iter()
+        .map(|unknown| format!("\"{}\"", json_escape(unknown)))
+        .collect::<Vec<_>>();
+    unknown_rows.sort();
+    let can_apply = preview.can_apply() && staged_status == "passed";
+    response(
+        id,
+        &format!(
+            "{{\"kind\":\"jet.signature-change-preview/v1\",\"status\":\"{}\",\"identity\":\"{}\",\"callable\":{{\"qualified_name\":\"{}\",\"source\":\"{}\",\"range\":{}}},\"parameter\":{{\"name\":\"{}\",\"type\":\"{}\",\"value_source\":\"explicit\"}},\"callers\":[{}],\"unknown\":[{}],\"source_scope\":{{\"status\":\"checked_static\",\"runtime_observation\":\"not_run\"}},\"document_versions\":{{{}}},\"edits\":[{}],\"staged_check\":{{\"status\":\"{}\",\"diagnostics\":{}}},\"can_apply\":{}}}",
+            if can_apply { "ready" } else { "incomplete" },
+            json_escape(&preview.identity),
+            json_escape(&preview.qualified_name),
+            json_escape(&preview.declaration_path),
+            sources
+                .get(&preview.declaration_path)
+                .and_then(|source| checked_byte_span_to_range(source, preview.declaration_span))
+                .map(range_json)
+                .unwrap_or_else(|| "null".to_string()),
+            json_escape(&preview.parameter_name),
+            json_escape(&preview.parameter_type),
+            caller_rows.join(","),
+            unknown_rows.join(","),
+            version_rows.join(","),
+            edit_rows.join(","),
+            staged_status,
+            staged_diagnostics,
+            can_apply,
+        ),
+    )
+}
+
+fn data_tree_text(value: &DataTree) -> Option<&str> {
+    match value {
+        DataTree::Text(value) | DataTree::TypedText(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn signature_module_path(bundle: &ProgramBundle, path: &str) -> Option<String> {
+    bundle
+        .modules
+        .iter()
+        .find(|module| {
+            module.display == path || source_paths_equal(&module.path.to_string_lossy(), path)
+        })
+        .map(|module| module.path.to_string_lossy().into_owned())
+}
+
+fn apply_signature_edits(source: &mut String, edits: &[SignatureChangeEdit]) -> bool {
+    let mut edits = edits.to_vec();
+    edits.sort_by(|left, right| {
+        right
+            .span
+            .start
+            .cmp(&left.span.start)
+            .then(right.span.end.cmp(&left.span.end))
+    });
+    for edit in edits {
+        if edit.span.start > edit.span.end
+            || edit.span.end > source.len()
+            || !source.is_char_boundary(edit.span.start)
+            || !source.is_char_boundary(edit.span.end)
+        {
+            return false;
+        }
+        source.replace_range(edit.span.start..edit.span.end, &edit.new_text);
+    }
+    true
+}
+fn impact_report_json_with_provenance(report: &str) -> String {
+    let trimmed = report.trim_end();
+    let Some(body) = trimmed.strip_suffix('}') else {
+        return report.to_string();
+    };
+    format!(
+        "{body},\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\",\"provenance_scope\":\"checked_semantic_index\"}}"
+    )
+}
+
 
 fn references_response(
     server: &Server,

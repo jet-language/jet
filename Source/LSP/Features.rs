@@ -5,7 +5,7 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::AST;
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::Completion::{
     context_is_member_access, context_is_option_field, use_statement_for_module, JET_KEYWORDS,
@@ -407,6 +407,535 @@ fn reasoning_family(record: &jet_foundation::Facts::DerivationRecord) -> &'stati
         })
         .unwrap_or("relationships")
 }
+/// Resolve the callable selected by `jet.reasoning` without recovering by a
+/// spelling that could refer to a shadow or an unrelated overload.  A
+/// derivation id first resolves through its subject stable id; direct
+/// semantic identities are accepted only when they identify one checked
+/// definition.
+fn callable_definition_for_selection<'a>(
+    db: &'a SymbolDB,
+    selection: Option<&str>,
+) -> Option<&'a jet_semindex::SymbolDef> {
+    let selection = selection.filter(|value| !value.is_empty() && *value != "all")?;
+    let subject = db
+        .index
+        .derivations()
+        .iter()
+        .find(|record| record.id == selection || record.claim == selection)
+        .map(|record| record.subject.as_str());
+    db.index.definitions().iter().find(|definition| {
+        definition.callable_signature.is_some()
+            && (definition.identity == selection
+                || definition.qualified_name == selection
+                || subject.as_deref() == Some(definition.identity.as_str())
+                || db
+                    .index
+                    .definition_facts()
+                    .iter()
+                    .any(|fact| {
+                        fact.stable_id == subject.as_deref().unwrap_or("")
+                            && fact.human_identity == definition.identity
+                    }))
+    })
+}
+
+fn json_string_array(values: impl Iterator<Item = String>) -> String {
+    values
+        .map(|value| format!("\"{}\"", json_escape(&value)))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Project the optional summary-first view for one selected callable.  Every
+/// row comes from the checked semindex and derivation table.  In particular,
+/// a write-access parameter is labeled as a declaration fact, never as an
+/// observation, and missing effect/derivation rows remain unavailable rather
+/// than becoming an empty purity claim.
+fn callable_summary_json(db: &SymbolDB, selection: Option<&str>) -> String {
+    let Some(definition) = callable_definition_for_selection(db, selection) else {
+        return "{\"status\":\"unavailable\",\"reason\":\"select one checked callable identity or derivation\"}"
+            .to_string();
+    };
+    let Some(signature) = definition.callable_signature.as_ref() else {
+        return "{\"status\":\"unavailable\",\"reason\":\"selected definition is not callable\"}"
+            .to_string();
+    };
+
+    let stable_id = db
+        .index
+        .definition_facts()
+        .iter()
+        .find(|fact| fact.human_identity == definition.identity)
+        .map(|fact| fact.stable_id.as_str());
+    let records = db
+        .index
+        .derivations()
+        .iter()
+        .filter(|record| {
+            stable_id
+                .map(|stable_id| record.subject == stable_id)
+                .unwrap_or(false)
+                || record.subject == definition.identity
+        })
+        .collect::<Vec<_>>();
+    let stale = records
+        .iter()
+        .any(|record| record.disposition.as_str() == "stale");
+    let effect = db.index.effect_of(&definition.identity);
+    let write_parameters = signature
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.access == "write")
+        .map(|parameter| {
+            format!(
+                "{{\"name\":\"{}\",\"type\":\"{}\",\"access\":\"write\",\"evidence\":\"declared_parameter\"}}",
+                json_escape(&parameter.name),
+                json_escape(&parameter.ty),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let effects = effect
+        .map(|effect| {
+            let provenance = effect
+                .provenance
+                .iter()
+                .map(|witness| {
+                    let spans = witness
+                        .spans
+                        .iter()
+                        .map(|span| {
+                            format!("{{\"start\":{},\"end\":{}}}", span.start, span.end)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!(
+                        "{{\"effect\":\"{}\",\"call_path\":[{}],\"spans\":[{}]}}",
+                        json_escape(&witness.effect),
+                        json_string_array(witness.call_path.iter().cloned()),
+                        spans,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"status\":\"checked\",\"direct\":[{}],\"inferred\":[{}],\"callees\":[{}],\"maximal\":{},\"provenance\":[{}]}}",
+                json_string_array(effect.direct.iter().cloned()),
+                json_string_array(effect.inferred.iter().cloned()),
+                json_string_array(effect.callees.iter().cloned()),
+                effect.maximal,
+                provenance,
+            )
+        })
+        .unwrap_or_else(|| {
+            "{\"status\":\"unavailable\",\"reason\":\"no checked effect row\"}".to_string()
+        });
+    const MAX_SUMMARY_RECORDS: usize = 64;
+    let records_truncated = records.len() > MAX_SUMMARY_RECORDS;
+    let checked_records = records
+        .iter()
+        .take(MAX_SUMMARY_RECORDS)
+        .map(|record| {
+            let observed = record
+                .observation
+                .as_ref()
+                .map(|observation| {
+                    format!(
+                        "{{\"event\":{},\"counterexample\":{}}}",
+                        observation
+                            .event_id
+                            .as_deref()
+                            .map(|value| format!("\"{}\"", json_escape(value)))
+                            .unwrap_or_else(|| "null".to_string()),
+                        observation
+                            .counterexample_id
+                            .as_deref()
+                            .map(|value| format!("\"{}\"", json_escape(value)))
+                            .unwrap_or_else(|| "null".to_string()),
+                    )
+                })
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"id\":\"{}\",\"disposition\":\"{}\",\"identity\":{{\"source\":\"{}\",\"build\":\"{}\",\"run\":\"{}\",\"target\":\"{}\"}},\"observation\":{},\"evidence\":\"checked\"}}",
+                json_escape(&record.id),
+                record.disposition.as_str(),
+                json_escape(&record.identity.source),
+                json_escape(&record.identity.build),
+                json_escape(&record.identity.run),
+                json_escape(&record.identity.target),
+                observed,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let status = if stale {
+        "stale"
+    } else if records.is_empty() {
+        "checked_without_derivation"
+    } else {
+        "checked"
+    };
+    let returned_views = signature
+        .returned_views
+        .iter()
+        .map(|view| format!("\"{}\"", json_escape(&view.canonical())))
+        .collect::<Vec<_>>()
+        .join(",");
+    let callable_span = format!(
+        "{{\"start\":{},\"end\":{}}}",
+        definition.def_span.start, definition.def_span.end
+    );
+    let callable = format!(
+        "{{\"identity\":\"{}\",\"qualified_name\":\"{}\",\"module_path\":\"{}\",\"span\":{}}}",
+        json_escape(&definition.identity),
+        json_escape(&definition.qualified_name),
+        json_escape(&definition.module_path),
+        callable_span,
+    );
+    let declaration_source = format!(
+        "{{\"kind\":\"checked_declaration\",\"module_path\":\"{}\"}}",
+        json_escape(&definition.module_path),
+    );
+    let failure = format!(
+        "{{\"type\":\"{}\",\"source\":\"{}\",\"evidence\":\"checked_contract\"}}",
+        json_escape(&signature.failure_contract),
+        json_escape(&signature.failure_source),
+    );
+    let limits = format!(
+        "{{\"records\":{},\"records_truncated\":{}}}",
+        MAX_SUMMARY_RECORDS, records_truncated
+    );
+    format!(
+        "{{\"status\":\"{}\",\"callable\":{},\"declaration_source\":{},\"failure\":{},\"write_access_parameters\":[{}],\"effects\":{},\"returned_views\":[{}],\"policies\":[{}],\"checked_records\":[{}],\"limits\":{},\"runtime_observation\":\"{}\"}}",
+        status,
+        callable,
+        declaration_source,
+        failure,
+        write_parameters,
+        effects,
+        returned_views,
+        json_string_array(signature.policies.iter().cloned()),
+        checked_records,
+        limits,
+        if records.iter().any(|record| record.observation.is_some()) {
+            "present"
+        } else {
+            "not_observed"
+        },
+    )
+}
+
+
+#[derive(Clone)]
+pub(crate) struct SignatureChangeEdit {
+    pub path: String,
+    pub span: Span,
+    pub new_text: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct SignatureChangeCaller {
+    pub identity: String,
+    pub path: String,
+    pub span: Span,
+    pub value: Option<String>,
+    pub status: &'static str,
+}
+
+pub(crate) struct SignatureChangePreview {
+    pub identity: String,
+    pub qualified_name: String,
+    pub declaration_path: String,
+    pub declaration_span: Span,
+    pub parameter_name: String,
+    pub parameter_type: String,
+    pub callers: Vec<SignatureChangeCaller>,
+    pub unknown: Vec<String>,
+    pub edits: Vec<SignatureChangeEdit>,
+}
+
+impl SignatureChangePreview {
+    pub(crate) fn can_apply(&self) -> bool {
+        self.unknown.is_empty()
+            && self
+                .callers
+                .iter()
+                .all(|caller| caller.value.as_deref().is_some())
+            && !self.edits.is_empty()
+    }
+}
+
+/// Build an explicit-value signature migration from one checked semantic
+/// identity.  This is deliberately a preview, not a code action: every
+/// caller value is supplied by the user and every edit stays tied to a
+/// checked source span.  Unresolved, higher-order, public/external, and
+/// generated boundaries are recorded as unknown instead of being guessed.
+pub(crate) fn compute_signature_change_preview(
+    db: &SymbolDB,
+    sources: &BTreeMap<String, String>,
+    identity: &str,
+    parameter_name: &str,
+    parameter_type: &str,
+    caller_values: &BTreeMap<String, String>,
+) -> Result<SignatureChangePreview, String> {
+    if !is_valid_ident(parameter_name) {
+        return Err(format!(
+            "`{parameter_name}` is not a valid parameter identifier"
+        ));
+    }
+    if parameter_type.trim().is_empty()
+        || parameter_type.contains(['\r', '\n'])
+        || parameter_type.contains(['{', '}'])
+    {
+        return Err("parameter type must be one explicit, single-line type".to_string());
+    }
+    let definition = db
+        .index
+        .lookup_identity(identity)
+        .ok_or_else(|| format!("no checked callable identity `{identity}`"))?;
+    let signature = definition
+        .callable_signature
+        .as_ref()
+        .ok_or_else(|| format!("`{identity}` is not a checked callable"))?;
+    if signature
+        .parameters
+        .iter()
+        .any(|parameter| parameter.name == parameter_name)
+    {
+        return Err(format!(
+            "callable `{identity}` already has parameter `{parameter_name}`"
+        ));
+    }
+    if signature.parameters.iter().any(|parameter| parameter.variadic) {
+        return Err(format!(
+            "callable `{identity}` has a variadic parameter; its insertion order is unavailable"
+        ));
+    }
+    let declaration_source = sources
+        .get(&definition.module_path)
+        .ok_or_else(|| format!("checked declaration source `{}` is unavailable", definition.module_path))?;
+    let declaration_tokens = crate::Lexer::lex(declaration_source).0;
+    let declaration_name = declaration_tokens
+        .iter()
+        .position(|token| {
+            token.span.start == definition.def_span.start
+                && token.span.end == definition.def_span.end
+                && matches!(&token.kind, TokKind::Ident(name) if name == &definition.name)
+        })
+        .or_else(|| {
+            declaration_tokens.iter().position(|token| {
+                token.span.start == definition.def_span.start
+                    && matches!(&token.kind, TokKind::Ident(name) if name == &definition.name)
+            })
+        })
+        .ok_or_else(|| format!("checked declaration span for `{identity}` is unavailable"))?;
+    let declaration_open = next_paren(&declaration_tokens, declaration_name)
+        .ok_or_else(|| format!("checked parameter list for `{identity}` is unavailable"))?;
+    let declaration_close = matching_paren(&declaration_tokens, declaration_open)
+        .ok_or_else(|| format!("checked parameter list for `{identity}` is incomplete"))?;
+    let declaration_has_parameters = declaration_tokens
+        .get(declaration_open + 1..declaration_close)
+        .is_some_and(|tokens| !tokens.is_empty());
+    let declaration_insert = declaration_tokens[declaration_close].span.start;
+    let declaration_text = if declaration_has_parameters {
+        format!(", {parameter_name}: {}", parameter_type.trim())
+    } else {
+        format!("{parameter_name}: {}", parameter_type.trim())
+    };
+
+    let mut preview = SignatureChangePreview {
+        identity: definition.identity.clone(),
+        qualified_name: definition.qualified_name.clone(),
+        declaration_path: definition.module_path.clone(),
+        declaration_span: definition.def_span.into(),
+        parameter_name: parameter_name.to_string(),
+        parameter_type: parameter_type.trim().to_string(),
+        callers: Vec::new(),
+        unknown: Vec::new(),
+        edits: vec![SignatureChangeEdit {
+            path: definition.module_path.clone(),
+            span: Span::new(declaration_insert, declaration_insert),
+            new_text: declaration_text,
+        }],
+    };
+
+    let mut known_call_spans = BTreeSet::new();
+    let mut seen_callers = BTreeSet::new();
+    for edge in db.calls.iter().filter(|edge| {
+        edge.callee == definition.name
+            || edge.callee == definition.qualified_name
+            || edge.callee == definition.identity
+    }) {
+        let call_matches_identity = db.refs.iter().any(|reference| {
+            reference.module_path == edge.module_path
+                && reference.span == edge.call_span.into()
+                && reference.target.as_ref().is_some_and(|target| {
+                    target.semantic_identity.as_deref() == Some(definition.identity.as_str())
+                        || (target.module_path == definition.module_path
+                            && target.def_span == definition.def_span.into())
+                })
+        });
+        if !call_matches_identity {
+            preview.unknown.push(format!(
+                "unresolved_call:{}:{}-{}",
+                edge.module_path, edge.call_span.start, edge.call_span.end
+            ));
+            continue;
+        }
+        let source = match sources.get(&edge.module_path) {
+            Some(source) => source,
+            None => {
+                preview
+                    .unknown
+                    .push(format!("unavailable_source:{}", edge.module_path));
+                continue;
+            }
+        };
+        let tokens = crate::Lexer::lex(source).0;
+        let Some(open) = call_open(&tokens, edge.call_span) else {
+            preview.unknown.push(format!(
+                "unavailable_call_arguments:{}:{}-{}",
+                edge.module_path, edge.call_span.start, edge.call_span.end
+            ));
+            continue;
+        };
+        let Some(close) = matching_paren(&tokens, open) else {
+            preview.unknown.push(format!(
+                "incomplete_call_arguments:{}:{}-{}",
+                edge.module_path, edge.call_span.start, edge.call_span.end
+            ));
+            continue;
+        };
+        let key = format!(
+            "{}:{}:{}:{}",
+            edge.caller, edge.module_path, edge.call_span.start, edge.call_span.end
+        );
+        if !seen_callers.insert(key) {
+            continue;
+        }
+        let value = caller_values
+            .get(&edge.caller)
+            .or_else(|| {
+                caller_values.get(&format!(
+                    "{}:{}:{}",
+                    edge.module_path, edge.call_span.start, edge.call_span.end
+                ))
+            })
+            .filter(|value| !value.trim().is_empty())
+            .cloned();
+        let status = if value.is_some() {
+            "explicit_value"
+        } else {
+            preview.unknown.push(format!(
+                "missing_explicit_value:{}",
+                edge.caller
+            ));
+            "missing_explicit_value"
+        };
+        let has_arguments = tokens
+            .get(open + 1..close)
+            .is_some_and(|tokens| !tokens.is_empty());
+        let insert = tokens[close].span.start;
+        if let Some(value) = value.as_deref() {
+            preview.edits.push(SignatureChangeEdit {
+                path: edge.module_path.clone(),
+                span: Span::new(insert, insert),
+                new_text: if has_arguments {
+                    format!(", {value}")
+                } else {
+                    value.to_string()
+                },
+            });
+        }
+        known_call_spans.insert((
+            edge.module_path.clone(),
+            edge.call_span.start,
+            edge.call_span.end,
+        ));
+        preview.callers.push(SignatureChangeCaller {
+            identity: edge.caller.clone(),
+            path: edge.module_path.clone(),
+            span: edge.call_span.into(),
+            value,
+            status,
+        });
+    }
+
+    for reference in &db.refs {
+        let Some(target) = reference.target.as_ref() else {
+            continue;
+        };
+        let matches_identity = target.semantic_identity.as_deref() == Some(identity)
+            || (target.module_path == definition.module_path
+                && target.def_span == definition.def_span.into());
+        if !matches_identity {
+            continue;
+        }
+        let call_span = (
+            reference.module_path.clone(),
+            reference.span.start,
+            reference.span.end,
+        );
+        if !known_call_spans.contains(&call_span) {
+            preview.unknown.push(format!(
+                "unresolved_or_higher_order_reference:{}:{}-{}",
+                reference.module_path, reference.span.start, reference.span.end
+            ));
+        }
+    }
+    if declaration_source[..definition.def_span.start.min(declaration_source.len())]
+        .lines()
+        .last()
+        .is_some_and(|line| line.split_whitespace().any(|word| word == "pub"))
+    {
+        preview
+            .unknown
+            .push("external_callers_outside_checked_workspace".to_string());
+    }
+    preview.unknown.sort();
+    preview.unknown.dedup();
+    Ok(preview)
+}
+
+fn next_paren(tokens: &[Token], from: usize) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .skip(from.saturating_add(1))
+        .find_map(|(index, token)| matches!(token.kind, TokKind::LParen).then_some(index))
+}
+
+fn matching_paren(tokens: &[Token], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open) {
+        match token.kind {
+            TokKind::LParen => depth = depth.saturating_add(1),
+            TokKind::RParen => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn call_open(tokens: &[Token], call_span: jet_semindex::SourceSpan) -> Option<usize> {
+    let callee = tokens.iter().position(|token| {
+        token.span.start <= call_span.start && call_span.end <= token.span.end
+            || token.span == call_span.into()
+    })?;
+    for (index, token) in tokens.iter().enumerate().skip(callee.saturating_add(1)) {
+        match token.kind {
+            TokKind::LParen => return Some(index),
+            TokKind::Semi | TokKind::LBrace | TokKind::RBrace => return None,
+            _ => {}
+        }
+    }
+    None
+}
 
 /// Complete source-linked relationship data for the expandable/pinnable
 /// editor command.  It is a projection over `SemIndex::derivations()` and
@@ -466,11 +995,12 @@ pub(crate) fn reasoning_view_json(
     .collect::<Vec<_>>()
     .join(",");
     format!(
-        "{{\"kind\":\"jet.reasoning/v1\",\"source\":\"{}\",\"selection\":{},\"records\":[{}],\"lenses\":[{}],\"limits\":{{\"records\":{},\"records_truncated\":{},\"expanded\":{}}}}}",
+        "{{\"kind\":\"jet.reasoning/v1\",\"source\":\"{}\",\"selection\":{},\"summary\":{},\"records\":[{}],\"lenses\":[{}],\"limits\":{{\"records\":{},\"records_truncated\":{},\"expanded\":{}}}}}",
         json_escape(path),
         selected
             .map(|value| format!("\"{}\"", json_escape(value)))
             .unwrap_or_else(|| "\"all\"".to_string()),
+        callable_summary_json(db, selected),
         rendered,
         lenses,
         MAX_RECORDS,
@@ -3023,7 +3553,11 @@ fn infer_total_pure_return_type(
 
 #[cfg(test)]
 mod refactor_safety_tests {
-    use super::{extract_function_action, infer_total_pure_return_type, is_total_pure_expr};
+    use super::{
+        compute_signature_change_preview, extract_function_action, infer_total_pure_return_type,
+        is_total_pure_expr,
+    };
+    use std::collections::BTreeMap;
     use crate::Diagnostics::{Severity, Span};
 
     #[test]
@@ -3061,6 +3595,85 @@ mod refactor_safety_tests {
         assert!(
             extract_function_action(&db, &tokens, source, &shown, selected, "\"result\"").is_none()
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn signature_preview_requires_explicit_values_for_checked_callers() {
+        let root =
+            std::env::temp_dir().join(format!("jet-lsp-signature-preview-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        let source = concat!(
+            "fn target(value: Int) Int {\n",
+            "    return value\n",
+            "}\n",
+            "fn run() {\n",
+            "    print(target(1))\n",
+            "}\n",
+        );
+        std::fs::write(&path, source).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let mut bundle = crate::Loader::load_entry(&shown).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let definition = db
+            .index
+            .definitions()
+            .iter()
+            .find(|definition| definition.name == "target")
+            .expect("checked target definition");
+        let identity = definition.identity.clone();
+        let module_path = definition.module_path.clone();
+        let mut sources = BTreeMap::new();
+        for module in &bundle.modules {
+            sources.insert(module.display.clone(), module.source.clone());
+            sources.insert(
+                module.path.to_string_lossy().into_owned(),
+                module.source.clone(),
+            );
+        }
+        let missing = compute_signature_change_preview(
+            &db,
+            &sources,
+            &identity,
+            "offset",
+            "Int",
+            &BTreeMap::new(),
+        )
+        .expect("checked signature preview");
+        assert!(missing
+            .unknown
+            .iter()
+            .any(|unknown| unknown.starts_with("missing_explicit_value:")));
+        let caller = db
+            .calls
+            .iter()
+            .find(|edge| edge.callee == "target")
+            .expect("checked direct caller");
+        let mut values = BTreeMap::new();
+        values.insert(caller.caller.clone(), "0".to_string());
+        let ready = compute_signature_change_preview(
+            &db,
+            &sources,
+            &identity,
+            "offset",
+            "Int",
+            &values,
+        )
+        .expect("explicit signature preview");
+        assert!(ready.unknown.is_empty(), "{:?}", ready.unknown);
+        assert!(ready.edits.iter().any(|edit| edit.new_text.contains('0')));
+        assert_eq!(ready.declaration_path, module_path);
         let _ = std::fs::remove_dir_all(root);
     }
 }
