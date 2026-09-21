@@ -6256,6 +6256,37 @@ fn finish_test_evidence(
         }
         return Ok(None);
     }
+    let test_projection = jet::Codegen::test_report::JetTestOutcomeProjection::from_records(
+        report.records.iter().map(|record| {
+            jet::Codegen::test_report::JetTestOutcomeRecord {
+                terminal: matches!(
+                    record.kind,
+                    jet_foundation::Evidence::EvidenceKind::Unit
+                        | jet_foundation::Evidence::EvidenceKind::Property
+                        | jet_foundation::Evidence::EvidenceKind::Doctest
+                ),
+                outcome: match record.outcome {
+                    jet_foundation::Evidence::EvidenceOutcome::Passed => {
+                        jet::Codegen::test_report::JetTestRecordOutcome::Passed
+                    }
+                    jet_foundation::Evidence::EvidenceOutcome::Failed => {
+                        jet::Codegen::test_report::JetTestRecordOutcome::Failed
+                    }
+                    jet_foundation::Evidence::EvidenceOutcome::Error => {
+                        jet::Codegen::test_report::JetTestRecordOutcome::Error
+                    }
+                    jet_foundation::Evidence::EvidenceOutcome::Skipped => {
+                        jet::Codegen::test_report::JetTestRecordOutcome::Skipped
+                    }
+                    _ => jet::Codegen::test_report::JetTestRecordOutcome::Other,
+                },
+                expected_failure: matches!(
+                    record.expectation,
+                    jet_foundation::Evidence::EvidenceExpectation::ExpectedFailure
+                ),
+            }
+        }),
+    );
     let projection = jet::Package::ClaimsProjection::from_records(&report.records);
     let floor = jet::Loader::package_facts_for_entry(Path::new(file))
         .ok()
@@ -6281,50 +6312,20 @@ fn finish_test_evidence(
         "claims",
         StatusValue::object(StatusFields::new().with("grade", grade)),
     ));
-    let mut passed = 0usize;
-    let mut failed = 0usize;
-    let mut skipped = 0usize;
-    let mut expected_failures = 0usize;
-    let mut unexpected_passes = 0usize;
-    for record in &report.records {
-        if !matches!(
-            record.kind,
-            jet_foundation::Evidence::EvidenceKind::Unit
-                | jet_foundation::Evidence::EvidenceKind::Property
-                | jet_foundation::Evidence::EvidenceKind::Doctest
-        ) {
-            continue;
-        }
-        if record.is_unexpected_pass() {
-            unexpected_passes += 1;
-            continue;
-        }
-        if record.is_expected_failure() {
-            expected_failures += 1;
-            continue;
-        }
-        match record.outcome {
-            jet_foundation::Evidence::EvidenceOutcome::Passed => passed += 1,
-            jet_foundation::Evidence::EvidenceOutcome::Failed
-            | jet_foundation::Evidence::EvidenceOutcome::Error => failed += 1,
-            jet_foundation::Evidence::EvidenceOutcome::Skipped => skipped += 1,
-            _ => {}
-        }
-    }
     let test = StatusValue::object(
         StatusFields::new()
-            .with("failed", failed)
-            .with("passed", passed)
-            .with("skipped", skipped)
-            .with(
-                "selected",
-                passed + failed + skipped + expected_failures + unexpected_passes,
-            )
-            .with("expectedFailures", expected_failures)
-            .with("unexpectedPasses", unexpected_passes),
+            .with("failed", test_projection.failed)
+            .with("passed", test_projection.passed)
+            .with("skipped", test_projection.skipped)
+            .with("selected", test_projection.selected())
+            .with("expectedFailures", test_projection.expected_failures)
+            .with("unexpectedPasses", test_projection.unexpected_passes),
     );
     let evidence = StatusValue::parse(&report.json()).map_err(|error| error.to_string())?;
-    let mut status = StatusEnvelope::new("test", failed == 0 && unexpected_passes == 0)
+    let mut status = StatusEnvelope::new(
+        "test",
+        test_projection.failed == 0 && test_projection.unexpected_passes == 0,
+    )
         .with_field("test", test)
         .with_field("evidence", evidence)
         .with_field("grade", projection.grade.render())

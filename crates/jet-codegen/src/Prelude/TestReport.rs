@@ -1,9 +1,29 @@
 // D-REPORT-TEST1=A: one test-result report for generated harnesses and
 // `jet prove`. Keep this source dependency-free so AOT can embed it and the
 // compiler can call the same renderer for its host-side report.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JetTestReport {
-    pub evidence: EvidenceReport,
+/// The source-independent facts needed to classify one terminal test record.
+/// Runtime and host projections adapt their borrowed evidence records to this
+/// shape; the precedence and five counters below stay in one implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetTestRecordOutcome {
+    Passed,
+    Failed,
+    Error,
+    Skipped,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JetTestOutcomeRecord {
+    pub terminal: bool,
+    pub outcome: JetTestRecordOutcome,
+    pub expected_failure: bool,
+}
+
+/// Borrowed production projection of the five test outcome counters. The
+/// iterator may borrow any evidence representation; only the counters survive.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct JetTestOutcomeProjection {
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
@@ -11,47 +31,88 @@ pub struct JetTestReport {
     pub unexpected_passes: usize,
 }
 
-impl JetTestReport {
-    /// Build the human and machine test view from the one canonical evidence
-    /// report. The caller owns insertion/finalization; this boundary validates
-    /// the report without re-recording any evidence.
-    pub fn from_evidence(report: &EvidenceReport) -> Result<Self, TestEvidenceError> {
-        query_test_evidence(report, None)?;
-        let mut view = Self {
-            evidence: report.clone(),
-            passed: 0,
-            failed: 0,
-            skipped: 0,
-            expected_failures: 0,
-            unexpected_passes: 0,
-        };
-        for record in &view.evidence.records {
-            // Runtime records are diagnostic observations emitted while a
-            // test body fails.  The harness' Unit record is the terminal
-            // test outcome; counting both would turn one expected failure
-            // into two while dropping the raw diagnostic would lose evidence.
-            if !matches!(
-                record.kind,
-                EvidenceKind::Unit | EvidenceKind::Property | EvidenceKind::Doctest
-            ) {
+impl JetTestOutcomeProjection {
+    pub fn from_records<I>(records: I) -> Self
+    where
+        I: IntoIterator<Item = JetTestOutcomeRecord>,
+    {
+        let mut projection = Self::default();
+        for record in records {
+            if !record.terminal {
                 continue;
             }
-            if record.is_unexpected_pass() {
-                view.unexpected_passes += 1;
+            if record.expected_failure
+                && matches!(record.outcome, JetTestRecordOutcome::Passed)
+            {
+                projection.unexpected_passes += 1;
                 continue;
             }
-            if record.is_expected_failure() {
-                view.expected_failures += 1;
+            if record.expected_failure
+                && matches!(record.outcome, JetTestRecordOutcome::Failed)
+            {
+                projection.expected_failures += 1;
                 continue;
             }
             match record.outcome {
-                EvidenceOutcome::Passed => view.passed += 1,
-                EvidenceOutcome::Failed | EvidenceOutcome::Error => view.failed += 1,
-                EvidenceOutcome::Skipped => view.skipped += 1,
-                _ => {}
+                JetTestRecordOutcome::Passed => projection.passed += 1,
+                JetTestRecordOutcome::Failed | JetTestRecordOutcome::Error => {
+                    projection.failed += 1
+                }
+                JetTestRecordOutcome::Skipped => projection.skipped += 1,
+                JetTestRecordOutcome::Other => {}
             }
         }
-        Ok(view)
+        projection
+    }
+
+    pub fn selected(self) -> usize {
+        self.passed + self.failed + self.skipped + self.expected_failures + self.unexpected_passes
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetTestReport<'report> {
+    pub evidence: &'report EvidenceReport,
+    pub passed: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub expected_failures: usize,
+    pub unexpected_passes: usize,
+}
+
+impl<'report> JetTestReport<'report> {
+    /// Build the human and machine test view from the one canonical evidence
+    /// report. The caller owns insertion/finalization; this boundary validates
+    /// the report without re-recording any evidence or cloning its payload.
+    pub fn from_evidence(report: &'report EvidenceReport) -> Result<Self, TestEvidenceError> {
+        query_test_evidence(report, None)?;
+        let projection = JetTestOutcomeProjection::from_records(
+            report.records.iter().map(|record| JetTestOutcomeRecord {
+                terminal: matches!(
+                    record.kind,
+                    EvidenceKind::Unit | EvidenceKind::Property | EvidenceKind::Doctest
+                ),
+                outcome: match record.outcome {
+                    EvidenceOutcome::Passed => JetTestRecordOutcome::Passed,
+                    EvidenceOutcome::Failed => JetTestRecordOutcome::Failed,
+                    EvidenceOutcome::Error => JetTestRecordOutcome::Error,
+                    EvidenceOutcome::Skipped => JetTestRecordOutcome::Skipped,
+                    _ => JetTestRecordOutcome::Other,
+                },
+                expected_failure: matches!(
+                    record.expectation,
+                    EvidenceExpectation::ExpectedFailure
+                ),
+            }),
+        );
+        Ok(Self {
+            evidence: report,
+            passed: projection.passed,
+            failed: projection.failed,
+            skipped: projection.skipped,
+            expected_failures: projection.expected_failures,
+            unexpected_passes: projection.unexpected_passes,
+        })
     }
 
     /// D-TEST-XFAIL1=A counts expected failures and unexpected passes apart
@@ -88,7 +149,7 @@ impl JetTestReport {
             self.failed == 0 && self.unexpected_passes == 0,
         )
         .with_field("test", test)
-        .with_field("evidence", evidence_status_value(&self.evidence)))
+        .with_field("evidence", evidence_status_value(self.evidence)))
     }
 
     pub fn json(&self) -> String {
@@ -103,8 +164,8 @@ impl JetTestReport {
 
 
     /// Render one failed/error evidence record using the established test
-    /// report frame. All structured evidence stays owned by `self.evidence`;
-    /// this is only the terminal view.
+    /// report frame. Structured evidence remains borrowed from the canonical
+    /// report; this is only the terminal view.
     pub fn render_record(record: &EvidenceRecord) -> String {
         let diagnostic = record.diagnostics.first();
         let code = diagnostic.map_or("E3001", |value| value.code.as_str());
