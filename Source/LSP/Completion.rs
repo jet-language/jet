@@ -304,25 +304,37 @@ fn completion_enum_definition_for_type<'a>(
         session_top_level: false,
     };
     if let Some(symbol) = db.symbols.resolve_visible_at(type_name, anchor) {
-        let mut matches = db.defs.iter().filter(|definition| {
+        // The checked semantic identity is authoritative.  An open workspace
+        // overlay can leave two rows for that identity in `db.defs`; row
+        // cardinality must not turn an otherwise unambiguous enum invisible.
+        if let Some(definition) = db.defs.iter().find(|definition| {
             definition.identity == symbol.identity
                 && matches!(&definition.kind, SymKind::Enum { .. })
-        });
-        if let Some(definition) = matches.next() {
-            if matches.next().is_none() {
-                return Some(definition);
-            }
+        }) {
+            return Some(definition);
         }
     }
     let leaf = type_name
         .rsplit_once('.')
         .map_or(type_name, |(_, leaf)| leaf);
-    let mut matches = db.defs.iter().filter(|definition| {
+    let mut identity = None;
+    for definition in db.defs.iter().filter(|definition| {
         matches!(&definition.kind, SymKind::Enum { .. })
             && (definition.name == type_name || definition.name == leaf)
-    });
-    let definition = matches.next()?;
-    matches.next().is_none().then_some(definition)
+    }) {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &&str| *existing != definition.identity.as_str())
+        {
+            return None;
+        }
+        identity.get_or_insert(definition.identity.as_str());
+    }
+    identity.and_then(|identity| {
+        db.defs.iter().find(|definition| {
+            definition.identity == identity && matches!(&definition.kind, SymKind::Enum { .. })
+        })
+    })
 }
 
 fn detect_switch_enum_type<'a>(
