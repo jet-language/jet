@@ -41,6 +41,14 @@ edit or a suggested edit for the named span; the human Fix sentence is never
 parsed to recover an edit. Machine JSON and LSP data carry the registered code,
 What/Why/Fix, span, and structured edits without requiring consumers to parse
 human prose.
+The canonical machine envelope is `jet.report/v3`. Its `cause` array is
+nearest-first and contains objects with `code`, `file`, `line`, `col`, and
+`span` fields. Repeated codes are not deduplicated. Each field is projected
+from that cause's own `DiagnosticCause` and originating source snapshot;
+unknown fields are `null` and never inherit the root diagnostic's location.
+When a source snapshot is unavailable, the projection must not invent a path
+or derived line/column (or a `0:0` position); an explicitly supplied byte span
+remains as-is.
 Safe edits may be applied automatically; suggested edits remain advisory until
 the user accepts them.
 

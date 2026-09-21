@@ -118,8 +118,8 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
-    render_status, render_status_with_reports, FixApplicability, FixSafety,
-    NoFixReason, NoFixReasonKind, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
+    render_status, render_status_with_reports, FixApplicability, FixSafety, NoFixReason,
+    NoFixReasonKind, ReportCause, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
     ReportSpan, StatusEnvelope, StatusFields, StatusValue, REPORT_SCHEMA, STATUS_SCHEMA,
 };
 
@@ -203,8 +203,9 @@ pub enum StructuredDiagnostic {
 }
 
 /// Stable identity for one report named in a dependent's cause chain. The
-/// public report wire stays code-only; source projections use the span and
-/// originating snapshot to distinguish repeated diagnostics with the same code.
+/// canonical report projection keeps the code and each known location field,
+/// including the originating source snapshot, to distinguish repeated
+/// diagnostics with the same code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticCause {
     pub code: String,
@@ -215,11 +216,8 @@ pub struct DiagnosticCause {
 impl DiagnosticCause {
     pub fn matches(&self, diagnostic: &Diagnostic) -> bool {
         self.code == diagnostic.code
-            && self.span.is_none_or(|span| diagnostic.span == Some(span))
-            && self
-                .origin
-                .as_ref()
-                .is_none_or(|origin| diagnostic.origin.as_ref() == Some(origin))
+            && self.span == diagnostic.span
+            && self.origin.as_ref() == diagnostic.origin.as_ref()
     }
 }
 #[derive(Debug, Clone)]
@@ -789,20 +787,6 @@ impl Diagnostic {
         self.origin.as_deref()
     }
 
-    /// Attach a legacy code-only cause chain. New compiler-produced chains
-    /// should use [`Diagnostic::caused_by`] so repeated codes retain identity.
-    pub fn with_causes(mut self, cause: Vec<String>) -> Self {
-        self.cause = cause
-            .into_iter()
-            .map(|code| DiagnosticCause {
-                code,
-                span: None,
-                origin: None,
-            })
-            .collect();
-        self
-    }
-
     /// Put the nearest wrapped report first, followed by its own causes.
     pub fn caused_by(mut self, cause: &Self) -> Self {
         self.cause.reserve(cause.cause.len() + 1);
@@ -814,6 +798,7 @@ impl Diagnostic {
         self.cause.extend(cause.cause.iter().cloned());
         self
     }
+
 
     pub fn crypto_misuse(
         why: String,
@@ -1086,7 +1071,28 @@ impl Diagnostic {
                 .set_no_fix_reason(reason.clone())
                 .unwrap_or_else(|error| crate::ice!(self.span, "{error}"));
         }
-        report.cause = self.cause.iter().map(|cause| cause.code.clone()).collect();
+        report.cause = self
+            .cause
+            .iter()
+            .map(|cause| {
+                let mut projected = ReportCause::new(cause.code.clone());
+                projected.span = cause
+                    .span
+                    .map(|span| ReportSpan::new(span.start, span.end));
+                if let Some(origin) = cause.origin.as_deref() {
+                    let path = ReportPath::from_process(&origin.path);
+                    if !path.is_empty() {
+                        projected.file = Some(path);
+                    }
+                    if let Some(span) = cause.span {
+                        let (line, col) = line_col(&origin.source, span.start);
+                        projected.line = Some(line);
+                        projected.col = Some(col);
+                    }
+                }
+                projected
+            })
+            .collect();
         report.clears = clears;
         if let Some(StructuredDiagnostic::CryptoMisuse {
             reason,
@@ -1113,7 +1119,7 @@ impl Diagnostic {
         report
     }
 
-    /// Render this diagnostic as one `jet.report/v2` JSON object.
+    /// Render this diagnostic as one `jet.report/v3` JSON object.
     pub fn to_json(&self, file: &ReportPath, src: &str) -> String {
         self.to_report(file, src).json()
     }
@@ -1916,7 +1922,7 @@ mod crypto_diagnostic_contract_tests {
         assert!(object.starts_with('{') && object.ends_with('}'), "{json}");
         assert!(crate::JSON::parse_json(object).is_ok(), "{json}");
         for required in [
-            "\"schema\":\"jet.report/v2\"",
+            "\"schema\":\"jet.report/v3\"",
             "\"severity\":\"error\"",
             "\"code\":\"E2702\"",
             "\"what\":\"Crypto API misuse\"",
@@ -1952,7 +1958,7 @@ mod crypto_diagnostic_contract_tests {
             None,
         );
         let json = render_all_json(&ReportPath::from_process("x.jet"), "", &[diagnostic]);
-        assert!(json.starts_with("{\"schema\":\"jet.report/v2\",\"moment\":\"compile\""));
+        assert!(json.starts_with("{\"schema\":\"jet.report/v3\",\"moment\":\"compile\""));
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
         assert_eq!(
@@ -2049,15 +2055,21 @@ mod crypto_diagnostic_contract_tests {
         let lines = json.lines().collect::<Vec<_>>();
         assert!(lines[0].contains("\"cause\":[],\"clears\":3"), "{json}");
         assert!(
-            lines[1].contains("\"cause\":[\"E0109\"],\"clears\":1"),
+            lines[1].contains(
+                "\"cause\":[{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}],\"clears\":1"
+            ),
             "{json}"
         );
         assert!(
-            lines[2].contains("\"cause\":[\"E0108\",\"E0109\"],\"clears\":0"),
+            lines[2].contains(
+                "\"cause\":[{\"code\":\"E0108\",\"file\":null,\"line\":null,\"col\":null,\"span\":null},{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}],\"clears\":0"
+            ),
             "{json}"
         );
         assert!(
-            lines[3].contains("\"cause\":[\"E0109\"],\"clears\":0"),
+            lines[3].contains(
+                "\"cause\":[{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}],\"clears\":0"
+            ),
             "{json}"
         );
     }
@@ -2241,7 +2253,7 @@ mod crypto_diagnostic_contract_tests {
             &[diagnostic(), diagnostic()],
         );
         assert_eq!(json.lines().count(), 2);
-        assert_eq!(json.matches("\"schema\":\"jet.report/v2\"").count(), 2);
+        assert_eq!(json.matches("\"schema\":\"jet.report/v3\"").count(), 2);
         assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
     }
 
@@ -2270,11 +2282,11 @@ mod crypto_diagnostic_contract_tests {
             .iter()
             .all(|line| crate::JSON::parse_json(line).is_ok()));
         assert!(
-            lines[0].contains("\"schema\":\"jet.report/v2\"")
+            lines[0].contains("\"schema\":\"jet.report/v3\"")
                 && lines[0].contains("\"code\":\"E2702\"")
         );
         assert!(
-            lines[1].contains("\"schema\":\"jet.report/v2\"")
+            lines[1].contains("\"schema\":\"jet.report/v3\"")
                 && lines[1].contains("\"code\":\"E0001\"")
         );
     }

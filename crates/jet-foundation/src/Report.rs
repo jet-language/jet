@@ -5,8 +5,8 @@
 // serialize this envelope instead of maintaining separate protocol shapes.
 
 pub const REPORT_NAME: &str = "jet.report";
-pub const REPORT_VERSION: u32 = 2;
-pub const REPORT_SCHEMA: &str = "jet.report/v2";
+pub const REPORT_VERSION: u32 = 3;
+pub const REPORT_SCHEMA: &str = "jet.report/v3";
 pub const STATUS_NAME: &str = "jet.status";
 pub const STATUS_VERSION: u32 = 1;
 pub const STATUS_SCHEMA: &str = "jet.status/v1";
@@ -550,6 +550,38 @@ impl ReportSpan {
     }
 }
 
+/// One ordered cause in a `jet.report/v3` diagnostic.
+///
+/// Every location component is independent. A cause with no originating
+/// snapshot or span keeps those fields explicitly unknown instead of
+/// inheriting the root report's location.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportCause {
+    pub code: String,
+    pub file: Option<ReportPath>,
+    pub line: Option<usize>,
+    pub col: Option<usize>,
+    pub span: Option<ReportSpan>,
+}
+
+impl ReportCause {
+    pub fn new(code: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            file: None,
+            line: None,
+            col: None,
+            span: None,
+        }
+    }
+
+    /// Code-only access for non-report status projections.
+    pub fn as_str(&self) -> &str {
+        &self.code
+    }
+}
+
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportEdit {
     pub file: ReportPath,
@@ -587,7 +619,7 @@ pub enum ReportExtension {
     },
 }
 
-/// A `jet.report/v2` diagnostic or machine finding.
+/// A `jet.report/v3` diagnostic or machine finding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportEnvelope {
     pub schema_name: &'static str,
@@ -605,7 +637,7 @@ pub struct ReportEnvelope {
     pub col: Option<usize>,
     pub span: Option<ReportSpan>,
     fix_edits: Vec<ReportEdit>,
-    pub cause: Vec<String>,
+    pub cause: Vec<ReportCause>,
     pub clears: usize,
     pub extension: Option<ReportExtension>,
     no_fix_reason: Option<NoFixReason>,
@@ -704,7 +736,7 @@ impl ReportEnvelope {
         Ok(())
     }
     pub fn json(&self) -> String {
-        self.validate().expect("invalid jet.report/v2 envelope");
+        self.validate().expect("invalid jet.report/v3 envelope");
         let mut out = String::from("{\"schema\":");
         let schema = format!("{}/v{}", self.schema_name, self.schema_version);
         out.push_str(&report_json_string(&schema));
@@ -791,7 +823,28 @@ impl ReportEnvelope {
             if index > 0 {
                 out.push(',');
             }
-            out.push_str(&report_json_string(cause));
+            out.push_str("{\"code\":");
+            out.push_str(&report_json_string(&cause.code));
+            out.push_str(",\"file\":");
+            match &cause.file {
+                Some(file) if !file.is_empty() => {
+                    out.push_str(&report_json_string(file.as_str()))
+                }
+                _ => out.push_str("null"),
+            }
+            out.push_str(",\"line\":");
+            push_optional_usize(&mut out, cause.line);
+            out.push_str(",\"col\":");
+            push_optional_usize(&mut out, cause.col);
+            out.push_str(",\"span\":");
+            match cause.span {
+                Some(span) => out.push_str(&format!(
+                    "{{\"start\":{},\"end\":{}}}",
+                    span.start, span.end
+                )),
+                None => out.push_str("null"),
+            }
+            out.push('}');
         }
         out.push(']');
         out.push_str(&format!(",\"clears\":{}", self.clears));
