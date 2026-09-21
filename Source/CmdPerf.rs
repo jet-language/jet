@@ -11,12 +11,14 @@
 use jet_foundation::Devtools::JetDevtoolsEventBody;
 use jet_foundation::ExitCodes;
 use jet_foundation::JetTrace::{
-    artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
-    project_game_devtools_bodies, trace_id, verify_jettrace, CapturePolicy, JetSymbolRef,
-    SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent, TraceGameFrame,
-    TraceHardware, TraceIo, TraceLock, TraceNative, TraceReceiptSection, TraceSample,
-    TraceSkeleton, TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS,
-    TRACE_IO_ROW_LIMIT, TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_locations_from_source,
+    fn_names_from_source, project_game_devtools_bodies, trace_id, verify_jettrace, CapturePolicy,
+    JetSymbolRef, SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent,
+    TraceGameFrame, TraceHardware, TraceIo, TraceLock, TraceNative, TraceProfile,
+    TraceProfileRow, TraceProfileSource, TraceReceiptSection, TraceSample, TraceSkeleton,
+    TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS,
+    TRACE_IO_ROW_LIMIT, TRACE_PROFILE_SAMPLE_LIMIT, TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT,
+    TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
@@ -42,6 +44,7 @@ fn perf_error_with_fix(what: impl Into<String>, fix: impl Into<String>) {
 }
 struct CaptureBundle {
     samples: Vec<TraceSample>,
+    profile: TraceProfile,
     allocations: Vec<TraceAllocation>,
     browser: Vec<TraceBrowser>,
     browser_rows_truncated: bool,
@@ -64,6 +67,7 @@ impl CaptureBundle {
     fn empty() -> Self {
         Self {
             samples: Vec::new(),
+            profile: TraceProfile::unsupported("source sampling requires a source capture"),
             allocations: Vec::new(),
             browser: Vec::new(),
             browser_rows_truncated: false,
@@ -216,7 +220,11 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
                     // Observe publishes under the program PID, not the jet host.
                     if let Some(snapshot) = poll_observe_snapshot(pid) {
                         let observed_at_ns = elapsed_ns(started);
-                        io_timeline.observe(&snapshot.tasks, observed_at_ns);
+                        io_timeline.observe(
+                            &snapshot.tasks,
+                            observed_at_ns,
+                            snapshot.process_cpu_ns.is_some(),
+                        );
                         native_timing = snapshot
                             .process_cpu_ns
                             .map(|duration_ns| NativeTimingInput::Captured {
@@ -878,6 +886,95 @@ fn attribution_symbol(
         name,
     })
 }
+fn sampled_source_profile(
+    source_path: &str,
+    source_sha256: &str,
+    source: &str,
+    entry: Option<&str>,
+    wall_samples: u64,
+    cpu_samples: u64,
+    samples_truncated: bool,
+) -> TraceProfile {
+    let Some(entry) = entry else {
+        return TraceProfile::unsupported("source has no `fn run` entrypoint");
+    };
+    let Some(location) = fn_locations_from_source(source)
+        .into_iter()
+        .find(|location| location.name == entry)
+    else {
+        return TraceProfile::unsupported("entrypoint source location was not observed");
+    };
+    let retained_wall = wall_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
+    let retained_cpu = cpu_samples.min(TRACE_PROFILE_SAMPLE_LIMIT);
+    let source_for_row = || TraceProfileSource {
+        path: source_path.into(),
+        sha256: source_sha256.into(),
+        start_line: location.start_line,
+        start_column: location.start_column,
+        end_line: location.end_line,
+        end_column: location.end_column,
+    };
+    let symbol = JetSymbolRef {
+        path: source_path.into(),
+        name: entry.into(),
+    };
+    let mut rows = Vec::new();
+    if retained_wall > 0 {
+        rows.push(TraceProfileRow {
+            clock: "wall".into(),
+            execution_count: None,
+            sample_count: retained_wall,
+            sample_weight: retained_wall,
+            source: source_for_row(),
+            symbol: symbol.clone(),
+        });
+    }
+    if retained_cpu > 0 {
+        rows.push(TraceProfileRow {
+            clock: "cpu".into(),
+            execution_count: None,
+            sample_count: retained_cpu,
+            sample_weight: retained_cpu,
+            source: source_for_row(),
+            symbol,
+        });
+    }
+    let truncated = samples_truncated
+        || wall_samples > TRACE_PROFILE_SAMPLE_LIMIT
+        || cpu_samples > TRACE_PROFILE_SAMPLE_LIMIT;
+    let (status, coverage, reason) = if truncated {
+        (
+            "truncated",
+            "partial",
+            "sampling observations exceeded the bounded profile sample limit",
+        )
+    } else if rows.is_empty() {
+        (
+            "no_samples",
+            "none",
+            "the observe channel produced no source-attributed samples",
+        )
+    } else {
+        (
+            "captured",
+            "partial",
+            "sampling is attributed to the observed entrypoint; execution counts are not inferred",
+        )
+    };
+    TraceProfile {
+        method: "sampling".into(),
+        status: status.into(),
+        coverage: coverage.into(),
+        rows,
+        row_limit: TRACE_PROFILE_SAMPLE_LIMIT,
+        rows_truncated: truncated,
+        overhead_ns: None,
+        overhead_status: "not_measured".into(),
+        overhead_reason: "no matched non-profiled run was captured".into(),
+        reason: reason.into(),
+    }
+}
+
 
 fn capture_from_source(
     source_path: &str,
@@ -899,10 +996,28 @@ fn capture_from_source(
     let path_text = source_path.to_string();
     let fn_names = fn_names_from_source(&src);
     let entry = entrypoint_name_from_source(&src);
-    let symbol = entry.map(|name| JetSymbolRef {
+    let symbol = entry.as_ref().map(|name| JetSymbolRef {
         path: path_text.clone(),
-        name,
+        name: name.clone(),
     });
+    let profile_wall_samples = io_timeline
+        .map(IOTimeline::profile_samples)
+        .unwrap_or_else(|| u64::from(snapshot.is_some()));
+    let profile_cpu_samples = io_timeline
+        .map(IOTimeline::profile_cpu_samples)
+        .unwrap_or_else(|| u64::from(snapshot.is_some() && cpu_ns.is_some()));
+    let profile_truncated = io_timeline
+        .map(IOTimeline::profile_samples_truncated)
+        .unwrap_or(false);
+    let profile = sampled_source_profile(
+        &path_text,
+        &sha256,
+        &src,
+        entry.as_deref(),
+        profile_wall_samples,
+        profile_cpu_samples,
+        profile_truncated,
+    );
     let snapshot_tasks = snapshot
         .and_then(|snapshot| {
             let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
@@ -1133,6 +1248,7 @@ fn capture_from_source(
     }
     Ok(CaptureBundle {
         samples,
+        profile,
         allocations,
         browser: Vec::new(),
         browser_rows_truncated: false,
@@ -1385,6 +1501,9 @@ struct IOTimeline {
     completed: Vec<ObservedIoSpan>,
     io_rows_truncated: bool,
     process_last_seen: BTreeMap<u32, u64>,
+    profile_samples: u64,
+    profile_cpu_samples: u64,
+    profile_samples_truncated: bool,
     span_rows_truncated: bool,
     task_spans: BTreeMap<ObservedTaskKey, ObservedTaskSpan>,
     task_rows_truncated: bool,
@@ -1392,7 +1511,24 @@ struct IOTimeline {
 }
 
 impl IOTimeline {
-    fn observe(&mut self, observed_tasks: &ObservedTasks, now_ns: u64) {
+    fn observe(
+        &mut self,
+        observed_tasks: &ObservedTasks,
+        now_ns: u64,
+        cpu_observed: bool,
+    ) {
+        if self.profile_samples < TRACE_PROFILE_SAMPLE_LIMIT {
+            self.profile_samples += 1;
+        } else {
+            self.profile_samples_truncated = true;
+        }
+        if cpu_observed {
+            if self.profile_cpu_samples < TRACE_PROFILE_SAMPLE_LIMIT {
+                self.profile_cpu_samples += 1;
+            } else {
+                self.profile_samples_truncated = true;
+            }
+        }
         self.task_rows_truncated |= observed_tasks.truncated;
         self.io_rows_truncated |= observed_tasks.truncated;
         self.span_rows_truncated |= observed_tasks.truncated;
@@ -1500,6 +1636,18 @@ impl IOTimeline {
             self.io_rows_truncated = true;
         }
     }
+    fn profile_samples(&self) -> u64 {
+        self.profile_samples
+    }
+
+    fn profile_cpu_samples(&self) -> u64 {
+        self.profile_cpu_samples
+    }
+
+    fn profile_samples_truncated(&self) -> bool {
+        self.profile_samples_truncated
+    }
+
 
     fn tasks(&self) -> Vec<ObservedTask> {
         self.tasks.values().cloned().collect()
@@ -1955,6 +2103,9 @@ fn render_view_text(trace: &CanonicalJson, frames: FramesMode, color: bool) {
     if let Some((domain, ns, symbol)) = first_sample(trace) {
         println!("sample {domain} {ns}ns · {symbol}");
     }
+    if let Some(summary) = profile_summary(trace) {
+        println!("{summary}");
+    }
     if let Some((count, bytes, symbol)) = first_allocation(trace) {
         println!("alloc count={count} bytes={bytes} · {symbol}");
     }
@@ -2004,6 +2155,29 @@ fn ascii_flame(trace: &CanonicalJson) -> Vec<String> {
     if let Some((domain, ns, symbol)) = first_sample(trace) {
         let width = ((ns.parse::<u64>().unwrap_or(1).min(40)) as usize).max(1);
         rows.push(format!("{symbol} {domain} {}", "#".repeat(width)));
+    }
+    if let Some(CanonicalJson::Object(profile)) =
+        content_object(trace).and_then(|content| content.get("profile"))
+    {
+        if let Some(CanonicalJson::Array(profile_rows)) = profile.get("rows") {
+            for row in profile_rows.iter().take(8) {
+                let CanonicalJson::Object(fields) = row else {
+                    continue;
+                };
+                let Some(symbol) = fields.get("symbol").and_then(symbol_label) else {
+                    continue;
+                };
+                let clock = match fields.get("clock") {
+                    Some(CanonicalJson::String(clock)) => clock,
+                    _ => continue,
+                };
+                let weight = match fields.get("sample_weight") {
+                    Some(CanonicalJson::Integer(weight)) => weight,
+                    _ => continue,
+                };
+                rows.push(format!("{symbol} profile:{clock} samples={weight}"));
+            }
+        }
     }
     if let Some((n, symbol)) = browser_summary(trace) {
         let width = n.min(40).max(1);
@@ -2507,6 +2681,7 @@ enum ExportMode {
 
 fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
     let loss = if first_sample(trace).is_some()
+        || profile_summary(trace).is_some()
         || first_allocation(trace).is_some()
         || browser_summary(trace).is_some()
         || task_summary(trace).is_some()
@@ -2515,7 +2690,7 @@ fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
         || native_summary(trace).is_some()
         || span_summary(trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/browser/tasks/locks/io/native/spans only — standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
+        "json-envelope; typed profile evidence and domains are retained in trace — standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
     } else {
         "json-envelope-only; standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
     };
@@ -2916,6 +3091,10 @@ fn chrome_task_tid(task_id: u64) -> u64 {
 fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
     let mut symbols = Vec::new();
     let mut maps = Vec::new();
+    let profile = content_object(trace)
+        .and_then(|content| content.get("profile"))
+        .cloned()
+        .unwrap_or(CanonicalJson::Null);
     if let Some(content) = content_object(trace) {
         if let Some(CanonicalJson::Array(items)) = content.get("source_identity") {
             for item in items {
@@ -2936,13 +3115,14 @@ fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
         (
             "loss".into(),
             CanonicalJson::String(
-                "profile-map; source_identity+source_maps only — no Rust/LLVM frames, no address ranges, no DWARF"
+                "profile-map; source_identity+source_maps+typed profile evidence — no Rust/LLVM frames, no address ranges, no DWARF"
                     .into(),
             ),
         ),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("source_identity".into(), CanonicalJson::Array(symbols)),
         ("source_maps".into(), CanonicalJson::Array(maps)),
+        ("profile".into(), profile),
         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
@@ -3042,6 +3222,7 @@ fn write_session_trace(
         hardware: TraceHardware::current(),
         capture_policy,
         samples: capture.samples,
+        profile: capture.profile,
         allocations: capture.allocations,
         browser: capture.browser,
         game_frames: capture.game_frames,
@@ -3216,6 +3397,41 @@ fn first_sample(trace: &CanonicalJson) -> Option<(String, String, String)> {
     let symbol = symbol_label(fields.get("symbol")?)?;
     Some((domain, ns, symbol))
 }
+fn profile_summary(trace: &CanonicalJson) -> Option<String> {
+    let CanonicalJson::Object(profile) = content_object(trace)?.get("profile")? else {
+        return None;
+    };
+    let string_field = |key: &str| match profile.get(key)? {
+        CanonicalJson::String(value) => Some(value.as_str()),
+        _ => None,
+    };
+    let status = string_field("status")?;
+    let coverage = string_field("coverage")?;
+    let method = string_field("method")?;
+    let overhead = string_field("overhead_status")?;
+    let rows = match profile.get("rows")? {
+        CanonicalJson::Array(rows) => rows,
+        _ => return None,
+    };
+    let mut clocks = BTreeSet::new();
+    for row in rows {
+        if let CanonicalJson::Object(fields) = row {
+            if let Some(CanonicalJson::String(clock)) = fields.get("clock") {
+                clocks.insert(clock.as_str());
+            }
+        }
+    }
+    let clocks = if clocks.is_empty() {
+        "none".to_string()
+    } else {
+        clocks.into_iter().collect::<Vec<_>>().join(",")
+    };
+    Some(format!(
+        "profile method={method} status={status} coverage={coverage} rows={} clocks={clocks} overhead={overhead}",
+        rows.len()
+    ))
+}
+
 
 fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
     let alloc = content_array(trace, "allocations")?.first()?;
@@ -3646,7 +3862,7 @@ mod tests {
         assert!(observed.truncated);
 
         let mut timeline = IOTimeline::default();
-        timeline.observe(&observed, 10);
+        timeline.observe(&observed, 10, false);
         timeline.finish(20);
         assert_eq!(timeline.tasks.len(), TRACE_TASK_ROW_LIMIT as usize);
         assert_eq!(timeline.completed.len(), TRACE_IO_ROW_LIMIT as usize);
@@ -3662,8 +3878,8 @@ mod tests {
         let first = observe_tasks(snapshot, 100);
         let second = observe_tasks(snapshot, 200);
         let mut timeline = IOTimeline::default();
-        timeline.observe(&first, 10);
-        timeline.observe(&second, 20);
+        timeline.observe(&first, 10, true);
+        timeline.observe(&second, 20, false);
         timeline.finish(30);
 
         let tasks = timeline.tasks();

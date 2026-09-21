@@ -20,6 +20,12 @@ pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
 pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
 pub const TRACE_NATIVE_ROW_LIMIT: u64 = 4096;
 pub const TRACE_SPAN_ROW_LIMIT: u64 = 4096;
+/// Maximum number of source-profile rows retained in one trace.
+pub const TRACE_PROFILE_ROW_LIMIT: usize = 4096;
+
+/// Maximum number of live sampling observations folded into one profile.
+pub const TRACE_PROFILE_SAMPLE_LIMIT: u64 = 4096;
+
 const TRACE_RECEIPT_SECTION_NAME_BYTES: usize = 128;
 const TRACE_RECEIPT_SECTION_TYPE_BYTES: usize = 256;
 
@@ -283,6 +289,220 @@ pub fn entrypoint_name_from_source(src: &str) -> Option<String> {
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
+/// Source location for a function declaration found by the lightweight
+/// profiler parser.  The range covers the `fn` keyword through the function
+/// name; it is deliberately not presented as a body/execution range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceFunctionLocation {
+    pub name: String,
+    pub start_line: u64,
+    pub start_column: u64,
+    pub end_line: u64,
+    pub end_column: u64,
+}
+
+/// Best-effort source locations matching [`fn_names_from_source`].
+pub fn fn_locations_from_source(src: &str) -> Vec<TraceFunctionLocation> {
+    let mut locations = Vec::new();
+    let bytes = src.as_bytes();
+    let mut i = 0usize;
+    while i + 2 < bytes.len() {
+        let at_word_start = i == 0 || !is_ident_byte(bytes[i - 1]);
+        if at_word_start && bytes[i] == b'f' && bytes[i + 1] == b'n' {
+            let after = i + 2;
+            if after < bytes.len() && bytes[after].is_ascii_whitespace() {
+                let mut j = after;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let start = j;
+                while j < bytes.len() && is_ident_byte(bytes[j]) {
+                    j += 1;
+                }
+                if j > start {
+                    let (start_line, start_column) = source_position(bytes, i);
+                    let (end_line, end_column) = source_position(bytes, j);
+                    locations.push(TraceFunctionLocation {
+                        name: String::from_utf8_lossy(&bytes[start..j]).into_owned(),
+                        start_line,
+                        start_column,
+                        end_line,
+                        end_column,
+                    });
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    locations
+}
+
+fn source_position(bytes: &[u8], offset: usize) -> (u64, u64) {
+    let mut line = 1u64;
+    let mut column = 1u64;
+    for byte in bytes.iter().take(offset) {
+        if *byte == b'\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceProfileSource {
+    pub path: String,
+    pub sha256: String,
+    pub start_line: u64,
+    pub start_column: u64,
+    pub end_line: u64,
+    pub end_column: u64,
+}
+
+impl TraceProfileSource {
+    fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            (
+                "end_column".into(),
+                CanonicalJson::Integer(self.end_column.to_string()),
+            ),
+            (
+                "end_line".into(),
+                CanonicalJson::Integer(self.end_line.to_string()),
+            ),
+            ("path".into(), CanonicalJson::String(self.path.clone())),
+            (
+                "sha256".into(),
+                CanonicalJson::String(self.sha256.clone()),
+            ),
+            (
+                "start_column".into(),
+                CanonicalJson::Integer(self.start_column.to_string()),
+            ),
+            (
+                "start_line".into(),
+                CanonicalJson::Integer(self.start_line.to_string()),
+            ),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceProfileRow {
+    pub clock: String,
+    pub execution_count: Option<u64>,
+    pub sample_count: u64,
+    pub sample_weight: u64,
+    pub source: TraceProfileSource,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceProfileRow {
+    fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("clock".into(), CanonicalJson::String(self.clock.clone())),
+            (
+                "execution_count".into(),
+                self.execution_count
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            (
+                "sample_count".into(),
+                CanonicalJson::Integer(self.sample_count.to_string()),
+            ),
+            (
+                "sample_weight".into(),
+                CanonicalJson::Integer(self.sample_weight.to_string()),
+            ),
+            ("source".into(), self.source.to_json()?),
+            ("symbol".into(), self.symbol.to_json()?),
+        ])
+    }
+}
+
+/// Bounded, source-attributed profile evidence.  This is the only profile
+/// recorder: aggregate wall/cpu samples remain in `TraceSample`, while these
+/// rows retain the sampling method, source identity, and explicit coverage
+/// state needed by CLI/devtools projections.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceProfile {
+    pub method: String,
+    pub status: String,
+    pub coverage: String,
+    pub rows: Vec<TraceProfileRow>,
+    pub row_limit: u64,
+    pub rows_truncated: bool,
+    pub overhead_ns: Option<u64>,
+    pub overhead_status: String,
+    pub overhead_reason: String,
+    pub reason: String,
+}
+
+impl TraceProfile {
+    pub fn unsupported(reason: impl Into<String>) -> Self {
+        Self {
+            method: "sampling".into(),
+            status: "unsupported".into(),
+            coverage: "unsupported".into(),
+            rows: Vec::new(),
+            row_limit: TRACE_PROFILE_ROW_LIMIT as u64,
+            rows_truncated: false,
+            overhead_ns: None,
+            overhead_status: "not_applicable".into(),
+            overhead_reason: "source sampling was not available".into(),
+            reason: reason.into(),
+        }
+    }
+
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("coverage".into(), CanonicalJson::String(self.coverage.clone())),
+            (
+                "method".into(),
+                CanonicalJson::String(self.method.clone()),
+            ),
+            (
+                "overhead_ns".into(),
+                self.overhead_ns
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            (
+                "overhead_reason".into(),
+                CanonicalJson::String(self.overhead_reason.clone()),
+            ),
+            (
+                "overhead_status".into(),
+                CanonicalJson::String(self.overhead_status.clone()),
+            ),
+            ("reason".into(), CanonicalJson::String(self.reason.clone())),
+            (
+                "row_limit".into(),
+                CanonicalJson::Integer(self.row_limit.to_string()),
+            ),
+            (
+                "rows".into(),
+                CanonicalJson::Array(
+                    self.rows
+                        .iter()
+                        .map(TraceProfileRow::to_json)
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+            ),
+            (
+                "rows_truncated".into(),
+                CanonicalJson::Bool(self.rows_truncated),
+            ),
+            ("status".into(), CanonicalJson::String(self.status.clone())),
+        ])
+    }
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceSample {
@@ -959,6 +1179,7 @@ pub struct TraceSkeleton {
     pub hardware: TraceHardware,
     pub capture_policy: CapturePolicy,
     pub samples: Vec<TraceSample>,
+    pub profile: TraceProfile,
     pub allocations: Vec<TraceAllocation>,
     pub browser: Vec<TraceBrowser>,
     pub game_frames: Vec<TraceGameFrame>,
@@ -999,6 +1220,7 @@ impl TraceSkeleton {
             .iter()
             .map(TraceSample::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let profile = self.profile.to_json()?;
         let allocations = self
             .allocations
             .iter()
@@ -1087,6 +1309,7 @@ impl TraceSkeleton {
             ("locks".into(), CanonicalJson::Array(locks)),
             ("native".into(), CanonicalJson::Array(native)),
             ("samples".into(), CanonicalJson::Array(samples)),
+            ("profile".into(), profile),
             (
                 "source_identity".into(),
                 CanonicalJson::Array(source_identity),
@@ -1178,6 +1401,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
             "io",
             "locks",
             "native",
+            "profile",
             "samples",
             "receipt_sections",
             "source_identity",
@@ -1224,6 +1448,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_native(&fields["native"], &tasks, limits.native_rows)?;
     validate_spans(&fields["spans"], &tasks, limits.span_rows)?;
     validate_source_identity(&fields["source_identity"])?;
+    validate_profile(&fields["profile"], &fields["source_identity"])?;
     validate_source_maps(&fields["source_maps"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
@@ -1464,6 +1689,195 @@ fn validate_samples(value: &CanonicalJson) -> Result<(), String> {
     }
     Ok(())
 }
+fn validate_profile(
+    value: &CanonicalJson,
+    source_identity: &CanonicalJson,
+) -> Result<(), String> {
+    let fields = object_keys(
+        value,
+        "content.profile",
+        &[
+            "coverage",
+            "method",
+            "overhead_ns",
+            "overhead_reason",
+            "overhead_status",
+            "reason",
+            "row_limit",
+            "rows",
+            "rows_truncated",
+            "status",
+        ],
+    )?;
+    let method = text(&fields["method"], "content.profile.method")?;
+    if method != "sampling" {
+        return Err("content.profile.method must be sampling".into());
+    }
+    let status = text(&fields["status"], "content.profile.status")?;
+    if !matches!(status, "captured" | "no_samples" | "unsupported" | "truncated") {
+        return Err("content.profile.status is not a supported state".into());
+    }
+    let coverage = text(&fields["coverage"], "content.profile.coverage")?;
+    if !matches!(coverage, "complete" | "partial" | "none" | "unsupported") {
+        return Err("content.profile.coverage is not a supported state".into());
+    }
+    let row_limit = unsigned(&fields["row_limit"], "content.profile.row_limit")?;
+    if row_limit != TRACE_PROFILE_ROW_LIMIT as u64 {
+        return Err("content.profile.row_limit does not match the bounded profile policy".into());
+    }
+    let rows_truncated = match &fields["rows_truncated"] {
+        CanonicalJson::Bool(value) => *value,
+        _ => return Err("content.profile.rows_truncated is not a boolean".into()),
+    };
+    if rows_truncated != (status == "truncated") {
+        return Err("content.profile truncation state is inconsistent".into());
+    }
+    let overhead_status = text(
+        &fields["overhead_status"],
+        "content.profile.overhead_status",
+    )?;
+    if !matches!(overhead_status, "measured" | "not_measured" | "not_applicable") {
+        return Err("content.profile.overhead_status is not supported".into());
+    }
+    let overhead_ns = match &fields["overhead_ns"] {
+        CanonicalJson::Null => None,
+        value => Some(unsigned(value, "content.profile.overhead_ns")?),
+    };
+    if overhead_status == "measured" && overhead_ns.is_none() {
+        return Err("measured profile overhead must include overhead_ns".into());
+    }
+    if overhead_status != "measured" && overhead_ns.is_some() {
+        return Err("unmeasured profile overhead cannot include overhead_ns".into());
+    }
+    text(&fields["overhead_reason"], "content.profile.overhead_reason")?;
+    text(&fields["reason"], "content.profile.reason")?;
+    let rows = match &fields["rows"] {
+        CanonicalJson::Array(rows) => rows,
+        _ => return Err("content.profile.rows is not an array".into()),
+    };
+    if rows.len() > TRACE_PROFILE_ROW_LIMIT {
+        return Err("content.profile.rows exceeds row_limit".into());
+    }
+    if matches!(status, "no_samples" | "unsupported") && !rows.is_empty() {
+        return Err(format!(
+            "content.profile.{status} state cannot contain rows"
+        ));
+    }
+    if status == "captured" && rows.is_empty() {
+        return Err("captured profile must contain at least one row".into());
+    }
+    if status == "truncated" && rows.is_empty() {
+        return Err("truncated profile must retain bounded rows".into());
+    }
+    let identities = match source_identity {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.source_identity is not an array".into()),
+    };
+    for (i, row) in rows.iter().enumerate() {
+        let label = format!("content.profile.rows[{i}]");
+        let row_fields = object_keys(
+            row,
+            &label,
+            &[
+                "clock",
+                "execution_count",
+                "sample_count",
+                "sample_weight",
+                "source",
+                "symbol",
+            ],
+        )?;
+        let clock = text(&row_fields["clock"], &format!("{label}.clock"))?;
+        if !matches!(clock, "wall" | "cpu") {
+            return Err(format!("{label}.clock must be wall or cpu"));
+        }
+        if !matches!(&row_fields["execution_count"], CanonicalJson::Null) {
+            unsigned(
+                &row_fields["execution_count"],
+                &format!("{label}.execution_count"),
+            )?;
+        }
+        unsigned(
+            &row_fields["sample_count"],
+            &format!("{label}.sample_count"),
+        )?;
+        unsigned(
+            &row_fields["sample_weight"],
+            &format!("{label}.sample_weight"),
+        )?;
+        let source_fields = object_keys(
+            &row_fields["source"],
+            &format!("{label}.source"),
+            &[
+                "end_column",
+                "end_line",
+                "path",
+                "sha256",
+                "start_column",
+                "start_line",
+            ],
+        )?;
+        let path = text(
+            &source_fields["path"],
+            &format!("{label}.source.path"),
+        )?;
+        let sha256 = text(
+            &source_fields["sha256"],
+            &format!("{label}.source.sha256"),
+        )?;
+        if sha256.len() != 64
+            || !sha256
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(format!("{label}.source.sha256 is not lowercase Hex64"));
+        }
+        for key in ["start_line", "start_column", "end_line", "end_column"] {
+            if unsigned(
+                &source_fields[key],
+                &format!("{label}.source.{key}"),
+            )? == 0
+            {
+                return Err(format!("{label}.source.{key} must be nonzero"));
+            }
+        }
+        let symbol_fields = object_keys(
+            &row_fields["symbol"],
+            &format!("{label}.symbol"),
+            &["name", "path"],
+        )?;
+        let symbol_path = text(
+            &symbol_fields["path"],
+            &format!("{label}.symbol.path"),
+        )?;
+        if symbol_path != path {
+            return Err(format!("{label}.symbol.path does not match source.path"));
+        }
+        text(
+            &symbol_fields["name"],
+            &format!("{label}.symbol.name"),
+        )?;
+        let identity_matches = identities.iter().any(|identity| {
+            let Ok(identity_fields) = object_keys(
+                identity,
+                "content.source_identity",
+                &["path", "sha256", "symbols"],
+            ) else {
+                return false;
+            };
+            identity_fields.get("path") == Some(&CanonicalJson::String(path.into()))
+                && identity_fields.get("sha256")
+                    == Some(&CanonicalJson::String(sha256.into()))
+        });
+        if !identity_matches {
+            return Err(format!(
+                "{label}.source does not match content.source_identity"
+            ));
+        }
+    }
+    Ok(())
+}
+
 
 fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
     let items = match value {
@@ -2261,6 +2675,7 @@ mod tests {
             },
             capture_policy: CapturePolicy::default_exclusions(),
             samples: Vec::new(),
+            profile: TraceProfile::unsupported("test fixture has no source capture"),
             allocations: Vec::new(),
             browser: Vec::new(),
             game_frames: Vec::new(),
