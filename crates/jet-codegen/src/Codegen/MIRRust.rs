@@ -12614,7 +12614,7 @@ impl<'a> RustEmitter<'a> {
             }) if fact.cursor.is_some_and(|cursor| {
                 Self::canonical_cursor_value_matches(function, *index, cursor)
             }) => {
-                let index = self.value_read(*index);
+                let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
                 if let Some(slot) = self.vector_column_slot(fact, *base, *column) {
                     Some(format!(
                         "core::array::from_fn(|lane| __jet_vec_column_{slot}[{index}].clone())"
