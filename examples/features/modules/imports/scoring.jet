@@ -1,7 +1,31 @@
-pub fn letter(score: Int) -> String {
+// Hidden representation and nominal roles stay inside this module.
+// Representation decision: Score and Offset are public nominal records with
+// private Int fields. Their storage can change here without changing callers;
+// no caller may read or construct `value` directly.
+// Public contract: score(Int) -> Score, offset(Int) -> Offset, and
+// letter(Score, Offset) -> String. The grade depends on score + offset:
+// 90 or more is "A", 80 or more is "B", and lower is "C".
+pub struct Score {
+    value: Int
+}
+
+pub struct Offset {
+    value: Int
+}
+
+pub fn score(raw: Int) -> Score {
+    return Score{value: raw}
+}
+
+pub fn offset(raw: Int) -> Offset {
+    return Offset{value: raw}
+}
+
+pub fn letter(score: Score, offset: Offset) -> String {
+    adjusted :: score.value + offset.value
     return if {
-        score >= 90 -> "A"
-        score >= 80 -> "B"
+        adjusted >= 90 -> "A"
+        adjusted >= 80 -> "B"
         else -> "C"
     }
 }

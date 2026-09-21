@@ -1,7 +1,30 @@
 use "scoring"
 use util as text
 
+// BIG-F12 application experiment.
+// Behavior oracle to verify: score 91 plus offset 0 is "A"; a successful
+// executable run prints exactly `A` and then `hello!`. The hidden and exposed
+// paths must agree.
+// Module/dependent inventory: scoring.jet owns the hidden decision and its
+// nominal Score/Offset contract; this file is its consumer. util.jet is the
+// exposed-Int counterpart and the unrelated shout consumer.
+// A representation-only edit to scoring.jet changes no caller here: callers
+// use its constructors and `letter`, not its private fields. There is no
+// runtime or compile-time cost claim until matched binaries are measured.
 fn run() {
-    print(scoring.letter(91))
+    score :: scoring.score(91)
+    offset :: scoring.offset(0)
+    hidden :: scoring.letter(score, offset)
+    exposed :: text.exposed_letter(91, 0)
+    if hidden != exposed -> panic("hidden and exposed scoring disagree")
+    print(hidden)
     print(text.shout("hello"))
 }
+
+// Deliberate role-confusion witness (kept out of the executable):
+// `scoring.letter(offset, score)` swaps two nominal roles and should be
+// rejected by the current checker. `text.exposed_letter(0, 91)` still
+// type-checks because both roles are undifferentiated Int. This oracle uses
+// addition, so swapping happens to preserve its number; the contrast is that
+// only the nominal contract can reject the misuse before runtime. The
+// negative witness remains pending an executable check on a fresh binary.
