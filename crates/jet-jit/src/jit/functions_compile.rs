@@ -7863,13 +7863,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let value = match kind {
             jet_foundation::MIR::MirIndexKind::List
             | jet_foundation::MIR::MirIndexKind::FixedListProof => {
-                let float = base_type.and_then(sequence_element_type).is_some_and(|ty| {
+                let element = base_type.and_then(sequence_element_type);
+                let float = element.is_some_and(|ty| {
                     matches!(ty.kind(), MirTypeKind::Float | MirTypeKind::Float32)
+                });
+                let dense_int = element.is_some_and(|ty| {
+                    is_exact_int_type(ty) || ty.fixed_int() == Some((false, 8))
                 });
                 let host = match kind {
                     jet_foundation::MIR::MirIndexKind::List => {
                         if float {
                             self.host.coll.list_get_f64
+                        } else if dense_int {
+                            self.host.coll.fixed_list_get
                         } else {
                             self.host.coll.list_get
                         }

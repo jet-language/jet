@@ -4879,26 +4879,27 @@ fn jet_jit_columnar_get_f64(list: i64, field: i64, idx: i64, line: u32) -> f64 {
 
 fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(len) = rt.heap.list_len(list) else {
-            jet_foundation::ice!(None, "jit fixed-list read: bad handle");
+        let view = crate::runtime_host::view_index(rt, list).is_some();
+        let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+            jet_foundation::ice!(None, "jit fixed-list read: bad sequence handle");
         };
-        let Some(index) = usize::try_from(idx).ok() else {
-            rt.set_runtime_stop(
-                "E3010",
-                line,
-                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
-            );
-            return 0;
-        };
-        if index >= len as usize {
-            rt.set_runtime_stop(
-                "E3010",
-                line,
-                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
-            );
-            return 0;
+        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |index| {
+            if view {
+                crate::runtime_host::sequence_get_int(rt, list, index)
+            } else {
+                Some(rt.heap.list_get_int_proven(list, index as i64))
+            }
+        }) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                rt.set_host_fault("jit fixed-list read: sequence element has the wrong ABI");
+                0
+            }
+            Err(error) => {
+                rt.set_runtime_stop("E3010", line, &error.message());
+                0
+            }
         }
-        rt.heap.list_get_int_proven(list, idx)
     })
 }
 
