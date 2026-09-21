@@ -1642,20 +1642,15 @@ pub(super) fn lower_expr(
         } => {
             let left = ctx.lower_child(lhs)?;
             let right = ctx.lower_child(rhs)?;
-            let dispatch = match super::binary_route(
+            let dispatch = lower_binary_dispatch(
+                ctx,
                 *op,
                 *overflow,
                 &lhs.ty,
                 &rhs.ty,
                 &expr.ty,
-                &carrier,
-            )? {
-                super::TRoutePlan::Primitive => MirBinaryDispatch::Primitive,
-                super::TRoutePlan::Prelude(route) => MirBinaryDispatch::Prelude {
-                    call: ctx.intern_prelude_route(route)?,
-                    location: Some(panic_location(ctx, *line as usize)),
-                },
-            };
+                *line,
+            )?;
             ctx.emit(
                 "binary",
                 Some(expr.ty.clone()),
@@ -4479,6 +4474,25 @@ fn panic_location(ctx: &mut LowerCtx, line: usize) -> MirPanicLoc {
         column: 1,
     }
 }
+pub(super) fn lower_binary_dispatch(
+    ctx: &mut LowerCtx,
+    op: BinOp,
+    overflow: bool,
+    lhs: &Type,
+    rhs: &Type,
+    result: &Type,
+    line: u32,
+) -> Result<MirBinaryDispatch, LowerError> {
+    let carrier = super::TFailureCarrier::from_checked_type(result);
+    match super::binary_route(op, overflow, lhs, rhs, result, &carrier)? {
+        super::TRoutePlan::Primitive => Ok(MirBinaryDispatch::Primitive),
+        super::TRoutePlan::Prelude(route) => Ok(MirBinaryDispatch::Prelude {
+            call: ctx.intern_prelude_route(route)?,
+            location: Some(panic_location(ctx, line as usize)),
+        }),
+    }
+}
+
 
 fn lower_index_hook(
     ctx: &mut LowerCtx,

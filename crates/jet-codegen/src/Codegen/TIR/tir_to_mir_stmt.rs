@@ -230,8 +230,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             op,
             value,
             clone_value,
-            line: _,
-        } => lower_assign(ctx, place, *op, value, *clone_value),
+            line,
+        } => lower_assign(ctx, place, *op, value, *clone_value, *line),
 
         TStmt::Return(value) => ctx.lower_return(value.as_ref()),
 
@@ -1127,15 +1127,45 @@ fn lower_list_destructure(
     Ok(())
 }
 
+fn assignment_place_type(
+    ctx: &LowerCtx,
+    place: &crate::Codegen::TIR::TPlace,
+) -> Result<Type, LowerError> {
+    match place {
+        crate::Codegen::TIR::TPlace::Expr(expr) => Ok(expr.ty.clone()),
+        crate::Codegen::TIR::TPlace::Local(local) => ctx
+            .local_types
+            .get(&local.name)
+            .cloned()
+            .or_else(|| local.persist_ty.clone())
+            .ok_or_else(|| {
+                ctx.error(
+                    ctx.span(),
+                    format!("checked MIR local `{}` has no type", local.name),
+                )
+            }),
+    }
+}
+
+fn assignment_binary_overflow(op: BinOp, lhs: &Type, rhs: &Type) -> bool {
+    (matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+        && (lhs.is_integer() || rhs.is_integer()))
+        || (matches!(op, BinOp::Shl | BinOp::Shr) && lhs.is_integer())
+}
+
 fn lower_assign(
     ctx: &mut LowerCtx,
     place: &crate::Codegen::TIR::TPlace,
     op: Option<BinOp>,
     value: &TExpr,
     clone_value: bool,
+    line: u32,
 ) -> Result<(), LowerError> {
     // A structured place can evaluate a receiver/index.  TIR's assignment
     // emitter evaluates the RHS before that place, so retain the same order.
+    let place_ty = op
+        .map(|_| assignment_place_type(ctx, place))
+        .transpose()?;
     let rhs = lower_expr(ctx, value)?;
     let rhs = maybe_copy(ctx, rhs, &value.ty, clone_value)?;
     let place_id = ctx.lower_place(place, MirAccess::Write)?;
@@ -1145,12 +1175,24 @@ fn lower_assign(
             Some(value.ty.clone()),
             MirOperation::ReadPlace(place_id),
         )?;
+        let place_ty = place_ty.as_ref().ok_or_else(|| {
+            ctx.error(ctx.span(), "compound assignment missing place type")
+        })?;
+        let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
+            ctx,
+            op,
+            assignment_binary_overflow(op, place_ty, &value.ty),
+            place_ty,
+            &value.ty,
+            &value.ty,
+            line,
+        )?;
         ctx.emit(
             "stmt.assign.rmw",
             Some(value.ty.clone()),
             MirOperation::Binary {
                 op: super::mir_binary_op(op),
-                dispatch: MirBinaryDispatch::Primitive,
+                dispatch,
                 left: old,
                 right: rhs,
             },
@@ -1197,12 +1239,21 @@ fn lower_index_field_assign(ctx: &mut LowerCtx, assign: &TIndexFieldAssign) -> R
             Some(assign.field_ty.clone()),
             MirOperation::ReadPlace(place),
         )?;
+        let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
+            ctx,
+            op,
+            assignment_binary_overflow(op, &assign.field_ty, &assign.value.ty),
+            &assign.field_ty,
+            &assign.value.ty,
+            &assign.field_ty,
+            assign.line as u32,
+        )?;
         ctx.emit(
             "stmt.index-field.rmw",
             Some(assign.field_ty.clone()),
             MirOperation::Binary {
                 op: super::mir_binary_op(op),
-                dispatch: MirBinaryDispatch::Primitive,
+                dispatch,
                 left: old,
                 right: rhs,
             },
