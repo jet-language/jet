@@ -1065,43 +1065,73 @@ fn type_name_from_kind(kind: &SymKind) -> Option<String> {
 
 fn function_head_type_name(
     db: &SymbolDB,
+    tokens: &[Token],
     path: &str,
     head_start: usize,
 ) -> Option<String> {
-    let definition = db
+    let head_offset = tokens.get(head_start)?.span.start;
+    let function_span = db
         .index
         .definition_facts()
         .iter()
         .filter(|fact| {
             fact.module_path == path
                 && fact.kind == "function"
-                && fact.span.start <= head_start
-                && head_start <= fact.span.end
+                && fact.span.start <= head_offset
+                && head_offset <= fact.span.end
         })
         .min_by_key(|fact| fact.span.end.saturating_sub(fact.span.start))
-        .and_then(|fact| {
-            db.defs
-                .iter()
-                .find(|definition| definition.identity == fact.human_identity)
-        })
+        .map(|fact| fact.span)
         .or_else(|| {
             db.defs
                 .iter()
                 .filter(|definition| {
                     definition.module_path == path
-                        && definition.def_span.start <= head_start
+                        && definition.def_span.start <= head_offset
                         && matches!(&definition.kind, SymKind::Function { .. })
                 })
                 .max_by_key(|definition| definition.def_span.start)
+                .map(|definition| jet_semindex::SourceSpan {
+                    start: definition.def_span.start,
+                    end: usize::MAX,
+                })
         })?;
-    let SymKind::Function { params, .. } = &definition.kind else {
+    let variant_index = next_significant(tokens, head_start)?;
+    let variant_span = tokens.get(variant_index)?.span;
+    if variant_span.start < function_span.start || function_span.end < variant_span.end {
+        return None;
+    }
+    let TokKind::Ident(variant_name) = &tokens[variant_index].kind else {
         return None;
     };
-    let (_, ty) = params.first()?;
-    match ty {
-        AST::Type::Named(name) | AST::Type::Apply { name, .. } => Some(name.clone()),
-        _ => None,
+
+    // The head pattern is the checked identity anchor.  Do not infer the
+    // owning enum from `SymKind::Function.params`: those rows describe
+    // payload bindings and are empty for unit heads.
+    let mut identity = None;
+    for definition in db.defs.iter().filter(|definition| {
+        definition.module_path == path
+            && definition.name == *variant_name
+            && matches!(&definition.kind, SymKind::EnumVariant { .. })
+    }) {
+        if identity
+            .as_ref()
+            .is_some_and(|existing: &&str| *existing != definition.identity.as_str())
+        {
+            return None;
+        }
+        identity.get_or_insert(definition.identity.as_str());
     }
+    let identity = identity?;
+    let definition = db.defs.iter().find(|definition| {
+        definition.identity == identity
+            && definition.module_path == path
+            && matches!(&definition.kind, SymKind::EnumVariant { .. })
+    })?;
+    let SymKind::EnumVariant { parent } = &definition.kind else {
+        return None;
+    };
+    Some(parent.clone())
 }
 
 fn method_owner_from_scope(scope: &str) -> Option<String> {
@@ -1244,7 +1274,7 @@ fn enum_variant_definition_at<'a>(
         if let Some(subject_index) = active_pattern_subject(tokens, index) {
             checked_subject_type_name(db, tokens, path, subject_index)?
         } else if bare_function_head_start(tokens, index) == Some(head_start) {
-            function_head_type_name(db, path, tokens[head_start].span.start)?
+            function_head_type_name(db, tokens, path, head_start)?
         } else {
             return None;
         }
@@ -1310,78 +1340,26 @@ fn enum_variant_spans(
     spans
 }
 
-const MAX_ENUM_VARIANT_LEXICAL_BYTES: usize = 1024 * 1024;
 const MAX_ENUM_VARIANT_LEXICAL_TOKENS: usize = 64 * 1024;
 
-/// Read only a bounded source candidate for a checked module.  The semantic
-/// index remains the authority for identities and visibility; this text is
-/// used solely to recover parser-valid pattern leaves that sema intentionally
-/// does not publish as `SymRef` rows.  Navigation responses still validate the
-/// returned span against the checked snapshot before exposing an LSP range.
-fn checked_module_source_for_lexical_scan(
-    module_path: &str,
-    current_path: &str,
-) -> Option<String> {
-    if module_path.starts_with("file://") || module_path.is_empty() {
-        return None;
-    }
-    let mut candidates = vec![std::path::PathBuf::from(module_path)];
-    if let Some(parent) = std::path::Path::new(current_path).parent() {
-        candidates.push(parent.join(module_path));
-    }
-    candidates.into_iter().find_map(|candidate| {
-        let source = std::fs::read_to_string(candidate).ok()?;
-        (source.len() <= MAX_ENUM_VARIANT_LEXICAL_BYTES).then_some(source)
-    })
-}
-
-/// Supplement checked references with lexical pattern leaves in every
-/// available checked module.  Leading-dot arms have no semantic `SymRef`, so
-/// the checked identity/type resolver is applied to each bounded token stream
-/// instead of guessing from variant spelling.
+/// Supplement checked references with lexical pattern leaves from the current
+/// checked/open source snapshot.  Sibling module snapshots are not carried by
+/// `SymbolDB`; their lexical occurrences are therefore unavailable here and
+/// must not be recovered by reopening the filesystem.  Checked semantic
+/// references still cover those modules.
 fn enum_variant_spans_across_checked_modules(
     db: &SymbolDB,
     current_tokens: &[Token],
     current_path: &str,
     identity: &str,
 ) -> Vec<(String, Span)> {
-    let mut module_paths = std::collections::BTreeSet::new();
-    module_paths.insert(current_path.to_string());
-    module_paths.extend(
-        db.defs
-            .iter()
-            .map(|definition| definition.module_path.clone()),
-    );
-    module_paths.extend(db.refs.iter().map(|reference| reference.module_path.clone()));
-    module_paths.extend(
-        db.index
-            .structural_nodes()
-            .iter()
-            .map(|node| node.module_path.clone()),
-    );
-
+    if current_tokens.len() > MAX_ENUM_VARIANT_LEXICAL_TOKENS {
+        return Vec::new();
+    }
     let mut spans = enum_variant_spans(db, current_tokens, current_path, identity)
         .into_iter()
         .map(|span| (current_path.to_string(), span))
         .collect::<Vec<_>>();
-    for module_path in module_paths {
-        if module_path == current_path {
-            continue;
-        }
-        let Some(source) = checked_module_source_for_lexical_scan(&module_path, current_path)
-        else {
-            continue;
-        };
-        let (tokens, diagnostics) = crate::Lexer::lex(&source);
-        if !diagnostics.is_empty() || tokens.len() > MAX_ENUM_VARIANT_LEXICAL_TOKENS {
-            continue;
-        }
-        spans.extend(
-            enum_variant_spans(db, &tokens, &module_path, identity)
-                .into_iter()
-                .map(|span| (module_path.clone(), span)),
-        );
-    }
     spans.sort_by(|left, right| {
         left.0
             .cmp(&right.0)
