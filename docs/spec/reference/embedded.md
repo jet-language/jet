@@ -1,27 +1,78 @@
 # Embedded and Typed Target Profiles (E2-M15)
 
-Jet supports cross-compilation and typed no-OS and hosted WASM profiles using
-rustc's target matrix. This document covers the local QEMU harness
-(D-CROSS3 option A).
+The current implementation exposes cross-compilation and typed no-OS and
+hosted WASM paths using rustc's target matrix. This document records the
+source-backed target ownership, local QEMU harness, and known proof boundary
+for the preparation slice (D-CROSS3 option A).
 
-## Cross-compilation
+## Cross-compilation and target ownership
 
-Build for a non-host target by passing `--target=<triple>` to `jet build`:
+`--target` is the existing machine axis. It is not a standalone
+`TargetProfile` API: `Source/main.rs` parses the request, the driver resolves
+named `TargetMachine` values, and the compile command owns target admission and
+artifact publication. A request is either a Jet backend alias, a declared
+machine name, or a raw rustc target triple.
 
-```
-jet build --target=aarch64-unknown-linux-gnu examples/features/lowlevel/cross.jet
-```
+The current source-backed matrix is intentionally bounded:
 
-Jet passes `--target <triple>` straight through to rustc. Any triple that
-rustc knows (run `rustc --print target-list`) is accepted. The standard
-library for the target must be installed first:
+| Request | Effective target and owner | Availability gate | ABI, artifact, and provenance |
+|---------|----------------------------|-------------------|-------------------------------|
+| no `--target` | Hosted default. The driver creates the hosted machine for the host triple; no named machine is selected. | The ordinary host rustc path. No cross-target probe runs. | Hosted providers and linker defaults. The normal native artifact path is used; the dossier records the hosted/default boundary. |
+| raw triple, for example `aarch64-unknown-linux-gnu` | `Source/main.rs` keeps the exact triple. The driver creates a hosted `TargetMachine` for that triple; it does not invent a named board profile. | `validate_target` calls `Doctor::probe_target_component`: target-list membership, `rustc --print sysroot`, and non-empty `$sysroot/lib/rustlib/<triple>/lib` are all required. Failure is E3302 before rustc. | rustc owns the target ABI. Jet does not pass a user sysroot or select a Jet-owned toolchain descriptor here. The target triple, hosted dossier, compiler identity, provider identity, linker identity, Prelude closure, profile, and layout feed artifact identity; cross-target builds bypass the host native binary cache. |
+| `web` | Jet web backend alias. Doctor maps the rustc component check to `wasm32-unknown-unknown`; the driver uses the browser target machine for the dossier. | The mapped wasm target component must be present. No host-native execution path is used. | Browser providers are typed target facts. Web codegen publishes the manifest, DOM/HTML, JavaScript, Wasm, and applicable map artifacts under the build output authority; the manifest carries the selected Wasm/runtime target facts. |
+| `sandbox` | Jet sandbox backend alias. Its rustc guest target is `wasm32-unknown-unknown`. | The mapped wasm component must be present; Component Model assembly additionally requires `wasm-tools`. Missing target support remains E3302, while assembly failure remains the plugin diagnostic. | The plugin owns the Component Model ABI and publishes the WIT, guest Rust, core Wasm, and component Wasm artifacts. This is not a native host artifact or a source fallback. |
+| `wasm.browser` | Named `TargetMachine::wasm_browser()`; triple `wasm32-unknown-unknown`, hosted browser environment. | The machine triple still passes the target-component probe. | Explicit browser providers and their digestable target dossier own the runtime boundary. Direct driver fixtures emit browser artifacts; CLI materialization is listed below as a proof gap until exercised end to end. |
+| `wasm.wasi` | Named `TargetMachine::wasm_wasi()`; triple `wasm32-wasip2`, hosted WASI environment. | The WASI target component must be present. | Explicit WASI providers and the target dossier own the runtime boundary. The direct target-machine fixture proves a hosted WASI compile; a CLI artifact and runtime proof still need the production-path check below. |
+| `wasm.no-os` | Named `TargetMachine::wasm_no_os()`; triple `wasm32-unknown-unknown`, Core/no-OS environment. | The wasm component must be present and typed no-OS facts must validate. | The target is AOT-only and heap-free. The no-OS Wasm output is a reactor (`cdylib`, `--no-entry`, explicit `__jet_program_entry` export); its provider and dossier identities are target inputs, not host defaults. |
+| `board.sensor_v1` | Named no-OS machine; triple `thumbv7em-none-eabihf`. The machine supplies memory, generated linker/startup, providers, and board facts. | The rustc target component is checked before codegen; typed machine validation and target C/LLD tools must then succeed. | Startup uses the explicit C/1 provider ABI. Firmware work is keyed by `jet-firmware-build-v1` plus source, profile, native toolchain, and target dossier. The machine emits `memory.ld`, startup/provider sources and objects, `firmware.elf`, `firmware.map`, and `<machine>.target.json`; the CLI copies the ELF to its requested build output. |
+| `board.virt_aarch64` | Named no-OS machine; triple `aarch64-unknown-none`. The machine supplies AArch64 startup, memory, linker, UART, and QEMU facts. | The rustc target component is checked before codegen; typed machine validation and target C/LLD tools must then succeed. | Startup uses the explicit AArch64/1 provider ABI. Firmware artifacts and the target dossier follow the same content-bound path as `board.sensor_v1`; QEMU proof selects `virt`/`cortex-a57` from the machine facts. |
 
-```
-rustup target add aarch64-unknown-linux-gnu
-```
+`TargetProfileIdentity` in `jet-pkg-model` remains the manifest
+`targets:` data model. Its closed built-ins are currently
+`web.browser`, `web.wasi_server`, and `web.no_os`, with validated named
+identities. Those manifest identities must not be silently treated as the
+CLI machine names `wasm.browser`, `wasm.wasi`, and `wasm.no-os`: the current
+CLI trace resolves the latter through `Driver::target_machine_by_name`.
+No source-backed path currently makes a manifest profile a replacement for
+that command-owned dispatch.
 
-Run `jet self doctor --target=aarch64-unknown-linux-gnu` to check whether the
-toolchain component is present before building.
+Unavailable targets remain explicit. `validate_target` runs before the
+cross-target compile, and an unknown `board.*` name is rejected before
+dispatch. A missing target-list entry, sysroot, or target library produces
+E3302; the driver does not relabel a host artifact as the requested target or
+silently fall back to the host. The checked-in `tests/cli/unknown_target_e3302.txt`
+fixture covers the user-facing unavailable-target wording.
+
+### Current production-path proof gaps
+
+This matrix records source-backed ownership, not completion of the full #758
+slice:
+
+- Raw triples only prove local rustc readiness. There is no production
+  Jet-owned toolchain/sysroot descriptor, target-specific sysroot binding, or
+  clean-machine acquisition/air-gap proof; `rustc`, `clang`, and `ld.lld`
+  remain process-resolved tools.
+- The raw-triple path has no dedicated CLI artifact dossier containing
+  compiler, sysroot, linker, ABI, debug-data, and output digests. Target
+  dossier/cache identities exist in the compiler facts, but their end-to-end
+  publication and inspection are not proven here.
+- `tests/target_machines.rs` exercises target-machine compilation, firmware
+  files, dossiers, and QEMU directly through driver functions. It does not
+  prove `jet build --target=<named-machine>` through CLI parsing, publication,
+  and final artifact inspection for every named machine.
+- No focused production fixture currently proves raw foreign-target ABI
+  compatibility, linker/sysroot selection, debug-data parity, or emulator
+  runtime parity. `jet run` intentionally does not execute a cross-compiled
+  artifact on the host; it emits the emulation note instead.
+- C headers, libraries, linker inputs, and runtime objects remain the
+  separately owned follow-on slice (#1058); this matrix does not claim those
+  production proofs.
+
+The focused source-backed checks currently available are the unavailable
+target CLI fixture, `tests/cross.rs` for target-aware front-end behavior, and
+`tests/target_machines.rs` for direct typed-machine/artifact/QEMU behavior.
+
+
 
 ## Native Library embedding
 
@@ -84,35 +135,12 @@ in a child process.
 
 ## Typed target profiles
 
-Embedded and hosted WASM builds use named `TargetMachine` profiles. The
-selected profile supplies one typed target dossier to sema, codegen, and the
-artifact cache. There is no standalone no-OS switch and no alternate Prelude:
+The package manifest and CLI target axes are intentionally separate. Embedded
+and hosted WASM builds use the named `TargetMachine` entries in the matrix
+above; a selected machine supplies one typed target dossier to sema, codegen,
+and artifact identity. There is no standalone no-OS switch and no alternate
+Prelude.
 
-| Profile | Triple | Runtime layer | Providers |
-|---------|--------|---------------|-----------|
-| `wasm.browser` | `wasm32-unknown-unknown` | Hosted | browser DOM/JS output, clocks, entropy, scheduler |
-| `wasm.wasi` | `wasm32-wasip2` | Hosted | WASI startup, files, sockets, output, clocks, entropy |
-| `wasm.no-os` | `wasm32-unknown-unknown` | Core | no OS, heap, standard streams, or ambient providers |
-
-Select a profile with `--target=<name>`:
-
-```sh
-jet build --target=wasm.browser examples/features/lowlevel/cross.jet
-jet build --target=wasm.wasi examples/features/lowlevel/cross.jet
-jet build --target=wasm.no-os examples/features/lowlevel/freestanding.jet
-```
-
-The no-OS profile admits only the shared Core layer. OS-dependent APIs produce
-E3301 before codegen. A no-OS target must declare typed allocator, panic,
-startup, input/output, time, entropy, scheduler, linker, and memory facts when
-the program uses those capabilities. Missing facts are target admission
-errors, not rustc fallbacks.
-
-Named target profiles also work for `jet inspect dossier target` and carry
-provider identities, Prelude closure, linker identity, compiler identity,
-dependency identity, environment, execution tier, and a stable artifact key.
-Hosted single-file programs keep their existing hidden defaults unless a
-named target is selected.
 
 ## Typed target machine facts
 
@@ -192,19 +220,22 @@ The smoke harness expects the UART to print `OK` (see `tests/target_machines.rs`
 jet self doctor --target=aarch64-unknown-linux-gnu
 ```
 
-Adds a `cross` section to the doctor report:
-- Confirms the target is in `rustc --print target-list`
-- Checks whether `rustup target add` has installed the std library
-- Reports `ok` or `warn` with the fix command
+The `cross` doctor row uses the same `Doctor::probe_target_component` gate as
+`jet build`: it checks target-list membership, the rustc sysroot, and a
+non-empty target library. The report is `ok` only when all three are proven;
+otherwise it reports the concrete missing component and its fix. Backend
+aliases map to their effective rustc target, and `sandbox` also checks for
+`wasm-tools`.
 
 ## Caveats (v1)
 
 - No board-support package or HAL library (use the low-level tier directly).
-- Jet module spelling for board machines (`module board.sensor_v1 { … }` per
-  D-TARGET-SURFACE1) selects through typed machine builders today; package
-  `targets: { machine: … }` wiring stays on the existing `targets:` surface.
-- Machine validation errors remain data (`TargetMachineError`) until a follow-up
-  diagnostic ballot promotes them to registered codes.
-- WASM profiles use the named browser, WASI, and no-OS provider sets above.
+- The package `targets:` field remains manifest data; CLI machine names
+  dispatch through the `TargetMachine` registry described in the matrix.
+- Direct driver APIs return typed `TargetMachineError` values. The CLI wraps
+  selected-machine validation failures as the existing target-support E3302
+  path; this does not add a second public diagnostic family.
+- WASM profiles use the exact named browser, WASI, and no-OS provider sets
+  above.
 - E3303 (missing allocator on a no-OS target) remains registered; the typed
   machine model catches the same fact as data.
