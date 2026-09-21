@@ -436,7 +436,8 @@ mod test_report_tests {
 
     #[test]
     fn canonical_records_drive_counts_and_status() {
-        let view = JetTestReport::from_evidence(&evidence_report()).unwrap();
+        let evidence = evidence_report();
+        let view = JetTestReport::from_evidence(&evidence).unwrap();
         assert_eq!(view.passed, 1);
         assert_eq!(view.failed, 1);
         assert_eq!(view.skipped, 1);
