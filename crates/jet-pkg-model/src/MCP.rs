@@ -1701,4 +1701,74 @@ mod tests {
             Err(CodecError::MessageTooLarge { .. })
         ));
     }
+    #[test]
+    fn rejects_unknown_revisions_invalid_limits_and_malformed_messages() {
+        let mut peer = Peer::default();
+        assert!(matches!(
+            peer.negotiate(&["2099-01-01"]),
+            Err(NegotiationError::NoCommonRevision { .. })
+        ));
+        assert!(matches!(
+            peer.shutdown(),
+            Err(LifecycleError::NotNegotiated)
+        ));
+
+        let request = McpMessage::Request(
+            McpRequest::new(
+                RequestId::Number(1),
+                "tools/list",
+                Some(DataTree::Object(Vec::new())),
+            )
+            .unwrap(),
+        );
+        let codec = McpCodec::Stable2025_11_25;
+        assert!(matches!(
+            codec.encode(
+                &request,
+                McpLimits {
+                    max_message_bytes: 0,
+                    ..McpLimits::default()
+                }
+            ),
+            Err(CodecError::InvalidLimit {
+                name: "max_message_bytes",
+                ..
+            })
+        ));
+        assert!(matches!(
+            codec.decode("{", McpLimits::default()),
+            Err(CodecError::InvalidJson)
+        ));
+    }
+
+    #[test]
+    fn codec_rejects_nested_values_beyond_schema_bound() {
+        let nested = DataTree::Object(vec![(
+            "nested".to_string(),
+            DataTree::Object(vec![(
+                "value".to_string(),
+                DataTree::Object(Vec::new()),
+            )]),
+        )]);
+        let request = McpMessage::Request(
+            McpRequest::new(
+                RequestId::Number(2),
+                "tools/list",
+                Some(nested),
+            )
+            .unwrap(),
+        );
+        let codec = McpCodec::Stable2025_11_25;
+        let encoded = codec.encode(&request, McpLimits::default()).unwrap();
+        assert!(matches!(
+            codec.decode(
+                &encoded,
+                McpLimits {
+                    max_schema_depth: 1,
+                    ..McpLimits::default()
+                }
+            ),
+            Err(CodecError::SchemaTooDeep { .. })
+        ));
+    }
 }
