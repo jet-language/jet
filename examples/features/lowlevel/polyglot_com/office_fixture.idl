@@ -1,0 +1,28 @@
+import "oaidl.idl";
+import "ocidl.idl";
+
+[
+  uuid(7C9368D5-42CA-4D9F-98B0-98E7AE89C601),
+  version(1.0)
+]
+library JetOfficeFixture {
+  importlib("stdole2.tlb");
+
+  [
+    uuid(BA7C79CD-DF52-4F91-A72B-D6F197281701),
+    dual,
+    oleautomation
+  ]
+  interface IWorkbook : IDispatch {
+    [id(1), propget] HRESULT Title([out, retval] BSTR *value);
+    [id(2)] HRESULT Add([in] hyper left, [in] hyper right, [out, retval] hyper *value);
+    [id(3)] HRESULT EchoValues([in] VARIANT values, [out, retval] VARIANT *result);
+  };
+
+  [
+    uuid(8A8A44C1-6C3C-4A02-9705-4D7C0D967801)
+  ]
+  coclass Workbook {
+    [default] interface IWorkbook;
+  };
+};

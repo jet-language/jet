@@ -1,0 +1,17 @@
+// Windows-only COM example. The source stays checked in on every host; a
+// non-Windows build reports E3260 before it reads the binding cache.
+//
+// The binder consumes a Windows type-library file. Compile office_fixture.idl
+// to a .tlb on the Windows host, then run:
+//   jet inspect bind com office_fixture.tlb --pkg office
+//   jet run run.jet
+//
+// This example does not claim Office or Windows execution.
+use com.office as office
+
+fn run() {
+    book :: office.open() ?? panic("COM fixture class unavailable")
+    print(office.IWorkbook_Add(book, 20, 22) ?? -1)
+    print(office.IWorkbook_Title(book) ?? "untitled")
+    office.close(^book)
+}
