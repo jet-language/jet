@@ -1,7 +1,7 @@
 //! dev / repl / doctor / explain / completions / bind / eval / emit
 //! developer-tooling subcommand handlers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
 use std::net::TcpListener;
@@ -8527,6 +8527,11 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
 
 /// `jet lint --complexity <file>` — deterministic per-function scores. The
 /// category reports by default; `--max=<n>` is the explicit failure gate.
+///
+/// D-ARCH-ADVICE1: the read-only inspection form (without `--max`) also
+/// projects conservative architecture evidence from the checked semantic
+/// index. Complexity remains a local control-flow signal; call-graph rows are
+/// only invariant candidates and never an automatic refactor or policy.
 pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Option<u32>) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -8595,7 +8600,34 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
                 )
             })
             .collect();
-        println!("[{}]", json_rows.join(","));
+        if max_budget.is_none() {
+            let inspection = collect_architecture_inspection(file);
+            let mut envelope = StatusEnvelope::new("lint.complexity", true)
+                .with_field("contract", ARCH_ADVICE_SCHEMA)
+                .with_field("file", file)
+                .with_field(
+                    "local_complexity",
+                    complexity_rows_value(file, &reports, &rows),
+                )
+                .with_field("architecture_advice", architecture_inspection_value(&inspection))
+                .with_field(
+                    "measurement",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("benchmark", "not_run")
+                            .with("change_task", "not_measured")
+                            .with("claim", "none"),
+                    ),
+                );
+            if let Some(check) = inspection.check.clone() {
+                envelope = envelope.with_field("check", check);
+            }
+            println!("{}", envelope.json());
+        } else {
+            // The explicit budget form keeps its established machine array
+            // contract and rejection behavior; advice is inspection-only.
+            println!("[{}]", json_rows.join(","));
+        }
     } else {
         for (report, (line, _)) in reports.iter().zip(&rows) {
             match max_budget {
@@ -8608,6 +8640,9 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
                     file, line, report.name, report.score
                 ),
             }
+        }
+        if max_budget.is_none() {
+            render_architecture_inspection(&collect_architecture_inspection(file));
         }
     }
     let Some(budget) = max_budget else { return };
@@ -8637,6 +8672,440 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
         );
     }
     exit(ExitCodes::USER_ERROR);
+}
+
+const ARCH_ADVICE_SCHEMA: &str = "jet.architecture-advice/v1";
+const ARCH_ADVICE_MAX_ROWS: usize = 64;
+
+#[derive(Clone, Debug)]
+struct ArchitectureSourceEvidence {
+    role: &'static str,
+    module_path: String,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ArchitectureBehaviorCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct ArchitectureAdviceRow {
+    kind: &'static str,
+    subject: String,
+    scope: &'static str,
+    evidence: Vec<ArchitectureSourceEvidence>,
+    boundaries: Vec<String>,
+    behavior: Vec<ArchitectureBehaviorCheck>,
+    uncertainty: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ArchitectureCall {
+    caller_key: String,
+    caller_name: String,
+    caller_module: String,
+    caller_span: (usize, usize),
+    callee_key: String,
+    callee_name: String,
+    callee_module: String,
+    callee_span: (usize, usize),
+    callee_return: Option<String>,
+    call_span: (usize, usize),
+}
+
+#[derive(Clone, Debug)]
+struct ArchitectureInspection {
+    status: &'static str,
+    check: Option<StatusValue>,
+    rows: Vec<ArchitectureAdviceRow>,
+    reason: Option<String>,
+}
+
+fn complexity_rows_value(
+    file: &str,
+    reports: &[jet::Sema::CognitiveComplexityReport],
+    rows: &[(usize, bool)],
+) -> StatusValue {
+    StatusValue::array(reports.iter().zip(rows).map(|(report, (line, over))| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("file", file)
+                .with("fn", report.name.as_str())
+                .with("line", *line)
+                .with("score", report.score)
+                .with("budget", StatusValue::Null)
+                .with("over", *over),
+        )
+    }))
+}
+
+fn collect_architecture_inspection(file: &str) -> ArchitectureInspection {
+    let projection = match crate::CmdInspect::check_projection(Path::new(file)) {
+        Ok(projection) => projection,
+        Err(diagnostics) => {
+            let reason = diagnostics
+                .iter()
+                .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return ArchitectureInspection {
+                status: "unavailable",
+                check: None,
+                rows: Vec::new(),
+                reason: Some(format!(
+                    "the checked semantic projection was unavailable; no architecture claim was emitted ({reason})"
+                )),
+            };
+        }
+    };
+    let check = crate::CmdInspect::check_result_value(&projection.check);
+    let calls = architecture_calls(&projection.index);
+    let mut rows = architecture_advice_rows(&projection.index, &calls);
+    rows.sort_by(|left, right| {
+        left.subject
+            .cmp(&right.subject)
+            .then(left.kind.cmp(right.kind))
+            .then(left.scope.cmp(right.scope))
+    });
+    rows.truncate(ARCH_ADVICE_MAX_ROWS);
+    ArchitectureInspection {
+        status: "advisory",
+        check: Some(check),
+        rows,
+        reason: None,
+    }
+}
+
+fn architecture_calls(index: &jet_semindex::SemIndex) -> Vec<ArchitectureCall> {
+    index
+        .call_edges()
+        .iter()
+        .filter_map(|edge| {
+            let caller = index.definitions().iter().find(|definition| {
+                definition.module_path == edge.module_path
+                    && function_definition_matches(&definition.name, &edge.caller)
+            })?;
+            let reference = index
+                .references()
+                .iter()
+                .filter(|reference| {
+                    reference.module_path == edge.module_path
+                        && spans_overlap(
+                            (reference.span.start, reference.span.end),
+                            (edge.call_span.start, edge.call_span.end),
+                        )
+                        && reference.target.is_some()
+                })
+                .min_by_key(|reference| {
+                    reference.span.end.saturating_sub(reference.span.start)
+                })?;
+            let target = reference.target.as_ref()?;
+            let callee = index.definitions().iter().find(|definition| {
+                definition.module_path == target.module_path
+                    && definition.def_span.start == target.def_span.start
+                    && definition.def_span.end == target.def_span.end
+            })?;
+            let callee_return = match &callee.kind {
+                jet_semindex::SymbolKind::Function { ret, .. } => ret.clone(),
+                _ => return None,
+            };
+            Some(ArchitectureCall {
+                caller_key: definition_key(caller),
+                caller_name: caller.qualified_name.clone(),
+                caller_module: caller.module_path.clone(),
+                caller_span: (caller.def_span.start, caller.def_span.end),
+                callee_key: definition_key(callee),
+                callee_name: callee.qualified_name.clone(),
+                callee_module: callee.module_path.clone(),
+                callee_span: (callee.def_span.start, callee.def_span.end),
+                callee_return,
+                call_span: (edge.call_span.start, edge.call_span.end),
+            })
+        })
+        .collect()
+}
+
+fn function_definition_matches(name: &str, key: &str) -> bool {
+    key == name || key.rsplit("::").next().is_some_and(|short| short == name)
+}
+
+fn definition_key(definition: &jet_semindex::SymbolDef) -> String {
+    format!(
+        "{}:{}..{}",
+        definition.module_path, definition.def_span.start, definition.def_span.end
+    )
+}
+
+fn spans_overlap(left: (usize, usize), right: (usize, usize)) -> bool {
+    left.0 <= right.1 && right.0 <= left.1
+}
+
+fn architecture_advice_rows(
+    index: &jet_semindex::SemIndex,
+    calls: &[ArchitectureCall],
+) -> Vec<ArchitectureAdviceRow> {
+    let mut rows = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut by_callee: BTreeMap<String, Vec<ArchitectureCall>> = BTreeMap::new();
+    let mut by_caller: BTreeMap<String, Vec<ArchitectureCall>> = BTreeMap::new();
+    for call in calls {
+        by_callee
+            .entry(call.callee_key.clone())
+            .or_default()
+            .push(call.clone());
+        by_caller
+            .entry(call.caller_key.clone())
+            .or_default()
+            .push(call.clone());
+    }
+
+    for calls in by_callee.into_values() {
+        let callers = calls
+            .iter()
+            .map(|call| call.caller_key.as_str())
+            .collect::<BTreeSet<_>>();
+        if callers.len() < 2 {
+            continue;
+        }
+        let subject = calls[0].callee_name.clone();
+        let key = format!("shared-callee:{subject}");
+        if seen.insert(key) {
+            rows.push(make_architecture_advice_row(
+                index,
+                "shared-callee",
+                subject,
+                calls,
+                "one checked callable is consumed by multiple callers; review whether they must preserve one invariant",
+            ));
+        }
+    }
+
+    for calls in by_caller.into_values() {
+        let callees = calls
+            .iter()
+            .map(|call| call.callee_key.as_str())
+            .collect::<BTreeSet<_>>();
+        let return_types = calls
+            .iter()
+            .filter_map(|call| call.callee_return.as_deref())
+            .collect::<BTreeSet<_>>();
+        if callees.len() < 2 || return_types.len() != 1 {
+            continue;
+        }
+        let subject = calls[0].caller_name.clone();
+        let key = format!("consumer-agreement:{subject}");
+        if seen.insert(key) {
+            rows.push(make_architecture_advice_row(
+                index,
+                "consumer-agreement",
+                subject,
+                calls,
+                "one checked consumer joins multiple same-result call paths; review whether their results must agree",
+            ));
+        }
+    }
+    rows
+}
+
+fn make_architecture_advice_row(
+    index: &jet_semindex::SemIndex,
+    kind: &'static str,
+    subject: String,
+    calls: Vec<ArchitectureCall>,
+    note: &'static str,
+) -> ArchitectureAdviceRow {
+    let mut evidence = Vec::new();
+    let mut evidence_keys = BTreeSet::new();
+    let mut boundary_set = BTreeSet::new();
+    for call in &calls {
+        boundary_set.insert(format!(
+            "{} -> {}",
+            call.caller_module, call.callee_module
+        ));
+        let entries = [
+            (
+                "caller-definition",
+                call.caller_module.as_str(),
+                call.caller_span,
+            ),
+            (
+                "callee-definition",
+                call.callee_module.as_str(),
+                call.callee_span,
+            ),
+            ("checked-call-site", call.caller_module.as_str(), call.call_span),
+        ];
+        for (role, module_path, (start, end)) in entries {
+            let key = format!("{role}:{module_path}:{start}:{end}");
+            if evidence_keys.insert(key) {
+                evidence.push(ArchitectureSourceEvidence {
+                    role,
+                    module_path: module_path.to_string(),
+                    start,
+                    end,
+                });
+            }
+        }
+    }
+    evidence.sort_by(|left, right| {
+        left.module_path
+            .cmp(&right.module_path)
+            .then(left.start.cmp(&right.start))
+            .then(left.role.cmp(right.role))
+    });
+    let cross_module = calls
+        .iter()
+        .any(|call| call.caller_module != call.callee_module);
+    let scope = if cross_module {
+        "cross-module"
+    } else {
+        "same-module"
+    };
+    let mut boundaries = boundary_set.into_iter().collect::<Vec<_>>();
+    for call in &calls {
+        if let Some(effect) = index.effect_of(&call.caller_name) {
+            if !effect.inferred.is_empty() {
+                boundaries.push(format!(
+                    "effects {}: {}",
+                    call.caller_name,
+                    effect.inferred.join(", ")
+                ));
+            }
+        }
+    }
+    boundaries.sort();
+    boundaries.dedup();
+    ArchitectureAdviceRow {
+        kind,
+        subject,
+        scope,
+        evidence,
+        boundaries,
+        behavior: vec![
+            ArchitectureBehaviorCheck {
+                name: "checked_reference_resolution",
+                status: "passed",
+                detail: "the compiler semantic index resolved the definitions and call sites",
+            },
+            ArchitectureBehaviorCheck {
+                name: "consumer_behavior",
+                status: "not_run",
+                detail: "this read-only inspection does not execute user code",
+            },
+            ArchitectureBehaviorCheck {
+                name: "cross_mode_agreement",
+                status: "unknown",
+                detail: "no runtime or change-task receipt was supplied",
+            },
+        ],
+        uncertainty: vec![
+            note.to_string(),
+            "the checked call graph proves references, not a business invariant".to_string(),
+            "operator review may reject this candidate; no refactor or policy is applied".to_string(),
+        ],
+    }
+}
+
+fn architecture_source_value(evidence: &ArchitectureSourceEvidence) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("role", evidence.role)
+            .with("module", evidence.module_path.as_str())
+            .with(
+                "span",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("start", evidence.start)
+                        .with("end", evidence.end),
+                ),
+            ),
+    )
+}
+
+fn architecture_row_value(row: &ArchitectureAdviceRow) -> StatusValue {
+    let behavior = StatusValue::array(row.behavior.iter().map(|check| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", check.name)
+                .with("status", check.status)
+                .with("detail", check.detail),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", row.kind)
+            .with("subject", row.subject.as_str())
+            .with("scope", row.scope)
+            .with(
+                "source_evidence",
+                StatusValue::array(row.evidence.iter().map(architecture_source_value)),
+            )
+            .with(
+                "affected_boundaries",
+                StatusValue::array(row.boundaries.iter().map(|value| StatusValue::from(value.as_str()))),
+            )
+            .with("behavioral_checks", behavior)
+            .with(
+                "uncertainty",
+                StatusValue::array(row.uncertainty.iter().map(|value| StatusValue::from(value.as_str()))),
+            )
+            .with("operator_action", "review_or_reject"),
+    )
+}
+
+fn architecture_inspection_value(inspection: &ArchitectureInspection) -> StatusValue {
+    let mut fields = StatusFields::new()
+        .with("status", inspection.status)
+        .with(
+            "rows",
+            StatusValue::array(inspection.rows.iter().map(architecture_row_value)),
+        )
+        .with("operator_action", "review_or_reject");
+    if let Some(reason) = inspection.reason.as_deref() {
+        fields = fields.with("reason", reason);
+    }
+    StatusValue::object(fields)
+}
+
+fn render_architecture_inspection(inspection: &ArchitectureInspection) {
+    println!("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):");
+    if let Some(reason) = inspection.reason.as_deref() {
+        println!("  status: unavailable — {reason}");
+    } else if inspection.rows.is_empty() {
+        println!(
+            "  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant"
+        );
+    } else {
+        for row in &inspection.rows {
+            println!("  {} `{}` [{}]", row.kind, row.subject, row.scope);
+            for evidence in &row.evidence {
+                println!(
+                    "    evidence: {} {}:{}..{}",
+                    evidence.role,
+                    evidence.module_path,
+                    evidence.start,
+                    evidence.end
+                );
+            }
+            for boundary in &row.boundaries {
+                println!("    boundary: {boundary}");
+            }
+            for check in &row.behavior {
+                println!(
+                    "    check: {}={} ({})",
+                    check.name, check.status, check.detail
+                );
+            }
+            for uncertainty in &row.uncertainty {
+                println!("    uncertainty: {uncertainty}");
+            }
+        }
+    }
+    println!("  measurement: benchmark/change-task not measured; no advantage claim");
 }
 
 #[derive(Clone, Debug)]
