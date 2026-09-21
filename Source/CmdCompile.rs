@@ -10988,7 +10988,9 @@ pub(crate) fn run_dev_web(
         }
     };
     loop {
-        thread::sleep(Duration::from_millis(jet_devserver::WATCH_POLL_INTERVAL_MS));
+        watch.wait_for_change_for(Some(Duration::from_millis(
+            jet_devserver::WATCH_POLL_INTERVAL_MS,
+        )));
         if let Some(code) = host.exit_code() {
             rustc_incremental_session.cleanup();
             exit(code);
