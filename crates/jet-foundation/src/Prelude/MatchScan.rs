@@ -160,19 +160,35 @@ pub fn jet_bin_match_scan(
                     return None;
                 }
                 let mut value = 0u64;
-                for offset in 0..width {
-                    let position = bit_pos + offset;
-                    let byte = subject[position / 8];
-                    let bit = 7 - (position % 8);
-                    value = (value << 1) | u64::from((byte >> bit) & 1);
-                }
-                if little && width % 8 == 0 {
+                if bit_pos % 8 == 0 && width % 8 == 0 && width <= 64 {
+                    let byte_pos = bit_pos / 8;
                     let bytes = width / 8;
-                    let mut swapped = 0u64;
-                    for index in 0..bytes {
-                        swapped |= ((value >> (8 * index)) & 0xff) << (8 * (bytes - 1 - index));
+                    let byte_end = byte_pos.checked_add(bytes)?;
+                    let subject_bytes = subject.get(byte_pos..byte_end)?;
+                    if little {
+                        for (index, byte) in subject_bytes.iter().enumerate() {
+                            value |= u64::from(*byte) << (8 * index);
+                        }
+                    } else {
+                        for byte in subject_bytes {
+                            value = (value << 8) | u64::from(*byte);
+                        }
                     }
-                    value = swapped;
+                } else {
+                    for offset in 0..width {
+                        let position = bit_pos + offset;
+                        let byte = subject[position / 8];
+                        let bit = 7 - (position % 8);
+                        value = (value << 1) | u64::from((byte >> bit) & 1);
+                    }
+                    if little && width % 8 == 0 {
+                        let bytes = width / 8;
+                        let mut swapped = 0u64;
+                        for index in 0..bytes {
+                            swapped |= ((value >> (8 * index)) & 0xff) << (8 * (bytes - 1 - index));
+                        }
+                        value = swapped;
+                    }
                 }
                 bit_pos = end;
                 values.push(JetBinMatchValue::Int(value));
