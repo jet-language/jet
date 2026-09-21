@@ -1,0 +1,448 @@
+{
+  "fixture_kind": "card-owned-static-compute-evidence",
+  "fixture_status": "preparation_only",
+  "runtime_claim": "none",
+  "base_revision": "2999fe335",
+  "owner_cards": ["#3210", "#3211", "#3219", "#3221", "#3222", "#3223"],
+  "card_keys": {
+    "#3210": "gpu-f07",
+    "#3211": "gpu-f08",
+    "#3219": "gpu-f16",
+    "#3221": "gpu-f18",
+    "#3222": "gpu-f19",
+    "#3223": "gpu-f20"
+  },
+  "decisions": {
+    "compute_family": "D-COMPUTE1",
+    "tensor_and_view": "D-COMPUTE-TYPE1",
+    "placement": "D-COMPUTE-PLACE1",
+    "kernel_proof": "D-COMPUTE-KERNEL1",
+    "kernel_surface": "D-COMPUTE-KERNEL-SURFACE1",
+    "autodiff": "D-COMPUTE-AUTODIFF1",
+    "gradient": "D-COMPUTE-GRAD1",
+    "vjp": "D-COMPUTE-VJP1",
+    "backend_policy": "D-COMPUTE-BACKEND1",
+    "raw_provider_boundary": "D-COMPUTE-RAWBOUNDARY1",
+    "data_bridge": "D-DATA-BRIDGE1",
+    "data_status": "D-DATA-STATUS1",
+    "launch_contract": "D-GPU-COMPUTE-LAUNCH1"
+  },
+  "source_anchors": [
+    {
+      "path": "docs/spec/syntax-decisions.md",
+      "range": "6112-6187",
+      "sha256": "06c7a96044a5bd07105bc15292df10f34d019228a005738d7e4ded6058e5cba2",
+      "role": "ratified compute, placement, kernel, autodiff, backend, and provider-boundary decisions"
+    },
+    {
+      "path": "docs/spec/reference/core-library.md",
+      "range": "4077-4140",
+      "sha256": "c4343f0930a0a9c41508eaea00f3f9f5e608b6c9103b8aa1bc10ae74c5c07e51",
+      "role": "current provider and operation contract"
+    },
+    {
+      "path": "crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs",
+      "sha256": "e591c93bac41e3db21f030f2d170977e9400f00d312c3e25909602e75fbbde63",
+      "role": "current placement, transfer, stream, tensor, and autodiff implementation contract"
+    },
+    {
+      "path": "crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs",
+      "sha256": "094629bc914bb11725b914c8a86eec0b2590f76dc39ce461b630f47c1da5e4e6",
+      "role": "typed data-bridge availability and status contract"
+    },
+    {
+      "path": "tests/compute_parity.rs",
+      "sha256": "683f11ac8010cbbf75e08a3c507950c764d1f3ab6b3fed9d9d9beb080bfbd6b9",
+      "role": "CPU arithmetic and shape/bounds baseline"
+    },
+    {
+      "path": "tests/compute_extended.rs",
+      "sha256": "d9f212f68d6696795ebdd28985f43ce164194432c361d2ddcf50554547ab1ee5",
+      "role": "autodiff, effect rejection, provider parity, and typed unavailable-provider paths"
+    },
+    {
+      "path": "tests/compute_cuda.rs",
+      "sha256": "716b52f78a3aa0f607f9d9c7fd923b7e6e5b81112b3f75e3b9a5fadd56f2c628",
+      "role": "explicit CUDA profile, transfer, stream, and unavailable-device contract"
+    },
+    {
+      "path": "examples/features/tooling/compute_autodiff.jet",
+      "sha256": "c8eeb0e92891b69d5146abdd615ead5974d2aec691ae0259c065f2740ebc8922",
+      "role": "existing value/gradient/JVP/VJP witness"
+    },
+    {
+      "path": "examples/features/expected/tooling/compute_autodiff.out",
+      "sha256": "a13ff79f33f3b9d1b224f25423d345270d1df2ce6c3970630177512ab43a09db",
+      "role": "existing autodiff expected contract"
+    },
+    {
+      "path": "examples/features/tooling/compute_device.jet",
+      "sha256": "7509aa1357647d8cdec4a93f8410298344b73e68a0effa0ef6e49ac50d931847",
+      "role": "existing CPU placement, stream, and same-device transfer witness"
+    },
+    {
+      "path": "examples/features/expected/tooling/compute_device.out",
+      "sha256": "de033a687c483127cfe9c048e4c615d8425a51bc2194d3fc1b3ef4211be28af8",
+      "role": "existing placement and transfer expected contract"
+    },
+    {
+      "path": "examples/features/tooling/data_bridges.jet",
+      "sha256": "606bdd8b1c6169a30bdab62e13b8843ed9d2b9dba8b8d14f3ba40ad80d5e6347",
+      "role": "existing direct-root bridge/status witness"
+    },
+    {
+      "path": "examples/features/expected/tooling/data_bridges.out",
+      "sha256": "5109e89f7bdc1f307a735cbd9fa8931c166465051dfd754128ee226c07469b06",
+      "role": "existing bridge expected contract"
+    }
+  ],
+  "shared_metadata_fields": [
+    "card",
+    "workload_id",
+    "fixture_status",
+    "source_path",
+    "source_sha256",
+    "expected_path",
+    "expected_sha256",
+    "compiler_identity",
+    "build_identity",
+    "target_triple",
+    "execution_tier",
+    "device",
+    "driver_or_provider_version",
+    "numeric_policy",
+    "cache_state",
+    "warmup_count",
+    "sample_count",
+    "submitted_program_identity",
+    "kernel_only_timing",
+    "end_to_end_timing",
+    "oracle_result",
+    "provider_result",
+    "evidence_status"
+  ],
+  "measurement_rules": [
+    "Freeze the same source, input values, dtype, shape, strides, layout, precision, and effect policy for CPU, peer-library, and Jet provider lanes.",
+    "Record compiler/build/target/device/driver-or-provider version, numeric policy, cache state, warmups, samples, and the actual submitted program before comparing timings.",
+    "Keep kernel-only timing separate from transfer-inclusive end-to-end timing; include transfer and completion facts whenever a buffer crosses an owner or device boundary.",
+    "A CPU oracle, captured expected output, unavailable-device error, or source example is not GPU execution, performance, residency, overlap, or all-tier agreement.",
+    "A provider lane is successful only when a real compatible provider and device execute the authored workload; no implicit CPU fallback or host substitution is evidence."
+  ],
+  "matched_contract_lanes": ["explicit CPU oracle", "strongest relevant captured peer library", "Jet provider on a real compatible device"],
+  "matched_contract_fields": ["source", "inputs", "dtype", "shape", "strides", "layout", "precision", "effects", "output", "error behavior", "kernel_only_timing", "end_to_end_timing"],
+  "provider_contracts": [
+    {
+      "device": "CPU",
+      "backend": "cpu-oracle",
+      "version": "builtin",
+      "cache": "none",
+      "profiles": ["F64Strict+Reproducible", "F32Strict+Reproducible"],
+      "role": "explicit differential oracle and native CPU baseline",
+      "fallback": "not a provider fallback; Auto may select CPU under current policy"
+    },
+    {
+      "device": "Metal",
+      "backend": "metal",
+      "version": "system",
+      "cache": "runtime",
+      "profile": "F32Strict+Reproducible",
+      "unavailable_outcome": "typed Device or Unsupported error; no CPU fallback"
+    },
+    {
+      "device": "CUDA",
+      "backend": "cuda",
+      "version": "driver",
+      "cache": "runtime",
+      "profile": "F32Strict+Reproducible",
+      "unavailable_outcome": "typed Device or Unsupported error; no CPU fallback"
+    },
+    {
+      "device": "Vulkan",
+      "backend": "vulkan",
+      "version": "system",
+      "cache": "runtime",
+      "profile": "F32Strict+Reproducible",
+      "unavailable_outcome": "typed Device or Unsupported error for loader/device/queue/memory/pipeline; no CPU fallback"
+    },
+    {
+      "device": "WebGPU",
+      "backend": "webgpu",
+      "version": "browser",
+      "cache": "runtime",
+      "profile": "F32Strict+Reproducible",
+      "unavailable_outcome": "typed Device error on a native host without a browser-owned provider; no native WebGPU claim"
+    }
+  ],
+  "workloads": [
+    {
+      "id": "W0",
+      "card": "#3210",
+      "fixture_status": "static_input_only",
+      "source_path": null,
+      "operation": "F32 elementwise addition",
+      "dtype": "F32",
+      "shape": [3],
+      "inputs": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+      "expected_cpu_oracle": [5.0, 7.0, 9.0],
+      "policy": "F32Strict+Reproducible",
+      "metadata_fields": ["dtype", "shape", "strides", "device", "stream", "owner", "completion"],
+      "provider_execution": "unproved; requires a real compatible provider/device",
+      "timing": "not captured"
+    },
+    {
+      "id": "W1",
+      "card": "#3210",
+      "fixture_status": "static_input_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "U32 affine map y[i] = (3 * i + 1) mod 2^32",
+      "dtype": "U32",
+      "shape": [257],
+      "inputs": "i = 0..256",
+      "input_definition": "x[i] = i",
+      "expected_values": {"first": 1, "last": 769, "length": 257},
+      "launch_shape": {"logical_elements": 257, "workgroup": 256, "groups": "ceil(257/256)=2", "tail_guard": true},
+      "out_of_range_behavior": "invocations outside N do not access memory",
+      "negative_cases": ["out-of-bounds index", "missing bounds proof", "provider unavailable"],
+      "related_existing_paths": ["tests/compute_cuda.rs", "examples/features/tooling/compute_kernel.jet"],
+      "provider_execution": "unproved; report recipe is not an executable source fixture in this checkout",
+      "timing": "not captured"
+    },
+    {
+      "id": "W2",
+      "card": "#3210",
+      "fixture_status": "static_input_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "U32 reduction sum",
+      "dtype": "U32",
+      "shape": [256],
+      "inputs": "0..255",
+      "expected_value": 32640,
+      "launch_shape": {"logical_elements": 256, "workgroup": 256, "groups": 1, "tail_guard": false},
+      "scratch": "shared",
+      "barrier_policy": "uniform barriers",
+      "proof_obligations": ["barrier ordering", "no conflicting writes", "bounds"],
+      "negative_cases": ["missing barrier", "conflicting write", "provider unavailable"],
+      "provider_execution": "unproved; report recipe is not an executable source fixture in this checkout",
+      "timing": "not captured"
+    },
+    {
+      "id": "W3",
+      "card": "#3210",
+      "fixture_status": "handoff_shape_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "graphics handoff",
+      "dtype": "F32",
+      "shape": "small RGBA image; exact dimensions remain owned by the provider/device matrix",
+      "layout": "explicit row-major layout and stride metadata required",
+      "handoff_fields": ["source_owner", "destination_owner", "device", "stream", "usage", "lifetime", "submission", "completion", "copy_direction", "copy_bytes"],
+      "expected_result": "no value is frozen until the handoff provider and dimensions are selected",
+      "cpu_readback": false,
+      "usage_layout_order": "explicit; freeze concrete usage/layout/order in the provider lane",
+      "provider_execution": "unproved; no graphics provider/device claim",
+      "timing": "not captured"
+    },
+    {
+      "id": "W4",
+      "card": "#3211",
+      "fixture_status": "typed_handoff_input_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "U32 data/library handoff using the W1 allocation",
+      "dtype": "U32",
+      "shape": [257],
+      "stride": "contiguous; record explicit byte stride in the executed lane",
+      "device": "concrete source and destination devices required",
+      "stream": "concrete stream/order required",
+      "owner": "library-owned device buffer; ownership transfer must be explicit",
+      "completion": "completion event/fact required before consumer reads",
+      "copy_facts": ["direction", "bytes", "count", "submission", "completion", "fallback"],
+      "no_hidden_host_copy": true,
+      "parity_scope": "same affine workload only; no full tensor-library parity claim",
+      "related_existing_paths": ["tests/compute_cuda.rs", "examples/features/tooling/data_bridges.jet"],
+      "provider_execution": "unproved; current gpu.* bridge is unavailable by default",
+      "timing": "not captured"
+    },
+    {
+      "id": "W5",
+      "card": "#3210",
+      "fixture_status": "static_input_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "F32 indexed neighbor gather",
+      "definition": "preserve the first element; average each remaining element with its left neighbor",
+      "contract_status": "indexed resource amendment proposed, not ratified",
+      "dtype": "F32",
+      "shape": [5],
+      "inputs": {"values": [2.0, 4.0, 8.0, 16.0, 32.0], "indices": "resource/domain indices are source-defined; no current executable fixture freezes them"},
+      "expected_values": [2.0, 3.0, 6.0, 12.0, 24.0],
+      "policy": "F32Strict+Reproducible",
+      "negative_cases": ["out-of-bounds index", "unsupported gather capability", "provider unavailable"],
+      "provider_execution": "unproved; report recipe is not an executable source fixture in this checkout",
+      "timing": "not captured"
+    },
+    {
+      "id": "W6",
+      "card": "#3210",
+      "fixture_status": "static_input_only",
+      "source_path": "docs/research/mine-for-jet-2026-09-12.md",
+      "operation": "strict F32 reduction",
+      "dtype": "F32",
+      "shape": [256],
+      "inputs": "0.0..255.0",
+      "expected_value": 32640.0,
+      "launch_shape": {"logical_elements": 256, "workgroup": 256, "groups": 1, "tail_guard": false},
+      "proof_requirements": ["fixed reduction order", "uniform barriers", "source/profile capability"],
+      "reduction_tree": "adjacent_pair; exact tree must be recorded by the executed provider lane",
+      "rounding_probe": {"inputs": [16777216.0, 1.0, -16777216.0], "padding": 0.0, "expected_adjacent_pair_result": 0.0},
+      "negative_cases": ["fast/reassociated reduction policy", "unsupported deterministic reduction", "provider unavailable"],
+      "provider_execution": "unproved; report recipe is not an executable source fixture in this checkout",
+      "timing": "not captured"
+    }
+  ],
+  "handoff": {
+    "card": "#3211",
+    "witness_workload": "W4",
+    "direct_bridge_roots": ["py.*", "r.*", "gpu.*"],
+    "comparison_frameworks": ["Burn", "PyTorch", "CuPy"],
+    "comparison_rule": "Compare only matched W4 dtype/shape/stride/device/stream/owner/completion facts; do not treat an external framework's host copy or unsupported bridge as Jet provider evidence.",
+    "required_fields": ["dtype", "shape", "stride", "device", "stream", "owner", "completion", "copy_count", "copy_direction", "bytes", "fallback"],
+    "current_gpu_bridge_status": {
+      "path": "unavailable",
+      "copy": "device-transfer",
+      "ownership": "device-buffer",
+      "trust": "untrusted-accelerator",
+      "fallback": "none",
+      "replacement": "core.data / native Tensor CPU path",
+      "require_bridge_outcome": "typed bridge error"
+    },
+    "rules": [
+      "Keep provider roots direct; do not nest providers under core.data.",
+      "Do not copy an external framework wholesale into Jet.",
+      "Do not infer residency from a device label or omit ownership/completion facts.",
+      "Do not report a bridge value or gradient unless the operation supports that result."
+    ],
+    "provider_execution": "unproved; current bridge status is an explicit unsupported outcome"
+  },
+  "overlap": {
+    "card": "#3219",
+    "witness_workload": "W4",
+    "stage_order": ["host_prepare", "transfer_in", "compute_submit", "compute_complete", "transfer_out", "host_consume"],
+    "required_fields": ["submission", "completion", "resource_lifetime", "stream_ordering", "cancellation", "host_blocking", "copy_bytes"],
+    "comparison_lanes": ["CUDA/HIP event recipe when a real provider/device exists", "cuTile DeviceOp recipe when a real provider/device exists", "existing Jet concurrency mechanisms if available"],
+    "current_jet_contract": "D-GPU-COMPUTE-LAUNCH1 returns a completed Tensor; it is not an in-flight async result token",
+    "negative_outcome": "a vendor stream/event trace alone does not prove Jet host overlap",
+    "no_new_async_result": true,
+    "provider_execution": "unproved; no GPU/CUDA/HIP execution in this preparation"
+  },
+  "authoring_and_repair": {
+    "card": "#3221",
+    "existing_source_paths": [
+      "examples/features/tooling/compute_kernel.jet",
+      "examples/features/tooling/debug.jet",
+      "examples/features/tooling/debug_native.jet",
+      "tests/compute_extended.rs"
+    ],
+    "required_distinctions": ["CPU example", "built-in provider call", "user-authored kernel", "source-level repair", "provider/device failure"],
+    "quantities": ["verdict_fidelity", "latency", "actionability", "context_economy", "repair_determinism"],
+    "record_fields": ["context_bytes", "tool_count", "action_count", "visible_safety_stage", "type_stage", "resource_ownership_stage", "transfer_copy_stage", "discovery_stage", "formatting_stage", "diagnostic_stage", "shape_stage", "capability_stage", "code_search_stage", "actual_repair_result"],
+    "witnesses": {
+      "existing_kernel": {"path": "examples/features/tooling/compute_kernel.jet", "expected_path": "examples/features/expected/tooling/compute_kernel.out", "scope": "native scalar/kernel proof example; not authored GPU execution"},
+      "effect_rejection": {"path": "tests/compute_extended.rs", "scope": "effectful Tensor function rejection; preserve typed source context"},
+      "debug_route": {"paths": ["examples/features/tooling/debug.jet", "examples/features/tooling/debug_native.jet"], "scope": "existing source/native debug routes; no new command"}
+    },
+    "rules": [
+      "Use the current source-equated CLI/help/authority recipes; do not invent a command or repair result.",
+      "Retain context and action counts from an actual run; this static fixture contains no savings claim.",
+      "An interpreter authority denial or unavailable provider is a verdict/error witness, not a successful GPU result."
+    ],
+    "provider_execution": "unproved; no interpreter or GPU authority claim is added here"
+  },
+  "trace": {
+    "card": "#3222",
+    "witness_workload": "W1",
+    "required_fields": ["source_path", "source_span", "source_sha256", "kernel_declaration", "proof_facts", "cache_identity", "provider", "provider_program_label", "placement_receipt", "device", "driver", "allocation", "copy", "submission", "completion", "timing", "instrumentation_overhead", "unsupported_reason"],
+    "identity_chain": ["authored source", "proof/cache identity", "actual provider program and label"],
+    "debug_boundary": "CPU/source debugging and native debugging are distinct from real device execution; never claim source-level GPU stepping from either",
+    "failure_witnesses": [
+      {"path": "tests/compute_extended.rs", "kind": "source/effect rejection", "required_result": "typed error retains source context"},
+      {"path": "examples/features/tooling/compute_vulkan_webgpu.jet", "kind": "provider availability branch", "required_result": "typed unsupported/unavailable outcome when no real device exists"}
+    ],
+    "rules": [
+      "Capture feature-dependent data only when the provider supports it.",
+      "Measure instrumentation overhead rather than implying zero overhead.",
+      "Do not add a telemetry subsystem, capture command, or provider dependency in this fixture."
+    ],
+    "provider_execution": "unproved; this matrix records the fields needed for a future real-provider trace"
+  },
+  "autodiff": {
+    "card": "#3223",
+    "witness_workload": "AD-SUM-SQUARE",
+    "fixture_status": "static_value_gradient_input",
+    "operation": "sum(x * x)",
+    "dtype": "F32",
+    "shape": [3],
+    "input": [1.0, 2.0, 3.0],
+    "expected_value": 14.0,
+    "expected_gradient": [2.0, 4.0, 6.0],
+    "existing_positive_witness": {
+      "source_path": "examples/features/tooling/compute_autodiff.jet",
+      "source_sha256": "c8eeb0e92891b69d5146abdd615ead5974d2aec691ae0259c065f2740ebc892",
+      "expected_path": "examples/features/expected/tooling/compute_autodiff.out",
+      "expected_sha256": "a13ff79f33f3b9d1b224f25423d345270d1df2ce6c3970630177512ab43a09db",
+      "scope": "existing value/gradient/JVP/VJP route; its concrete inputs differ from AD-SUM-SQUARE"
+    },
+    "transform_surface": ["compute.gradient", "compute.value_and_gradient", "compute.jvp", "compute.vjp"],
+    "required_fields": ["custom_operation_registration", "derivative_ownership", "shape_checks", "effect_checks", "seed_or_pull", "primal_device", "gradient_device", "primal_residency", "gradient_residency"],
+    "placement_rule": "run the same authored operation/reference on CPU and a real provider when one exists; gradient inherits primal placement and determinism",
+    "negative_cases": ["mutation", "unsupported control flow", "effectful operation", "unavailable provider", "typed/source-level error"],
+    "rules": [
+      "Do not claim a value or gradient for an unexecuted provider lane.",
+      "Do not infer residency from a placement label; record concrete transfer/owner facts.",
+      "Do not add hidden host fallback, second derivative, or a new autodiff API."
+    ],
+    "provider_execution": "unproved; the expected value/gradient is a fixture input, not a provider result"
+  },
+  "unsupported_outcomes": [
+    {
+      "request": "Auto with default F64Strict+Reproducible",
+      "outcome": "CPU selected by current policy",
+      "evidence_boundary": "CPU oracle/native baseline only; not GPU evidence"
+    },
+    {
+      "request": "Metal/CUDA/Vulkan/WebGPU with F64Strict+Reproducible",
+      "outcome": "typed Unsupported error",
+      "fallback": "none; use the explicit F32 provider profile when a real provider supports it"
+    },
+    {
+      "request": "Metal/CUDA/Vulkan F32Strict+Reproducible without a usable driver/device/runtime",
+      "outcome": "typed Device or Unsupported error",
+      "fallback": "none"
+    },
+    {
+      "request": "WebGPU on a native host without a browser-owned provider",
+      "outcome": "typed Device error",
+      "fallback": "none; no native WebGPU claim"
+    },
+    {
+      "request": "gpu.* data bridge while the bridge is unavailable",
+      "outcome": "typed bridge failure/status with path=unavailable",
+      "fallback": "none; native core.data/Tensor CPU path is a replacement, not an accelerator result"
+    },
+    {
+      "request": "authored GPU launch without a real compatible device/provider",
+      "outcome": "typed device/capability failure before execution",
+      "fallback": "none; CPU oracle may be run only as an explicitly separate reference"
+    }
+  ],
+  "evidence_gaps": [
+    "No checked-in executable source currently proves the report's W1/W2/W3/W5/W6 authored launch recipes; this fixture preserves inputs and marks them unproved.",
+    "No real GPU/CUDA/HIP/device execution, provider timing, driver identity, stream overlap, device residency, or provider program identity was captured.",
+    "No matched peer-library timing or end-to-end transfer measurement was captured.",
+    "No graphics handoff dimensions/provider ownership or completion trace is frozen yet.",
+    "The current gpu.* bridge is unavailable by contract; no successful external-library handoff is claimed.",
+    "The five #3221 quantities and #3222 instrumentation overhead require an actual source-equated run; this static file contains no measured values."
+  ],
+  "non_goals": [
+    "No new Jet syntax, marker, command, public API, provider registry, dependency, fallback, or telemetry schema.",
+    "No GPU/CUDA execution or claim of provider execution.",
+    "No Tower card update or card closure."
+  ]
+}
