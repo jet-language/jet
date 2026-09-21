@@ -1,0 +1,112 @@
+{
+  "fixture": "tests/cffi_native_matrix.rs",
+  "preparation": {
+    "cards": [3141, 3111],
+    "shared_matrix_owners": [524, 525],
+    "evidence_class": "native-runtime-only",
+    "status": "preparation",
+    "native_host_required": true,
+    "scope": "Existing C archive, generated Rust, linker, and runner contract; no new ABI, default, dependency, or provider choice."
+  },
+  "toolchain_inputs": {
+    "required_environment": [
+      "JET_CFFI_MATRIX_REQUIRED=1",
+      "JET_CFFI_CC",
+      "JET_CFFI_AR",
+      "JET_CFFI_RUSTC",
+      "JET_CFFI_ABI"
+    ],
+    "optional_environment": [
+      "JET_CFFI_RUST_TARGET",
+      "JET_CFFI_RUST_LINKER",
+      "JET_CFFI_RUNNER"
+    ],
+    "accepted_abi_rows_in_existing_fixture": ["default", "sysv64"],
+    "artifact": "libjetmatrix.a",
+    "runner": "generated matrix binary, optionally through JET_CFFI_RUNNER"
+  },
+  "enum_c_layout": {
+    "native_fixture_types": [
+      {
+        "name": "Status",
+        "tag": "C int",
+        "variants": {"Ok": 0, "Lost": 7},
+        "foreign_function": "status_value"
+      },
+      {
+        "name": "Packet",
+        "tag": "U8",
+        "variants": {"Ping": 3, "Data": 7},
+        "payload": "C union of int64_t ping and two-int64 data",
+        "foreign_function": "packet_value"
+      }
+    ],
+    "existing_runtime_observations": {
+      "packet_size": 24,
+      "packet_alignment": 8,
+      "packet_payload_offset": 8,
+      "evidence_class": "native-runtime-only",
+      "source": "tests/cffi_native_matrix.rs::required_native_c_abi_matrix"
+    },
+    "checked_negative_rows": [
+      {
+        "case": "unsupported tag width U24",
+        "boundary": "E3203",
+        "proof": "tests/cffi_enum_boundaries.rs::cffi_enum_unknown_tag_width_stays_at_the_checked_boundary",
+        "evidence_class": "front-end boundary, not native target evidence"
+      },
+      {
+        "case": "discriminant outside signed i64",
+        "boundary": "E0035",
+        "proof": "tests/cffi_enum_boundaries.rs::cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary",
+        "evidence_class": "front-end boundary, not native target evidence"
+      }
+    ],
+    "future_native_rows": [
+      "compare tag and payload bytes for every legal variant",
+      "exercise an unknown foreign discriminant through the checked boundary",
+      "prove declared tag width and payload alignment on each available native target"
+    ],
+    "default_layout_claim": "none"
+  },
+  "artifact_compatibility": {
+    "current_fixture_ownership": [
+      "C stack-owned Coord, Packet, and Record values",
+      "caller-owned Record out slot; read only after status zero",
+      "foreign callback pointer supplied by generated Rust"
+    ],
+    "allocator_exchange": "not exercised by the existing fixture; no allocator or freeing contract is inferred",
+    "required_receipt_fields": [
+      "runtime and toolchain identities",
+      "target triple and architecture",
+      "selected C ABI",
+      "C compiler and archiver identity",
+      "Rust compiler and linker identity",
+      "required system assets",
+      "ownership and freeing rule for every C-safe value"
+    ],
+    "wrong_artifact_or_abi": "must be rejected or reported unsupported by the existing matrix gate; no bundled-versus-system choice is made here"
+  },
+  "unavailable_target_gates": [
+    {
+      "target": "x86_64-apple-darwin",
+      "reason": "no macOS host is available in this lane",
+      "required_owner": 524
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "reason": "no macOS host is available in this lane",
+      "required_owner": 524
+    },
+    {
+      "target": "windows-x86_64-msvc",
+      "reason": "no Windows host is available in this lane",
+      "required_owner": 525
+    },
+    {
+      "target": "windows-i686-msvc",
+      "reason": "no Windows host is available in this lane",
+      "required_owner": 525
+    }
+  ]
+}
