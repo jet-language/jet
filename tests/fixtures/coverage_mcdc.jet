@@ -1,0 +1,19 @@
+// D-TEST-MCDC1=A preparation fixture only.
+//
+// This source keeps the retained contrast from the 2026-09-09 audit beside the
+// existing branch-coverage fixture. It is not an MC/DC runtime receipt and does
+// not change the default coverage gate. The predicate is a && (b || c), so the
+// four independent witnesses are 010, 110, 100, and 101.
+fn permission(a: Bool, b: Bool, c: Bool) Bool -> a && (b || c)
+
+fn run() {
+    // Branch-only contrast: both decision outcomes, no independent pair set.
+    assert_eq(permission(false, false, false), false)
+    assert_eq(permission(true, true, false), true)
+
+    // Masking witness pairs: a (010/110), b (110/100), c (100/101).
+    assert_eq(permission(false, true, false), false)
+    assert_eq(permission(true, true, false), true)
+    assert_eq(permission(true, false, false), false)
+    assert_eq(permission(true, false, true), true)
+}
