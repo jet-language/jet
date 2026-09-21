@@ -21,9 +21,45 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{ImportDecl, ImportKind, InlineVersion, Program};
-use crate::SHA256::{sha256_hex, try_tree_hash, TreeHashError};
+use crate::SHA256::{sha256_file_hex, sha256_hex, try_tree_hash, TreeHashError};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const INLINE_DEPS_FIXTURES_ENV: &str = "JET_INLINE_DEPS_FIXTURES";
+
+fn framed(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn framed_count(bytes: &mut Vec<u8>, count: usize) {
+    bytes.extend_from_slice(&(count as u64).to_be_bytes());
+}
+
+fn valid_package_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|byte| byte != b'/' && byte != b'\\' && byte != 0)
+}
+
+fn numeric_version(value: &str) -> Option<Vec<u64>> {
+    let parts: Vec<&str> = value.split('.').collect();
+    if !(1..=3).contains(&parts.len()) {
+        return None;
+    }
+    parts
+        .into_iter()
+        .map(|part| {
+            if part.is_empty() || (part.len() > 1 && part.starts_with('0')) {
+                return None;
+            }
+            part.parse::<u64>().ok()
+        })
+        .collect()
+}
 
 /// One `use pkg#version;` ref collected from a manifest-less script.
 #[derive(Debug, Clone)]
@@ -61,11 +97,83 @@ pub fn collect_from_imports(imports: &[ImportDecl]) -> Vec<InlineDep> {
 /// (`1.4.2`). Anything looser (`1.4`, `1`, `latest`, `*`) is L0203 — fine to
 /// write (rung 0 stays magic), but not reproducible without `jet fetch --lock`.
 pub fn is_pinned(selector: &str) -> bool {
-    let parts: Vec<&str> = selector.split('.').collect();
-    parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    numeric_version(selector).is_some_and(|parts| parts.len() == 3)
+}
+
+/// The content-addressed identity carried from an inline reference into a
+/// lock, package lift, or build cache. The selector is retained separately
+/// from the selected version: changing a loose selector is a semantic change
+/// even when it happens to select the same source today.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DependencyIdentity {
+    pub name: String,
+    pub selector: String,
+    pub resolved_version: String,
+    pub content_hash: String,
+}
+
+/// The facts that identify a prepared script result. Paths and ambient
+/// process state are deliberately absent: only recorded source/dependency
+/// content plus the selected toolchain and target can authorize reuse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheIdentity {
+    pub source_hash: String,
+    pub dependencies: Vec<DependencyIdentity>,
+    pub toolchain: String,
+    pub target: String,
+}
+
+impl CacheIdentity {
+    pub fn new(
+        source_hash: impl Into<String>,
+        dependencies: impl IntoIterator<Item = DependencyIdentity>,
+        toolchain: impl Into<String>,
+        target: impl Into<String>,
+    ) -> Self {
+        let mut dependencies: Vec<_> = dependencies.into_iter().collect();
+        dependencies.sort();
+        Self {
+            source_hash: source_hash.into(),
+            dependencies,
+            toolchain: toolchain.into(),
+            target: target.into(),
+        }
+    }
+
+    /// Stable cache key; length-framing keeps distinct fields distinct even
+    /// when a name, hash, or toolchain contains delimiters.
+    pub fn digest(&self) -> String {
+        let mut bytes = Vec::new();
+        framed(&mut bytes, "jet-script-cache.v1");
+        framed(&mut bytes, &self.source_hash);
+        framed_count(&mut bytes, self.dependencies.len());
+        for dependency in &self.dependencies {
+            framed(&mut bytes, &dependency.name);
+            framed(&mut bytes, &dependency.selector);
+            framed(&mut bytes, &dependency.resolved_version);
+            framed(&mut bytes, &dependency.content_hash);
+        }
+        framed(&mut bytes, &self.toolchain);
+        framed(&mut bytes, &self.target);
+        format!("sha256-{}", sha256_hex(&bytes))
+    }
+}
+
+/// Build the identity for a resolved script without reading or executing any
+/// dependency source. Callers can recompute it after a source edit and reject
+/// a stale prepared result before execution.
+pub fn cache_identity(
+    source_hash: &str,
+    dependencies: &[Resolved],
+    toolchain: &str,
+    target: &str,
+) -> CacheIdentity {
+    CacheIdentity::new(
+        source_hash,
+        dependencies.iter().map(Resolved::dependency_identity),
+        toolchain,
+        target,
+    )
 }
 
 /// A resolved inline dependency: `dir` is the module search root that
@@ -79,9 +187,28 @@ pub struct Resolved {
     pub content_hash: String,
 }
 
+impl Resolved {
+    /// Return the portable dependency identity. `dir` is intentionally not
+    /// part of it: the same prepared source must identify the same way after
+    /// a clone moves the workspace.
+    pub fn dependency_identity(&self) -> DependencyIdentity {
+        DependencyIdentity {
+            name: self.name.clone(),
+            selector: self.selector.clone(),
+            resolved_version: self.resolved_version.clone(),
+            content_hash: self.content_hash.clone(),
+        }
+    }
+}
+
+
 /// Why an inline dep didn't resolve (E1253's `{reason}` half).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unresolved {
+    /// The import name would escape the local dependency root.
+    InvalidName,
+    /// The selector is not the supported dotted numeric form.
+    InvalidSelector,
     /// No local source has ever heard of `name`.
     UnknownPackage,
     /// `name` is known locally, but no version satisfies the selector.
@@ -92,86 +219,151 @@ pub enum Unresolved {
 
 /// Resolve one inline dep against the script's local `.jet/inline-deps/`
 /// cache, then (if set) `JET_INLINE_DEPS_FIXTURES`. It hashes the selected
-/// source only after pure directory lookup; no network or code execution is
-/// involved, exactly like reading an already-realized hangar entry. A registry
-/// dependency is not silently substituted for this local source cache; it must
-/// be lifted into a manifest and fetched through the package workflow first.
 pub fn resolve(dep: &InlineDep, script_dir: &Path) -> Result<Resolved, Unresolved> {
-    let mut roots = vec![script_dir.join(".jet").join("inline-deps")];
-    if let Ok(fixtures) = std::env::var("JET_INLINE_DEPS_FIXTURES") {
-        roots.push(PathBuf::from(fixtures));
+    if !valid_package_name(&dep.name) {
+        return Err(Unresolved::InvalidName);
+    }
+    if numeric_version(&dep.selector).is_none() {
+        return Err(Unresolved::InvalidSelector);
     }
 
-    let mut saw_package = false;
-    for root in &roots {
-        let Some(candidates) = list_versions(root, &dep.name) else {
+    let local_root = script_dir.join(".jet").join("inline-deps");
+    let fixture_root = std::env::var_os(INLINE_DEPS_FIXTURES_ENV).map(PathBuf::from);
+
+    // The project-local source is authoritative. If the project has a package
+    // directory but the requested version is absent, do not keep searching a
+    // fixture (or a future registry) and silently change the dependency.
+    let roots = std::iter::once(local_root).chain(fixture_root);
+    for root in roots {
+        let Some(candidates) = list_versions(&root, &dep.name)? else {
             continue;
         };
-        saw_package = true;
-        if let Some((version, dir)) = best_match(&dep.selector, &candidates) {
-            // `try_tree_hash` returns the same `sha256-<hex>`-prefixed string
-            // as `LockedPackage::content_hash`/`IndexEntry`, while preserving
-            // any hostile-tree failure for the caller.
-            let content_hash = try_tree_hash(&dir).map_err(Unresolved::InvalidTree)?;
-            return Ok(Resolved {
-                name: dep.name.clone(),
-                selector: dep.selector.clone(),
-                resolved_version: version,
-                dir,
-                content_hash,
-            });
-        }
+        let Some((version, dir)) = best_match(&dep.selector, &candidates) else {
+            return Err(Unresolved::NoMatch);
+        };
+        // `try_tree_hash` returns the same `sha256-<hex>`-prefixed string
+        // as `LockedPackage::content_hash`/`IndexEntry`, while preserving
+        // any hostile-tree failure for the caller.
+        let content_hash = try_tree_hash(&dir).map_err(Unresolved::InvalidTree)?;
+        return Ok(Resolved {
+            name: dep.name.clone(),
+            selector: dep.selector.clone(),
+            resolved_version: version,
+            dir,
+            content_hash,
+        });
     }
-    Err(if saw_package {
-        Unresolved::NoMatch
-    } else {
-        Unresolved::UnknownPackage
-    })
+    Err(Unresolved::UnknownPackage)
 }
 
-/// Every version directory under `<root>/<name>/`, or `None` if `<name>`
-/// itself doesn't exist under `root`.
-fn list_versions(root: &Path, name: &str) -> Option<Vec<(String, PathBuf)>> {
-    let pkg_dir = root.join(name);
-    if !pkg_dir.is_dir() {
-        return None;
+/// Every version directory under `<root>/<name>`, or `None` if `<name>`
+/// itself doesn't exist under `root`. Filesystem errors and links fail closed:
+/// a missing source is not interchangeable with another source root.
+fn list_versions(
+    root: &Path,
+    name: &str,
+) -> Result<Option<Vec<(String, PathBuf)>>, Unresolved> {
+    let root_metadata = match fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(Unresolved::InvalidTree(TreeHashError::Io {
+                path: root.to_path_buf(),
+                detail: error.to_string(),
+            }))
+        }
+    };
+    if root_metadata.file_type().is_symlink() {
+        return Err(Unresolved::InvalidTree(TreeHashError::Symlink(
+            root.to_path_buf(),
+        )));
     }
+    if !root_metadata.is_dir() {
+        return Ok(None);
+    }
+
+    let pkg_dir = root.join(name);
+    let package_metadata = match fs::symlink_metadata(&pkg_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(Unresolved::InvalidTree(TreeHashError::Io {
+                path: pkg_dir,
+                detail: error.to_string(),
+            }))
+        }
+    };
+    if package_metadata.file_type().is_symlink() {
+        return Err(Unresolved::InvalidTree(TreeHashError::Symlink(pkg_dir)));
+    }
+    if !package_metadata.is_dir() {
+        return Ok(None);
+    }
+
+    let entries = fs::read_dir(&pkg_dir).map_err(|error| {
+        Unresolved::InvalidTree(TreeHashError::Io {
+            path: pkg_dir.clone(),
+            detail: error.to_string(),
+        })
+    })?;
     let mut out = Vec::new();
-    if let Ok(entries) = fs::read_dir(&pkg_dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                if let Some(v) = p.file_name().and_then(|n| n.to_str()) {
-                    out.push((v.to_string(), p));
-                }
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            Unresolved::InvalidTree(TreeHashError::Io {
+                path: pkg_dir.clone(),
+                detail: error.to_string(),
+            })
+        })?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            Unresolved::InvalidTree(TreeHashError::Io {
+                path: path.clone(),
+                detail: error.to_string(),
+            })
+        })?;
+        if metadata.is_dir() || metadata.file_type().is_symlink() {
+            if let Some(version) = path.file_name().and_then(|name| name.to_str()) {
+                out.push((version.to_string(), path));
             }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// The highest version whose dotted prefix matches `selector` (`1.4` matches
 /// `1.4.2`; an exact `1.4.2` selector matches only that version).
 fn best_match(selector: &str, candidates: &[(String, PathBuf)]) -> Option<(String, PathBuf)> {
-    let sel_parts: Vec<&str> = selector.split('.').filter(|p| !p.is_empty()).collect();
+    let selector_parts = numeric_version(selector)?;
     let mut matches: Vec<&(String, PathBuf)> = candidates
         .iter()
-        .filter(|(v, _)| {
-            let vp: Vec<&str> = v.split('.').collect();
-            vp.len() >= sel_parts.len() && vp.iter().zip(&sel_parts).all(|(a, b)| a == b)
+        .filter(|(version, _)| {
+            let Some(version_parts) = numeric_version(version) else {
+                return false;
+            };
+            if selector_parts.len() == 3 {
+                version_parts == selector_parts
+            } else {
+                version_parts.len() == 3
+                    && version_parts
+                        .iter()
+                        .zip(&selector_parts)
+                        .all(|(actual, selected)| actual == selected)
+            }
         })
         .collect();
-    matches.sort_by_key(|(v, _)| version_key(v));
-    matches.last().map(|&(ref v, ref p)| (v.clone(), p.clone()))
+    matches.sort_by_key(|(version, _)| version_key(version));
+    matches.last().map(|&(ref version, ref path)| (version.clone(), path.clone()))
 }
 
 fn version_key(v: &str) -> (u64, u64, u64) {
-    let mut p = v.split('.');
-    let a = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-    let b = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-    let c = p.next().and_then(|x| x.parse().ok()).unwrap_or(0);
-    (a, b, c)
+    let parts = numeric_version(v).unwrap_or_default();
+    (
+        parts.first().copied().unwrap_or(0),
+        parts.get(1).copied().unwrap_or(0),
+        parts.get(2).copied().unwrap_or(0),
+    )
 }
+
 
 // ──────────────────────────────────────────────
 // Diagnostics
@@ -182,6 +374,20 @@ fn version_key(v: &str) -> (u64, u64, u64) {
 /// satisfies the selector.
 pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
     let (why, fix) = match reason {
+        Unresolved::InvalidName => (
+            format!(
+                "`{}` is not a safe local package name.",
+                dep.name
+            ),
+            "use a single package name without path separators.".to_string(),
+        ),
+        Unresolved::InvalidSelector => (
+            format!(
+                "`{}` is not a supported dotted numeric version selector.",
+                dep.selector
+            ),
+            "use `major`, `major.minor`, or `major.minor.patch`.".to_string(),
+        ),
         Unresolved::UnknownPackage => (
             format!(
                 "no local source knows a package named `{}` — an inline dependency must resolve from a committed or explicitly materialized local copy.",
@@ -243,8 +449,7 @@ pub fn l0203_unpinned(dep: &InlineDep) -> Diagnostic {
 /// key `jet fetch --lock`/`jet run` use to detect an edited script (U11 "locks by
 /// file-content hash").
 pub fn file_hash(path: &Path) -> std::io::Result<String> {
-    let bytes = fs::read(path)?;
-    Ok(format!("sha256-{}", sha256_hex(&bytes)))
+    Ok(format!("sha256-{}", sha256_file_hex(path)?))
 }
 
 #[cfg(test)]
@@ -259,6 +464,54 @@ mod tests {
         assert!(!is_pinned("latest"));
         assert!(!is_pinned("*"));
         assert!(!is_pinned("^1.4.2"));
+        assert!(!is_pinned("01.4.2"));
+        assert!(!is_pinned("1.4.999999999999999999999999"));
+    }
+
+    #[test]
+    fn exact_match_does_not_accept_incompatible_or_malformed_versions() {
+        let cands = vec![
+            ("1.4.2".to_string(), PathBuf::from("exact")),
+            ("1.4.3".to_string(), PathBuf::from("newer")),
+            ("1.4.2.1".to_string(), PathBuf::from("malformed")),
+        ];
+        assert_eq!(best_match("1.4.2", &cands).unwrap().0, "1.4.2");
+        assert!(best_match("1.4.1", &cands).is_none());
+    }
+
+    #[test]
+    fn cache_identity_is_order_independent_but_binds_all_facts() {
+        let left = Resolved {
+            name: "textkit".to_string(),
+            selector: "1.4".to_string(),
+            resolved_version: "1.4.2".to_string(),
+            dir: PathBuf::from("/first/checkout"),
+            content_hash: "sha256-source".to_string(),
+        };
+        let mut right = left.clone();
+        right.name = "other".to_string();
+        right.dir = PathBuf::from("/second/checkout");
+
+        let first =
+            cache_identity("sha256-script", &[left.clone(), right.clone()], "jet-1", "x86_64");
+        let reordered =
+            cache_identity("sha256-script", &[right.clone(), left.clone()], "jet-1", "x86_64");
+        assert_eq!(first.digest(), reordered.digest());
+
+        let changed_source = CacheIdentity::new(
+            "sha256-script-edited",
+            [left.dependency_identity(), right.dependency_identity()],
+            "jet-1",
+            "x86_64",
+        );
+        let changed_toolchain = CacheIdentity::new(
+            "sha256-script",
+            [left.dependency_identity(), right.dependency_identity()],
+            "jet-2",
+            "x86_64",
+        );
+        assert_ne!(first.digest(), changed_source.digest());
+        assert_ne!(first.digest(), changed_toolchain.digest());
     }
 
     #[test]
