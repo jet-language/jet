@@ -1,0 +1,84 @@
+// Insertion-ordered unique string set. Membership is linear; n is small by
+// design so the implementation stays obvious and allocation-free besides the
+// backing arrays. Missing keys are `false`, never an error.
+
+pub struct StringSet {
+    pub items: [String]
+}
+
+pub fn new() -> StringSet { StringSet{items: [String]{}} }
+
+pub fn from_list(items: [String]) -> StringSet {
+    s := new()
+    loop item in items -> s = add(s, item)
+    s
+}
+
+pub fn add(s: StringSet, item: String) -> StringSet {
+    if contains(s, item) -> s
+    items := s.items
+    items.push(item)
+    StringSet{items: items}
+}
+
+pub fn discard(s: StringSet, item: String) -> StringSet {
+    items := [String]{}
+    loop x in s.items {
+        if x != item -> items.push(x)
+    }
+    StringSet{items: items}
+}
+
+pub fn remove(s: StringSet, item: String) -> ?StringSet {
+    if !contains(s, item) -> return None
+    Val(discard(s, item))
+}
+
+pub fn contains(s: StringSet, item: String) -> Bool {
+    loop x in s.items {
+        if x == item -> return true
+    }
+    false
+}
+
+pub fn len(s: StringSet) -> Int { s.items.len() }
+pub fn is_empty(s: StringSet) -> Bool { s.items.len() == 0 }
+pub fn to_list(s: StringSet) -> [String] { s.items }
+pub fn clear(_s: StringSet) -> StringSet { new() }
+
+pub fn union(a: StringSet, b: StringSet) -> StringSet {
+    s := a
+    loop x in b.items -> s = add(s, x)
+    s
+}
+
+pub fn intersection(a: StringSet, b: StringSet) -> StringSet {
+    s := new()
+    loop x in a.items {
+        if contains(b, x) -> s = add(s, x)
+    }
+    s
+}
+
+pub fn difference(a: StringSet, b: StringSet) -> StringSet {
+    s := new()
+    loop x in a.items {
+        if !contains(b, x) -> s = add(s, x)
+    }
+    s
+}
+
+pub fn symmetric_difference(a: StringSet, b: StringSet) -> StringSet { union(difference(a, b), difference(b, a)) }
+
+pub fn issubset(a: StringSet, b: StringSet) -> Bool {
+    loop x in a.items {
+        if !contains(b, x) -> return false
+    }
+    true
+}
+
+pub fn issuperset(a: StringSet, b: StringSet) -> Bool { issubset(b, a) }
+
+pub fn isdisjoint(a: StringSet, b: StringSet) -> Bool { intersection(a, b).items.len() == 0 }
+
+pub fn clone_set(s: StringSet) -> StringSet { StringSet{items: s.items} }

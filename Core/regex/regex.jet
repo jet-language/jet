@@ -1,0 +1,542 @@
+package {
+    name: "core.regex"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Checked regular expressions."
+    license: "MIT"
+    outputs: {
+        regex: .Library{ entry: regex }
+    }
+}
+
+// core.regex — one engine, compile-checked literals, fallible runtime.
+//
+// `r"..."` literals are a compiler feature. `compile` is for patterns that
+// arrive at run time. This file is a backtracking NFA over UTF-8 bytes:
+// concatenation, `|`, `()` , `*` `+` `?` `{n,m}`, `.`, `^`, `$`, `[]`/`[^]`
+// and the usual `\d\w\s` classes. Flags: `ignore_case` (ASCII), `multiline`
+// `dot_matches_newline`. Nested backtracking is bounded by the input length;
+// a pattern that does not compile fails with a reason string, never a panic.
+
+pub struct RegexFlags {
+    pub ignore_case: Bool
+    pub multiline: Bool
+    pub dot_matches_newline: Bool
+}
+
+pub struct Pattern {
+    pub pattern: String
+}
+
+pub struct RegexFlag {
+    pub name: String
+    pub value: Int
+}
+
+pub struct Regex {
+    pub pattern: String
+    pub flags: RegexFlags
+    pub nodes: [Node]
+    pub root: Int
+}
+
+pub struct Match {
+    pub start: Int
+    pub end: Int
+    pub text: String
+    pub groups: [String]
+}
+
+pub struct Node {
+    pub kind: String
+    pub s: String
+    pub a: Int
+    pub b: Int
+    pub left: Int
+    pub right: Int
+    pub neg: Bool
+}
+
+pub fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags {
+    RegexFlags{
+    ignore_case: ignore_case,
+    multiline: multiline,
+    dot_matches_newline: dot_matches_newline,
+    }
+}
+
+/// Quote regex metacharacters in `text` so it matches as a literal.
+pub fn escape(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        if is_meta(b) -> out.push(U8{92})
+        out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+pub fn compile(pattern: String) -> Regex { compile_with(pattern, flags(false, false, false)) }
+
+pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex {
+    p := Parser{bytes: pattern.bytes(), i: 0, flags: flags, nodes: [Node]{}}
+    root :: p.parse_alt()
+    if p.i != p.bytes.len() -> return Err("trailing characters in regex")
+    Ok(Regex{pattern: pattern, flags: flags, nodes: p.nodes, root: root})
+}
+
+pub fn is_match(pattern: Regex, text: String) -> Bool {
+    m :: find(pattern, text)
+    m != None
+}
+
+pub fn full_match(pattern: Regex, text: String) -> Bool {
+    raw :: text.bytes()
+    caps := [Group]{}
+    if exec(pattern, raw, 0, pattern.root, caps) != raw.len() -> return false
+    true
+}
+
+pub fn match(pattern: Regex, text: String) -> ?Match { find_match(pattern, text) }
+pub fn finditer(pattern: Regex, text: String) -> [Match] { matches(pattern, text) }
+
+pub fn purge() {}
+
+pub fn find(pattern: Regex, text: String) -> ?String {
+    m :: find_match(pattern, text) ?? return None
+    Val(m.text)
+}
+
+pub fn find_all(pattern: Regex, text: String) -> [String] {
+    out := [String]{}
+    loop m in matches(pattern, text) -> out.push(m.text)
+    out
+}
+
+pub fn matches(pattern: Regex, text: String) -> [Match] {
+    raw :: text.bytes()
+    out := [Match]{}
+    i := 0
+    loop i <= raw.len() {
+        caps := [Group]{}
+        end :: exec(pattern, raw, i, pattern.root, caps)
+        if end >= i && (end > i || empty_ok(pattern)) {
+            out.push(make_match(raw, i, end, caps))
+            if end == i {
+                i = i + 1
+            } else {
+                i = end
+            }
+        } else {
+            i = i + 1
+        }
+        if out.len() > raw.len() + 1 -> break
+    }
+    out
+}
+
+pub fn split(pattern: Regex, text: String) -> [String] { split_limit(pattern, text, 0) }
+
+pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] {
+    raw :: text.bytes()
+    ms :: matches(pattern, text)
+    out := [String]{}
+    cur := 0
+    used := 0
+    loop m in ms {
+        if n > 0 && used + 1 >= n -> break
+        out.push(slice(raw, cur, m.start))
+        cur = m.end
+        used = used + 1
+    }
+    out.push(slice(raw, cur, raw.len()))
+    out
+}
+
+pub fn replace(pattern: Regex, text: String, replacement: String) -> String { replace_n(pattern, text, replacement, false) }
+
+/// Expand numbered capture references in a replacement template.
+/// Supported forms are `\1` through `\9`, `\g<1>`, and `\\`.
+pub fn expand(m: Match, template: String) -> String {
+    raw :: template.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] != (U8{92}) {
+            out.push(raw[i])
+            i = i + 1
+            next
+        }
+        i = i + 1
+        if i >= raw.len() {
+            out.push(U8{92})
+            break
+        }
+        n :: raw[i]
+        if n >= 49 && n <= 57 {
+            index := n - 49
+            if index < m.groups.len() {
+                loop b in m.groups[index].bytes() -> out.push(b)
+            }
+            i = i + 1
+            next
+        }
+        if n == 103 && i + 1 < raw.len() && raw[i + 1] == (U8{60}) {
+            j := i + 2
+            index := 0
+            found := false
+            loop j < raw.len() {
+                d :: raw[j]
+                if d == (U8{62}) {
+                    found = true
+                    break
+                }
+                if d < 48 || d > 57 -> break
+                index = index * 10 + d - 48
+                j = j + 1
+            }
+            if found && index > 0 && index - 1 < m.groups.len() {
+                loop b in m.groups[index - 1].bytes() -> out.push(b)
+                i = j + 1
+                next
+            }
+        }
+        out.push(n)
+        i = i + 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+pub fn replace_first(pattern: Regex, text: String, replacement: String) -> String { replace_n(pattern, text, replacement, true) }
+
+fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String {
+    raw :: text.bytes()
+    ms :: matches(pattern, text)
+    out := [U8]{}
+    cur := 0
+    loop m in ms {
+        loop b in slice(raw, cur, m.start).bytes() -> out.push(b)
+        loop b in replacement.bytes() -> out.push(b)
+        cur = m.end
+        if first_only -> break
+    }
+    loop b in slice(raw, cur, raw.len()).bytes() -> out.push(b)
+    String.from_bytes(out) ?? ""
+}
+
+struct Parser {
+    bytes: [U8]
+    i: Int
+    flags: RegexFlags
+    nodes: [Node]
+}
+
+struct Group {
+    start: Int
+    end: Int
+}
+
+impl Parser {
+    fn parse_alt(&self) -> Int {
+        left :: self.parse_seq()
+        if self.peek() ?? (U8{0}) != (U8{124}) -> return Ok(left)
+        _ :: self.bump()
+        right :: self.parse_alt()
+        Ok(self.emit("alt", "", 0, 0, left, right, false))
+    }
+
+    fn parse_seq(&self) -> Int {
+        ids := [Int]{}
+        loop {
+            b :: self.peek() ?? break
+            n :: b
+            if n == 124 || n == 41 -> break
+            ids.push(self.parse_atom())
+        }
+        if ids.len() == 0 -> return Ok(self.emit("empty", "", 0, 0, -1, -1, false))
+        if ids.len() == 1 -> return Ok(ids[0])
+        acc := ids[0]
+        loop i in 1..<ids.len() {
+            acc = self.emit("seq", "", 0, 0, acc, ids[i], false)
+        }
+        Ok(acc)
+    }
+
+    fn parse_atom(&self) -> Int {
+        id :: self.parse_piece()
+        b :: self.peek() ?? return Ok(id)
+        n :: b
+        if n == 42 {
+            _ :: self.bump()
+            return Ok(self.emit("rep", "", 0, -1, id, -1, false))
+        }
+        if n == 43 {
+            _ :: self.bump()
+            return Ok(self.emit("rep", "", 1, -1, id, -1, false))
+        }
+        if n == 63 {
+            _ :: self.bump()
+            return Ok(self.emit("rep", "", 0, 1, id, -1, false))
+        }
+        if n == 123 {
+            _ :: self.bump()
+            lo :: self.num()
+            hi := lo
+            if self.peek() ?? (U8{0}) == (U8{44}) {
+                _ :: self.bump()
+                if self.peek() ?? (U8{0}) == (U8{125}) {
+                    hi = -1
+                } else {
+                    hi = self.num()
+                }
+            }
+            if self.peek() ?? (U8{0}) != (U8{125}) -> return Err("unclosed `{{` quantifier")
+            _ :: self.bump()
+            return Ok(self.emit("rep", "", lo, hi, id, -1, false))
+        }
+        Ok(id)
+    }
+
+    fn parse_piece(&self) -> Int {
+        b :: self.bump() ?? return Err("unexpected end of regex")
+        n :: b
+        if n == {
+            46 -> return Ok(self.emit("dot", "", 0, 0, -1, -1, false))
+            94 -> return Ok(self.emit("start", "", 0, 0, -1, -1, false))
+            36 -> return Ok(self.emit("end", "", 0, 0, -1, -1, false))
+            else -> { _ := 0 }
+        }
+        if n == 40 {
+            inner :: self.parse_alt()
+            if self.peek() ?? (U8{0}) != (U8{41}) -> return Err("unclosed group")
+            _ :: self.bump()
+            return Ok(self.emit("group", "", 0, 0, inner, -1, false))
+        }
+        if n == {
+            91 -> self.parse_class()
+            92 -> self.parse_escape()
+            41 | 124 | 42 | 43 | 63 | 123 -> Err("dangling metacharacter")
+            else -> Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
+        }
+    }
+
+    fn parse_escape(&self) -> Int {
+        b :: self.bump() ?? return Err("dangling backslash")
+        n :: b
+        if n == {
+            100 -> return Ok(self.emit("class", "0-9", 0, 0, -1, -1, false))
+            68 -> return Ok(self.emit("class", "0-9", 0, 0, -1, -1, true))
+            119 -> return Ok(self.emit("class", "A-Za-z0-9_", 0, 0, -1, -1, false))
+            87 -> return Ok(self.emit("class", "A-Za-z0-9_", 0, 0, -1, -1, true))
+            115 -> return Ok(self.emit("class", String.from_bytes([U8]{32, 9, 10, 13, 11, 12}) ?? "", 0, 0, -1, -1, false))
+            83 -> return Ok(self.emit("class", String.from_bytes([U8]{32, 9, 10, 13, 11, 12}) ?? "", 0, 0, -1, -1, true))
+            110 -> return Ok(self.emit("lit", "\n", 0, 0, -1, -1, false))
+            116 -> return Ok(self.emit("lit", "\t", 0, 0, -1, -1, false))
+            else -> { _ := 0 }
+        }
+        Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
+    }
+
+    fn parse_class(&self) -> Int {
+        neg := false
+        if self.peek() ?? (U8{0}) == (U8{94}) {
+            neg = true
+            _ :: self.bump()
+        }
+        body := [U8]{}
+        loop {
+            b :: self.bump() ?? return Err("unclosed character class")
+            if b == (U8{93}) -> break
+            body.push(b)
+        }
+        Ok(self.emit("class", String.from_bytes(body) ?? "", 0, 0, -1, -1, neg))
+    }
+
+    fn emit(&self, kind: String, s: String, a: Int, b: Int, left: Int, right: Int, neg: Bool) -> Int {
+        self.nodes.push(Node{kind: kind, s: s, a: a, b: b, left: left, right: right, neg: neg})
+        self.nodes.len() - 1
+    }
+
+    fn num(&self) -> Int {
+        n := 0
+        got := false
+        loop {
+            b :: self.peek() ?? break
+            d :: b
+            if d < 48 || d > 57 -> break
+            _ :: self.bump()
+            n = n * 10 + (d - 48)
+            got = true
+        }
+        if !got -> return Err("expected a number in `{{n,m}}`")
+        Ok(n)
+    }
+
+    fn peek(self) -> ?U8 {
+        if self.i >= self.bytes.len() -> return None
+        Val(self.bytes[self.i])
+    }
+
+    fn bump(&self) -> ?U8 {
+        if self.i >= self.bytes.len() -> return None
+        b :: self.bytes[self.i]
+        self.i = self.i + 1
+        Val(b)
+    }
+}
+
+fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: [Group]) -> Int {
+    if i < 0 || node < 0 -> return -1
+    n :: re.nodes[node]
+    if n.kind == "empty" -> return i
+    if n.kind == "lit" {
+        lit :: n.s.bytes()
+        if i + lit.len() > text.len() -> return -1
+        loop k in 0..<lit.len() {
+            a :: fold(text[i + k], re.flags.ignore_case)
+            b :: fold(lit[k], re.flags.ignore_case)
+            if a != b -> return -1
+        }
+        return i + lit.len()
+    }
+    if n.kind == "dot" {
+        if i >= text.len() -> return -1
+        if text[i] == (U8{10}) && !re.flags.dot_matches_newline -> return -1
+        return i + 1
+    }
+    if n.kind == "start" {
+        if i == 0 -> return i
+        if re.flags.multiline && i > 0 && text[i - 1] == (U8{10}) -> return i
+        return -1
+    }
+    if n.kind == "end" {
+        if i == text.len() -> return i
+        if re.flags.multiline && i < text.len() && text[i] == (U8{10}) -> return i
+        return -1
+    }
+    if n.kind == "seq" {
+        mid :: exec(re, text, i, n.left, caps)
+        if mid < 0 -> return -1
+        return exec(re, text, mid, n.right, caps)
+    }
+    if n.kind == "alt" {
+        a :: exec(re, text, i, n.left, caps)
+        if a >= 0 -> return a
+        return exec(re, text, i, n.right, caps)
+    }
+    if n.kind == "group" {
+        end :: exec(re, text, i, n.left, caps)
+        if end >= 0 -> caps.push(Group{start: i, end: end})
+        return end
+    }
+    if n.kind == "class" {
+        if i >= text.len() -> return -1
+        ok :: class_hit(n.s, text[i], re.flags.ignore_case)
+        if n.neg {
+            if ok -> return -1
+            return i + 1
+        }
+        if ok -> return i + 1
+        return -1
+    }
+    if n.kind == "rep" {
+        return exec_rep(re, text, i, n, caps, 0)
+    }
+    -1
+}
+
+fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: [Group], count: Int) -> Int {
+    if n.b >= 0 && count == n.b -> return i
+    if count >= n.a {
+        rest :: exec_rep_more(re, text, i, n, caps, count)
+        if rest >= 0 -> return rest
+        return i
+    }
+    nxt :: exec(re, text, i, n.left, caps)
+    if nxt < 0 || nxt == i && n.b != 0 -> return -1
+    exec_rep(re, text, nxt, n, caps, count + 1)
+}
+
+fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: [Group], count: Int) -> Int {
+    if n.b >= 0 && count >= n.b -> return -1
+    nxt :: exec(re, text, i, n.left, caps)
+    if nxt < 0 || nxt == i -> return -1
+    deeper :: exec_rep_more(re, text, nxt, n, caps, count + 1)
+    if deeper >= 0 -> return deeper
+    nxt
+}
+
+fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool {
+    ch :: fold(b, fold_case)
+    raw :: spec.bytes()
+    i := 0
+    loop i < raw.len() {
+        if i + 2 < raw.len() && raw[i + 1] == (U8{45}) {
+            lo :: fold(raw[i], fold_case)
+            hi :: fold(raw[i + 2], fold_case)
+            if ch >= lo && ch <= hi -> return true
+            i = i + 3
+        } else {
+            if fold(raw[i], fold_case) == ch -> return true
+            i = i + 1
+        }
+    }
+    false
+}
+
+fn fold(b: U8, on: Bool) -> Int {
+    n :: b
+    if on && n >= 65 && n <= 90 -> return n + 32
+    n
+}
+
+fn find_match(pattern: Regex, text: String) -> ?Match {
+    raw :: text.bytes()
+    i := 0
+    loop i <= raw.len() {
+        caps := [Group]{}
+        end :: exec(pattern, raw, i, pattern.root, caps)
+        if end >= i {
+            return Val(make_match(raw, i, end, caps))
+        }
+        i = i + 1
+    }
+    None
+}
+
+fn make_match(raw: [U8], start: Int, end: Int, caps: [Group]) -> Match {
+    groups := [String]{}
+    loop g in caps -> groups.push(slice(raw, g.start, g.end))
+    Match{start: start, end: end, text: slice(raw, start, end), groups: groups}
+}
+
+fn empty_ok(pattern: Regex) -> Bool { true }
+
+fn slice(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn is_meta(b: U8) -> Bool {
+    n :: b
+    n == 92 || n == 46 || n == 94 || n == 36 || n == 42 || n == 43 || n == 63 || n == 40 || n == 41 || n == 91 || n == 93 || n == 123 || n == 125 || n == 124
+}
+/// Python-style constructor spelling for a runtime pattern.
+pub fn regex(pattern: String) -> Regex { compile(pattern) }
+
+/// Return the canonical source pattern represented by a compiled regex.
+pub fn join(pattern: Regex) -> String { pattern.pattern }
+/// Python `re` spellings over the same compiled Regex carrier.
+pub fn search(pattern: Regex, text: String) -> ?Match { match(pattern, text) }
+pub fn findall(pattern: Regex, text: String) -> [String] { find_all(pattern, text) }
+pub fn fullmatch(pattern: Regex, text: String) -> Bool { full_match(pattern, text) }
+pub fn sub(pattern: Regex, text: String, replacement: String) -> String {
+    replace(pattern, text, replacement)
+}
+pub fn subn(pattern: Regex, text: String, replacement: String) -> (text: String, count: Int) {
+    (text: replace(pattern, text, replacement), count: matches(pattern, text).len())
+}

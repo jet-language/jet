@@ -3,11 +3,16 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Exec, FFI, IO, Mem.Alloc] } }
 }
-
 use core.mem
 
-#[Unsafe("the operands are scalar registers and add does not access memory"), FFI(asm)] fn add_registers(a: Int, b: Int) Int -> {
-    """add {a}, {b} ; -> return"""
+#[Unsafe("the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"), FFI(asm)]
+fn add_registers(a: Int, b: Int) -> Int -> {
+    """
+    mov r10, {a}
+    add r10, {b}
+    mov {a}, r10 ; -> return
+    ; clobbers r10
+    """
 }
 
 fn run() {

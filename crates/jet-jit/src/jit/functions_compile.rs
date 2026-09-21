@@ -4,9 +4,9 @@ use cranelift_codegen::ir::{
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{FuncId, FuncOrDataId, Linkage, Module};
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirArtifactId, MirArtifactPlan, MirArtifactTarget, MirBasicBlock,
+    stable_id, MirAbi, MirAccess, MirArtifactId, MirArtifactPlan, MirArtifactTarget, MirBasicBlock,
     MirBinaryOp, MirCallArg, MirCallee, MirCaptureOperand, MirConstKey, MirConstReport,
     MirConstant, MirCoreClosureKind, MirDropKind, MirFailureCarrier, MirFieldId, MirFieldRow,
     MirFunction, MirFunctionForm, MirFunctionId, MirGcEditKind, MirInstruction, MirOperation,
@@ -22,8 +22,8 @@ use jet_rt::{
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use super::runtime_host::{runtime_type_id, HostFns, JitRuntime};
-use super::types_meta::{clif_ty_from_mir, mir_fn_name, prelude_enum_variant_index};
-use crate::Cell::CellProjection;
+use super::types_meta::{clif_ty_from_mir, mir_fn_name, prelude_enum_variant_index, JitMeta};
+use crate::Cell::{CellGuardLayout, CellProjection, CellSchema};
 
 /// Define a lowered function, keeping the backend's own explanation when it
 /// rejects the IR.  `ModuleError`'s `Display` collapses a verifier failure to
@@ -122,6 +122,12 @@ fn is_key_name(name: &str) -> bool {
 fn is_io_error_name(name: &str) -> bool {
     nominal_leaf(name) == jet_foundation::Syntax::TYPE_IO_ERROR
 }
+fn is_http_error_name(name: &str) -> bool {
+    nominal_leaf(name) == "HTTPError"
+}
+fn is_http_error_id(id: MirTypeId) -> bool {
+    id == MirTypeId(stable_id("mir-type", "HTTPError"))
+}
 
 fn is_packed_service_enum_name(name: &str) -> bool {
     match nominal_leaf(name) {
@@ -186,6 +192,30 @@ fn is_shared_guard_type(ty: &MirType) -> bool {
         _ => false,
     }
 }
+fn view_element_type(ty: &MirType) -> Option<&MirType> {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            args.first()
+        }
+        MirTypeKind::Tagged { inner, .. } => view_element_type(inner),
+        _ => None,
+    }
+}
+
+fn pin_inner_type(ty: &MirType) -> Option<&MirType> {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args }
+            if name.name == jet_foundation::Syntax::TYPE_PIN && args.len() == 1 =>
+        {
+            args.first()
+        }
+        MirTypeKind::Tagged { inner, .. } => pin_inner_type(inner),
+        _ => None,
+    }
+}
+
 
 fn shared_guard_inner_type(ty: &MirType) -> Option<&MirType> {
     match ty.kind() {
@@ -336,7 +366,13 @@ fn copy_is_clock_type(ty: &MirType) -> bool {
 /// use the checked runtime descriptor to recurse into their fields.
 fn copy_needs_typed_clone(ty: &MirType) -> bool {
     match ty.kind() {
-        MirTypeKind::Apply { .. } => true,
+        // Built-in math values are resident MathVal handles, not heap records.
+        // Treating a copied Vec/Mat/SIMD value as a typed record clone traps
+        // before the math host can consume it (notably swizzle constructors).
+        MirTypeKind::Apply { name, .. } => {
+            !matches!(name.name.as_str(), "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4")
+                && !jet_foundation::Syntax::is_simd_lane_type(&name.name)
+        }
         MirTypeKind::Shared(_) => false,
         MirTypeKind::List(inner)
         | MirTypeKind::FixedList { elem: inner, .. }
@@ -607,6 +643,85 @@ fn csv_decode_spec(
         element_kind,
     }))
 }
+type JsonDecodeThunkKey = (MirFunctionId, MirFunctionId);
+
+#[derive(Clone)]
+struct JsonDecodeSpec {
+    value_type: MirType,
+    target: Option<MirFunctionId>,
+}
+
+fn json_decode_function<'a>(
+    program: &'a MirProgram,
+    value_type: &MirType,
+) -> Result<Option<&'a MirFunction>, String> {
+    let matches = program
+        .functions
+        .iter()
+        .filter(|function| function.is_decode_for(value_type))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [function] => {
+            if !function.target_applicability.cranelift {
+                return Err(format!(
+                    "JSON Decode function `{}` is unavailable to Cranelift",
+                    function.name
+                ));
+            }
+            if !function.capture_params.is_empty() || function.generator.is_some() {
+                return Err(format!(
+                    "JSON Decode function `{}` has an unsupported callable shape",
+                    function.name
+                ));
+            }
+            if function.params.len() != 1
+                || clif_ty_from_mir(&function.params[0].ty) != Some(types::I64)
+                || clif_ty_from_mir(&function.return_type) != Some(types::I64)
+            {
+                return Err(format!(
+                    "JSON Decode function `{}` does not use the canonical DataTree/result ABI",
+                    function.name
+                ));
+            }
+            Ok(Some(*function))
+        }
+        _ => Err(format!(
+            "JSON type `{}` resolves to multiple Decode functions",
+            value_type.display_name()
+        )),
+    }
+}
+
+fn json_decode_spec(
+    program: &MirProgram,
+    call: jet_foundation::MIR::MirCoreCallId,
+    type_args: &[MirType],
+) -> Result<Option<JsonDecodeSpec>, String> {
+    let row = program
+        .core_calls
+        .iter()
+        .find(|candidate| candidate.id == call)
+        .ok_or_else(|| format!("MIR Core call {:?} is missing", call))?;
+    if !matches!(
+        (row.module.as_str(), row.member.as_str()),
+        ("core.encoding.json", "decode") | ("core.data", "json")
+    ) {
+        return Ok(None);
+    }
+    if type_args.is_empty() {
+        return Ok(None);
+    }
+    if type_args.len() != 1 {
+        return Err(format!(
+            "typed JSON CoreCall needs one value type argument, got {}",
+            type_args.len()
+        ));
+    }
+    let value_type = type_args[0].clone();
+    let target = json_decode_function(program, &value_type)?.map(|function| function.id);
+    Ok(Some(JsonDecodeSpec { value_type, target }))
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledIterableHook {
@@ -625,6 +740,13 @@ pub(crate) struct CompiledMirProgram {
 }
 
 type ViewThunkKey = (MirFunctionId, MirValueId, usize);
+#[derive(Clone)]
+struct ViewThunkSpec {
+    key: ViewThunkKey,
+    callback_ty: MirType,
+    arity: usize,
+    preserve_result: bool,
+}
 type AppThunkKey = (MirFunctionId, MirValueId);
 type IterableThunkKey = String;
 
@@ -673,11 +795,13 @@ struct FunctionLower<'a, 'm> {
     function_ids: &'a HashMap<MirFunctionId, FuncId>,
     view_thunks: &'a HashMap<ViewThunkKey, FuncId>,
     csv_thunks: &'a HashMap<CsvDecodeThunkKey, FuncId>,
+    json_thunks: &'a HashMap<JsonDecodeThunkKey, FuncId>,
     app_thunks: &'a HashMap<AppThunkKey, AppThunk>,
     yield_sender: Option<Value>,
     stop_block: Option<ir::Block>,
     sentry_state: bool,
     sentry_frame: bool,
+    cell_frame_layout: i64,
 }
 
 fn sentry_pointee_type(ty: &MirType) -> Option<&MirType> {
@@ -1108,6 +1232,67 @@ fn iterable_hook_function_ids(
     }
     Ok(())
 }
+fn json_decode_function_ids(
+    program: &MirProgram,
+    selected_ids: &mut BTreeSet<MirFunctionId>,
+) -> Result<(), String> {
+    let mut resolve_function = |function_id: MirFunctionId| {
+        let mut matches = program
+            .functions
+            .iter()
+            .filter(|function| function.id == function_id);
+        let function = matches.next().ok_or_else(|| {
+            format!("MIR function {:?} is missing", function_id)
+        })?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "MIR function {:?} resolves to multiple function rows",
+                function_id
+            ));
+        }
+        Ok(function)
+    };
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let current = selected_ids.iter().copied().collect::<Vec<_>>();
+        for selected in current {
+            let function = resolve_function(selected)?;
+            if !function.target_applicability.cranelift {
+                return Err(format!(
+                    "MIR function {:?} is not applicable to Cranelift",
+                    selected
+                ));
+            }
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    let MirOperation::CoreCall {
+                        call, type_args, ..
+                    } = &instruction.operation
+                    else {
+                        continue;
+                    };
+                    let Some(spec) = json_decode_spec(program, *call, type_args)? else {
+                        continue;
+                    };
+                    let Some(callee) = spec.target else {
+                        continue;
+                    };
+                    let callee_function = resolve_function(callee)?;
+                    if !callee_function.target_applicability.cranelift {
+                        return Err(format!(
+                            "MIR function {:?} calls function {:?} unavailable to Cranelift",
+                            selected, callee
+                        ));
+                    }
+                    changed |= selected_ids.insert(callee);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn hardware_handler_function<'a>(
     program: &'a MirProgram,
     handler_symbol: &str,
@@ -1174,6 +1359,177 @@ pub(crate) fn compile_program_object(
     Ok(compiled.entry_id)
 }
 
+/// Compile an explicit MIR function set into an already resident hotswap
+/// module. The caller owns the semantic closure; this helper only reuses the
+/// ordinary declaration, thunk, and lowering path.
+pub(crate) fn redefine_mir_functions(
+    module: &mut JITModule,
+    host: &HostFns,
+    program: &MirProgram,
+    selected_ids: &BTreeSet<MirFunctionId>,
+    runtime: &mut JitRuntime,
+) -> Result<HashMap<MirFunctionId, FuncId>, String> {
+    program
+        .validate()
+        .map_err(|error| format!("invalid MIR: {error}"))?;
+    jet_foundation::MIROptimization::require_canonical_mir_optimization(program)
+        .map_err(|error| format!("MIR is not canonically optimized: {error}"))?;
+    let selected_functions = selected_function_rows(program, selected_ids)?;
+    prepare_function_redefinitions(module, selected_functions.as_slice())?;
+    compile_selected_functions(
+        module,
+        host,
+        program,
+        selected_ids,
+        runtime,
+        false,
+    )
+}
+
+fn selected_function_rows<'a>(
+    program: &'a MirProgram,
+    selected_ids: &BTreeSet<MirFunctionId>,
+) -> Result<Vec<&'a MirFunction>, String> {
+    let mut rows = Vec::with_capacity(selected_ids.len());
+    for function_id in selected_ids {
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == *function_id)
+            .ok_or_else(|| format!("MIR function {:?} is missing", function_id))?;
+        if !function.target_applicability.cranelift {
+            return Err(format!(
+                "MIR function {:?} is not applicable to Cranelift",
+                function_id
+            ));
+        }
+        rows.push(function);
+    }
+    Ok(rows)
+}
+
+fn prepare_function_redefinitions(
+    module: &mut JITModule,
+    selected_functions: &[&MirFunction],
+) -> Result<(), String> {
+    let mut ids = Vec::with_capacity(selected_functions.len() * 2);
+    for function in selected_functions {
+        let name = mir_fn_name(function.id);
+        let Some(FuncOrDataId::Func(id)) = module.get_name(&name) else {
+            return Err(format!(
+                "resident MIR function {:?} has no declared definition",
+                function.id
+            ));
+        };
+        ids.push(id);
+        if function.generator.is_some() {
+            let name = format!("{}__generator", mir_fn_name(function.id));
+            let Some(FuncOrDataId::Func(body_id)) = module.get_name(&name) else {
+                return Err(format!(
+                    "resident MIR generator {:?} has no declared definition",
+                    function.id
+                ));
+            };
+            ids.push(body_id);
+        }
+    }
+    for id in ids {
+        module
+            .prepare_for_function_redefine(id)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn compile_selected_functions(
+    module: &mut dyn Module,
+    host: &HostFns,
+    program: &MirProgram,
+    selected_ids: &BTreeSet<MirFunctionId>,
+    runtime: &mut JitRuntime,
+    reset_runtime_state: bool,
+) -> Result<HashMap<MirFunctionId, FuncId>, String> {
+    if reset_runtime_state {
+        runtime.clear_iterable_hooks();
+        runtime.model_sessions.clear();
+    }
+    runtime.model_outputs = program.facts.model_outputs.clone();
+    let selected_functions = selected_function_rows(program, selected_ids)?;
+    super::runtime_host::install_program_type_descriptors(runtime, program, &selected_functions);
+    let mut function_ids = HashMap::new();
+    let mut generator_body_ids = HashMap::new();
+    for function in &selected_functions {
+        let signature = function_signature(module, function)?;
+        let id = module
+            .declare_function(&mir_fn_name(function.id), Linkage::Local, &signature)
+            .map_err(|error| error.to_string())?;
+        function_ids.insert(function.id, id);
+        if function.generator.is_some() {
+            let body_signature = generator_body_signature(module, function)?;
+            let body_id = module
+                .declare_function(
+                    &format!("{}__generator", mir_fn_name(function.id)),
+                    Linkage::Local,
+                    &body_signature,
+                )
+                .map_err(|error| error.to_string())?;
+            generator_body_ids.insert(function.id, body_id);
+        }
+    }
+    let view_thunks = install_view_callback_thunks(module, host, program, &selected_functions)?;
+    let app_thunks =
+        install_app_callback_thunks(module, host, program, &selected_functions, runtime)?;
+    let csv_thunks =
+        install_csv_decode_thunks(module, program, &selected_functions, &function_ids)?;
+    let json_thunks =
+        install_json_decode_thunks(module, program, &selected_functions, &function_ids)?;
+    let _ = install_iterable_hook_thunks(
+        module,
+        host,
+        program,
+        &selected_functions,
+        &function_ids,
+    )?;
+    for function in &selected_functions {
+        let wrapper_id = *function_ids
+            .get(&function.id)
+            .ok_or_else(|| format!("MIR function {:?} was not declared", function.id))?;
+        if let Some(body_id) = generator_body_ids.get(&function.id).copied() {
+            lower_function(
+                module,
+                host,
+                program,
+                function,
+                runtime,
+                &function_ids,
+                &view_thunks,
+                &app_thunks,
+                &csv_thunks,
+                &json_thunks,
+                body_id,
+                true,
+            )?;
+            lower_generator_wrapper(module, host, function, wrapper_id, body_id)?;
+        } else {
+            lower_function(
+                module,
+                host,
+                program,
+                function,
+                runtime,
+                &function_ids,
+                &view_thunks,
+                &app_thunks,
+                &csv_thunks,
+                &json_thunks,
+                wrapper_id,
+                false,
+            )?;
+        }
+    }
+    Ok(function_ids)
+}
+
 /// Compile one explicitly requested MIR function without selecting an artifact.
 /// This low-level compiler has no execution artifact to attach to deopt frames;
 /// whole-artifact execution uses `compile_program_inner` below.
@@ -1200,9 +1556,6 @@ pub(crate) fn compile_mir_function(
             function_id
         ));
     }
-    runtime.clear_iterable_hooks();
-    runtime.model_outputs = program.facts.model_outputs.clone();
-    runtime.model_sessions.clear();
     let mut selected_ids = BTreeSet::from([function_id]);
     hardware_handler_function_ids(program, &mut selected_ids)?;
     protocol_render_function_ids(program, &mut selected_ids);
@@ -1260,79 +1613,9 @@ pub(crate) fn compile_mir_function(
         }
     }
     iterable_hook_function_ids(program, &mut selected_ids)?;
-    let selected_functions = program
-        .functions
-        .iter()
-        .filter(|function| selected_ids.contains(&function.id))
-        .collect::<Vec<_>>();
-    super::runtime_host::install_program_type_descriptors(runtime, program, &selected_functions);
-    let mut function_ids = HashMap::new();
-    let mut generator_body_ids = HashMap::new();
-    for function in &selected_functions {
-        let signature = function_signature(module, function)?;
-        let id = module
-            .declare_function(&mir_fn_name(function.id), Linkage::Local, &signature)
-            .map_err(|error| error.to_string())?;
-        function_ids.insert(function.id, id);
-        if function.generator.is_some() {
-            let body_signature = generator_body_signature(module, function)?;
-            let body_id = module
-                .declare_function(
-                    &format!("{}__generator", mir_fn_name(function.id)),
-                    Linkage::Local,
-                    &body_signature,
-                )
-                .map_err(|error| error.to_string())?;
-            generator_body_ids.insert(function.id, body_id);
-        }
-    }
-    let view_thunks = install_view_callback_thunks(module, host, program, &selected_functions)?;
-    let app_thunks =
-        install_app_callback_thunks(module, host, program, &selected_functions, runtime)?;
-    let csv_thunks =
-        install_csv_decode_thunks(module, program, &selected_functions, &function_ids)?;
-    let _ = install_iterable_hook_thunks(
-        module,
-        host,
-        program,
-        &selected_functions,
-        &function_ids,
-    )?;
-    for function in &selected_functions {
-        let wrapper_id = *function_ids
-            .get(&function.id)
-            .ok_or_else(|| format!("MIR function {:?} was not declared", function.id))?;
-        if let Some(body_id) = generator_body_ids.get(&function.id).copied() {
-            lower_function(
-                module,
-                host,
-                program,
-                function,
-                runtime,
-                &function_ids,
-                &view_thunks,
-                &app_thunks,
-                &csv_thunks,
-                body_id,
-                true,
-            )?;
-            lower_generator_wrapper(module, host, function, wrapper_id, body_id)?;
-        } else {
-            lower_function(
-                module,
-                host,
-                program,
-                function,
-                runtime,
-                &function_ids,
-                &view_thunks,
-                &app_thunks,
-                &csv_thunks,
-                wrapper_id,
-                false,
-            )?;
-        }
-    }
+    json_decode_function_ids(program, &mut selected_ids)?;
+    let function_ids =
+        compile_selected_functions(module, host, program, &selected_ids, runtime, true)?;
     function_ids
         .get(&function_id)
         .copied()
@@ -1356,6 +1639,7 @@ fn compile_program_inner(
     let artifact = cranelift_artifact(program, artifact_id)?;
     let mut selected_ids = artifact_function_ids(program, artifact)?;
     protocol_render_function_ids(program, &mut selected_ids);
+    json_decode_function_ids(program, &mut selected_ids)?;
     iterable_hook_function_ids(program, &mut selected_ids)?;
     let selected_functions = program
         .functions
@@ -1386,6 +1670,8 @@ fn compile_program_inner(
     let view_thunks = install_view_callback_thunks(module, host, program, &selected_functions)?;
     let app_thunks =
         install_app_callback_thunks(module, host, program, &selected_functions, runtime)?;
+    let json_thunks =
+        install_json_decode_thunks(module, program, &selected_functions, &function_ids)?;
     let csv_thunks =
         install_csv_decode_thunks(module, program, &selected_functions, &function_ids)?;
     let (_, iterable_hooks) =
@@ -1406,6 +1692,7 @@ fn compile_program_inner(
                 &view_thunks,
                 &app_thunks,
                 &csv_thunks,
+                &json_thunks,
                 body_id,
                 true,
             )?;
@@ -1421,6 +1708,7 @@ fn compile_program_inner(
                 &view_thunks,
                 &app_thunks,
                 &csv_thunks,
+                &json_thunks,
                 wrapper_id,
                 false,
             )?;
@@ -1475,12 +1763,59 @@ fn sequence_element_type(ty: &MirType) -> Option<&MirType> {
         _ => None,
     }
 }
-fn indexed_element_type(ty: &MirType, kind: jet_foundation::MIR::MirIndexKind) -> Option<&MirType> {
+fn lane_scalar_type(ty: &MirType) -> Option<MirType> {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => lane_scalar_type(inner),
+        MirTypeKind::Apply { name, .. } => {
+            let scalar = match name.name.as_str() {
+                "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4" => MirTypeKind::Float,
+                name => match jet_foundation::Syntax::simd_lane_layout(name)?.0 {
+                    jet_foundation::Syntax::SimdLaneKind::F32 => MirTypeKind::Float32,
+                    jet_foundation::Syntax::SimdLaneKind::F64 => MirTypeKind::Float,
+                    jet_foundation::Syntax::SimdLaneKind::I8 => {
+                        MirTypeKind::IntN { signed: true, bits: 8 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::I16 => {
+                        MirTypeKind::IntN { signed: true, bits: 16 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::I32 => {
+                        MirTypeKind::IntN { signed: true, bits: 32 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::I64 => {
+                        MirTypeKind::IntN { signed: true, bits: 64 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::U8 => {
+                        MirTypeKind::IntN { signed: false, bits: 8 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::U16 => {
+                        MirTypeKind::IntN { signed: false, bits: 16 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::U32 => {
+                        MirTypeKind::IntN { signed: false, bits: 32 }
+                    }
+                    jet_foundation::Syntax::SimdLaneKind::U64 => {
+                        MirTypeKind::IntN { signed: false, bits: 64 }
+                    }
+                },
+            };
+            Some(MirType::from_kind(scalar))
+        }
+        _ => None,
+    }
+}
+fn indexed_element_type(
+    ty: &MirType,
+    kind: jet_foundation::MIR::MirIndexKind,
+) -> Option<MirType> {
     match kind {
         jet_foundation::MIR::MirIndexKind::List
-        | jet_foundation::MIR::MirIndexKind::FixedListProof => sequence_element_type(ty),
+        | jet_foundation::MIR::MirIndexKind::FixedListProof => {
+            sequence_element_type(ty).cloned()
+        }
         jet_foundation::MIR::MirIndexKind::Map => match &ty.kind {
-            MirTypeKind::Map { value, .. } => Some(value),
+            MirTypeKind::Map { value, .. } => Some((**value).clone()),
             MirTypeKind::Shared(inner)
             | MirTypeKind::Tagged { inner, .. }
             | MirTypeKind::InlineRange { base: inner, .. }
@@ -1488,20 +1823,20 @@ fn indexed_element_type(ty: &MirType, kind: jet_foundation::MIR::MirIndexKind) -
             _ => None,
         },
         jet_foundation::MIR::MirIndexKind::Pool => match &ty.kind {
-            MirTypeKind::Apply { args, .. } if args.len() == 1 => args.first(),
+            MirTypeKind::Apply { args, .. } if args.len() == 1 => args.first().cloned(),
             MirTypeKind::Shared(inner)
             | MirTypeKind::Tagged { inner, .. }
             | MirTypeKind::InlineRange { base: inner, .. }
             | MirTypeKind::Quantity { base: inner, .. } => indexed_element_type(inner, kind),
             _ => None,
         },
-        jet_foundation::MIR::MirIndexKind::Lane => None,
+        jet_foundation::MIR::MirIndexKind::Lane => lane_scalar_type(ty),
     }
 }
 fn checked_index_element_type(
     ty: &MirType,
     kind: jet_foundation::MIR::MirIndexKind,
-) -> Result<&MirType, String> {
+) -> Result<MirType, String> {
     indexed_element_type(ty, kind).ok_or_else(|| match kind {
         jet_foundation::MIR::MirIndexKind::List
         | jet_foundation::MIR::MirIndexKind::FixedListProof => {
@@ -1619,22 +1954,22 @@ fn builtin_callback_shapes(
     }
     Ok(shapes)
 }
-
 fn add_callback_thunk_spec(
-    specs: &mut Vec<(ViewThunkKey, MirType, usize)>,
+    specs: &mut Vec<ViewThunkSpec>,
     owner: MirFunctionId,
     callback: MirValueId,
     callback_ty: MirType,
     expected_params: usize,
+    preserve_result: bool,
 ) -> Result<(), String> {
     let (params, ret) = callable_signature(&callback_ty)
         .ok_or_else(|| format!("MIR callback {:?} has no function signature", callback))?;
     if params.len() != expected_params {
         return Err(format!(
-            "MIR callback {:?} expects {} parameters, got {}",
+            "MIR callback {:?} expects {} parameters, route provides {}",
             callback,
-            expected_params,
-            params.len()
+            params.len(),
+            expected_params
         ));
     }
     if params
@@ -1655,8 +1990,21 @@ fn add_callback_thunk_spec(
         }
     }
     let key = (owner, callback, expected_params);
-    if !specs.iter().any(|(existing, _, _)| *existing == key) {
-        specs.push((key, callback_ty, expected_params));
+    if let Some(existing) = specs.iter_mut().find(|existing| existing.key == key) {
+        if !existing.callback_ty.same_checked_type(&callback_ty) {
+            return Err(format!(
+                "MIR callback {:?} has incompatible callback carriers",
+                callback
+            ));
+        }
+        existing.preserve_result |= preserve_result;
+    } else {
+        specs.push(ViewThunkSpec {
+            key,
+            callback_ty,
+            arity: expected_params,
+            preserve_result,
+        });
     }
     Ok(())
 }
@@ -1664,7 +2012,7 @@ fn add_callback_thunk_spec(
 fn view_callback_thunk_specs(
     program: &MirProgram,
     selected_functions: &[&MirFunction],
-) -> Result<Vec<(ViewThunkKey, MirType, usize)>, String> {
+) -> Result<Vec<ViewThunkSpec>, String> {
     let mut specs = Vec::new();
     for function in selected_functions {
         for block in &function.blocks {
@@ -1672,7 +2020,11 @@ fn view_callback_thunk_specs(
                 // Keep a universal thunk on every closure value. History
                 // strategies store callback closures inside a record, so
                 // there is no Core call site at which to attach one later.
-                if let MirOperation::Closure { .. } = &instruction.operation {
+                if let MirOperation::Closure {
+                    function: _,
+                    ..
+                } = &instruction.operation
+                {
                     let Some(callback) = instruction.result else {
                         continue;
                     };
@@ -1682,12 +2034,14 @@ fn view_callback_thunk_specs(
                     let Some((params, _)) = callable_signature(&callback_ty) else {
                         continue;
                     };
+                    let arity = params.len();
                     add_callback_thunk_spec(
                         &mut specs,
                         function.id,
                         callback,
-                        callback_ty.clone(),
-                        params.len(),
+                        callback_ty,
+                        arity,
+                        false,
                     )?;
                     continue;
                 }
@@ -1716,11 +2070,13 @@ fn view_callback_thunk_specs(
                             callback,
                             callback_ty,
                             expected_params,
+                            false,
                         )?;
                     }
                     continue;
                 }
 
+                let mut preserve_result = false;
                 let (args, shapes): (&[MirCallArg], Vec<CallbackShape>) = match &instruction
                     .operation
                 {
@@ -1730,6 +2086,8 @@ fn view_callback_thunk_specs(
                             .iter()
                             .find(|row| row.id == *call)
                             .ok_or_else(|| format!("MIR collection route {call:?} is missing"))?;
+                        preserve_result = row.module == "core.event"
+                            && matches!(row.member.as_str(), "on" | "once" | "on_priority");
                         if let Some((pair, index, count)) =
                             view_callback_shape(row).or_else(|| plot_callback_shape(row))
                         {
@@ -1776,12 +2134,13 @@ fn view_callback_thunk_specs(
                         callback,
                         callback_ty,
                         expected_params,
+                        preserve_result,
                     )?;
                 }
             }
         }
     }
-    specs.sort_by_key(|(key, _, _)| *key);
+    specs.sort_by_key(|spec| spec.key);
     Ok(specs)
 }
 
@@ -1793,7 +2152,13 @@ fn install_view_callback_thunks(
 ) -> Result<HashMap<ViewThunkKey, FuncId>, String> {
     let specs = view_callback_thunk_specs(program, selected_functions)?;
     let mut thunks = HashMap::new();
-    for ((function, callback, arity), callback_ty, _) in specs {
+    for ViewThunkSpec {
+        key: (function, callback, arity),
+        callback_ty,
+        arity: _,
+        preserve_result,
+    } in specs
+    {
         let mut signature = Signature::new(module.target_config().default_call_conv);
         signature.params.push(AbiParam::new(types::I64));
         if arity <= 2 {
@@ -1814,7 +2179,14 @@ fn install_view_callback_thunks(
         let thunk_id = module
             .declare_function(&name, Linkage::Local, &signature)
             .map_err(|error| error.to_string())?;
-        lower_view_callback_thunk(module, host, &callback_ty, arity, thunk_id)?;
+        lower_view_callback_thunk(
+            module,
+            host,
+            &callback_ty,
+            arity,
+            preserve_result,
+            thunk_id,
+        )?;
         thunks.insert((function, callback, arity), thunk_id);
     }
     Ok(thunks)
@@ -2356,6 +2728,100 @@ fn install_csv_decode_thunks(
     }
     Ok(thunks)
 }
+fn lower_json_decode_thunk(
+    module: &mut dyn Module,
+    target_id: FuncId,
+    thunk_id: FuncId,
+) -> Result<(), String> {
+    let mut context = module.make_context();
+    let mut signature = Signature::new(module.target_config().default_call_conv);
+    signature.params.push(AbiParam::new(types::I64));
+    signature.params.push(AbiParam::new(types::I64));
+    signature.returns.push(AbiParam::new(types::I64));
+    context.func.signature = signature;
+    let mut builder_context = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    builder.seal_block(entry);
+    let payload = builder
+        .block_params(entry)
+        .get(1)
+        .copied()
+        .ok_or_else(|| "JSON Decode thunk has no DataTree payload".to_string())?;
+    let target = module.declare_func_in_func(target_id, builder.func);
+    let call = builder.ins().call(target, &[payload]);
+    let result = builder
+        .inst_results(call)
+        .first()
+        .copied()
+        .ok_or_else(|| "JSON Decode function returned no Result carrier".to_string())?;
+    builder.ins().return_(&[result]);
+    builder.finalize();
+    define_function_checked(module, thunk_id, &mut context)?;
+    module.clear_context(&mut context);
+    Ok(())
+}
+
+fn install_json_decode_thunks(
+    module: &mut dyn Module,
+    program: &MirProgram,
+    selected_functions: &[&MirFunction],
+    function_ids: &HashMap<MirFunctionId, FuncId>,
+) -> Result<HashMap<JsonDecodeThunkKey, FuncId>, String> {
+    let mut specs = Vec::new();
+    for function in selected_functions {
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                let MirOperation::CoreCall {
+                    call, type_args, ..
+                } = &instruction.operation
+                else {
+                    continue;
+                };
+                let Some(spec) = json_decode_spec(program, *call, type_args)? else {
+                    continue;
+                };
+                let Some(target) = spec.target else {
+                    continue;
+                };
+                let key = (function.id, target);
+                if !specs.iter().any(|(existing, _)| *existing == key) {
+                    specs.push((key, target));
+                }
+            }
+        }
+    }
+    specs.sort_by_key(|(key, _)| *key);
+    let mut thunks = HashMap::new();
+    for ((function, target), target_function) in specs {
+        let target_id = *function_ids.get(&target_function).ok_or_else(|| {
+            format!(
+                "MIR JSON Decode function {:?} was not declared",
+                target_function
+            )
+        })?;
+        let signature = {
+            let mut signature = Signature::new(module.target_config().default_call_conv);
+            signature.params.push(AbiParam::new(types::I64));
+            signature.params.push(AbiParam::new(types::I64));
+            signature.returns.push(AbiParam::new(types::I64));
+            signature
+        };
+        let thunk_id = module
+            .declare_function(
+                &format!("__jet_json_decode_{}_{}", function.0, target.0),
+                Linkage::Local,
+                &signature,
+            )
+            .map_err(|error| error.to_string())?;
+        lower_json_decode_thunk(module, target_id, thunk_id)?;
+        thunks.insert((function, target), thunk_id);
+    }
+    Ok(thunks)
+}
+
 
 fn iterable_function_by_symbol<'a>(
     program: &'a MirProgram,
@@ -2846,6 +3312,7 @@ fn lower_view_callback_thunk(
     host: &HostFns,
     callback_ty: &MirType,
     arity: usize,
+    preserve_result: bool,
     thunk_id: FuncId,
 ) -> Result<(), String> {
     let (params, ret) = callable_signature(callback_ty)
@@ -2864,12 +3331,19 @@ fn lower_view_callback_thunk(
         .function_signature()
         .and_then(|signature| signature.call_metadata.as_ref())
         .map(|metadata| metadata.conventions.as_slice());
-    let return_type = ret
+    let source_return_type = ret
         .map(|result| {
             clif_ty_from_mir(result)
                 .ok_or_else(|| "MIR View callback return has no Cranelift ABI".to_string())
         })
         .transpose()?;
+    let wrapped_return = !preserve_result
+        && ret.is_some_and(|result| {
+            matches!(
+                result.kind(),
+                MirTypeKind::Result { .. } | MirTypeKind::Option(_)
+            )
+        });
     let mut context = module.make_context();
     let mut thunk_signature = Signature::new(module.target_config().default_call_conv);
     thunk_signature.params.push(AbiParam::new(types::I64));
@@ -2938,9 +3412,7 @@ fn lower_view_callback_thunk(
     let env_block = builder.create_block();
     let plain_block = builder.create_block();
     let merge_block = builder.create_block();
-    if return_type.is_some() {
-        builder.append_block_param(merge_block, types::I64);
-    }
+    builder.append_block_param(merge_block, types::I64);
     let mut typed_signature = Signature::new(module.target_config().default_call_conv);
     let mut typed_values = Vec::with_capacity(raw_values.len());
     let mut writebacks = Vec::new();
@@ -2951,8 +3423,6 @@ fn lower_view_callback_thunk(
         .enumerate()
     {
         if conventions.and_then(|access| access.get(index)) == Some(&MirAccess::Write) {
-            // The host lends a raw word. Give the callback a correctly sized
-            // typed place, then encode its final value back into that word.
             let word = builder.ins().load(types::I64, MemFlags::new(), raw, 0);
             let value = thunk_decode_raw(&mut builder, word, target)?;
             let slot = builder.create_sized_stack_slot(StackSlotData::new(
@@ -2969,7 +3439,7 @@ fn lower_view_callback_thunk(
             typed_signature.params.push(AbiParam::new(target));
         }
     }
-    if let Some(return_type) = return_type {
+    if let Some(return_type) = source_return_type {
         typed_signature.returns.push(AbiParam::new(return_type));
     }
     builder
@@ -2990,34 +3460,72 @@ fn lower_view_callback_thunk(
     let env_call = builder
         .ins()
         .call_indirect(env_signature_ref, fn_ptr, &env_values);
-    if let Some(return_type) = return_type {
+    let result = if source_return_type.is_some() {
         let result = builder
             .inst_results(env_call)
             .first()
             .copied()
             .ok_or_else(|| "MIR captured View callback returned no value".to_string())?;
-        let result = thunk_encode_raw(&mut builder, result, return_type)?;
-        builder.ins().jump(merge_block, &[result]);
+        let result = if wrapped_return {
+            thunk_call_host(
+                module,
+                &mut builder,
+                host.result_unwrap_callback,
+                &[result],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| {
+                "MIR captured View callback result unwrapper returned no value".to_string()
+            })?
+        } else {
+            result
+        };
+        thunk_encode_raw(
+            &mut builder,
+            result,
+            source_return_type.expect("callback return"),
+        )?
     } else {
-        builder.ins().jump(merge_block, &[]);
-    }
+        builder.ins().iconst(types::I64, 0)
+    };
+    builder.ins().jump(merge_block, &[result]);
 
     builder.switch_to_block(plain_block);
     let signature_ref = builder.import_signature(typed_signature);
     let plain_call = builder
         .ins()
         .call_indirect(signature_ref, fn_ptr, &typed_values);
-    if let Some(return_type) = return_type {
+    let result = if source_return_type.is_some() {
         let result = builder
             .inst_results(plain_call)
             .first()
             .copied()
             .ok_or_else(|| "MIR plain View callback returned no value".to_string())?;
-        let result = thunk_encode_raw(&mut builder, result, return_type)?;
-        builder.ins().jump(merge_block, &[result]);
+        let result = if wrapped_return {
+            thunk_call_host(
+                module,
+                &mut builder,
+                host.result_unwrap_callback,
+                &[result],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| {
+                "MIR plain View callback result unwrapper returned no value".to_string()
+            })?
+        } else {
+            result
+        };
+        thunk_encode_raw(
+            &mut builder,
+            result,
+            source_return_type.expect("callback return"),
+        )?
     } else {
-        builder.ins().jump(merge_block, &[]);
-    }
+        builder.ins().iconst(types::I64, 0)
+    };
+    builder.ins().jump(merge_block, &[result]);
 
     builder.switch_to_block(merge_block);
     for (address, slot, target) in writebacks {
@@ -3025,17 +3533,12 @@ fn lower_view_callback_thunk(
         let raw = thunk_encode_raw(&mut builder, value, target)?;
         builder.ins().store(MemFlags::new(), raw, address, 0);
     }
-    if return_type.is_some() {
-        let result = builder
-            .block_params(merge_block)
-            .first()
-            .copied()
-            .ok_or_else(|| "universal callback thunk merge has no result".to_string())?;
-        builder.ins().return_(&[result]);
-    } else {
-        let zero = builder.ins().iconst(types::I64, 0);
-        builder.ins().return_(&[zero]);
-    }
+    let result = builder
+        .block_params(merge_block)
+        .first()
+        .copied()
+        .ok_or_else(|| "universal callback thunk merge has no result".to_string())?;
+    builder.ins().return_(&[result]);
     builder.seal_all_blocks();
     builder.finalize();
     define_function_checked(module, thunk_id, &mut context)?;
@@ -3166,6 +3669,7 @@ fn lower_function(
     view_thunks: &HashMap<ViewThunkKey, FuncId>,
     app_thunks: &HashMap<AppThunkKey, AppThunk>,
     csv_thunks: &HashMap<CsvDecodeThunkKey, FuncId>,
+    json_thunks: &HashMap<JsonDecodeThunkKey, FuncId>,
     function_id: FuncId,
     generator_body: bool,
 ) -> Result<(), String> {
@@ -3178,6 +3682,12 @@ fn lower_function(
     let mut builder_context = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
     let (sentry_state, sentry_frame) = sentry_function_requirements(program, function);
+    let cell_frame_layout = {
+        let meta = JitMeta::from_program(program);
+        CellGuardLayout::from_type(&function.return_type, &meta)?
+            .map(|layout| runtime.cells.register_guard_layout(layout))
+            .unwrap_or(0)
+    };
     let mut lower = FunctionLower {
         module,
         host,
@@ -3189,15 +3699,17 @@ fn lower_function(
         values: HashMap::new(),
         places: HashMap::new(),
         write_parameters: Vec::new(),
+        capture_env: None,
         function_ids,
         view_thunks,
         app_thunks,
+        json_thunks,
         csv_thunks,
-        capture_env: None,
         yield_sender: None,
         stop_block: None,
         sentry_state,
         sentry_frame,
+        cell_frame_layout,
     };
     for block in &function.blocks {
         lower.blocks.insert(block.id, builder.create_block());
@@ -3297,6 +3809,7 @@ fn lower_function(
         let _ = lower.call_host(&mut builder, lower.host.hardware_interrupt_poll, &[])?;
         if block.id == function.entry {
             lower.emit_stack_enter(&mut builder)?;
+            let _ = lower.call_host(&mut builder, lower.host.cell.frame_enter, &[])?;
         }
         if block.id == function.entry && lower.sentry_state {
             lower.emit_sentry_function_mark(&mut builder)?;
@@ -3350,6 +3863,7 @@ fn lower_function(
     }
     if let Some(stop_block) = lower.stop_block {
         builder.switch_to_block(stop_block);
+        lower.emit_cell_frame_drop(&mut builder)?;
         lower.emit_stack_leave(&mut builder)?;
         let mut values = Vec::with_capacity(builder.func.signature.returns.len());
         for index in 0..builder.func.signature.returns.len() {
@@ -3913,7 +4427,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 } else {
                     let ty =
                         expected.ok_or_else(|| "MIR dereference has no pointee ABI".to_string())?;
-                    let pointee = sentry_pointee_type(&addr_ty).unwrap_or(&addr_ty);
+                    let pointee = pin_inner_type(&addr_ty)
+                        .or_else(|| sentry_pointee_type(&addr_ty))
+                        .unwrap_or(&addr_ty);
                     self.emit_sentry_check(builder, addr, pointee, "read")?;
                     Some(builder.ins().load(ty, MemFlags::new(), addr, 0))
                 }
@@ -4003,11 +4519,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.semantic(builder, operation, instruction, instruction.source_line, expected)?
             }
             MirOperation::LoopRangeInit {
-                call,
                 start,
                 end,
                 step,
                 exclusive,
+                ..
             } => {
                 let start =
                     self.index_operand(builder, *start, jet_foundation::MIR::MirIndexKind::List)?;
@@ -4028,31 +4544,59 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     ),
                 };
                 let exclusive = builder.ins().iconst(types::I8, i64::from(*exclusive));
-                Some(self.call_prelude(
-                    builder,
-                    *call,
-                    vec![start, end, step, has_step, exclusive],
-                    expected,
-                )?)
+                let value = self
+                    .call_host(
+                        builder,
+                        self.host.coll.loop_range_init,
+                        &[start, end, step, has_step, exclusive],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT range loop initializer returned no value".to_string())?;
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
             }
-            MirOperation::LoopRangeValue { call, cursor } => {
-                let value =
-                    self.call_prelude(builder, *call, vec![self.value(*cursor)?], expected)?;
+            MirOperation::LoopRangeValue { cursor, .. } => {
+                let value = self
+                    .call_host(
+                        builder,
+                        self.host.coll.loop_range_value,
+                        &[self.value(*cursor)?],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT range loop value returned no value".to_string())?;
                 Some(self.native_int_result(builder, value, instruction.ty.as_ref())?)
             }
-            MirOperation::LoopRangeHasNext { call, cursor }
-            | MirOperation::LoopRangeAdvance { call, cursor }
-            | MirOperation::LoopIterHasNext { call, cursor }
-            | MirOperation::LoopIterValue { call, cursor }
-            | MirOperation::LoopIterAdvance { call, cursor } => {
-                Some(self.call_prelude(builder, *call, vec![self.value(*cursor)?], expected)?)
+            MirOperation::LoopRangeHasNext { cursor, .. } => {
+                let value = self
+                    .call_host(
+                        builder,
+                        self.host.coll.loop_range_has_next,
+                        &[self.value(*cursor)?],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT range loop predicate returned no value".to_string())?;
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
+            }
+            MirOperation::LoopRangeAdvance { cursor, .. } => {
+                let result = self.call_host(
+                    builder,
+                    self.host.coll.loop_range_advance,
+                    &[self.value(*cursor)?],
+                )?;
+                let value = result
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
             }
             MirOperation::LoopIterInit {
-                call,
                 collection,
                 step,
                 by_value,
                 source_kind,
+                ..
             } => {
                 let collection_type = self.mir_value_type(*collection)?;
                 let map_types = match (source_kind, comparison_map_parts(&collection_type)) {
@@ -4081,33 +4625,70 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         builder.ins().iconst(types::I8, 0),
                     ),
                 };
-                if let Some((key_type_id, value_type_id)) = map_types {
+                let value = if let Some((key_type_id, value_type_id)) = map_types {
                     let has_step = builder.ins().uextend(types::I64, has_step);
                     let key_type_id = builder.ins().iconst(types::I64, key_type_id as i64);
                     let value_type_id = builder.ins().iconst(types::I64, value_type_id as i64);
-                    let result = self
-                        .call_host(
-                            builder,
-                            self.host.coll.loop_map_init,
-                            &[collection, step, has_step, key_type_id, value_type_id],
-                        )?
-                        .first()
-                        .copied()
-                        .ok_or_else(|| "MIR map loop initializer returned no value".to_string())?;
-                    Some(result)
+                    self.call_host(
+                        builder,
+                        self.host.coll.loop_map_init,
+                        &[collection, step, has_step, key_type_id, value_type_id],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR map loop initializer returned no value".to_string())?
                 } else {
                     let by_value = builder.ins().iconst(types::I8, i64::from(*by_value));
                     let source_kind = builder.ins().iconst(
                         types::I64,
                         self.runtime.heap.alloc_string(source_kind.wire()),
                     );
-                    Some(self.call_prelude(
+                    self.call_host(
                         builder,
-                        *call,
-                        vec![collection, step, has_step, by_value, source_kind],
-                        expected,
-                    )?)
-                }
+                        self.host.coll.loop_iter_init,
+                        &[collection, step, has_step, by_value, source_kind],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT iterator initializer returned no value".to_string())?
+                };
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
+            }
+            MirOperation::LoopIterHasNext { cursor, .. } => {
+                let value = self
+                    .call_host(
+                        builder,
+                        self.host.coll.loop_iter_has_next,
+                        &[self.value(*cursor)?],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT iterator predicate returned no value".to_string())?;
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
+            }
+            MirOperation::LoopIterValue { cursor, .. } => {
+                let value = self
+                    .call_host(
+                        builder,
+                        self.host.coll.loop_iter_value,
+                        &[self.value(*cursor)?],
+                    )?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "JIT iterator value returned no value".to_string())?;
+                Some(self.native_int_result(builder, value, instruction.ty.as_ref())?)
+            }
+            MirOperation::LoopIterAdvance { cursor, .. } => {
+                let result = self.call_host(
+                    builder,
+                    self.host.coll.loop_iter_advance,
+                    &[self.value(*cursor)?],
+                )?;
+                let value = result
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+                Some(expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))?)
             }
             MirOperation::ScopeEnter { scope, .. } => {
                 let kind = self
@@ -4153,6 +4734,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         }
                     }
                     Some(jet_foundation::MIR::MirScopeKind::Transaction) => {
+                        let committed = self
+                            .call_host(builder, self.host.transaction_scope_exit, &[])?
+                            .first()
+                            .copied();
+                        // Shared STM still commits on the success path. Local
+                        // rollback hooks ran in `transaction_scope_exit`.
+                        let _ = committed;
                         let _ = self.call_host(
                             builder,
                             self.host.memory.shared_txn_commit,
@@ -4182,6 +4770,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     }
                     let token = self.cast(builder, self.value(*value)?, types::I64)?;
                     let _ = self.call_host(builder, self.host.ffi.drop_handle, &[token])?;
+                } else if is_shared_guard_type(&value_ty) {
+                    let guard = self.cast(builder, self.value(*value)?, types::I64)?;
+                    let _ =
+                        self.call_host(builder, self.host.memory.shared_guard_end, &[guard])?;
                 } else if value_ty.nominal_name() == Some("ScopeGuard") {
                     let guard = self.cast(builder, self.value(*value)?, types::I64)?;
                     let _ = self.call_host(builder, self.host.io.scope_guard_drop, &[guard])?;
@@ -4203,6 +4795,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     let _ = self.call_host(
                         builder,
                         self.host.memory.allocator_close,
+                        &[handle],
+                    )?;
+                } else if matches!(
+                    value_ty.nominal_name(),
+                    Some("ByteIterCursor" | "IterCursor" | "RangeCursor")
+                ) {
+                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
+                    let _ = self.call_host(
+                        builder,
+                        self.host.coll.loop_iter_drop,
                         &[handle],
                     )?;
                 }
@@ -4276,13 +4878,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 }
             }
             MirTerminator::Return { value } => {
-                if self.yield_sender.is_some() {
+                if let Some(sender) = self.yield_sender {
                     let value = value
                         .map(|id| self.value(id))
                         .transpose()?
                         .map(|value| self.cast(builder, value, types::I64))
                         .transpose()?
                         .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+                    let failed = builder.ins().iconst(types::I64, 0);
+                    let _ = self.call_host(
+                        builder,
+                        self.host.conc.sender_close,
+                        &[sender, failed],
+                    )?;
+                    self.emit_cell_frame_leave(builder, Some(value))?;
                     self.emit_sentry_function_exit(builder)?;
                     self.emit_stack_leave(builder)?;
                     builder.ins().return_(&[value]);
@@ -4305,6 +4914,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             self.result_value(builder, true, unit, Some(types::I64))?
                         }
                     };
+                    self.emit_cell_frame_leave(builder, Some(value))?;
                     self.emit_sentry_function_exit(builder)?;
                     self.emit_stack_leave(builder)?;
                     builder.ins().return_(&[value]);
@@ -4317,6 +4927,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .map(|value| self.normalize_function_return(builder, value))
                         .transpose()?
                         .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+                    self.emit_cell_frame_leave(builder, Some(value))?;
                     self.emit_sentry_function_exit(builder)?;
                     self.emit_stack_leave(builder)?;
                     builder.ins().return_(&[value]);
@@ -4329,6 +4940,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     if let Some(id) = value {
                         let _ = self.value(*id)?;
                     }
+                    self.emit_cell_frame_drop(builder)?;
                     self.emit_sentry_function_exit(builder)?;
                     self.emit_stack_leave(builder)?;
                     let mut values = Vec::with_capacity(builder.func.signature.returns.len());
@@ -4358,6 +4970,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             });
                         }
                     }
+                    self.emit_cell_frame_leave(builder, values.first().copied())?;
                     self.emit_sentry_function_exit(builder)?;
                     self.emit_stack_leave(builder)?;
                     builder.ins().return_(&values);
@@ -4379,9 +4992,24 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let ready = builder.create_block();
                 builder.ins().brif(interrupted, cancelled, &[], ready, &[]);
                 builder.switch_to_block(cancelled);
-                self.emit_sentry_function_exit(builder)?;
-                self.emit_stack_leave(builder)?;
-                builder.ins().return_(&[zero]);
+                // AOT cancel unwinds the Rust generator and runs return-path
+                // defers. JIT converted the unwind at the host, so jump to the
+                // unique Return block when it is phi-free (the defer thunk is
+                // defined before the first yield).
+                // Cleanup runs while the producer is still cancelled. Print and
+                // other wait points inside `defer` would unwind again; enter
+                // `#Shield` for the jump into the Return block (D-CANCELMODEL1).
+                let _ = self.call_host(builder, self.host.conc.shield_enter, &[])?;
+                if let Some(target) = self.generator_cancel_return_block() {
+                    let target_block = self.block(target)?;
+                    if builder.block_params(target_block).is_empty() {
+                        builder.ins().jump(target_block, &[]);
+                    } else {
+                        self.emit_cancelled_sender_close(builder, sender, zero)?;
+                    }
+                } else {
+                    self.emit_cancelled_sender_close(builder, sender, zero)?;
+                }
                 builder.switch_to_block(ready);
                 let target_block = self.block(*resume)?;
                 let args = self.edge_args(*resume, block.id)?;
@@ -4468,6 +5096,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         owner: jet_foundation::MIR::MirTypeId,
         name: &str,
     ) -> Result<(i64, jet_foundation::MIR::MirVariantPayload), String> {
+        if is_http_error_id(owner) {
+            let discriminant = prelude_enum_variant_index("HTTPError", name)
+                .ok_or_else(|| format!("Prelude HTTPError variant `{name}` is missing metadata"))?;
+            return Ok((
+                discriminant,
+                jet_foundation::MIR::MirVariantPayload::Unit,
+            ));
+        }
         let definition = self
             .program
             .types
@@ -4529,7 +5165,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             })
     }
     fn is_packed_enum(&self, owner: jet_foundation::MIR::MirTypeId) -> bool {
-        self.is_ordering_enum(owner)
+        is_http_error_id(owner)
+            || self.is_ordering_enum(owner)
             || self.is_key_enum(owner)
             || self.is_io_error_enum(owner)
             || self.is_packed_service_enum(owner)
@@ -4576,6 +5213,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         index: usize,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
+        if is_http_error_id(owner) {
+            let _ = prelude_enum_variant_index("HTTPError", variant).ok_or_else(|| {
+                format!("Prelude HTTPError variant `{variant}` is missing metadata")
+            })?;
+            if index != 0 {
+                return Err(format!(
+                    "MIR enum variant `{variant}` has no payload {index}"
+                ));
+            }
+            let raw = self.cast(builder, self.value(subject)?, types::I64)?;
+            let payload = builder.ins().sshr_imm(raw, 8);
+            return self.cast(builder, payload, expected.unwrap_or(types::I64));
+        }
         let (_, payload) = self.enum_variant(owner, variant)?;
         let fields = match payload {
             jet_foundation::MIR::MirVariantPayload::Unit => Vec::new(),
@@ -4689,6 +5339,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                                         | "list_remove_slot"
                                         | "set_first"
                                         | "set_pop"
+                                        | "set_replace"
                                         | "deque_pop_front"
                                         | "deque_pop_back"
                                         | "deque_peek_front"
@@ -5004,8 +5655,68 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok(())
     }
 
+    fn emit_cell_frame_leave(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        returned: Option<Value>,
+    ) -> Result<(), String> {
+        let layout = builder
+            .ins()
+            .iconst(types::I64, self.cell_frame_layout);
+        let returned = if self.cell_frame_layout == 0 {
+            builder.ins().iconst(types::I64, 0)
+        } else {
+            returned
+                .map(|value| self.cast(builder, value, types::I64))
+                .transpose()?
+                .unwrap_or_else(|| builder.ins().iconst(types::I64, 0))
+        };
+        let _ = self.call_host(builder, self.host.cell.frame_leave, &[layout, returned])?;
+        Ok(())
+    }
+
+    fn emit_cell_frame_drop(&mut self, builder: &mut FunctionBuilder<'_>) -> Result<(), String> {
+        let layout = builder.ins().iconst(types::I64, 0);
+        let returned = builder.ins().iconst(types::I64, 0);
+        let _ =
+            self.call_host_unchecked(builder, self.host.cell.frame_leave, &[layout, returned])?;
+        Ok(())
+    }
+
     fn emit_stack_leave(&mut self, builder: &mut FunctionBuilder<'_>) -> Result<(), String> {
         let _ = self.call_host_unchecked(builder, self.host.stack_leave, &[])?;
+        Ok(())
+    }
+
+    fn generator_cancel_return_block(&self) -> Option<jet_foundation::MIR::MirBlockId> {
+        let mut found = None;
+        for block in &self.function.blocks {
+            if let jet_foundation::MIR::MirTerminator::Return { .. } = block.terminator {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(block.id);
+            }
+        }
+        found
+    }
+
+    fn emit_cancelled_sender_close(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        sender: Value,
+        zero: Value,
+    ) -> Result<(), String> {
+        let failed = builder.ins().iconst(types::I64, 0);
+        let _ = self.call_host(
+            builder,
+            self.host.conc.sender_close,
+            &[sender, failed],
+        )?;
+        self.emit_cell_frame_drop(builder)?;
+        self.emit_sentry_function_exit(builder)?;
+        self.emit_stack_leave(builder)?;
+        builder.ins().return_(&[zero]);
         Ok(())
     }
 
@@ -6445,6 +7156,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
         }
         if let MirTypeKind::Apply { name, args } = ty.kind() {
+            if args.is_empty() && name.name == "DataError" {
+                let value = self.cast(builder, value, types::I64)?;
+                return self
+                    .call_host(builder, self.host.data.error_show, &[value])?
+                    .first()
+                    .copied()
+                    .ok_or_else(|| "MIR DataError display host returned no value".to_string());
+            }
             if args.is_empty() && name.name == "HTTPError" {
                 let value = self.cast(builder, value, types::I64)?;
                 return self
@@ -7227,6 +7946,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         base: Value,
         index: MirValueId,
         kind: jet_foundation::MIR::MirIndexKind,
+        call: jet_foundation::MIR::MirPreludeCallId,
         write_call: Option<jet_foundation::MIR::MirPreludeCallId>,
         location: &jet_foundation::MIR::MirPanicLoc,
         context: Option<&jet_foundation::MIR::MirPanicContext>,
@@ -7235,16 +7955,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         value_ty: &MirType,
         value: Value,
     ) -> Result<(), String> {
-        let write_call = write_call.ok_or_else(|| {
-            "MIR writable index place has no exact setter Prelude route".to_string()
-        })?;
+        let metadata_call = write_call.unwrap_or(call);
         let metadata =
-            self.index_location(builder, write_call, location, context, source_line, span)?;
+            self.index_location(builder, metadata_call, location, context, source_line, span)?;
         let base = self.cast(builder, base, types::I64)?;
         let index_value = self.index_operand(builder, index, kind)?;
         match kind {
             jet_foundation::MIR::MirIndexKind::List
             | jet_foundation::MIR::MirIndexKind::FixedListProof => {
+                let _write_call = write_call.ok_or_else(|| {
+                    "MIR writable index place has no exact setter Prelude route".to_string()
+                })?;
                 let target = clif_ty_from_mir(value_ty)
                     .ok_or_else(|| "MIR list index value has no ABI".to_string())?;
                 let (host, value) = if target == types::F64 || target == types::F32 {
@@ -7269,6 +7990,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Ok(())
             }
             jet_foundation::MIR::MirIndexKind::Map => {
+                let _write_call = write_call.ok_or_else(|| {
+                    "MIR writable index place has no exact setter Prelude route".to_string()
+                })?;
                 let value = self.cast(builder, value, types::I64)?;
                 let host = match self.map_key_kind(index)? {
                     MapKeyKind::String => self.host.coll.index_map_set,
@@ -7281,6 +8005,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Ok(())
             }
             jet_foundation::MIR::MirIndexKind::Pool => {
+                let _write_call = write_call.ok_or_else(|| {
+                    "MIR writable index place has no exact setter Prelude route".to_string()
+                })?;
                 let value = self.cast(builder, value, types::I64)?;
                 let mut args = vec![base, index_value, value];
                 args.extend(metadata);
@@ -7288,7 +8015,35 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Ok(())
             }
             jet_foundation::MIR::MirIndexKind::Lane => {
-                Err("MIR lane index has no checked Cranelift setter".to_string())
+                let target = clif_ty_from_mir(value_ty)
+                    .ok_or_else(|| "MIR lane index value has no ABI".to_string())?;
+                let (host, replacement) = match target {
+                    types::F32 => (
+                        self.host.math.lane_set_f32,
+                        self.cast(builder, value, types::F32)?,
+                    ),
+                    types::F64 => (
+                        self.host.math.lane_set_f64,
+                        self.cast(builder, value, types::F64)?,
+                    ),
+                    types::I8 | types::I16 | types::I32 | types::I64 => (
+                        self.host.math.lane_set_i64,
+                        self.cast(builder, value, types::I64)?,
+                    ),
+                    _ => return Err("MIR lane index value has no scalar ABI".to_string()),
+                };
+                let file = *metadata
+                    .first()
+                    .ok_or_else(|| "MIR lane setter has no source file metadata".to_string())?;
+                let line = *metadata
+                    .get(1)
+                    .ok_or_else(|| "MIR lane setter has no source line metadata".to_string())?;
+                let _ = self.call_host(
+                    builder,
+                    host,
+                    &[base, index_value, replacement, file, line],
+                )?;
+                Ok(())
             }
         }
     }
@@ -7402,7 +8157,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     ..
                 } => {
                     let base_type = current_type.clone();
-                    let element_type = checked_index_element_type(&base_type, *kind)?.clone();
+                    let element_type = checked_index_element_type(&base_type, *kind)?;
                     let value = self.index_read(
                         builder,
                         current,
@@ -7457,8 +8212,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         } else {
                             types::I64
                         };
-                        let pointee = sentry_pointee_type(&current_type).unwrap_or(&current_type);
+                        let pin_inner = pin_inner_type(&current_type).cloned();
+                        let pointee = pin_inner
+                            .as_ref()
+                            .or_else(|| sentry_pointee_type(&current_type))
+                            .unwrap_or(&current_type);
                         self.emit_sentry_check(builder, address, pointee, "read")?;
+                        if let Some(inner) = pin_inner {
+                            current_type = inner;
+                        }
                         builder.ins().load(target, MemFlags::new(), address, 0)
                     }
                 }
@@ -7517,6 +8279,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     jet_foundation::MIR::MirProjection::Index {
                         kind,
                         index,
+                        call,
                         write_call,
                         location,
                         context,
@@ -7528,6 +8291,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             current,
                             *index,
                             *kind,
+                            *call,
                             *write_call,
                             location,
                             context.as_ref(),
@@ -7555,8 +8319,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             )?;
                         } else {
                             let value = self.cast(builder, value, result_ty)?;
-                            let pointee =
-                                sentry_pointee_type(&current_type).unwrap_or(&current_type);
+                            let pin_inner = pin_inner_type(&current_type).cloned();
+                            let pointee = pin_inner
+                                .as_ref()
+                                .or_else(|| sentry_pointee_type(&current_type))
+                                .unwrap_or(&current_type);
                             self.emit_sentry_check(builder, address, pointee, "write")?;
                             builder.ins().store(MemFlags::new(), value, address, 0);
                         }
@@ -7585,7 +8352,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     ..
                 } => {
                     let base_type = current_type.clone();
-                    let element_type = checked_index_element_type(&base_type, *kind)?.clone();
+                    let element_type = checked_index_element_type(&base_type, *kind)?;
                     let value = self.index_read(
                         builder,
                         current,
@@ -7621,8 +8388,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         }
                         value
                     } else {
-                        let pointee = sentry_pointee_type(&current_type).unwrap_or(&current_type);
+                        let pin_inner = pin_inner_type(&current_type).cloned();
+                        let pointee = pin_inner
+                            .as_ref()
+                            .or_else(|| sentry_pointee_type(&current_type))
+                            .unwrap_or(&current_type);
                         self.emit_sentry_check(builder, address, pointee, "read")?;
+                        if let Some(inner) = pin_inner {
+                            current_type = inner;
+                        }
                         builder.ins().load(types::I64, MemFlags::new(), address, 0)
                     }
                 }
@@ -7748,6 +8522,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         )?;
         Ok(())
     }
+
 
     fn write_parameter_address(&self, place: &MirPlace) -> Option<Value> {
         let MirPlaceBase::Parameter(value) = place.base else {
@@ -7919,6 +8694,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
     }
 
+
     fn capture_parameter(
         &self,
         slot: usize,
@@ -8084,7 +8860,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         ));
                     }
                     let base_type = current_type.clone();
-                    let element_type = checked_index_element_type(&base_type, *kind)?.clone();
+                    let element_type = checked_index_element_type(&base_type, *kind)?;
                     let value = self.index_read(
                         builder,
                         current,
@@ -8123,10 +8899,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         }
                         value
                     } else if final_projection {
+                        if let Some(inner) = pin_inner_type(&current_type) {
+                            self.emit_sentry_check(builder, address, inner, "read")?;
+                        }
                         return Ok(address);
                     } else {
-                        let pointee = sentry_pointee_type(&current_type).unwrap_or(&current_type);
+                        let pin_inner = pin_inner_type(&current_type).cloned();
+                        let pointee = pin_inner
+                            .as_ref()
+                            .or_else(|| sentry_pointee_type(&current_type))
+                            .unwrap_or(&current_type);
                         self.emit_sentry_check(builder, address, pointee, "read")?;
+                        if let Some(inner) = pin_inner {
+                            current_type = inner;
+                        }
                         builder.ins().load(types::I64, MemFlags::new(), address, 0)
                     }
                 }
@@ -8409,7 +9195,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let discriminant = self.enum_discriminant(type_name, variant)?;
             return Ok(builder.ins().iconst(types::I64, discriminant));
         }
-        if is_key_name(type_name) || is_packed_service_enum_name(type_name) {
+        if is_key_name(type_name)
+            || is_http_error_name(type_name)
+            || is_packed_service_enum_name(type_name)
+        {
             let discriminant = self.enum_discriminant(type_name, variant)?;
             if args.is_empty() {
                 return Ok(builder.ins().iconst(types::I64, discriminant));
@@ -8503,6 +9292,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .ok_or_else(|| {
                     format!("Prelude Ordering variant `{type_name}::{variant}` is missing metadata")
                 });
+        }
+        if is_http_error_name(type_name) {
+            return prelude_enum_variant_index("HTTPError", variant).ok_or_else(|| {
+                format!("Prelude HTTPError variant `{type_name}::{variant}` is missing metadata")
+            });
         }
         let definition = self
             .program
@@ -9852,6 +10646,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     )
                 });
         }
+        if let Some(element) = view_element_type(&ty) {
+            let host = if matches!(element.kind(), MirTypeKind::String)
+                || element.nominal_name() == Some("str")
+            {
+                self.host.memory.view_string
+            } else {
+                self.list_copy_host(element)
+            };
+            let value = self.cast(builder, self.value(value_id)?, types::I64)?;
+            return self
+                .call_host(builder, host, &[value])?
+                .first()
+                .copied()
+                .ok_or_else(|| format!("MIR `{}` view copy host returned no value", ty.display_name()));
+        }
         if copy_needs_typed_clone(&ty) {
             let value = self.cast(builder, self.value(value_id)?, types::I64)?;
             let type_id = runtime_type_id(&ty).ok_or_else(|| {
@@ -10056,7 +10865,14 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         field: MirFieldId,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
-        let base_ty = self.mir_value_type(base)?;
+        let mut base_ty = self.mir_value_type(base)?;
+        let mut base_value = self.value(base)?;
+        if let Some(inner) = pin_inner_type(&base_ty) {
+            let address = self.cast(builder, base_value, types::I64)?;
+            self.emit_sentry_check(builder, address, inner, "read")?;
+            base_value = builder.ins().load(types::I64, MemFlags::new(), address, 0);
+            base_ty = inner.clone();
+        }
         let process_field = self
             .program
             .fields
@@ -10065,7 +10881,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .map(|row| row.field.name.clone());
         if base_ty.nominal_name() == Some("ProcessChild") {
             if let Some(name) = process_field.as_deref() {
-                let child = self.cast(builder, self.value(base)?, types::I64)?;
+                let child = self.cast(builder, base_value, types::I64)?;
                 let value = match name {
                     // ProcessStdin methods use the child carrier in the JIT
                     // ABI; the resident host resolves the shared stdin cell.
@@ -10107,11 +10923,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .find(|row| row.id == field)
             .is_some_and(|row| row.field.name == "value");
         if event_value {
-            let value = self.value(base)?;
+            let value = base_value;
             return expected.map_or(Ok(value), |ty| self.cast(builder, value, ty));
         }
-        let base = self.value(base)?;
-        let base = self.cast(builder, base, types::I64)?;
+        let base = self.cast(builder, base_value, types::I64)?;
         self.field_load_value(builder, base, field, Some(&base_ty), expected)
     }
 
@@ -10293,8 +11108,16 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR aggregate host returned no record".to_string())?;
+        let base_ty = self
+            .program
+            .type_instances
+            .iter()
+            .find(|instance| instance.identity == Some(type_id));
         for (field, value) in fields {
-            let (index, ty) = self.field_info(*field)?;
+            let (index, ty) = base_ty.map_or_else(
+                || self.field_info(*field),
+                |base_ty| self.field_info_for_base(*field, base_ty),
+            )?;
             let value = self.value(*value)?;
             self.set_field(builder, record, index, &ty, value)?;
         }
@@ -10345,6 +11168,114 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         })
     }
 
+    fn ordered_map_key_ids(&self, value: MirValueId) -> Option<Vec<MirValueId>> {
+        let mut seen = HashSet::new();
+        self.ordered_map_key_ids_inner(value, &mut seen)
+    }
+
+    fn ordered_map_key_ids_inner(
+        &self,
+        value: MirValueId,
+        seen: &mut HashSet<MirValueId>,
+    ) -> Option<Vec<MirValueId>> {
+        if !seen.insert(value) {
+            return None;
+        }
+        let operation = self
+            .function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .find(|instruction| instruction.result == Some(value))
+            .map(|instruction| &instruction.operation)?;
+        match operation {
+            MirOperation::BuildMap { entries } => {
+                Some(entries.iter().map(|(key, _)| *key).collect())
+            }
+            MirOperation::Copy { value }
+            | MirOperation::Move { value }
+            | MirOperation::AttachTag { value, .. } => self.ordered_map_key_ids_inner(*value, seen),
+            MirOperation::Convert {
+                value,
+                conversion:
+                    jet_foundation::MIR::MirConversion::Transparent
+                    | jet_foundation::MIR::MirConversion::SendFn,
+                ..
+            } => self.ordered_map_key_ids_inner(*value, seen),
+            MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
+                self.ordered_map_place_keys(*place)
+            }
+            _ => None,
+        }
+    }
+
+    fn ordered_map_place_keys(&self, place_id: MirPlaceId) -> Option<Vec<MirValueId>> {
+        let place = self
+            .function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)?;
+        if !place.projections.is_empty() {
+            return None;
+        }
+        let mut keys = Vec::new();
+        for instruction in self
+            .function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+        {
+            let MirOperation::WritePlace {
+                place: write_place,
+                ..
+            } = &instruction.operation
+            else {
+                continue;
+            };
+            let Some(write) = self
+                .function
+                .places
+                .iter()
+                .find(|candidate| candidate.id == *write_place)
+            else {
+                continue;
+            };
+            if write.base != place.base || write.projections.len() != 1 {
+                continue;
+            }
+            let Some(jet_foundation::MIR::MirProjection::Index {
+                kind: jet_foundation::MIR::MirIndexKind::Map,
+                index,
+                ..
+            }) = write.projections.first()
+            else {
+                continue;
+            };
+            keys.push(*index);
+        }
+        (!keys.is_empty()).then_some(keys)
+    }
+
+    fn ordered_map_key_list(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        value: MirValueId,
+    ) -> Result<Option<Value>, String> {
+        let Some(keys) = self.ordered_map_key_ids(value) else {
+            return Ok(None);
+        };
+        let list = self
+            .call_host(builder, self.host.coll.list_new, &[])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR ordered DataTree object keys returned no list".to_string())?;
+        for key in keys {
+            let key = self.cast(builder, self.value(key)?, types::I64)?;
+            let _ = self.call_host(builder, self.host.coll.list_push, &[list, key])?;
+        }
+        Ok(Some(list))
+    }
+
     fn enum_value(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -10352,6 +11283,24 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         variant_name: &str,
         args: &[jet_foundation::MIR::MirEnumArg],
     ) -> Result<Value, String> {
+        if is_http_error_id(type_id) {
+            let discriminant = prelude_enum_variant_index("HTTPError", variant_name).ok_or_else(
+                || format!("Prelude HTTPError variant `{variant_name}` is missing metadata"),
+            )?;
+            if args.len() > 1 {
+                return Err(format!(
+                    "MIR packed enum `HTTPError::{variant_name}` expects at most one payload, got {}",
+                    args.len()
+                ));
+            }
+            let discriminant = builder.ins().iconst(types::I64, discriminant);
+            let Some(arg) = args.first() else {
+                return Ok(discriminant);
+            };
+            let payload = self.cast(builder, self.value(arg.value)?, types::I64)?;
+            let payload = builder.ins().ishl_imm(payload, 8);
+            return Ok(builder.ins().bor(payload, discriminant));
+        }
         let definition = self
             .program
             .types
@@ -10453,8 +11402,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 && is_core_data_type_name(&definition.key)
                 && matches!(ty.kind(), MirTypeKind::Map { .. })
             {
+                let ordered_keys = self.ordered_map_key_list(builder, arg.value)?;
+                let (host, args) = if let Some(ordered_keys) = ordered_keys {
+                    (
+                        self.host.encoding.object_from_map_ordered,
+                        vec![value, ordered_keys],
+                    )
+                } else {
+                    (self.host.encoding.object_from_map, vec![value])
+                };
                 value = self
-                    .call_host(builder, self.host.encoding.object_from_map, &[value])?
+                    .call_host(builder, host, &args)?
                     .first()
                     .copied()
                     .ok_or_else(|| {
@@ -10482,9 +11440,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .copied()
             .ok_or_else(|| "MIR map host returned no value".to_string())?;
         for (key, value) in entries {
+            let key_kind = self.map_key_kind(*key)?;
             let key = self.cast(builder, self.value(*key)?, types::I64)?;
             let value = self.cast(builder, self.value(*value)?, types::I64)?;
-            let _ = self.call_host(builder, self.host.coll.map_insert, &[map, key, value])?;
+            let host = match key_kind {
+                MapKeyKind::String => self.host.coll.map_insert,
+                MapKeyKind::Int => self.host.coll.map_insert_int,
+                MapKeyKind::Composite => self.host.coll.map_insert_composite,
+            };
+            let _ = self.call_host(builder, host, &[map, key, value])?;
         }
         Ok(map)
     }
@@ -10792,7 +11756,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         } else {
             zero
         };
-        let binding = if matches!(row.member.as_str(), "route" | "page" | "layout" | "loader") {
+        let binding = if matches!(
+            row.member.as_str(),
+            "route" | "page" | "layout" | "loader" | "form"
+        ) {
             args.last()
                 .map(|value| self.value(*value))
                 .unwrap_or_else(|| Ok(zero))?
@@ -12314,6 +13281,37 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         Ok(bound)
     }
 
+    fn json_decode_callback(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        spec: &JsonDecodeSpec,
+    ) -> Result<Value, String> {
+        let Some(target) = spec.target else {
+            return Ok(builder.ins().iconst(types::I64, 0));
+        };
+        let thunk = *self
+            .json_thunks
+            .get(&(self.function.id, target))
+            .ok_or_else(|| {
+                format!(
+                    "JSON Decode function {:?} has no generated universal thunk",
+                    target
+                )
+            })?;
+        let thunk_ref = self.module.declare_func_in_func(thunk, builder.func);
+        let raw = builder.ins().func_addr(types::I64, thunk_ref);
+        let env = builder.ins().iconst(types::I64, 0);
+        let has_env = builder.ins().iconst(types::I8, 1);
+        let bound = self
+            .call_host(builder, self.host.callable_bind, &[raw, env, has_env])?
+            .first()
+            .copied()
+            .ok_or_else(|| "JSON Decode callback binder returned no value".to_string())?;
+        let zero = builder.ins().iconst(types::I64, 0);
+        let _ = self.call_host(builder, self.host.callable_bind_raw, &[bound, raw, zero])?;
+        Ok(bound)
+    }
+
     fn bind_universal_callback(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -12381,7 +13379,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     ) -> Result<Option<(Signature, Value)>, String> {
         if !matches!(
             (module, member),
-            ("core.data", "group_by" | "sum") | ("", "group_by" | "sum")
+            ("core.data", "group_by") | ("", "group_by")
         ) {
             return Ok(None);
         }
@@ -12507,10 +13505,29 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .find(|row| row.id == id)
             .ok_or_else(|| format!("MIR Core call {:?} is missing", id))?;
         let model_open = row.module == "core.models" && row.member == "open";
+        let async_event_error_type =
+            if row.module == "core.event" && row.member == "async_result" {
+                result_type.and_then(result_ok_type).and_then(|ok| match ok.kind() {
+                    MirTypeKind::Apply { name, args }
+                        if name.name == "AsyncEvent" && args.len() == 2 =>
+                    {
+                        args.get(1)
+                    }
+                    _ => None,
+                })
+            } else {
+                None
+            };
+        let async_event_typed = async_event_error_type.is_some();
         let csv_typed = matches!(
             (row.module.as_str(), row.member.as_str()),
             ("core.data", "csv") | ("core.encoding.csv", "decode" | "query")
         );
+        let json_typed = !type_args.is_empty()
+            && matches!(
+                (row.module.as_str(), row.member.as_str()),
+                ("core.encoding.json", "decode") | ("core.data", "json")
+            );
         if row.module == "core.mem"
             && matches!(row.member.as_str(), "volatile_read" | "volatile_write")
         {
@@ -12609,11 +13626,47 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             && matches!(args[0].kind(), MirTypeKind::Float)
                 )
             });
-        let typed_symbol = if measurement_sqrt {
+        let data_stream_row_type = if type_args.is_empty()
+            && row.module == "core.data.stream"
+            && matches!(row.member.as_str(), "next" | "collect")
+        {
+            result_type.and_then(|ty| {
+                let ok = result_ok_type(ty)?;
+                match (row.member.as_str(), ok.kind()) {
+                    ("next", MirTypeKind::Option(inner))
+                    | ("collect", MirTypeKind::List(inner)) => Some(inner.as_ref()),
+                    _ => None,
+                }
+            })
+        } else {
+            None
+        };
+        let data_reader_row_type = if row.module == "core.data"
+            && matches!(row.member.as_str(), "csv_reader" | "json_reader")
+        {
+            result_type
+                .and_then(result_ok_type)
+                .and_then(|ok| match ok.kind() {
+                    MirTypeKind::Apply { name, args }
+                        if name.name == "DataStream" && args.len() == 1 =>
+                    {
+                        args.first()
+                    }
+                    _ => None,
+                })
+        } else {
+            None
+        };
+        let typed_symbol = if async_event_typed {
+            Some("jet_jit_async_event_new_typed")
+        } else if measurement_sqrt {
             Some("jet_std::JetMeasurement::sqrt")
         } else if model_open {
             Some("jet_jit_model_open")
-        } else if !type_args.is_empty() {
+        } else if !type_args.is_empty()
+            || data_stream_row_type.is_some()
+            || data_reader_row_type.is_some()
+        {
             match (row.module.as_str(), row.member.as_str()) {
                 ("core.args", "decode") => Some("jet_jit_args_decode"),
                 ("core.args", "merge") => Some("jet_jit_args_merge"),
@@ -12630,7 +13683,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 ("core.testing", "histories") => Some("jet_jit_testing_histories"),
                 // The public list receiver spelling is `query`; its
                 // internal SQL symbol carries the element descriptor trailer.
-                ("", "query") => Some("jet_jit_data_query_sql"),
+                ("", "query") | ("core.encoding.csv", "query") => Some("jet_jit_enc_csv_query"),
                 ("core.data", "load") => Some("jet_data_loader_load"),
                 ("core.data", "load_default") => Some("jet_data_loader_load_default"),
                 ("core.data", "file") => Some("jet_data_loader_file"),
@@ -12639,6 +13692,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 ("core.data", "database") => Some("jet_data_loader_database"),
                 ("core.data", "value") => Some("jet_data_loader_value"),
                 ("core.data", "snapshot") => Some("jet_data_loader_snapshot"),
+                ("core.data", "csv_reader") => Some("jet_jit_data_csv_reader"),
+                ("core.data", "json_reader") => Some("jet_jit_data_json_reader"),
                 ("core.data.loader", "stream") => Some("jet_data_loader_stream"),
                 ("core.data.stream", "next") => Some("jet_data_stream_next"),
                 ("core.data.stream", "collect") => Some("jet_data_stream_collect"),
@@ -12647,21 +13702,51 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         } else {
             None
         };
-        let jit_symbol = typed_symbol
+        let preferred = typed_symbol
             .map(str::to_owned)
             .or_else(|| row.jit_symbol.clone());
-        if let Some(symbol) = jit_symbol {
-            let host = self
-                .host
-                .lookup(&symbol)
-                .ok_or_else(|| format!("resolved MIR Core symbol `{symbol}` is not registered"))?;
+        let host = if typed_symbol.is_some() {
+            preferred
+                .as_deref()
+                .and_then(|symbol| self.host.lookup(symbol))
+        } else {
+            self.lookup_host_with_core_adapter_arity(
+                &row.module,
+                &row.member,
+                args.len(),
+                preferred.as_deref(),
+            )
+        };
+        if let Some(host) = host {
             let signature = self
                 .module
                 .declarations()
                 .get_function_decl(host)
                 .signature
                 .clone();
-            let mut values = if model_open {
+            let mut values = if async_event_typed {
+                if signature.params.len() != args.len() + 1 {
+                    return Err(format!(
+                        "typed async event JIT ABI expects {} source arguments plus error metadata, got {}",
+                        args.len(),
+                        signature.params.len()
+                    ));
+                }
+                let mut source_signature = signature.clone();
+                source_signature.params.pop();
+                let mut values = self.lower_core_call_args(
+                    builder,
+                    &row.module,
+                    &row.member,
+                    args,
+                    &source_signature,
+                )?;
+                let error_type = async_event_error_type
+                    .expect("typed async event call has checked error metadata");
+                let type_key = self.runtime.heap.alloc_string(error_type.identity_key());
+                values.push(builder.ins().iconst(types::I64, type_key));
+                values
+            } else if model_open {
                 if type_args.len() != 1 || signature.params.len() != args.len() + 1 {
                     return Err(
                         "model.open JIT ABI requires one trait key and one output argument"
@@ -12690,7 +13775,29 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 values.push(self.csv_decode_callback(builder, &spec)?);
                 values.push(builder.ins().iconst(types::I64, spec.element_kind));
                 values
-            } else if !type_args.is_empty()
+            } else if json_typed {
+                let spec = json_decode_spec(self.program, id, type_args)?
+                    .ok_or_else(|| "typed JSON CoreCall has no value type".to_string())?;
+                if signature.params.len() != args.len() + 2 {
+                    return Err(format!(
+                        "typed JSON host ABI expects {} source arguments plus callback metadata, got {}",
+                        args.len(),
+                        signature.params.len()
+                    ));
+                }
+                let mut source_signature = signature.clone();
+                source_signature.params.truncate(args.len());
+                let mut values = self.lower_call_args(builder, args, &source_signature)?;
+                values.push(self.json_decode_callback(builder, &spec)?);
+                let type_key = self
+                    .runtime
+                    .heap
+                    .alloc_string(spec.value_type.identity_key());
+                values.push(builder.ins().iconst(types::I64, type_key));
+                values
+            } else if (!type_args.is_empty()
+                || data_stream_row_type.is_some()
+                || data_reader_row_type.is_some())
                 && matches!(
                     (row.module.as_str(), row.member.as_str()),
                     ("core.args", "decode")
@@ -12711,13 +13818,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         | ("core.data", "database")
                         | ("core.data", "value")
                         | ("core.data", "snapshot")
+                        | ("core.data", "csv_reader")
+                        | ("core.data", "json_reader")
                         | ("core.testing", "histories")
                         | ("core.data.loader", "stream")
                         | ("core.data.stream", "next")
                         | ("core.data.stream", "collect")
                 )
             {
-                if type_args.len() < 1 || signature.params.len() != args.len() + 1 {
+                let row_type = type_args
+                    .first()
+                    .or(data_stream_row_type)
+                    .or(data_reader_row_type)
+                    .ok_or_else(|| {
+                        format!(
+                            "typed MIR Core call `{}`.{} has no type metadata",
+                            row.module, row.member
+                        )
+                    })?;
+                if signature.params.len() != args.len() + 1 {
                     return Err(format!(
                         "typed MIR Core call `{}`.{} expects {} source arguments plus type metadata, got {}",
                         row.module,
@@ -12728,8 +13847,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 }
                 let mut source_signature = signature.clone();
                 source_signature.params.pop();
-                let mut values = self.lower_call_args(builder, args, &source_signature)?;
-                let type_key = self.runtime.heap.alloc_string(type_args[0].identity_key());
+                let mut values =
+                    self.lower_core_call_args(builder, &row.module, &row.member, args, &source_signature)?;
+                let type_key = self.runtime.heap.alloc_string(row_type.identity_key());
                 values.push(builder.ins().iconst(types::I64, type_key));
                 values
             } else if row.module == "core.crypto.vault"
@@ -12769,6 +13889,12 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         if csv_typed {
             return Err(format!(
                 "MIR typed CSV call {:?} has no resolved JIT symbol",
+                id
+            ));
+        }
+        if json_typed {
+            return Err(format!(
+                "MIR typed JSON call {:?} has no resolved JIT symbol",
                 id
             ));
         }
@@ -13272,6 +14398,94 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         })
     }
 
+
+    fn host_param_count(&self, host: FuncId) -> usize {
+        self.module
+            .declarations()
+            .get_function_decl(host)
+            .signature
+            .params
+            .len()
+    }
+
+    fn arity_specific_host_symbols(module: &str, member: &str, argc: usize) -> Vec<&'static str> {
+        match (module, member, argc) {
+            ("core.net.tls", "client", 2) => vec!["jet_jit_tls_client"],
+            ("core.net.tls", "client", 3) => vec!["jet_jit_tls_client_deadline"],
+            ("core.net.tls", "client", 4) => vec!["jet_jit_tls_client_config_deadline"],
+            ("core.encoding.json", "canonical", 1) => vec!["jet_jit_json_canonical"],
+            ("core.encoding.json", "canonical", 2) => vec!["jet_jit_json_canonical_checked"],
+            ("core.encoding.cbor", "parse", 1) => vec!["jet_jit_cbor_parse"],
+            ("core.encoding.cbor", "parse", 2) => vec!["jet_jit_cbor_parse_options"],
+            _ => Vec::new(),
+        }
+    }
+
+    fn host_symbol_candidates(
+        module: &str,
+        member: &str,
+        argc: usize,
+        preferred: Option<&str>,
+    ) -> Vec<String> {
+        let mut names: Vec<String> =
+            Self::arity_specific_host_symbols(module, member, argc)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+        if let Some(preferred) = preferred {
+            if !names.iter().any(|known| known == preferred) {
+                names.push(preferred.to_string());
+            }
+        }
+        if let Some(record) = jet_foundation::Syntax::core_call(module, member) {
+            for candidate in record.jit_symbol_candidates() {
+                if !names.iter().any(|known| known == &candidate) {
+                    names.push(candidate);
+                }
+            }
+        }
+        names
+    }
+
+
+    fn lookup_host_matching_arity(
+        &self,
+        module: &str,
+        member: &str,
+        argc: usize,
+        preferred: Option<&str>,
+    ) -> Option<FuncId> {
+        Self::host_symbol_candidates(module, member, argc, preferred)
+            .into_iter()
+            .filter_map(|name| self.host.lookup(&name))
+            .find(|host| self.host_param_count(*host) == argc)
+    }
+
+    /// Direct Core hosts may append checked metadata words (for example a
+    /// callback return key or a generic type tag) after the source arguments.
+    /// Prefer the exact checked arity; only then select a canonical candidate
+    /// with one of the adapter-owned trailing metadata shapes.
+    fn lookup_host_with_core_adapter_arity(
+        &self,
+        module: &str,
+        member: &str,
+        argc: usize,
+        preferred: Option<&str>,
+    ) -> Option<FuncId> {
+        self.lookup_host_matching_arity(module, member, argc, preferred)
+            .or_else(|| {
+                let one = argc.saturating_add(1);
+                let two = argc.saturating_add(2);
+                Self::host_symbol_candidates(module, member, argc, preferred)
+                    .into_iter()
+                    .filter_map(|name| self.host.lookup(&name))
+                    .find(|host| {
+                        let params = self.host_param_count(*host);
+                        params == one || params == two
+                    })
+            })
+    }
+
     fn lookup_prelude_host(
         &self,
         row: &jet_foundation::MIR::MirPreludeCall,
@@ -13380,6 +14594,73 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
 
         let member = row.member.as_str();
+        if member == "set_from" && row.symbol.name() == "jet_set_from" {
+            let receiver_ty = self.mir_value_type(receiver)?;
+            let Some(element_ty) = comparison_sequence_element_type(&receiver_ty) else {
+                return Err(format!(
+                    "MIR Set.from receiver `{}` has no element type",
+                    receiver_ty.display_name()
+                ));
+            };
+            let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let string_kind = i64::from(matches!(
+                comparison_element_kind(element_ty),
+                Some(ComparisonElementKind::String)
+            ));
+            let string_kind = builder.ins().iconst(types::I64, string_kind);
+            let value = self
+                .call_host(builder, self.host.coll.set_from_list, &[receiver, string_kind])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR Set.from host returned no value".to_string())?;
+            return expected
+                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                .map(Some);
+        }
+        if member == "map_update" && row.symbol.name() == "jet_map_update_all" {
+            let [other] = args else {
+                return Err("MIR Map.update expects one map argument".to_string());
+            };
+            let receiver_ty = self.mir_value_type(receiver)?;
+            let (key_ty, _) = comparison_map_parts(&receiver_ty).ok_or_else(|| {
+                format!(
+                    "MIR Map.update receiver `{}` has no map key type",
+                    receiver_ty.display_name()
+                )
+            })?;
+            let host = match self.map_key_kind_for_type(key_ty)? {
+                MapKeyKind::String => self.host.coll.map_update,
+                MapKeyKind::Int => self.host.coll.map_update_int,
+                MapKeyKind::Composite => self.host.coll.map_update_composite,
+            };
+            let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let other = self.cast(builder, self.value(*other)?, types::I64)?;
+            self.call_host(builder, host, &[receiver, other])?;
+            return Ok(Some(builder.ins().iconst(types::I64, 0)));
+        }
+        if matches!(
+            member,
+            "difference_update" | "intersection_update" | "symmetric_difference_update"
+        ) && matches!(
+            row.symbol.name(),
+            "jet_set_difference_update"
+                | "jet_set_intersection_update"
+                | "jet_set_symmetric_difference_update"
+        ) {
+            let [other] = args else {
+                return Err(format!("MIR Set.{member} expects one set argument"));
+            };
+            let host = match member {
+                "difference_update" => self.host.coll.set_difference_update,
+                "intersection_update" => self.host.coll.set_intersection_update,
+                "symmetric_difference_update" => self.host.coll.set_symmetric_difference_update,
+                _ => unreachable!(),
+            };
+            let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let other = self.cast(builder, self.value(*other)?, types::I64)?;
+            self.call_host(builder, host, &[receiver, other])?;
+            return Ok(Some(builder.ins().iconst(types::I64, 0)));
+        }
         if matches!(member, "equal" | "list_equal") && row.symbol.name() == "jet_list_equal" {
             let [other] = args else {
                 return Err("MIR List.equal expects one value argument".to_string());
@@ -13391,6 +14672,59 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             let left = self.collection_receiver_value(builder, receiver, receiver_place)?;
             let right = self.cast(builder, self.value(*other)?, types::I64)?;
             let value = self.list_equal_recursive(builder, &receiver_ty, left, right)?;
+            return expected
+                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                .map(Some);
+        }
+        if member == "list_index_of" && row.symbol.name() == "jet_list_index_of" {
+            let [needle] = args else {
+                return Err("MIR List.index expects one value argument".to_string());
+            };
+            let receiver_ty = self.mir_value_type(receiver)?;
+            let Some(element_ty) = sequence_element_type(&receiver_ty) else {
+                return Err(format!(
+                    "MIR List.index receiver `{}` has no element type",
+                    receiver_ty.display_name()
+                ));
+            };
+            let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let needle = self.value(*needle)?;
+            let (host, needle) = match comparison_element_kind(element_ty) {
+                Some(ComparisonElementKind::String) => (
+                    self.host.coll.list_index_of_str,
+                    self.cast(builder, needle, types::I64)?,
+                ),
+                Some(ComparisonElementKind::Integer) => (
+                    self.host.coll.list_index_of,
+                    self.cast(builder, needle, types::I64)?,
+                ),
+                Some(ComparisonElementKind::Float) => {
+                    let value_type = self.value_type(builder, needle);
+                    if value_type == types::F64 {
+                        (self.host.coll.list_index_of_f64, needle)
+                    } else if value_type == types::F32 {
+                        (
+                            self.host.coll.list_index_of_f64,
+                            builder.ins().fpromote(types::F64, needle),
+                        )
+                    } else {
+                        return Err(format!(
+                            "MIR List.index float needle has unsupported carrier `{value_type:?}`"
+                        ));
+                    }
+                }
+                Some(ComparisonElementKind::Date) | None => {
+                    return Err(format!(
+                        "MIR List.index receiver `{}` has no resident equality host",
+                        receiver_ty.display_name()
+                    ));
+                }
+            };
+            let value = self
+                .call_host(builder, host, &[receiver, needle])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR List.index host returned no value".to_string())?;
             return expected
                 .map_or(Ok(value), |ty| self.cast(builder, value, ty))
                 .map(Some);
@@ -13461,6 +14795,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 | "map_min"
                 | "map_max"
                 | "map_insert"
+                | "map_setdefault"
                 | "map_add_new"
                 | "map_try_insert"
                 | "map_remove"
@@ -13828,7 +15163,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 };
                 (host, vec![receiver_value!()?])
             }
-            "map_insert" | "map_add_new" | "map_try_insert" => {
+            "map_insert" | "map_add_new" | "map_setdefault" | "map_try_insert" => {
                 if args.len() != 2 {
                     return Err(format!("MIR {member} expects key and value arguments"));
                 }
@@ -13842,6 +15177,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     ("map_add_new", MapKeyKind::String) => self.host.coll.map_add_new,
                     ("map_add_new", MapKeyKind::Int) => self.host.coll.map_add_new_int,
                     ("map_add_new", MapKeyKind::Composite) => self.host.coll.map_add_new_composite,
+                    ("map_setdefault", MapKeyKind::String) => self.host.coll.map_setdefault,
+                    ("map_setdefault", MapKeyKind::Int) => self.host.coll.map_setdefault_int,
+                    ("map_setdefault", MapKeyKind::Composite) => {
+                        self.host.coll.map_setdefault_composite
+                    }
                     ("map_try_insert", MapKeyKind::String) => self.host.coll.map_try_insert,
                     ("map_try_insert", MapKeyKind::Int) => self.host.coll.map_try_insert_int,
                     ("map_try_insert", MapKeyKind::Composite) => {
@@ -14099,7 +15439,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             values.push(self.duration_unit_discriminant(builder, unit)?);
         }
 
-        let host = self.lookup_prelude_host(&row)?;
+        let host = self
+            .lookup_host_matching_arity(
+                &row.module,
+                &row.member,
+                values.len(),
+                Some(row.symbol.name()),
+            )
+            .map(Ok)
+            .unwrap_or_else(|| self.lookup_prelude_host(&row))?;
         let signature = self
             .module
             .declarations()
@@ -14251,6 +15599,156 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         self.call_prelude_args_bound(builder, id, args, &[], expected)
     }
 
+    fn cell_get_or_set_args(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        args: &[MirCallArg],
+        expected: Option<types::Type>,
+    ) -> Result<Value, String> {
+        let [cell_arg, initializer] = args else {
+            return Err(format!(
+                "MIR Cell.get_or_set expects a cell and initializer, got {} arguments",
+                args.len()
+            ));
+        };
+        let cell_ty = self.mir_value_type(cell_arg.value)?;
+        let mut cell_shape = &cell_ty;
+        while let MirTypeKind::Tagged { inner, .. } = cell_shape.kind() {
+            cell_shape = inner;
+        }
+        let element_ty = match cell_shape.kind() {
+            MirTypeKind::Apply { name, args } if name.name == "Cell" && args.len() == 1 => {
+                args.first().ok_or_else(|| {
+                    "MIR Cell.get_or_set receiver has no element type".to_string()
+                })?
+            }
+            _ => {
+                return Err(format!(
+                    "MIR Cell.get_or_set receiver `{}` is not a Cell<T>",
+                    cell_ty.display_name()
+                ))
+            }
+        };
+        let initializer_value = initializer.value;
+        let initializer_ty = self.mir_value_type(initializer_value)?;
+        let (params, ret) = callable_signature(&initializer_ty).ok_or_else(|| {
+            "MIR Cell.get_or_set initializer has no function signature".to_string()
+        })?;
+        if !params.is_empty() {
+            return Err(format!(
+                "MIR Cell.get_or_set initializer takes {} parameters, expected zero",
+                params.len()
+            ));
+        }
+        let ret = ret.ok_or_else(|| {
+            "MIR Cell.get_or_set initializer must return a value".to_string()
+        })?;
+        let return_type = clif_ty_from_mir(ret)
+            .ok_or_else(|| "MIR Cell.get_or_set initializer has no ABI".to_string())?;
+        let mut callback_signature =
+            Signature::new(self.module.target_config().default_call_conv);
+        callback_signature.returns.push(AbiParam::new(return_type));
+
+        let meta = JitMeta::from_program(self.program);
+        let schema = CellSchema::from_type(element_ty, &meta)?;
+        let schema_handle = self.runtime.cells.register_schema(schema);
+        let schema_value = builder.ins().iconst(types::I64, schema_handle);
+        let cell = self.cast(builder, self.value(cell_arg.value)?, types::I64)?;
+        let record = self
+            .call_host(
+                builder,
+                self.host.cell.get_or_set_begin,
+                &[cell, schema_value],
+            )?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR Cell.get_or_set begin returned no value".to_string())?;
+        let zero = builder.ins().iconst(types::I64, 0);
+        let present = self
+            .call_host(builder, self.host.struct_get_bool, &[record, zero])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR Cell.get_or_set discriminator returned no value".to_string())?;
+        let present = self.bool_value(builder, present)?;
+        let one = builder.ins().iconst(types::I64, 1);
+        let payload = self
+            .call_host(builder, self.host.struct_get_i64, &[record, one])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR Cell.get_or_set payload returned no value".to_string())?;
+        let initializer = self.cast(builder, self.value(initializer_value)?, types::I64)?;
+        let present_block = builder.create_block();
+        let empty_block = builder.create_block();
+        let merge_block = builder.create_block();
+        builder.append_block_param(merge_block, return_type);
+        builder
+            .ins()
+            .brif(present, present_block, &[], empty_block, &[]);
+
+        builder.switch_to_block(present_block);
+        let value = self.cast(builder, payload, return_type)?;
+        builder.ins().jump(merge_block, &[value]);
+        builder.switch_to_block(empty_block);
+
+        let value = if let Some(thunk) = self
+            .view_thunks
+            .get(&(self.function.id, initializer_value, 0))
+            .copied()
+        {
+            // Cell stores invoke zero-argument initializers through the same
+            // universal thunk as host callbacks.  Calling the resident
+            // callable slot directly would return its checked Result carrier
+            // instead of the source callback payload.
+            let thunk_ref = self.module.declare_func_in_func(thunk, builder.func);
+            let thunk_ptr = builder.ins().func_addr(types::I64, thunk_ref);
+            let mut thunk_signature =
+                Signature::new(self.module.target_config().default_call_conv);
+            thunk_signature.params.push(AbiParam::new(types::I64));
+            thunk_signature.returns.push(AbiParam::new(types::I64));
+            let thunk_signature_ref = builder.import_signature(thunk_signature);
+            let call = builder.ins().call_indirect(thunk_signature_ref, thunk_ptr, &[initializer]);
+            let callback = builder
+                .inst_results(call)
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR Cell initializer thunk returned no value".to_string())?;
+            self.emit_pending_exit_check(builder);
+            self.cast(builder, callback, return_type)?
+        } else {
+            self.call_callable_values(
+                builder,
+                initializer,
+                callback_signature,
+                vec![],
+                Some(return_type),
+            )?
+        };
+        let encoded = thunk_encode_raw(builder, value, return_type)?;
+        let one = builder.ins().iconst(types::I64, 1);
+        let guard = self
+            .call_host(builder, self.host.struct_get_i64, &[record, one])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR Cell.get_or_set guard payload returned no value".to_string())?;
+        let _ = self.call_host(
+            builder,
+            self.host.cell.get_or_set_store,
+            &[guard, encoded, schema_value],
+        )?;
+        let edit_kind = builder.ins().iconst(types::I64, 2);
+        let _ = self
+            .call_host(builder, self.host.cell.guard_drop, &[edit_kind, guard])?;
+        builder.ins().jump(merge_block, &[value]);
+
+        builder.switch_to_block(merge_block);
+        let value = builder
+            .block_params(merge_block)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR Cell.get_or_set merge returned no value".to_string())?;
+        expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
+    }
+
     /// Prelude host call whose function-typed arguments at `callbacks` are
     /// handed over as universal-thunk slots.  Core rows without a resident
     /// `jit_symbol` reach their host through this route, so it binds the same
@@ -14277,6 +15775,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             );
         if Self::service_module_id(&row.module).is_some() {
             return self.call_service_args(builder, &row.module, &row.member, args, expected);
+        }
+        if row.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+            && row.module == "core.host"
+            && row.member == "Cell.get_or_set"
+        {
+            if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
+                return Err("MIR Cell.get_or_set route has unsupported Prelude ABI".to_string());
+            }
+            if row.symbol.name() != "jet_cell_get_or_set" {
+                return Err(format!(
+                    "MIR Cell.get_or_set route has non-canonical symbol `{}`",
+                    row.symbol.name()
+                ));
+            }
+            return self.cell_get_or_set_args(builder, args, expected);
         }
         if row.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
             && row.module == "core.time"
@@ -14385,7 +15898,15 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             return expected.map_or(Ok(value), |ty| self.cast(builder, value, ty));
         }
         let symbol = row.symbol.name().to_owned();
-        let host = self.lookup_prelude_host(row)?;
+        let host = self
+            .lookup_host_matching_arity(
+                &row.module,
+                &row.member,
+                args.len(),
+                Some(row.symbol.name()),
+            )
+            .map(Ok)
+            .unwrap_or_else(|| self.lookup_prelude_host(row))?;
         let signature = self
             .module
             .declarations()
@@ -14395,7 +15916,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         if symbol == "jet_plugin_load" {
             return self.plugin_load_args(builder, args, expected, host, &signature);
         }
-        let mut values = if let Some((source_signature, key)) = self.callback_return_key(
+        let mut values = if row.module == "core.expiring" {
+            if args.len() != 3 || signature.params.len() != 4 {
+                return Err(format!(
+                    "MIR expiring constructor expects three source arguments plus secret metadata, got {} source arguments and {} parameters",
+                    args.len(),
+                    signature.params.len()
+                ));
+            }
+            let mut source_signature = signature.clone();
+            source_signature.params.pop();
+            let mut values = self.lower_call_args(builder, args, &source_signature)?;
+            values.push(builder.ins().iconst(
+                types::I64,
+                i64::from(row.member == "secret_new"),
+            ));
+            values
+        } else if let Some((source_signature, key)) = self.callback_return_key(
             builder,
             &row.module,
             &row.member,
@@ -14458,7 +15995,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         args: &[MirCallArg],
         signature: &Signature,
     ) -> Result<Vec<Value>, String> {
-        if module == "core.host" || (module == "core.compute" && member == "set") {
+        let data_direct = matches!(
+            (module, member),
+            ("core.data", "snapshot")
+                | (
+                    "core.data.loader",
+                    "bind"
+                        | "bind_text"
+                        | "cancel"
+                        | "offline"
+                        | "invalidate"
+                        | "needs_refresh"
+                        | "ready"
+                        | "status"
+                        | "source_identity"
+                        | "authority_of"
+                        | "snapshot_reusable"
+                        | "stream"
+                )
+                | ("core.data.stream", "next" | "collect" | "cancel")
+        );
+        if module == "core.host"
+            || (module == "core.compute" && member == "set")
+            || data_direct
+        {
             self.lower_core_direct_args(builder, args, signature)
         } else {
             self.lower_call_args(builder, args, signature)
@@ -14967,6 +16527,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .runtime
             .cells
             .register_projection(CellProjection { paths, editable });
+        let handle = if editable { -handle } else { handle };
         Ok(builder.ins().iconst(types::I64, handle))
     }
 
@@ -14986,9 +16547,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
         let mut projected = self.value(guard)?;
         if let Some(split_call) = split_call {
-            if paths.len() != 2 || !edit_paths_disjoint {
+            if paths.len() != 2 || (editable && !edit_paths_disjoint) {
                 return Err(
-                    "MIR Cell guard split route requires two disjoint edit paths".to_string(),
+                    "MIR Cell guard split route has invalid path/disjointness proof".to_string(),
                 );
             }
             let common = paths[0]
@@ -15970,6 +17531,75 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         .map_or(Ok(result), |ty| self.cast(builder, result, ty))
                         .map(Some);
                 }
+                let is_cell_constructor = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == *call)
+                    .is_some_and(|row| {
+                        row.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                            && row.module == "::jet_std::JetCell"
+                            && row.member == "new"
+                    });
+                if is_cell_constructor {
+                    let row = self
+                        .program
+                        .prelude_calls
+                        .iter()
+                        .find(|row| row.id == *call)
+                        .ok_or_else(|| format!("MIR Prelude call {:?} is missing", call))?;
+                    if row.symbol.name() != "jet_std::JetCell::new" {
+                        return Err(format!(
+                            "MIR Cell constructor has a non-canonical symbol `{}`",
+                            row.symbol.name()
+                        ));
+                    }
+                    if args.len() != 1 || owner_type_args.len() != 1 || !type_args.is_empty() {
+                        return Err(
+                            "MIR Cell.new expects one value argument and one owner type argument"
+                                .to_string(),
+                        );
+                    }
+                    let element_ty = match &owner_type_args[0] {
+                        MirPreludeTypeArg::Type(ty) => ty,
+                        MirPreludeTypeArg::HostUsize => {
+                            return Err(
+                                "MIR Cell.new owner argument must be an element type".to_string()
+                            )
+                        }
+                    };
+                    let host = self.lookup_prelude_host(row)?;
+                    let signature = self
+                        .module
+                        .declarations()
+                        .get_function_decl(host)
+                        .signature
+                        .clone();
+                    if signature.params.len() != 2 {
+                        return Err(format!(
+                            "MIR Cell constructor ABI expects raw value and schema metadata, got {} parameters",
+                            signature.params.len()
+                        ));
+                    }
+                    let mut source_signature = signature.clone();
+                    source_signature.params.pop();
+                    let mut values = self.lower_call_args(builder, args, &source_signature)?;
+                    let meta = JitMeta::from_program(self.program);
+                    let schema = CellSchema::from_type(element_ty, &meta)?;
+                    let schema_handle = self.runtime.cells.register_schema(schema);
+                    values.push(builder.ins().iconst(types::I64, schema_handle));
+                    let result = self
+                        .call_declared_values(builder, host, &signature, values)?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| {
+                            "MIR Cell constructor host returned no value".to_string()
+                        })?;
+                    return expected
+                        .map_or(Ok(result), |ty| self.cast(builder, result, ty))
+                        .map(Some);
+                }
+
 
                 let is_set_constructor = self
                     .program
@@ -16994,20 +18624,26 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 column_index: _,
                 accessor,
             } => {
-                // AOT: `jet_columns_gather_cell(&store, column, index)` then the
-                // arithmetic stop with the instruction's source line on a bounds
-                // failure. The resident tier gathers the whole row through the
-                // Prelude's own column store (one E3010 stop, same wording) and
-                // reads the checked field slot, whose declared order is the
-                // column order the store was built with.
+                // AOT: `JetColumnList::cell` owns the checked read. The
+                // resident numeric path uses the same field/index facts but
+                // reads the typed Float slot directly, avoiding row material-
+                // ization and the generic cell carrier in the hot loop.
                 let row = self
                     .program
                     .prelude_calls
                     .iter()
                     .find(|row| row.id == *accessor)
                     .ok_or_else(|| format!("MIR Prelude call {:?} is missing", accessor))?;
-                if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
-                    return Err("MIR columnar accessor has unsupported Prelude ABI".to_string());
+                if row.family != jet_foundation::MIR::MirPreludeFamily::ColumnarAccess
+                    || row.module != "core.columnar"
+                    || row.symbol.name() != "jet_columns_gather_cell"
+                    || row.signature.arity != 3
+                    || row.signature.max_arity != 3
+                    || row.signature.borrow_mask.as_slice() != [true, false, false]
+                {
+                    return Err(
+                        "MIR columnar accessor has non-canonical Prelude route".to_string()
+                    );
                 }
                 let line = match source_line {
                     Some(line) => line,
@@ -17016,6 +18652,27 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 let list = self.cast(builder, self.value(*base)?, types::I64)?;
                 let at =
                     self.index_operand(builder, *index, jet_foundation::MIR::MirIndexKind::List)?;
+                let (field_index, field_ty) = self.field_info(*column)?;
+                if matches!(field_ty.kind(), MirTypeKind::Float) {
+                    let field = builder
+                        .ins()
+                        .iconst(types::I64, i64::try_from(field_index).map_err(|_| {
+                            "MIR columnar field index exceeds resident ABI".to_string()
+                        })?);
+                    let line = builder.ins().iconst(types::I32, i64::from(line));
+                    let value = self
+                        .call_host(
+                            builder,
+                            self.host.coll.columnar_get_f64,
+                            &[list, field, at, line],
+                        )?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR columnar Float read returned no value".to_string())?;
+                    return expected
+                        .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                        .map(Some);
+                }
                 let line = builder.ins().iconst(types::I32, i64::from(line));
                 let record = self
                     .call_host(builder, self.host.coll.columnar_gather, &[list, at, line])?

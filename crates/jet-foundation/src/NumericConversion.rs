@@ -67,6 +67,15 @@ pub fn jet_numeric_bit_count(value: i64, operation: i64, width: i64) -> i64 {
         1 => width - ones,
         2 => bits.leading_zeros() - (64 - width),
         3 => bits.trailing_zeros().min(width),
+        4 => (value as i64).unsigned_abs().count_ones(),
+        5 => {
+            let magnitude = (value as i64).unsigned_abs();
+            if magnitude == 0 {
+                0
+            } else {
+                64 - magnitude.leading_zeros()
+            }
+        }
         _ => panic!("checked integer population operation"),
     })
 }

@@ -6,12 +6,56 @@ mod common;
 mod tir_support;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn have_tool(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
 }
+fn resolve_executable(candidate: impl AsRef<Path>) -> Option<PathBuf> {
+    let candidate = candidate.as_ref();
+    if candidate.components().count() > 1 {
+        return candidate.is_file().then(|| candidate.to_path_buf());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(candidate))
+        .find(|path| path.is_file())
+}
+
+fn web_tools() -> Option<(PathBuf, PathBuf)> {
+    let chromium = std::env::var_os("JET_WEB_CHROMIUM")
+        .or_else(|| std::env::var_os("CHROMIUM"))
+        .or_else(|| Some("chromium".into()))
+        .and_then(|name| resolve_executable(Path::new(&name)))?;
+    let node = std::env::var_os("JET_WEB_NODE")
+        .or_else(|| std::env::var_os("NODE"))
+        .or_else(|| Some("node".into()))
+        .and_then(|name| resolve_executable(Path::new(&name)))?;
+    let chromium_ok = Command::new(&chromium)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|out| {
+            let version = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            version.contains("Chromium") || version.contains("Chrome")
+        })
+        .unwrap_or(false);
+    let node_ok = Command::new(&node)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|out| {
+            let version = String::from_utf8_lossy(&out.stdout);
+            version.starts_with('v') && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+        })
+        .unwrap_or(false);
+    (chromium_ok && node_ok).then_some((chromium, node))
+}
+
 
 fn build_web_fixture(stem: &str, src: &str, shown: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("jet_web_{stem}_{}", std::process::id()));
@@ -662,6 +706,10 @@ fn expected_fuel_pct(elapsed_ms: i64) -> i64 {
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
+fn cli_build_root(dir: &Path) -> PathBuf {
+    dir.join(".jet").join("build")
+}
+
 
 #[test]
 fn jet_cli_explain_partition_requires_web_target() {
@@ -747,12 +795,12 @@ fn jet_cli_infers_web_target_from_file_marker() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        dir.join("build/app.js").is_file(),
-        "no build/app.js — web backend wasn't inferred"
+        cli_build_root(&dir).join("app.js").is_file(),
+        "no .jet/build/app.js — web backend wasn't inferred"
     );
     assert!(
-        dir.join("build/app.wasm").is_file(),
-        "no build/app.wasm — web backend wasn't inferred"
+        cli_build_root(&dir).join("app.wasm").is_file(),
+        "no .jet/build/app.wasm — web backend wasn't inferred"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -794,12 +842,12 @@ fn jet_cli_infers_web_target_from_manifest() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        dir.join("build/app.js").is_file(),
-        "no build/app.js — web backend wasn't inferred from package.jet"
+        cli_build_root(&dir).join("app.js").is_file(),
+        "no .jet/build/app.js — web backend wasn't inferred from package.jet"
     );
     assert!(
-        dir.join("build/app.wasm").is_file(),
-        "no build/app.wasm — web backend wasn't inferred from package.jet"
+        cli_build_root(&dir).join("app.wasm").is_file(),
+        "no .jet/build/app.wasm — web backend wasn't inferred from package.jet"
     );
     let run = Command::new(&jet)
         .current_dir(&dir)
@@ -958,7 +1006,7 @@ fn jet_cli_uses_explicit_html_marker() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let served = fs::read_to_string(dir.join("build/index.html")).unwrap();
+    let served = fs::read_to_string(cli_build_root(&dir).join("index.html")).unwrap();
     assert!(
         served.contains("custom marker page"),
         "expected the #HTML(\"custom.html\") content, got:\n{served}"
@@ -1037,7 +1085,7 @@ fn jet_cli_html_marker_rejects_parent_traversal() {
         "<html>must survive</html>"
     );
     assert!(
-        !dir.join("build/index.html").exists(),
+        !cli_build_root(&dir).join("index.html").exists(),
         "rejected #HTML source must not publish an index"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -1161,6 +1209,34 @@ fn jet_cli_html_marker_rejects_hardlinked_source() {
 fn compile_web_file_loads() {
     let out = jet::compile_web("examples/features/web/web_compute.jet").expect("compile_web");
     assert!(out.web.is_some());
+}
+
+#[test]
+fn forms_table_web_lowering_preserves_typed_form_contract() {
+    let shown = "examples/features/web/forms_table.jet";
+    let source = fs::read_to_string(shown).unwrap();
+    let out = jet::compile_web(shown).unwrap_or_else(|diags| {
+        panic!(
+            "forms/table web source must lower through the checked web path:\n{}",
+            jet::render_diagnostics(shown, &source, &diags)
+        )
+    });
+    let web = out.web.expect("forms/table web source must produce artifacts");
+    let generated = format!("{}\n{}", web.wasm_rust, web.js_app);
+    for marker in [
+        "jet_web_form",
+        "jet_web_forms_typed_html",
+        "\"Person\"",
+        "\"save\"",
+        "\"id\"",
+        "\"name\"",
+        "\"active\"",
+    ] {
+        assert!(
+            generated.contains(marker),
+            "generated web artifacts lost source-backed form marker `{marker}`"
+        );
+    }
 }
 
 /// D-FMT-PLAIN1=A / I9: web keeps the plain and grouped selectors on the
@@ -1430,26 +1506,28 @@ fn web_build_publishes_maps_and_release_omits_them() {
         "default web build failed:\n{}",
         String::from_utf8_lossy(&default_out.stderr)
     );
-    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    let js = fs::read_to_string(cli_build_root(&dir).join("app.js")).unwrap();
     assert!(
         js.contains("//# sourceMappingURL=app.js.map"),
         "missing js map URL:\n{js}"
     );
-    let js_map = fs::read_to_string(dir.join("build/app.js.map")).unwrap();
+    let js_map = fs::read_to_string(cli_build_root(&dir).join("app.js.map")).unwrap();
     assert!(js_map.contains("\"version\":3"), "{js_map}");
     assert!(js_map.contains("\"sourcesContent\":["), "{js_map}");
     assert!(!js_map.contains("/home/"), "host path leaked into js map");
-    let wasm_map = fs::read_to_string(dir.join("build/app.wasm.map")).unwrap();
+    let wasm_map = fs::read_to_string(cli_build_root(&dir).join("app.wasm.map")).unwrap();
     assert!(wasm_map.contains("\"file\":\"app.wasm\""), "{wasm_map}");
     assert!(wasm_map.contains("\"sourcesContent\":["), "{wasm_map}");
-    let wasm = fs::read(dir.join("build/app.wasm")).unwrap();
+    let default_wasm = fs::read(cli_build_root(&dir).join("app.wasm")).unwrap();
     assert!(
-        wasm.windows(b"sourceMappingURL".len())
+        default_wasm
+            .windows(b"sourceMappingURL".len())
             .any(|w| w == b"sourceMappingURL"),
         "wasm missing sourceMappingURL custom section"
     );
     assert!(
-        wasm.windows(b"app.wasm.map".len())
+        default_wasm
+            .windows(b"app.wasm.map".len())
             .any(|w| w == b"app.wasm.map"),
         "wasm missing relative map URL"
     );
@@ -1464,30 +1542,43 @@ fn web_build_publishes_maps_and_release_omits_them() {
         "release web build failed:\n{}",
         String::from_utf8_lossy(&release_out.stderr)
     );
-    let release_js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    let release_js = fs::read_to_string(cli_build_root(&dir).join("app.js")).unwrap();
     assert!(
         !release_js.contains("sourceMappingURL="),
         "release app.js must not reference maps"
     );
     assert!(
-        !dir.join("build/app.js.map").is_file(),
+        !cli_build_root(&dir).join("app.js.map").is_file(),
         "release must not write app.js.map"
     );
     assert!(
-        !dir.join("build/app.wasm.map").is_file(),
+        !cli_build_root(&dir).join("app.wasm.map").is_file(),
         "release must not write app.wasm.map"
     );
-    let release_manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    let release_manifest =
+        fs::read_to_string(cli_build_root(&dir).join("web.manifest.json")).unwrap();
     assert!(
         !release_manifest.contains("\"sourceMap\""),
         "release manifest must omit sourceMap"
     );
-    let release_wasm = fs::read(dir.join("build/app.wasm")).unwrap();
+    let release_wasm = fs::read(cli_build_root(&dir).join("app.wasm")).unwrap();
     assert!(
         !release_wasm
             .windows(b"sourceMappingURL".len())
             .any(|w| w == b"sourceMappingURL"),
         "release wasm must not embed sourceMappingURL"
+    );
+    assert!(
+        release_wasm.len() <= default_wasm.len(),
+        "optimized release Wasm must not exceed the mapped default artifact: {} > {} bytes",
+        release_wasm.len(),
+        default_wasm.len()
+    );
+    assert!(
+        !release_wasm
+            .windows(b".debug_".len())
+            .any(|window| window == b".debug_"),
+        "optimized release Wasm must not carry debug custom sections"
     );
 
     // Wasm-export body must produce non-empty app.wasm.map mappings.
@@ -1503,7 +1594,7 @@ fn web_build_publishes_maps_and_release_omits_them() {
         "wasm export build failed:\n{}",
         String::from_utf8_lossy(&wasm_out.stderr)
     );
-    let wasm_map2 = fs::read_to_string(dir.join("build/app.wasm.map")).unwrap();
+    let wasm_map2 = fs::read_to_string(cli_build_root(&dir).join("app.wasm.map")).unwrap();
     let mappings_field = wasm_map2
         .split("\"mappings\":")
         .nth(1)
@@ -3904,6 +3995,26 @@ fn web_plain_run_loads_wasm_before_dom_print() {
     let dir = build_web_fixture("plain_run_startup", src, shown);
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
+        !js.contains("jet_data_web_imports"),
+        "plain Wasm run must not bundle the unreachable Data bridge",
+    );
+    assert!(
+        !js.contains("jet_testing_history_web_imports"),
+        "plain Wasm run must not initialize the unreachable history bridge",
+    );
+    assert!(
+        !js.contains("function jet_compute_web"),
+        "plain Wasm run must not bundle the unreachable WebGPU runtime",
+    );
+    assert!(
+        !js.contains("function jet_game_"),
+        "plain Wasm run must not bundle the unreachable game runtime",
+    );
+    assert!(
+        !js.contains("exact repository TZif inputs"),
+        "plain Wasm run must not embed the unreachable timezone database",
+    );
+    assert!(
         js.contains("async function loadWasm()"),
         "plain Wasm run needs loader:\n{js}"
     );
@@ -5455,4 +5566,79 @@ console.log("ok");
         "ok\n"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_runtime_uses_streaming_wasm_for_browser_mime() {
+    if !have_tool("node") {
+        eprintln!("note: skipping streaming Wasm loader test (need node)");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!(
+        "jet_web_streaming_loader_{}",
+        std::process::id()
+    ));
+    let build = root.join("build");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&build).unwrap();
+    fs::write(
+        build.join("package.json"),
+        r#"{"type":"module"}"#,
+    )
+    .unwrap();
+    fs::write(
+        build.join("jet_dom_runtime.js"),
+        include_str!("../crates/jet-codegen/src/Prelude/DomRuntime.js"),
+    )
+    .unwrap();
+    fs::write(
+        build.join("streaming_loader.mjs"),
+        r#"
+const runtime = await import("./jet_dom_runtime.js");
+const originalProcess = globalThis.process;
+const originalFetch = globalThis.fetch;
+const originalStreaming = WebAssembly.instantiateStreaming;
+const originalInstantiate = WebAssembly.instantiate;
+let streamingCalls = 0;
+let fallbackCalls = 0;
+WebAssembly.instantiateStreaming = async () => {
+  streamingCalls += 1;
+  return { instance: { exports: { memory: { buffer: new ArrayBuffer(0) } } } };
+};
+WebAssembly.instantiate = async () => {
+  fallbackCalls += 1;
+  throw new Error("array-buffer fallback used");
+};
+globalThis.process = undefined;
+globalThis.fetch = async () => ({
+  ok: true,
+  headers: { get(name) { return name === "content-type" ? "application/wasm" : null; } },
+});
+try {
+  await runtime.instantiateWasm("app.wasm");
+} finally {
+  globalThis.process = originalProcess;
+  globalThis.fetch = originalFetch;
+  WebAssembly.instantiateStreaming = originalStreaming;
+  WebAssembly.instantiate = originalInstantiate;
+}
+if (streamingCalls !== 1) throw new Error(`expected one streaming call, got ${streamingCalls}`);
+if (fallbackCalls !== 0) throw new Error(`unexpected fallback call: ${fallbackCalls}`);
+console.log("ok");
+"#,
+    )
+    .unwrap();
+    let node = Command::new("node")
+        .current_dir(&build)
+        .arg("streaming_loader.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "streaming loader harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
+    let _ = fs::remove_dir_all(&root);
 }

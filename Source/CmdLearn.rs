@@ -26,7 +26,7 @@ const LEARN_DIR: &str = ".jet/learn/feedback";
 const CURRICULUM_JSON: &str = include_str!("../examples/learn/curriculum.json");
 const CURRICULUM_SCHEMA: &str = "jet-learning-curriculum-v1";
 const CENSUS_RELATION: &str = "jet-learning-census-v1";
-const CENSUS_RELATION_SOURCE: &str = "scripts/agent/learning-census.mjs";
+const CENSUS_RELATION_SOURCE: &str = "examples/learn/curriculum.json";
 const PROGRESS_SCHEMA: &str = "jet-learn-progress-v1";
 const REVISION_RULE: &str = "source-bound observations are valid only when source_identity.digest matches; a source edit invalidates the observation until the dependent projection is regenerated and the task is re-run";
 

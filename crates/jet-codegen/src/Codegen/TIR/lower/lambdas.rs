@@ -2,7 +2,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::lambda_body_ty_expecting;
+use crate::Codegen::TIR::lambda_body_ty_expecting_with_return;
 use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower::{
@@ -88,6 +88,13 @@ pub(super) fn materialized_capture_kind(
     let source = env.split_view_handle(name).or_else(|| env.ty_of(name))?;
     let owned = view_copy_owned_type(&source)?;
     Some((view_copy_symbol(&source), owned))
+}
+
+fn is_write_split_view(name: &str, env: &LowerEnv) -> bool {
+    matches!(
+        env.split_view_handle(name),
+        Some(Type::Apply { name, .. }) if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+    )
 }
 
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
@@ -236,7 +243,7 @@ pub(crate) fn lower_lambda_expecting_host_borrow_with_return(
 /// D-FAILURE-FOUNDATION1: mirror sema's implicit `Error` carrier for a lambda
 /// that writes a success/error annotation. The AST keeps those two source
 /// slots separate, while the lowered callable must expose one Rust carrier.
-fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
+pub(crate) fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
     if lam.result_type.is_none() && lam.error_type.is_none() {
         return None;
     }
@@ -340,7 +347,9 @@ fn lower_lambda_expecting_with_host_borrow(
     let mut body_ty = shared_body
         .as_ref()
         .map(|body| lowered_block_return_ty(body))
-        .unwrap_or_else(|| lambda_body_ty_expecting(lam, cx, env, expected_params));
+        .unwrap_or_else(|| {
+            lambda_body_ty_expecting_with_return(lam, cx, env, expected_params, expected_return)
+        });
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function. The lambda's return
@@ -349,8 +358,8 @@ fn lower_lambda_expecting_with_host_borrow(
     // to `Unit`.
     let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let lambda_ret_ty = expected_return
-        .or(lam.meta.fallible_carrier.as_ref())
         .or(explicit_failure_carrier.as_ref())
+        .or(lam.meta.fallible_carrier.as_ref())
         .map(|ret| lambda_carrier_return_type(&body_ty, ret))
         .unwrap_or_else(|| body_ty.clone());
     // A lambda called immediately in a fallible outer expression still needs the
@@ -384,6 +393,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // The cap rebinds the name with place `__jet___cap_<n>` and its checked
     // capture type.
     let mut extra_cloned: Vec<String> = Vec::new();
+    let mut handle_shares: Vec<String> = Vec::new();
     let mut captures: Vec<(String, String, Type)> = Vec::new();
     // Moving escape into `jet_iter_map` / similar hosts needs owned captures. A
     // borrowed Fn parameter (`&Box<dyn Fn…>`) is not always in `cloned_captures`
@@ -407,7 +417,17 @@ fn lower_lambda_expecting_with_host_borrow(
             }
             let needs_clone =
                 env.is_borrowed(&name) || matches!(env.ty_of(&name), Some(Type::Fn { .. }));
-            if needs_clone {
+            // D-TASKBORROW1=A: a joined group child keeps the write window.
+            // `through_ref` makes the alias look borrowed, and cloning it here
+            // copies the element so owner writes never land.
+            if needs_clone
+                && is_write_split_view(&name, env)
+                && !lam.meta.materialized_captures.iter().any(|c| c == &name)
+            {
+                // Keep the TIR alias. MIR still records an owned handle so
+                // the child mutates the same heap record.
+                handle_shares.push(name);
+            } else if needs_clone {
                 extra_cloned.push(name);
             }
         }
@@ -548,6 +568,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // closure own borrowed/Fn captures.  Carry the fact onto the target MIR
     // row so its capture parameter and the enclosing Closure operand agree.
     capture_facts.cloned.extend(extra_cloned.iter().cloned());
+    capture_facts.cloned.extend(handle_shares.iter().cloned());
     TLambda {
         executable,
         source_span: lam.span,
@@ -555,8 +576,18 @@ fn lower_lambda_expecting_with_host_borrow(
         frame_schedule_derivation: lam.meta.frame_schedule_derivation.clone(),
         capture_facts,
         effects: crate::Codegen::TIR::lambda_effect_facts(lam),
-        host_param_conventions: (by_value && host_borrow.is_none())
-            .then(|| vec![crate::AST::AccessConvention::Move; param_types.len()]),
+        // By-value host callbacks take ownership of each argument. Write
+        // host borrows (`Shared.edit`, `Cell.edit`) take `&mut T`: AOT
+        // renders that signature, and JIT passes a pointer to the cell
+        // slot. Defaulting those params to Read made field writes hit a
+        // non-writable place (AOT ICE) or mutate a copied handle (JIT).
+        host_param_conventions: if by_value && host_borrow.is_none() {
+            Some(vec![crate::AST::AccessConvention::Move; param_types.len()])
+        } else if host_borrow == Some(true) {
+            Some(vec![crate::AST::AccessConvention::Write; param_types.len()])
+        } else {
+            None
+        },
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         jit_name: lambda_jit_name(lam.span.start, lam.span.end),
         param_types,
@@ -612,8 +643,8 @@ fn fallible_lambda_value(
 ) -> TExpr {
     let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let carrier = expected_return
-        .or(lam.meta.fallible_carrier.as_ref())
-        .or(explicit_failure_carrier.as_ref());
+        .or(explicit_failure_carrier.as_ref())
+        .or(lam.meta.fallible_carrier.as_ref());
     if carrier.is_none() {
         return value;
     }

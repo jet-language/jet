@@ -23,18 +23,16 @@ struct PlainParticle {
     mass: Float
 }
 
-fn total_mass(ps: [Particle]) Float -> {
+fn total_mass(ps: [Particle]) -> Float {
     sum := Float{0.0}
     loop p in ps -> sum += p.mass
     return sum
 }
 
 // Indexed field arithmetic keeps the physical column access contiguous.
-fn particle_energy(ps: [Particle]) Float -> {
+fn particle_energy(ps: [Particle]) -> Float {
     total := Float{0.0}
-    loop i in 0..<ps.len() {
-        total += ps[i].x * ps[i].y + ps[i].mass
-    }
+    loop i in 0..<ps.len() -> total += ps[i].x * ps[i].y + ps[i].mass
     return total
 }
 
@@ -57,7 +55,7 @@ fn run() {
     plain :: [PlainParticle]{
         PlainParticle{x: 0.0, y: 0.0, mass: 1.0},
         PlainParticle{x: 1.0, y: 2.0, mass: 3.0},
-        PlainParticle{x: 4.0, y: 5.0, mass: 6.0}
+        PlainParticle{x: 4.0, y: 5.0, mass: 6.0},
     }
     columnar_json :: json.to_string(ps)
     plain_json :: json.to_string(plain)

@@ -12,8 +12,8 @@ use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
 use super::gap::JitGap;
 use super::resident::{
-    ensure_resident_module, fresh_runtime, publish_runtime_decisions, resident_hot_swap,
-    resident_run_fresh, resident_teardown,
+    ensure_resident_module, fresh_runtime_with_allocator_cap, program_allocator_cap_bytes,
+    publish_runtime_decisions, resident_hot_swap, resident_run_fresh, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
 use super::safety::{
@@ -100,7 +100,10 @@ fn try_compile_debug_aot_on_stack(
     object_builder.per_function_section(true);
     let mut module = ObjectModule::new(object_builder);
     let host = super::runtime_host::declare_host_fns_for_module(&mut module)?;
-    let mut runtime = super::resident::fresh_runtime(release_devtools_policy.clone());
+    let mut runtime = super::resident::fresh_runtime_with_allocator_cap(
+        release_devtools_policy.clone(),
+        program_allocator_cap_bytes(program),
+    );
     let entry_id = super::functions_compile::compile_program_object(
         &mut module,
         &host,
@@ -132,7 +135,12 @@ pub(crate) fn try_resident(
     let plan = plan_mir_tiers(program, artifact);
     note_jit_execution();
     match catch_jit_panic("resident run", || {
-        resident_run_fresh(program, None, artifact, release_devtools_policy)
+        resident_run_fresh(
+            program,
+            program_allocator_cap_bytes(program),
+            artifact,
+            release_devtools_policy,
+        )
     }) {
         Ok(outcome) => {
             record_trace(plan.rows.clone());
@@ -158,7 +166,12 @@ pub(crate) fn try_resident_hot_swap(
     let plan = plan_mir_tiers(program, artifact);
     note_jit_execution();
     match catch_jit_panic("resident hot swap", || {
-        resident_hot_swap(program, None, artifact, release_devtools_policy)
+        resident_hot_swap(
+            program,
+            program_allocator_cap_bytes(program),
+            artifact,
+            release_devtools_policy,
+        )
     }) {
         Ok(outcome) => {
             record_trace(plan.rows.clone());
@@ -186,7 +199,12 @@ pub(crate) fn try_resident_restart(
     let plan = plan_mir_tiers(program, artifact);
     note_jit_execution();
     match catch_jit_panic("resident restart", || {
-        resident_run_fresh(program, None, artifact, release_devtools_policy)
+        resident_run_fresh(
+            program,
+            program_allocator_cap_bytes(program),
+            artifact,
+            release_devtools_policy,
+        )
     }) {
         Ok(outcome) => {
             record_trace(plan.rows.clone());
@@ -236,7 +254,10 @@ pub fn try_compile_program(
         catch_jit_panic("compile", || {
             resident_teardown();
             RESIDENT_RUNTIME.with(|slot| {
-                *slot.borrow_mut() = Some(fresh_runtime(release_devtools_policy.clone()))
+                *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(
+                    release_devtools_policy.clone(),
+                    program_allocator_cap_bytes(program),
+                ))
             });
             ensure_resident_module(program, artifact, release_devtools_policy)
         })

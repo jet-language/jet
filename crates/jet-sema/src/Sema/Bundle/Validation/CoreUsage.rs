@@ -86,8 +86,8 @@ pub(crate) fn collect_used_core(
     if states.iter().any(|state| state.exact_int_reachable.get()) {
         used.insert("core.math::__exact_int__".to_string());
     }
-    // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
-    // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
+    // D-CABI-CALLBACK1: canonical function keys sema proved are passed as
+    // stable C callback symbols (`arg.flags.c_callback_symbol`) at some
     // `#Import` call site anywhere in the bundle. Collected in this same
     // whole-program walk (not a second traversal) so codegen can emit each
     // function's raw C trampoline — never every `#Pure fn` (that leaked the
@@ -522,8 +522,8 @@ pub(crate) fn check_ui_capabilities(
     used_core: &HashSet<String>,
     usage_spans: &HashMap<String, crate::Diagnostics::Span>,
 ) -> Vec<crate::Diagnostics::Diagnostic> {
-    let granted = &bundle.package_guarantees.authority_needs;
     let mut diagnostics = Vec::new();
+    let declared = &bundle.package_guarantees.authority_needs;
     for usage in used_core {
         let Some((module, member)) = usage.split_once("::") else {
             continue;
@@ -532,7 +532,7 @@ pub(crate) fn check_ui_capabilities(
             continue;
         };
         for capability in row.ui_capabilities() {
-            if granted.iter().any(|need| need == capability) {
+            if declared.iter().any(|need| need == capability) {
                 continue;
             }
             let service = format!("{module}.{member}");
@@ -1389,14 +1389,11 @@ pub(crate) fn collect_core_expr(
             }
             collect_core_expr(receiver, imports, registry, used, spans, ffi_cb);
             for arg in args {
-                // D-CABI-CALLBACK1: a qualified `#Extern`-module call
-                // (`c.callback_twice(increment, x)`) resolves through
-                // `infer_import_call` (CheckerCoreLib/imports.rs), a separate
-                // path from the bare-name call below — same flag, same fix.
-                if arg.flags.c_callback_symbol {
-                    if let Expr::Ident(name, _) = &arg.expr {
-                        ffi_cb.insert(name.clone());
-                    }
+                // D-CABI-CALLBACK1: carry sema's canonical declaration key, not
+                // the source leaf, so equal callback names in different modules
+                // publish distinct trampoline facts.
+                if let Some(key) = arg.flags.c_callback_function_key.as_ref() {
+                    ffi_cb.insert(key.clone());
                 }
                 collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
             }
@@ -1441,13 +1438,10 @@ pub(crate) fn collect_core_expr(
                 );
             }
             for arg in &c.args {
-                // D-CABI-CALLBACK1: sema proved this bare function name is
-                // passed as a stable C callback at a `#Import` call site.
-                // Record it so codegen emits the matching raw trampoline.
-                if arg.flags.c_callback_symbol {
-                    if let Expr::Ident(name, _) = &arg.expr {
-                        ffi_cb.insert(name.clone());
-                    }
+                // D-CABI-CALLBACK1: sema proved this named function is passed as
+                // a stable C callback; retain its canonical declaration identity.
+                if let Some(key) = arg.flags.c_callback_function_key.as_ref() {
+                    ffi_cb.insert(key.clone());
                 }
                 collect_core_expr(&arg.expr, imports, registry, used, spans, ffi_cb);
             }

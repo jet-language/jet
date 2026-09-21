@@ -755,6 +755,7 @@ pub(crate) fn method_call_in_subset(
                     | ("Set", "new", 0)
                     | ("Map", "new", 0)
                     | ("Map", "from_keys", 2)
+                    | ("Map", "fromkeys", 2)
                     | (crate::Syntax::TYPE_RANK, "from", 1)
                     | ("PriorityQueue", "from", 1)
                     | (crate::Syntax::TYPE_BYTES, "from", 1)
@@ -1792,17 +1793,20 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         // path, handled separately above; raw/snapshot/new have bespoke lowering).
         "clone" | "raw" | "snapshot" | "new"
         // String / list / map / collection builtins (`emit_builtin_method`).
-        | "parse" | "from_bytes" | "from_bytes_lossy" | "len" | "is_empty" | "push" | "pop" | "insert"
+        | "parse" | "from_bytes" | "from_bytes_lossy" | "len" | "is_empty" | "push" | "append" | "pop" | "insert"
         | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
-        | "contains" | "has" | "index_of" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
-        | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
+        | "contains" | "has" | "index_of" | "index" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
+        | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "encode" | "trim"
+        | "strip" | "lstrip" | "rstrip" | "expandtabs" | "startswith" | "endswith"
         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
-        | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
+        | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "items" | "has_key" | "add" | "add_new" | "setdefault" | "update"
+        | "difference_update" | "intersection_update" | "symmetric_difference_update"
         | "merge"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
         | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
         | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
         | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
+        | "rfind" | "rpartition"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
         | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"

@@ -1,0 +1,92 @@
+package {
+    name: "core.event"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Event scopes, hooks, and policy."
+    license: "MIT"
+    outputs: {
+        event: .Library{ entry: event }
+    }
+}
+
+pub struct EventScope { pub name: String, pub hooks: [String] }
+pub struct Hook { pub name: String }
+pub struct Policy { pub sync: Bool }
+pub fn new() -> EventScope { EventScope{name: "root", hooks: [String]{}} }
+pub fn scope(name: String) -> EventScope { EventScope{name: name, hooks: [String]{}} }
+pub fn hook(name: String) -> Hook { Hook{name: name} }
+pub fn decision_hook(name: String) -> Hook { Hook{name: "decision:{name}"} }
+pub fn policy_sync() -> Policy { Policy{sync: true} }
+pub fn with_policy(scope: EventScope, policy: Policy) -> EventScope { scope }
+pub fn async_result(ok: Bool) -> String {
+    if ok -> "ok"
+    "err"
+}
+
+
+pub fn emit(scope: EventScope, hook: String) -> EventScope {
+    hooks := scope.hooks
+    hooks.push(hook)
+    EventScope{name: scope.name, hooks: hooks}
+}
+
+pub fn listen(scope: EventScope, hook: String) -> EventScope { emit(scope, hook) }
+
+pub fn once(scope: EventScope, hook: String) -> EventScope { emit(scope, "once:{hook}") }
+
+pub fn off(scope: EventScope, hook: String) -> EventScope {
+    hooks := [String]{}
+    loop h in scope.hooks {
+        if h != hook -> hooks.push(h)
+    }
+    EventScope{name: scope.name, hooks: hooks}
+}
+
+pub fn clear(scope: EventScope) -> EventScope { EventScope{name: scope.name, hooks: [String]{}} }
+
+pub fn names(scope: EventScope) -> [String] { scope.hooks }
+
+pub fn contains(scope: EventScope, hook: String) -> Bool {
+    loop h in scope.hooks {
+        if h == hook -> return true
+    }
+    false
+}
+
+pub fn policy_async() -> Policy { Policy{sync: false} }
+
+pub fn is_sync(policy: Policy) -> Bool { policy.sync }
+
+
+
+pub fn len(scope: EventScope) -> Int { scope.hooks.len() }
+
+pub fn is_empty(scope: EventScope) -> Bool { scope.hooks.len() == 0 }
+
+pub fn once_pending(scope: EventScope, hook: String) -> Bool { contains(scope, "once:{hook}") }
+
+pub fn emit_all(scope: EventScope, hooks: [String]) -> EventScope {
+    out := scope
+    loop h in hooks -> out = emit(out, h)
+    out
+}
+
+pub fn drain_once(scope: EventScope, hook: String) -> EventScope { off(scope, "once:{hook}") }
+
+pub fn count(scope: EventScope, hook: String) -> Int {
+    n := 0
+    loop h in scope.hooks {
+        if h == hook -> n = n + 1
+    }
+    n
+}
+
+pub fn rename(scope: EventScope, name: String) -> EventScope { EventScope{name: name, hooks: scope.hooks} }
+
+pub fn merge(a: EventScope, b: EventScope) -> EventScope {
+    out := a
+    loop h in b.hooks {
+        if !contains(out, h) -> out = emit(out, h)
+    }
+    out
+}

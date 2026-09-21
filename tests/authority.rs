@@ -1277,7 +1277,7 @@ struct State {
     event_count: Int{0}
 }
 
-fn panel_lines(state: State) [UiNode] -> {
+fn panel_lines(state: State) -> [UiNode] {
     return [UiNode]{
         ui.text(state.selected),
         ui.text("{state.event_count}")
@@ -1285,7 +1285,7 @@ fn panel_lines(state: State) [UiNode] -> {
 }
 
 #DevPanel
-pub fn panel(state: State) UiNode -> {
+pub fn panel(state: State) -> UiNode {
     return ui.box(panel_lines(state))
 }
 
@@ -1308,5 +1308,39 @@ fn run() {
     assert_eq!(
         error_codes,
         vec!["E1414".to_string(), "E1414".to_string()]
+    );
+}
+
+#[test]
+fn erased_authority_scope_does_not_survive_erasure() {
+    let source = r#"
+fn erased() {
+    #Off {
+        #FX(authority: FS.Read) {
+            print("erased")
+        }
+    }
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
+}
+
+fn active() {
+    #FX(authority: FS.Read) {
+        print("active")
+    }
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
+}
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("active authority scope must reject IO");
+    let e0712 = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "E0712")
+        .count();
+    assert_eq!(
+        e0712, 1,
+        "only the active authority scope must reject IO: {diagnostics:#?}"
     );
 }

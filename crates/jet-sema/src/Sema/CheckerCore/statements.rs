@@ -434,10 +434,22 @@ impl<'a> Checker<'a> {
         let before_maximal = self.fx_maximal;
         let diagnostics_start = self.diags.len();
         let allows_start = self.statement_lint_allows.len();
-        self.check_stmt_inner(stmt);
-        let effect_free = self.fx_direct == before_direct
-            && self.fx_edges == before_edges
-            && self.fx_maximal == before_maximal;
+        let effect_free = if before.reachable {
+            self.check_stmt_inner(stmt);
+            self.fx_direct == before_direct
+                && self.fx_edges == before_edges
+                && self.fx_maximal == before_maximal
+        } else {
+            // An unreachable statement is still checked for diagnostics, but
+            // its semantic facts must not leak into a later join. Reuse the
+            // erased-scope boundary so every fact plane follows one gate.
+            self.with_erased_scope(|checker| {
+                checker.check_stmt_inner(stmt);
+                checker.fx_direct == before_direct
+                    && checker.fx_edges == before_edges
+                    && checker.fx_maximal == before_maximal
+            })
+        };
         self.emit_stdlib_lints_for_stmt(stmt);
         self.emit_loop_liveness_lints_for_stmt(stmt, before.reachable, effect_free);
         let allows = self.statement_lint_allows.split_off(allows_start);
@@ -799,16 +811,57 @@ impl<'a> Checker<'a> {
                     self.note_move_if_direct_ident(e);
                 }
                 if let Some(et) = et {
-                    let http_handler_lambda = matches!(
-                        (&rt, &et),
-                        (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
-                            if name == "HTTPHandler"
-                                && params == &vec![Type::Named("HTTPRequest".to_string())]
-                                && ret.as_ref() == &Type::Result {
-                                    ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                                    err: Box::new(Type::Named("HTTPError".to_string())),
-                                }
-                    );
+                    let http_handler_lambda = if matches!(
+                        rt.without_user_tags(),
+                        Type::Named(name) if name.rsplit('.').next() == Some("HTTPHandler")
+                    ) {
+                        match et.without_user_tags() {
+                            Type::Fn {
+                                params,
+                                ret: Some(ret),
+                                effect_bound,
+                                ..
+                            } => {
+                                let returns_http_handler = match ret.without_user_tags() {
+                                    Type::Result { ok, err } => {
+                                        matches!(
+                                            ok.without_user_tags(),
+                                            Type::Named(name)
+                                                if name.rsplit('.').next() == Some("HTTPResponse")
+                                        ) && matches!(
+                                            err.without_user_tags(),
+                                            Type::Named(name)
+                                                if name.rsplit('.').next() == Some("HTTPError")
+                                        )
+                                    }
+                                    Type::Named(name)
+                                        if name.rsplit('.').next() == Some("HTTPResponse") =>
+                                    {
+                                        effect_bound.as_ref().is_some_and(|effects| {
+                                            effects.iter().any(|(name, _)| {
+                                                name.trim()
+                                                    .trim_start_matches('!')
+                                                    .rsplit('.')
+                                                    .next()
+                                                    == Some("HTTPError")
+                                            })
+                                        })
+                                    }
+                                    _ => false,
+                                };
+                                params.len() == 1
+                                    && matches!(
+                                        params[0].without_user_tags(),
+                                        Type::Named(name)
+                                            if name.rsplit('.').next() == Some("HTTPRequest")
+                                    )
+                                    && returns_http_handler
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
                     let string_view_compatible = string_view_return && et == Type::String;
                     let union_member_widen = matches!(
                         &rt,
@@ -2829,11 +2882,41 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 self.inferred_lambda_mut_captures = enclosing_mut_captures;
             }
+            Stmt::Switched { marker, body, .. } if crate::AST::switched_off(marker) => {
+                // D-ERASED-SCOPE1: #Off source is checked for diagnostics, but
+                // no semantic fact, effect edge, or optimizer evidence may
+                // escape. Check a disposable AST copy: inference annotates
+                // expressions in place, and post-check projections must never
+                // consume annotations from code that emits nowhere.
+                let original_body = std::mem::take(body);
+                let mut checked_body = original_body.clone();
+                self.with_erased_scope(|checker| {
+                    checker.suppress_must_use = true;
+                    checker.push_scope();
+                    for stmt in &mut checked_body {
+                        checker.check_stmt(stmt);
+                    }
+                    checker.check_single_use_consumed_in_current_scope();
+                    checker.drop_scope_no_obligation_checks();
+                });
+                *body = original_body;
+                // Lambda rows are the one post-check projection that needs an
+                // explicit erased marker; all other checked annotations stay
+                // on the disposable copy above.
+                for stmt in body {
+                    stmt.for_each_expr_mut(|expr| {
+                        if let Expr::Lambda(lambda) = expr {
+                            lambda.meta.runtime_erased = true;
+                        }
+                    });
+                }
+            }
             Stmt::Switched { marker, body, .. }
-                if crate::AST::switched_off(marker)
-                    || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {
-                // D-ERASED-SCOPE1: erased source is checked for diagnostics, but
-                // no semantic fact, effect edge, or optimizer evidence may escape.
+                if marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {
+                // DebugOnly may execute in a debug/dev profile, so retain its
+                // checked AST annotations for that lowering. Its semantic
+                // ledgers still use the erased-scope boundary: release output
+                // cannot rely on facts from a body it removes.
                 self.with_erased_scope(|checker| {
                     checker.suppress_must_use = true;
                     checker.push_scope();
@@ -2845,6 +2928,7 @@ impl<'a> Checker<'a> {
                             }
                         });
                     }
+                    checker.check_single_use_consumed_in_current_scope();
                     checker.drop_scope_no_obligation_checks();
                 });
             }

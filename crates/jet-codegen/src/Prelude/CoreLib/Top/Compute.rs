@@ -5073,6 +5073,89 @@ fn jet_compute_view_storage_end(
     })
 }
 
+fn jet_compute_visit_tensor_values<F>(
+    tensor: &JetTensor,
+    mut visit: F,
+) -> Result<(), JetComputeError>
+where
+    F: FnMut(f64) -> Result<(), JetComputeError>,
+{
+    let expected_len = jet_compute_storage_len(&tensor.shape)?;
+    let (strides, offset) = jet_compute_view_metadata(tensor)?;
+    if expected_len == 0 {
+        return Ok(());
+    }
+    let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
+    let data = tensor.data.as_ref();
+    if strides == expected_strides.as_slice() {
+        let end = offset.checked_add(expected_len).ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor view metadata does not address its logical storage".to_string())
+        })?;
+        let values = data.get(offset..end).ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor view metadata does not address its logical storage".to_string())
+        })?;
+        for &value in values {
+            visit(value)?;
+        }
+        return Ok(());
+    }
+    let dimensions = tensor
+        .shape
+        .iter()
+        .map(|dimension| {
+            usize::try_from(*dimension).map_err(|_| {
+                JetComputeError::InvalidShape("Tensor shape axis is too large".to_string())
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let strides = strides
+        .iter()
+        .map(|stride| {
+            usize::try_from(*stride).map_err(|_| {
+                JetComputeError::InvalidShape(
+                    "Tensor view strides must be non-negative and representable".to_string(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut coordinates = vec![0usize; dimensions.len()];
+    let mut physical_offset = offset;
+    for _ in 0..expected_len {
+        let value = data.get(physical_offset).copied().ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor view metadata does not address its logical storage".to_string())
+        })?;
+        visit(value)?;
+        let mut axis = dimensions.len();
+        while axis > 0 {
+            axis -= 1;
+            let dimension = dimensions[axis];
+            if coordinates[axis] + 1 < dimension {
+                coordinates[axis] += 1;
+                physical_offset = physical_offset
+                    .checked_add(strides[axis])
+                    .ok_or_else(|| {
+                        JetComputeError::InvalidShape(
+                            "Tensor view metadata does not address its logical storage".to_string(),
+                        )
+                    })?;
+                break;
+            }
+            coordinates[axis] = 0;
+            let rewind = strides[axis]
+                .checked_mul(dimension - 1)
+                .ok_or_else(|| {
+                    JetComputeError::InvalidShape(
+                        "Tensor view metadata does not address its logical storage".to_string(),
+                    )
+                })?;
+            physical_offset = physical_offset.checked_sub(rewind).ok_or_else(|| {
+                JetComputeError::InvalidShape("Tensor view metadata does not address its logical storage".to_string())
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn jet_compute_tensor_values(tensor: &JetTensor) -> Vec<f64> {
     let Ok(expected_len) = jet_compute_storage_len(&tensor.shape) else {
         return Vec::new();
@@ -5246,24 +5329,22 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
             "Tensor view exceeds backing storage".to_string(),
         ));
     }
-    let values = jet_compute_tensor_values(tensor);
-    if values.len() != expected_len {
-        return Err(JetComputeError::InvalidShape(
-            "Tensor view metadata does not address its logical storage".to_string(),
-        ));
-    }
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(JetComputeError::Arithmetic(
-            "Tensor values must be finite".to_string(),
-        ));
-    }
-    for value in &values {
+    jet_compute_visit_tensor_values(tensor, |value| {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(JetComputeError::Arithmetic(
+                "Tensor values must be finite".to_string(),
+            ))
+        }
+    })?;
+    jet_compute_visit_tensor_values(tensor, |value| {
         jet_compute_validate_profile_value(
             &tensor.last_placement.profile,
-            *value,
+            value,
             "Tensor value",
-        )?;
-    }
+        )
+    })?;
     Ok(())
 }
 
@@ -6944,9 +7025,7 @@ fn jet_compute_materialize_broadcast(
     let mut coordinates = vec![0usize; dst_rank];
     let mut source_index = source_offset;
     for _ in 0..n {
-        let value = tensor.data.get(source_index).copied().ok_or_else(|| {
-            JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-        })?;
+        let value = tensor.data[source_index];
         data.push(value);
         let mut axis = dst_rank;
         while axis > 0 {
@@ -7060,37 +7139,75 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
     if out_shape.is_empty() {
         out_shape.push(1);
     }
+    let (source_strides, source_offset) = jet_compute_view_metadata(tensor)?;
+    let axis_stride = usize::try_from(source_strides[axis]).map_err(|_| {
+        JetComputeError::InvalidShape(
+            "Tensor view strides must be non-negative and representable".to_string(),
+        )
+    })?;
+    let axis_len = usize::try_from(tensor.shape[axis]).map_err(|_| {
+        JetComputeError::InvalidShape("sum_axis extent is too large".to_string())
+    })?;
+    let out_n = usize::try_from(jet_compute_numel(&out_shape)?).map_err(|_| {
+        JetComputeError::InvalidShape("sum_axis output is too large".to_string())
+    })?;
+    let source_data = tensor.data.as_ref();
+    let source_offset_for = |flat: usize| -> Result<usize, JetComputeError> {
+        let mut remainder = flat;
+        let mut offset = source_offset;
+        for source_axis in (0..tensor.shape.len()).rev() {
+            if source_axis == axis {
+                continue;
+            }
+            let dimension = usize::try_from(tensor.shape[source_axis]).map_err(|_| {
+                JetComputeError::InvalidShape("Tensor shape axis is too large".to_string())
+            })?;
+            let coordinate = if dimension == 0 {
+                0
+            } else {
+                remainder % dimension
+            };
+            remainder = if dimension == 0 {
+                0
+            } else {
+                remainder / dimension
+            };
+            let stride = usize::try_from(source_strides[source_axis]).map_err(|_| {
+                JetComputeError::InvalidShape(
+                    "Tensor view strides must be non-negative and representable".to_string(),
+                )
+            })?;
+            let term = coordinate.checked_mul(stride).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+            offset = offset.checked_add(term).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+        }
+        Ok(offset)
+    };
+
     if jet_compute_is_accelerator(tensor.device) {
-        let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape.clone(), 0.0)?;
-        let axis_len = usize::try_from(tensor.shape[axis]).map_err(|_| {
-            JetComputeError::InvalidShape("accelerator sum_axis extent is too large".to_string())
-        })?;
-        let out_n = usize::try_from(jet_compute_numel(&out_shape)?).map_err(|_| {
-            JetComputeError::InvalidShape("accelerator sum_axis output is too large".to_string())
-        })?;
+        let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape, 0.0)?;
+        let Some(output_data) = std::sync::Arc::get_mut(&mut out.data) else {
+            return Err(JetComputeError::Unsupported(
+                "accelerator sum_axis requires exclusive output storage".to_string(),
+            ));
+        };
+        let mut values = Vec::with_capacity(axis_len);
         for flat in 0..out_n {
-            let mut rem = flat as i64;
-            let mut out_coords = vec![0i64; out_shape.len()];
-            for index in (0..out_shape.len()).rev() {
-                let dim = out_shape[index];
-                out_coords[index] = if dim == 0 { 0 } else { rem % dim };
-                rem = if dim == 0 { 0 } else { rem / dim };
-            }
-            let mut coords = vec![0i64; tensor.shape.len()];
-            let mut out_index = 0;
-            for index in 0..tensor.shape.len() {
-                if index != axis {
-                    coords[index] = out_coords[out_index];
-                    out_index += 1;
-                }
-            }
-            let mut values = Vec::with_capacity(axis_len);
-            for value in 0..axis_len {
-                coords[axis] = value as i64;
+            let mut source_index = source_offset_for(flat)?;
+            values.clear();
+            for k in 0..axis_len {
                 values.push(jet_compute_f32_value(
-                    jet_compute_get_raw(tensor, &coords)?,
+                    source_data[source_index],
                     "accelerator sum input",
                 )?);
+                if k + 1 < axis_len {
+                    source_index = source_index.checked_add(axis_stride).ok_or_else(|| {
+                        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+                    })?;
+                }
             }
             let sum = if values.is_empty() {
                 0.0
@@ -7105,7 +7222,18 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
                         ))
                     })?
             };
-            jet_compute_set(&mut out, &out_coords, f64::from(sum))?;
+            let output = f64::from(sum);
+            if !output.is_finite() {
+                return Err(JetComputeError::Arithmetic(
+                    "Tensor values must be finite".to_string(),
+                ));
+            }
+            jet_compute_validate_profile_value(
+                &tensor.last_placement.profile,
+                output,
+                "Tensor write value",
+            )?;
+            output_data[flat] = output;
         }
         return jet_compute_record(
             out,
@@ -7117,32 +7245,19 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
             },
         );
     }
+
     let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
-    let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape.clone(), 0.0)?;
-    let axis_len = tensor.shape[axis];
-    let out_n = jet_compute_numel(&out_shape)?;
+    let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape, 0.0)?;
+    let Some(output_data) = std::sync::Arc::get_mut(&mut out.data) else {
+        return Err(JetComputeError::Unsupported(
+            "sum_axis requires exclusive output storage".to_string(),
+        ));
+    };
     for flat in 0..out_n {
-        let mut coords = vec![0i64; tensor.shape.len()];
-        let mut rem = flat;
-        let mut out_coords = vec![0i64; out_shape.len()];
-        for i in (0..out_shape.len()).rev() {
-            let dim = out_shape[i];
-            out_coords[i] = if dim == 0 { 0 } else { rem % dim };
-            rem = if dim == 0 { 0 } else { rem / dim };
-        }
-        let mut o = 0usize;
-        for i in 0..tensor.shape.len() {
-            if i == axis {
-                coords[i] = 0;
-            } else {
-                coords[i] = out_coords[o];
-                o += 1;
-            }
-        }
+        let mut source_index = source_offset_for(flat)?;
         let mut sum = 0.0;
         for k in 0..axis_len {
-            coords[axis] = k;
-            let value = jet_compute_get_raw(tensor, &coords)?;
+            let value = source_data[source_index];
             sum = if f32_profile {
                 let value = jet_compute_f32_value(value, "sum_axis input")?;
                 f64::from(value + sum as f32)
@@ -7154,8 +7269,13 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
                     "sum_axis accumulation produced a non-finite value".to_string(),
                 ));
             }
+            if k + 1 < axis_len {
+                source_index = source_index.checked_add(axis_stride).ok_or_else(|| {
+                    JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+                })?;
+            }
         }
-        jet_compute_set(&mut out, &out_coords, sum)?;
+        output_data[flat] = sum;
     }
     jet_compute_record(
         out,
@@ -7196,9 +7316,9 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
         );
     }
     let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
-    let values = jet_compute_tensor_values(tensor);
-    let mut data = Vec::with_capacity(values.len());
-    for value in values {
+    let expected_len = jet_compute_storage_len(&tensor.shape)?;
+    let mut data = Vec::with_capacity(expected_len);
+    jet_compute_visit_tensor_values(tensor, |value| {
         let output = if f32_profile {
             let value = jet_compute_f32_value(value, "unary input")?;
             let output = match op {
@@ -7246,10 +7366,18 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
             )));
         }
         data.push(output);
-    }
-    let mut output = jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), 0.0)?;
-    output.strides = jet_compute_row_major_strides(&tensor.shape)?;
-    output.data = std::sync::Arc::new(data);
+        Ok(())
+    })?;
+    let shape = tensor.shape.clone();
+    let output = JetTensor {
+        strides: jet_compute_row_major_strides(&shape)?,
+        data: std::sync::Arc::new(data),
+        shape,
+        device: tensor.device,
+        last_placement: tensor.last_placement.clone(),
+        last_transfer: None,
+        trace: None,
+    };
     jet_compute_record(
         output,
         &[tensor],
@@ -7415,12 +7543,8 @@ fn jet_compute_binary_strided(
         let mut right_index =
             jet_compute_contiguous_row_offset(row, shape, &right_strides, right_offset)?;
         for _ in 0..row_width {
-            let x = a.data.get(left_index).copied().ok_or_else(|| {
-                JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-            })?;
-            let y = b.data.get(right_index).copied().ok_or_else(|| {
-                JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-            })?;
+            let x = a.data[left_index];
+            let y = b.data[right_index];
             data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
             left_index = left_index.checked_add(left_column_stride).ok_or_else(|| {
                 JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
@@ -7491,17 +7615,8 @@ fn jet_compute_binary_contiguous(
     if n == 0 {
         return Ok(Some(Vec::new()));
     }
-    let row_width = usize::try_from(*shape.last().ok_or_else(|| {
-        JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
-    })?)
-    .map_err(|_| JetComputeError::InvalidShape("Tensor row width is too large".to_string()))?;
-    if row_width == 0 {
-        return Ok(Some(Vec::new()));
-    }
-    let row_count = n / row_width;
-    // Equal-shape row-major tensors stay as contiguous slices. Chunk by
-    // elements so rank-1 and singleton-leading shapes can use bounded workers
-    // without allocating a tensor per element.
+    // Equal-shape row-major tensors stay as contiguous slices. Write directly
+    // into the one output allocation instead of building chunk intermediates.
     if !shape.is_empty() && a.shape.as_slice() == shape && b.shape.as_slice() == shape {
         let expected_strides = jet_compute_row_major_strides(shape)?;
         let (left_source_strides, left_source_offset) = jet_compute_view_metadata(a)?;
@@ -7521,35 +7636,22 @@ fn jet_compute_binary_contiguous(
             let right_values = b.data.get(right_source_offset..right_end).ok_or_else(|| {
                 JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
             })?;
-            let worker_cap = std::thread::available_parallelism()
-                .map(|parallelism| parallelism.get())
-                .unwrap_or(1);
-            let indexed = jet_list_para_chunks_kernel(
-                n,
-                worker_cap,
-                worker_cap,
-                |elements| {
-                    let left_chunk = left_values.get(elements.start..elements.end).ok_or_else(|| {
-                        JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-                    })?;
-                    let right_chunk = right_values.get(elements.start..elements.end).ok_or_else(|| {
-                        JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
-                    })?;
-                    let mut chunk = Vec::with_capacity(elements.len());
-                    for (&x, &y) in left_chunk.iter().zip(right_chunk) {
-                        chunk.push(jet_compute_binary_element(op, x, y, f32_profile)?);
-                    }
-                    Ok(chunk)
-                },
-            );
             let mut data = Vec::with_capacity(n);
-            for (_, chunk) in indexed {
-                data.extend(chunk?);
+            for (&x, &y) in left_values.iter().zip(right_values) {
+                data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
             }
             return Ok(Some(data));
         }
     }
 
+    let row_width = usize::try_from(*shape.last().ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+    })?)
+    .map_err(|_| JetComputeError::InvalidShape("Tensor row width is too large".to_string()))?;
+    if row_width == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let row_count = n / row_width;
     let left_column_stride = usize::try_from(
         *left_strides.last().ok_or_else(|| {
             JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
@@ -7570,63 +7672,27 @@ fn jet_compute_binary_contiguous(
             "Tensor view strides must be non-negative and representable".to_string(),
         )
     })?;
-    let worker_cap = std::thread::available_parallelism()
-        .map(|parallelism| parallelism.get())
-        .unwrap_or(1);
-    let indexed = jet_list_para_chunks_kernel(
-        row_count,
-        worker_cap,
-        worker_cap,
-        |rows| {
-            let chunk_len = rows
-                .len()
-                .checked_mul(row_width)
-                .ok_or_else(|| {
-                    JetComputeError::InvalidShape("Tensor row chunk is too large".to_string())
-                })?;
-            let mut chunk = Vec::with_capacity(chunk_len);
-            for row in rows {
-                let mut left_index = jet_compute_contiguous_row_offset(
-                    row,
-                    shape,
-                    &left_strides,
-                    left_offset,
-                )?;
-                let mut right_index = jet_compute_contiguous_row_offset(
-                    row,
-                    shape,
-                    &right_strides,
-                    right_offset,
-                )?;
-                for _ in 0..row_width {
-                    let x = a.data.get(left_index).copied().ok_or_else(|| {
-                        JetComputeError::OutOfBounds(
-                            "tensor index is outside storage".to_string(),
-                        )
-                    })?;
-                    let y = b.data.get(right_index).copied().ok_or_else(|| {
-                        JetComputeError::OutOfBounds(
-                            "tensor index is outside storage".to_string(),
-                        )
-                    })?;
-                    chunk.push(jet_compute_binary_element(op, x, y, f32_profile)?);
-                    left_index = left_index.checked_add(left_column_stride).ok_or_else(|| {
-                        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
-                    })?;
-                    right_index = right_index.checked_add(right_column_stride).ok_or_else(|| {
-                        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
-                    })?;
-                }
-            }
-            Ok(chunk)
-        },
-    );
     let mut data = Vec::with_capacity(n);
-    for (_, chunk) in indexed {
-        data.extend(chunk?);
+    for row in 0..row_count {
+        let mut left_index =
+            jet_compute_contiguous_row_offset(row, shape, &left_strides, left_offset)?;
+        let mut right_index =
+            jet_compute_contiguous_row_offset(row, shape, &right_strides, right_offset)?;
+        for _ in 0..row_width {
+            let x = a.data[left_index];
+            let y = b.data[right_index];
+            data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
+            left_index = left_index.checked_add(left_column_stride).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+            right_index = right_index.checked_add(right_column_stride).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+        }
     }
     Ok(Some(data))
 }
+
 
 fn jet_compute_binary(
     op: &str,

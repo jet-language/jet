@@ -2333,6 +2333,81 @@ pub fn check_region_caps(
         }
     }
 }
+/// Collect source ranges belonging to removed/debug-only statement bodies.
+///
+/// The body checker restores its semantic ledgers after each such body, but
+/// authority delegation is projected from checked AST flags after the walk.
+/// Keep that projection on the same active-source boundary so an erased call
+/// cannot publish a delegation fact merely because its argument was checked.
+fn erased_scope_spans(body: &[crate::AST::Stmt], spans: &mut HashSet<Span>) {
+    use crate::AST::{Expr, LambdaBody, OrFallback, Stmt};
+
+    for statement in body {
+        if matches!(
+            statement,
+            Stmt::Switched { marker, .. }
+                if crate::AST::switched_off(marker)
+                    || marker.name == crate::Syntax::MARKER_DEBUG_ONLY
+        ) {
+            spans.insert(statement.span());
+            continue;
+        }
+
+        for nested in super::ScopeMembers::statement_bodies(statement) {
+            erased_scope_spans(nested, spans);
+        }
+
+        // `Stmt::for_each_expr` also reaches expression-position blocks and
+        // lambda bodies, whose statements are not exposed by
+        // `statement_bodies`.
+        statement.for_each_expr(|expression| match expression {
+            Expr::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                erased_scope_spans(then_body, spans);
+                erased_scope_spans(else_body, spans);
+            }
+            Expr::Lambda(lambda) => {
+                if let LambdaBody::Block(body) = &lambda.body {
+                    erased_scope_spans(body, spans);
+                }
+            }
+            Expr::OrFallback { fallback, .. } => {
+                if let OrFallback::Block { body, .. } = fallback {
+                    erased_scope_spans(body, spans);
+                }
+            }
+            _ => {}
+        });
+    }
+}
+
+fn expression_is_erased(expression: &crate::AST::Expr, spans: &HashSet<Span>) -> bool {
+    let span = expression.span();
+    spans
+        .iter()
+        .any(|scope| scope.start <= span.start && span.end <= scope.end)
+}
+
+/// Walk only active checked expressions. Sema still checks every erased body,
+/// but post-check projections must not consume its AST-attached facts.
+fn for_each_active_expression(
+    body: &[crate::AST::Stmt],
+    mut visit: impl FnMut(&crate::AST::Expr),
+) {
+    let mut erased = HashSet::new();
+    erased_scope_spans(body, &mut erased);
+    for statement in body {
+        statement.for_each_expr(|expression| {
+            if !expression_is_erased(expression, &erased) {
+                visit(expression);
+            }
+        });
+    }
+}
+
 
 /// D-AUTHORITY-SCOPE1: detect whether the authority handle `handle` bound by a
 /// named `#FX(…)` region
@@ -2365,38 +2440,36 @@ pub fn authority_delegations(
     }
 
     let mut delegations = Vec::new();
-    for statement in body {
-        statement.for_each_expr(|expression| match expression {
-            crate::AST::Expr::Call(call) => {
-                let (resource, operation) = operation_parts(&call.name);
-                for argument in &call.args {
-                    if argument.flags.authority_boundary {
-                        delegations.push(AuthorityDelegation {
-                            scope_span,
-                            binding: binding.to_string(),
-                            resource: resource.clone(),
-                            operation: operation.clone(),
-                            span: argument.span,
-                        });
-                    }
+    for_each_active_expression(body, |expression| match expression {
+        crate::AST::Expr::Call(call) => {
+            let (resource, operation) = operation_parts(&call.name);
+            for argument in &call.args {
+                if argument.flags.authority_boundary {
+                    delegations.push(AuthorityDelegation {
+                        scope_span,
+                        binding: binding.to_string(),
+                        resource: resource.clone(),
+                        operation: operation.clone(),
+                        span: argument.span,
+                    });
                 }
             }
-            crate::AST::Expr::MethodCall { method, args, .. } => {
-                for argument in args {
-                    if argument.flags.authority_boundary {
-                        delegations.push(AuthorityDelegation {
-                            scope_span,
-                            binding: binding.to_string(),
-                            resource: "method".to_string(),
-                            operation: method.clone(),
-                            span: argument.span,
-                        });
-                    }
+        }
+        crate::AST::Expr::MethodCall { method, args, .. } => {
+            for argument in args {
+                if argument.flags.authority_boundary {
+                    delegations.push(AuthorityDelegation {
+                        scope_span,
+                        binding: binding.to_string(),
+                        resource: "method".to_string(),
+                        operation: method.clone(),
+                        span: argument.span,
+                    });
                 }
             }
-            _ => {}
-        });
-    }
+        }
+        _ => {}
+    });
     delegations
 }
 

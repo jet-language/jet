@@ -1,0 +1,74 @@
+package {
+    name: "core.game"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Game loop, scene, and replay. Raylib is a nested ring."
+    license: "MIT"
+    outputs: {
+        game: .Library{ entry: game }
+    }
+}
+// core.game — a backend-neutral scene/replay loop.
+//
+// `run` pumps frames until the backend reports close or `scene.max_frames`
+// is reached. Each frame records input into the replay log. Rendering is
+// the nested `core.game.raylib` ring.
+module raylib
+
+pub struct Scene {
+    pub name: String
+    pub max_frames: Int
+    pub tick: Int
+}
+
+pub struct ReplayFrame {
+    pub tick: Int
+    pub keys: [Int]
+}
+
+pub struct Replay {
+    pub frames: [ReplayFrame]
+}
+
+pub struct Backend {
+    pub name: String
+    pub running: Bool
+}
+
+pub fn scene(name: String) -> Scene { {name: name, max_frames: 0, tick: 0} }
+
+pub fn backend_null() -> Backend { {name: "null", running: true} }
+
+pub fn backend_raylib() -> Backend { {name: "raylib", running: true} }
+
+/// Pump the scene. A `max_frames` of 0 means "until the backend closes".
+pub fn run(scene: Scene, backend: Backend) -> Replay {
+    replay := {frames: [ReplayFrame]{}}
+    tick := scene.tick
+    running := backend.running
+    loop running {
+        if scene.max_frames > 0 && tick >= scene.max_frames -> break
+        if backend.name == "raylib" {
+            if host_game_should_close() -> break
+            host_game_begin()
+            host_game_end()
+        } else {
+            if !host_game_tick(tick) -> break
+        }
+        keys := host_game_keys()
+        replay.frames.push(ReplayFrame{tick: tick, keys: keys})
+        tick = tick + 1
+        if backend.name == "null" && scene.max_frames == 0 -> break
+    }
+    replay
+}
+
+fn host_game_should_close() -> Bool { panic("host_game_should_close") }
+
+fn host_game_begin() { panic("host_game_begin") }
+
+fn host_game_end() { panic("host_game_end") }
+
+fn host_game_tick(tick: Int) -> Bool { panic("host_game_tick") }
+
+fn host_game_keys() -> [Int] { panic("host_game_keys") }

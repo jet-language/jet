@@ -536,7 +536,7 @@ fn run() {
 #[test]
 fn imported_never_bool_condition_runs_on_all_tiers() {
     let helper_src = "\
-pub fn helper(value: Bool) Bool !Never -> {
+pub fn helper(value: Bool) -> Bool !Never {
     return value
 }
 ";

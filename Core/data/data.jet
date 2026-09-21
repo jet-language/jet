@@ -1,0 +1,1272 @@
+package {
+    name: "core.data"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Tabular data, loaders, sketches, and plots."
+    license: "MIT"
+    outputs: {
+        data: .Library{ entry: data }
+    }
+}
+// core.data — column-oriented snapshots over text cells.
+//
+// A snapshot is an in-memory table: named columns of equal length, a schema
+// and a source identity. Codecs (`csv`, `json`) parse bytes the caller already
+// holds. `file` / `url` / `database` are loaders; `load` is the host door.
+// Joins, aggregates, and pivots are Jet. Nested `plot` owns chart types;
+// this file re-declares the same names so `core.data` matches the live export
+// table. Nested `loader` / `stream` / `arrow` / `sketch` stay their own rings.
+module arrow
+
+module loader
+
+module stream
+
+module plot
+
+module sketch
+
+pub enum DataFormat {
+    Csv
+    Json
+    Jsonl
+    Arrow
+    Unknown
+}
+
+pub enum DataErrorKind {
+    Syntax
+    Missing
+    Type
+    Limit
+    IO
+    Unsupported
+}
+
+#Error
+pub struct DataError {
+    pub kind: DataErrorKind
+    pub message: String
+    pub path: String
+}
+
+pub enum DataLoaderKind {
+    File
+    Url
+    Database
+    Value
+}
+
+pub enum DataLoaderStatus {
+    Idle
+    Ready
+    Failed
+    Offline
+}
+
+pub enum DataWatchStatus {
+    Idle
+    Armed
+    Fired
+}
+
+pub enum DataStatus {
+    Empty
+    Ready
+    Stale
+    Error
+}
+
+pub enum DataFreshness {
+    Live
+    Cached
+    Stale
+}
+
+pub enum DataInvalidationCause {
+    Write
+    Schema
+    Manual
+}
+
+pub struct DataLimits {
+    pub max_rows: Int
+    pub max_bytes: Int
+}
+
+pub struct DataLineOptions {
+    pub header: Bool
+    pub skip_blank: Bool
+}
+
+pub struct DataAuthority {
+    pub name: String
+}
+
+pub struct DataSourceIdentity {
+    pub kind: String
+    pub target: String
+}
+
+pub struct DataSnapshotIdentity {
+    pub id: String
+    pub generation: Int
+}
+
+pub struct DataProvenance {
+    pub source: DataSourceIdentity
+    pub generation: Int
+}
+
+pub struct DataColumn {
+    pub name: String
+    pub values: [String]
+}
+
+pub struct DataSchema {
+    pub columns: [String]
+    pub types: [String]
+}
+
+pub struct DataSnapshot {
+    pub identity: DataSnapshotIdentity
+    pub schema: DataSchema
+    pub columns: [DataColumn]
+    pub provenance: DataProvenance
+    pub status: DataStatus
+}
+
+pub struct DataLoader {
+    pub kind: DataLoaderKind
+    pub target: String
+    pub status: DataLoaderStatus
+}
+
+pub struct DataStream {
+    pub items: [String]
+    pub index: Int
+}
+
+pub struct DataTracked {
+    pub name: String
+    pub snapshot: DataSnapshot
+}
+
+pub struct DataWatch {
+    pub target: String
+    pub status: DataWatchStatus
+}
+
+pub struct DataPivotCell {
+    pub row: String
+    pub col: String
+    pub value: Float
+}
+
+pub struct Group {
+    pub key: String
+    pub count: Int
+    pub sum: Float
+}
+
+pub struct Query {
+    pub sql: String
+}
+
+pub enum JetDataPlotMark {
+    Bar
+    Line
+    Point
+}
+
+pub enum JetDataPlotChannel {
+    X
+    Y
+    Color
+    Size
+}
+
+pub enum JetDataPlotAggregate {
+    Sum
+    Mean
+    Count
+    Min
+    Max
+}
+
+pub enum JetDataPlotFilterOp {
+    Eq
+    Ne
+    Lt
+    Le
+    Gt
+    Ge
+}
+
+pub enum JetDataPlotValue {
+    Number
+    Text
+    Bool
+}
+
+pub enum JetDataPlotTransform {
+    Identity
+    Filter
+    Aggregate
+}
+
+pub enum JetDataPlotScaleKind {
+    Linear
+    Log
+    Band
+}
+
+pub enum JetDataPlotDomain {
+    Auto
+    Explicit
+}
+
+pub enum JetDataPlotLegendPosition {
+    Top
+    Bottom
+    Left
+    Right
+}
+
+pub enum JetDataPlotFacetKind {
+    Wrap
+    Grid
+}
+
+pub enum JetDataPlotInteraction {
+    Hover
+    Select
+    Pan
+}
+
+pub enum JetDataPlotBackend {
+    Svg
+    Text
+}
+
+pub enum JetDataPlotSupport {
+    Full
+    Partial
+    Unsupported
+}
+
+pub enum JetDataPlotErrorKind {
+    Schema
+    Encoding
+    Render
+}
+
+pub enum JetDataPlotRenderFormat {
+    Svg
+    Text
+    Json
+}
+
+pub struct JetDataPlotField {
+    pub name: String
+    pub kind: JetDataPlotValue
+}
+
+pub struct JetDataPlotSchema {
+    pub fields: [JetDataPlotField]
+}
+
+pub struct JetDataPlotSourceFacts {
+    pub rows: Int
+    pub columns: Int
+}
+
+pub struct JetDataPlotEncoding {
+    pub x: String
+    pub y: String
+    pub mark: JetDataPlotMark
+}
+
+pub struct JetDataPlotScale {
+    pub kind: JetDataPlotScaleKind
+    pub field: String
+}
+
+pub struct JetDataPlotAxis {
+    pub field: String
+    pub title: String
+}
+
+pub struct JetDataPlotLegend {
+    pub position: JetDataPlotLegendPosition
+}
+
+pub struct JetDataPlotFacet {
+    pub kind: JetDataPlotFacetKind
+    pub field: String
+}
+
+pub struct JetDataPlotLayer {
+    pub mark: JetDataPlotMark
+    pub encoding: JetDataPlotEncoding
+}
+
+pub struct JetDataPlotAccessibility {
+    pub title: String
+    pub summary: String
+}
+
+pub struct JetDataPlotLayout {
+    pub width: Int
+    pub height: Int
+}
+
+pub struct JetDataPlotCapability {
+    pub backend: JetDataPlotBackend
+    pub support: JetDataPlotSupport
+}
+
+#Error
+pub struct JetDataPlotError {
+    pub kind: JetDataPlotErrorKind
+    pub message: String
+}
+
+pub struct JetDataPlotColumn {
+    pub name: String
+    pub values: [String]
+}
+
+pub struct JetDataPlotSelectedRow {
+    pub index: Int
+}
+
+pub struct JetDataPlotInspection {
+    pub text: String
+}
+
+pub struct JetDataPlotRender {
+    pub format: JetDataPlotRenderFormat
+    pub body: String
+}
+
+pub struct JetDataPlotProjection {
+    pub start: Int
+    pub end: Int
+}
+
+pub struct JetDataPlotPlan {
+    pub mark: JetDataPlotMark
+    pub labels: [String]
+    pub values: [Float]
+    pub layout: JetDataPlotLayout
+}
+
+/// Bind a tracked name. The snapshot is empty until `load` / `csv` / `json`.
+pub fn track(name: String) -> DataTracked { {name: name, snapshot: empty_snapshot(name)} }
+
+/// Empty loader pointing at a filesystem path.
+pub fn file(path: String) -> DataLoader {
+    {kind: DataLoaderKind.File, target: path, status: DataLoaderStatus.Idle}
+}
+
+/// Member inside an archive path (`zip:entry` spelling is a host concern).
+pub fn file_member(path: String, member: String) -> DataLoader {
+    {kind: DataLoaderKind.File, target: "{path}::{member}", status: DataLoaderStatus.Idle}
+}
+
+pub fn url(href: String) -> DataLoader {
+    {kind: DataLoaderKind.Url, target: href, status: DataLoaderStatus.Idle}
+}
+
+pub fn database(dsn: String) -> DataLoader {
+    {kind: DataLoaderKind.Database, target: dsn, status: DataLoaderStatus.Idle}
+}
+
+/// Parse RFC 4180-ish CSV text into a snapshot. First row is the header.
+pub fn csv(text: String) -> DataSnapshot !DataError { table_from_csv(text, "csv") }
+
+pub fn csv_reader(text: String) -> DataSnapshot !DataError { csv(text) }
+
+/// JSON array-of-arrays, array-of-objects, or JSONL objects → snapshot.
+pub fn json(text: String) -> DataSnapshot !DataError { table_from_json(text, "json") }
+
+pub fn json_reader(text: String) -> DataSnapshot !DataError { json(text) }
+
+pub fn load_default() -> DataSnapshot { empty_snapshot("default") }
+
+/// Materialize a loader. File/url/database bytes come from the host; sniffing
+/// CSV vs JSON is Jet.
+pub fn load(loader: DataLoader) -[FS, Net, DB]> DataSnapshot !DataError {
+    if loader.target.len() == 0 {
+        return Err(DataError{kind: DataErrorKind.Missing, message: "empty loader target", path: ""})
+    }
+    text := ""
+    if {
+        loader.kind == DataLoaderKind.File -> { text = host_data_read(loader.target) }
+        loader.kind == DataLoaderKind.Url -> { text = host_data_fetch(loader.target) }
+        loader.kind == DataLoaderKind.Database -> {
+            text = host_data_sql(loader.target, "SELECT *")
+        }
+        else -> { text = loader.target }
+    }
+    Ok(from_text(text, loader.target))
+}
+
+pub fn require_bridge() !DataError {
+    if host_data_bridge() -> return Ok()
+    Err(DataError{kind: DataErrorKind.Unsupported, message: "data bridge unavailable", path: ""})
+}
+
+pub fn snapshot(loader: DataLoader) -[FS, Net, DB]> DataSnapshot !DataError { load(loader) }
+
+pub fn schema(snapshot: DataSnapshot) -> DataSchema { snapshot.schema }
+
+pub fn status(snapshot: DataSnapshot) -> DataStatus { snapshot.status }
+
+pub fn describe(snapshot: DataSnapshot) -> String {
+    out := "rows={row_count(snapshot)} cols={snapshot.columns.len()}\n"
+    loop i in 0..<snapshot.columns.len() {
+        name :: snapshot.columns[i].name
+        ty :: type_at(snapshot, i)
+        out = "{out}{name}: {ty}\n"
+    }
+    out
+}
+
+pub fn show(snapshot: DataSnapshot) -> String { to_csv(snapshot) }
+
+pub fn text(snapshot: DataSnapshot) -> String { show(snapshot) }
+
+pub fn inspect(snapshot: DataSnapshot) -> String { describe(snapshot) }
+
+pub fn inspect_json(snapshot: DataSnapshot) -> String {
+    cols := ""
+    loop i in 0..<snapshot.columns.len() {
+        if i > 0 -> cols = "{cols},"
+        cols = "{cols}\"{snapshot.columns[i].name}\""
+    }
+    "{{\"rows\":{row_count(snapshot)},\"columns\":[{cols}]}}"
+}
+
+pub fn value(snapshot: DataSnapshot, row: Int, column: String) -> String !DataError {
+    col :: column_named(snapshot, column) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{column}`", path: column})
+    if row < 0 || row >= col.values.len() {
+        return Err(DataError{kind: DataErrorKind.Missing, message: "row {row} out of range", path: column})
+    }
+    Ok(col.values[row])
+}
+
+/// Tiny SQL: `SELECT *`, `SELECT COUNT(*)`, `SELECT col`, optional
+/// `WHERE col = value`. FROM clauses are ignored.
+pub fn query(snapshot: DataSnapshot, sql: String) -> DataSnapshot !DataError {
+    q :: Query{sql: trim(sql)}
+    raw :: upper(q.sql)
+    if starts(raw, "SELECT COUNT") -> return Ok(count_snapshot(snapshot))
+    filtered := snapshot
+    w :: index_of(raw, " WHERE ")
+    body := q.sql
+    if w >= 0 {
+        filtered = apply_where(snapshot, slice_str(q.sql, w + 7, q.sql.len())) ?? return Err(DataError{kind: DataErrorKind.Syntax, message: "WHERE clause", path: sql})
+        body = slice_str(q.sql, 0, w)
+    }
+    sel := strip_select(body)
+    if sel == "*" -> return Ok(filtered)
+    if sel.len() == 0 -> return Ok(filtered)
+    col :: column_named(filtered, sel) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{sel}`", path: sel})
+    Ok(snapshot_from_columns([DataColumn]{col}, filtered.provenance.source.target))
+}
+
+pub fn count(snapshot: DataSnapshot) -> Int { row_count(snapshot) }
+
+pub fn min(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 0) }
+
+pub fn max(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 1) }
+
+pub fn sum(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 2) }
+
+pub fn mean(snapshot: DataSnapshot, column: String) -> ?Float {
+    s :: sum(snapshot, column) ?? return None
+    n :: numeric_count(snapshot, column)
+    if n == 0 -> return None
+    Val(s / (Float{n}))
+}
+
+pub fn variance(snapshot: DataSnapshot, column: String) -> ?Float {
+    m :: mean(snapshot, column) ?? return None
+    col :: column_named(snapshot, column) ?? return None
+    acc := 0.0
+    n := 0
+    loop v in col.values {
+        x :: Float.parse(v) ?? next
+        d :: x - m
+        acc = acc + d * d
+        n = n + 1
+    }
+    if n < 2 -> return None
+    Val(acc / (Float{n - 1}))
+}
+
+pub fn stddev(snapshot: DataSnapshot, column: String) -> ?Float {
+    v :: variance(snapshot, column) ?? return None
+    Val(sqrt_f(v))
+}
+
+pub fn median(snapshot: DataSnapshot, column: String) -> ?Float {
+    xs :: sorted_nums(snapshot, column)
+    if xs.len() == 0 -> return None
+    mid :: xs.len() / 2
+    if xs.len() % 2 == 1 -> return Val(xs[mid])
+    Val((xs[mid - 1] + xs[mid]) / 2.0)
+}
+
+pub fn quantile(snapshot: DataSnapshot, column: String, q: Float) -> ?Float {
+    xs :: sorted_nums(snapshot, column)
+    if xs.len() == 0 -> return None
+    p := q
+    if p < 0.0 -> p = 0.0
+    if p > 1.0 -> p = 1.0
+    idx := (Float{xs.len() - 1}) * p
+    lo := 0
+    loop {
+        if (Float{lo + 1}) > idx -> break
+        lo = lo + 1
+        if lo >= xs.len() - 1 -> break
+    }
+    hi := lo + 1
+    if hi >= xs.len() -> return Val(xs[lo])
+    frac :: idx - (Float{lo})
+    Val(xs[lo] * (1.0 - frac) + xs[hi] * frac)
+}
+
+pub fn rolling_mean(snapshot: DataSnapshot, column: String, window: Int) -> DataSnapshot !DataError {
+    w := window
+    if w < 1 {
+        return Err(DataError{kind: DataErrorKind.Limit, message: "window must be ≥ 1", path: column})
+    }
+    col :: column_named(snapshot, column) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{column}`", path: column})
+    out := [String]{}
+    loop i in 0..<col.values.len() {
+        start := i - w + 1
+        if start < 0 -> start = 0
+        acc := 0.0
+        n := 0
+        loop j in start..<(i + 1) {
+            x :: Float.parse(col.values[j]) ?? next
+            acc = acc + x
+            n = n + 1
+        }
+        if n == 0 -> out.push("") else -> out.push("{acc / Float{n}}")
+    }
+    Ok(snapshot_from_columns([DataColumn]{DataColumn{name: "{column}_rmean", values: out}}, snapshot.provenance.source.target))
+}
+
+pub fn inner_join(left: DataSnapshot, right: DataSnapshot, on: String) -> DataSnapshot !DataError {
+    join_on(left, right, on, false)
+}
+
+pub fn left_join(left: DataSnapshot, right: DataSnapshot, on: String) -> DataSnapshot !DataError {
+    join_on(left, right, on, true)
+}
+
+/// Pivot: group `rows` × `cols`, summing `values`.
+pub fn pivot_sum(snapshot: DataSnapshot, rows: String, cols: String, values: String) -> DataSnapshot !DataError {
+    rcol :: column_named(snapshot, rows) ?? return Err(missing(rows))
+    ccol :: column_named(snapshot, cols) ?? return Err(missing(cols))
+    vcol :: column_named(snapshot, values) ?? return Err(missing(values))
+    n :: rcol.values.len()
+    row_keys := [String]{}
+    col_keys := [String]{}
+    loop i in 0..<n {
+        if !contains_str(row_keys, rcol.values[i]) {
+            row_keys.push(rcol.values[i])
+            if !contains_str(col_keys, ccol.values[i]) -> col_keys.push(ccol.values[i])
+        }
+    }
+    names := [String]{rows}
+    loop c in col_keys -> names.push(c)
+    cols_out := [DataColumn]{}
+    loop name in names -> cols_out.push(DataColumn{name: name, values: [String]{}})
+    loop r in row_keys {
+        cols_out[0].values.push(r)
+        loop j in 0..<col_keys.len() {
+            acc := 0.0
+            loop i in 0..<n {
+                if rcol.values[i] == r && ccol.values[i] == col_keys[j] {
+                    acc = acc + (Float.parse(vcol.values[i]) ?? 0.0)
+                }
+            }
+            cols_out[j + 1].values.push("{acc}")
+        }
+    }
+    Ok(snapshot_from_columns(cols_out, snapshot.provenance.source.target))
+}
+
+pub fn plot(snapshot: DataSnapshot, labels: String, values: String) -> JetDataPlotPlan !DataError {
+    lcol :: column_named(snapshot, labels) ?? return Err(missing(labels))
+    vcol :: column_named(snapshot, values) ?? return Err(missing(values))
+    ys := [Float]{}
+    loop v in vcol.values -> ys.push(Float.parse(v) ?? 0.0)
+    Ok(JetDataPlotPlan{mark: JetDataPlotMark.Bar, labels: lcol.values, values: ys, layout: JetDataPlotLayout{width: 320, height: 24 * lcol.values.len() + 16}})
+}
+
+pub fn bar_text(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
+    p :: plot(snapshot, labels, values)
+    Ok(render_bar_text(p.labels, p.values))
+}
+
+pub fn bar_svg(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
+    p :: plot(snapshot, labels, values)
+    Ok(render_bar_svg(p.labels, p.values))
+}
+
+pub fn line_text(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
+    p :: plot(snapshot, labels, values)
+    Ok(render_line_text(p.labels, p.values))
+}
+
+pub fn line_svg(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
+    p :: plot(snapshot, labels, values)
+    Ok(render_line_svg(p.labels, p.values))
+}
+
+pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender {
+    {format: JetDataPlotRenderFormat.Svg, body: render_bar_svg(plan.labels, plan.values)}
+}
+
+pub fn svg(plan: JetDataPlotPlan) -> String { render_bar_svg(plan.labels, plan.values) }
+
+fn empty_snapshot(id: String) -> DataSnapshot {
+    ident :: DataSourceIdentity{kind: "empty", target: id}
+    {
+        identity: DataSnapshotIdentity{id: id, generation: 0},
+        schema: DataSchema{columns: [String]{}, types: [String]{}},
+        columns: [DataColumn]{},
+        provenance: DataProvenance{source: ident, generation: 0},
+        status: DataStatus.Empty,
+    }
+}
+
+fn snapshot_from_columns(columns: [DataColumn], target: String) -> DataSnapshot {
+    names := [String]{}
+    types := [String]{}
+    loop c in columns {
+        names.push(c.name)
+        types.push(guess_type(c))
+    }
+    status := DataStatus.Ready
+    if columns.len() == 0 -> status = DataStatus.Empty
+    ident :: DataSourceIdentity{kind: "table", target: target}
+    {
+        identity: DataSnapshotIdentity{id: target, generation: 1},
+        schema: DataSchema{columns: names, types: types},
+        columns: columns,
+        provenance: DataProvenance{source: ident, generation: 1},
+        status: status,
+    }
+}
+
+fn from_text(text: String, target: String) -> DataSnapshot !DataError {
+    t :: trim(text)
+    if t.len() == 0 -> return Ok(empty_snapshot(target))
+    b :: t.bytes()[0]
+    if b == (U8{91}) || b == (U8{123}) -> return table_from_json(t, target)
+    table_from_csv(t, target)
+}
+
+fn table_from_csv(text: String, target: String) -> DataSnapshot !DataError {
+    rows :: split_csv(text)
+    if rows.len() == 0 -> return Ok(empty_snapshot(target))
+    header :: rows[0]
+    cols := [DataColumn]{}
+    loop h in header -> cols.push(DataColumn{name: h, values: [String]{}})
+    loop r in 1..<rows.len() {
+        row :: rows[r]
+        loop c in 0..<cols.len() {
+            v := ""
+            if c < row.len() -> v = row[c]
+            cols[c].values.push(v)
+        }
+    }
+    Ok(snapshot_from_columns(cols, target))
+}
+
+fn table_from_json(text: String, target: String) -> DataSnapshot !DataError {
+    t :: trim(text)
+    if t.len() == 0 -> return Ok(empty_snapshot(target))
+    b :: t.bytes()[0]
+    if b == (U8{91}) -> return table_from_json_array(t, target)
+    table_from_jsonl(t, target)
+}
+
+fn table_from_jsonl(text: String, target: String) -> DataSnapshot !DataError {
+    lines :: split_lines(text)
+    keys := [String]{}
+    records := [[String:String]]{}
+    loop line in lines {
+        s :: trim(line)
+        if s.len() == 0 -> next
+        rec :: parse_object_strings(s) ?? return Err(DataError{kind: DataErrorKind.Syntax, message: "jsonl object", path: target})
+        loop pair in rec {
+            if !contains_str(keys, pair.key) -> keys.push(pair.key)
+        }
+        records.push(rec)
+    }
+    cols := [DataColumn]{}
+    loop k in keys -> cols.push(DataColumn{name: k, values: [String]{}})
+    loop rec in records {
+        loop i in 0..<keys.len() {
+            v :: rec.get(keys[i]) ?? ""
+            cols[i].values.push(v)
+        }
+    }
+    Ok(snapshot_from_columns(cols, target))
+}
+
+fn table_from_json_array(text: String, target: String) -> DataSnapshot !DataError {
+    // Array of arrays of strings/numbers, or array of objects.
+    inner :: trim(strip_brackets(text))
+    if inner.len() == 0 -> return Ok(empty_snapshot(target))
+    if trim(inner).bytes()[0] == (U8{123}) {
+        return table_from_jsonl(objects_to_jsonl(inner), target)
+    }
+    rows := [[String]]{}
+    cur := [String]{}
+    field := [U8]{}
+    in_str := false
+    escape := false
+    loop b in inner.bytes() {
+        n :: b
+        if in_str {
+            if escape {
+                field.push(b)
+                escape = false
+                next
+            }
+            if n == 92 {
+                escape = true
+                next
+            }
+            if n == 34 {
+                in_str = false
+                next
+            }
+            field.push(b)
+            next
+        }
+        if n == 34 {
+            in_str = true
+            next
+        }
+        if n == 91 {
+            cur = [String]{}
+            next
+        }
+        if n == 93 || n == 44 {
+            if field.len() > 0 || n == 93 {
+                cur.push(trim(String.from_bytes(field) ?? ""))
+                field = [U8]{}
+            }
+            if n == 93 && cur.len() > 0 {
+                rows.push(cur)
+                cur = [String]{}
+            }
+            next
+        }
+        if n == 32 || n == 10 || n == 13 || n == 9 -> next
+        field.push(b)
+    }
+    if rows.len() == 0 -> return Ok(empty_snapshot(target))
+    header := [String]{}
+    start := 0
+    all_num := true
+    loop cell in rows[0] {
+        if Float.parse(cell) == .None -> all_num = false
+    }
+    if {
+        all_num -> {
+            loop i in 0..<rows[0].len() -> header.push("c{i}")
+        }
+        else -> {
+            header = rows[0]
+            start = 1
+        }
+    }
+    cols := [DataColumn]{}
+    loop h in header -> cols.push(DataColumn{name: h, values: [String]{}})
+    loop r in start..<rows.len() {
+        row :: rows[r]
+        loop c in 0..<cols.len() {
+            v := ""
+            if c < row.len() -> v = row[c]
+            cols[c].values.push(v)
+        }
+    }
+    Ok(snapshot_from_columns(cols, target))
+}
+
+fn objects_to_jsonl(inner: String) -> String {
+    // Split top-level `{...}` objects on commas between them.
+    out := ""
+    depth := 0
+    start := 0
+    raw :: inner.bytes()
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 123 -> depth = depth + 1
+        if n == 125 {
+            depth = depth - 1
+            if depth == 0 {
+                chunk :: String.from_bytes(raw[start..i]) ?? ""
+                if out.len() > 0 -> out = "{out}\n"
+                out = "{out}{chunk}"
+                start = i + 1
+            }
+        }
+        i = i + 1
+    }
+    out
+}
+
+fn split_csv(text: String) -> [[String]] {
+    rows := [[String]]{}
+    fields := [String]{}
+    field := [U8]{}
+    in_quotes := false
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if in_quotes {
+            if n == 34 {
+                if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
+                    field.push(U8{34})
+                    i = i + 2
+                    next
+                }
+                in_quotes = false
+                i = i + 1
+                next
+            }
+            field.push(raw[i])
+            i = i + 1
+            next
+        }
+        if n == 34 {
+            in_quotes = true
+            i = i + 1
+            next
+        }
+        if n == 44 {
+            fields.push(String.from_bytes(field) ?? "")
+            field = [U8]{}
+            i = i + 1
+            next
+        }
+        if n == 10 {
+            fields.push(String.from_bytes(field) ?? "")
+            field = [U8]{}
+            if fields.len() > 1 || fields[0].len() > 0 -> rows.push(fields)
+            fields = [String]{}
+            i = i + 1
+            next
+        }
+        if n == 13 {
+            i = i + 1
+            next
+        }
+        field.push(raw[i])
+        i = i + 1
+    }
+    fields.push(String.from_bytes(field) ?? "")
+    if fields.len() > 1 || fields[0].len() > 0 -> rows.push(fields)
+    rows
+}
+
+fn to_csv(snapshot: DataSnapshot) -> String {
+    out := ""
+    loop i in 0..<snapshot.columns.len() {
+        if i > 0 -> out = "{out},"
+        out = "{out}{snapshot.columns[i].name}"
+    }
+    out = "{out}\n"
+    n :: row_count(snapshot)
+    loop r in 0..<n {
+        loop c in 0..<snapshot.columns.len() {
+            if c > 0 -> out = "{out},"
+            out = "{out}{snapshot.columns[c].values[r]}"
+        }
+        out = "{out}\n"
+    }
+    out
+}
+
+fn column_named(snapshot: DataSnapshot, name: String) -> ?DataColumn {
+    loop c in snapshot.columns {
+        if c.name == name -> return Val(c)
+    }
+    None
+}
+
+fn row_count(snapshot: DataSnapshot) -> Int {
+    if snapshot.columns.len() == 0 -> return 0
+    snapshot.columns[0].values.len()
+}
+
+fn type_at(snapshot: DataSnapshot, i: Int) -> String {
+    if i >= snapshot.schema.types.len() -> return "text"
+    snapshot.schema.types[i]
+}
+
+fn guess_type(col: DataColumn) -> String {
+    saw := false
+    loop v in col.values {
+        if v.len() == 0 -> next
+        if Float.parse(v) == .None -> return "text"
+        saw = true
+    }
+    if saw -> "number"
+    "text"
+}
+
+fn count_snapshot(snapshot: DataSnapshot) -> DataSnapshot {
+    n :: row_count(snapshot)
+    col :: DataColumn{name: "count", values: [String]{"{n}"}}
+    snapshot_from_columns([DataColumn]{col}, snapshot.provenance.source.target)
+}
+
+fn apply_where(snapshot: DataSnapshot, clause: String) -> ?DataSnapshot {
+    c :: trim(clause)
+    eq :: index_of(c, "=")
+    if eq <= 0 -> return None
+    col_name :: trim(slice_str(c, 0, eq))
+    raw_val :: trim(slice_str(c, eq + 1, c.len()))
+    want :: trim_quotes(raw_val)
+    col :: column_named(snapshot, col_name) ?? return None
+    keep := [Int]{}
+    loop i in 0..<col.values.len() {
+        if col.values[i] == want -> keep.push(i)
+    }
+    cols := [DataColumn]{}
+    loop src in snapshot.columns {
+        vals := [String]{}
+        loop i in keep -> vals.push(src.values[i])
+        cols.push(DataColumn{name: src.name, values: vals})
+    }
+    Val(snapshot_from_columns(cols, snapshot.provenance.source.target))
+}
+
+fn join_on(left: DataSnapshot, right: DataSnapshot, on: String, left_outer: Bool) -> DataSnapshot !DataError {
+    lcol :: column_named(left, on) ?? return Err(missing(on))
+    rcol :: column_named(right, on) ?? return Err(missing(on))
+    names := [String]{}
+    loop c in left.columns -> names.push(c.name)
+    loop c in right.columns {
+        if c.name == on -> next
+        names.push("{c.name}_r")
+    }
+    cols := [DataColumn]{}
+    loop n in names -> cols.push(DataColumn{name: n, values: [String]{}})
+    loop i in 0..<lcol.values.len() {
+        matched := false
+        loop j in 0..<rcol.values.len() {
+            if lcol.values[i] != rcol.values[j] -> next
+            matched = true
+            push_join_row(&cols, left, right, i, j, on)
+        }
+        if !matched && left_outer -> push_join_row(&cols, left, right, i, -1, on)
+    }
+    Ok(snapshot_from_columns(cols, left.provenance.source.target))
+}
+
+fn push_join_row(cols: [DataColumn], left: DataSnapshot, right: DataSnapshot, i: Int, j: Int, on: String) {
+    k := 0
+    loop c in left.columns {
+        cols[k].values.push(c.values[i])
+        k = k + 1
+    }
+    loop c in right.columns {
+        if c.name == on -> next
+        if j < 0 -> cols[k].values.push("") else -> cols[k].values.push(c.values[j])
+        k = k + 1
+    }
+}
+
+fn reduce_num(snapshot: DataSnapshot, column: String, op: Int) -> ?Float {
+    col :: column_named(snapshot, column) ?? return None
+    acc := 0.0
+    any := false
+    loop v in col.values {
+        x :: Float.parse(v) ?? next
+        if {
+            !any -> {
+                acc = x
+                any = true
+            }
+            op == 0 -> {
+                if x < acc -> acc = x
+            }
+            op == 1 -> {
+                if x > acc -> acc = x
+            }
+            else -> { acc = acc + x }
+        }
+    }
+    if !any -> return None
+    Val(acc)
+}
+
+fn numeric_count(snapshot: DataSnapshot, column: String) -> Int {
+    col :: column_named(snapshot, column) ?? return 0
+    n := 0
+    loop v in col.values {
+        if Float.parse(v) != None -> n = n + 1
+    }
+    n
+}
+
+fn sorted_nums(snapshot: DataSnapshot, column: String) -> [Float] {
+    col :: column_named(snapshot, column) ?? return [Float]{}
+    xs := [Float]{}
+    loop v in col.values {
+        x :: Float.parse(v) ?? next
+        xs.push(x)
+    }
+    loop i in 0..<xs.len() {
+        loop j in (i + 1)..<xs.len() {
+            if xs[j] < xs[i] {
+                t :: xs[i]
+                xs[i] = xs[j]
+                xs[j] = t
+            }
+        }
+    }
+    xs
+}
+
+fn render_bar_text(labels: [String], values: [Float]) -> String {
+    out := ""
+    max := 1.0
+    loop v in values {
+        if v > max -> max = v
+    }
+    loop i in 0..<labels.len() {
+        v := 0.0
+        if i < values.len() -> v = values[i]
+        w := 0
+        if max > 0.0 -> w = (Int{v * 20.0 / max})
+        bar := ""
+        loop _ in 0..<w -> bar = "{bar}#"
+        out = "{out}{labels[i]} | {bar} {v}\n"
+    }
+    out
+}
+
+fn render_bar_svg(labels: [String], values: [Float]) -> String {
+    max := 1.0
+    loop v in values {
+        if v > max -> max = v
+    }
+    w := 320
+    h := 24 * labels.len() + 16
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    loop i in 0..<labels.len() {
+        v := 0.0
+        if i < values.len() -> v = values[i]
+        bw := 0
+        if max > 0.0 -> bw = (Int{v * 200.0 / max})
+        y := 8 + i * 24
+        out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{labels[i]}</text>"
+        out = "{out}<rect x=\"80\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
+    }
+    "{out}</svg>"
+}
+
+fn render_line_text(labels: [String], values: [Float]) -> String {
+    out := ""
+    loop i in 0..<labels.len() {
+        v := 0.0
+        if i < values.len() -> v = values[i]
+        out = "{out}{labels[i]}={v}\n"
+    }
+    out
+}
+
+fn render_line_svg(labels: [String], values: [Float]) -> String {
+    n :: labels.len()
+    w := 320
+    h := 120
+    max := 1.0
+    loop v in values {
+        if v > max -> max = v
+    }
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
+    loop i in 0..<n {
+        v := 0.0
+        if i < values.len() -> v = values[i]
+        x := 0
+        if n > 1 -> x = i * (w - 16) / (n - 1) + 8
+        y := h - 8
+        if max > 0.0 -> y = h - 8 - (Int{v * (Float{h - 16}) / max})
+        if i > 0 -> out = "{out} "
+        out = "{out}{x},{y}"
+    }
+    "{out}\"/></svg>"
+}
+
+fn missing(name: String) -> DataError {
+    {kind: DataErrorKind.Missing, message: "no column `{name}`", path: name}
+}
+
+fn parse_object_strings(text: String) -> ?[String:String] {
+    rec := [String:String]{}
+    raw :: text.bytes()
+    i := 0
+    key := ""
+    loop i < raw.len() {
+        if raw[i] != (U8{34}) {
+            i = i + 1
+            next
+        }
+        i = i + 1
+        start :: i
+        loop i < raw.len() && raw[i] != (U8{34}) -> i = i + 1
+        token :: String.from_bytes(raw[start..(i - 1)]) ?? ""
+        i = i + 1
+        if key.len() == 0 -> key = token else {
+            rec.add(key, token)
+            key = ""
+        }
+    }
+    Val(rec)
+}
+
+fn strip_select(sql: String) -> String {
+    t :: trim(sql)
+    u :: upper(t)
+    if !starts(u, "SELECT ") -> return "*"
+    rest :: trim(slice_str(t, 7, t.len()))
+    sp :: index_of(upper(rest), " FROM")
+    if sp >= 0 -> return trim(slice_str(rest, 0, sp))
+    trim(rest)
+}
+
+fn strip_brackets(text: String) -> String {
+    raw :: trim(text).bytes()
+    if raw.len() < 2 -> return text
+    if raw[0] == (U8{91}) && raw[raw.len() - 1] == (U8{93}) {
+        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
+    }
+    text
+}
+
+fn trim_quotes(text: String) -> String {
+    raw :: text.bytes()
+    if raw.len() >= 2 && raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39}) {
+        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
+    }
+    if raw.len() >= 2 && raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34}) {
+        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
+    }
+    text
+}
+
+fn split_lines(text: String) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if {
+            b == (U8{10}) -> {
+                out.push(String.from_bytes(cur) ?? "")
+                cur = [U8]{}
+            }
+            b != (U8{13}) -> { cur.push(b) }
+        }
+    }
+    if cur.len() > 0 -> out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn trim(text: String) -> String {
+    raw :: text.bytes()
+    s := 0
+    e := raw.len()
+    loop s < e {
+        n :: raw[s]
+        if n == 32 || n == 9 || n == 10 || n == 13 -> s = s + 1 else { break }
+    }
+    loop e > s {
+        n :: raw[e - 1]
+        if n == 32 || n == 9 || n == 10 || n == 13 -> e = e - 1 else { break }
+    }
+    if s == 0 && e == raw.len() -> return text
+    if e <= s -> return ""
+    String.from_bytes(raw[s..(e - 1)]) ?? ""
+}
+
+fn upper(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn starts(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn index_of(text: String, needle: String) -> Int {
+    hay :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() == 0 -> return 0
+    if nd.len() > hay.len() -> return -1
+    loop i in 0..<(hay.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if hay[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return i
+    }
+    -1
+}
+
+fn slice_str(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    s := start
+    e := end
+    if s < 0 -> s = 0
+    if e > raw.len() -> e = raw.len()
+    if e <= s -> return ""
+    String.from_bytes(raw[s..(e - 1)]) ?? ""
+}
+
+fn contains_str(xs: [String], want: String) -> Bool {
+    loop x in xs {
+        if x == want -> return true
+    }
+    false
+}
+
+fn sqrt_f(x: Float) -> Float {
+    if x <= 0.0 -> return 0.0
+    g := x
+    loop _ in 0..<24 -> g = 0.5 * (g + x / g)
+    g
+}
+
+fn host_data_read(path: String) -[FS]> String !DataError { panic("host_data_read") }
+
+fn host_data_fetch(url: String) -[Net]> String !DataError { panic("host_data_fetch") }
+
+fn host_data_sql(dsn: String, sql: String) -[DB]> String !DataError { panic("host_data_sql") }
+
+fn host_data_bridge() -[Env]> Bool { panic("host_data_bridge") }

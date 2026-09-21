@@ -18,38 +18,38 @@ struct Row {
     active: Bool
 }
 
-fn rows() [Row] -> [Row]{
+fn rows() -> [Row] { [Row]{ }
     Row{id: 1, name: "Ada", active: true},
     Row{id: 2, name: "Grace", active: false},
     Row{id: 3, name: "Linus", active: true},
 }
 
-fn row_key(row: Row) String -> "{row.id}"
-fn row_name(row: Row) String -> row.name
-fn row_active(row: Row) String -> "{row.active}"
-fn row_is_active(row: Row) Bool -> row.active
-fn updated_row(row: Row) Row -> Row{id: row.id, name: "Updated {row.name}", active: row.active}
+fn row_key(row: Row) -> String { "{row.id}" }
+fn row_name(row: Row) -> String { row.name }
+fn row_active(row: Row) -> String { "{row.active}" }
+fn row_is_active(row: Row) -> Bool { row.active }
+fn updated_row(row: Row) -> Row { Row{id: row.id, name: "Updated {row.name}", active: row.active} }
 
-fn fetch_rows() String !String -> Ok("rows")
-fn send_mutation(payload: String) String !String -> Ok(payload)
-fn replay_mutation(_payload: String) Unit !String -> Ok()
-fn validate_name(value: String) Unit !String -> {
+fn fetch_rows() -> String !String { Ok("rows") }
+fn send_mutation(payload: String) -> String !String { Ok(payload) }
+fn replay_mutation(_payload: String) -> Unit !String { Ok() }
+fn validate_name(value: String) -> Unit !String {
     if value == "bad" -> return Err("name rejected")
     return Ok()
 }
-fn form_action(_input: WebFormDecodedInput) String !WebFormActionError -> Ok("saved")
+fn form_action(_input: WebFormDecodedInput) -> String !WebFormActionError { Ok("saved") }
 
-fn route_loader(_navigation: WebNavigation) String !String -> Ok("route data")
-fn not_found(path: String) String -> "not found: {path}"
+fn route_loader(_navigation: WebNavigation) -> String !String { Ok("route data") }
+fn not_found(path: String) -> String { "not found: {path}" }
 
-fn load_table_page(state: WebTableState) WebTablePage<Row> !String -> {
+fn load_table_page(state: WebTableState) -> WebTablePage<Row> !String {
     source :: rows()
     return Ok(table.page(source, state.page_index, state.page_size))
 }
 
-fn store_update(value: Int) Unit -> { print(value) }
-fn store_select(value: Int) Int -> value + 1
-fn store_selected(value: Int) Unit -> { print(value) }
+fn store_update(value: Int) -> Unit { print(value) }
+fn store_select(value: Int) -> Int { value + 1 }
+fn store_selected(value: Int) -> Unit { print(value) }
 
 fn app_surface() {
     live :: web.live("users", "[alice,bob]")

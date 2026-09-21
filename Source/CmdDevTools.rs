@@ -23,9 +23,31 @@ pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
 
 struct DevCaptureSession {
     name: String,
+    explicit: bool,
     capture: crate::ProveReplay::NamedCapture,
     budget: RecordBudget,
 }
+fn capture_failure<T>(
+    explicit: bool,
+    mode: OutputMode,
+    operation: &str,
+    error: impl std::fmt::Display,
+) -> Option<T> {
+    let error = error.to_string();
+    if explicit {
+        crate::emit_cli_report(
+            "E3629",
+            format!("dev capture failed while {operation}: {error}"),
+            "an explicit named capture must be finalized and retained".to_string(),
+            "repair `.jet` capture storage and retry the named capture".to_string(),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    crate::ReceiptStore::optional_history_notice(operation, &error);
+    None
+}
+
 
 fn dev_capture_budget(file: &str) -> (jet::Package::DevCaptureSetting, RecordBudget) {
     let records = jet::Loader::package_facts_for_entry(Path::new(file))
@@ -33,13 +55,14 @@ fn dev_capture_budget(file: &str) -> (jet::Package::DevCaptureSetting, RecordBud
         .flatten()
         .map(|facts| facts.dev.records)
         .unwrap_or_default();
-    let budget =
-        RecordBudget::new(records.budget.max_bytes, records.budget.max_records).unwrap_or_default();
+    let budget = RecordBudget::new(records.budget.max_bytes).unwrap_or_default();
     (records.capture, budget)
 }
 
-fn configure_dev_capture_budget(budget: RecordBudget) -> Result<(), String> {
-    let mut index = RecordIndex::load_for_project(".")?;
+fn configure_dev_capture_budget(file: &str, budget: RecordBudget) -> Result<(), String> {
+    let project_root = jet::build_project_root(file)
+        .map_err(|diagnostics| format!("could not resolve project root: {diagnostics:?}"))?;
+    let mut index = RecordIndex::load_for_project(&project_root)?;
     index.set_budget(budget)?;
     index.store()
 }
@@ -79,28 +102,40 @@ fn start_dev_capture(
         }
         return None;
     }
-    if let Err(error) = configure_dev_capture_budget(budget) {
-        if explicit {
-            eprintln!("capture: record index unavailable: {error}");
-        } else if !mode.quiet && !mode.json {
-            eprintln!("capture: skipped (record index unavailable: {error})");
+    if explicit {
+        if let Err(error) = configure_dev_capture_budget(file, budget) {
+            return capture_failure(true, mode, "configuring dev capture retention", error);
         }
-        return None;
     }
     let name = record_name
         .map(str::to_owned)
         .unwrap_or_else(|| generated_dev_capture_name(source));
-    let capture =
-        crate::ProveReplay::begin_named_capture(file, &name, profile, setting_overrides, mode.json)
-            .unwrap_or_else(|status| exit(status));
+    let capture = match crate::ProveReplay::begin_named_capture(
+        file,
+        &name,
+        profile,
+        setting_overrides,
+        mode.json && explicit,
+    ) {
+        Ok(capture) => capture,
+        Err(status) => {
+            return capture_failure(
+                explicit,
+                mode,
+                "preparing a dev capture",
+                format!("capture preparation exited with status {status}"),
+            );
+        }
+    };
     if !mode.quiet && !mode.json {
         eprintln!(
-            "capture: safe Time only; budget={} bytes/{} records",
-            budget.max_bytes, budget.max_records
+            "capture: safe Time only; budget={} bytes",
+            budget.max_bytes
         );
     }
     Some(DevCaptureSession {
         name,
+        explicit,
         capture,
         budget,
     })
@@ -111,39 +146,161 @@ fn finish_dev_capture(
     exit_code: i32,
     mode: OutputMode,
 ) -> Option<String> {
-    crate::ProveReplay::finish_named_capture(&session.capture, exit_code, mode.json)
-        .unwrap_or_else(|status| exit(status));
-    let path = PathBuf::from(format!(".jet/replays/{}.jetproof-replay", session.name));
+    if !session.explicit {
+        let capture = session.capture.clone();
+        let budget = session.budget;
+        jet::ReceiptStore::enqueue_optional_history("writing a dev capture", move || {
+            finish_optional_dev_capture(&capture, budget, exit_code);
+        });
+        return None;
+    }
+    finish_required_dev_capture(session, exit_code, mode)
+}
+
+fn finish_optional_dev_capture(
+    capture: &crate::ProveReplay::NamedCapture,
+    budget: RecordBudget,
+    exit_code: i32,
+) {
+    if let Err(status) = crate::ProveReplay::finish_named_capture(capture, exit_code, true) {
+        jet::ReceiptStore::optional_history_notice(
+            "finalizing a dev capture",
+            &format!("capture finalization exited with status {status}"),
+        );
+        return;
+    }
+    let Some(path) = capture.artifact_path().map(Path::to_path_buf) else {
+        jet::ReceiptStore::optional_history_notice(
+            "resolving a finalized dev capture",
+            "named capture has no artifact path",
+        );
+        return;
+    };
+    let link = match crate::ProveReplay::index_named_replay_artifact(
+        capture,
+        &path,
+        RecordCapture::Safe,
+        false,
+    ) {
+        Ok(link) => link,
+        Err(error) => {
+            jet::ReceiptStore::optional_history_notice("indexing a dev capture", &error);
+            return;
+        }
+    };
+    let project_root = match jet::build_project_root(&path.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            jet::ReceiptStore::optional_history_notice(
+                "resolving dev capture retention",
+                &format!("could not resolve project root: {diagnostics:?}"),
+            );
+            return;
+        }
+    };
+    let mut index = match RecordIndex::load_for_project(&project_root) {
+        Ok(index) => index,
+        Err(error) => {
+            jet::ReceiptStore::optional_history_notice("loading dev capture retention", &error);
+            return;
+        }
+    };
+    if let Err(error) = index
+        .set_budget(budget)
+        .and_then(|()| index.store())
+    {
+        jet::ReceiptStore::optional_history_notice("retaining a dev capture", &error);
+        return;
+    }
+    if index
+        .find(RecordKind::Replay, &link.artifact_id, true)
+        .is_none()
+    {
+        jet::ReceiptStore::optional_history_notice(
+            "retaining a dev capture",
+            "the finalized replay was evicted before it could be retained",
+        );
+    }
+}
+
+fn finish_required_dev_capture(
+    session: &DevCaptureSession,
+    exit_code: i32,
+    mode: OutputMode,
+) -> Option<String> {
+    let finalize_json = mode.json && session.explicit;
+    if let Err(status) =
+        crate::ProveReplay::finish_named_capture(&session.capture, exit_code, finalize_json)
+    {
+        if session.explicit {
+            exit(status);
+        }
+        return capture_failure(
+            false,
+            mode,
+            "finalizing a dev capture",
+            format!("capture finalization exited with status {status}"),
+        );
+    }
+    let path = match session.capture.artifact_path() {
+        Some(path) => path.to_path_buf(),
+        None => {
+            return capture_failure(
+                session.explicit,
+                mode,
+                "resolving a finalized dev capture",
+                "named capture has no artifact path",
+            );
+        }
+    };
     let link = match crate::ProveReplay::index_named_replay_artifact(
         &session.capture,
         &path,
         RecordCapture::Safe,
+        session.explicit,
     ) {
         Ok(link) => link,
         Err(error) => {
-            if !mode.json {
-                eprintln!("capture: index skipped ({error})");
-            }
-            return None;
+            return capture_failure(
+                session.explicit,
+                mode,
+                "indexing a dev capture",
+                error,
+            );
         }
     };
-    let mut index = match RecordIndex::load_for_project(".") {
+    let project_root = match jet::build_project_root(&path.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            return capture_failure(
+                session.explicit,
+                mode,
+                "resolving dev capture retention",
+                format!("could not resolve project root: {diagnostics:?}"),
+            );
+        }
+    };
+    let mut index = match RecordIndex::load_for_project(&project_root) {
         Ok(index) => index,
         Err(error) => {
-            if !mode.json {
-                eprintln!("capture: retention skipped ({error})");
-            }
-            return None;
+            return capture_failure(
+                session.explicit,
+                mode,
+                "loading dev capture retention",
+                error,
+            );
         }
     };
     if let Err(error) = index
         .set_budget(session.budget)
         .and_then(|()| index.store())
     {
-        if !mode.json {
-            eprintln!("capture: retention skipped ({error})");
-        }
-        return None;
+        return capture_failure(
+            session.explicit,
+            mode,
+            "retaining a dev capture",
+            error,
+        );
     }
     if index
         .find(RecordKind::Replay, &link.artifact_id, true)
@@ -151,7 +308,12 @@ fn finish_dev_capture(
     {
         Some(link.artifact_id)
     } else {
-        None
+        capture_failure(
+            session.explicit,
+            mode,
+            "retaining a dev capture",
+            "the finalized replay was evicted before it could be retained",
+        )
     }
 }
 
@@ -657,6 +819,7 @@ pub(crate) fn run_dev(
     no_capture: bool,
     canvas: bool,
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
+    app_port: Option<u16>,
 ) {
     crate::CmdCompile::require_project_environment("dev", Path::new(file), mode);
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
@@ -678,6 +841,7 @@ pub(crate) fn run_dev(
             no_capture,
             canvas,
             canvas_options,
+            app_port,
         );
     });
 }
@@ -713,14 +877,21 @@ fn detect_static_output_root(file: &str) -> Option<PathBuf> {
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let mut candidates = ["dist", "public", "out", "build"]
+    let project_root = jet::build_project_root(file).ok()?;
+    let mut candidates = ["dist", "public", "out"]
         .into_iter()
         .map(|name| source_dir.join(name))
         .collect::<Vec<_>>();
+    candidates.push(project_root.join(".jet").join("build"));
     if let Ok(entries) = fs::read_dir(source_dir) {
         let mut extras = entries
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|path| path.is_dir())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name != "build" && name != ".jet")
+            })
             .collect::<Vec<_>>();
         extras.sort();
         candidates.extend(extras);
@@ -885,12 +1056,22 @@ fn run_dev_inner(
     no_capture: bool,
     canvas: bool,
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
+    app_port: Option<u16>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            let source = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &source, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let build_root = project_root.join(".jet").join("build");
     // Fold manifest profile and deployment environment facts before any host
     // binds.  Every production-capable host receives this same typed policy.
     let release_policy = crate::CmdCompile::release_devtools_policy_for_name(file, profile, mode);
@@ -899,6 +1080,7 @@ fn run_dev_inner(
         let options = canvas_options.unwrap_or_default();
         match jet_devserver::WebHost::WebHost::bind_canvas_with_options_and_policy(
             file,
+            &build_root,
             false,
             &options,
             release_policy.clone(),
@@ -974,7 +1156,7 @@ fn run_dev_inner(
     }
 
     let mut pending_application_listener = if canvas_host.is_none() {
-        jet_devserver::WebHost::WebHost::bind_application_preview_listener(None).ok()
+        jet_devserver::WebHost::WebHost::bind_application_preview_listener(app_port).ok()
     } else {
         None
     };
@@ -1028,6 +1210,24 @@ fn run_dev_inner(
     register_dev_watch_paths(&mut watch, path);
     let mut incremental_cache = jet::Sema::IncrementalSemaCache::new();
 
+    // Prime the cache from the successful baseline before accepting edits.
+    // The first save must reuse the same body-checking boundary as later
+    // saves; otherwise an otherwise incremental session pays a full sema
+    // recomputation on its first reload.
+    //
+    // This path is deliberately limited to the default dev contract guarded
+    // by `dev_incremental_reload_enabled`. A failed seed is discarded; the
+    // normal edit path will report the actual diagnostics for that source.
+    let prime_incremental_cache = |cache: &mut jet::Sema::IncrementalSemaCache| {
+        let (diags, bundle, _) =
+            jet::Driver::check_file_with_effect_facts_incremental(file, None, false, cache);
+        let has_errors = diags
+            .iter()
+            .any(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error));
+        if bundle.is_none() || has_errors {
+            cache.clear();
+        }
+    };
 
     // The checked snapshot from the last successful load, kept so a resident
     // edit can be diffed against it for type stability (D-HOTSWAP1).
@@ -1042,11 +1242,12 @@ fn run_dev_inner(
         profile,
         setting_overrides,
     );
-    if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
-        if prev_snapshot.is_some() {
-            prime_dev_incremental_cache(file, &mut incremental_cache);
-        }
+    if prev_snapshot.is_some()
+        && dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides)
+    {
+        prime_incremental_cache(&mut incremental_cache);
     }
+
 
     let mut static_host = if canvas_host.is_none() && prev_snapshot.is_some() {
         start_static_output_host(
@@ -1233,12 +1434,6 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
-                    incremental_cache.clear();
-                    if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
-                        if prev_snapshot.is_some() {
-                            prime_dev_incremental_cache(file, &mut incremental_cache);
-                        }
-                    }
 
                     game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
                         matches!(
@@ -1421,6 +1616,24 @@ fn run_dev_inner(
                 &mut game_facts,
                 canvas_host.as_ref().or(static_host.as_ref()),
             );
+            let dependency_paths = next
+                .as_ref()
+                .map(|snapshot| {
+                    snapshot
+                        .bundle
+                        .modules
+                        .iter()
+                        .map(|module| module.path.clone())
+                        .chain(
+                            snapshot
+                                .bundle
+                                .comptime_inputs
+                                .iter()
+                                .map(|input| snapshot.bundle.project_root.join(&input.path)),
+                        )
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if next.is_none() {
                 jet_foundation::Persist::shared_replace(persist_before_change.clone());
                 jet_jit::discard_hot_swap_plan();
@@ -1565,7 +1778,12 @@ fn run_dev_inner(
                     session = txn.rollback(reason);
                 }
             }
-            if let Err(diagnostic) = watch.acknowledge(&receipt) {
+            let acknowledged = if dependency_paths.is_empty() {
+                watch.acknowledge(&receipt)
+            } else {
+                watch.acknowledge_with_dependencies(&receipt, &dependency_paths)
+            };
+            if let Err(diagnostic) = acknowledged {
                 eprint!(
                     "{}",
                     jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
@@ -1607,12 +1825,6 @@ fn run_dev_inner(
                     &mut game_controls_enabled,
                     &mut canvas_hint_printed,
                 );
-                incremental_cache.clear();
-                if dev_incremental_reload_enabled(entry_fn, profile, gates, setting_overrides) {
-                    if prev_snapshot.is_some() {
-                        prime_dev_incremental_cache(file, &mut incremental_cache);
-                    }
-                }
                 if let Err(error) = project_session.finish_project_rebuild(&request, result) {
                     if !mode.quiet {
                         eprintln!("Project rebuild receipt: {error}");
@@ -2017,19 +2229,6 @@ fn dev_incremental_reload_enabled(
     entry_fn.is_none() && profile == "dev" && gates.is_empty() && setting_overrides.is_empty()
 }
 
-fn prime_dev_incremental_cache(
-    file: &str,
-    cache: &mut jet::Sema::IncrementalSemaCache,
-) {
-    let (diagnostics, _, _) =
-        jet::Driver::check_file_with_effect_facts_incremental(file, None, false, cache);
-    if diagnostics
-        .iter()
-        .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-    {
-        cache.clear();
-    }
-}
 
 fn load_and_check_dev_change(
     file: &str,
@@ -2231,6 +2430,13 @@ fn render_dev_change(
                         };
                         *game_facts_out = facts.clone();
                         let decision = decision.with_change_facts(facts);
+                        let reuse_current = !use_interpreter
+                            && decision.is_compatible()
+                            && decision.changed.is_empty()
+                            && decision.changed_functions.is_empty()
+                            && decision.rechecked().is_empty()
+                            && decision.schema_migrations().is_empty()
+                            && decision.change_facts().is_empty();
                         if let Some(host) = devtools_host {
                             let _ = host.publish_hot_swap_decision(&decision);
                         }
@@ -2292,6 +2498,7 @@ fn render_dev_change(
                                 file,
                                 mode,
                                 use_interpreter,
+                                reuse_current,
                                 release_policy,
                             )
                         } else {
@@ -2650,12 +2857,20 @@ fn run_resident_swap(
     file: &str,
     mode: OutputMode,
     use_interpreter: bool,
+    reuse_current: bool,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
 
-    let outcome = if use_interpreter {
+    let outcome = if reuse_current {
+        jet_jit::run_resident_current().map_err(|reason| {
+            vec![jet::Diagnostics::Diagnostic::runtime_host_fault(
+                String::new(),
+                reason,
+            )]
+        })
+    } else if use_interpreter {
         let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
         b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
     } else {
@@ -2675,6 +2890,7 @@ fn run_resident_swap(
         }
     }
 }
+
 
 /// Clean restart via the strict Cranelift backend.
 fn run_resident_restart(
@@ -3323,10 +3539,17 @@ pub(crate) fn run_devtools_ice_report(args: &[&String]) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let bundle_dir =
-        PathBuf::from(".jet")
-            .join("ice-report")
-            .join(format!("{}-{}", stem(file), ts));
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diags) => {
+            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bundle_dir = project_root
+        .join(".jet")
+        .join("ice-report")
+        .join(format!("{}-{}", stem(file), ts));
     fs::create_dir_all(&bundle_dir).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't create `{}`: {}", bundle_dir.display(), e);
         exit(ExitCodes::USER_ERROR);
@@ -4662,9 +4885,9 @@ pub(crate) fn run_bind(args: &[&String]) {
         );
     }
 
-    // Default cache path follows D-CBIND7: .jet/bindings/c/<lib>.jet.
-    let out_path =
-        out.unwrap_or_else(|| format!(".jet/bindings/c/{}.{}", lib, jet::Syntax::FILE_EXT));
+    // Default cache path follows D-CBIND7 under the selected project root.
+    let project_root = selected_project_root_for_path(header);
+    let out_path = out.unwrap_or_else(|| default_binding_output(header, "c", &lib));
     if let Some(parent) = std::path::Path::new(&out_path).parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             crate::cli_error!("E2105", "could not create `{}`: {}", parent.display(), e);
@@ -4691,13 +4914,6 @@ pub(crate) fn run_bind(args: &[&String]) {
             "rerun `jet inspect bind` after checking the output path".to_string(),
         );
     }
-    let project_root = std::env::current_dir().unwrap_or_else(|error| {
-        bind_e3208(
-            format!("Could not publish C binding provenance for `{header}`."),
-            format!("the project root could not be resolved ({error})."),
-            "rerun the bind command from the project root".to_string(),
-        )
-    });
     let header_path = std::fs::canonicalize(header).unwrap_or_else(|error| {
         bind_e3208(
             format!("Could not publish C binding provenance for `{header}`."),
@@ -4824,6 +5040,7 @@ fn run_binding_plan_command(args: &[&String]) {
     }
 
     let package_path = Path::new("package.jet");
+    let project_root = selected_project_root_for_path("package.jet");
     if let Some(policy) = policy {
         if name.is_none() {
             if let Err(error) =
@@ -4844,9 +5061,9 @@ fn run_binding_plan_command(args: &[&String]) {
         exit(ExitCodes::USAGE);
     };
 
-    let Some(header) = binding_header_path(&name) else {
+    let Some(header) = binding_header_path(&project_root, &name) else {
         if explain {
-            if let Some(record) = read_binding_plan(&name) {
+            if let Some(record) = read_binding_plan(&project_root, &name) {
                 print!("{record}");
                 return;
             }
@@ -4901,7 +5118,7 @@ fn run_binding_plan_command(args: &[&String]) {
             crate::cli_error!("E3208", "{error}");
             exit(ExitCodes::USER_ERROR);
         });
-    if let Some(recorded) = read_binding_plan(&name) {
+    if let Some(recorded) = read_binding_plan(&project_root, &name) {
         if policy == Some(jet::Bindgen::BindingPolicy::Frozen) || freeze {
             if let Err(error) = plan.frozen_drift(recorded_digest(&recorded)) {
                 crate::cli_error!("E3208", "{error}");
@@ -4953,11 +5170,11 @@ fn run_binding_plan_command(args: &[&String]) {
         );
         exit(ExitCodes::USER_ERROR);
     });
-    if let Err(error) = write_binding_cache(&name, &projected.source) {
+    if let Err(error) = write_binding_cache(&project_root, &name, &projected.source) {
         crate::cli_error!("E2105", "{error}");
         exit(ExitCodes::USER_ERROR);
     }
-    if let Err(error) = write_binding_plan(&name, &plan) {
+    if let Err(error) = write_binding_plan(&project_root, &name, &plan) {
         crate::cli_error!("E2105", "{error}");
         exit(ExitCodes::USER_ERROR);
     }
@@ -4970,20 +5187,20 @@ fn run_binding_plan_command(args: &[&String]) {
         crate::cli_error!("E2105", "{error}");
         exit(ExitCodes::USER_ERROR);
     }
-    if let Err(error) = write_binding_facade(&name, &plan) {
+    if let Err(error) = write_binding_facade(&project_root, &name, &plan) {
         crate::cli_error!("E2105", "{error}");
         exit(ExitCodes::USER_ERROR);
     }
     println!("binding plan {} ({})", name, plan.candidate_digest());
 }
 
-fn binding_header_path(name: &str) -> Option<PathBuf> {
+fn binding_header_path(project_root: &Path, name: &str) -> Option<PathBuf> {
     let candidates = [
         PathBuf::from(name),
         PathBuf::from(format!("{name}.h")),
         PathBuf::from(format!("include/{name}.h")),
         PathBuf::from(format!("ffi/{name}.h")),
-        PathBuf::from(format!(".jet/ffi/{name}.h")),
+        project_root.join(".jet").join("ffi").join(format!("{name}.h")),
     ];
     candidates.into_iter().find(|path| path.is_file())
 }
@@ -5159,12 +5376,16 @@ fn annotate_binding_contract(
     Ok(contract)
 }
 
-fn binding_plan_path(name: &str) -> PathBuf {
-    PathBuf::from(format!(".jet/lock/bindings/{name}.plan"))
+fn binding_plan_path(project_root: &Path, name: &str) -> PathBuf {
+    project_root
+        .join(".jet")
+        .join("lock")
+        .join("bindings")
+        .join(format!("{name}.plan"))
 }
 
-fn read_binding_plan(name: &str) -> Option<String> {
-    fs::read_to_string(binding_plan_path(name)).ok()
+fn read_binding_plan(project_root: &Path, name: &str) -> Option<String> {
+    fs::read_to_string(binding_plan_path(project_root, name)).ok()
 }
 
 fn recorded_digest(record: &str) -> &str {
@@ -5174,8 +5395,12 @@ fn recorded_digest(record: &str) -> &str {
         .unwrap_or("")
 }
 
-fn write_binding_plan(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<(), String> {
-    let path = binding_plan_path(name);
+fn write_binding_plan(
+    project_root: &Path,
+    name: &str,
+    plan: &jet::Bindgen::BindingPlan,
+) -> Result<(), String> {
+    let path = binding_plan_path(project_root, name);
     let Some(parent) = path.parent() else {
         return Err("binding lock path has no parent".to_string());
     };
@@ -5191,8 +5416,16 @@ fn write_binding_plan(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<()
     fs::write(path, record).map_err(|error| format!("could not write binding lock: {error}"))
 }
 
-fn write_binding_facade(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<(), String> {
-    let path = PathBuf::from(format!(".jet/bindings/c/{name}.adapted.jet"));
+fn write_binding_facade(
+    project_root: &Path,
+    name: &str,
+    plan: &jet::Bindgen::BindingPlan,
+) -> Result<(), String> {
+    let path = project_root
+        .join(".jet")
+        .join("bindings")
+        .join("c")
+        .join(format!("{name}.adapted.jet"));
     let Some(parent) = path.parent() else {
         return Err("binding facade path has no parent".to_string());
     };
@@ -5202,8 +5435,16 @@ fn write_binding_facade(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<
         .map_err(|error| format!("could not write generated binding facade: {error}"))
 }
 
-fn write_binding_cache(name: &str, source: &str) -> Result<(), String> {
-    let path = PathBuf::from(format!(".jet/bindings/c/{name}.jet"));
+fn write_binding_cache(
+    project_root: &Path,
+    name: &str,
+    source: &str,
+) -> Result<(), String> {
+    let path = project_root
+        .join(".jet")
+        .join("bindings")
+        .join("c")
+        .join(format!("{name}.jet"));
     let Some(parent) = path.parent() else {
         return Err("binding cache path has no parent".to_string());
     };
@@ -5312,6 +5553,26 @@ fn bind_e3208(what: String, why: String, fix: String) -> ! {
     exit(ExitCodes::USER_ERROR);
 }
 
+fn selected_project_root_for_path(path: &str) -> PathBuf {
+    match jet::build_project_root(path) {
+        Ok(root) => root,
+        Err(_) => {
+            eprintln!("error: couldn't select a project root for `{path}`");
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+fn default_binding_output(path: &str, module_root: &str, lib: &str) -> String {
+    selected_project_root_for_path(path)
+        .join(".jet")
+        .join("bindings")
+        .join(module_root)
+        .join(format!("{lib}.{}", jet::Syntax::FILE_EXT))
+        .display()
+        .to_string()
+}
+
 fn run_data_bind(format: &str, args: &[&String]) {
     let usage = || {
         eprintln!(
@@ -5390,7 +5651,12 @@ fn run_data_bind(format: &str, args: &[&String]) {
         let stem = base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base);
         let safe =
             jet::Syntax::sanitize_generated_name(stem, jet::Syntax::NameCase::Snake, "schema");
-        format!("bindings/{safe}.{}", jet::Syntax::FILE_EXT)
+        selected_project_root_for_path(input_path)
+            .join(".jet")
+            .join("bindings")
+            .join(format!("{safe}.{}", jet::Syntax::FILE_EXT))
+            .display()
+            .to_string()
     });
     let mut command = vec![
         jet::Syntax::BINARY_NAME.to_string(),
@@ -5635,12 +5901,7 @@ fn run_cpp_bind(args: &[&String]) {
             .to_ascii_lowercase()
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::CPP_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(header, jet::Syntax::CPP_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -5749,12 +6010,7 @@ fn run_tcl_bind(args: &[&String]) {
     let source = std::fs::read_to_string(path)
         .unwrap_or_else(|e| tcl_bind_error(path, &format!("the script could not be read ({e})")));
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::TCL_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::TCL_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -5839,12 +6095,7 @@ fn run_lua_bind(args: &[&String]) {
     let source = std::fs::read_to_string(path)
         .unwrap_or_else(|e| lua_bind_error(path, &format!("the script could not be read ({e})")));
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::LUA_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::LUA_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -5939,12 +6190,7 @@ fn run_ada_bind(args: &[&String]) {
         ada_bind_error(path, &format!("the package spec could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::ADA_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::ADA_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6039,12 +6285,7 @@ fn run_pascal_bind(args: &[&String]) {
         pascal_bind_error(path, &format!("the Pascal source could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::PASCAL_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::PASCAL_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6141,12 +6382,7 @@ fn run_dart_bind(args: &[&String]) {
         dart_bind_error(path, &format!("the Dart contract could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::DART_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::DART_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6313,12 +6549,7 @@ fn run_powershell_bind(args: &[&String]) {
         )
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::PWSH_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::PWSH_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6403,12 +6634,7 @@ fn run_perl_bind(args: &[&String]) {
         perl_bind_error(path, &format!("the Perl script could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::PERL_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::PERL_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6494,12 +6720,7 @@ fn run_ruby_bind(args: &[&String]) {
         ruby_bind_error(path, &format!("the Ruby script could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::RUBY_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::RUBY_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6585,12 +6806,7 @@ fn run_php_bind(args: &[&String]) {
         php_bind_error(path, &format!("the PHP script could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::PHP_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::PHP_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6675,12 +6891,7 @@ fn run_r_bind(args: &[&String]) {
     let source = std::fs::read_to_string(path)
         .unwrap_or_else(|e| r_bind_error(path, &format!("the R script could not be read ({e})")));
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::R_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::R_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6766,12 +6977,7 @@ fn run_python_bind(args: &[&String]) {
         python_bind_error(path, &format!("the Python script could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::PY_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::PY_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6872,12 +7078,7 @@ fn run_javascript_bind(args: &[&String]) {
         )
     };
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::JS_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(declaration, jet::Syntax::JS_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -6975,12 +7176,7 @@ fn run_octave_bind(args: &[&String]) {
         octave_bind_error(path, &format!("the Octave script could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::OCTAVE_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::OCTAVE_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -7084,12 +7280,13 @@ fn run_com_bind(args: &[&String]) {
         usage();
         exit(ExitCodes::USAGE)
     };
-    let input = if let Some(path) = file {
+    let binding_root_path = file.as_deref().unwrap_or("package.jet").to_owned();
+    let input = if let Some(path) = file.as_ref() {
         if guid.is_some() {
             usage();
             exit(ExitCodes::USAGE)
         }
-        jet::ComBind::TypeLibraryInput::File(path.into())
+        jet::ComBind::TypeLibraryInput::File(path.to_owned().into())
     } else {
         let (Some(guid), Some(major), Some(minor)) = (guid, major, minor) else {
             usage();
@@ -7106,12 +7303,8 @@ fn run_com_bind(args: &[&String]) {
             lcid,
         }
     };
-    let out_path = format!(
-        ".jet/bindings/{}/{}.{}",
-        jet::Syntax::COM_MODULE_ROOT,
-        lib,
-        jet::Syntax::FILE_EXT
-    );
+    let out_path =
+        default_binding_output(&binding_root_path, jet::Syntax::COM_MODULE_ROOT, &lib);
     let cache = std::path::Path::new(&out_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
@@ -7341,12 +7534,7 @@ fn run_java_bind(args: &[&String]) {
         )
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::JAVA_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(source_path, jet::Syntax::JAVA_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -7444,12 +7632,7 @@ fn run_dotnet_bind(args: &[&String]) {
         dotnet_bind_error(path, &format!("the C# source could not be read ({e})"))
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::CS_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(path, jet::Syntax::CS_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -7537,12 +7720,7 @@ fn run_go_bind(args: &[&String]) {
         )
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::GO_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(source_path, jet::Syntax::GO_MODULE_ROOT, &lib)
     });
     let cache_dir = std::path::Path::new(&out_path)
         .parent()
@@ -7648,12 +7826,7 @@ fn run_fortran_bind(args: &[&String]) {
         ),
     };
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::FORTRAN_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(source_path, jet::Syntax::FORTRAN_MODULE_ROOT, &lib)
     });
     let cache_dir = std::path::Path::new(&out_path)
         .parent()
@@ -7781,12 +7954,7 @@ fn run_cobol_bind(args: &[&String]) {
         )
     });
     let out_path = out.unwrap_or_else(|| {
-        format!(
-            ".jet/bindings/{}/{}.{}",
-            jet::Syntax::COBOL_MODULE_ROOT,
-            lib,
-            jet::Syntax::FILE_EXT
-        )
+        default_binding_output(source_path, jet::Syntax::COBOL_MODULE_ROOT, &lib)
     });
     let cache = std::path::Path::new(&out_path)
         .parent()
@@ -8497,7 +8665,17 @@ pub(crate) fn collect_measure_evidence(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let bin = PathBuf::from("build").join(format!("test_measure_{}", stem(file)));
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = project_root
+        .join(".jet")
+        .join("build")
+        .join(format!("test_measure_{}", stem(file)));
     build(
         file,
         &rust_code,
@@ -8826,7 +9004,17 @@ pub(crate) fn collect_scene_evidence(
             return Vec::new();
         }
     };
-    let bin = PathBuf::from("build").join(format!("scene_probe_{}", stem(file)));
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            return Vec::new();
+        }
+    };
+    let bin = project_root
+        .join(".jet")
+        .join("build")
+        .join(format!("scene_probe_{}", stem(file)));
     build(
         file,
         &compiled.rust,

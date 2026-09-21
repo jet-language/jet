@@ -9,7 +9,15 @@ use jet_sema::AST::{CFfi, LoadedModule, ProgramBundle};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+fn ensure_mir_bridge() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
+    });
+}
+
 fn diags(src: &str) -> Vec<Diagnostic> {
+    ensure_mir_bridge();
     let (toks, lex_diags) = Lexer::lex(src);
     if !lex_diags.is_empty() {
         return lex_diags;
@@ -82,5 +90,25 @@ fn run() {
             .iter()
             .map(|d| format!("{}: {}", d.code, d.what))
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn nominal_method_implicit_err_unwraps_in_declared_failure_context() {
+    let found = diags(
+        r#"
+struct Config {}
+impl Config {
+    fn projection(self) -> String { "port_slot" }
+}
+fn run() ![FieldError] {
+    config :: Config{}
+    assert(config.projection() == "port_slot", "layout shape name")
+}
+"#,
+    );
+    assert!(
+        found.is_empty(),
+        "a nominal method's implicit Err must unwrap before exact equality: {found:#?}"
     );
 }

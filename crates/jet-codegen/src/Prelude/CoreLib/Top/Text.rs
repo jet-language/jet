@@ -599,10 +599,13 @@ const JET_WB_NUMERIC: u8 = 16;
 const JET_WB_EXTENDNUMLET: u8 = 17;
 const JET_WB_WSEGSPACE: u8 = 18;
 
-fn jet_text_word_reduce(cps: &[char]) -> (Vec<(u8, char)>, Vec<usize>) {
+fn jet_text_word_reduce<I>(chars: I) -> (Vec<(u8, char)>, Vec<usize>)
+where
+    I: IntoIterator<Item = char>,
+{
     let mut units: Vec<(u8, char)> = Vec::new();
     let mut ends: Vec<usize> = Vec::new();
-    for (idx, &c) in cps.iter().enumerate() {
+    for (idx, c) in chars.into_iter().enumerate() {
         let cl = jet_text_word_class(c as u32);
         if matches!(cl, JET_WB_EXTEND | JET_WB_FORMAT | JET_WB_ZWJ) {
             if let Some(&(last_cl, _)) = units.last() {
@@ -618,16 +621,24 @@ fn jet_text_word_reduce(cps: &[char]) -> (Vec<(u8, char)>, Vec<usize>) {
     (units, ends)
 }
 
-fn jet_text_word_break_at(units: &[(u8, char)], ends: &[usize], cps: &[char], i: usize) -> bool {
+fn jet_text_word_break_at<F>(
+    units: &[(u8, char)],
+    ends: &[usize],
+    char_at: F,
+    i: usize,
+) -> bool
+where
+    F: Fn(usize) -> char,
+{
     let (pc, _) = units[i];
     let (cc, _) = units[i + 1];
     if pc == JET_WB_CR && cc == JET_WB_LF { return false; } // WB3
     if matches!(pc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3a
     if matches!(cc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3b
-    if jet_text_word_class(cps[ends[i]] as u32) == JET_WB_ZWJ && jet_text_is_ext_pictographic(units[i + 1].1 as u32) {
+    if jet_text_word_class(char_at(ends[i]) as u32) == JET_WB_ZWJ && jet_text_is_ext_pictographic(units[i + 1].1 as u32) {
         return false; // WB3c
     }
-    if pc == JET_WB_WSEGSPACE && cc == JET_WB_WSEGSPACE && jet_text_word_class(cps[ends[i]] as u32) == JET_WB_WSEGSPACE {
+    if pc == JET_WB_WSEGSPACE && cc == JET_WB_WSEGSPACE && jet_text_word_class(char_at(ends[i]) as u32) == JET_WB_WSEGSPACE {
         return false; // WB3d
     }
     if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } // WB5
@@ -662,7 +673,7 @@ fn jet_text_word_break_at(units: &[(u8, char)], ends: &[usize], cps: &[char], i:
 fn jet_text_word_segments(s: &String) -> Vec<String> {
     let cps: Vec<char> = s.chars().collect();
     if cps.is_empty() { return Vec::new(); }
-    let (units, ends) = jet_text_word_reduce(&cps);
+    let (units, ends) = jet_text_word_reduce(cps.iter().copied());
     let n = units.len();
     let mut brk = vec![true; n.saturating_sub(1)];
     let mut ri_run: usize = 0;
@@ -674,7 +685,7 @@ fn jet_text_word_segments(s: &String) -> Vec<String> {
             brk[i] = if cl == JET_WB_RI && nc == JET_WB_RI {
                 ri_run % 2 == 0 // WB15/WB16
             } else {
-                jet_text_word_break_at(&units, &ends, &cps, i)
+                jet_text_word_break_at(&units, &ends, |index| cps[index], i)
             };
         }
     }
@@ -709,8 +720,7 @@ fn jet_text_word_view_spans(s: &str) -> Vec<(usize, usize)> {
     if indexed.is_empty() {
         return Vec::new();
     }
-    let cps: Vec<char> = indexed.iter().map(|(_, c)| *c).collect();
-    let (units, ends) = jet_text_word_reduce(&cps);
+    let (units, ends) = jet_text_word_reduce(indexed.iter().map(|(_, c)| *c));
     let n = units.len();
     let mut breaks = vec![true; n.saturating_sub(1)];
     let mut ri_run = 0usize;
@@ -726,7 +736,7 @@ fn jet_text_word_view_spans(s: &str) -> Vec<(usize, usize)> {
             breaks[i] = if class == JET_WB_RI && next_class == JET_WB_RI {
                 ri_run % 2 == 0
             } else {
-                jet_text_word_break_at(&units, &ends, &cps, i)
+                jet_text_word_break_at(&units, &ends, |index| indexed[index].1, i)
             };
         }
     }
@@ -1121,11 +1131,692 @@ fn jet_text_center(
     let right = gap - left;
     format!("{}{}{}", jet_text_fill_columns(fill, left), s, jet_text_fill_columns(fill, right))
 }
+fn jet_text_pad_start_i64(s: &String, width: i64, fill: &String) -> String {
+    jet_text_pad_start(
+        s,
+        jet_foundation::Numeric::JetInt::from_i64(width),
+        fill,
+    )
+}
+fn jet_text_pad_end_i64(s: &String, width: i64, fill: &String) -> String {
+    jet_text_pad_end(
+        s,
+        jet_foundation::Numeric::JetInt::from_i64(width),
+        fill,
+    )
+}
+fn jet_text_center_i64(s: &String, width: i64, fill: &String) -> String {
+    jet_text_center(
+        s,
+        jet_foundation::Numeric::JetInt::from_i64(width),
+        fill,
+    )
+}
+fn jet_text_pad_start_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+    jet_text_pad_start(s, width.clone(), fill)
+}
+fn jet_text_pad_end_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+    jet_text_pad_end(s, width.clone(), fill)
+}
+fn jet_text_center_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+    jet_text_center(s, width.clone(), fill)
+}
 fn jet_text_starts_any(s: &String, prefixes: &Vec<String>) -> bool {
     prefixes.iter().any(|p| s.starts_with(p))
 }
+pub(crate) fn jet_text_parse_split(text: &String, separator: &String) -> Vec<String> {
+    if separator.is_empty() {
+        return text.chars().map(|character| character.to_string()).collect();
+    }
+    text.split(separator.as_str())
+        .map(str::to_string)
+        .collect()
+}
+pub(crate) fn jet_text_parse_rsplit(
+    text: &String,
+    separator: &String,
+    maxsplit: i64,
+) -> Vec<String> {
+    if separator.is_empty() {
+        return text.chars().map(|character| character.to_string()).collect();
+    }
+    if maxsplit < 0 {
+        return text.split(separator.as_str()).map(str::to_string).collect();
+    }
+    let mut parts = text
+        .rsplitn(maxsplit.saturating_add(1) as usize, separator.as_str())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    parts.reverse();
+    parts
+}
+pub(crate) fn jet_text_parse_split_once(
+    text: &String,
+    separator: &String,
+) -> (bool, String, String) {
+    match text.find(separator.as_str()) {
+        Some(index) => (
+            true,
+            text[..index].to_string(),
+            text[index + separator.len()..].to_string(),
+        ),
+        None => (false, text.clone(), String::new()),
+    }
+}
+pub(crate) fn jet_text_parse_partition(
+    text: &String,
+    separator: &String,
+) -> (String, String, String) {
+    match text.find(separator.as_str()) {
+        Some(index) => (
+            text[..index].to_string(),
+            separator.clone(),
+            text[index + separator.len()..].to_string(),
+        ),
+        None => (text.clone(), String::new(), String::new()),
+    }
+}
+pub(crate) fn jet_text_parse_rpartition(
+    text: &String,
+    separator: &String,
+) -> (String, String, String) {
+    match text.rfind(separator.as_str()) {
+        Some(index) => (
+            text[..index].to_string(),
+            separator.clone(),
+            text[index + separator.len()..].to_string(),
+        ),
+        None => (String::new(), String::new(), text.clone()),
+    }
+}
+pub(crate) fn jet_text_parse_split_ws(text: &String) -> Vec<String> {
+    text.split_whitespace().map(str::to_string).collect()
+}
+pub(crate) fn jet_text_parse_bool(text: &String) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+pub(crate) fn jet_text_parse_int(text: &String) -> Option<i64> {
+    text.trim().parse::<i64>().ok()
+}
+pub(crate) fn jet_text_parse_int_base(text: &String, base: i64) -> Option<i64> {
+    if !(2..=36).contains(&base) {
+        return None;
+    }
+    let text = text.trim();
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let parsed = i64::from_str_radix(digits, base as u32).ok()?;
+    Some(if negative { -parsed } else { parsed })
+}
+pub(crate) fn jet_text_parse_float(text: &String) -> Option<f64> {
+    text.trim().parse::<f64>().ok()
+}
+pub(crate) fn jet_text_parse_find(text: &String, needle: &String) -> i64 {
+    text.find(needle.as_str()).map_or(-1, |index| index as i64)
+}
+pub(crate) fn jet_text_parse_rfind(text: &String, needle: &String) -> i64 {
+    text.rfind(needle.as_str()).map_or(-1, |index| index as i64)
+}
+pub(crate) fn jet_text_parse_count(text: &String, needle: &String) -> i64 {
+    if needle.is_empty() {
+        return text.chars().count() as i64 + 1;
+    }
+    text.match_indices(needle.as_str()).count() as i64
+}
+pub(crate) fn jet_text_parse_replace_n(
+    text: &String,
+    old: &String,
+    new: &String,
+    count: i64,
+) -> String {
+    if old.is_empty() {
+        return text.clone();
+    }
+    if count < 0 {
+        text.replace(old.as_str(), new.as_str())
+    } else {
+        text.replacen(old.as_str(), new.as_str(), count as usize)
+    }
+}
+pub(crate) fn jet_text_parse_kv(
+    text: &String,
+    separator: &String,
+) -> (String, bool, String) {
+    if separator.is_empty() {
+        return (text.trim().to_string(), false, String::new());
+    }
+    match text.find(separator.as_str()) {
+        Some(index) => (
+            text[..index].trim().to_string(),
+            true,
+            text[index + separator.len()..].trim().to_string(),
+        ),
+        None => (text.trim().to_string(), false, String::new()),
+    }
+}
+pub(crate) fn jet_text_parse_join(parts: &Vec<String>, separator: &String) -> String {
+    parts.join(separator.as_str())
+}
+pub(crate) fn jet_text_parse_splitlines(text: &String, keepends: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let width = match bytes[index] {
+            b'\n' => 1,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => 2,
+            b'\r' => 1,
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+        let end = index + width;
+        out.push(
+            text.get(start..if keepends { end } else { index })
+                .unwrap_or_default()
+                .to_string(),
+        );
+        start = end;
+        index = end;
+    }
+    if start < bytes.len() || (start == 0 && !text.is_empty()) {
+        out.push(text.get(start..).unwrap_or_default().to_string());
+    }
+    out
+}
+pub(crate) fn jet_text_wrap(text: &String, width: i64) -> Vec<String> {
+    if width <= 0 {
+        return vec![text.clone()];
+    }
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if line.is_empty() {
+            line.push_str(word);
+        } else {
+            let trial = format!("{line} {word}");
+            if trial.len() <= width as usize {
+                line = trial;
+            } else {
+                out.push(std::mem::take(&mut line));
+                line.push_str(word);
+            }
+        }
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+pub(crate) fn jet_text_fill(text: &String, width: i64) -> String {
+    jet_text_wrap(text, width).join("\n")
+}
+pub(crate) fn jet_text_indent_with(
+    text: &String,
+    prefix: &String,
+    predicate_nonblank: bool,
+) -> String {
+    text.split('\n')
+        .map(|line| {
+            if !predicate_nonblank || !line.trim_matches([' ', '\t']).is_empty() {
+                format!("{prefix}{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+pub(crate) fn jet_text_wrap_paragraphs(text: &String, width: i64) -> String {
+    text.split("\n\n")
+        .filter(|paragraph| !paragraph.trim().is_empty())
+        .map(|paragraph| jet_text_fill(&paragraph.to_string(), width))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+pub(crate) fn jet_text_hanging_indent(
+    text: &String,
+    first: &String,
+    rest: &String,
+    width: i64,
+) -> String {
+    let words = text.split_whitespace().collect::<Vec<_>>();
+    if words.is_empty() {
+        return String::new();
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut prefix = first.as_str();
+    for word in words {
+        let limit = (width - prefix.len() as i64).max(1) as usize;
+        let trial = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{current} {word}")
+        };
+        if !current.is_empty() && trial.len() > limit {
+            lines.push(format!("{prefix}{current}"));
+            prefix = rest.as_str();
+            current = word.to_string();
+        } else {
+            current = trial;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(format!("{prefix}{current}"));
+    }
+    lines.join("\n")
+}
+pub(crate) fn jet_text_shorten(text: &String, width: i64, placeholder: &String) -> String {
+    if width < 0 || text.len() <= width as usize {
+        return text.clone();
+    }
+    let keep = (width as usize).saturating_sub(placeholder.len());
+    let end = text
+        .char_indices()
+        .take_while(|(index, _)| *index < keep)
+        .map(|(index, character)| index + character.len_utf8())
+        .last()
+        .unwrap_or(0)
+        .min(keep);
+    format!("{}{}", &text[..end], placeholder)
+}
+pub(crate) fn jet_text_indent(text: &String, prefix: &String) -> String {
+    text.split('\n')
+        .map(|line| format!("{prefix}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+pub(crate) fn jet_text_dedent(text: &String) -> String {
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let margin = lines
+        .iter()
+        .filter(|line| !line.trim_matches([' ', '\t']).is_empty())
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
+    if margin == 0 {
+        return text.clone();
+    }
+    lines
+        .iter()
+        .map(|line| {
+            if line.trim_matches([' ', '\t']).is_empty() {
+                (*line).to_string()
+            } else {
+                line.get(margin..).unwrap_or("").to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+pub(crate) fn jet_text_expand_tabs(text: &String, tabsize: i64) -> String {
+    let tabsize = if tabsize <= 0 { 8 } else { tabsize as usize };
+    let mut out = String::with_capacity(text.len());
+    let mut column = 0usize;
+    for character in text.chars() {
+        match character {
+            '\t' => {
+                let spaces = tabsize - (column % tabsize);
+                out.extend(std::iter::repeat_n(' ', spaces));
+                column += spaces;
+            }
+            '\n' => {
+                out.push('\n');
+                column = 0;
+            }
+            _ => {
+                out.push(character);
+                column += 1;
+            }
+        }
+    }
+    out
+}
+fn jet_text_wrap_int(
+    text: &String,
+    width: jet_foundation::Numeric::JetInt,
+) -> Vec<String> {
+    jet_text_wrap(
+        text,
+        width
+            .to_i64()
+            .unwrap_or_else(|| panic!("text wrapping width does not fit native i64")),
+    )
+}
+fn jet_text_fill_int(
+    text: &String,
+    width: jet_foundation::Numeric::JetInt,
+) -> String {
+    jet_text_fill(
+        text,
+        width
+            .to_i64()
+            .unwrap_or_else(|| panic!("text filling width does not fit native i64")),
+    )
+}
+fn jet_text_shorten_int(
+    text: &String,
+    width: jet_foundation::Numeric::JetInt,
+    placeholder: &String,
+) -> String {
+    jet_text_shorten(
+        text,
+        width
+            .to_i64()
+            .unwrap_or_else(|| panic!("text shortening width does not fit native i64")),
+        placeholder,
+    )
+}
+fn jet_text_expand_tabs_int(
+    text: &String,
+    tabsize: jet_foundation::Numeric::JetInt,
+) -> String {
+    jet_text_expand_tabs(
+        text,
+        tabsize
+            .to_i64()
+            .unwrap_or_else(|| panic!("text tab size does not fit native i64")),
+    )
+}
+fn jet_text_html_entity(name: &str) -> Option<String> {
+    let named = match name {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "nbsp" => Some(' '),
+        "copy" => Some('©'),
+        "reg" => Some('®'),
+        "trade" => Some('™'),
+        "mdash" => Some('—'),
+        "ndash" => Some('–'),
+        "hellip" => Some('…'),
+        _ => None,
+    };
+    if let Some(character) = named {
+        return Some(character.to_string());
+    }
+    let number = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
+        u32::from_str_radix(hex, 16).ok()
+    } else {
+        name.strip_prefix('#').and_then(|decimal| decimal.parse().ok())
+    };
+    number.and_then(char::from_u32).map(|character| character.to_string())
+}
+pub(crate) fn jet_text_html_escape(text: &String, quote: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' if quote => out.push_str("&quot;"),
+            '\'' if quote => out.push_str("&#x27;"),
+            _ => out.push(character),
+        }
+    }
+    out
+}
+pub(crate) fn jet_text_html_unescape(text: &String) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(';').filter(|end| *end <= 31) else {
+            out.push('&');
+            rest = after;
+            continue;
+        };
+        let name = &after[..end];
+        if let Some(decoded) = jet_text_html_entity(name) {
+            out.push_str(&decoded);
+            rest = &after[end + 1..];
+        } else {
+            out.push('&');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+pub(crate) fn jet_text_html_strip_tags(text: &String) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for character in text.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(character),
+            _ => {}
+        }
+    }
+    out
+}
+pub(crate) fn jet_text_html_escape_quoted(text: &String) -> String {
+    jet_text_html_escape(text, true)
+}
+pub(crate) fn jet_text_html_escape_text(text: &String) -> String {
+    jet_text_html_escape(text, false)
+}
+pub(crate) fn jet_text_html_unescape_and_strip(text: &String) -> String {
+    jet_text_html_unescape(&jet_text_html_strip_tags(text))
+}
+pub(crate) fn jet_text_parse_capwords(text: &String) -> String {
+    text.split_whitespace()
+        .map(|word| jet_text_capitalize(&word.to_string()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+pub(crate) fn jet_text_parse_find_from(text: &String, needle: &String, start: i64) -> i64 {
+    let start = start.max(0) as usize;
+    let Some(rest) = text.get(start..) else {
+        return -1;
+    };
+    rest.find(needle.as_str())
+        .map_or(-1, |index| (start + index) as i64)
+}
+pub(crate) fn jet_text_parse_rfind_from(text: &String, needle: &String, end: i64) -> i64 {
+    let end = end.clamp(0, text.len() as i64) as usize;
+    let Some(prefix) = text.get(..end) else {
+        return -1;
+    };
+    prefix.rfind(needle.as_str()).map_or(-1, |index| index as i64)
+}
+pub(crate) fn jet_text_parse_index(text: &String, needle: &String) -> i64 {
+    jet_text_parse_find(text, needle)
+}
+pub(crate) fn jet_text_parse_contains(text: &String, needle: &String) -> bool {
+    text.contains(needle.as_str())
+}
+pub(crate) fn jet_text_parse_lstrip(text: &String) -> String {
+    text.trim_start().to_string()
+}
+pub(crate) fn jet_text_parse_rstrip(text: &String) -> String {
+    text.trim_end().to_string()
+}
+pub(crate) fn jet_text_parse_strip(text: &String) -> String {
+    text.trim().to_string()
+}
+pub(crate) fn jet_text_parse_escape_c(text: &String) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            other => out.push(other),
+        }
+    }
+    out
+}
+pub(crate) fn jet_text_parse_unescape_c(text: &String) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            out.push(character);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
 fn jet_text_ends_any(s: &String, suffixes: &Vec<String>) -> bool {
     suffixes.iter().any(|p| s.ends_with(p))
+}
+fn jet_text_rindex(s: &String, needle: &String) -> i64 {
+    s.rfind(needle).map(|index| index as i64).unwrap_or(-1)
+}
+fn jet_text_removeprefix(s: &String, prefix: &String) -> String {
+    s.strip_prefix(prefix).unwrap_or(s).to_string()
+}
+fn jet_text_removesuffix(s: &String, suffix: &String) -> String {
+    s.strip_suffix(suffix).unwrap_or(s).to_string()
+}
+fn jet_text_isidentifier(s: &String) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_alphabetic())
+        && chars.all(|character| character == '_' || character.is_alphanumeric())
+}
+fn jet_text_encode(s: &String) -> Vec<u8> {
+    s.as_bytes().to_vec()
+}
+fn jet_text_isalpha(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_alphabetic)
+}
+fn jet_text_isdecimal(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
+}
+fn jet_text_isnumeric(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_numeric)
+}
+fn jet_text_isalnum(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_alphanumeric)
+}
+fn jet_text_isascii(s: &String) -> bool {
+    s.is_ascii()
+}
+fn jet_text_isdigit(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
+}
+fn jet_text_islower(s: &String) -> bool {
+    s.chars().any(char::is_lowercase) && !s.chars().any(char::is_uppercase)
+}
+fn jet_text_isspace(s: &String) -> bool {
+    !s.is_empty() && s.chars().all(char::is_whitespace)
+}
+fn jet_text_istitle(s: &String) -> bool {
+    let mut has_cased = false;
+    let mut expect_upper = true;
+    for character in s.chars() {
+        if character.is_uppercase() {
+            has_cased = true;
+            expect_upper = false;
+        } else if character.is_lowercase() {
+            has_cased = true;
+            if expect_upper {
+                return false;
+            }
+        } else if character.is_alphabetic() {
+            return false;
+        } else {
+            expect_upper = true;
+        }
+    }
+    has_cased
+}
+fn jet_text_isupper(s: &String) -> bool {
+    s.chars().any(char::is_uppercase) && !s.chars().any(char::is_lowercase)
+}
+fn jet_text_isprintable(s: &String) -> bool {
+    s.chars().all(|character| !character.is_control())
+}
+fn jet_text_expandtabs(
+    s: &String,
+    tabsize: jet_foundation::Numeric::JetInt,
+) -> String {
+    let width = tabsize
+        .to_i64()
+        .unwrap_or_else(|| panic!("text tab size does not fit native i64"))
+        .max(0);
+    let mut column = 0i64;
+    let mut out = String::with_capacity(s.len());
+    for character in s.chars() {
+        match character {
+            '\t' if width > 0 => {
+                let spaces = width - column.rem_euclid(width);
+                out.extend(std::iter::repeat_n(' ', spaces as usize));
+                column += spaces;
+            }
+            '\t' => {}
+            '\n' | '\r' => {
+                out.push(character);
+                column = 0;
+            }
+            _ => {
+                out.push(character);
+                column += 1;
+            }
+        }
+    }
+    out
+}
+fn jet_text_zfill(s: &String, width: i64) -> String {
+    let length = s.chars().count() as i64;
+    if width <= length {
+        return s.clone();
+    }
+    let (sign, body) = if let Some(rest) = s.strip_prefix('+') {
+        ("+", rest)
+    } else if let Some(rest) = s.strip_prefix('-') {
+        ("-", rest)
+    } else {
+        ("", s.as_str())
+    };
+    format!("{sign}{}{}", "0".repeat((width - length) as usize), body)
+}
+fn jet_text_zfill_int(
+    s: &String,
+    width: jet_foundation::Numeric::JetInt,
+) -> String {
+    jet_text_zfill(
+        s,
+        width
+            .to_i64()
+            .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
+    )
+}
+fn jet_text_zfill_ref(s: &String, width: &jet_foundation::Numeric::JetInt) -> String {
+    jet_text_zfill(
+        s,
+        width
+            .to_i64()
+            .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
+    )
 }
 fn jet_text_char_indices(s: &String) -> Vec<String> {
     s.char_indices().map(|(i, c)| format!("{}:{}", i, c)).collect()

@@ -20,9 +20,7 @@ fn run() {
     client_i := 0
     loop client_i < requests {
         response :: http.get("http://{address}/")
-        if response.status() == 200 && response.body().text(8192) == "ok" {
-            passed += 1
-        }
+        if response.status() == 200 && response.body().text(8192) == "ok" -> passed += 1
         client_i += 1
     }
     server.join() ?? panic("server task failed")

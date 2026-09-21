@@ -151,18 +151,19 @@ fn main() {
         "Warning".to_string(), "one".to_string(),
         "Warning".to_string(), "two".to_string(),
     ];
-    let (_, body, _, headers) = bridge::jet_http_client_send_impl(
+    let response = bridge::jet_http_client_send_parts_impl(
         "GET", &url, &request_headers, None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap();
+    let body = response.body_handle;
     assert_eq!(
         bridge::jet_http_client_body_read_impl(body, 8).unwrap(),
         Some(vec![255, 0]),
     );
     assert_eq!(bridge::jet_http_client_body_read_impl(body, 8).unwrap(), None);
-    let selected = headers.chunks_exact(2)
-        .filter(|pair| matches!(pair[0].as_str(), "x-a" | "x-b" | "set-cookie"))
-        .flat_map(|pair| [pair[0].clone(), pair[1].clone()])
+    let selected = response.headers.iter()
+        .filter(|(name, _)| matches!(name.as_str(), "x-a" | "x-b" | "set-cookie"))
+        .flat_map(|(name, value)| [name.clone(), value.clone()])
         .collect::<Vec<_>>();
     assert_eq!(selected, vec![
         "x-a", "one", "x-b", "middle", "x-a", "two",
@@ -358,13 +359,12 @@ fn main() {
     let multipart = vec![
         line_break_name,
         format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter"),
-    ];
-    let response = bridge::jet_http_client_send_impl(
+    let response = bridge::jet_http_client_send_parts_impl(
         "POST", &url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &multipart,
     ).unwrap();
-    let body = bridge::jet_http_client_body_read_impl(response.1, 8).unwrap().unwrap();
-    assert_eq!((response.0, body.as_slice()), (200, b"ok".as_slice()));
+    let body = bridge::jet_http_client_body_read_impl(response.body_handle, 8).unwrap().unwrap();
+    assert_eq!((response.status, body.as_slice()), (200, b"ok".as_slice()));
 }
 "#,
     )
@@ -520,7 +520,7 @@ fn main() {
         (None, None, None, Some(-1)),
     ];
     let errors = cases.into_iter().map(|(timeout, connect, read, total)| {
-        bridge::jet_http_client_send_impl(
+        bridge::jet_http_client_send_parts_impl(
             "GET", &url, &[], None, timeout, connect, read, total, None, None, None, None, None, None,
             &[], &[], &[],
         ).err()
@@ -528,36 +528,36 @@ fn main() {
     assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHTTPBridgeError::Timeout))));
     let unsupported_url = url.replacen("http://", "ftp://", 1);
     let url_errors = ["http://[".to_string(), unsupported_url].map(|url| {
-        bridge::jet_http_client_send_impl(
+        bridge::jet_http_client_send_parts_impl(
             "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None,
             &[], &[], &[],
         ).unwrap_err()
     });
     assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHTTPBridgeError::InvalidUrl)));
     let refused_url = "http://127.0.0.1:0/".to_string();
-    let connection_error = bridge::jet_http_client_send_impl(
+    let connection_error = bridge::jet_http_client_send_parts_impl(
         "GET", &refused_url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(connection_error, bridge::JetHTTPBridgeError::Connect));
-    let proxy_error = bridge::jet_http_client_send_impl(
+    let proxy_error = bridge::jet_http_client_send_parts_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_error, bridge::JetHTTPBridgeError::Proxy));
-    let proxy_connection_error = bridge::jet_http_client_send_impl(
+    let proxy_connection_error = bridge::jet_http_client_send_parts_impl(
         "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_connection_error, bridge::JetHTTPBridgeError::Proxy));
-    let proxy_auth_error = bridge::jet_http_client_send_impl(
+    let proxy_auth_error = bridge::jet_http_client_send_parts_impl(
         "GET", &"https://auth.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_auth_error, bridge::JetHTTPBridgeError::Proxy));
-    let io_error = bridge::jet_http_client_send_impl(
+    let io_error = bridge::jet_http_client_send_parts_impl(
         "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
@@ -673,36 +673,36 @@ fn main() {
     let base = std::env::args().nth(1).unwrap();
     let url = format!("{base}/redirect");
     let errors = [-1, i64::from(u32::MAX) + 1].into_iter().map(|redirects| {
-        bridge::jet_http_client_send_impl(
+        bridge::jet_http_client_send_parts_impl(
             "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(redirects), None,
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
     assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHTTPBridgeError::Redirect))));
-    let stopped = bridge::jet_http_client_send_impl(
+    let stopped = bridge::jet_http_client_send_parts_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(0), None,
         &[], &[], &[],
     ).unwrap();
-    let stopped_body = bridge::jet_http_client_body_read_impl(stopped.1, 16).unwrap().unwrap();
-    assert_eq!((stopped.0, stopped_body.as_slice()), (302, b"redirect".as_slice()));
-    let followed = bridge::jet_http_client_send_impl(
+    let stopped_body = bridge::jet_http_client_body_read_impl(stopped.body_handle, 16).unwrap().unwrap();
+    assert_eq!((stopped.status, stopped_body.as_slice()), (302, b"redirect".as_slice()));
+    let followed = bridge::jet_http_client_send_parts_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None,
         Some(i64::from(u32::MAX)), None, &[], &[], &[],
     ).unwrap();
-    let followed_body = bridge::jet_http_client_body_read_impl(followed.1, 8).unwrap().unwrap();
-    assert_eq!((followed.0, followed_body.as_slice()), (200, b"ok".as_slice()));
-    let explicit = bridge::jet_http_client_send_impl(
+    let followed_body = bridge::jet_http_client_body_read_impl(followed.body_handle, 8).unwrap().unwrap();
+    assert_eq!((followed.status, followed_body.as_slice()), (200, b"ok".as_slice()));
+    let explicit = bridge::jet_http_client_send_parts_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(1), None,
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(explicit, bridge::JetHTTPBridgeError::Redirect));
-    let within = bridge::jet_http_client_send_impl(
+    let within = bridge::jet_http_client_send_parts_impl(
         "GET", &format!("{base}/within/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap();
-    let within_body = bridge::jet_http_client_body_read_impl(within.1, 8).unwrap().unwrap();
-    assert_eq!((within.0, within_body.as_slice()), (200, b"ok".as_slice()));
-    let over = bridge::jet_http_client_send_impl(
+    let within_body = bridge::jet_http_client_body_read_impl(within.body_handle, 8).unwrap().unwrap();
+    assert_eq!((within.status, within_body.as_slice()), (200, b"ok".as_slice()));
+    let over = bridge::jet_http_client_send_parts_impl(
         "GET", &format!("{base}/over/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap_err();
@@ -1171,27 +1171,21 @@ fn run() {{
     input :: files.open("{path_lit}") ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
     first :: reader.next() ?? panic("next")
-    if first == {{
-        Val(row) -> print("first:{{row.service}}")
-        None -> panic("eof")
-    }}
-    groups := data.query(reader)
+    print("first:{{first.service}}")
+    if data.query(reader)
         .group_by((e) -> e.service)
         .mean((e) -> e.latency_ms)
-        .collect()
-    if groups == {{
+        .collect() == {{
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
-    empty := data.mean([Float]{{}})
-    if empty == {{
+    if data.mean([Float]{{}}) == {{
         .Ok(_) -> print("unexpected mean")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
-    bad := data.quantile([1.0, 2.0], 1.5)
-    if bad == {{
+    if data.quantile([1.0, 2.0], 1.5) == {{
         .Ok(_) -> print("unexpected q")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}

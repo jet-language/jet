@@ -526,6 +526,13 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
         "Transaction" => Some("JetTransaction"),
+        "Counter" => Some("JetCounter"),
+        "Deque" => Some("JetDeque"),
+        "OrderedMap" => Some("JetOrderedMap"),
+        "Layer" => Some("JetLayer"),
+        "Chain" => Some("JetChain"),
+        "StringSet" => Some("JetStringSet"),
+
         "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
@@ -1273,17 +1280,20 @@ impl Cx {
             .filter(|identity| self.distinct_types.contains_key(identity))
     }
 
-    /// Read the ordinary lowered trait-method facts for a String-backed
-    /// nominal. This keeps constructor lowering independent of any
-    /// compiler-owned type whitelist.
-    pub(crate) fn string_distinct_has_trait_method(&self, name: &str, method: &str) -> bool {
+    /// Checked-text ownership may be lowered from a comptime fragment whose
+    /// synthetic impl has no trait label. Keep the exact nominal identity and
+    /// reuse its registered static method signatures rather than recovering an
+    /// owner from a lowered receiver value.
+    pub(crate) fn string_distinct_has_registered_method(&self, name: &str, method: &str) -> bool {
         let Some(identity) = self.distinct_type_identity(name) else {
             return false;
         };
         self.distinct_types
             .get(&identity)
             .is_some_and(|(base, _)| matches!(base, Type::String))
-            && self.trait_methods.contains(&(identity, method.to_string()))
+            && self
+                .method_sigs
+                .contains_key(&(identity, method.to_string()))
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -1500,6 +1510,15 @@ impl Cx {
                 "DataLoaderStatus" => Some("DataLoaderStatus"),
                 "DataLoader" => Some("DataLoader"),
                 "DataSnapshot" => Some("DataSnapshot"),
+                "DataLineOptions" => Some("DataLineOptions"),
+                "DataColumn" => Some("DataColumn"),
+                "DataStatus" => Some("DataStatus"),
+                "DataSummary" => Some("DataSummary"),
+                "DataLimits" => Some("DataLimits"),
+                "DataError" => Some("DataError"),
+                "DataErrorKind" => Some("DataErrorKind"),
+                "DataPivotCell" => Some("DataPivotCell"),
+                "DataStream" => Some("DataStream"),
                 "JetDataPlotAggregate" => Some("JetDataPlotAggregate"),
                 "JetDataPlotFilterOp" => Some("JetDataPlotFilterOp"),
                 "JetDataPlotValue" => Some("JetDataPlotValue"),
@@ -1544,7 +1563,13 @@ impl Cx {
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
             (Some("core.sync"), "SyncMap") => Some("SyncMap"),
-            (Some("core.sync"), "SyncList") => Some("SyncList"),
+            (Some("core.collections"), "Counter") => Some("Counter"),
+            (Some("core.collections"), "Deque") => Some("Deque"),
+            (Some("core.collections"), "OrderedMap") => Some("OrderedMap"),
+            (Some("core.collections"), "Layer") => Some("Layer"),
+            (Some("core.collections"), "Chain") => Some("Chain"),
+            (Some("core.collections.set"), "StringSet") => Some("StringSet"),
+
             (Some("core.sync"), "RowPolicy") => Some("RowPolicy"),
             (Some("core.http.client"), "Proxy") => Some("HTTPProxy"),
             (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
@@ -2224,13 +2249,108 @@ impl Cx {
                 binder_names.insert(name.clone());
             }
         }
-        let expanded = self.expand_type_aliases(ty);
+        let expanded = self.canonicalize_core_type_aliases(&self.expand_type_aliases(ty));
         crate::Codegen::TIR::tir_to_mir_types::canonicalize_checked_trait_types(
             &expanded,
             &self.trait_names,
             &self.type_names,
             &binder_names,
         )
+    }
+    fn canonicalize_core_type_aliases(&self, ty: &Type) -> Type {
+        fn canonical_name(cx: &Cx, name: &str) -> String {
+            cx.core_qualified_rust_type_name(name)
+                .map(str::to_owned)
+                .unwrap_or_else(|| name.to_string())
+        }
+
+        match ty {
+            Type::Named(name) => Type::Named(canonical_name(self, name)),
+            Type::List(inner) => {
+                Type::List(Box::new(self.canonicalize_core_type_aliases(inner)))
+            }
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
+                key: Box::new(self.canonicalize_core_type_aliases(key)),
+                key_span: *key_span,
+                value: Box::new(self.canonicalize_core_type_aliases(value)),
+            },
+            Type::Shared(inner) => {
+                Type::Shared(Box::new(self.canonicalize_core_type_aliases(inner)))
+            }
+            Type::Option(inner) => {
+                Type::Option(Box::new(self.canonicalize_core_type_aliases(inner)))
+            }
+            Type::Result { ok, err } => Type::Result {
+                ok: Box::new(self.canonicalize_core_type_aliases(ok)),
+                err: Box::new(self.canonicalize_core_type_aliases(err)),
+            },
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                call_metadata,
+                return_view_provenance,
+            } => Type::Fn {
+                params: params
+                    .iter()
+                    .map(|param| self.canonicalize_core_type_aliases(param))
+                    .collect(),
+                ret: ret.as_ref().map(|ret| {
+                    Box::new(self.canonicalize_core_type_aliases(ret))
+                }),
+                effect_bound: effect_bound.clone(),
+                param_contract: param_contract.clone(),
+                call_metadata: call_metadata.clone(),
+                return_view_provenance: return_view_provenance.clone(),
+            },
+            Type::Apply { name, args } => Type::Apply {
+                name: canonical_name(self, name),
+                args: args
+                    .iter()
+                    .map(|arg| self.canonicalize_core_type_aliases(arg))
+                    .collect(),
+            },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| {
+                        (
+                            name.clone(),
+                            Box::new(self.canonicalize_core_type_aliases(ty)),
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::FixedList { elem, len } => Type::FixedList {
+                elem: Box::new(self.canonicalize_core_type_aliases(elem)),
+                len: len.clone(),
+            },
+            Type::InlineRange { base, lo, hi } => Type::InlineRange {
+                base: Box::new(self.canonicalize_core_type_aliases(base)),
+                lo: *lo,
+                hi: *hi,
+            },
+            Type::Tagged { marker, inner } => Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(self.canonicalize_core_type_aliases(inner)),
+            },
+            Type::Union(members) => crate::AST::canonicalize_union(
+                members
+                    .iter()
+                    .map(|member| self.canonicalize_core_type_aliases(member))
+                    .collect(),
+            ),
+            Type::Quantity { base, dimension } => Type::Quantity {
+                base: Box::new(self.canonicalize_core_type_aliases(base)),
+                dimension: dimension.clone(),
+            },
+            other => other.clone(),
+        }
     }
 
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
@@ -2874,7 +2994,12 @@ impl Cx {
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
-                    || resolved == "SyncList"
+                    || resolved == "Counter"
+                    || resolved == "Deque"
+                    || resolved == "OrderedMap"
+                    || resolved == "Layer"
+                    || resolved == "Chain"
+                    || resolved == "StringSet"
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
@@ -2886,6 +3011,12 @@ impl Cx {
                         "SyncCounter" => "JetSyncCounter",
                         "SyncMap" => "JetSyncMap",
                         "SyncList" => "JetSyncList",
+                        "Counter" => "JetCounter",
+                        "Deque" => "JetDeque",
+                        "OrderedMap" => "JetOrderedMap",
+                        "Layer" => "JetLayer",
+                        "StringSet" => "JetStringSet",
+                        "Chain" => "JetChain",
                         "RowPolicy" => "JetRowPolicy",
                         _ => resolved,
                     };
@@ -4498,6 +4629,25 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         }
         cx.enum_variants.insert("TLSClientTrust".to_string(), trust);
         cx.cloneable.insert("TLSClientTrust".to_string());
+    }
+    // D-DX-LOADERS1: `DataLoaderKind` is a native Prelude enum whose checked
+    // source patterns still need the same owner/tag facts as user enums.
+    if cx
+        .core_imports
+        .values()
+        .any(|module| module == "core.data")
+    {
+        let variants = ["File", "Url", "Database", "Value"]
+            .into_iter()
+            .map(|variant| (variant.to_string(), VariantPayload::Unit))
+            .collect::<Vec<_>>();
+        for (variant, _) in &variants {
+            cx.variant_owner
+                .insert(variant.clone(), "DataLoaderKind".to_string());
+        }
+        cx.enum_variants
+            .insert("DataLoaderKind".to_string(), variants);
+        cx.cloneable.insert("DataLoaderKind".to_string());
     }
     // stdlib-api-laws D4 (#2055): `core.watcher` hands back typed `WatchEvent`
     // domain/kind values, so the two closed enums must be registered like the
@@ -6456,46 +6606,49 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
 
 pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
     // c148: pass the struct's declared type-param names so multi-char params are
-    // treated as cloneable (they carry a `T: Clone` bound in the emitted impl).
+    // recognized everywhere (struct_is_generic, field_type_cloneable, …).
     let param_names: HashSet<String> = s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| field_type_cloneable(&f.ty, types, &param_names))
+        .all(|field| field_type_cloneable(&field.ty, types, &param_names))
 }
-
 pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
-    // c148: pass the enum's declared type-param names.
     let param_names: HashSet<String> = e.type_params.iter().map(|p| p.name.clone()).collect();
-    e.variants.iter().all(|v| match &v.payload {
+    e.variants.iter().all(|variant| match &variant.payload {
         VariantPayload::Unit => true,
-        VariantPayload::Single(t, _) => field_type_cloneable(t, types, &param_names),
-        VariantPayload::Named(fs) => fs
+        VariantPayload::Single(ty, _) => field_type_cloneable(ty, types, &param_names),
+        VariantPayload::Named(fields) => fields
             .iter()
-            .all(|f| field_type_cloneable(&f.ty, types, &param_names)),
+            .all(|field| field_type_cloneable(&field.ty, types, &param_names)),
     })
 }
+
 
 /// Core nominal values are emitted by the Prelude rather than registered in
 /// `Cx::type_names`. Most of those carriers derive `Clone`; these are the
 /// stateful stream/reader handles whose single-use state intentionally does not.
 fn core_type_cloneable(name: &str) -> bool {
-    core_rust_type_name(name).is_some()
-        && !matches!(
-            name,
-            "JobQueue" | "Clock"
-                | "Match"
-                | "DataStream"
-                | "JSONReader"
-                | "JSONWriter"
-                | "JSONLReader"
-                | "JSONLWriter"
-                | "CSVReader"
-                | "CSVWriter"
-                | "XMLReader"
-                | "XMLWriter"
-                | "CBORReader"
-                | "CBORWriter"
-        )
+    matches!(
+        name,
+        "Counter" | "Deque" | "OrderedMap" | "Layer" | "Chain" | "StringSet"
+    )
+        || (core_rust_type_name(name).is_some()
+            && !matches!(
+                name,
+                "JobQueue" | "Clock"
+                    | "Match"
+                    | "DataStream"
+                    | "JSONReader"
+                    | "JSONWriter"
+                    | "JSONLReader"
+                    | "JSONLWriter"
+                    | "CSVReader"
+                    | "CSVWriter"
+                    | "XMLReader"
+                    | "XMLWriter"
+                    | "CBORReader"
+                    | "CBORWriter"
+            ))
 }
 
 pub(crate) fn field_type_cloneable(

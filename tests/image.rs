@@ -37,9 +37,9 @@ fn jetpack() -> Command {
 }
 
 /// A minimal project: `package.jet` declaring `<pkg_kind>` for `app`, `env.jet`
-/// declaring `image.server { from: packages.app, … }`, and — when `built` is
-/// true — a fake executable already staged at `build/app` (the `jet build`
-/// output convention `jet image` reads from).
+/// declaring `image.server { … }`, and — when `built` is `true` — a fake executable
+/// already staged at `.jet/build/app` (the `jet build` output convention `jet image`
+/// reads from).
 fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
     fs::write(
         dir.join("package.jet"),
@@ -52,12 +52,12 @@ fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
     )
     .unwrap();
     if built {
-        fs::create_dir_all(dir.join("build")).unwrap();
-        fs::write(dir.join("build").join("app"), b"#!/bin/sh\necho hi\n").unwrap();
+        fs::create_dir_all(dir.join(".jet/build")).unwrap();
+        fs::write(dir.join(".jet/build").join("app"), b"#!/bin/sh\necho hi\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let bin = dir.join("build").join("app");
+            let bin = dir.join(".jet/build").join("app");
             let mut perm = fs::metadata(&bin).unwrap().permissions();
             perm.set_mode(0o755);
             fs::set_permissions(&bin, perm).unwrap();
@@ -523,7 +523,7 @@ fn environment_image_uses_realized_package_output() {
         report.contains("package:bash@nixpkgs"),
         "projection: {report}"
     );
-    assert!(!project.path.join("build").exists());
+    assert!(!project.path.join(".jet/build").exists());
     let image = project.path.join(".jet/images/server");
     let layer = image_layer(&image);
     assert!(layer

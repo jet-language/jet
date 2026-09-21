@@ -27,10 +27,10 @@ const STATUS_METRICS_BY_MODE = Object.freeze({
   batch: ["runtime_wall_seconds", "runtime_peak_rss_kb", "runtime_first_stdout_seconds", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
   "batch-steps": ["runtime_wall_seconds", "runtime_peak_rss_kb", "runtime_first_stdout_seconds", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
   service: ["service_latency_ms_p50", "service_latency_ms_p99", "service_startup_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
-  web: ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
-  "web-app": ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  web: ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  "web-app": ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
 });
-const STATUS_AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes"]);
+const STATUS_AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"]);
 const STATUS_POLICY_FAILURE_STATUSES = Object.freeze(["missing", "wrong", "unavailable", "uncovered", "mismatched", "inconclusive"]);
 const STATUS_POLICY_TERRITORIES = Object.freeze({
   foundations: Object.freeze([
@@ -53,7 +53,7 @@ const STATUS_POLICY_TERRITORIES = Object.freeze({
     { id: "embedded", required: true, cells: ["embedded.kernel", "embedded.data"], metrics: "all" },
   ]),
 });
-const DETAIL_KEYS = Object.freeze(["reason", "unit", "applicability", "evidence", "stats"]);
+const DETAIL_KEYS = Object.freeze(["reason", "unit", "applicability", "evidence", "stats", "confidence", "noise"]);
 const STAMP_KEYS = Object.freeze(["measured_at", "measured_iso", "run_id", "source_file"]);
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -404,13 +404,19 @@ function isMeasured(value) {
 function metricVerdict(peer, metric, mode, policyByMode) {
   const comparison = asObject(peer?.metric_comparisons?.[metric] ?? peer?.metrics?.[metric]);
   if (peer?.verdict === "inconclusive" || comparison.verdict === "inconclusive") return "unmeasured";
+  if (comparison.status === "not_applicable" || comparison.applicable === false || comparison.verdict === "not_applicable") {
+    return "not_applicable";
+  }
   const tiers = asObject(comparison.tiers);
   const hasExplicitPolicy = Array.isArray(peer?.required_tiers) || isObject(peer?.tier_policy);
   const declared = asArray(peer?.required_tiers).length
     ? peer.required_tiers
     : (hasExplicitPolicy ? tierPolicyFor(mode, policyByMode) : Object.keys(tiers));
-  const ratioTiers = declared.filter((tier) => RATIO_TIERS.includes(tier));
-  const tierNames = ratioTiers.length ? ratioTiers : Object.keys(tiers);
+  const ratioTiers = declared.filter((tier) =>
+    RATIO_TIERS.includes(tier) && statusMetricComparableAtTier(metric, tier));
+  const tierNames = ratioTiers.length
+    ? ratioTiers
+    : Object.keys(tiers).filter((tier) => statusMetricComparableAtTier(metric, tier));
   if (!tierNames.length) {
     const fallback = peer?.metric_verdicts?.[metric] ?? comparison.verdict;
     return recognizedVerdict(fallback) ? fallback : "unmeasured";
@@ -512,6 +518,16 @@ function statusMetricFailures(cellId, peerName, peer, metric, mode, cellFailures
     ? peer.required_tiers
     : (isObject(peer.tier_policy) ? Object.keys(peer.tier_policy) : (STATUS_TIER_POLICY_BY_MODE[mode] ?? ["aot", "run"]));
   const ratioTiers = [...new Set(declared.filter((tier) => RATIO_TIERS.includes(tier)))];
+  const metricNotApplicable = comparison.status === "not_applicable" ||
+    comparison.applicable === false ||
+    comparison.verdict === "not_applicable";
+  if (metricNotApplicable) {
+    const complete = ratioTiers.length > 0 && ratioTiers.every((tier) => tiers[tier]?.status === "not_applicable");
+    if (!complete || !statusHasStructuralReason(comparison, ...Object.values(tiers))) {
+      return [`${prefix}: metric not_applicable lacks an explicit structural reason`];
+    }
+    return [];
+  }
   const values = [];
   const issues = [];
   for (const tier of ratioTiers) {
@@ -795,6 +811,34 @@ function isFullMatrixReport(report) {
   return scopeOf(report) === "full_matrix";
 }
 
+function isAxisReport(report, axisId = null) {
+  const scope = scopeOf(report);
+  if (typeof scope !== "string" || !scope.startsWith("axis_")) return false;
+  return axisId == null || scope === `axis_${axisId}`;
+}
+
+function slimReport(report) {
+  if (!isObject(report)) return report;
+  const hasScoreboard = asArray(report.scoreboard?.cells).length > 0;
+  if (!hasScoreboard && !isAxisReport(report)) return report;
+  const slim = { ...report };
+  delete slim.entries;
+  return slim;
+}
+
+async function loadReportFile(file) {
+  const report = slimReport(JSON.parse(await fs.readFile(file, "utf8")));
+  return { report, reportPath: file };
+}
+
+export async function rebuildStatusFromResults(directory = path.join(repoDir, "gauntlet/results")) {
+  const files = await reportFiles(directory);
+  if (!files.length) throw new Error("no gauntlet report files found");
+  const reports = [];
+  for (const file of files) reports.push(await loadReportFile(file));
+  return mergeStatus(reports);
+}
+
 function normalizeInputReports(input, reportPaths = []) {
   return asArray(input).map((item, index) => {
     const report = isObject(item?.report) ? item.report : item;
@@ -834,8 +878,6 @@ function candidateMetric(peer, metric, tier) {
 
 function chooseMetricCandidate(candidates) {
   const ordered = [...candidates].sort((left, right) => compareStamps(left.stamp, right.stamp));
-  const measured = ordered.filter((item) => isMeasured(item.value));
-  if (measured.length) return measured[measured.length - 1];
   return ordered.length ? ordered[ordered.length - 1] : null;
 }
 
@@ -844,8 +886,8 @@ function mergeAxisParts(parts) {
   const axisIds = [...new Set(parts.flatMap((part) => Object.keys(asObject(part.report.axes))))];
   for (const id of axisIds) {
     const candidates = parts.filter((part) => Object.hasOwn(asObject(part.report.axes), id));
-    const fullCandidates = candidates.filter((part) => isFullMatrixReport(part.report));
-    const selectedParts = fullCandidates.length ? fullCandidates : candidates;
+    const axisCandidates = candidates.filter((part) => isAxisReport(part.report, id));
+    const selectedParts = axisCandidates.length ? axisCandidates : candidates;
     const latestPart = selectedParts.at(-1);
     byId.set(id, {
       latest: {
@@ -867,9 +909,8 @@ function mergeAxisParts(parts) {
       const phaseValues = {};
       for (const phase of ["cold", "warm"]) {
         const values = state.parts
-          .map((part) => ({ value: part.projected?.comparisons?.[peer]?.[phase], stamp: part.stamp }))
-          .filter((item) => item.value);
-        const selected = chooseMetricCandidate(values.map((item) => ({ value: item.value, stamp: item.stamp })));
+          .map((part) => ({ value: part.projected?.comparisons?.[peer]?.[phase], stamp: part.stamp }));
+        const selected = chooseMetricCandidate(values);
         phaseValues[phase] = selected?.value ?? projectTier(null);
       }
       const latestComparison = [...state.parts]
@@ -900,8 +941,7 @@ function mergeAxisParts(parts) {
 
 function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
   const matchingParts = parts.filter((part) => part.cells.some((cell) => cell.source.id === cellId));
-  const fullParts = matchingParts.filter((part) => isFullMatrixReport(part.report));
-  const selectedParts = fullParts.length ? fullParts : matchingParts;
+  const selectedParts = matchingParts;
   const definitions = selectedParts
     .flatMap((part) => part.cells.filter((cell) => cell.source.id === cellId))
     .sort((left, right) => compareStamps(left.stamp, right.stamp));
@@ -930,8 +970,7 @@ function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
       for (const tier of required) if (!tierNames.includes(tier)) tierNames.push(tier);
       const tiers = Object.fromEntries(tierNames.map((tier) => {
         const values = peerCandidates
-          .map(({ peer, stamp }) => ({ value: candidateMetric(peer, metric, tier), stamp }))
-          .filter((item) => item.value);
+          .map(({ peer, stamp }) => ({ value: candidateMetric(peer, metric, tier), stamp }));
         const selected = chooseMetricCandidate(values);
         return [tier, selected
           ? projectTier(selected.value, null, {
@@ -1126,8 +1165,9 @@ async function loadMatrix() {
 }
 
 async function writeStatusAndReport(status, matrix) {
-  if (status?.source?.scope === "partial_entry") {
-    console.log(`status\tskipped partial scope; ${path.relative(repoDir, statusPath).split(path.sep).join("/")} was not overwritten`);
+  const scope = status?.source?.scope;
+  if (scope === "partial_entry" || (typeof scope === "string" && scope.startsWith("axis_"))) {
+    console.log(`status\tskipped ${scope}; ${path.relative(repoDir, statusPath).split(path.sep).join("/")} was not overwritten`);
     return;
   }
   const strictBlockers = applyStatusGate(status, matrix);
@@ -1150,12 +1190,7 @@ async function main() {
     await writeStatusAndReport(status, matrix);
     return;
   }
-  const files = await reportFiles(options.merge);
-  const reports = await Promise.all(files.map(async (file) => ({
-    report: JSON.parse(await fs.readFile(file, "utf8")),
-    reportPath: file,
-  })));
-  const status = mergeStatus(reports);
+  const status = await rebuildStatusFromResults(path.resolve(process.cwd(), options.merge));
   await writeStatusAndReport(status, matrix);
 }
 

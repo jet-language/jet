@@ -39,6 +39,7 @@ scripts/agent/jet-env jet run examples/features/basics/hello.jet
 scripts/agent/jet-env jet check examples/features/basics/functions.jet
 scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
 cargo test --test golden examples_compile_and_run -- --nocapture
+scripts/agent/run-feature-examples.mjs
 ```
 
 [Executable examples](examples/README.md) include small feature programs and

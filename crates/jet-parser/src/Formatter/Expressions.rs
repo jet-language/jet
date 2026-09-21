@@ -891,12 +891,29 @@ impl<'a> Fmt<'a> {
                     },
                 );
                 self.write(")");
-                if let Some(r) = ret {
-                    let unit_fallible = Self::is_unit_fallible_type(r);
-                    if unit_fallible {
+                if let Some(bound) = effect_bound {
+                    self.write(" ");
+                    self.write(Syntax::EFFECT_ARROW_OPEN);
+                    self.fmt_comma_items(
+                        bound,
+                        source.and_then(|span| self.source_effect_row_span_after(span.start)),
+                        |(_, span)| *span,
+                        |f, (name, _)| f.write(name),
+                    );
+                    self.write(Syntax::EFFECT_ARROW_CLOSE);
+                    if let Some(r) = ret {
+                        if Self::is_unit_fallible_type(r) {
+                            self.fmt_unit_fallible_return(r);
+                        } else {
+                            self.write(" ");
+                            self.fmt_type(r);
+                        }
+                    }
+                } else if let Some(r) = ret {
+                    if Self::is_unit_fallible_type(r) {
                         self.fmt_unit_fallible_return(r);
                     } else {
-                        self.write(" ");
+                        self.write(" -> ");
                         self.fmt_type(r);
                     }
                 }
@@ -956,19 +973,6 @@ impl<'a> Fmt<'a> {
                         }
                     }
                     let _ = synthetic;
-                }
-                if let Some(bound) = effect_bound {
-                    self.write(" ");
-                    self.write(Syntax::EFFECT_ARROW_OPEN);
-                    self.fmt_comma_items(
-                        bound,
-                        source.and_then(|span| {
-                            self.source_effect_row_span_after(span.start)
-                        }),
-                        |(_, span)| *span,
-                        |f, (name, _)| f.write(name),
-                    );
-                    self.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
             }
             Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
@@ -1097,10 +1101,6 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    pub(super) fn return_type_has_value(ty: &Type) -> bool {
-        !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-            && !Self::is_unit_fallible_type(ty)
-    }
 
     pub(super) fn fmt_unit_fallible_return(&mut self, ty: &Type) {
         self.write(" ");

@@ -247,7 +247,11 @@ impl<'a> Checker<'a> {
 
     /// D-FLOWTYPE1=A: immutable local/param of type `T?` may refine to `T`.
     pub(crate) fn flow_narrowable_optional_inner(&self, name: &str) -> Option<Type> {
-        let info = self.lookup(name)?;
+        // Keep asking the stable declaration plane: `lookup` intentionally
+        // returns the payload overlay after a proven `.None` guard, but
+        // later pattern checks still need to recognize the original Option
+        // carrier.
+        let info = self.flow.bindings.get(name)?;
         if info.mutable {
             return None;
         }
@@ -259,7 +263,7 @@ impl<'a> Checker<'a> {
 
     /// D-FLOWTYPE1=A: `Present` binding that refines the same stable Optional name.
     pub(crate) fn is_optional_flow_refine(&self, name: &str, binding_ty: &Type) -> bool {
-        let Some(info) = self.lookup(name) else {
+        let Some(info) = self.flow.bindings.get(name) else {
             return false;
         };
         if info.mutable {
@@ -279,15 +283,19 @@ impl<'a> Checker<'a> {
             return;
         }
         let depth = self.scope_depth();
-        if self.flow.bindings.get_at(name, depth).is_some()
-            || self.flow.narrow.get_at(name, depth).is_some()
-        {
+        if self.flow.narrow.get_at(name, depth).is_some() {
+            // A prior guard already installed this payload overlay at this
+            // scope. Reusing it for an explicit `.Val(name)` pattern is a
+            // refinement, not a duplicate declaration.
+            return;
+        }
+        if self.flow.bindings.get_at(name, depth).is_some() {
             self.diags
                 .push(crate::Sema::Registration::already_defined(name, name_span));
         }
         self.record_optional_flow_narrow(name, name_span, inner);
-    }
 
+        }
     /// Carry a proven Optional complement on the path that continues at
     /// the current scope depth. Unlike a condition binding, this fact is
     /// not a child-scope declaration and therefore survives the guard's
@@ -1171,18 +1179,12 @@ impl<'a> Checker<'a> {
             let all_arm_paths_exit = !paths.is_empty() && paths.iter().all(|path| !path.reachable);
             let mut fallthrough = outside_table.clone();
             if all_arm_paths_exit {
-                // Keep the optional wrapper for a following explicit
-                // `.Val(...)` test after an early `== .None` return. The
-                // runtime value is still an Option; the payload-only flow
-                // fact is useful for arithmetic, but it must not erase the
-                // constructor spelling from the next condition.
-                let early_absent_return = original_conditions.len() == 1
-                    && atomic_absent_optional_subject(&original_conditions[0]).is_some();
-                let complement = if early_absent_return {
-                    HashMap::new()
-                } else {
-                    self.complement_condition_bindings(&original_conditions)
-                };
+                // A guard that exits on `.None` proves the payload on the
+                // fallthrough path just like an explicit `else` complement.
+                // Keep that proof in the flow overlay; pattern typing below
+                // can still consult the stable Option binding when a later
+                // `.Val(...)`/`.None` test needs the original carrier.
+                let complement = self.complement_condition_bindings(&original_conditions);
                 if !complement.is_empty() {
                     self.flow = fallthrough;
                     let fact_span = original_conditions

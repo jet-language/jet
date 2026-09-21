@@ -18,6 +18,7 @@ use jet::Diagnostics::{Diagnostic, ReportPath};
 use jet::ExitCodes;
 pub(crate) use jet::{Diagnostics, Syntax, SHA256};
 use jet_foundation::BuildEffect;
+pub(crate) use jet::ReceiptStore;
 use jet_foundation::Report::{
     render_status, render_status_with_reports, StatusFields, StatusValue,
 };
@@ -391,6 +392,9 @@ pub(crate) struct ProfileConfig {
     pub debug_info: bool,
     pub codegen_units: Option<u16>,
     pub small: bool,
+    /// Size-oriented AOT-only backend settings.  Kept separate from `small`,
+    /// whose panic-abort contract is intentionally stronger.
+    pub size_opt: bool,
     pub panic_abort: bool,
     pub inspect: jet::Package::Blocks::ReleaseInspect,
     pub settings: BTreeMap<String, String>,
@@ -403,10 +407,18 @@ impl ProfileConfig {
             debug_info: false,
             codegen_units: None,
             small: false,
+            size_opt: false,
             panic_abort: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
         }
+    }
+    /// Release's canonical AOT linker/codegen settings.  Hardened keeps the
+    /// ordinary release contract so its sentry profile remains untouched.
+    pub(crate) fn release_aot() -> Self {
+        let mut profile = Self::release();
+        profile.size_opt = true;
+        profile
     }
 
     pub(crate) fn debug() -> Self {
@@ -416,6 +428,7 @@ impl ProfileConfig {
             codegen_units: Some(256),
             small: false,
             panic_abort: false,
+            size_opt: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
         }
@@ -427,6 +440,7 @@ impl ProfileConfig {
             debug_info: true,
             codegen_units: None,
             small: false,
+            size_opt: false,
             panic_abort: false,
             settings: BTreeMap::new(),
             inspect: Default::default(),
@@ -440,6 +454,7 @@ impl ProfileConfig {
             debug_info: def.debug_info,
             codegen_units: None,
             small: def.small,
+            size_opt: false,
             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
             settings: def.settings.clone(),
             inspect: def.inspect,
@@ -456,6 +471,9 @@ impl ProfileConfig {
         }
         if self.small {
             parts.push("small".into());
+        }
+        if self.size_opt {
+            parts.push("size-opt".into());
         }
         if self.panic_abort {
             parts.push("panic=abort".into());
@@ -507,6 +525,13 @@ impl ProfileConfig {
             }
             return args;
         }
+        if self.size_opt && !ffi {
+            args.extend(
+                ["-C", "codegen-units=1", "-C", "lto=fat"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
         if let Some(units) = self.codegen_units {
             args.extend(["-C".to_string(), format!("codegen-units={units}")]);
         }
@@ -534,7 +559,7 @@ impl ProfileConfig {
         if self.panic_abort {
             args.extend(["-C".to_string(), "panic=abort".to_string()]);
         }
-        if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
+        if !ffi && !matches!(self.optimize, OptimizeLevel::None) && !self.size_opt {
             args.extend(["-C".to_string(), "lto=thin".to_string()]);
         }
         if native {
@@ -546,11 +571,12 @@ impl ProfileConfig {
 
 #[derive(Clone)]
 pub(crate) enum BuildProfile {
-    /// Default `jet build` profile: optimized (opt-level=2, thin LTO).
+    /// Default `jet build` profile: optimized (opt-level=2, fat LTO, one codegen unit).
     Default,
     /// D-BUILD-DEFAULT1: fast `jet run`/`jet dev` profile.
     Fast,
-    /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization.
+    /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization
+    /// with the canonical size-oriented linker/codegen settings.
     Release,
     /// D-MEM-SENTRY1: release optimization with runtime sentries enabled at
     /// every audited memory boundary.
@@ -607,9 +633,9 @@ impl BuildProfile {
 
     pub(crate) fn cache_tag(&self) -> String {
         match self {
-            BuildProfile::Default => "default".to_string(),
+            BuildProfile::Default => "default;size-opt".to_string(),
             BuildProfile::Fast => "fast".to_string(),
-            BuildProfile::Release => "release".to_string(),
+            BuildProfile::Release => "release;size-opt".to_string(),
             BuildProfile::Hardened => "hardened".to_string(),
             BuildProfile::Debug => "debug".to_string(),
             BuildProfile::Ci => "ci".to_string(),
@@ -628,6 +654,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: false,
+                size_opt: true,
                 panic_abort: false,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -637,11 +664,12 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: Some(256),
                 small: false,
+                size_opt: false,
                 panic_abort: false,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
             },
-            BuildProfile::Release => ProfileConfig::release(),
+            BuildProfile::Release => ProfileConfig::release_aot(),
             BuildProfile::Hardened => ProfileConfig::release(),
             BuildProfile::Debug => ProfileConfig::debug(),
             BuildProfile::Ci => ProfileConfig::ci(),
@@ -651,6 +679,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: true,
+                size_opt: false,
                 panic_abort: true,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -660,6 +689,7 @@ impl BuildProfile {
                 debug_info: false,
                 codegen_units: None,
                 small: true,
+                size_opt: false,
                 panic_abort: true,
                 settings: BTreeMap::new(),
                 inspect: Default::default(),
@@ -1593,7 +1623,11 @@ fn run_question_mark(args: &[String], output: &OutputAdapterHost) -> ! {
     let mut record_name = None;
     let mut replay_name = None;
     let mut skip_value = false;
-    let store = jet_cli::Recording::RecordingStore::default_store();
+    let project_root = jet::build_project_root(".").unwrap_or_else(|_| {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    });
+    let store =
+        jet_cli::Recording::RecordingStore::new(project_root.join(".jet").join("replays"));
     for arg in args {
         if skip_value {
             skip_value = false;
@@ -2604,6 +2638,9 @@ fn main() {
     let argv0 = argv.next().unwrap_or_default();
     let mut raw: Vec<String> = argv.collect();
     normalize_compiler_alias(&mut raw, &argv0);
+    if raw.first().map(String::as_str) == Some("__jet_receipt_persist") {
+        std::process::exit(jet::ReceiptStore::run_optional_receipt_helper(&raw[1..]));
+    }
 
     // Resolve every output capability at the host boundary. The standalone
     // separator belongs to the child program and cannot change this profile.
@@ -4248,6 +4285,7 @@ fn main() {
                         no_capture,
                         canvas_requested,
                         canvas_options.clone(),
+                        dev_port,
                     );
                 }
                 run_web_app_dev_entry(
@@ -4262,7 +4300,7 @@ fn main() {
                 return;
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
-            // and serves `build/` with browser live-reload — a completely
+            // and serves `.jet/build/` with browser live-reload — a completely
             // different execution model from the native interpret/hot-swap
             // loop above, so it's a separate function, not a new branch
             // inside `run_dev`'s interpreter machinery.
@@ -4298,6 +4336,7 @@ fn main() {
                 no_capture,
                 canvas_requested,
                 canvas_options,
+                dev_port,
             );
             return;
         }
@@ -4559,6 +4598,7 @@ fn main() {
                             no_capture,
                             canvas_requested,
                             canvas_options,
+                            dev_port,
                         );
                         return;
                     }
@@ -4603,6 +4643,7 @@ fn main() {
                                 false,
                                 false,
                                 None,
+                                dev_port,
                             );
                             return;
                         }
@@ -4936,6 +4977,7 @@ fn main() {
                         false,
                         false,
                         None,
+                        dev_port,
                     );
                     return;
                 }

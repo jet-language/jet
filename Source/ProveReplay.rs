@@ -12,7 +12,7 @@ use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet::ExitCodes;
-use jet::RecordIndex::RecordIdentity;
+use jet::RecordIndex::{RecordCapture, RecordIdentity, RecordLink};
 use jet::SHA256;
 use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::parse_json;
@@ -67,6 +67,7 @@ impl ReplayIdentity {
 pub(crate) struct CaptureAuthority {
     unix_ns: u64,
     explicit_path: Option<PathBuf>,
+    project_root: PathBuf,
 }
 
 impl CaptureAuthority {
@@ -200,14 +201,25 @@ pub(crate) struct NamedCapture {
     identity: ReplayIdentity,
     authority: CaptureAuthority,
 }
-
 impl NamedCapture {
     pub(crate) fn record_identity(&self) -> Result<RecordIdentity, String> {
         self.identity.record_identity()
     }
+
+    pub(crate) fn artifact_path(&self) -> Option<&Path> {
+        self.authority.explicit_path.as_deref()
+    }
 }
 
-/// Start the ordinary safe Time-only capture used by run/dev/test.
+pub(crate) fn index_named_replay_artifact(
+    capture: &NamedCapture,
+    path: &Path,
+    capture_mode: RecordCapture,
+    save_requested: bool,
+) -> Result<RecordLink, String> {
+    crate::CmdProve::index_replay_artifact(path, &capture.identity, capture_mode, save_requested)
+}
+
 pub(crate) fn begin_named_capture(
     file: &str,
     name: &str,
@@ -215,19 +227,6 @@ pub(crate) fn begin_named_capture(
     setting_overrides: &BTreeMap<String, String>,
     json_mode: bool,
 ) -> Result<NamedCapture, i32> {
-    let path = match replay_path_for_name(name) {
-        Ok(path) => path,
-        Err(message) => {
-            emit_diag(
-                "E2104",
-                "invalid replay name",
-                &message,
-                "write `--record=NAME` with letters, digits, `-`, or `_`",
-                json_mode,
-            );
-            return Err(ExitCodes::USAGE);
-        }
-    };
     let identity = match identity_for_file(file, profile, setting_overrides) {
         Ok(identity) => identity,
         Err(message) => {
@@ -241,12 +240,39 @@ pub(crate) fn begin_named_capture(
             return Err(ExitCodes::USER_ERROR);
         }
     };
-    let authority = match prepare_safe_capture(
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            emit_diag(
+                "E3629",
+                "replay artifact could not be prepared",
+                &format!("could not resolve the project root: {diagnostics:?}"),
+                "record a readable project-relative `.jet` file",
+                json_mode,
+            );
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    let path = match replay_path_for_name(name) {
+        Ok(path) => path,
+        Err(message) => {
+            emit_diag(
+                "E2104",
+                "invalid replay name",
+                &message,
+                "write `--record=NAME` with letters, digits, `-`, or `_`",
+                json_mode,
+            );
+            return Err(ExitCodes::USAGE);
+        }
+    };
+    let authority = match prepare_safe_capture_at(
         &CaptureOpts {
             path: Some(path),
             sensitive: false,
         },
         json_mode,
+        &project_root,
     ) {
         Ok(authority) => authority,
         Err(status) => return Err(status),
@@ -269,6 +295,7 @@ pub(crate) fn finish_named_capture(
         json_mode,
         None,
     )
+    .map(|_| ())
 }
 
 pub(crate) fn finish_named_capture_with_run(
@@ -284,19 +311,10 @@ pub(crate) fn finish_named_capture_with_run(
         json_mode,
         Some(run),
     )
+    .map(|_| ())
 }
 /// Index a finalized named replay through the canonical CmdProve producer.
 /// Devtools callers reuse the identity established before execution.
-pub(crate) fn index_named_replay_artifact(
-    capture: &NamedCapture,
-    path: &Path,
-    capture_mode: jet::RecordIndex::RecordCapture,
-) -> Result<jet::RecordIndex::RecordLink, String> {
-    crate::CmdProve::index_replay_artifact(path, &capture.identity, capture_mode)
-}
-
-/// Open a named artifact for `jet debug`, install the shared Time adapter, and
-/// consume its bounded record before the debugger starts.
 pub(crate) fn open_named_replay(
     file: &str,
     value: &str,
@@ -304,23 +322,6 @@ pub(crate) fn open_named_replay(
     setting_overrides: &BTreeMap<String, String>,
     json_mode: bool,
 ) -> Result<ReplayAuthority, i32> {
-    let path = if value.ends_with(".jetproof-replay") || value.contains('/') {
-        value.to_string()
-    } else {
-        match replay_path_for_name(value) {
-            Ok(path) => path,
-            Err(message) => {
-                emit_diag(
-                    "E2104",
-                    "invalid replay name",
-                    &message,
-                    "write `--replay=NAME` with a valid replay name or artifact path",
-                    json_mode,
-                );
-                return Err(ExitCodes::USAGE);
-            }
-        }
-    };
     let identity = match identity_for_file(file, profile, setting_overrides) {
         Ok(identity) => identity,
         Err(message) => {
@@ -334,7 +335,54 @@ pub(crate) fn open_named_replay(
             return Err(ExitCodes::USER_ERROR);
         }
     };
-    let mut authority = match prepare_replay(&identity, &path) {
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            emit_diag(
+                "E3621",
+                "replay semantic identity could not be established",
+                &format!("could not resolve the project root: {diagnostics:?}"),
+                "replay the matching readable project file",
+                json_mode,
+            );
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    let path = if value.ends_with(".jetproof-replay") || value.contains('/') {
+        let path = match validate_replay_path(value) {
+            Ok(path) => path,
+            Err(message) => {
+                emit_diag(
+                    "E2104",
+                    "invalid replay name",
+                    &message,
+                    "write `--replay=NAME` with a valid replay name or artifact path",
+                    json_mode,
+                );
+                return Err(ExitCodes::USAGE);
+            }
+        };
+        if path.starts_with(Path::new(".jet")) {
+            project_root.join(path)
+        } else {
+            path
+        }
+    } else {
+        match replay_path_for_name(value) {
+            Ok(path) => project_root.join(path),
+            Err(message) => {
+                emit_diag(
+                    "E2104",
+                    "invalid replay name",
+                    &message,
+                    "write `--replay=NAME` with a valid replay name or artifact path",
+                    json_mode,
+                );
+                return Err(ExitCodes::USAGE);
+            }
+        }
+    };
+    let mut authority = match prepare_replay(&identity, &path.to_string_lossy()) {
         Ok(authority) => authority,
         Err((code, why)) => {
             let (what, fix) = match code {
@@ -374,6 +422,7 @@ pub(crate) fn open_named_replay(
     }
     Ok(authority)
 }
+
 
 fn identity_for_file(
     file: &str,
@@ -436,6 +485,16 @@ pub(crate) fn prepare_safe_capture(
     opts: &CaptureOpts,
     json_mode: bool,
 ) -> Result<CaptureAuthority, i32> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let project_root = jet::build_project_root(".").unwrap_or(cwd);
+    prepare_safe_capture_at(opts, json_mode, &project_root)
+}
+
+pub(crate) fn prepare_safe_capture_at(
+    opts: &CaptureOpts,
+    json_mode: bool,
+    project_root: &Path,
+) -> Result<CaptureAuthority, i32> {
     if opts.sensitive {
         // Non-interactive expert path refuses until a TTY consent flow lands.
         emit_diag(
@@ -480,6 +539,11 @@ pub(crate) fn prepare_safe_capture(
     let explicit_path = match opts.path.as_deref() {
         Some(path) => match validate_capture_path(path) {
             Ok(path) => {
+                let path = if path.starts_with(Path::new(".jet")) {
+                    project_root.join(path)
+                } else {
+                    path
+                };
                 if fs::symlink_metadata(&path).is_ok() {
                     emit_diag(
                         "E3629",
@@ -526,6 +590,7 @@ pub(crate) fn prepare_safe_capture(
     Ok(CaptureAuthority {
         unix_ns,
         explicit_path,
+        project_root: project_root.to_path_buf(),
     })
 }
 
@@ -536,6 +601,16 @@ pub(crate) fn finalize_safe_capture(
     json_mode: bool,
     recorded_run: Option<&jet::Debug::RecordedRun>,
 ) -> Result<(), i32> {
+    finalize_safe_capture_path(identity, authority, exit_code, json_mode, recorded_run).map(|_| ())
+}
+
+pub(crate) fn finalize_safe_capture_path(
+    identity: &ReplayIdentity,
+    authority: &CaptureAuthority,
+    exit_code: i32,
+    json_mode: bool,
+    recorded_run: Option<&jet::Debug::RecordedRun>,
+) -> Result<PathBuf, i32> {
     if let Err(message) = validate_identity_for_capture(identity) {
         emit_diag(
             "E3629",
@@ -573,7 +648,7 @@ pub(crate) fn finalize_safe_capture(
     };
     let dest = match &authority.explicit_path {
         Some(path) => path.clone(),
-        None => match resolve_capture_path(identity, None, &bytes) {
+        None => match resolve_capture_path(identity, None, &bytes, &authority.project_root) {
             Ok(path) => path,
             Err(message) => {
                 emit_diag(
@@ -602,7 +677,7 @@ pub(crate) fn finalize_safe_capture(
         eprintln!("capture: finalized outcome={outcome} status={status}");
         eprintln!("artifact: {rel}");
     }
-    Ok(())
+    Ok(dest)
 }
 
 /// Check artifact presence without opening its contents. Missing artifacts
@@ -623,11 +698,22 @@ pub(crate) fn replay_artifact_is_present(artifact_path: &str) -> bool {
 /// Validate an artifact and install its captured authorities for the normal
 /// proof producer. Replay is execution of the same producer under this
 /// adapter, not a successful early return that merely checks a file.
+fn identity_project_root(identity: &ReplayIdentity) -> Result<PathBuf, String> {
+    jet::build_project_root(&identity.entry)
+        .map_err(|diagnostics| format!("could not resolve the project root: {diagnostics:?}"))
+}
+
 pub(crate) fn prepare_replay(
     identity: &ReplayIdentity,
     artifact_path: &str,
 ) -> Result<ReplayAuthority, (&'static str, String)> {
     let path = validate_replay_path(artifact_path).map_err(|message| ("E3622", message))?;
+    let path = if path.starts_with(Path::new(".jet")) {
+        let root = identity_project_root(identity).map_err(|message| ("E3622", message))?;
+        root.join(path)
+    } else {
+        path
+    };
     ensure_read_parent(&path).map_err(|message| ("E3622", message))?;
     let metadata = fs::symlink_metadata(&path).map_err(|error| {
         (
@@ -647,7 +733,7 @@ pub(crate) fn prepare_replay(
             format!("replay artifact exceeds the {MAX_REPLAY_BYTES}-byte limit"),
         ));
     }
-    let bytes = fs::read(path).map_err(|error| {
+    let bytes = fs::read(&path).map_err(|error| {
         (
             "E3622",
             format!("could not read `{artifact_path}`: {error}"),
@@ -663,7 +749,18 @@ pub(crate) fn prepare_saved_replay(
     identity: &ReplayIdentity,
     artifact_path: &Path,
 ) -> Result<ReplayAuthority, (&'static str, String)> {
-    let path = validate_saved_replay_path(artifact_path).map_err(|message| ("E3622", message))?;
+    let project_root = identity_project_root(identity).map_err(|message| ("E3622", message))?;
+    let path = if artifact_path.is_absolute() {
+        let relative = artifact_path
+            .strip_prefix(&project_root)
+            .map_err(|_| ("E3622", "saved replay path is outside the project root".to_string()))?;
+        validate_saved_replay_path(relative).map_err(|message| ("E3622", message))?;
+        artifact_path.to_path_buf()
+    } else {
+        let relative =
+            validate_saved_replay_path(artifact_path).map_err(|message| ("E3622", message))?;
+        project_root.join(relative)
+    };
     ensure_read_parent(&path).map_err(|message| ("E3622", message))?;
     let display = path.display().to_string();
     let metadata = fs::symlink_metadata(&path)
@@ -745,17 +842,24 @@ fn resolve_capture_path(
     identity: &ReplayIdentity,
     explicit: Option<&str>,
     bytes: &[u8],
+    project_root: &Path,
 ) -> Result<PathBuf, String> {
     if let Some(path) = explicit {
         if path.is_empty() {
             return Err("explicit capture path is empty".into());
         }
-        return validate_capture_path(path);
+        return validate_capture_path(path).map(|path| {
+            if path.starts_with(Path::new(".jet")) {
+                project_root.join(path)
+            } else {
+                path
+            }
+        });
     }
     let id = artifact_id_from_bytes(bytes)?;
     let stem = sanitize_entry(&identity.entry);
     let short_id = &id[..12.min(id.len())];
-    Ok(PathBuf::from(format!(
+    Ok(project_root.join(format!(
         ".jet/replays/{stem}-{short_id}.jetproof-replay"
     )))
 }
@@ -971,8 +1075,29 @@ fn finalize_artifact(path: &Path, bytes: &[u8], json_mode: bool) -> Result<(), S
     // cannot replace a concurrent file or symlink.  The temporary file stays
     // in the same directory and is removed after the commit.
     if let Err(error) = fs::hard_link(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(error.to_string());
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            let _ = fs::remove_file(&tmp);
+            return Err(error.to_string());
+        }
+        let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "final replay path is not a regular file: {}",
+                path.display()
+            ));
+        }
+        let existing = fs::read(path).map_err(|e| e.to_string())?;
+        if existing != bytes {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "refusing to overwrite differing artifact at {}",
+                path.display()
+            ));
+        }
+        if !json_mode {
+            eprintln!("already captured");
+        }
     }
     if let Err(error) = fs::remove_file(&tmp) {
         return Err(error.to_string());
@@ -992,36 +1117,45 @@ fn finalize_artifact(path: &Path, bytes: &[u8], json_mode: bool) -> Result<(), S
 
 fn ensure_safe_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut current = PathBuf::from(".");
+    let mut current = if parent.is_absolute() {
+        PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
+    } else {
+        PathBuf::from(".")
+    };
     for component in parent.components() {
-        let Component::Normal(name) = component else {
-            continue;
-        };
-        current.push(name);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(
-                    "capture parent is a symlink: {}",
-                    current.display()
-                ));
-            }
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(format!(
-                    "capture parent is not a directory: {}",
-                    current.display()
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(|error| error.to_string())?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
-                        .map_err(|error| error.to_string())?;
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => {
+                current.push(name);
+                match fs::symlink_metadata(&current) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(format!(
+                            "capture parent is a symlink: {}",
+                            current.display()
+                        ));
+                    }
+                    Ok(metadata) if !metadata.is_dir() => {
+                        return Err(format!(
+                            "capture parent is not a directory: {}",
+                            current.display()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        fs::create_dir(&current).map_err(|error| error.to_string())?;
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+                                .map_err(|error| error.to_string())?;
+                        }
+                    }
+                    Err(error) => return Err(error.to_string()),
                 }
             }
-            Err(error) => return Err(error.to_string()),
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err("capture parent contains an unsafe component".into());
+            }
         }
     }
     Ok(())

@@ -14,14 +14,10 @@ fn run() {
     input :: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_output_rows = 2
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
     first :: reader.next() ?? panic("next")
-    if first == {
-        .Val(row) -> { print("first: {row.service} {row.latency_ms}") }
-        .None -> panic("expected row")
-    }
-    remaining := data.stream.collect(reader)
-    if remaining == {
+    print("first: {first.service} {first.latency_ms}")
+    if data.stream.collect(reader) == {
         .Ok(rows) -> {
             groups :: data.query(rows)
                 .group_by((e) -> e.service)
@@ -32,13 +28,11 @@ fn run() {
         .Err(error) -> print("{error}")
     }
     empty_vals :: [Float]{}
-    empty := data.mean(empty_vals)
-    if empty == {
+    if data.mean(empty_vals) == {
         .Ok(v) -> { print("unexpected mean {v}") }
         .Err(error) -> print("{error}")
     }
-    bad_q := data.quantile([1.0, 2.0], 1.5)
-    if bad_q == {
+    if data.quantile([1.0, 2.0], 1.5) == {
         .Ok(v) -> { print("unexpected q {v}") }
         .Err(error) -> print("{error}")
     }

@@ -729,19 +729,19 @@ impl<'a> Parser<'a> {
         let mut return_type_span = None;
         let mut arrow_return = false;
         if self.at_unified_arrow() {
-            let arrow = self.expect_unified_arrow("before a callable result type")?;
+            let _arrow = self.expect_unified_arrow("before a callable result type")?;
             arrow_return = true;
-            let (ty, span) = self.return_type()?;
-            return_type = Some(ty);
-            return_type_span = Some(span);
-            self.diags.push(Self::retired_signature_shape(arrow.span));
-        } else if self.type_starts_here() {
             let (ty, span) = self.return_type()?;
             return_type = Some(ty);
             return_type_span = Some(span);
         } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
             return_type = Some(ty);
             return_type_span = Some(span);
+        } else if self.type_starts_here() {
+            let (ty, span) = self.return_type()?;
+            return_type = Some(ty);
+            return_type_span = Some(span);
+            self.diags.push(Self::retired_signature_shape(span));
         }
         if arrow_return
             && return_type

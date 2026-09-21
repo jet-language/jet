@@ -1,0 +1,353 @@
+// core.web.table — sort, filter, paginate, select.
+//
+// Rows are strings (JSON objects at the call site). Sorting is lexicographic
+// on the selected column's projected text. Filtering is substring match.
+// Client paging slices the filtered view; server paging trusts the row list.
+
+@c_default_page :: 25
+@c_max_page :: 10000
+
+pub enum WebTableSortDirection {
+    Ascending
+    Descending
+}
+
+pub enum WebTablePageMode {
+    Client
+    Server
+}
+
+pub struct WebTableSort {
+    pub column: String
+    pub descending: Bool
+}
+
+pub struct WebTableFilter {
+    pub column: String
+    pub value: String
+}
+
+pub struct WebTableColumn {
+    pub name: String
+    pub label: String
+}
+
+pub struct WebTableRow {
+    pub key: String
+    pub value: String
+}
+
+pub struct WebTableState {
+    pub sort: WebTableSort
+    pub filter: WebTableFilter
+    pub page_index: Int
+    pub page_size: Int
+    pub selected: [String]
+    pub focus: String
+    pub page_mode: WebTablePageMode
+}
+
+pub struct WebTable {
+    pub columns: [WebTableColumn]
+    pub rows: [WebTableRow]
+    pub state: WebTableState
+}
+
+pub fn new(columns: [String], rows: [String]) -> WebTable {
+    cols := [WebTableColumn]{}
+    loop c in columns -> cols.push(WebTableColumn{name: c, label: c})
+    keyed := [WebTableRow]{}
+    loop i in 0..<rows.len() -> keyed.push(WebTableRow{key: "{i}", value: rows[i]})
+    WebTable{columns: cols, rows: keyed, state: default_state()}
+}
+
+pub fn new_keyed(columns: [String], keys: [String], rows: [String]) -> WebTable {
+    t :: new(columns, rows)
+    keyed := [WebTableRow]{}
+    n := rows.len()
+    loop i in 0..<n {
+        k := "{i}"
+        if i < keys.len() -> k = keys[i]
+        keyed.push(WebTableRow{key: k, value: rows[i]})
+    }
+    WebTable{columns: t.columns, rows: keyed, state: t.state}
+}
+
+pub fn column(name: String, label: String) -> WebTableColumn { WebTableColumn{name: name, label: label} }
+
+pub fn with_column(t: WebTable, col: WebTableColumn) -> WebTable {
+    cols := [WebTableColumn]{}
+    loop c in t.columns -> cols.push(c)
+    cols.push(col)
+    WebTable{columns: cols, rows: t.rows, state: t.state}
+}
+
+pub fn sort(t: WebTable, column: String, descending: Bool) -> WebTable {
+    st := t.state
+    st = WebTableState{sort: WebTableSort{column: column, descending: descending}, filter: st.filter, page_index: 0, page_size: st.page_size, selected: st.selected, focus: st.focus, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn sort_by(t: WebTable, column: String, descending: Bool) -> WebTable { sort(t, column, descending) }
+
+pub fn filter(t: WebTable, value: String) -> WebTable { filter_by(t, "", value) }
+
+pub fn filter_by(t: WebTable, column: String, value: String) -> WebTable {
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: WebTableFilter{column: column, value: value}, page_index: 0, page_size: st.page_size, selected: st.selected, focus: st.focus, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn page(t: WebTable, index: Int, size: Int) -> WebTable { paginate(t, index, size) }
+
+pub fn paginate(t: WebTable, index: Int, size: Int) -> WebTable {
+    sz := size
+    if sz < 1 -> sz = @c_default_page
+    if sz > @c_max_page -> sz = @c_max_page
+    idx := index
+    if idx < 0 -> idx = 0
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: st.filter, page_index: idx, page_size: sz, selected: st.selected, focus: st.focus, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn with_server_page(t: WebTable, rows: [String]) -> WebTable {
+    keyed := [WebTableRow]{}
+    loop i in 0..<rows.len() -> keyed.push(WebTableRow{key: "{i}", value: rows[i]})
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: st.filter, page_index: st.page_index, page_size: st.page_size, selected: st.selected, focus: st.focus, page_mode: WebTablePageMode.Server}
+    WebTable{columns: t.columns, rows: keyed, state: st}
+}
+
+pub fn state(t: WebTable) -> WebTableState { t.state }
+
+pub fn facts(t: WebTable) -> String {
+    vis :: visible_rows(t)
+    "{{\"rows\":{t.rows.len()},\"visible\":{vis.len()},\"page\":{t.state.page_index},\"page_size\":{t.state.page_size}}}"
+}
+
+pub fn keys(t: WebTable) -> [String] {
+    out := [String]{}
+    loop r in t.rows -> out.push(r.key)
+    out
+}
+
+pub fn page_state(t: WebTable) -> String { "{t.state.page_index}/{t.state.page_size}" }
+
+pub fn set_rows(t: WebTable, rows: [String]) -> WebTable {
+    keyed := [WebTableRow]{}
+    loop i in 0..<rows.len() -> keyed.push(WebTableRow{key: "{i}", value: rows[i]})
+    WebTable{columns: t.columns, rows: keyed, state: t.state}
+}
+
+pub fn set_selected(t: WebTable, key: String, on: Bool) -> WebTable {
+    sel := [String]{}
+    loop k in t.state.selected {
+        if k != key -> sel.push(k)
+    }
+    if on -> sel.push(key)
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: st.filter, page_index: st.page_index, page_size: st.page_size, selected: sel, focus: st.focus, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn toggle_selection(t: WebTable, key: String) -> WebTable {
+    on := true
+    loop k in t.state.selected {
+        if k == key -> on = false
+    }
+    set_selected(t, key, on)
+}
+
+pub fn focus(t: WebTable, key: String) -> WebTable {
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: st.filter, page_index: st.page_index, page_size: st.page_size, selected: st.selected, focus: key, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn clear_focus(t: WebTable) -> WebTable { focus(t, "") }
+
+pub fn focused_key(t: WebTable) -> String { t.state.focus }
+
+pub fn clear_selection(t: WebTable) -> WebTable {
+    st := t.state
+    st = WebTableState{sort: st.sort, filter: st.filter, page_index: st.page_index, page_size: st.page_size, selected: [String]{}, focus: st.focus, page_mode: st.page_mode}
+    WebTable{columns: t.columns, rows: t.rows, state: st}
+}
+
+pub fn selected_keys(t: WebTable) -> [String] { t.state.selected }
+
+pub fn selected_rows(t: WebTable) -> [String] {
+    out := [String]{}
+    loop r in t.rows {
+        loop k in t.state.selected {
+            if r.key == k -> out.push(r.value)
+        }
+    }
+    out
+}
+
+pub fn insert_row(t: WebTable, value: String) -> WebTable {
+    rows := [WebTableRow]{}
+    loop r in t.rows -> rows.push(r)
+    rows.push(WebTableRow{key: "{t.rows.len()}", value: value})
+    WebTable{columns: t.columns, rows: rows, state: t.state}
+}
+
+pub fn replace_row(t: WebTable, key: String, value: String) -> WebTable {
+    rows := [WebTableRow]{}
+    loop r in t.rows {
+        if r.key == key {
+            rows.push(WebTableRow{key: key, value: value})
+        } else {
+            rows.push(r)
+        }
+    }
+    WebTable{columns: t.columns, rows: rows, state: t.state}
+}
+
+pub fn update_row(t: WebTable, key: String, value: String) -> WebTable { replace_row(t, key, value) }
+
+pub fn remove_row(t: WebTable, key: String) -> WebTable {
+    rows := [WebTableRow]{}
+    loop r in t.rows {
+        if r.key != key -> rows.push(r)
+    }
+    WebTable{columns: t.columns, rows: rows, state: t.state}
+}
+
+pub fn first_page(t: WebTable) -> WebTable { paginate(t, 0, t.state.page_size) }
+
+pub fn next_page(t: WebTable) -> WebTable { paginate(t, t.state.page_index + 1, t.state.page_size) }
+
+pub fn last_page(t: WebTable) -> WebTable {
+    vis :: apply_view(t)
+    pages := 1
+    if t.state.page_size > 0 {
+        pages = (vis.len() + t.state.page_size - 1) / t.state.page_size
+        if pages < 1 -> pages = 1
+    }
+    paginate(t, pages - 1, t.state.page_size)
+}
+
+pub fn visible_rows(t: WebTable) -> [String] {
+    view :: apply_view(t)
+    if t.state.page_mode == WebTablePageMode.Server {
+        out := [String]{}
+        loop r in view -> out.push(r.value)
+        return out
+    }
+    start := t.state.page_index * t.state.page_size
+    if start < 0 -> start = 0
+    if start > view.len() -> start = view.len()
+    end := start + t.state.page_size
+    if end > view.len() -> end = view.len()
+    out := [String]{}
+    loop i in start..<end -> out.push(view[i].value)
+    out
+}
+
+fn default_state() -> WebTableState {
+    WebTableState{
+        sort: WebTableSort{column: "", descending: false},
+        filter: WebTableFilter{column: "", value: ""},
+        page_index: 0,
+        page_size: @c_default_page,
+        selected: [String]{},
+        focus: "",
+        page_mode: WebTablePageMode.Client,
+    }
+}
+
+fn apply_view(t: WebTable) -> [WebTableRow] {
+    filtered := [WebTableRow]{}
+    needle :: t.state.filter.value
+    col :: t.state.filter.column
+    loop r in t.rows {
+        if needle.len() == 0 {
+            filtered.push(r)
+        } else {
+            cell :: project(r.value, col)
+            if contains(cell, needle) || contains(r.value, needle) -> filtered.push(r)
+    }
+    }
+    col_s :: t.state.sort.column
+    if col_s.len() == 0 -> return filtered
+    sort_rows(filtered, col_s, t.state.sort.descending)
+}
+
+fn sort_rows(rows: [WebTableRow], col: String, desc: Bool) -> [WebTableRow] {
+    out := [WebTableRow]{}
+    loop r in rows -> out.push(r)
+    n :: out.len()
+    loop i in 0..<n {
+        loop j in 0..<(n - 1) {
+            a :: project(out[j].value, col)
+            b :: project(out[j + 1].value, col)
+            swap := a > b
+            if desc -> swap = a < b
+            if swap {
+                tmp :: out[j]
+                out[j] = out[j + 1]
+                out[j + 1] = tmp
+            }
+        }
+    }
+    out
+}
+
+fn project(value: String, col: String) -> String {
+    if col.len() == 0 -> return value
+    needle :: "\"{col}\":"
+    raw :: value.bytes()
+    n :: needle.bytes()
+    loop i in 0..<raw.len() {
+        if starts_at(raw, n, i) -> return slice_json_value(raw, i + n.len())
+    }
+    value
+}
+
+fn starts_at(raw: [U8], n: [U8], i: Int) -> Bool {
+    if i + n.len() > raw.len() -> return false
+    loop k in 0..<n.len() {
+        if raw[i + k] != n[k] -> return false
+    }
+    true
+}
+
+fn slice_json_value(raw: [U8], j: Int) -> String {
+    loop j < raw.len() {
+        if raw[j] == (U8{32}) || raw[j] == (U8{9}) -> j = j + 1
+        else -> break
+    }
+    if j >= raw.len() -> return ""
+    if raw[j] == (U8{34}) {
+        k := j + 1
+        loop k < raw.len() {
+            if raw[k] == (U8{34}) -> return String.from_bytes(raw[j + 1..k - 1]) ?? ""
+            k = k + 1
+        }
+    }
+    k := j
+    loop k < raw.len() {
+        b :: raw[k]
+        if b == (U8{44}) || b == (U8{125}) || b == (U8{93}) -> break
+        k = k + 1
+    }
+    String.from_bytes(raw[j..k - 1]) ?? ""
+}
+
+fn contains(hay: String, needle: String) -> Bool {
+    h :: hay.bytes()
+    n :: needle.bytes()
+    if n.len() == 0 -> return true
+    if n.len() > h.len() -> return false
+    loop i in 0..<(h.len() - n.len() + 1) {
+        ok := true
+        loop k in 0..<n.len() {
+            if h[i + k] != n[k] -> ok = false
+        }
+        if ok -> return true
+    }
+    false
+}

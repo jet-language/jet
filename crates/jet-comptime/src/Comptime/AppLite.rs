@@ -390,6 +390,7 @@ mod http_kernel {
         jet_enc_json_decode, jet_enc_json_to_string, jet_runtime_stop,
     };
     use super::CtValue;
+    use crate::AST::Type;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     use jet_foundation::Devtools::*;
@@ -456,6 +457,78 @@ mod http_kernel {
             args,
         }
     }
+    fn http_response_to_ct(response: JetHTTPResponse) -> Result<CtValue, JetHTTPError> {
+        let JetHTTPResponse {
+            status,
+            version,
+            headers,
+            body,
+            trailers,
+            protocol,
+            remote_address,
+            redirect_history,
+            timings_ms,
+            reused_connection,
+            raw_content_encoding,
+            ..
+        } = response;
+        let body = body.bytes(usize::MAX)?;
+        let headers_to_ct = |headers: JetHTTPHeaders| CtValue::Struct {
+            type_name: "HTTPHeaders".to_string(),
+            fields: headers
+                .entries
+                .into_iter()
+                .map(|(name, value)| (name, CtValue::Str(value)))
+                .collect(),
+        };
+        let raw_content_encoding = raw_content_encoding
+            .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+            .unwrap_or_else(|| CtValue::absent(Type::String));
+        Ok(CtValue::Struct {
+            type_name: "HTTPResponse".to_string(),
+            fields: vec![
+                ("status".to_string(), CtValue::Int(status)),
+                ("version".to_string(), CtValue::Str(version)),
+                ("headers".to_string(), headers_to_ct(headers)),
+                (
+                    "body".to_string(),
+                    CtValue::Struct {
+                        type_name: "HTTPBody".to_string(),
+                        fields: vec![("bytes".to_string(), CtValue::Bytes(body))],
+                    },
+                ),
+                ("trailers".to_string(), headers_to_ct(trailers)),
+                ("protocol".to_string(), CtValue::Str(protocol)),
+                ("remote_address".to_string(), CtValue::Str(remote_address)),
+                (
+                    "redirect_history".to_string(),
+                    CtValue::List(
+                        redirect_history
+                            .into_iter()
+                            .map(CtValue::Str)
+                            .collect(),
+                    ),
+                ),
+                (
+                    "timings_ms".to_string(),
+                    CtValue::List(timings_ms.into_iter().map(CtValue::Int).collect()),
+                ),
+                (
+                    "reused_connection".to_string(),
+                    CtValue::Bool(reused_connection),
+                ),
+                ("raw_content_encoding".to_string(), raw_content_encoding),
+            ],
+        })
+    }
+
+    pub(super) fn http_static_file(path: String, mime: String) -> CtValue {
+        match jet_http_srv_static_file(&path, &mime).and_then(http_response_to_ct) {
+            Ok(response) => CtValue::Present(Box::new(response)),
+            Err(error) => CtValue::failed(Box::new(http_error_to_ct(error))),
+        }
+    }
+
 
     pub(super) fn http_text_from_bytes(
         bytes: Vec<u8>,
@@ -477,6 +550,49 @@ mod http_kernel {
             ))),
         }
     }
+    pub(super) fn http_error_response(error: CtValue) -> Result<CtValue, String> {
+        let CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } = error
+        else {
+            return Err("MIR HTTP handler error is not an enum carrier".to_string());
+        };
+        if type_name != "HTTPError" {
+            return Err("MIR HTTP handler error is not HTTPError".to_string());
+        }
+        let mut payload = 0;
+        let mut text = None;
+        for (_, value) in args {
+            match value {
+                CtValue::Int(value) => payload = value,
+                CtValue::Str(value) => text = Some(value),
+                CtValue::Enum {
+                    type_name,
+                    variant,
+                    args,
+                } if type_name == "HTTPOperation" && args.is_empty() => {
+                    payload = match variant.as_str() {
+                        "ClientConnect" => 0,
+                        "ServerBind" => 1,
+                        "ServeListener" => 2,
+                        _ => {
+                            return Err(
+                                "MIR HTTP operation error has an unknown variant".to_string()
+                            )
+                        }
+                    };
+                }
+                _ => return Err("MIR HTTP handler error has an invalid payload".to_string()),
+            }
+        }
+        let error = jet_http_error_from_surface_name(&variant, payload, text)
+            .ok_or_else(|| "MIR HTTP handler error has an unknown variant".to_string())?;
+        http_response_to_ct(jet_http_srv_error_response(error))
+            .map_err(|_| "canonical HTTP error response could not be materialized".to_string())
+    }
+
 }
 
 /// Marshal MIR's byte carrier through the canonical HTTPMessage body-text
@@ -484,9 +600,16 @@ mod http_kernel {
 pub fn http_text_from_bytes(bytes: Vec<u8>, limit: Option<i64>) -> Result<String, CtValue> {
     http_kernel::http_text_from_bytes(bytes, limit)
 }
+pub fn http_static_file(path: String, mime: String) -> CtValue {
+    http_kernel::http_static_file(path, mime)
+}
 pub fn http_project_json_decode_error(result: CtValue) -> CtValue {
     http_kernel::http_project_json_decode_error(result)
 }
+pub fn http_error_response(error: CtValue) -> Result<CtValue, String> {
+    http_kernel::http_error_response(error)
+}
+
 
 pub(crate) fn jet_live_publish_transport(topic: String, event: String) {
     web_kernel::app_live_publish_transport(topic, event);
@@ -1389,6 +1512,16 @@ pub fn app_method_runtime(
         "action" | "form" | "data" => {
             let name = app_string(one(0)?, "app server function name", span)?;
             let callback = app_callback(one(1)?, span)?;
+            let binding = if method == "form" {
+                app_string(
+                    args.get(2)
+                        .ok_or_else(|| unsupported("app form binding", span))?,
+                    "app form binding",
+                    span,
+                )?
+            } else {
+                String::new()
+            };
             let invoke = move |args| {
                 let value = super::Methods::invoke_standalone_closure(&callback, args, span)
                     .map_err(|error| format!("{error:?}"))?;
@@ -1402,18 +1535,29 @@ pub fn app_method_runtime(
                     std::sync::Arc::new(move || invoke(Vec::new()));
                 match method {
                     "action" => web_kernel::jet_app_action(&handle.0, name, action),
-                    "form" => web_kernel::jet_app_form(&handle.0, name, action),
+                    "form" => web_kernel::jet_app_form(&handle.0, name, action, binding),
                     _ => web_kernel::jet_app_data(&handle.0, name, action),
                 }
             } else {
                 let action: std::sync::Arc<
                     dyn Fn(&String) -> Result<String, String> + Send + Sync,
-                > = std::sync::Arc::new(move |body| {
-                    invoke(vec![CtValue::Str(body.clone())])
-                });
+                > = if method == "form" {
+                    let bindings = web_kernel::jet_app_route_binding(&binding);
+                    let types = callback_types.to_vec();
+                    std::sync::Arc::new(move |body| {
+                        let tree = parse_app_json_tree(body)?;
+                        let values =
+                            decode_route_inputs(std::slice::from_ref(&tree), &bindings, &types, span)?;
+                        invoke(values)
+                    })
+                } else {
+                    std::sync::Arc::new(move |body| {
+                        invoke(vec![CtValue::Str(body.clone())])
+                    })
+                };
                 match method {
                     "action" => web_kernel::jet_app_action(&handle.0, name, action),
-                    "form" => web_kernel::jet_app_form(&handle.0, name, action),
+                    "form" => web_kernel::jet_app_form(&handle.0, name, action, binding),
                     _ => web_kernel::jet_app_data(&handle.0, name, action),
                 }
             };

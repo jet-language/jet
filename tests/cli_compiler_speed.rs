@@ -450,7 +450,7 @@ mod production_path {
             "default production build failed:\n{}",
             String::from_utf8_lossy(&build.stderr)
         );
-        let run = Command::new(scratch.join("build/main"))
+        let run = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -720,7 +720,7 @@ mod production_path {
             String::from_utf8_lossy(&build.stderr)
         );
 
-        let run = Command::new(scratch.join("build/main"))
+        let run = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -795,8 +795,8 @@ mod production_path {
             );
         }
 
-        let left_rust = fs::read(left.join("build/main.rs")).unwrap();
-        let right_rust = fs::read(right.join("build/main.rs")).unwrap();
+        let left_rust = fs::read(left.join(".jet/build/main.rs")).unwrap();
+        let right_rust = fs::read(right.join(".jet/build/main.rs")).unwrap();
         assert_eq!(
             jet::SHA256::sha256_hex(&left_rust),
             jet::SHA256::sha256_hex(&right_rust),
@@ -807,8 +807,8 @@ mod production_path {
             "generated Rust changed with checkout path"
         );
 
-        let left_binary = fs::read(left.join("build/main")).unwrap();
-        let right_binary = fs::read(right.join("build/main")).unwrap();
+        let left_binary = fs::read(left.join(".jet/build/main")).unwrap();
+        let right_binary = fs::read(right.join(".jet/build/main")).unwrap();
         assert_eq!(
             jet::SHA256::sha256_hex(&left_binary),
             jet::SHA256::sha256_hex(&right_binary),
@@ -1018,7 +1018,7 @@ fn run() {
             "cold production build failed:\n{}",
             String::from_utf8_lossy(&cold.stderr)
         );
-        let first = Command::new(scratch.join("build/main"))
+        let first = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -1056,7 +1056,8 @@ fn run() {
                 .any(|entry| entry.kind == jet_store::EntryKind::Action),
             "cold build did not publish an action record to the machine-wide store"
         );
-        let binary_digest = jet::SHA256::sha256_hex(&fs::read(scratch.join("build/main")).unwrap());
+        let binary_digest =
+            jet::SHA256::sha256_hex(&fs::read(scratch.join(".jet/build/main")).unwrap());
         let cached_bin = initial_status
             .entries
             .iter()
@@ -1077,7 +1078,7 @@ fn run() {
             "unchanged production build did not reuse its final binary:\n{}",
             String::from_utf8_lossy(&unchanged.stderr)
         );
-        let unchanged_output = Command::new(scratch.join("build/main"))
+        let unchanged_output = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -1103,7 +1104,7 @@ fn run() {
             "final cache repair did not republish the binary:\n{}",
             String::from_utf8_lossy(&final_repaired.stderr)
         );
-        let final_repaired_output = Command::new(scratch.join("build/main"))
+        let final_repaired_output = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -1148,7 +1149,7 @@ fn run() {
             "warm production build failed:\n{}",
             String::from_utf8_lossy(&warm.stderr)
         );
-        let changed = Command::new(scratch.join("build/main"))
+        let changed = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -1184,7 +1185,7 @@ fn run() {
             "corrupt-cache build failed:\n{}",
             String::from_utf8_lossy(&repaired.stderr)
         );
-        let repaired_output = Command::new(scratch.join("build/main"))
+        let repaired_output = Command::new(scratch.join(".jet/build/main"))
             .current_dir(&scratch.path)
             .output()
             .unwrap();
@@ -1216,7 +1217,7 @@ fn run() {
             1,
             "cold release build must compile once:\n{cold_stderr}"
         );
-        let first_binary = fs::read(scratch.join("build/main")).unwrap();
+        let first_binary = fs::read(scratch.join(".jet/build/main")).unwrap();
 
         // Rewriting identical bytes changes filesystem metadata, but must not
         // change the content key or turn the warm invocation into a miss.
@@ -1244,7 +1245,7 @@ fn run() {
         );
         assert_eq!(
             first_binary,
-            fs::read(scratch.join("build/main")).unwrap(),
+            fs::read(scratch.join(".jet/build/main")).unwrap(),
             "a byte-identical release build must reuse the same artifact"
         );
 
@@ -1356,7 +1357,7 @@ fn run() {
                 .any(|args| has_pair(args, "--crate-name", "main")),
             "first build must run rustc for the program:\n{first_log}"
         );
-        let binary = scratch.join("build/main");
+        let binary = scratch.join(".jet/build/main");
         let first_binary = fs::read(&binary).unwrap();
         let first_modified = fs::metadata(&binary).unwrap().modified().unwrap();
         let first_pointers = context_pointers();

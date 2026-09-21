@@ -105,7 +105,7 @@ which Zed clones into `grammars/jet/` on install (that folder is removed by
 Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
 
 ```bash
-nix develop -c cargo run --bin jet -- devtools grammars
+nix develop -c cargo run --bin jet -- self devtools grammars
 nix develop -c cargo test --test grammar
 ```
 

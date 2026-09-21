@@ -3,8 +3,8 @@
 // build output under `.jet/generated/`; it is ignored and never committed.
 use core.compiler as jc
 
-fn build(b: BuildContext) BuildPlan -> {
-    @source :: "fn generated_compiler_api() String -> {{ return \"compiler API\" }}"
+fn build(b: BuildContext) -> BuildPlan {
+    @source :: "fn generated_compiler_api() -> String {{ return \"compiler API\" }}"
     @lexed :: jc.lex(@source) ?? panic("compiler API lex failed")
     if @lexed.tokens().len() == 0 -> panic("compiler API lost tokens")
     @parsed :: jc.parse(@source) ?? panic("compiler API parse failed")
@@ -12,10 +12,10 @@ fn build(b: BuildContext) BuildPlan -> {
     if @checked.functions().len() != 1 -> panic("compiler API lost a function")
     @map :: jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("compiler API source map failed")
     if @map.generated_lines().len() != 1 -> panic("compiler API lost source mapping")
-    b.generate("compiler_api") {
-        fn generated_compiler_api() String -> "compiler API"
+    b.generate("compiler_api_generated") {
+        fn generated_compiler_api() -> String { "compiler API" }
     }
-    app :: b.add_executable("compiler_api", ["run.jet", ".jet/generated/compiler_api/compiler_api.jet"], [])
+    app :: b.add_executable("compiler_api", ["run.jet", ".jet/generated/compiler_api_generated/compiler_api_generated.jet"], [])
     return b.plan(app)
 }
 

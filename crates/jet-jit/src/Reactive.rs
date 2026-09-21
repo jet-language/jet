@@ -136,10 +136,14 @@ fn async_event_callback(
     })
 }
 
+fn async_event_failure_value(message: &str) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(message.to_string()))
+}
+
 fn invoke_async_event_callback(
     callback: AsyncEventCallback,
     payload: i64,
-) -> Result<(), String> {
+) -> Result<(), i64> {
     let AsyncEventCallback::Universal { handle, epoch } = callback;
     let Some(result) = Concurrency::with_http_jet_runtime(|| {
         if Concurrency::http_runtime_epoch() != epoch {
@@ -150,7 +154,9 @@ fn invoke_async_event_callback(
         });
         slot.and_then(|slot| crate::runtime_host::invoke_universal_unary(slot, payload))
     }) else {
-        return Err("async Event listener callback runtime snapshot expired".to_string());
+        return Err(async_event_failure_value(
+            "async Event listener callback runtime snapshot expired",
+        ));
     };
     if result == 0 {
         // Unit-returning handlers have no Result carrier; their universal thunk
@@ -160,19 +166,23 @@ fn invoke_async_event_callback(
     }
     let outcome = Concurrency::with_http_jet_runtime(|| {
         if Concurrency::http_runtime_epoch() != epoch {
-            return Err("async Event listener callback result runtime expired".to_string());
+            return Err(async_event_failure_value(
+                "async Event listener callback result runtime expired",
+            ));
         }
-        Concurrency::with_runtime_string(|rt| {
+        Concurrency::with_runtime_result(0_i64, |rt| {
             let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
-                return Err("async Event listener callback returned an invalid Result".to_string());
+                return Err(rt.heap.alloc_string(
+                    "async Event listener callback returned an invalid Result".to_string(),
+                ));
             };
             if ok {
                 Ok(())
             } else {
-                Err(rt
-                    .heap
-                    .clone_string(bits as i64)
-                    .unwrap_or_else(|| "async Event listener failed".to_string()))
+                // The checked E carrier is already encoded in the universal
+                // value word. Keep that heap/int/record handle intact for the
+                // generic AsyncEvent<E> report instead of stringifying it.
+                Err(bits as i64)
             }
         })
     });
@@ -214,28 +224,23 @@ fn invoke_event_callback(
     }
 }
 
-fn invoke_text_callback(
+fn invoke_raw_callback(
     callback: crate::runtime_host::JitCallableSlot,
     payload: i64,
-) -> String {
+) -> i64 {
     let Some(value) = invoke_unary_callback(callback, payload) else {
         Concurrency::with_runtime_mut(|rt| {
             rt.set_host_fault("JIT Hook listener callback invocation failed");
         });
-        return String::new();
+        return 0;
     };
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap.clone_string(value).unwrap_or_else(|| {
-            rt.set_host_fault("JIT Hook listener callback returned non-text");
-            String::new()
-        })
-    })
+    value
 }
 
 fn invoke_decision_callback(
     callback: crate::runtime_host::JitCallableSlot,
     payload: i64,
-) -> reactive_rt::JetHookDecision<i64, String> {
+)-> reactive_rt::JetHookDecision<i64, i64> {
     let Some(packed) = invoke_unary_callback(callback, payload) else {
         Concurrency::with_runtime_mut(|rt| {
             rt.set_host_fault("JIT DecisionHook listener callback invocation failed");
@@ -247,32 +252,23 @@ fn invoke_decision_callback(
     match disc {
         1 => reactive_rt::JetHookDecision::Transform(value),
         2 => reactive_rt::JetHookDecision::Cancel,
-        3 => {
-            let message = Concurrency::with_runtime_mut(|rt| {
-                rt.heap.clone_string(value).unwrap_or_else(|| {
-                    rt.set_host_fault("JIT DecisionHook callback returned invalid failure text");
-                    String::new()
-                })
-            });
-            reactive_rt::JetHookDecision::Fail(message)
-        }
+        3 => reactive_rt::JetHookDecision::Fail(value),
         _ => reactive_rt::JetHookDecision::Continue,
     }
 }
 
 pub(crate) struct AsyncEventSlot {
-    pub(crate) policy: reactive_rt::JetAsyncPolicy,
-    pub(crate) failure_policy: reactive_rt::JetFailurePolicy,
-    pub(crate) event: reactive_rt::JetAsyncEvent<i64, String>,
+    pub(crate) event: reactive_rt::JetAsyncEvent<i64, i64>,
+    pub(crate) error_type: Option<crate::runtime_host::RuntimeTypeDescriptor>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct DispatchReportSlot {
-    pub(crate) delivered: bool,
     pub(crate) accepted: bool,
     pub(crate) handlers: i64,
     pub(crate) state: Option<reactive_rt::JetDispatchState>,
-    pub(crate) failures: Vec<reactive_rt::JetDispatchFailure<String>>,
+    pub(crate) failures: Vec<reactive_rt::JetDispatchFailure<i64>>,
+    pub(crate) error_type: Option<crate::runtime_host::RuntimeTypeDescriptor>,
     pub(crate) trace: Option<reactive_rt::JetEventTrace>,
 }
 
@@ -391,8 +387,8 @@ pub(crate) struct ReactiveState {
     pub(crate) event_policies: Vec<reactive_rt::JetEventPolicy>,
     pub(crate) events: Vec<reactive_rt::JetEvent<i64>>,
     pub(crate) subscriptions: Vec<reactive_rt::JetSubscription>,
-    pub(crate) hooks: Vec<reactive_rt::JetHook<i64, String>>,
-    pub(crate) decision_hooks: Vec<reactive_rt::JetDecisionHook<i64, String>>,
+    pub(crate) hooks: Vec<reactive_rt::JetHook<i64, i64>>,
+    pub(crate) decision_hooks: Vec<reactive_rt::JetDecisionHook<i64, i64>>,
     pub(crate) event_traces: Vec<reactive_rt::JetEventTrace>,
     pub(crate) async_events: Vec<AsyncEventSlot>,
     pub(crate) dispatch_reports: Vec<DispatchReportSlot>,
@@ -950,10 +946,11 @@ fn jet_jit_subscription_active(sub: i64) -> i64 {
     .unwrap_or_else(|| crate::Watcher::subscription_is_active(sub))
 }
 
-fn jet_jit_hook_new(name: i64) -> i64 {
+fn jet_jit_hook_new(fallback: i64) -> i64 {
     with_rt(|rt| {
-        let name = rt.heap.clone_string(name).unwrap_or_default();
-        rt.reactive.hooks.push(reactive_rt::JetHook::new(name));
+        rt.reactive
+            .hooks
+            .push(reactive_rt::JetHook::new(fallback));
         rt.reactive.hooks.len() as i64
     })
 }
@@ -985,7 +982,7 @@ fn jet_jit_hook_subscribe(
         else {
             return 0;
         };
-        let handler = move |payload| invoke_text_callback(callback, payload);
+        let handler = move |payload| invoke_raw_callback(callback, payload);
         let sub = if once {
             hook.once(&scope, handler)
         } else if priority == 0 {
@@ -1012,15 +1009,13 @@ fn jet_jit_hook_on_priority(hook: i64, scope: i64, priority: i64, fn_ptr: i64) -
 
 fn jet_jit_hook_run(hook: i64, payload: i64, fallback: i64) -> i64 {
     with_rt(|rt| {
-        let fallback = rt.heap.clone_string(fallback).unwrap_or_default();
         let hook = rt
             .reactive
             .hooks
             .get(hook.saturating_sub(1) as usize)
             .expect("jit hook run: bad handle")
             .clone();
-        let out = hook.run(payload, fallback);
-        rt.heap.alloc_string(out)
+        hook.run(payload, fallback)
     })
 }
 
@@ -1117,10 +1112,7 @@ fn jet_jit_decision_hook_run(hook: i64, payload: i64) -> i64 {
         match outcome {
             reactive_rt::JetHookOutcome::Continue(v) => (v << 8) | 0,
             reactive_rt::JetHookOutcome::Cancel => 1,
-            reactive_rt::JetHookOutcome::Fail(e) => {
-                let sid = rt.heap.alloc_string(e);
-                (sid << 8) | 2
-            }
+            reactive_rt::JetHookOutcome::Fail(e) => (e << 8) | 2,
         }
     })
 }
@@ -1202,34 +1194,66 @@ fn async_event_index(handle: i64) -> Option<usize> {
     usize::try_from((handle & !(1 << 62)).checked_sub(1)?).ok()
 }
 
-fn dispatch_state_index(state: reactive_rt::JetDispatchState) -> i64 {
-    match state {
-        reactive_rt::JetDispatchState::Delivered => 0,
-        reactive_rt::JetDispatchState::HandlerFailed => 1,
-        reactive_rt::JetDispatchState::DroppedNewest => 2,
-        reactive_rt::JetDispatchState::DroppedOldest => 3,
-        reactive_rt::JetDispatchState::Closed => 4,
-        reactive_rt::JetDispatchState::Cancelled => 5,
-        reactive_rt::JetDispatchState::DeadlineExceeded => 6,
-    }
+fn dispatch_state_handle(
+    rt: &mut crate::runtime_host::JitRuntime,
+    state: reactive_rt::JetDispatchState,
+) -> i64 {
+    let variant = match state {
+        reactive_rt::JetDispatchState::Delivered => "Delivered",
+        reactive_rt::JetDispatchState::HandlerFailed => "HandlerFailed",
+        reactive_rt::JetDispatchState::DroppedNewest => "DroppedNewest",
+        reactive_rt::JetDispatchState::DroppedOldest => "DroppedOldest",
+        reactive_rt::JetDispatchState::Closed => "Closed",
+        reactive_rt::JetDispatchState::Cancelled => "Cancelled",
+        reactive_rt::JetDispatchState::DeadlineExceeded => "DeadlineExceeded",
+    };
+    let discriminant = crate::types_meta::prelude_enum_variant_index(
+        jet_foundation::Syntax::TYPE_DISPATCH_STATE,
+        variant,
+    )
+    .unwrap_or_else(|| panic!("Prelude DispatchState variant metadata is missing: {variant}"));
+    let record = rt.heap.alloc_record(1);
+    let _ = rt.heap.record_set_int(record, 0, discriminant);
+    record
 }
 
 fn async_dispatch_report_slot(
-    report: reactive_rt::JetDispatchReport<String>,
+    report: reactive_rt::JetDispatchReport<i64>,
+    error_type: Option<crate::runtime_host::RuntimeTypeDescriptor>,
 ) -> DispatchReportSlot {
     let state = report.state();
     DispatchReportSlot {
-        delivered: matches!(state, reactive_rt::JetDispatchState::Delivered),
         accepted: report.accepted(),
         handlers: report.delivered_handlers(),
         state: Some(state),
         failures: report.failures(),
+        error_type,
         trace: Some(report.trace()),
     }
 }
 
-fn jet_jit_async_event_new(policy: i64, failure: i64) -> i64 {
+fn jet_jit_async_event_new_with_error_type(
+    policy: i64,
+    failure: i64,
+    error_type: Option<i64>,
+) -> i64 {
     with_rt(|rt| {
+        let error_type = match error_type {
+            Some(handle) => {
+                let Some(type_name) = rt.heap.clone_string(handle) else {
+                    rt.set_host_fault("JIT async event constructor received an invalid error type key");
+                    return 0;
+                };
+                let Some(descriptor) =
+                    crate::runtime_host::checked_runtime_type_descriptor(rt, &type_name)
+                else {
+                    rt.set_host_fault("JIT async event constructor received an unknown error type");
+                    return 0;
+                };
+                Some(descriptor)
+            }
+            None => None,
+        };
         let Some(policy) = decode_async_policy(rt, policy) else {
             rt.set_host_fault("JIT async event constructor received an invalid AsyncPolicy");
             return 0;
@@ -1242,14 +1266,119 @@ fn jet_jit_async_event_new(policy: i64, failure: i64) -> i64 {
             Ok(event) => event,
             Err(error) => return async_config_error_result(rt, error),
         };
-        rt.reactive.async_events.push(AsyncEventSlot {
-            policy,
-            failure_policy,
-            event,
-        });
+        rt.reactive
+            .async_events
+            .push(AsyncEventSlot { event, error_type });
         // High bit tags async handles so EventMethod.on can dispatch correctly.
         let handle = (rt.reactive.async_events.len() as i64) | (1 << 62);
         crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
+    })
+}
+
+fn jet_jit_async_event_new(policy: i64, failure: i64) -> i64 {
+    jet_jit_async_event_new_with_error_type(policy, failure, None)
+}
+
+fn jet_jit_async_event_new_typed(policy: i64, failure: i64, error_type: i64) -> i64 {
+    jet_jit_async_event_new_with_error_type(policy, failure, Some(error_type))
+}
+fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
+    let Some(index) = async_event_index(event) else {
+        return 0;
+    };
+    let Some((event, error_type)) = with_rt(|rt| {
+        rt.reactive
+            .async_events
+            .get(index)
+            .map(|slot| (slot.event.clone(), slot.error_type.clone()))
+    }) else {
+        with_rt(|rt| rt.set_host_fault("JIT async Event emit received an invalid event"));
+        return 0;
+    };
+    Concurrency::spawn_ffi_task_typed(move || {
+        let task = event.emit_async(payload);
+        let report = match task.join() {
+            Ok(report) => async_dispatch_report_slot(report, error_type),
+            Err(failure) => {
+                let message = match failure {
+                    JetTaskFailure::Cancelled => "async event dispatch cancelled".to_string(),
+                    JetTaskFailure::DeadlineBlown => {
+                        "async event dispatch deadline exceeded".to_string()
+                    }
+                    JetTaskFailure::Panicked(reason) => {
+                        format!("async event dispatch failed: {reason}")
+                    }
+                };
+                std::panic::resume_unwind(Box::new(message));
+            }
+        };
+        with_rt(|rt| {
+            rt.reactive.dispatch_reports.push(report);
+            rt.reactive.dispatch_reports.len() as i64
+        })
+    })
+}
+fn dispatch_failure_record(
+    rt: &mut crate::runtime_host::JitRuntime,
+    failure: &reactive_rt::JetDispatchFailure<i64>,
+    error_type: Option<&crate::runtime_host::RuntimeTypeDescriptor>,
+) -> i64 {
+    let record = rt.heap.alloc_record(2);
+    let _ = rt.heap.record_set_int(
+        record,
+        0,
+        match failure {
+            reactive_rt::JetDispatchFailure::Handler(_) => 0,
+            reactive_rt::JetDispatchFailure::Panic(_) => 1,
+        },
+    );
+    match failure {
+        reactive_rt::JetDispatchFailure::Handler(raw) => {
+            let typed = error_type.is_some_and(|descriptor| {
+                crate::runtime_host::write_typed_record_field(rt, record, 1, *raw, descriptor)
+                    .is_ok()
+            });
+            if !typed && rt.heap.record_set_string(record, 1, *raw).is_none() {
+                if let Some(error) = crate::runtime_host::jit_error(rt, *raw) {
+                    let message =
+                        rt.heap
+                            .alloc_string(jet_foundation::Outcome::jet_err_message(&error));
+                    let _ = rt.heap.record_set_string(record, 1, message);
+                } else if rt.heap.clone_record_values(*raw).is_some()
+                    || rt.heap.clone_list_values(*raw).is_some()
+                {
+                    let _ = rt.heap.record_set_record(record, 1, *raw);
+                } else {
+                    let _ = rt.heap.record_set_int(record, 1, *raw);
+                }
+            }
+        }
+        reactive_rt::JetDispatchFailure::Panic(message) => {
+            let message = rt.heap.alloc_string(message.clone());
+            let _ = rt.heap.record_set_string(record, 1, message);
+        }
+    }
+    record
+}
+fn jet_jit_dispatch_report_failures(report: i64) -> i64 {
+    with_rt(|rt| {
+        let (failures, error_type) = rt
+            .reactive
+            .dispatch_reports
+            .get(report.saturating_sub(1) as usize)
+            .map(|r| (r.failures.clone(), r.error_type.clone()))
+            .unwrap_or_default();
+        let values = failures
+            .iter()
+            .map(|failure| {
+                jet_rt::JetVal::RecordRef(dispatch_failure_record(
+                    rt,
+                    failure,
+                    error_type.as_ref(),
+                ))
+            })
+            .collect();
+        rt.heap.alloc_list_values(values)
     })
 }
 
@@ -1316,42 +1445,6 @@ fn jet_jit_async_event_on_priority(
     jet_jit_async_event_subscribe(event, scope, priority, fn_ptr, false)
 }
 
-fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
-    let Some(index) = async_event_index(event) else {
-        return 0;
-    };
-    let Some(event) = with_rt(|rt| {
-        rt.reactive
-            .async_events
-            .get(index)
-            .map(|slot| slot.event.clone())
-    }) else {
-        with_rt(|rt| rt.set_host_fault("JIT async Event emit received an invalid event"));
-        return 0;
-    };
-    Concurrency::spawn_ffi_task_typed(move || {
-        let task = event.emit_async(payload);
-        let report = match task.join() {
-            Ok(report) => async_dispatch_report_slot(report),
-            Err(failure) => {
-                let message = match failure {
-                    JetTaskFailure::Cancelled => "async event dispatch cancelled".to_string(),
-                    JetTaskFailure::DeadlineBlown => {
-                        "async event dispatch deadline exceeded".to_string()
-                    }
-                    JetTaskFailure::Panicked(reason) => {
-                        format!("async event dispatch failed: {reason}")
-                    }
-                };
-                std::panic::resume_unwind(Box::new(message));
-            }
-        };
-        with_rt(|rt| {
-            rt.reactive.dispatch_reports.push(report);
-            rt.reactive.dispatch_reports.len() as i64
-        })
-    })
-}
 
 fn jet_jit_async_event_close(event: i64) {
     let Some(index) = async_event_index(event) else {
@@ -1403,12 +1496,13 @@ fn jet_jit_async_event_blocked_count(event: i64) -> i64 {
 
 fn jet_jit_dispatch_report_state(report: i64) -> i64 {
     with_rt(|rt| {
-        rt.reactive
+        let state = rt
+            .reactive
             .dispatch_reports
             .get(report.saturating_sub(1) as usize)
             .and_then(|r| r.state)
-            .map(dispatch_state_index)
-            .unwrap_or(1)
+            .unwrap_or(reactive_rt::JetDispatchState::HandlerFailed);
+        dispatch_state_handle(rt, state)
     })
 }
 
@@ -1434,36 +1528,6 @@ fn jet_jit_dispatch_report_handlers(report: i64) -> i64 {
     })
 }
 
-fn dispatch_failure_record(
-    rt: &mut crate::runtime_host::JitRuntime,
-    failure: &reactive_rt::JetDispatchFailure<String>,
-) -> i64 {
-    let (discriminant, message) = match failure {
-        reactive_rt::JetDispatchFailure::Handler(message) => (0, message),
-        reactive_rt::JetDispatchFailure::Panic(message) => (1, message),
-    };
-    let record = rt.heap.alloc_record(2);
-    let message_handle = rt.heap.alloc_string(message.clone());
-    let _ = rt.heap.record_set_int(record, 0, discriminant);
-    let _ = rt.heap.record_set_string(record, 1, message_handle);
-    record
-}
-
-fn jet_jit_dispatch_report_failures(report: i64) -> i64 {
-    with_rt(|rt| {
-        let failures = rt
-            .reactive
-            .dispatch_reports
-            .get(report.saturating_sub(1) as usize)
-            .map(|r| r.failures.clone())
-            .unwrap_or_default();
-        let values = failures
-            .iter()
-            .map(|failure| jet_rt::JetVal::RecordRef(dispatch_failure_record(rt, failure)))
-            .collect();
-        rt.heap.alloc_list_values(values)
-    })
-}
 
 fn jet_jit_dispatch_report_trace(report: i64) -> i64 {
     with_rt(|rt| {
@@ -1625,6 +1689,7 @@ host_fns! {
     decision_hook_listener_count: "jet_jit_decision_hook_listener_count" => jet_jit_decision_hook_listener_count: unary;
     decision_hook_listener_count_aot: "jet_std::JetDecisionHook::listener_count" => jet_jit_decision_hook_listener_count: unary;
     async_event_new: "jet_jit_async_event_new" => jet_jit_async_event_new: binary;
+    async_event_new_typed: "jet_jit_async_event_new_typed" => jet_jit_async_event_new_typed: ternary;
     async_event_new_aot: "jet_std::JetAsyncEvent::new" => jet_jit_async_event_new: binary;
     async_event_on: "jet_jit_async_event_on" => jet_jit_async_event_on: listener;
     async_event_on_aot: "jet_std::JetAsyncEvent::on" => jet_jit_async_event_on: listener;
@@ -1634,6 +1699,7 @@ host_fns! {
     async_event_on_priority_aot: "jet_std::JetAsyncEvent::on_priority" => jet_jit_async_event_on_priority: listener_priority;
     async_event_emit: "jet_jit_async_event_emit" => jet_jit_async_event_emit: binary;
     async_event_emit_aot: "jet_std::JetAsyncEvent::emit_async" => jet_jit_async_event_emit: binary;
+    async_event_emit_result_aot: "jet_std::JetAsyncEvent::emit_async_result" => jet_jit_async_event_emit: binary;
     async_event_close: "jet_jit_async_event_close" => jet_jit_async_event_close: unary_void;
     async_event_close_aot: "jet_std::JetAsyncEvent::close" => jet_jit_async_event_close: unary_void;
     async_event_listener_count: "jet_jit_async_event_listener_count" => jet_jit_async_event_listener_count: unary;

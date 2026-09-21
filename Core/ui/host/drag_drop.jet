@@ -1,0 +1,28 @@
+// core.ui.host.drag_drop — file and text drop events.
+pub struct UiDropEvent {
+    pub paths: [String]
+    pub text: String
+    pub x: Int
+    pub y: Int
+}
+
+/// Poll one drop. `None` when nothing is pending.
+pub fn poll() -> ?UiDropEvent {
+    n :: host_drop_count()
+    if n <= 0 -> return None
+    paths := host_drop_paths()
+    text :: host_drop_text()
+    x :: host_drop_x()
+    y :: host_drop_y()
+    Val(UiDropEvent{paths: paths, text: text, x: x, y: y})
+}
+
+fn host_drop_count() -> Int { panic("host_drop_count") }
+
+fn host_drop_paths() -> [String] { panic("host_drop_paths") }
+
+fn host_drop_text() -> String { panic("host_drop_text") }
+
+fn host_drop_x() -> Int { panic("host_drop_x") }
+
+fn host_drop_y() -> Int { panic("host_drop_y") }

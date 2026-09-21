@@ -1236,11 +1236,10 @@ fn lower_c_foreign(
     }
 }
 
-/// Lower a top-level `#FFI(c)` function to the native bridge symbol emitted
-/// by the prepared FFI crate. The call expression retains the wrapper identity
-/// (`jet_ffi_<name>`); MIR uses this row to resolve that identity to the
-/// checked C symbol (`jet_inline_jet_ffi_<name>`). Assembly stays out of this
-/// table until MIRRust has a target-aware lowering for its Rust wrapper.
+/// Lower a top-level `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)` function to the
+/// native bridge symbol emitted by the prepared FFI crate. The call expression
+/// retains the wrapper identity (`jet_ffi_<name>`); MIR uses this row to resolve
+/// that identity to the checked bridge symbol (`jet_inline_jet_ffi_<name>`).
 fn lower_inline_c_foreign(
     function: &Func,
     module: &str,
@@ -1252,6 +1251,13 @@ fn lower_inline_c_foreign(
         return None;
     }
     let wrapper = format!("jet_ffi_{}", function.name);
+    let applicability = if matches!(target, TirArtifactTarget::Web) {
+        // The native bridge has no browser provider. Keep this fact explicit so
+        // Web cannot silently fall back to AOT or resident native execution.
+        TirTargetApplicability::default()
+    } else {
+        target_applicability_for(target)
+    };
     Some(TirForeignFact {
         key: wrapper.clone(),
         module: module.to_string(),
@@ -1264,7 +1270,7 @@ fn lower_inline_c_foreign(
         return_type: function.return_type.clone(),
         abi: "C".to_string(),
         language,
-        applicability: target_applicability_for(target),
+        applicability,
         effect_root: None,
         callback_transport: None,
         callback_plan_digest: None,
@@ -1573,19 +1579,17 @@ fn lower_links(bundle: &ProgramBundle, target: TirArtifactTarget) -> Vec<TirLink
 }
 
 fn lower_callbacks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> Vec<TirCallbackFact> {
-    let mut functions = HashMap::new();
-    for function in &facts.functions {
-        functions.insert(function.reference.name.clone(), function);
-        functions.insert(function.reference.key.clone(), function);
-    }
+    let functions = facts
+        .functions
+        .iter()
+        .map(|function| (function.reference.key.clone(), function))
+        .collect::<HashMap<_, _>>();
     let mut names = bundle.ffi_callback_fns.iter().cloned().collect::<Vec<_>>();
     names.sort();
-    names.into_iter()
+    names
+        .into_iter()
         .filter_map(|name| {
-            let function = functions.get(&name).or_else(|| {
-                name.rsplit_once("::")
-                    .and_then(|(_, leaf)| functions.get(leaf))
-            })?;
+            let function = functions.get(&name)?;
             Some(TirCallbackFact {
                 key: format!("{}::callback", function.reference.key),
                 symbol: function.reference.key.clone(),

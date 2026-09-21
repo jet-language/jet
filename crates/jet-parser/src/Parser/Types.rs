@@ -1301,7 +1301,7 @@ impl<'a> Parser<'a> {
         let retired_eq = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
-        let prefix_effect_span = (canonical_effect || retired_colon).then(|| self.peek().span);
+        let _prefix_effect_span = (canonical_effect || retired_colon).then(|| self.peek().span);
         if canonical_effect || retired_colon || retired_eq || retired_double {
             if retired_colon || retired_eq || retired_double {
                 self.diags
@@ -1318,18 +1318,12 @@ impl<'a> Parser<'a> {
         let mut return_type_span = None;
         let ret = if canonical_effect || retired_colon {
             if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                self.diags.push(Self::retired_signature_shape(
-                    prefix_effect_span.unwrap_or(span),
-                ));
                 return_type_span = Some(span);
                 Some(Box::new(ty))
             } else if self.type_starts_here() {
                 arrow_return = true;
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
-                self.diags.push(Self::retired_signature_shape(
-                    prefix_effect_span.unwrap_or(span),
-                ));
                 Some(Box::new(r))
             } else {
                 None
@@ -1344,20 +1338,10 @@ impl<'a> Parser<'a> {
             }
             if let Some((r, span)) = self.parse_unit_fallible_return()? {
                 return_type_span = Some(span);
-                if arrow.is_some() {
-                    self.diags.push(Self::retired_signature_shape(
-                        arrow.as_ref().map(|token| token.span).unwrap_or(span),
-                    ));
-                }
                 Some(Box::new(r))
             } else if self.type_starts_here() {
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
-                if arrow.is_some() {
-                    self.diags.push(Self::retired_signature_shape(
-                        arrow.as_ref().map(|token| token.span).unwrap_or(span),
-                    ));
-                }
                 Some(Box::new(r))
             } else {
                 None
@@ -1368,6 +1352,7 @@ impl<'a> Parser<'a> {
         } else if self.type_starts_here() {
             let (r, span) = self.type_()?;
             return_type_span = Some(span);
+            self.diags.push(Self::retired_signature_shape(span));
             Some(Box::new(r))
         } else {
             None

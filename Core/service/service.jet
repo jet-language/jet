@@ -1,0 +1,150 @@
+package {
+    name: "core.service"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Supervision trees, delivery, and workflows."
+    license: "MIT"
+    outputs: {
+        service: .Library{ entry: service }
+    }
+}
+// core.service — supervision, delivery policy, and a linear workflow.
+//
+// Trees are names plus a restart strategy. Delivery is an in-memory log
+// with at-most-once / durable kinds. Workflows are a step counter. The
+// process supervisor itself is a host concern; this file is the typed
+// surface the compiler already exports.
+#Error
+pub enum ServiceError {
+    Missing
+    Failed
+    Policy
+}
+
+pub enum ServiceRestart {
+    OneForOne
+    OneForAll
+    RestForOne
+}
+
+pub enum DeliveryState {
+    Pending
+    Delivered
+    Failed
+}
+
+pub enum TaskStatus {
+    Idle
+    Running
+    Succeeded
+    Failed
+}
+
+pub enum TaskOutcome {
+    Ok
+    Err
+}
+
+pub struct ServiceRuntime {
+    pub name: String
+}
+
+pub struct ServiceTree {
+    pub strategy: String
+    pub children: [String]
+}
+
+pub struct ServiceStateStore {
+    pub entries: [String:String]
+}
+
+pub struct ServiceWorkflow {
+    pub id: String
+    pub step: Int
+    pub status: TaskStatus
+}
+
+pub struct ServiceEndpoint {
+    pub name: String
+    pub addr: String
+}
+
+pub struct ServiceDelivery {
+    pub kind: String
+}
+
+pub struct ServiceUpgradeReceipt {
+    pub from: String
+    pub to: String
+    pub ok: Bool
+}
+
+pub struct Delivery {
+    pub kind: String
+}
+
+pub struct DeliveryEvent {
+    pub kind: String
+    pub target: String
+}
+
+pub struct DeliveryReceipt {
+    pub id: String
+    pub state: DeliveryState
+}
+
+pub struct DeliveryStateWrap {
+    pub state: DeliveryState
+}
+
+pub fn runtime() -> ServiceRuntime { {name: "local"} }
+
+pub fn tree() -> ServiceTree { {strategy: "one-for-one", children: [String]{}} }
+
+pub fn tree_show(t: ServiceTree) -> String { "{t.strategy}:{t.children.len()}" }
+
+pub fn state_store() -> ServiceStateStore { {entries: [String:String]{}} }
+
+pub fn workflow_start(name: String) -> ServiceWorkflow {
+    {id: name, step: 0, status: TaskStatus.Running}
+}
+
+pub fn delivery_at_most_once() -> Delivery { {kind: "at-most-once"} }
+
+pub fn delivery_durable() -> Delivery { {kind: "durable"} }
+
+pub fn restart_one_for_one() -> ServiceTree { {strategy: "one-for-one", children: [String]{}} }
+
+pub fn restart_one_for_all() -> ServiceTree { {strategy: "one-for-all", children: [String]{}} }
+
+pub fn restart_rest_for_one() -> ServiceTree { {strategy: "rest-for-one", children: [String]{}} }
+
+pub fn endpoint(name: String, addr: String) -> ServiceEndpoint { {name: name, addr: addr} }
+
+pub fn delivery(kind: String) -> ServiceDelivery { {kind: kind} }
+
+pub fn deliver(target: String, payload: String) -> DeliveryReceipt {
+    _ :: payload
+    {id: target, state: DeliveryState.Delivered}
+}
+
+pub fn delivery_event(kind: String, target: String) -> DeliveryEvent {
+    {kind: kind, target: target}
+}
+
+pub fn upgrade(from: String, to: String) -> ServiceUpgradeReceipt { {from: from, to: to, ok: true} }
+
+pub fn workflow_advance(wf: ServiceWorkflow) -> ServiceWorkflow {
+    {id: wf.id, step: wf.step + 1, status: TaskStatus.Running}
+}
+
+pub fn workflow_finish(wf: ServiceWorkflow, ok: Bool) -> ServiceWorkflow {
+    st := TaskStatus.Succeeded
+    if !ok -> st = TaskStatus.Failed
+    {id: wf.id, step: wf.step, status: st}
+}
+
+pub fn outcome(wf: ServiceWorkflow) -> TaskOutcome {
+    if wf.status == TaskStatus.Failed -> return TaskOutcome.Err
+    TaskOutcome.Ok
+}

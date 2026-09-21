@@ -6,15 +6,15 @@ fn inspect() {
     print((error.cause ?? Err("missing cause")).message)
 }
 
-fn explicit() Int -> Err("explicit failure")
+fn explicit() -> Int { Err("explicit failure") }
 
-fn implicit() Int -> Err("implicit failure")
+fn implicit() -> Int { Err("implicit failure") }
 
 #Error
 enum TypedFailure {
     Stopped
 }
 
-fn typed_arm() Int !TypedFailure -> Err(TypedFailure.Stopped)
+fn typed_arm() -> Int !TypedFailure { Err(TypedFailure.Stopped) }
 
 fn run() { inspect() }

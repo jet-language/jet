@@ -1,0 +1,49 @@
+package {
+    name: "core.prelude"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Always-imported prelude hooks."
+    license: "MIT"
+    outputs: {
+        prelude: .Library{ entry: prelude }
+    }
+}
+// core.prelude — values the compiler keeps alive across inlining.
+//
+// `keep` is a use-site barrier so a binding is not deleted as dead.
+pub fn keep(value: Int) -> Int { value }
+
+pub fn identity(value: ^String) -> String { value }
+
+pub fn always(value: Bool) -> Bool { value }
+
+pub fn identity_int(value: Int) -> Int { value }
+
+pub fn identity_float(value: Float) -> Float { value }
+
+pub fn identity_bool(value: Bool) -> Bool { value }
+
+pub fn const_int(value: Int, ignored: Int) -> Int {
+    _ :: ignored
+    value
+}
+
+pub fn const_bool(value: Bool, ignored: Bool) -> Bool {
+    _ :: ignored
+    value
+}
+
+pub fn not_bool(value: Bool) -> Bool {
+    if value -> return false
+    true
+}
+
+pub fn min_int(a: Int, b: Int) -> Int {
+    if a <= b -> return a
+    b
+}
+
+pub fn max_int(a: Int, b: Int) -> Int {
+    if a >= b -> return a
+    b
+}

@@ -856,6 +856,7 @@ fn canonicalize_expr(expr: &mut TExpr) {
         | TExprKind::Drop(operand)
         | TExprKind::Close(operand)
         | TExprKind::ResourceNew(operand)
+        | TExprKind::Move(operand)
         | TExprKind::Deref(operand)
         | TExprKind::RawOf(operand)
         | TExprKind::Clone(operand)

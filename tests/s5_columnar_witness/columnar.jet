@@ -1,0 +1,35 @@
+#Layout(columnar)
+struct Particle {
+    x: Float
+    y: Float
+    vx: Float
+    vy: Float
+    mass: Float
+}
+
+fn run() {
+    dt :: Float{0.01}
+    particles := [Particle]{Particle{
+        x: 0.1,
+        y: 0.2,
+        vx: 0.3,
+        vy: 0.4,
+        mass: 0.97719869706062
+    }}
+    loop _ in 1..<2000 {
+        particles.push(Particle{
+            x: 0.1,
+            y: 0.2,
+            vx: 0.3,
+            vy: 0.4,
+            mass: 0.9771986970684
+        })
+    }
+    checksum := Float{0.0}
+    loop i in 0..<2000 {
+        x :: particles[i].x + particles[i].vx * dt
+        y :: particles[i].y + particles[i].vy * dt
+        checksum += particles[i].mass * (x + y)
+    }
+    print(checksum)
+}

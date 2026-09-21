@@ -239,8 +239,10 @@ impl<T> Drop for JetStream<T> {
         if let Some(task) = producer {
             task.drain();
         }
+        // Join already waited for the producer. After drain the completion
+        // word is queued if sender Drop ran; do not park if it did not.
         if let Some(completion) = self.completion.take() {
-            let _ = completion.receive();
+            let _ = completion.try_receive();
         }
     }
 }
@@ -298,6 +300,13 @@ impl<T> Drop for JetStreamSender<T> {
         } else {
             JetStreamCompletion::Completed
         };
+
+        // Drop glue, including JIT's converted cancel path: the producer is still
+        // marked cancelled but is no longer panicking, so an interruptible send
+        // would raise again and skip this notification. Shield so the consumer
+        // join can observe completion (#2007).
+        jet_scheduler_shield_enter();
         let _ = self.completion.send(completion);
+        let _ = jet_scheduler_shield_leave_status();
     }
 }

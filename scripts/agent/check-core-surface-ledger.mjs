@@ -233,6 +233,7 @@ const PYTHON_ABSENT = {
 // same competitor surface across two names.
 const CONTAINER_ALIASES = {
   "core.http.client": "core.http",
+  "core.files.path": "core.files",
   "core.http.server": "core.http",
   "core.time.expiring": "core.time",
   "core.archive.gzip": "core.archive",
@@ -560,6 +561,8 @@ const TYPE_CONTAINER = {
   TypeInfo: "core.reflect",
   ProgramInfo: "core.reflect",
   FunctionInfo: "core.reflect",
+  FieldInfo: "core.reflect",
+  MethodInfo: "core.reflect",
   PackageInfo: "core.reflect",
   CompilerLexed: "core.compiler",
   CompilerChecked: "core.compiler",
@@ -782,7 +785,6 @@ const RATIFIED_DECLINES = {
   "gap.text.indexofany": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
   "gap.text.lastindexofany": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
   "gap.text.chop": ["D-STR-DECLINE1", "String.slice()"],
-  "gap.text.rpartition": ["D-STR-DECLINE1", "String.slice() + String.last_index_of()"],
   // D-SET-DECLINE1=C: Set's 3 declined ledger gaps (sort/shuffle ship
   // instead — see Collections.rs `set_method_return`).
   "gap.Set.indexof": ["D-SET-DECLINE1", "Set.to_list() then List.index_of — a hash Set keeps no position"],
@@ -842,7 +844,6 @@ const RATIFIED_DECLINES = {
   "gap.core.reflect.loadfile": ["D-CORESURF-SMALL1", "declined — a compiled, ahead-of-time language does not load code at runtime"],
   "gap.core.http.cancelrequest": ["D-CORESURF-SMALL1", "duplicates the deadline every request already takes"],
   "gap.core.http.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
-  "gap.core.http.first": ["D-CORESURF-SMALL1", "HTTPHeaders.first"],
   "gap.core.http.postform": ["D-CORESURF-SMALL1", "the request builder's .form(...) call"],
   "gap.network.start": ["D-CORESURF-SMALL1", "tls.client()"],
   "gap.network.handshake": ["D-CORESURF-SMALL1", "happens inside tls.client() automatically, by design"],
@@ -854,10 +855,7 @@ const RATIFIED_DECLINES = {
   "gap.core.encoding.csv.flush": ["D-CORESURF-SMALL1", "CSVWriter.flush"],
   "gap.core.encoding.csv.read": ["D-CORESURF-SMALL1", "CSVReader.next"],
   "gap.core.encoding.csv.fieldsizelimit": ["D-CORESURF-SMALL1", "EncodingLimits.max_item_bytes"],
-  "gap.core.math.random.random": ["D-CORESURF-SMALL1", "core.math.random.float"],
-  "gap.core.math.random.uniform": ["D-CORESURF-SMALL1", "core.math.random.float_range"],
   "gap.core.args.parseargs": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
-  "gap.core.encoding.json.dump": ["D-CORESURF-SMALL1", "to_string() + a file write, or the streaming JSONWriter"],
   "gap.core.mem.replace": ["D-CORESURF-SMALL1", "the take operator (^) + assignment"],
   "gap.core.mem.copy": ["D-CORESURF-SMALL1", "one witness language; duplicates plain assignment for Copy values"],
 };

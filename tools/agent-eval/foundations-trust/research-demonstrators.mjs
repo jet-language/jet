@@ -1073,7 +1073,7 @@ function frontierLoadLearningRelation() {
   const valid = curriculum.status === "available"
     && value?.schema === "jet-learning-curriculum-v1"
     && value?.relation === "jet-learning-census-v1"
-    && value?.relation_source === "scripts/agent/learning-census.mjs"
+    && value?.relation_source === "examples/learn/curriculum.json"
     && Array.isArray(value.tasks);
   if (!valid) {
     return {
@@ -1082,7 +1082,7 @@ function frontierLoadLearningRelation() {
       path: curriculum.path,
       digest: curriculum.digest,
       task_joins: [],
-      relation: "examples/learn/curriculum.json.tasks projected from scripts/agent/learning-census.mjs",
+      relation: "examples/learn/curriculum.json.tasks projected from examples/learn/curriculum.json",
     };
   }
   const taskJoins = value.tasks.map((task) => ({
@@ -1105,7 +1105,7 @@ function frontierLoadLearningRelation() {
     path: curriculum.path,
     digest: curriculum.digest,
     schema: value.schema,
-    relation: "examples/learn/curriculum.json.tasks projected from scripts/agent/learning-census.mjs",
+    relation: "examples/learn/curriculum.json.tasks projected from examples/learn/curriculum.json",
     revision_rule: value.revision_rule,
     task_joins: taskJoins,
     tasks: value.tasks,

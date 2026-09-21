@@ -14,7 +14,6 @@ See [`jet-env`](../../../scripts/agent/jet-env) and the
 A registry declaration alone does not prove dispatch. Exercise the real caller,
 consume its result, and check the observable value or effect. A bind-and-discard
 probe can pass while the operation does nothing. The
-[Core conformance checker](../../../scripts/agent/core-conformance.mjs) and
 [Core call tests](../../../tests/core_call_table.rs) expose the relevant seams.
 
 Do not bless a backend rejection as a new user diagnostic. Trace it to the

@@ -10,7 +10,7 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-use super::runtime_host::{self, contract_kernel, jit_result_parts};
+use super::runtime_host::{self, alloc_jit_result, contract_kernel, jit_result_parts};
 use super::Concurrency;
 use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
 use jet_foundation::Devtools::*;
@@ -966,7 +966,7 @@ pub(crate) fn ambient_log_flush() {
 /// Keep that coercion at the resident boundary, matching the shared
 /// interpreter/AOT path normalization instead of treating a record as an
 /// invalid string handle.
-fn clone_path_arg(id: i64) -> String {
+pub(crate) fn clone_path_arg(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
             .record_clone_string(id, 0)
@@ -1624,6 +1624,30 @@ fn jet_jit_fs_stat(path: i64) -> i64 {
         })
     })
 }
+fn jet_jit_fs_is_fifo(path: i64) -> i64 {
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_is_fifo(&path), u64::from)
+}
+
+fn jet_jit_fs_is_socket(path: i64) -> i64 {
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_is_socket(&path), u64::from)
+}
+
+fn jet_jit_fs_chown(path: i64, owner: i64, group: i64) -> i64 {
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(
+        fs_prelude::jet_std_fs_chown(&path, owner, group),
+        |_| 0,
+    )
+}
+
+fn jet_jit_fs_mktemp_path(prefix: i64) -> i64 {
+    let prefix = clone_string(prefix);
+    let path = fs_prelude::jet_std_fs_mktemp_path(&prefix);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path))
+}
+
 
 fn jet_jit_fs_set_mode(path: i64, mode: i64) -> i64 {
     let path = clone_path_arg(path);
@@ -1898,6 +1922,13 @@ fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
         Err(e) => result_err_msg(&format!("temp_dir {path}: {e}")),
     }
 }
+fn jet_jit_fs_mkdtemp(prefix: i64) -> i64 {
+    let pref = clone_string(prefix);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_temp_dir_path(&pref), |path| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path) as u64)
+    })
+}
+
 
 fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
@@ -2085,6 +2116,10 @@ fn jet_jit_process_exit(code: i64) {
     // recorder writes BOTH fields (`set_explicit_exit`); writing `exit_code`
     // here and then calling `set_trap` left `trapped` empty, so generated code
     // sailed past every `emit_trap_check` and the program outlived its exit.
+    //
+    // D-FAIL-EXIT1: `os.atexit` runs after defer/scope-guard cleanup. Generated
+    // epilogues still run after this host returns, then `resident_invoke`
+    // drains the queue. Draining here printed atexit before guards.
     Concurrency::with_runtime_mut(|rt| {
         rt.set_explicit_exit(contract_kernel::jet_runtime_exit_code(code));
     });
@@ -2161,8 +2196,8 @@ fn jet_jit_carrier_fact(result: i64, field: i64, notes: i8) -> i64 {
             list
         } else {
             match jet_foundation::Outcome::jet_partial(&outcome, |report| report.partial) {
-                Ok(value) => value.saturating_add(1),
-                Err(_) => 0,
+                Ok(value) => alloc_jit_result(rt, true, value as u64),
+                Err(_) => alloc_jit_result(rt, false, 0),
             }
         }
     })
@@ -2370,6 +2405,11 @@ host_fns! {
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
     io_binwrite: "jet_jit_io_binwrite" => jet_jit_io_binwrite: sig_i64_i64_i64;
     fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
+    fs_lstat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
+    fs_is_fifo: "jet_jit_fs_is_fifo" => jet_jit_fs_is_fifo: sig_unary_i64;
+    fs_is_socket: "jet_jit_fs_is_socket" => jet_jit_fs_is_socket: sig_unary_i64;
+    fs_chown: "jet_jit_fs_chown" => jet_jit_fs_chown: sig_i64_i64_i64_i64;
+    fs_mktemp_path: "jet_jit_fs_mktemp_path" => jet_jit_fs_mktemp_path: sig_unary_i64;
     fs_set_mode: "jet_jit_fs_set_mode" => jet_jit_fs_set_mode: sig_i64_i64_i64;
     fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
     fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;
@@ -2392,7 +2432,7 @@ host_fns! {
     fs_absolute: "jet_jit_fs_absolute" => jet_jit_fs_absolute: sig_unary_i64;
     fs_copy_dir: "jet_jit_fs_copy_dir" => jet_jit_fs_copy_dir: sig_i64_i64_i64;
     fs_copy: "jet_jit_fs_copy" => jet_jit_fs_copy: sig_i64_i64_i64;
-    fs_temp_dir: "jet_jit_fs_temp_dir" => jet_jit_fs_temp_dir: sig_unary_i64;
+    fs_mkdtemp: "jet_jit_fs_mkdtemp" => jet_jit_fs_mkdtemp: sig_unary_i64;
     fs_temp_file: "jet_jit_fs_temp_file" => jet_jit_fs_temp_file: sig_unary_i64;
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
     mod_load: "jet_jit_mod_load" => jet_jit_mod_load: sig_i64_i64_i64;

@@ -251,6 +251,13 @@ pub(super) fn complete_bundle_check(
     // `#Inline(Always)` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
+    fn preserve_inline_foreign_caller_path(diagnostic: &Diagnostic) -> bool {
+        matches!(
+            diagnostic.code.as_str(),
+            "E3102" | "E3215" | "E3222" | "E3223"
+        )
+    }
+
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let origin = std::sync::Arc::new(
@@ -283,10 +290,14 @@ pub(super) fn complete_bundle_check(
         super::super::prune_conversion_cascades(&mut module_diags);
         dedupe_soft_public_lints(&mut module_diags);
         for diagnostic in &mut module_diags {
-            diagnostic.set_origin(origin.clone());
+            if !preserve_inline_foreign_caller_path(diagnostic) {
+                diagnostic.set_origin(origin.clone());
+            }
         }
         for pending in &mut local_pending_diagnostics {
-            pending.diagnostic.set_origin(origin.clone());
+            if !preserve_inline_foreign_caller_path(&pending.diagnostic) {
+                pending.diagnostic.set_origin(origin.clone());
+            }
         }
         // Spans are local to a module. Attach same-span causes before this
         // batch joins the other modules, so an identical byte range in a

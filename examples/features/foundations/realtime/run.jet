@@ -11,7 +11,7 @@ struct ControlStats {
     sum_jitter_us: Int
 }
 
-fn control_loop() ControlStats -> {
+fn control_loop() -> ControlStats {
     started :: time.instant()
     next_due := started + 1ms
     ticks := 0
@@ -45,7 +45,7 @@ fn control_loop() ControlStats -> {
         missed: missed,
         min_jitter_us: min_jitter,
         max_jitter_us: max_jitter,
-        sum_jitter_us: sum_jitter
+        sum_jitter_us: sum_jitter,
     }
 }
 
@@ -53,10 +53,14 @@ fn run() {
     // `core.rt` owns scheduling, the reusable 256-sample block, and stream
     // cancellation. The callback does bounded work only: one pass over its
     // fixed-size input, with no allocation, wait, or I/O.
-    stream := rt.callback(48000, 256, samples -> {
+    stream := rt.callback(
+    48000,
+    256,
+    samples -> {
         total := 0.0
         loop sample in samples -> total += sample
-    })
+    },
+    )
     stream.next_deadline()
 
     control :: control_loop()

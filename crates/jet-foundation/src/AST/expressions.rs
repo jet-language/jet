@@ -134,6 +134,10 @@ pub struct CallArgFlags {
     pub template_items: Option<Vec<super::DeriveBodyItem>>,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
+    /// Canonical checked function key targeted by a named C callback. This is
+    /// the declaration identity used by TIR/MIR and callback trampoline facts;
+    /// it is deliberately absent for lambda callbacks.
+    pub c_callback_function_key: Option<String>,
     /// D-FFI-CALLBACK2=A: this callback flows through a generated managed
     /// registration. The companion identity/digest fields are checked before
     /// TIR creates a retained adapter.

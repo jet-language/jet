@@ -2,20 +2,70 @@
 """Run one command and emit machine-local timing data as JSON."""
 
 import json
-import os
 import resource
 import subprocess
 import sys
 import time
 
 
-def emit_sample(started, first_stdout, exit_code):
-    print(json.dumps({
-        "wall_seconds": time.monotonic() - started,
+TIMER_SCHEMA = "jet.gauntlet.timer.v2"
+MONOTONIC_INFO = time.get_clock_info("monotonic")
+CLOCK = {
+    "source": "time.monotonic_ns",
+    "implementation": MONOTONIC_INFO.implementation,
+    "resolution_ns": max(1, round(MONOTONIC_INFO.resolution * 1_000_000_000)),
+    "monotonic": MONOTONIC_INFO.monotonic,
+    "adjustable": MONOTONIC_INFO.adjustable,
+}
+
+
+def elapsed_ns(started_ns, ended_ns):
+    return max(0, ended_ns - started_ns)
+
+
+def seconds(value_ns):
+    return None if value_ns is None else value_ns / 1_000_000_000
+
+
+def emit_sample(started_ns, first_stdout_ns, exit_code, steps=None, error=None):
+    ended_ns = time.monotonic_ns()
+    wall_ns = elapsed_ns(started_ns, ended_ns)
+    first_ns = None if first_stdout_ns is None else elapsed_ns(started_ns, first_stdout_ns)
+    sample = {
+        "schema": TIMER_SCHEMA,
+        "clock": CLOCK,
+        "wall_time_ns": wall_ns,
+        "wall_seconds": seconds(wall_ns),
         "peak_rss_kb": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
         "exit_code": exit_code,
-        "time_to_first_stdout_seconds": first_stdout,
-    }, separators=(",", ":")))
+        "time_to_first_stdout_ns": first_ns,
+        "time_to_first_stdout_seconds": seconds(first_ns),
+    }
+    if steps is not None:
+        sample["steps"] = steps
+    if error is not None:
+        sample["error"] = error
+    print(json.dumps(sample, separators=(",", ":")))
+
+
+def run_child(command):
+    child_started_ns = time.monotonic_ns()
+    child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=None)
+    first = child.stdout.read(1)
+    first_stdout_ns = time.monotonic_ns() if first else None
+    while child.stdout.read(65536):
+        pass
+    child_code = child.wait()
+    child_ended_ns = time.monotonic_ns()
+    child_wall_ns = elapsed_ns(child_started_ns, child_ended_ns)
+    child_first_ns = None if first_stdout_ns is None else elapsed_ns(child_started_ns, first_stdout_ns)
+    return child_code, {
+        "wall_time_ns": child_wall_ns,
+        "wall_seconds": seconds(child_wall_ns),
+        "exit_code": child_code,
+        "time_to_first_stdout_ns": child_first_ns,
+        "time_to_first_stdout_seconds": seconds(child_first_ns),
+    }, first_stdout_ns
 
 
 def run_sequence(encoded: str) -> int:
@@ -28,30 +78,22 @@ def run_sequence(encoded: str) -> int:
         print(json.dumps({"error": "sequence must be a non-empty list of commands"}))
         return 64
 
-    started = time.monotonic()
-    first_stdout = None
+    started_ns = time.monotonic_ns()
+    first_stdout_ns = None
     exit_code = 0
+    steps = []
     for command in commands:
         try:
-            child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=None)
-            first = child.stdout.read(1)
-            if first and first_stdout is None:
-                first_stdout = time.monotonic() - started
-            while child.stdout.read(65536):
-                pass
-            child_code = child.wait()
+            child_code, step, child_first_stdout_ns = run_child(command)
         except OSError as error:
-            print(json.dumps({
-                "wall_seconds": time.monotonic() - started,
-                "peak_rss_kb": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
-                "exit_code": 127,
-                "time_to_first_stdout_seconds": first_stdout,
-                "error": str(error),
-            }))
+            emit_sample(started_ns, first_stdout_ns, 127, steps, str(error))
             return 0
+        if child_first_stdout_ns is not None and first_stdout_ns is None:
+            first_stdout_ns = child_first_stdout_ns
+        steps.append(step)
         if child_code != 0 and exit_code == 0:
             exit_code = child_code
-    emit_sample(started, first_stdout, exit_code)
+    emit_sample(started_ns, first_stdout_ns, exit_code, steps)
     return 0
 
 
@@ -74,28 +116,12 @@ def main() -> int:
         print(json.dumps({"error": "timer requires a command"}))
         return 64
 
-    started = time.monotonic()
-    first_stdout = None
-    exit_code = 127
+    started_ns = time.monotonic_ns()
     try:
-        child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=None)
-        first = child.stdout.read(1)
-        if first:
-            first_stdout = time.monotonic() - started
-        while child.stdout.read(65536):
-            pass
-        exit_code = child.wait()
+        child_code, _, first_stdout_ns = run_child(command)
+        emit_sample(started_ns, first_stdout_ns, child_code)
     except OSError as error:
-        print(json.dumps({
-            "wall_seconds": time.monotonic() - started,
-            "peak_rss_kb": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
-            "exit_code": exit_code,
-            "time_to_first_stdout_seconds": first_stdout,
-            "error": str(error),
-        }))
-        return 0
-
-    emit_sample(started, first_stdout, exit_code)
+        emit_sample(started_ns, None, 127, error=str(error))
     return 0
 
 

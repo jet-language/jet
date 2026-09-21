@@ -643,7 +643,254 @@ fn jet_jit_time_days_in_month(year: i64, month: i64) -> i64 {
 fn jet_jit_time_is_leap_year(year: i64) -> i8 {
     i8::from(time_rt::JetDate::is_leap(year))
 }
+fn jet_jit_calendar_isleap(year: i64) -> i8 {
+    i8::from(time_rt::JetDate::is_leap(year))
+}
+fn jet_jit_calendar_leapdays(first: i64, second: i64) -> i64 {
+    let (start, end) = if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    (start..end)
+        .filter(|year| time_rt::JetDate::is_leap(*year))
+        .count() as i64
+}
+fn jet_jit_calendar_weekday(year: i64, month: i64, day: i64) -> i64 {
+    let mut adjusted_year = year;
+    if month < 3 {
+        adjusted_year -= 1;
+    }
+    let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let month_index = month.saturating_sub(1).clamp(0, 11) as usize;
+    let sunday_zero = (adjusted_year
+        + adjusted_year.div_euclid(4)
+        - adjusted_year.div_euclid(100)
+        + adjusted_year.div_euclid(400)
+        + offsets[month_index]
+        + day)
+        .rem_euclid(7);
+    (sunday_zero + 6).rem_euclid(7)
+}
+fn jet_jit_calendar_monthrange(year: i64, month: i64) -> i64 {
+    let days = jet_jit_time_days_in_month(year, month);
+    let weekday = jet_jit_calendar_weekday(year, month, 1);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        rt.heap.record_set_int(record, 0, days);
+        rt.heap.record_set_int(record, 1, weekday);
+        record
+    })
+}
+fn calendar_day_abbr_text(weekday: i64) -> &'static str {
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        .get(weekday.clamp(0, 6) as usize)
+        .copied()
+        .unwrap_or("Sun")
+}
+fn calendar_month_name_text(month: i64) -> &'static str {
+    [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
+    .get(month.saturating_sub(1).clamp(0, 11) as usize)
+    .copied()
+    .unwrap_or("December")
+}
+fn calendar_weekheader_text(width: i64, firstweekday: i64) -> Vec<String> {
+    let width = width.max(1) as usize;
+    (0..7)
+        .map(|index| {
+            let text = calendar_day_abbr_text((index + firstweekday).rem_euclid(7));
+            if text.len() >= width {
+                text[..width].to_string()
+            } else {
+                format!("{text}{}", " ".repeat(width - text.len()))
+            }
+        })
+        .collect()
+}
+fn calendar_month_values(year: i64, month: i64, firstweekday: i64) -> Vec<Vec<i64>> {
+    let days = jet_jit_time_days_in_month(year, month);
+    let start = (jet_jit_calendar_weekday(year, month, 1) - firstweekday).rem_euclid(7);
+    let mut weeks = Vec::new();
+    let mut week = vec![0; start as usize];
+    for day in 1..=days {
+        week.push(day);
+        if week.len() == 7 {
+            weeks.push(week);
+            week = Vec::new();
+        }
+    }
+    if !week.is_empty() {
+        week.resize(7, 0);
+        weeks.push(week);
+    }
+    weeks
+}
+fn calendar_formatmonth_text(year: i64, month: i64, width: i64) -> String {
+    let width = width.max(2) as usize;
+    let title = format!("{} {year}", calendar_month_name_text(month));
+    let title_width = width * 7 + 6;
+    let title = if title.len() >= title_width {
+        title[..title_width].to_string()
+    } else {
+        let left = (title_width - title.len()) / 2;
+        format!("{}{}{}", " ".repeat(left), title, " ".repeat(title_width - title.len() - left))
+    };
+    let mut out = format!(
+        "{title}\n{}\n",
+        calendar_weekheader_text(width as i64, 0).join(" ")
+    );
+    for week in calendar_month_values(year, month, 0) {
+        let row = week
+            .into_iter()
+            .map(|day| {
+                let text = if day == 0 { String::new() } else { day.to_string() };
+                if text.len() >= width {
+                    text[..width].to_string()
+                } else {
+                    format!("{}{}", " ".repeat(width - text.len()), text)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+fn jet_jit_calendar_monthcalendar(year: i64, month: i64) -> i64 {
+    jet_jit_calendar_monthcalendar_start(year, month, 0)
+}
+fn jet_jit_calendar_monthcalendar_start(year: i64, month: i64, firstweekday: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let weeks = calendar_month_values(year, month, firstweekday);
+        let handles = weeks
+            .into_iter()
+            .map(|week| rt.heap.alloc_int_list(week))
+            .collect();
+        rt.heap.alloc_int_list(handles)
+    })
+}
+fn jet_jit_calendar_yearcalendar(year: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let months = (1..=12)
+            .map(|month| {
+                let weeks = calendar_month_values(year, month, 0)
+                    .into_iter()
+                    .map(|week| rt.heap.alloc_int_list(week))
+                    .collect();
+                rt.heap.alloc_int_list(weeks)
+            })
+            .collect();
+        rt.heap.alloc_int_list(months)
+    })
+}
+fn jet_jit_calendar_weekheader(width: i64, firstweekday: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = calendar_weekheader_text(width, firstweekday)
+            .into_iter()
+            .map(|text| rt.heap.alloc_string(text))
+            .collect();
+        rt.heap.alloc_int_list(values)
+    })
+}
+fn jet_jit_calendar_formatmonth(year: i64, month: i64, width: i64) -> i64 {
+    alloc_string(calendar_formatmonth_text(year, month, width))
+}
+fn jet_jit_calendar_formatyear(year: i64) -> i64 {
+    let mut out = String::new();
+    for month in 1..=12 {
+        out.push_str(&calendar_formatmonth_text(year, month, 3));
+        out.push('\n');
+    }
+    alloc_string(out)
+}
+fn jet_jit_calendar_day_name(weekday: i64) -> i64 {
+    alloc_string(
+        [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ]
+        .get(weekday.clamp(0, 6) as usize)
+        .unwrap_or(&"Sunday")
+        .to_string(),
+    )
+}
+fn jet_jit_calendar_day_abbr(weekday: i64) -> i64 {
+    alloc_string(
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            .get(weekday.clamp(0, 6) as usize)
+            .unwrap_or(&"Sun")
+            .to_string(),
+    )
+}
+fn jet_jit_calendar_month_name(month: i64) -> i64 {
+    alloc_string(
+        [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ]
+        .get(month.saturating_sub(1).clamp(0, 11) as usize)
+        .unwrap_or(&"December")
+        .to_string(),
+    )
+}
+fn jet_jit_calendar_month_abbr(month: i64) -> i64 {
+    alloc_string(
+        [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+            "Dec",
+        ]
+        .get(month.saturating_sub(1).clamp(0, 11) as usize)
+        .unwrap_or(&"Dec")
+        .to_string(),
+    )
+}
+fn jet_jit_calendar_timegm(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+) -> i64 {
+    time_rt::JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds()
+}
 
+
+fn jet_jit_time_expired(expires_at_ms: i64, now_ms: i64) -> i8 {
+    i8::from(now_ms >= expires_at_ms)
+}
+fn jet_jit_time_remaining_ms(expires_at_ms: i64, now_ms: i64) -> i64 {
+    expires_at_ms.saturating_sub(now_ms)
+}
 fn jet_jit_time_datetime(
     year: i64,
     month: i64,
@@ -1374,6 +1621,23 @@ host_fns! {
     datetime_now_canonical: "jet_time_now_utc" => jet_jit_datetime_now: nullary;
     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
+    calendar_isleap: "jet_calendar_isleap" => jet_jit_calendar_isleap: unary_i8;
+    calendar_leapdays: "jet_calendar_leapdays" => jet_jit_calendar_leapdays: binary;
+    calendar_weekday: "jet_calendar_weekday" => jet_jit_calendar_weekday: ternary;
+    calendar_monthrange: "jet_calendar_monthrange" => jet_jit_calendar_monthrange: binary;
+    calendar_monthcalendar: "jet_calendar_monthcalendar" => jet_jit_calendar_monthcalendar: binary;
+    calendar_monthcalendar_start: "jet_calendar_monthcalendar_start" => jet_jit_calendar_monthcalendar_start: ternary;
+    calendar_yearcalendar: "jet_calendar_yearcalendar" => jet_jit_calendar_yearcalendar: unary;
+    calendar_weekheader: "jet_calendar_weekheader" => jet_jit_calendar_weekheader: binary;
+    calendar_formatmonth: "jet_calendar_formatmonth" => jet_jit_calendar_formatmonth: ternary;
+    calendar_formatyear: "jet_calendar_formatyear" => jet_jit_calendar_formatyear: unary;
+    calendar_day_name: "jet_calendar_day_name" => jet_jit_calendar_day_name: unary;
+    calendar_day_abbr: "jet_calendar_day_abbr" => jet_jit_calendar_day_abbr: unary;
+    calendar_month_name: "jet_calendar_month_name" => jet_jit_calendar_month_name: unary;
+    calendar_month_abbr: "jet_calendar_month_abbr" => jet_jit_calendar_month_abbr: unary;
+    calendar_timegm: "jet_calendar_timegm" => jet_jit_calendar_timegm: hexary;
+    time_expired: "jet_time_expired" => jet_jit_time_expired: binary_i8;
+    time_remaining_ms: "jet_time_remaining_ms" => jet_jit_time_remaining_ms: binary;
     from_unix_seconds: "jet_jit_time_from_unix_seconds" => jet_jit_time_from_unix_seconds: unary;
     from_unix_microseconds: "jet_jit_time_from_unix_microseconds" => jet_jit_time_from_unix_microseconds: unary;
     from_unix_nanoseconds: "jet_jit_time_from_unix_nanoseconds" => jet_jit_time_from_unix_nanoseconds: unary;

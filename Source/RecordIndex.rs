@@ -14,13 +14,17 @@ use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const RECORD_INDEX_FILE: &str = "index.jsonl";
 pub const RECORD_INDEX_VERSION: i64 = 1;
 pub const RECORD_LINK_VERSION: i64 = 1;
+const RECORD_INDEX_LOCK_FILE: &str = ".index.lock";
+const RECORD_INDEX_LOCK_ATTEMPTS: usize = 2_000;
+const RECORD_INDEX_LOCK_STALE_AFTER: Duration = Duration::from_secs(60);
 pub const DEFAULT_RECORD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-pub const DEFAULT_RECORD_BUDGET_COUNT: usize = 200;
 const MAX_INDEX_LINE_BYTES: usize = 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_IDENTITY_FIELD_BYTES: usize = 512;
@@ -212,35 +216,27 @@ impl RecordCapture {
     }
 }
 
-/// Retention limits for the index's referenced records.  The byte budget is
-/// the sum of indexed artifact sizes, not the size of this small JSONL file.
+/// Retention limits for disposable referenced records. The byte budget is the
+/// sum of disposable artifact sizes, not the size of this small JSONL file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecordBudget {
     pub max_bytes: u64,
-    pub max_records: usize,
 }
 
 impl Default for RecordBudget {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_RECORD_BUDGET_BYTES,
-            max_records: DEFAULT_RECORD_BUDGET_COUNT,
         }
     }
 }
 
 impl RecordBudget {
-    pub fn new(max_bytes: u64, max_records: usize) -> Result<Self, String> {
+    pub fn new(max_bytes: u64) -> Result<Self, String> {
         if max_bytes == 0 {
             return Err("record budget byte limit must be greater than zero".into());
         }
-        if max_records == 0 {
-            return Err("record budget record limit must be greater than zero".into());
-        }
-        Ok(Self {
-            max_bytes,
-            max_records,
-        })
+        Ok(Self { max_bytes })
     }
 }
 
@@ -318,6 +314,25 @@ impl RecordIndexEntry {
 
     pub fn is_sensitive(&self) -> bool {
         self.capture.is_sensitive()
+    }
+
+    /// Ordinary run/build/test receipts, comparisons, evidence, and replay
+    /// artifacts are disposable. Proof, trust, saved, sensitive, and
+    /// production-report rows stay outside this budget.
+    pub fn is_disposable(&self) -> bool {
+        if self.saved || self.is_sensitive() {
+            return false;
+        }
+        let disposable_path = |prefix: &str| {
+            let prefix = Path::new(prefix);
+            self.path == prefix || self.path.starts_with(prefix)
+        };
+        match self.kind {
+            RecordKind::Replay => disposable_path(".jet/replays"),
+            RecordKind::Receipt | RecordKind::Comparison => disposable_path(".jet/receipts"),
+            RecordKind::Evidence => disposable_path(".jet/evidence"),
+            RecordKind::Proof | RecordKind::Trust => false,
+        }
     }
 
     pub fn key(&self) -> (RecordKind, &str) {
@@ -456,7 +471,9 @@ impl RecordIndex {
     }
 
     pub fn for_project(project_root: impl Into<PathBuf>) -> Self {
-        Self::new(project_root.into().join(".jet").join("records"))
+        let project_root = project_root.into();
+        let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
+        Self::new(project_root.join(".jet").join("records"))
     }
 
     /// Alias for callers that use `project` as the constructor name.
@@ -623,10 +640,10 @@ impl RecordIndex {
             .find(|entry| entry.kind == kind && entry.artifact_id == artifact_id)
     }
 
-    /// Add or replace one `(kind, artifact_id)` row in memory.  A byte-for-byte
+    /// Add or replace one `(kind, artifact_id)` row in memory. A byte-for-byte
     /// equivalent duplicate is idempotent; a differing duplicate is rejected.
-    /// Budget eviction considers safe, unsaved, unreferenced replay, receipt,
-    /// and evidence rows.
+    /// Only unsaved, non-sensitive ordinary receipts and replay artifacts are
+    /// disposable.
     pub fn update(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
         let entry = entry.normalize()?;
         let mut candidate = self.clone();
@@ -643,9 +660,21 @@ impl RecordIndex {
                 entry.kind, entry.artifact_id
             ));
         }
+        let entry_kind = entry.kind;
+        let entry_artifact_id = entry.artifact_id.clone();
         candidate.entries.push(entry);
         candidate.apply_eviction()?;
         candidate.validate_all()?;
+        if !candidate
+            .entries
+            .iter()
+            .any(|existing| existing.kind == entry_kind && existing.artifact_id == entry_artifact_id)
+        {
+            return Err(format!(
+                "disposable record `{}/{}` exceeds the byte budget and was not retained",
+                entry_kind, entry_artifact_id
+            ));
+        }
         self.entries = candidate.entries;
         Ok(())
     }
@@ -672,9 +701,21 @@ impl RecordIndex {
                 entry.kind, entry.artifact_id
             ));
         }
+        let entry_kind = entry.kind;
+        let entry_artifact_id = entry.artifact_id.clone();
         candidate.entries[position] = entry;
         candidate.apply_eviction()?;
         candidate.validate_all()?;
+        if !candidate
+            .entries
+            .iter()
+            .any(|existing| existing.kind == entry_kind && existing.artifact_id == entry_artifact_id)
+        {
+            return Err(format!(
+                "disposable record `{}/{}` exceeds the byte budget and was not retained",
+                entry_kind, entry_artifact_id
+            ));
+        }
         self.entries = candidate.entries;
         Ok(())
     }
@@ -743,21 +784,156 @@ impl RecordIndex {
     pub fn append(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
         self.update(entry)
     }
-
-    /// Update and publish in one operation.  The prior in-memory and on-disk
-    /// index remain intact if validation, eviction, staging, or publication
-    /// fails.
     pub fn update_and_store(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
-        let mut candidate = self.clone();
+        let _lock = acquire_index_lock(&self.root)?;
+        let mut candidate = if self.index_path().is_file() {
+            Self::load_with_budget(self.root.clone(), self.budget)?
+        } else {
+            self.clone()
+        };
+        let entry = if candidate
+            .entries
+            .iter()
+            .all(|existing| existing.key() != entry.key())
+            && entry.recorded_sequence
+                <= candidate
+                    .entries
+                    .iter()
+                    .map(|existing| existing.recorded_sequence)
+                    .max()
+                    .unwrap_or(0)
+        {
+            entry.with_recorded_sequence(
+                candidate
+                    .next_recorded_sequence()
+                    .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+            )
+        } else {
+            entry
+        };
         candidate.update(entry)?;
-        candidate.store()?;
+        candidate.store_unlocked()?;
         *self = candidate;
         Ok(())
     }
 
+    /// Atomically upsert a batch against the latest on-disk index.
+    ///
+    /// Receipt publication updates a receipt and its produced comparison rows
+    /// as one history transition.  Re-read under the lock so another process
+    /// cannot be overwritten by a stale in-memory snapshot.
+    pub(crate) fn upsert_many_and_store(
+        &mut self,
+        entries: impl IntoIterator<Item = RecordIndexEntry>,
+    ) -> Result<(), String> {
+        let _lock = acquire_index_lock(&self.root)?;
+        let mut candidate = if self.index_path().is_file() {
+            Self::load_with_budget(self.root.clone(), self.budget)?
+        } else {
+            self.clone()
+        };
+        for entry in entries {
+            if candidate
+                .entries
+                .iter()
+                .any(|existing| existing.key() == entry.key())
+            {
+                candidate.replace(entry)?;
+                continue;
+            }
+            let entry = if entry.recorded_sequence
+                <= candidate
+                    .entries
+                    .iter()
+                    .map(|existing| existing.recorded_sequence)
+                    .max()
+                    .unwrap_or(0)
+            {
+                entry.with_recorded_sequence(
+                    candidate
+                        .next_recorded_sequence()
+                        .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+                )
+            } else {
+                entry
+            };
+            candidate.update(entry)?;
+        }
+        candidate.store_unlocked()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    pub fn save_replay_and_store(
+        &mut self,
+        artifact_id: &str,
+        identity: &RecordIdentity,
+        path: impl Into<PathBuf>,
+        size: u64,
+    ) -> Result<RecordIndexEntry, String> {
+        let _lock = acquire_index_lock(&self.root)?;
+        let mut candidate = if self.index_path().is_file() {
+            Self::load_with_budget(self.root.clone(), self.budget)?
+        } else {
+            self.clone()
+        };
+        let saved = candidate.save_replay(artifact_id, identity, path, size)?;
+        candidate.store_unlocked()?;
+        *self = candidate;
+        Ok(saved)
+    }
+
+    pub fn replace_and_store(&mut self, entry: RecordIndexEntry) -> Result<(), String> {
+        let _lock = acquire_index_lock(&self.root)?;
+        let mut candidate = if self.index_path().is_file() {
+            Self::load_with_budget(self.root.clone(), self.budget)?
+        } else {
+            self.clone()
+        };
+        candidate.replace(entry)?;
+        candidate.store_unlocked()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    pub fn remove_replay_and_store(
+        &mut self,
+        artifact_id: &str,
+    ) -> Result<RecordIndexEntry, String> {
+        let _lock = acquire_index_lock(&self.root)?;
+        let mut candidate = if self.index_path().is_file() {
+            Self::load_with_budget(self.root.clone(), self.budget)?
+        } else {
+            self.clone()
+        };
+        let removed = candidate.remove_replay(artifact_id)?;
+        candidate.store_unlocked()?;
+        *self = candidate;
+        Ok(removed)
+    }
+
     /// Atomically publish the current validated rows as one JSONL file.
     pub fn store(&self) -> Result<(), String> {
+        let _lock = acquire_index_lock(&self.root)?;
+        self.store_unlocked()
+    }
+
+    fn store_unlocked(&self) -> Result<(), String> {
         self.validate_all()?;
+        let index_path = self.index_path();
+        let previous = match fs::symlink_metadata(&index_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(format!("record index is unsafe: {}", index_path.display()));
+            }
+            Ok(_) => Self::load_with_budget(self.root.clone(), self.budget)?.entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect record index {}: {error}",
+                    index_path.display()
+                ));
+            }
+        };
         let mut bytes = Vec::new();
         for entry in &self.entries {
             let line = entry.to_jsonl()?;
@@ -804,14 +980,23 @@ impl RecordIndex {
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temp);
+            return result;
         }
-        result
+        for entry in previous {
+            if !entry.is_disposable()
+                || self.entries.iter().any(|current| current.path == entry.path)
+            {
+                continue;
+            }
+            self.remove_disposable_artifact(&entry)?;
+        }
+        Ok(())
     }
 
     fn validate_all(&self) -> Result<(), String> {
         let mut keys = BTreeSet::new();
         let mut by_key = BTreeMap::new();
-        let mut total_size = 0u64;
+        let mut total_disposable_size = 0u64;
         let mut total_links = 0usize;
         let mut previous_sequence = None;
         for entry in &self.entries {
@@ -830,24 +1015,20 @@ impl RecordIndex {
                     entry.kind, entry.artifact_id
                 ));
             }
-            total_size = total_size
-                .checked_add(entry.size)
-                .ok_or_else(|| "record budget byte count overflows".to_string())?;
+            if entry.is_disposable() {
+                total_disposable_size = total_disposable_size
+                    .checked_add(entry.size)
+                    .ok_or_else(|| "record budget byte count overflows".to_string())?;
+            }
             total_links = total_links
                 .checked_add(entry.consumed.len() + entry.produced.len())
                 .ok_or_else(|| "record link count overflows".to_string())?;
             by_key.insert((entry.kind, entry.artifact_id.as_str()), entry);
         }
-        if self.entries.len() > self.budget.max_records {
+        if total_disposable_size > self.budget.max_bytes {
             return Err(format!(
-                "record count {} exceeds budget {}",
-                self.entries.len(), self.budget.max_records
-            ));
-        }
-        if total_size > self.budget.max_bytes {
-            return Err(format!(
-                "record size {} exceeds budget {}",
-                total_size, self.budget.max_bytes
+                "disposable record size {} exceeds budget {}",
+                total_disposable_size, self.budget.max_bytes
             ));
         }
         if total_links > MAX_LINKS_TOTAL {
@@ -868,51 +1049,130 @@ impl RecordIndex {
 
     fn apply_eviction(&mut self) -> Result<(), String> {
         loop {
-            let total_size = self.entries.iter().try_fold(0u64, |total, entry| {
+            let total_disposable_size = self.entries.iter().try_fold(0u64, |total, entry| {
+                if !entry.is_disposable() {
+                    return Ok(total);
+                }
                 total
                     .checked_add(entry.size)
                     .ok_or_else(|| "record budget byte count overflows".to_string())
             })?;
-            if self.entries.len() <= self.budget.max_records && total_size <= self.budget.max_bytes
-            {
+            if total_disposable_size <= self.budget.max_bytes {
                 return Ok(());
             }
-            let Some((position, _)) = self
-                .entries
-                .iter()
-                .enumerate()
-                .filter(|(_, entry)| {
-                    matches!(
-                        entry.kind,
-                        RecordKind::Replay | RecordKind::Receipt | RecordKind::Evidence
-                    ) && !entry.is_sensitive()
-                        && !entry.saved
-                        && !self.is_referenced(entry)
-                })
-                .min_by(|(_, left), (_, right)| {
-                    left.recorded_sequence
-                        .cmp(&right.recorded_sequence)
-                        .then(left.artifact_id.cmp(&right.artifact_id))
+            let Some(group) = self
+                .eviction_groups()
+                .into_iter()
+                .min_by(|left, right| {
+                    let left_key = left
+                        .iter()
+                        .map(|index| {
+                            (
+                                self.entries[*index].recorded_sequence,
+                                self.entries[*index].artifact_id.as_str(),
+                            )
+                        })
+                        .min();
+                    let right_key = right
+                        .iter()
+                        .map(|index| {
+                            (
+                                self.entries[*index].recorded_sequence,
+                                self.entries[*index].artifact_id.as_str(),
+                            )
+                        })
+                        .min();
+                    left_key.cmp(&right_key)
                 })
             else {
                 return Err(
-                    "record budget exceeded; no unreferenced unsaved safe record can be evicted"
+                    "disposable history budget exceeded; no unreferenced FIFO record group can be evicted"
                         .into(),
                 );
             };
-            self.entries.remove(position);
+            for position in group.into_iter().rev() {
+                self.entries.remove(position);
+            }
         }
     }
 
-    fn is_referenced(&self, target: &RecordIndexEntry) -> bool {
-        self.entries.iter().any(|entry| {
-            entry
-                .consumed
-                .iter()
-                .chain(entry.produced.iter())
-                .any(|link| link.kind == target.kind && link.artifact_id == target.artifact_id)
-        })
+    /// Return connected disposable groups whose members are not referenced by
+    /// any protected or otherwise non-group record. Evicting one group cannot
+    /// leave a dangling link.
+    fn eviction_groups(&self) -> Vec<Vec<usize>> {
+        let disposable = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| entry.is_disposable().then_some(index))
+            .collect::<Vec<_>>();
+        let mut visited = BTreeSet::new();
+        let mut groups = Vec::new();
+        for start in disposable.iter().copied() {
+            if !visited.insert(start) {
+                continue;
+            }
+            let mut group = BTreeSet::from([start]);
+            loop {
+                let mut changed = false;
+                for candidate in disposable.iter().copied() {
+                    if group.contains(&candidate) {
+                        continue;
+                    }
+                    if group.iter().any(|member| {
+                        entries_linked(&self.entries[*member], &self.entries[candidate])
+                    }) {
+                        group.insert(candidate);
+                        visited.insert(candidate);
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            let externally_referenced = self.entries.iter().enumerate().any(|(index, entry)| {
+                !group.contains(&index)
+                    && group.iter().any(|target| entry_links_to(entry, &self.entries[*target]))
+            });
+            if !externally_referenced {
+                groups.push(group.into_iter().collect());
+            }
+        }
+        groups
     }
+
+    fn remove_disposable_artifact(&self, entry: &RecordIndexEntry) -> Result<(), String> {
+        if self.entries.iter().any(|other| other.path == entry.path) {
+            return Ok(());
+        }
+        let Some(jet_root) = self.root.parent() else {
+            return Ok(());
+        };
+        let Some(project_root) = jet_root.parent() else {
+            return Ok(());
+        };
+        let path = project_root.join(&entry.path);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
+                format!("disposable artifact is not a regular file: {}", path.display()),
+            ),
+            Ok(_) => match fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!(
+                    "could not evict disposable artifact `{}`: {error}",
+                    path.display()
+                )),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "could not inspect disposable artifact `{}`: {error}",
+                path.display()
+            )),
+        }
+    }
+
 
     fn visible_entry(&self, entry: &RecordIndexEntry, authenticated: bool) -> RecordIndexEntry {
         if authenticated {
@@ -930,6 +1190,18 @@ impl RecordIndex {
             .find(|entry| entry.kind == link.kind && entry.artifact_id == link.artifact_id)
             .is_some_and(|entry| !entry.is_sensitive())
     }
+}
+
+fn entries_linked(left: &RecordIndexEntry, right: &RecordIndexEntry) -> bool {
+    entry_links_to(left, right) || entry_links_to(right, left)
+}
+
+fn entry_links_to(entry: &RecordIndexEntry, target: &RecordIndexEntry) -> bool {
+    entry
+        .consumed
+        .iter()
+        .chain(entry.produced.iter())
+        .any(|link| link.kind == target.kind && link.artifact_id == target.artifact_id)
 }
 
 fn compare_entries(left: &RecordIndexEntry, right: &RecordIndexEntry) -> std::cmp::Ordering {
@@ -1124,6 +1396,7 @@ fn links_field(
     for value in values {
         let DataTree::Object(fields) = value else {
             return Err(format!("record index {name} link must be an object"));
+
         };
         if fields
             .iter()
@@ -1138,6 +1411,59 @@ fn links_field(
     normalized.sort();
     reject_duplicate_links(&normalized, name)?;
     Ok(normalized)
+}
+
+struct IndexWriteLock {
+    path: PathBuf,
+}
+
+impl Drop for IndexWriteLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_index_lock(root: &Path) -> Result<IndexWriteLock, String> {
+    secure_create_dir(root)?;
+    let path = root.join(RECORD_INDEX_LOCK_FILE);
+    for _ in 0..RECORD_INDEX_LOCK_ATTEMPTS {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Err(error) = file.set_permissions(fs::Permissions::from_mode(0o600)) {
+                        let _ = fs::remove_file(&path);
+                        return Err(format!("could not secure record index lock: {error}"));
+                    }
+                }
+                if let Err(error) = file.write_all(std::process::id().to_string().as_bytes()) {
+                    let _ = fs::remove_file(&path);
+                    return Err(format!("could not write record index lock: {error}"));
+                }
+                return Ok(IndexWriteLock { path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if let Ok(metadata) = fs::symlink_metadata(&path) {
+                    if !metadata.file_type().is_symlink()
+                        && metadata.is_file()
+                        && metadata
+                            .modified()
+                            .ok()
+                            .and_then(|modified| modified.elapsed().ok())
+                            .is_some_and(|age| age > RECORD_INDEX_LOCK_STALE_AFTER)
+                    {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => {
+                return Err(format!("could not create record index lock: {error}"));
+            }
+        }
+    }
+    Err("timed out waiting for record index lock".into())
 }
 
 fn secure_create_dir(path: &Path) -> Result<(), String> {
@@ -1202,4 +1528,425 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
         return Err(format!("record index file exceeds {limit} bytes"));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    static TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_project(label: &str) -> (PathBuf, PathBuf) {
+        let project = std::env::temp_dir().join(format!(
+            "jet-record-index-{label}-{}-{}",
+            std::process::id(),
+            TEST_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let records = project.join(".jet").join("records");
+        fs::create_dir_all(&records).unwrap();
+        (project, records)
+    }
+
+    fn identity() -> RecordIdentity {
+        RecordIdentity::new("a".repeat(64), "test-toolchain", "test-engine").unwrap()
+    }
+
+    fn entry(
+        kind: RecordKind,
+        artifact_id: &str,
+        path: &str,
+        size: u64,
+        recorded_sequence: u64,
+        saved: bool,
+    ) -> RecordIndexEntry {
+        RecordIndexEntry::new(identity(), kind, artifact_id, path)
+            .unwrap()
+            .with_size(size)
+            .with_recorded_sequence(recorded_sequence)
+            .with_saved(saved)
+    }
+
+    fn artifact(project: &Path, relative: &str, bytes: usize) -> PathBuf {
+        let path = project.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, vec![b'x'; bytes]).unwrap();
+        path
+    }
+
+    #[test]
+    fn restart_eviction_removes_the_old_disposable_artifact() {
+        let (project, records) = temp_project("restart");
+        let old_path = artifact(&project, ".jet/receipts/old", 5);
+        let new_path = artifact(&project, ".jet/receipts/new", 5);
+        let budget = RecordBudget::new(5).unwrap();
+
+        let mut index = RecordIndex::new(records.clone());
+        index.set_budget(budget).unwrap();
+        index
+            .update(entry(
+                RecordKind::Receipt,
+                "old",
+                ".jet/receipts/old",
+                5,
+                1,
+                false,
+            ))
+            .unwrap();
+        index.store().unwrap();
+
+        let mut restarted = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        restarted
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "new",
+                ".jet/receipts/new",
+                5,
+                2,
+                false,
+            ))
+            .unwrap();
+
+        assert!(!old_path.exists());
+        assert!(new_path.is_file());
+        assert!(RecordIndex::load_with_budget(records, budget)
+            .unwrap()
+            .find(RecordKind::Receipt, "old", true)
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn saved_history_survives_disposable_eviction_after_restart() {
+        let (project, records) = temp_project("saved");
+        let saved_path = artifact(&project, ".jet/replays/saved", 100);
+        let old_path = artifact(&project, ".jet/receipts/old", 4);
+        let new_path = artifact(&project, ".jet/receipts/new", 4);
+        let budget = RecordBudget::new(4).unwrap();
+
+        let mut index = RecordIndex::new(records.clone());
+        index.set_budget(budget).unwrap();
+        index
+            .update(entry(
+                RecordKind::Replay,
+                "saved",
+                ".jet/replays/saved",
+                100,
+                1,
+                true,
+            ))
+            .unwrap();
+        index
+            .update(entry(
+                RecordKind::Receipt,
+                "old",
+                ".jet/receipts/old",
+                4,
+                2,
+                false,
+            ))
+            .unwrap();
+        index.store().unwrap();
+
+        let mut restarted = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        restarted
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "new",
+                ".jet/receipts/new",
+                4,
+                3,
+                false,
+            ))
+            .unwrap();
+
+        let loaded = RecordIndex::load_with_budget(records, budget).unwrap();
+        assert!(loaded.find(RecordKind::Replay, "saved", true).is_some());
+        assert!(saved_path.is_file());
+        assert!(!old_path.exists());
+        assert!(new_path.is_file());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn concurrent_update_and_store_preserves_each_row() {
+        let (project, records) = temp_project("concurrent");
+        let workers = 4usize;
+        let barrier = Arc::new(Barrier::new(workers));
+        let mut handles = Vec::with_capacity(workers);
+        for worker in 0..workers {
+            let records = records.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut index = RecordIndex::new(records);
+                index
+                    .update_and_store(entry(
+                        RecordKind::Receipt,
+                        &format!("receipt-{worker}"),
+                        &format!(".jet/receipts/receipt-{worker}"),
+                        1,
+                        worker as u64 + 1,
+                        false,
+                    ))
+                    .unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let loaded = RecordIndex::load(records).unwrap();
+        assert_eq!(loaded.query(true).len(), workers);
+        for worker in 0..workers {
+            assert!(loaded
+                .find(RecordKind::Receipt, &format!("receipt-{worker}"), true)
+                .is_some());
+        }
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn oversized_disposable_update_does_not_corrupt_the_previous_index() {
+        let (project, records) = temp_project("oversized");
+        let old_path = artifact(&project, ".jet/receipts/old", 1);
+        let new_path = artifact(&project, ".jet/receipts/too-large", 2);
+        let budget = RecordBudget::new(1).unwrap();
+
+        let mut index = RecordIndex::new(records.clone());
+        index.set_budget(budget).unwrap();
+        index
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "old",
+                ".jet/receipts/old",
+                1,
+                1,
+                false,
+            ))
+            .unwrap();
+
+        let mut oversized = RecordIndex::new(records.clone());
+        oversized.set_budget(budget).unwrap();
+        let error = oversized
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "too-large",
+                ".jet/receipts/too-large",
+                2,
+                2,
+                false,
+            ))
+            .expect_err("an oversized disposable record must be rejected");
+        assert!(error.contains("exceeds the byte budget"));
+
+        let loaded = RecordIndex::load_with_budget(records, budget).unwrap();
+        assert!(loaded.find(RecordKind::Receipt, "old", true).is_some());
+        assert!(old_path.is_file());
+        assert!(new_path.is_file());
+        let _ = fs::remove_dir_all(project);
+    }
+    #[test]
+    fn default_budget_retains_many_run_build_test_and_replay_rows_without_count_cap() {
+        let (project, records) = temp_project("default-budget");
+        let mut index = RecordIndex::new(records.clone());
+        assert_eq!(
+            index.budget().max_bytes,
+            256 * 1024 * 1024,
+            "the project budget is one 256 MiB byte limit"
+        );
+
+        let mut sequence = 1_u64;
+        for (kind, label, prefix, count) in [
+            (RecordKind::Receipt, "run", ".jet/receipts", 80_usize),
+            (RecordKind::Receipt, "build", ".jet/receipts", 80_usize),
+            (RecordKind::Receipt, "test", ".jet/receipts", 80_usize),
+            (RecordKind::Replay, "replay", ".jet/replays", 80_usize),
+        ] {
+            for offset in 0..count {
+                index
+                    .update(entry(
+                        kind,
+                        &format!("{label}-{offset}"),
+                        &format!("{prefix}/{label}-{offset}"),
+                        1,
+                        sequence,
+                        false,
+                    ))
+                    .unwrap();
+                sequence += 1;
+            }
+        }
+
+        assert_eq!(
+            index.entries_authenticated().len(),
+            320,
+            "ordinary history has no record-count eviction policy"
+        );
+        index.store().unwrap();
+        let loaded = RecordIndex::load(records).unwrap();
+        assert_eq!(loaded.entries_authenticated().len(), 320);
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn protected_sensitive_saved_and_linked_rows_survive_selective_eviction_and_failed_publish() {
+        let (project, records) = temp_project("protected");
+        let linked_path = artifact(&project, ".jet/receipts/linked", 1);
+        let old_path = artifact(&project, ".jet/receipts/old", 1);
+        let sensitive_path = artifact(&project, ".jet/receipts/sensitive", 8);
+        let saved_path = artifact(&project, ".jet/replays/saved", 32);
+        let proof_path = artifact(&project, ".jet/proofs/audit", 32);
+        let trust_path = artifact(&project, ".jet/trust/audit", 32);
+        let evidence_path = artifact(&project, ".jet/evidence/mandatory", 32);
+        let new_path = artifact(&project, ".jet/receipts/new", 1);
+        let oversized_path = artifact(&project, ".jet/receipts/oversized", 3);
+        let budget = RecordBudget::new(2).unwrap();
+
+        let linked = entry(
+            RecordKind::Receipt,
+            "linked",
+            ".jet/receipts/linked",
+            1,
+            1,
+            false,
+        );
+        let old = entry(
+            RecordKind::Receipt,
+            "old",
+            ".jet/receipts/old",
+            1,
+            2,
+            false,
+        );
+        let sensitive = entry(
+            RecordKind::Receipt,
+            "sensitive",
+            ".jet/receipts/sensitive",
+            8,
+            3,
+            false,
+        )
+        .with_capture(RecordCapture::Sensitive);
+        let saved = entry(
+            RecordKind::Replay,
+            "saved",
+            ".jet/replays/saved",
+            32,
+            4,
+            true,
+        );
+        let proof = entry(
+            RecordKind::Proof,
+            "audit-proof",
+            ".jet/proofs/audit",
+            32,
+            5,
+            false,
+        )
+        .with_links(
+            vec![RecordLink::new(RecordKind::Receipt, "linked").unwrap()],
+            Vec::new(),
+        )
+        .unwrap();
+        let trust = entry(
+            RecordKind::Trust,
+            "audit-trust",
+            ".jet/trust/audit",
+            32,
+            6,
+            false,
+        )
+        .with_links(
+            Vec::new(),
+            vec![RecordLink::new(RecordKind::Receipt, "sensitive").unwrap()],
+        )
+        .unwrap();
+        let evidence = entry(
+            RecordKind::Evidence,
+            "mandatory",
+            ".jet/evidence/mandatory",
+            32,
+            7,
+            false,
+        )
+        .with_capture(RecordCapture::Sensitive);
+
+        let mut index = RecordIndex::new(records.clone());
+        index.set_budget(budget).unwrap();
+        for row in [linked, old, sensitive, saved, proof, trust, evidence] {
+            index.update(row).unwrap();
+        }
+        index.store().unwrap();
+
+        let mut restarted = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        restarted
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "new",
+                ".jet/receipts/new",
+                1,
+                8,
+                false,
+            ))
+            .unwrap();
+
+        let loaded = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        assert!(!old_path.exists(), "only the unreferenced FIFO row is evicted");
+        assert!(new_path.is_file());
+        assert!(linked_path.is_file(), "linked rows cannot be evicted");
+        assert!(saved_path.is_file(), "saved replay bytes are protected");
+        assert!(sensitive_path.is_file(), "sensitive bytes are protected");
+        assert!(proof_path.is_file(), "proof/audit bytes are protected");
+        assert!(trust_path.is_file(), "trust/audit bytes are protected");
+        assert!(evidence_path.is_file(), "mandatory evidence bytes are protected");
+        assert!(loaded.find(RecordKind::Receipt, "old", true).is_none());
+        assert!(loaded.find(RecordKind::Receipt, "new", true).is_some());
+        assert!(loaded.find(RecordKind::Receipt, "sensitive", false).is_none());
+        assert!(loaded.find(RecordKind::Receipt, "sensitive", true).is_some());
+        let visible_trust = loaded
+            .find(RecordKind::Trust, "audit-trust", false)
+            .unwrap();
+        assert!(
+            visible_trust.produced.is_empty(),
+            "unauthenticated queries hide sensitive references"
+        );
+        let authenticated_trust = loaded
+            .find(RecordKind::Trust, "audit-trust", true)
+            .unwrap();
+        assert_eq!(authenticated_trust.produced.len(), 1);
+
+        // A failed publication must not replace the last valid index or remove
+        // protected data. This uses the same bounded candidate path as a
+        // disk-full/oversized write failure without depending on host quotas.
+        let mut failed = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        let error = failed
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "oversized",
+                ".jet/receipts/oversized",
+                3,
+                9,
+                false,
+            ))
+            .expect_err("an oversized disposable row must fail before publication");
+        assert!(error.contains("exceeds"));
+        let after_failure = RecordIndex::load_with_budget(records.clone(), budget).unwrap();
+        assert!(after_failure.find(RecordKind::Receipt, "new", true).is_some());
+        assert!(after_failure.find(RecordKind::Replay, "saved", true).is_some());
+        assert!(after_failure.find(RecordKind::Proof, "audit-proof", true).is_some());
+        assert!(saved_path.is_file());
+        assert!(proof_path.is_file());
+        assert!(oversized_path.is_file(), "the failed candidate never owns this path");
+
+        // An interrupted/stale staging file is ignored; the published JSONL
+        // remains the source of truth.
+        fs::write(records.join(".index.jsonl.interrupted"), b"partial").unwrap();
+        let after_interruption = RecordIndex::load_with_budget(records, budget).unwrap();
+        assert!(after_interruption
+            .find(RecordKind::Trust, "audit-trust", true)
+            .is_some());
+        let _ = fs::remove_dir_all(project);
+    }
 }

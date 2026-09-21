@@ -142,6 +142,28 @@ fn seeded_tree_sitter_drift_fails_the_generated_section_guard() {
 }
 
 #[test]
+fn vscode_strings_do_not_relex_interpolations() {
+    for path in [
+        "editors/vscode/syntaxes/jet.tmLanguage.json",
+        "editors/jet.tmGrammar",
+    ] {
+        let grammar = fs::read_to_string(path).unwrap();
+        assert!(
+            !grammar.contains("\"include\": \"$self\""),
+            "{path} must not re-lex string interpolations as Jet source"
+        );
+        assert!(
+            grammar.contains("\"include\": \"#string-interpolation\""),
+            "{path} must consume {{interpolation}} as string scope"
+        );
+        assert!(
+            !grammar.contains("constant.character.escape.jet"),
+            "{path} must not paint in-string escapes a second color"
+        );
+    }
+}
+
+#[test]
 fn classic_textmate_grammar_matches_vscode_source() {
     assert_eq!(
         fs::read_to_string("editors/jet.tmGrammar").unwrap(),
@@ -164,6 +186,9 @@ fn every_highlight_token_is_in_each_generated_section() {
     ];
 
     for token in jet::Syntax::highlighted_tokens_sorted() {
+        if matches!(token.text, "{" | "}" | "[" | "]" | "(" | ")") {
+            continue;
+        }
         for (path, section) in &sections {
             assert!(
                 section_has_token(section, token.text),

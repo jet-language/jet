@@ -353,6 +353,51 @@ fn math_lane_value(value: i64, index: i64) -> Result<MathLaneValue, String> {
         MathVal::Mat4(x) => MathLaneValue::F64(x.0[index]),
     })
 }
+fn math_lane_set_value(
+    handle: i64,
+    index: i64,
+    replacement: MathLaneValue,
+) -> Result<(), String> {
+    let value = take_val(handle).ok_or_else(|| "lane: bad recv".to_string())?;
+    let index =
+        simd_lanes::jet_simd_lane_index(index, type_name_of(value), lane_count(value))?;
+    match (value, replacement) {
+        (MathVal::F32(mut lanes), MathLaneValue::F32(replacement)) => {
+            lanes.lanes[index] = replacement;
+            store_val(handle, MathVal::F32(lanes));
+        }
+        (MathVal::F64(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.lanes[index] = replacement;
+            store_val(handle, MathVal::F64(lanes));
+        }
+        (MathVal::Int(mut lanes), MathLaneValue::Int(replacement)) => {
+            lanes.lanes[index] = replacement;
+            store_val(handle, MathVal::Int(lanes));
+        }
+        (MathVal::Vec2(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.0[index] = replacement;
+            store_val(handle, MathVal::Vec2(lanes));
+        }
+        (MathVal::Vec3(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.0[index] = replacement;
+            store_val(handle, MathVal::Vec3(lanes));
+        }
+        (MathVal::Vec4(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.0[index] = replacement;
+            store_val(handle, MathVal::Vec4(lanes));
+        }
+        (MathVal::Mat3(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.0[index] = replacement;
+            store_val(handle, MathVal::Mat3(lanes));
+        }
+        (MathVal::Mat4(mut lanes), MathLaneValue::F64(replacement)) => {
+            lanes.0[index] = replacement;
+            store_val(handle, MathVal::Mat4(lanes));
+        }
+        _ => return Err("lane: scalar carrier mismatch".to_string()),
+    }
+    Ok(())
+}
 
 
 /// Pack a scalar float with a negative tag; math handles remain non-negative.
@@ -961,6 +1006,54 @@ fn jet_jit_math_lane_i64(value: i64, index: i64, file: i64, line: i64) -> i64 {
         }
     }
 }
+fn jet_jit_math_lane_set_f32(
+    value: i64,
+    index: i64,
+    replacement: f32,
+    file: i64,
+    line: i64,
+) -> i64 {
+    match math_lane_set_value(value, index, MathLaneValue::F32(replacement)) {
+        Ok(()) => 0,
+        Err(message) => {
+            trap_at(file, line, &message);
+            0
+        }
+    }
+}
+
+fn jet_jit_math_lane_set_f64(
+    value: i64,
+    index: i64,
+    replacement: f64,
+    file: i64,
+    line: i64,
+) -> i64 {
+    match math_lane_set_value(value, index, MathLaneValue::F64(replacement)) {
+        Ok(()) => 0,
+        Err(message) => {
+            trap_at(file, line, &message);
+            0
+        }
+    }
+}
+
+fn jet_jit_math_lane_set_i64(
+    value: i64,
+    index: i64,
+    replacement: i64,
+    file: i64,
+    line: i64,
+) -> i64 {
+    match math_lane_set_value(value, index, MathLaneValue::Int(replacement)) {
+        Ok(()) => 0,
+        Err(message) => {
+            trap_at(file, line, &message);
+            0
+        }
+    }
+}
+
 
 
 /// `type_name`/`func` are string handles. `args` is a list of i64:
@@ -2591,6 +2684,18 @@ host_fns! {
         sig_lane_f64.returns[0] = AbiParam::new(types::F64);
         let mut sig_lane_i64 = sig_lane_f32.clone();
         sig_lane_i64.returns[0] = AbiParam::new(types::I64);
+        let mut sig_lane_set_f32 = Signature::new(cc);
+        sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+        sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+        sig_lane_set_f32.params.push(AbiParam::new(types::F32));
+        sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+        sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+        sig_lane_set_f32.returns.push(AbiParam::new(types::I64));
+        let mut sig_lane_set_f64 = sig_lane_set_f32.clone();
+        sig_lane_set_f64.params[2] = AbiParam::new(types::F64);
+        let mut sig_lane_set_i64 = sig_lane_set_f32.clone();
+        sig_lane_set_i64.params[2] = AbiParam::new(types::I64);
+
         let mut sig_i64_i8 = Signature::new(cc);
         sig_i64_i8.params.push(AbiParam::new(types::I64));
         sig_i64_i8.returns.push(AbiParam::new(types::I8));
@@ -3077,6 +3182,9 @@ host_fns! {
     lane_f64x2: "jet_math_F64x2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
     lane_f32x8: "jet_math_F32x8_lane" => jet_jit_math_lane_f32: sig_lane_f32;
     lane_f64x4: "jet_math_F64x4_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+    lane_vec2: "jet_math_Vec2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+    lane_vec3: "jet_math_Vec3_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+    lane_vec4: "jet_math_Vec4_lane" => jet_jit_math_lane_f64: sig_lane_f64;
     lane_i8x16: "jet_math_I8x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
     lane_i16x8: "jet_math_I16x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
     lane_i32x4: "jet_math_I32x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
@@ -3093,6 +3201,9 @@ host_fns! {
     lane_u16x16: "jet_math_U16x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
     lane_u32x8: "jet_math_U32x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
     lane_u64x4: "jet_math_U64x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+    lane_set_f32: "jet_math_F32x4_lane_set" => jet_jit_math_lane_set_f32: sig_lane_set_f32;
+    lane_set_f64: "jet_math_F64x2_lane_set" => jet_jit_math_lane_set_f64: sig_lane_set_f64;
+    lane_set_i64: "jet_math_I64x2_lane_set" => jet_jit_math_lane_set_i64: sig_lane_set_i64;
     reduce: "jet_jit_math_reduce" => jet_jit_math_reduce: sig_binary;
     dot: "jet_jit_math_dot" => jet_jit_math_dot: sig_binary;
     length: "jet_jit_math_length" => jet_jit_math_length: sig_unary;

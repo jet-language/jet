@@ -9,7 +9,10 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    Arc, Condvar, Mutex, OnceLock,
+};
 use std::time::{Duration, Instant, SystemTime};
 
 thread_local! {
@@ -632,7 +635,7 @@ pub fn jet_http_client_send_with_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     let handle = client_handles()
         .lock()
         .map_err(|_| JetHTTPBridgeError::Internal)?
@@ -693,6 +696,7 @@ pub fn jet_http_client_send_with_impl(
         handle.policy.tls_settings(),
     )
 }
+
 
 #[derive(Clone)]
 struct StoredCookie {
@@ -1382,7 +1386,7 @@ impl H2Connection {
         body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
         tee: &mut Option<Vec<u8>>,
         decompress: bool,
-        facts: &Arc<Mutex<ResponseFacts>>,
+        facts: &Arc<ResponseFacts>,
     ) -> Result<u32, JetHTTPBridgeError> {
         let write_started = Instant::now();
         let stream = self.next_stream;
@@ -1742,7 +1746,7 @@ fn default_dns_cache() -> &'static Arc<Mutex<DNSCache>> {
 
 fn connect_plain(
     dns: &Arc<Mutex<DNSCache>>,
-    facts: &Arc<Mutex<ResponseFacts>>,
+    facts: &Arc<ResponseFacts>,
     url: &ParsedUrl,
     dns_timeout: Duration,
     timeout: Duration,
@@ -2120,12 +2124,11 @@ fn resolve_request_phase_timeouts(
     })
 }
 
-/// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
-/// is alternating [key, value, key, value, ...].
-pub fn jet_http_client_get_impl(
+/// Perform an HTTP GET and return owned response parts.
+pub fn jet_http_client_get_parts_impl(
     url: &String,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
-    jet_http_client_send_impl(
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
+    jet_http_client_send_parts_impl(
         "GET",
         url,
         &[],
@@ -2146,12 +2149,13 @@ pub fn jet_http_client_get_impl(
     )
 }
 
+
 /// Perform an HTTP POST with a string body.
-pub fn jet_http_client_post_impl(
+pub fn jet_http_client_post_parts_impl(
     url: &String,
     body: &String,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
-    jet_http_client_send_impl(
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
+    jet_http_client_send_parts_impl(
         "POST",
         url,
         &[],
@@ -2172,10 +2176,11 @@ pub fn jet_http_client_post_impl(
     )
 }
 
+
 /// Perform a generic HTTP request.
 /// headers_flat: alternating [key, value, key, value, ...]
 
-pub fn jet_http_client_send_stream_impl(
+pub fn jet_http_client_send_stream_parts_impl(
     method: &str,
     url: &String,
     headers_flat: &[String],
@@ -2195,7 +2200,7 @@ pub fn jet_http_client_send_stream_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
@@ -2256,7 +2261,8 @@ pub fn jet_http_client_send_stream_impl(
     )
 }
 
-pub fn jet_http_client_send_with_stream_impl(
+
+pub fn jet_http_client_send_with_stream_parts_impl(
     id: i64,
     method: &str,
     url: &String,
@@ -2277,7 +2283,7 @@ pub fn jet_http_client_send_with_stream_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     let handle = client_handles()
         .lock()
         .map_err(|_| JetHTTPBridgeError::Internal)?
@@ -2349,7 +2355,8 @@ pub fn jet_http_client_send_with_stream_impl(
     )
 }
 
-pub fn jet_http_client_send_impl(
+
+pub fn jet_http_client_send_parts_impl(
     method: &str,
     url: &String,
     headers_flat: &[String],
@@ -2367,7 +2374,7 @@ pub fn jet_http_client_send_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     #[cfg(not(any(
         target_os = "linux",
         target_os = "android",
@@ -2387,6 +2394,51 @@ pub fn jet_http_client_send_impl(
         return Err(JetHTTPBridgeError::UnsupportedTarget);
     }
 
+    validate_request_headers(headers_flat)?;
+    jet_http_client_send_owned_impl(
+        method,
+        url,
+        coalesce_request_headers(headers_flat),
+        body.map(ToOwned::to_owned),
+        timeout_ms,
+        connect_timeout_ms,
+        read_timeout_ms,
+        total_timeout_ms,
+        dns_timeout_ms,
+        tls_timeout_ms,
+        write_timeout_ms,
+        first_byte_timeout_ms,
+        redirects,
+        proxy,
+        cookies_flat,
+        form_flat,
+        multipart_flat,
+    )
+}
+
+
+/// Owned request parts are the direct typed bridge used by resident JIT and
+/// generated AOT. The caller transfers headers/body once; policy and redirect
+/// handling remain in this one canonical client path.
+pub fn jet_http_client_send_owned_impl(
+    method: &str,
+    url: &String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+    timeout_ms: Option<i64>,
+    connect_timeout_ms: Option<i64>,
+    read_timeout_ms: Option<i64>,
+    total_timeout_ms: Option<i64>,
+    dns_timeout_ms: Option<i64>,
+    tls_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    first_byte_timeout_ms: Option<i64>,
+    redirects: Option<i64>,
+    proxy: Option<&str>,
+    cookies_flat: &[String],
+    form_flat: &[String],
+    multipart_flat: &[String],
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
@@ -2405,7 +2457,7 @@ pub fn jet_http_client_send_impl(
     let explicit_redirect_limit = redirects.is_some();
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
     let (headers, body) =
-        prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat)?;
+        prepare_request_parts_owned(headers, body, cookies_flat, form_flat, multipart_flat)?;
     send_following_redirects(
         default_client_pool().clone(),
         0,
@@ -2494,7 +2546,24 @@ fn prepare_request_parts(
     multipart_flat: &[String],
 ) -> Result<(Vec<(String, String)>, Option<Vec<u8>>), JetHTTPBridgeError> {
     validate_request_headers(headers_flat)?;
-    let mut headers = coalesce_request_headers(headers_flat);
+    prepare_request_parts_owned(
+        coalesce_request_headers(headers_flat),
+        body.map(ToOwned::to_owned),
+        cookies_flat,
+        form_flat,
+        multipart_flat,
+    )
+}
+
+fn prepare_request_parts_owned(
+    mut headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+    cookies_flat: &[String],
+    form_flat: &[String],
+    multipart_flat: &[String],
+) -> Result<(Vec<(String, String)>, Option<Vec<u8>>), JetHTTPBridgeError> {
+    validate_request_header_pairs(&headers)?;
+    headers = coalesce_request_header_pairs(headers);
     if !cookies_flat.is_empty() {
         let cookie = cookies_flat
             .chunks_exact(2)
@@ -2503,8 +2572,8 @@ fn prepare_request_parts(
             .join("; ");
         headers.push(("cookie".to_string(), cookie));
     }
-    let body = if let Some(body) = body {
-        Some(body.to_vec())
+    let body = if body.is_some() {
+        body
     } else if !multipart_flat.is_empty() {
         let boundary = multipart_boundary(multipart_flat);
         headers.push((
@@ -2553,7 +2622,7 @@ fn send_following_redirects(
     http11: bool,
     h2c: bool,
     tls: TLSSettings<'_>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     send_following_redirects_upload(
         pool,
         namespace,
@@ -2617,7 +2686,7 @@ fn send_following_redirects_upload(
     http11: bool,
     h2c: bool,
     tls: TLSSettings<'_>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     let mut method = original_method.to_string();
     let mut url = original_url.to_string();
     let mut visited = std::collections::HashSet::new();
@@ -2816,33 +2885,41 @@ fn finalize_response(
     response: NativeResponse,
     redirect_history: Vec<String>,
     started: Instant,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
-    let facts = response.facts.clone();
-    {
-        let mut facts = facts.lock().map_err(|_| JetHTTPBridgeError::Internal)?;
-        facts.protocol = response.protocol.clone();
-        facts.remote_address = response.remote_address.clone();
-        facts.redirect_history = redirect_history;
-        facts.timings_ms[6] = elapsed_ms(started);
-        facts.reused_connection = response.reused_connection;
-    }
-    let handle = response.body_handle;
-    let public = response.into_public();
-    response_facts()
-        .lock()
-        .map_err(|_| JetHTTPBridgeError::Internal)?
-        .insert(handle, facts);
-    Ok(public)
+) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
+    let NativeResponse {
+        status,
+        headers,
+        body_handle,
+        body_length,
+        reused_connection,
+        remote_address,
+        protocol,
+        facts,
+    } = response;
+    facts.set_total(elapsed_ms(started));
+    let (timings_ms, raw_content_encoding) = facts.snapshot();
+    Ok(JetHTTPResponseParts {
+        status,
+        body_handle,
+        body_length,
+        headers,
+        context: JetHTTPResponseContext {
+            protocol,
+            remote_address,
+            redirect_history,
+            timings_ms,
+            reused_connection,
+            raw_content_encoding,
+        },
+    })
 }
 
 fn elapsed_ms(started: Instant) -> i64 {
     started.elapsed().as_millis().min(i64::MAX as u128) as i64
 }
 
-fn set_timing(facts: &Arc<Mutex<ResponseFacts>>, index: usize, value: i64) {
-    if let Ok(mut facts) = facts.lock() {
-        facts.timings_ms[index] = facts.timings_ms[index].saturating_add(value);
-    }
+fn set_timing(facts: &ResponseFacts, index: usize, value: i64) {
+    facts.add_timing(index, value);
 }
 
 fn drain_redirect_body(handle: i64) {
@@ -2959,104 +3036,85 @@ struct NativeResponse {
     reused_connection: bool,
     remote_address: String,
     protocol: String,
-    facts: Arc<Mutex<ResponseFacts>>,
+    facts: Arc<ResponseFacts>,
 }
 
-impl NativeResponse {
-    fn into_public(self) -> (i64, i64, Option<i64>, Vec<String>) {
-        let headers = self
-            .headers
-            .into_iter()
-            .flat_map(|(name, value)| [name, value])
-            .collect();
-        (self.status, self.body_handle, self.body_length, headers)
+
+// One instance is created for each request. Body readers can finish after the
+// response headers are projected, so phase counters are lock-free and the
+// encoding fact is published once.
+struct ResponseFacts {
+    // dns, connect, tls, write_idle, first_byte, read_idle, total
+    timings_ms: [AtomicI64; 7],
+    raw_content_encoding: OnceLock<String>,
+}
+
+impl Default for ResponseFacts {
+    fn default() -> Self {
+        Self {
+            timings_ms: std::array::from_fn(|_| AtomicI64::new(0)),
+            raw_content_encoding: OnceLock::new(),
+        }
+    }
+}
+
+impl ResponseFacts {
+    fn add_timing(&self, index: usize, value: i64) {
+        let _ = self.timings_ms[index].fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |current| Some(current.saturating_add(value)),
+        );
+    }
+
+    fn max_timing(&self, index: usize, value: i64) {
+        let _ = self.timings_ms[index].fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |current| Some(current.max(value)),
+        );
+    }
+
+    fn set_total(&self, value: i64) {
+        self.timings_ms[6].store(value, Ordering::Relaxed);
+    }
+
+    fn set_raw_content_encoding(&self, value: Option<String>) {
+        // Absence is not publication: a later real header must remain able to
+        // install the immutable fact.
+        if let Some(value) = value {
+            let _ = self.raw_content_encoding.set(value);
+        }
+    }
+
+    fn snapshot(&self) -> ([i64; 7], Option<String>) {
+        (
+            std::array::from_fn(|index| self.timings_ms[index].load(Ordering::Relaxed)),
+            self.raw_content_encoding.get().cloned(),
+        )
     }
 }
 
 #[derive(Clone, Default)]
-struct ResponseFacts {
-    protocol: String,
-    remote_address: String,
-    redirect_history: Vec<String>,
-    // dns, connect, tls, write_idle, first_byte, read_idle, total
-    timings_ms: [i64; 7],
-    reused_connection: bool,
-    raw_content_encoding: Option<String>,
+pub struct JetHTTPResponseContext {
+    pub protocol: String,
+    pub remote_address: String,
+    pub redirect_history: Vec<String>,
+    pub timings_ms: [i64; 7],
+    pub reused_connection: bool,
+    pub raw_content_encoding: Option<String>,
 }
 
-fn response_facts() -> &'static Mutex<HashMap<i64, Arc<Mutex<ResponseFacts>>>> {
-    static FACTS: OnceLock<Mutex<HashMap<i64, Arc<Mutex<ResponseFacts>>>>> = OnceLock::new();
-    FACTS.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Clone)]
+pub struct JetHTTPResponseParts {
+    pub status: i64,
+    pub body_handle: i64,
+    pub body_length: Option<i64>,
+    pub headers: Vec<(String, String)>,
+    pub context: JetHTTPResponseContext,
 }
 
-pub fn jet_http_client_response_protocol_impl(handle: i64) -> String {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| facts.lock().ok().map(|facts| facts.protocol.clone()))
-        .unwrap_or_default()
-}
 
-pub fn jet_http_client_response_remote_address_impl(handle: i64) -> String {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| facts.lock().ok().map(|facts| facts.remote_address.clone()))
-        .unwrap_or_default()
-}
-
-pub fn jet_http_client_response_redirect_history_impl(handle: i64) -> Vec<String> {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| {
-            facts
-                .lock()
-                .ok()
-                .map(|facts| facts.redirect_history.clone())
-        })
-        .unwrap_or_default()
-}
-
-pub fn jet_http_client_response_timings_impl(handle: i64) -> Vec<i64> {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| facts.lock().ok().map(|facts| facts.timings_ms.to_vec()))
-        .unwrap_or_default()
-}
-
-pub fn jet_http_client_response_reused_impl(handle: i64) -> bool {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| facts.lock().ok().map(|facts| facts.reused_connection))
-        .unwrap_or(false)
-}
-
-pub fn jet_http_client_response_raw_encoding_impl(handle: i64) -> Option<String> {
-    response_facts()
-        .lock()
-        .ok()
-        .and_then(|facts| facts.get(&handle).cloned())
-        .and_then(|facts| {
-            facts
-                .lock()
-                .ok()
-                .and_then(|facts| facts.raw_content_encoding.clone())
-        })
-}
-
-pub fn jet_http_client_response_facts_drop_impl(handle: i64) {
-    let _ = response_facts()
-        .lock()
-        .map(|mut facts| facts.remove(&handle));
-}
 
 fn remaining_timeout(
     default: Duration,
@@ -3177,7 +3235,7 @@ fn send_once_upload(
     };
     let permit = limits.acquire(base_key.clone(), total_deadline)?;
     let mut reused = false;
-    let facts = Arc::new(Mutex::new(ResponseFacts::default()));
+    let facts = Arc::new(ResponseFacts::default());
     let mut h2_key = base_key.clone();
     h2_key.protocol = "h2";
     let mut h1_key = base_key;
@@ -3446,7 +3504,7 @@ fn redirect_may_replay_body(method: &str) -> bool {
 
 fn connect(
     dns: &Arc<Mutex<DNSCache>>,
-    facts: &Arc<Mutex<ResponseFacts>>,
+    facts: &Arc<ResponseFacts>,
     url: &ParsedUrl,
     proxy: Option<&ParsedUrl>,
     dns_timeout: Duration,
@@ -3816,7 +3874,7 @@ fn read_h2_response(
     _key: PoolKey,
     _pool: Arc<Mutex<ClientPool>>,
     decompress: bool,
-    facts: Arc<Mutex<ResponseFacts>>,
+    facts: Arc<ResponseFacts>,
     request_started: Instant,
     read_timeout: Duration,
     total_deadline: Option<Instant>,
@@ -3824,10 +3882,7 @@ fn read_h2_response(
     reused_connection: bool,
     remote_address: String,
 ) -> Result<NativeResponse, JetHTTPBridgeError> {
-    if let Ok(mut response_facts) = facts.lock() {
-        response_facts.raw_content_encoding =
-            header_first(&headers, "content-encoding").map(str::to_string);
-    }
+    facts.set_raw_content_encoding(header_first(&headers, "content-encoding").map(str::to_string));
     let length = content_length(&headers)?;
     if length.is_some_and(|length| length > HTTP_RESPONSE_BODY_LIMIT) {
         return Err(JetHTTPBridgeError::InvalidFraming);
@@ -3888,7 +3943,7 @@ struct H2BodyReader {
     finished: bool,
     expected: Option<usize>,
     received: usize,
-    facts: Arc<Mutex<ResponseFacts>>,
+    facts: Arc<ResponseFacts>,
     request_started: Instant,
     read_timeout: Duration,
     total_deadline: Option<Instant>,
@@ -3920,9 +3975,7 @@ impl H2BodyReader {
         self.finished = true;
         self.release_stream();
         self.permit.take();
-        if let Ok(mut facts) = self.facts.lock() {
-            facts.timings_ms[6] = elapsed_ms(self.request_started);
-        }
+        self.facts.set_total(elapsed_ms(self.request_started));
         self.connection.take();
         Ok(())
     }
@@ -4090,9 +4143,7 @@ impl Read for H2BodyReader {
                 self.finish()?;
             }
         }
-        if let Ok(mut facts) = self.facts.lock() {
-            facts.timings_ms[5] = facts.timings_ms[5].max(elapsed_ms(started));
-        }
+        self.facts.max_timing(5, elapsed_ms(started));
         Ok(count)
     }
 }
@@ -4103,7 +4154,7 @@ fn read_response(
     pool: Arc<Mutex<ClientPool>>,
     head_request: bool,
     decompress: bool,
-    facts: Arc<Mutex<ResponseFacts>>,
+    facts: Arc<ResponseFacts>,
     request_started: Instant,
     read_timeout: Duration,
     total_deadline: Option<Instant>,
@@ -4133,10 +4184,7 @@ fn read_response(
         }
     };
     set_stream_timeouts(&mut stream, read_timeout, read_timeout, total_deadline)?;
-    if let Ok(mut response_facts) = facts.lock() {
-        response_facts.raw_content_encoding =
-            header_first(&headers, "content-encoding").map(str::to_string);
-    }
+    facts.set_raw_content_encoding(header_first(&headers, "content-encoding").map(str::to_string));
     let transfer = headers
         .iter()
         .filter(|(name, _)| name == "transfer-encoding")
@@ -4238,7 +4286,7 @@ struct ResponseBodyReader {
     chunk_remaining: usize,
     received: usize,
     finished: bool,
-    facts: Arc<Mutex<ResponseFacts>>,
+    facts: Arc<ResponseFacts>,
     request_started: Instant,
     permit: Option<OriginPermit>,
     read_timeout: Duration,
@@ -4252,9 +4300,7 @@ impl ResponseBodyReader {
         }
         self.finished = true;
         self.permit.take();
-        if let Ok(mut facts) = self.facts.lock() {
-            facts.timings_ms[6] = elapsed_ms(self.request_started);
-        }
+        self.facts.set_total(elapsed_ms(self.request_started));
         if self.reusable {
             if let Some(stream) = self.stream.take() {
                 let _ = self
@@ -4435,9 +4481,7 @@ impl Read for ResponseBodyReader {
                 Ok(read)
             }
         };
-        if let Ok(mut facts) = self.facts.lock() {
-            facts.timings_ms[5] = facts.timings_ms[5].max(elapsed_ms(started));
-        }
+        self.facts.max_timing(5, elapsed_ms(started));
         result
     }
 }
@@ -5288,6 +5332,27 @@ fn hpack_huffman_decode(bytes: &[u8]) -> Result<Vec<u8>, JetHTTPBridgeError> {
         return Err(JetHTTPBridgeError::Protocol);
     }
     Ok(out)
+}
+fn coalesce_request_header_pairs(
+    headers: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::with_capacity(headers.len());
+    for (name, value) in headers {
+        if let Some((_, current)) = out
+            .iter_mut()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&name))
+        {
+            current.push_str(if name.eq_ignore_ascii_case("cookie") {
+                "; "
+            } else {
+                ", "
+            });
+            current.push_str(&value);
+        } else {
+            out.push((name, value));
+        }
+    }
+    out
 }
 
 fn coalesce_request_headers(flat: &[String]) -> Vec<(String, String)> {

@@ -1,8 +1,11 @@
 use core.encoding.json as json
 
 module rules
+
 module filter
+
 module formula
+
 module symbolic
 
 @comptime_seed :: 2 * 3 + 0
@@ -15,8 +18,8 @@ fn run() {
     assert(events == [String]{"bonus:score=10", "cap:skip", "award:score=11"})
     score :: facts.get("score") ?? -1
     assert(score == 11)
-    assert(rules.parse("bad: score >> 5 -> add 1") == None)
-    assert(rules.parse("bad: score >= nope -> add 1") == None)
+    assert(rules.parse("bad: score >> 5 -> add 1") == .None)
+    assert(rules.parse("bad: score >= nope -> add 1") == .None)
     print("rules={events}")
 
     raw_json :: "{{\"items\":[{{\"price\":3,\"sku\":\"a\"}},{{\"price\":8,\"sku\":\"b\"}},{{\"name\":\"free\"}}]}}"
@@ -26,7 +29,7 @@ fn run() {
     assert(selected == [DataTree]{DataTree.Int(8)})
     projected :: filter.run(~document, ".items[] | .price") ?? panic("projection parse")
     assert(projected == [DataTree]{DataTree.Int(3), DataTree.Int(8)})
-    assert(filter.parse(".items[] | price") == None)
+    assert(filter.parse(".items[] | price") == .None)
     assert((filter.run(~document, ".missing[]") ?? [DataTree]{}).len() == 0)
     print("filter={selected}")
 
@@ -39,9 +42,9 @@ fn run() {
     second_value :: second.values.get("total") ?? -1
     assert(second_value == 11)
     assert(second.touched == [String]{"a", "b", "total"})
-    assert(formula.parse("broken = a +") == None)
+    assert(formula.parse("broken = a +") == .None)
     cycle :: formula.parse("a = b + 1\nb = a + 1") ?? panic("cycle parse")
-    assert(formula.recalculate(cycle, [String:Int]{}, "a", 1) == None)
+    assert(formula.recalculate(cycle, [String:Int]{}, "a", 1) == .None)
     first_total :: first.values.get("total") ?? -1
     second_total :: second.values.get("total") ?? -1
     print("formula=first:{first_total} second:{second_total} touched:{second.touched}")
@@ -55,8 +58,8 @@ fn run() {
     assert(evaluated == 6.0)
     zero_identity :: symbolic.parse("0 * x + x * 1") ?? panic("identity parse")
     assert(symbolic.show(symbolic.simplify(zero_identity)) == "x")
-    assert(symbolic.parse("x / 2") == None)
-    assert(symbolic.parse("(x + 2") == None)
+    assert(symbolic.parse("x / 2") == .None)
+    assert(symbolic.parse("(x + 2") == .None)
     assert(@comptime_seed == 6)
     print("symbolic={symbolic.show(~simplified)} d/dx={symbolic.show(~derivative)} value={evaluated} comptime={@comptime_seed}")
 }

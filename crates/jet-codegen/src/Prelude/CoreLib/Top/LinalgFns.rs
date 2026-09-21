@@ -296,6 +296,31 @@ fn jet_math_Vec4_to_array(v: &jet_std::Vec4) -> [f64; 4] {
     v.0
 }
 #[inline(always)]
+fn jet_math_Vec2_lane(v: &jet_std::Vec2, i: i64, file: &str, line: u32) -> f64 {
+    let index = match crate::jet_simd_lane_index(i, "Vec2", 2) {
+        Ok(index) => index,
+        Err(message) => jet_panic(file, line, &message),
+    };
+    v.0[index]
+}
+#[inline(always)]
+fn jet_math_Vec3_lane(v: &jet_std::Vec3, i: i64, file: &str, line: u32) -> f64 {
+    let index = match crate::jet_simd_lane_index(i, "Vec3", 3) {
+        Ok(index) => index,
+        Err(message) => jet_panic(file, line, &message),
+    };
+    v.0[index]
+}
+#[inline(always)]
+fn jet_math_Vec4_lane(v: &jet_std::Vec4, i: i64, file: &str, line: u32) -> f64 {
+    let index = match crate::jet_simd_lane_index(i, "Vec4", 4) {
+        Ok(index) => index,
+        Err(message) => jet_panic(file, line, &message),
+    };
+    v.0[index]
+}
+
+#[inline(always)]
 fn jet_math_Vec2_add(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
     *left + right
 }

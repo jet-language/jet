@@ -897,12 +897,23 @@ async function jet_ui_web_load_harfbuzz_wasm(source = globalThis.__jetCanonicalH
     );
   }
   let bytes = source;
+  let response = null;
   if (typeof source === "string") {
-    const response = await fetch(source);
+    response = await fetch(source);
     if (!response.ok) throw new Error(`UI.FontShaping HarfBuzz Wasm load failed (${response.status})`);
-    bytes = await response.arrayBuffer();
   } else if (typeof Response !== "undefined" && source instanceof Response) {
-    bytes = await source.arrayBuffer();
+    response = source;
+  }
+  if (response) {
+    const contentType = response.headers?.get?.("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      ?.toLowerCase();
+    if (contentType === "application/wasm" && typeof WebAssembly.instantiateStreaming === "function") {
+      const result = await WebAssembly.instantiateStreaming(response, runtime.imports);
+      return jet_ui_web_harfbuzz_finish_instance(result.instance ?? result, runtime);
+    }
+    bytes = await response.arrayBuffer();
   } else {
     bytes = jet_ui_web_harfbuzz_bytes(source);
   }
@@ -1195,6 +1206,18 @@ async function jet_ui_web_harfbuzz_imports() {
   };
   jet_ui_web_harfbuzz_import_object = Object.freeze(imports);
   return jet_ui_web_harfbuzz_import_object;
+}
+
+// rustc may retain unused HostServices externs in an unoptimized Web module.
+// Supply linkage-only imports without loading HarfBuzz; a call is an internal
+// compiler error because MIR reachability proved font shaping unreachable.
+function jet_ui_web_unreachable_harfbuzz_imports() {
+  const unavailable = (name) => () => {
+    throw new Error(`unreachable Web font-shaping import called: ${name}`);
+  };
+  return Object.freeze(Object.fromEntries(
+    JET_UI_HARFBUZZ_EXPORTS.map((name) => [name, unavailable(name)]),
+  ));
 }
 
 function jet_ui_web_harfbuzz_bind_app(wasmExports) {

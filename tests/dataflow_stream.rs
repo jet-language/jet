@@ -94,34 +94,27 @@ fn run() {{
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
     first :: reader.next() ?? panic("next")
-    if first == {{
-        Val(row) -> print("first:{{row.service}}:{{row.latency_ms}}")
-        None -> panic("expected row")
-    }}
-    groups := data.query(reader)
+    print("first:{{first.service}}:{{first.latency_ms}}")
+    if data.query(reader)
         .group_by((e) -> e.service)
         .mean((e) -> e.latency_ms)
-        .collect()
-    if groups == {{
-        Ok(_) -> print("groups:ok")
-        Err(error) -> print("groups:{{error.operation}}:{{error.reason}}")
+        .collect() == {{
+        .Ok(_) -> print("groups:ok")
+        .Err(error) -> print("groups:{{error.operation}}:{{error.reason}}")
     }}
-    empty := data.mean([Float]{{}})
-    if empty == {{
-        Ok(_) -> print("mean:ok")
-        Err(error) -> print("mean:{{error.operation}}:{{error.reason}}")
+    if data.mean([Float]{{}}) == {{
+        .Ok(_) -> print("mean:ok")
+        .Err(error) -> print("mean:{{error.operation}}:{{error.reason}}")
     }}
-    bad_q := data.quantile([1.0, 2.0], 1.5)
-    if bad_q == {{
-        Ok(_) -> print("q:ok")
-        Err(error) -> print("q:{{error.operation}}:{{error.reason}}")
+    if data.quantile([1.0, 2.0], 1.5) == {{
+        .Ok(_) -> print("q:ok")
+        .Err(error) -> print("q:{{error.operation}}:{{error.reason}}")
     }}
-    bad_w := data.rolling_mean([1.0, 2.0], 0)
-    if bad_w == {{
-        Ok(_) -> print("roll:ok")
-        Err(error) -> print("roll:{{error.operation}}:{{error.reason}}")
+    if data.rolling_mean([1.0, 2.0], 0) == {{
+        .Ok(_) -> print("roll:ok")
+        .Err(error) -> print("roll:{{error.operation}}:{{error.reason}}")
     }}
 }}
 "#,
@@ -148,19 +141,17 @@ fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
 use core.data as data
 
 fn run() {
-    nonfinite := data.rolling_mean([1.0, Float.NAN, 3.0], 2)
-    if nonfinite == {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{error}")
     }
-    compensated := data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
+    compensated :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
     print(compensated[2])
-    overflow := data.rolling_mean([Float.MAX, Float.MAX], 2)
-    if overflow == {
+    if data.rolling_mean([Float.MAX, Float.MAX], 2) == {
         .Ok(_) -> print("unexpected overflow ok")
         .Err(error) -> print("{error}")
     }
-    zero := data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
+    zero :: data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
     print(zero[1])
 }
 "#;

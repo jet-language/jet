@@ -454,10 +454,10 @@ if ((stage_project)); then
         [[ "$relative_dir" == . ]] || mkdir -p "$stage_project_dir/$relative_dir"
         cp -p "${input_abs[index]}" "$stage_project_dir/$relative"
     done
-    if [[ -L "$stage_project_dir/target" || -e "$stage_project_dir/target" && ! -d "$stage_project_dir/target" ]]; then
-        die "JET-HOST-INPUT: staged project target is not a real directory"
+    if [[ -L "$stage_project_dir/.jet/build" || -e "$stage_project_dir/.jet/build" && ! -d "$stage_project_dir/.jet/build" ]]; then
+        die "JET-HOST-INPUT: staged project .jet/build is not a real directory"
     fi
-    remove_owned_tree "$stage_project_dir/target"
+    remove_owned_tree "$stage_project_dir/.jet/build"
     if [[ -L "$stage_project_dir/.jet/foreign-host.lock" ]]; then
         die "JET-HOST-INPUT: staged project lock is a symlink or reparse point"
     fi
@@ -601,7 +601,7 @@ jet_process_group=0
 ((status == 0)) \
     || die "JET-HOST-BUILD: Jet Library build failed with status $status; no new host artifact was published"
 
-target="$run_project/target"
+target="$run_project/.jet/build"
 target=$(canonical_dir "$target")
 case "$(uname -s)" in
     Darwin*) shared_artifact="lib$library.dylib" ;;
@@ -675,7 +675,7 @@ while IFS= read -r marker_line; do
     done
     ((known)) || die "JET-HOST-ABI: completion marker names an unexpected artifact '$marker_name'"
     if marker_index_for "$marker_name"; then
-        die "JET-HOST-ABI: completion marker repeats target/$marker_name"
+        die "JET-HOST-ABI: completion marker repeats .jet/build/$marker_name"
     fi
     marker_names+=("$marker_name")
     marker_digests+=("$marker_digest")
@@ -686,22 +686,22 @@ for artifact in "${marker_names[@]}"; do
     artifact_path="$target/$artifact"
     reject_link_components "$artifact_path"
     [[ -f "$artifact_path" && ! -L "$artifact_path" && -s "$artifact_path" ]] \
-        || die "JET-HOST-ABI: completion marker names missing or empty target/$artifact"
+        || die "JET-HOST-ABI: completion marker names missing or empty .jet/build/$artifact"
     marker_index_for "$artifact"
     [[ "${marker_digests[MARKER_INDEX]}" == "$(sha256_file "$artifact_path")" ]] \
-        || die "JET-HOST-ABI: completion marker does not match target/$artifact"
+        || die "JET-HOST-ABI: completion marker does not match .jet/build/$artifact"
 done
 for artifact in "${required_artifacts[@]}"; do
     marker_index_for "$artifact"
     ((MARKER_INDEX >= 0)) \
-        || die "JET-HOST-ABI: completion marker omits required target/$artifact"
+        || die "JET-HOST-ABI: completion marker omits required .jet/build/$artifact"
 done
 for artifact in "${known_artifacts[@]}"; do
     artifact_path="$target/$artifact"
     if [[ -e "$artifact_path" || -L "$artifact_path" ]]; then
         marker_index_for "$artifact"
         ((MARKER_INDEX >= 0)) \
-            || die "JET-HOST-ABI: target contains stale uncommitted artifact '$artifact'"
+            || die "JET-HOST-ABI: .jet/build contains stale uncommitted artifact '$artifact'"
     fi
 done
 
@@ -709,7 +709,7 @@ if ((loadable)); then
     jetlib_magic=$(dd if="$target/$library.jetlib" bs=1 count=14 2>/dev/null | od -An -tx1 | tr -d ' \n')
     expected_jetlib_magic=$(printf 'jet-jetlib-v3\0' | od -An -tx1 | tr -d ' \n')
     [[ "$jetlib_magic" == "$expected_jetlib_magic" ]] \
-        || die "JET-HOST-ABI: target/$library.jetlib is not a Jet Library artifact"
+        || die "JET-HOST-ABI: .jet/build/$library.jetlib is not a Jet Library artifact"
 fi
 
 # Direct builds must not publish a receipt for a source closure that changed

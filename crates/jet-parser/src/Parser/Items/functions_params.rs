@@ -199,18 +199,25 @@ impl<'a> Parser<'a> {
                 // A one-expression marker accepts a field-led brace as an
                 // inferred record literal. Statement-shaped braces are
                 // callable blocks, including `return` bodies.
-                let expr = self.expr()?;
-                let expr_end = expr.span().end;
-                self.finish_stmt()?;
-                let end = if self.pos > 0 {
-                    self.toks[self.pos - 1].span.end
+                let (body, end) = if self.function_body_is_missing() {
+                    self.diags
+                        .push(Self::missing_function_body(self.peek().span, &name));
+                    let end = self.peek().span.start;
+                    if matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                    }
+                    (Vec::new(), end)
                 } else {
-                    expr_end
+                    let expr = self.expr()?;
+                    let expr_end = expr.span().end;
+                    self.finish_stmt()?;
+                    let end = if self.pos > 0 {
+                        self.toks[self.pos - 1].span.end
+                    } else {
+                        expr_end
+                    };
+                    (vec![crate::AST::Stmt::Expr(expr)], end)
                 };
-                // Keep the authored expression as an expression statement. A
-                // value-expected callable body goes through the same sema and
-                // TIR tail-value path as a braced body.
-                let body = vec![crate::AST::Stmt::Expr(expr)];
                 return Ok(Func {
                     span: Span::new(declaration_start, end),
                     is_pub,
@@ -267,14 +274,66 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        if body_marker_span.is_none()
-            && return_type
-                .as_ref()
-                .is_some_and(|ty| Self::return_type_has_value(ty))
-            && matches!(self.peek().kind, TokKind::LBrace)
-        {
+        // D-SIG-AFTER1=A: a value-returning named body is `{ … }`. The
+        // retired D-CALLABLE-ONE1 extra `->` before braces is gone.
+        if !matches!(self.peek().kind, TokKind::LBrace) {
             self.diags
-                .push(Self::missing_callable_body_arrow(self.peek().span));
+                .push(Self::missing_function_body(self.peek().span, &name));
+            let end = self.peek().span.start;
+            return Ok(Func {
+                span: Span::new(declaration_start, end),
+                is_pub,
+                is_comptime: false,
+                is_package_pub,
+                external_type,
+                name,
+                name_span,
+                meta,
+                type_params,
+                head_pattern,
+                params,
+                return_type,
+                return_type_span,
+                return_view_provenance: None,
+                declared_return_view_provenance,
+                gc_return: false,
+                diverges: false,
+                gc_scope: false,
+                is_unsafe,
+                unsafe_reason,
+                unsafe_span,
+                is_pure,
+                is_sanitizer,
+                scrub_tag: None,
+                is_reactive,
+                reactive_upgrades: Vec::new(),
+                is_replayable,
+                replayable_span,
+                is_job: false,
+                job_span: None,
+                every: None,
+                job_metadata: None,
+                declared_effects,
+                effect_via,
+                state_requires,
+                state_transition,
+                web_marker,
+                is_must_use,
+                must_use_span,
+                maturity,
+                maturity_span,
+                kernel: None,
+                is_inline,
+                is_inline_always,
+                inline_span,
+                pre: Vec::new(),
+                post: Vec::new(),
+                inline_foreign: None,
+                undo: None,
+                markers: Vec::new(),
+                compiler_generated: false,
+                body: Vec::new(),
+            });
         }
         self.expect(TokKind::LBrace, "to open the function body")?;
         // D-TAIL-RETURN1=A (amends D-BODY-LAST1): keep the final expression
@@ -428,9 +487,9 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-SIG-SHAPE1=B: read the result and any legacy prefix effect row.
-    /// The current result form is bare after `)`. The old `-> T` and
-    /// `-[E]> T` forms stay readable until the corpus migration.
+    /// D-SIG-AFTER1=A: read the result after the one arrow.
+    /// Current forms are `-> T`, `-[E]> T`, unit `-[E]>`, and unit-fallible
+    /// `!E`. Bare type after `)` is retired teaching (E0068).
     pub(super) fn parse_callable_result_and_prefix_effects(
         &mut self,
     ) -> Result<
@@ -449,40 +508,35 @@ impl<'a> Parser<'a> {
         let mut arrow_return = false;
         let (return_type, return_type_span) = if has_prefix_effect {
             arrow_return = true;
-            if self.legacy_result_type_starts_here() {
+            if self.result_type_follows_arrow() {
                 let (ty, span) = self.return_type()?;
-                self.diags.push(Self::retired_signature_shape(
-                    prefix_effect_span.unwrap_or(span),
-                ));
                 (Some(ty), Some(span))
             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                self.diags.push(Self::retired_signature_shape(
-                    prefix_effect_span.unwrap_or(span),
-                ));
                 (Some(ty), Some(span))
             } else {
                 (None, None)
             }
         } else if self.at_unified_arrow() {
-            arrow_return = true;
             let arrow = self.bump();
-            if self.legacy_result_type_starts_here() {
+            if self.result_type_follows_arrow() {
+                arrow_return = true;
                 let (ty, span) = self.return_type()?;
-                self.diags.push(Self::retired_signature_shape(arrow.span));
                 (Some(ty), Some(span))
             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                self.diags.push(Self::retired_signature_shape(arrow.span));
+                arrow_return = true;
                 (Some(ty), Some(span))
             } else {
-                // `->` is the body marker when no result type follows.
-                // Leave it for the body parser below.
+                // `->` with no result is the old body marker. Leave it for
+                // the body parser so `fn f() -> expr` still recovers.
                 self.pos = self.pos.saturating_sub(1);
+                let _ = arrow;
                 (None, None)
             }
         } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
             (Some(ty), Some(span))
         } else if self.type_starts_here() {
             let (ty, span) = self.return_type()?;
+            self.diags.push(Self::retired_signature_shape(span));
             (Some(ty), Some(span))
         } else {
             (None, None)
@@ -504,11 +558,9 @@ impl<'a> Parser<'a> {
             prefix_effect_span,
         ))
     }
-
-    /// D-SIG-SHAPE1=B: a result after an arrow is the retired signature
-    /// shape. Probe the type and require a declaration-body boundary, so
-    /// a list or parenthesized one-expression body stays an expression.
-    fn legacy_result_type_starts_here(&mut self) -> bool {
+    /// D-SIG-AFTER1=A: a result after `->` or `-[E]>` is current when a
+    /// declaration-body boundary follows, so `-> n * 2` stays an expression.
+    fn result_type_follows_arrow(&mut self) -> bool {
         let saved_pos = self.pos;
         let saved_diags = self.diags.len();
         let saved_pending_type_gt = self.pending_type_gt;
@@ -517,7 +569,7 @@ impl<'a> Parser<'a> {
         let saved_type_generic_truncated = self.type_generic_truncated;
         let parsed_span = self.return_type().ok().map(|(_, span)| span);
         let parsed_end = parsed_span.map(|span| span.end);
-        let legacy_boundary = parsed_end.is_some_and(|end| {
+        let result_boundary = parsed_end.is_some_and(|end| {
             matches!(
                 self.peek().kind,
                 TokKind::ColonColon
@@ -525,6 +577,9 @@ impl<'a> Parser<'a> {
                     | TokKind::UnifiedArrow
                     | TokKind::Arrow
                     | TokKind::LambdaArrow
+                    | TokKind::Semi
+                    | TokKind::Comma
+                    | TokKind::RParen
             ) || (matches!(self.peek().kind, TokKind::LBrace) && end < self.peek().span.start)
                 || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
         });
@@ -535,7 +590,7 @@ impl<'a> Parser<'a> {
         self.type_generic_chain
             .truncate(saved_type_generic_chain_len);
         self.type_generic_truncated = saved_type_generic_truncated;
-        legacy_boundary
+        result_boundary
     }
 
     /// Lookahead shared by signature parsing. `parse_opt_func_effects`
@@ -750,13 +805,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(in crate::Parser) fn retired_signature_shape(span: Span) -> Diagnostic {
-        Diagnostic::error(
-                "E0068",
-                "This callable uses the retired result-arrow shape.".to_string(),
-                "a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type".to_string(),
-                "write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`".to_string(),
-                Some(span),
-            )
+        Diagnostic::from_row("E0068", &[], Some(span))
     }
 
     // D-ARROW-RESPELL1=A: retired callable/control arrows teach the
@@ -779,18 +828,40 @@ impl<'a> Parser<'a> {
         Diagnostic::error(
                 "E0065",
                 format!("This function uses the retired `{marker}` body marker."),
-                "A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition."
+                "Named function bodies use braces. `::` binds a name, and `=` fills a slot inside a definition."
                     .to_string(),
-                format!("Replace `{marker}` with `->`; `jet fmt` applies this fix."),
+                format!("Replace `{marker}` with `{{ … }}`; `jet fmt` applies this fix."),
                 Some(span),
             )
     }
 
-    pub(in crate::Parser) fn missing_callable_body_arrow(span: Span) -> Diagnostic {
-        Diagnostic::from_row("E0080", &[], Some(span)).with_edit(crate::Diagnostics::TextEdit {
-            span: Span::new(span.start, span.start),
-            new_text: format!("{} ", Syntax::OP_UNIFIED_ARROW),
-        })
+
+    fn function_body_is_missing(&self) -> bool {
+        match &self.peek().kind {
+            // `#Todo` is a value body. Any other `#` here starts the next item.
+            TokKind::Hash => !matches!(
+                &self.peek2().kind,
+                TokKind::Ident(name) if name == Syntax::KW_TODO
+            ),
+            TokKind::KwFn
+            | TokKind::KwPub
+            | TokKind::KwPriv
+            | TokKind::KwStruct
+            | TokKind::KwEnum
+            | TokKind::KwModule
+            | TokKind::KwImpl
+            | TokKind::KwTrait
+            | TokKind::KwUse
+            | TokKind::KwExtern
+            | TokKind::Eof
+            | TokKind::RBrace
+            | TokKind::Semi => true,
+            _ => false,
+        }
+    }
+
+    fn missing_function_body(span: Span, name: &str) -> Diagnostic {
+        Diagnostic::from_row("E0081", &[("name", name)], Some(span))
     }
 
     /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone

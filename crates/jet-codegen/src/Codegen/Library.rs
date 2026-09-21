@@ -473,6 +473,10 @@ pub fn emit_library(
                         "let {mutable}p{index} = {}(p{index});",
                         mangle_generated("library_read_text")
                     )
+                } else if export.scalar == ExportScalar::Int {
+                    format!(
+                        "let {mutable}p{index} = jet_std::jet_int_owned_from_i64(p{index});"
+                    )
                 } else if matches!(convention, MirAccess::Write) {
                     format!("let mut p{index} = p{index};")
                 } else {
@@ -483,7 +487,9 @@ pub fn emit_library(
             .collect::<Vec<_>>();
         let args = (0..export.params)
             .map(|index| match (export.scalar, export.conventions[index]) {
-                (ExportScalar::Text, MirAccess::Read) => format!("&p{index}"),
+                (ExportScalar::Text | ExportScalar::Int, MirAccess::Read) => {
+                    format!("&p{index}")
+                }
                 (_, MirAccess::Read | MirAccess::Move) => format!("p{index}"),
                 (_, MirAccess::Write) => format!("&mut p{index}"),
             })
@@ -496,10 +502,17 @@ pub fn emit_library(
         } else {
             export.scalar.rust_ty()
         };
-        let call = format!(
-            "match {callee}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
-            args.join(", ")
-        );
+        let call = if export.scalar == ExportScalar::Int {
+            format!(
+                "match {callee}({}) {{ Ok(value) => jet_std::jet_int_owned_to_i64(&value).unwrap_or_else(|_| jet_arithmetic_stop(\"\", 0, \"native Int result exceeds host range\")), Err(error) => jet_entry_error_exit_jet(error) }}",
+                args.join(", ")
+            )
+        } else {
+            format!(
+                "match {callee}({}) {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}",
+                args.join(", ")
+            )
+        };
         let body = if export.scalar == ExportScalar::Text {
             format!(
                 "{} {}({call})",

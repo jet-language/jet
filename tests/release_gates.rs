@@ -73,7 +73,7 @@ fn small_profile_binary_is_smaller_than_default() {
     let dir = std::env::temp_dir().join(format!("jet_small_test_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    fs::create_dir_all(dir.join("build")).unwrap();
+    fs::create_dir_all(dir.join(".jet/build")).unwrap();
 
     let build_default = Command::new(&jet)
         .args(["build", example.to_str().unwrap()])
@@ -86,8 +86,8 @@ fn small_profile_binary_is_smaller_than_default() {
         String::from_utf8_lossy(&build_default.stderr)
     );
     fs::rename(
-        dir.join("build/wordcount"),
-        dir.join("build/wordcount_default"),
+        dir.join(".jet/build/wordcount"),
+        dir.join(".jet/build/wordcount_default"),
     )
     .unwrap();
 
@@ -102,15 +102,15 @@ fn small_profile_binary_is_smaller_than_default() {
         String::from_utf8_lossy(&build_small.stderr)
     );
     fs::rename(
-        dir.join("build/wordcount"),
-        dir.join("build/wordcount_small"),
+        dir.join(".jet/build/wordcount"),
+        dir.join(".jet/build/wordcount_small"),
     )
     .unwrap();
 
-    let default_size = fs::metadata(dir.join("build/wordcount_default"))
+    let default_size = fs::metadata(dir.join(".jet/build/wordcount_default"))
         .unwrap()
         .len();
-    let small_size = fs::metadata(dir.join("build/wordcount_small"))
+    let small_size = fs::metadata(dir.join(".jet/build/wordcount_small"))
         .unwrap()
         .len();
 
@@ -206,7 +206,7 @@ fn ga_feature_size_budgets() {
 
     let features_dir = root().join("examples/features");
     let build_dir = std::env::temp_dir().join(format!("jet_ga_budgets_{}", std::process::id()));
-    fs::create_dir_all(build_dir.join("build")).unwrap();
+    fs::create_dir_all(build_dir.join(".jet/build")).unwrap();
 
     for (file, max_bytes) in budgets {
         let src = features_dir.join(file);
@@ -214,7 +214,7 @@ fn ga_feature_size_budgets() {
             .file_stem()
             .unwrap()
             .to_string_lossy();
-        let bin = build_dir.join("build").join(stem.as_ref());
+        let bin = build_dir.join(".jet/build").join(stem.as_ref());
 
         let out = Command::new(&jet)
             .args(["build", "--small", src.to_str().unwrap()])
@@ -284,25 +284,80 @@ fn check_fixture(name: &str, actual: &str) {
 fn version_banner() {
     let jet = jet_bin();
     assert!(jet.exists(), "build the jet binary first (cargo build)");
-    let out = Command::new(&jet).arg("--version").output().unwrap();
-    assert!(out.status.success(), "jet --version exited non-zero");
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    // The library banner and the CLI must agree.
-    assert_eq!(stdout, Manifest::version_banner());
-    check_fixture("version_banner.txt", &stdout);
+    for argument in ["version", "--version"] {
+        let out = Command::new(&jet).arg(argument).output().unwrap();
+        assert!(out.status.success(), "jet {argument} exited non-zero");
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        // Both entry points and the library must agree.
+        assert_eq!(stdout, Manifest::version_banner());
+        check_fixture("version_banner.txt", &stdout);
+    }
 }
 #[test]
 fn prerelease_status_is_not_a_shipped_1_0_policy() {
     let status = Manifest::current_release_status();
     assert_eq!(status.channel(), "prerelease");
+    assert_eq!(status.disposition(), "current");
     assert_eq!(status.readiness(), "not-ready");
     assert_eq!(status.policy(), "future-1.0");
+    assert_eq!(status.policy_disposition(), "planned");
     assert!(!status.policy_active());
 
     let banner = Manifest::version_banner();
     assert!(banner.contains("release status: prerelease"));
+    assert!(banner.contains("release disposition: current"));
     assert!(banner.contains("release readiness: not-ready"));
-    assert!(banner.contains("1.0 compatibility policy: future-1.0 (not active)"));
+    assert!(banner.contains(
+        "1.0 compatibility policy: future-1.0 (planned; not active)"
+    ));
+}
+
+#[test]
+fn claims_projection_uses_canonical_release_source_and_fails_closed() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_release_claims_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("package.jet"),
+        "name: \"release_claims\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = root.join("run.jet");
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let output = Command::new(jet_bin())
+        .args([
+            "inspect",
+            "claims",
+            entry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&root);
+    assert!(
+        output.status.success(),
+        "inspect claims failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "\"action\":\"inspect.claims\"",
+        "\"source\":\"manifest.capability_relation.rows\"",
+        "\"status\":\"prerelease\"",
+        "\"disposition\":\"current\"",
+        "\"readiness\":\"not-ready\"",
+        "\"compatibility_policy\":\"future-1.0\"",
+        "\"compatibility_policy_disposition\":\"planned\"",
+        "\"compatibility_policy_active\":false",
+        "\"release_ready\":false",
+        "\"claims\":[]",
+    ] {
+        assert!(json.contains(expected), "claims output missing {expected}: {json}");
+    }
 }
 
 #[test]

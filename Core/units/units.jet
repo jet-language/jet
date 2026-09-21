@@ -1,0 +1,114 @@
+package {
+    name: "core.units"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Measured quantities."
+    license: "MIT"
+    outputs: {
+        units: .Library{ entry: units }
+    }
+}
+pub struct Measurement {
+    pub magnitude: Float
+    pub unit: Float
+}
+
+pub fn from(magnitude: Float, unit: Float) -> Measurement { {magnitude: magnitude, unit: unit} }
+
+pub fn si(magnitude: Float) -> Measurement { {magnitude: magnitude, unit: 1.0} }
+
+@nano :: 0.000000001
+
+@micro :: 0.000001
+
+@milli :: 0.001
+
+@centi :: 0.01
+
+@kilo :: 1000.0
+
+@mega :: 1000000.0
+
+@giga :: 1000000000.0
+
+pub fn scale(m: Measurement, factor: Float) -> Measurement {
+    {magnitude: m.magnitude * factor, unit: m.unit}
+}
+
+pub fn add(a: Measurement, b: Measurement) -> Measurement {
+    {magnitude: a.magnitude + b.magnitude, unit: a.unit}
+}
+
+pub fn sub(a: Measurement, b: Measurement) -> Measurement {
+    {magnitude: a.magnitude - b.magnitude, unit: a.unit}
+}
+
+pub fn mul(a: Measurement, n: Float) -> Measurement { {magnitude: a.magnitude * n, unit: a.unit} }
+
+pub fn div(a: Measurement, n: Float) -> Measurement { {magnitude: a.magnitude / n, unit: a.unit} }
+
+pub fn convert(m: Measurement, new_unit: Float) -> Measurement {
+    if new_unit == 0.0 -> return m
+    si :: m.magnitude * m.unit
+    {magnitude: si / new_unit, unit: new_unit}
+}
+
+pub fn to_si(m: Measurement) -> Float { m.magnitude * m.unit }
+
+pub fn abs(m: Measurement) -> Measurement {
+    mag := m.magnitude
+    if mag < 0.0 -> mag = -mag
+    {magnitude: mag, unit: m.unit}
+}
+
+pub fn show(m: Measurement) -> String { "{m.magnitude} (unit={m.unit})" }
+
+@metre :: 1.0
+
+@gram :: 0.001
+
+@second :: 1.0
+
+@byte_unit :: 1.0
+
+@kibibyte :: 1024.0
+
+@mebibyte :: 1048576.0
+
+@gibibyte :: 1073741824.0
+
+pub fn metres(n: Float) -> Measurement { from(n, 1.0) }
+
+pub fn kilometres(n: Float) -> Measurement { from(n, 1000.0) }
+
+pub fn grams(n: Float) -> Measurement { from(n, 0.001) }
+
+pub fn kilograms(n: Float) -> Measurement { from(n, 1.0) }
+
+pub fn seconds(n: Float) -> Measurement { from(n, 1.0) }
+
+pub fn milliseconds(n: Float) -> Measurement { from(n, 0.001) }
+
+pub fn bytes_of(n: Float) -> Measurement { from(n, 1.0) }
+
+pub fn kibibytes(n: Float) -> Measurement { from(n, 1024.0) }
+
+pub fn equals(a: Measurement, b: Measurement) -> Bool {
+    left :: to_si(a)
+    right :: to_si(b)
+    d := left - right
+    if d < 0.0 -> d = -d
+    d < 0.000000001
+}
+
+pub fn ratio(a: Measurement, b: Measurement) -> Float {
+    den :: to_si(b)
+    if den == 0.0 -> return 0.0
+    to_si(a) / den
+}
+
+pub fn is_zero(m: Measurement) -> Bool {
+    v :: to_si(m)
+    if v < 0.0 -> v = -v
+    v < 0.000000001
+}

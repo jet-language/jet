@@ -18,6 +18,8 @@ pub fn jet_numeric_int_bit_count(value: i64, operation: i64, width: i64) -> i64 
         1 => "count_zeros",
         2 => "leading_zeros",
         3 => "trailing_zeros",
+        4 => "bit_count",
+        5 => "bit_length",
         _ => panic!("checked integer population operation"),
     };
     jet_std::jet_int_bit_count(value, width as u32, method)

@@ -76,15 +76,17 @@ mod typed_text_kernel {
 }
 
 pub use AmbientRuntime::{
-    ambient_hooks, package_read_root, record_package_input, try_ambient_core_closure,
-    try_ambient_mir_handle, try_ambient_standalone_closure, try_ambient_standalone_closure_mut,
+    ambient_hooks, ambient_runtime_snapshot, ambient_worker_context, package_read_root,
+    record_package_input, try_ambient_core_closure, try_ambient_mir_handle,
+    try_ambient_standalone_closure, try_ambient_standalone_closure_mut,
     try_core_call as try_ambient_core_call, try_core_call_typed as try_ambient_core_call_typed,
     try_core_call_typed_with_sink, try_extern_call as try_ambient_extern_call,
     try_handle as try_ambient_handle, try_mir_extern_call as try_ambient_mir_extern_call,
     with_ambient, with_ambient_core_closure, with_ambient_mir_extern, with_ambient_mir_handle,
-    with_package_read_context, AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall,
-    AmbientHandle, AmbientMirExternCall, AmbientMirHandle, AmbientMirHandleResult,
-    AmbientStandaloneClosure, StandaloneClosureHost,
+    with_ambient_runtime_snapshot, with_ambient_worker_context, with_package_read_context,
+    AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall, AmbientHandle,
+    AmbientMirExternCall, AmbientMirHandle, AmbientMirHandleResult, AmbientRuntimeSnapshot,
+    AmbientStandaloneClosure, AmbientWorkerContext, StandaloneClosureHost,
 };
 pub use Template::{
     format_tir_template_body, TemplateBody, TemplateHole, TemplateHoleKind, TemplateItem,
@@ -146,6 +148,116 @@ pub use Interpreter::{
     runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
     REPL_FUEL_BUDGET,
 };
+/// Maximum serialized weight of a speculative immutable binding fold.
+///
+/// Optional folding is an optimization, not a second way to force a large
+/// value through every generated tier.  Keep the cap structural so it applies
+/// equally to lists, maps, records, enums, and nested outcome values.
+pub const IMPLICIT_FOLD_OUTPUT_BUDGET: usize = 256 * 1024;
+
+/// Return whether a speculative fold is small enough to inline into generated
+/// code.  Explicit compile-time evaluation keeps the evaluator's normal fuel
+/// and diagnostics; this bound only declines the optional optimization.
+pub fn implicit_fold_value_within_budget(value: &CtValue) -> bool {
+    fn add(cost: &mut usize, amount: usize) {
+        *cost = cost.saturating_add(amount);
+    }
+
+    fn visit(value: &CtValue, cost: &mut usize) {
+        if *cost > IMPLICIT_FOLD_OUTPUT_BUDGET {
+            return;
+        }
+        match value {
+            CtValue::Int(..)
+            | CtValue::Float(..)
+            | CtValue::Bool(..)
+            | CtValue::Char(..)
+            | CtValue::BigInt(..)
+            | CtValue::Unit => add(cost, 16),
+            CtValue::Str(text) => add(cost, 16usize.saturating_add(text.len())),
+            CtValue::Bytes(bytes) => add(cost, 16usize.saturating_add(bytes.len())),
+            CtValue::List(values) => {
+                add(cost, 16usize.saturating_add(values.len().saturating_mul(8)));
+                for value in values {
+                    visit(value, cost);
+                }
+            }
+            CtValue::Map(values) => {
+                add(cost, 32usize.saturating_add(values.len().saturating_mul(16)));
+                for (key, value) in values {
+                    add(cost, 16);
+                    visit_map_key(key, cost);
+                    visit(value, cost);
+                }
+            }
+            CtValue::Struct { type_name, fields } => {
+                add(
+                    cost,
+                    32usize
+                        .saturating_add(type_name.len())
+                        .saturating_add(fields.len().saturating_mul(16)),
+                );
+                for (name, value) in fields {
+                    add(cost, name.len());
+                    visit(value, cost);
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                add(
+                    cost,
+                    32usize
+                        .saturating_add(type_name.len())
+                        .saturating_add(variant.len())
+                        .saturating_add(args.len().saturating_mul(16)),
+                );
+                for (name, value) in args {
+                    if let Some(name) = name {
+                        add(cost, name.len());
+                    }
+                    visit(value, cost);
+                }
+            }
+            CtValue::Present(value) => {
+                add(cost, 16);
+                visit(value, cost);
+            }
+            CtValue::Failed(crate::AST::CtReport::Clean(..)) => add(cost, 16),
+            CtValue::Failed(crate::AST::CtReport::Told(value)) => {
+                add(cost, 16);
+                visit(value, cost);
+            }
+            // A closure has no stable literal representation and is rejected
+            // by `ct_value_fits_binding`; count it as over-budget here too.
+            CtValue::Closure(..) => add(cost, IMPLICIT_FOLD_OUTPUT_BUDGET + 1),
+        }
+    }
+
+    fn visit_map_key(key: &crate::AST::CtKey, cost: &mut usize) {
+        match key {
+            crate::AST::CtKey::Int(..)
+            | crate::AST::CtKey::Bool(..)
+            | crate::AST::CtKey::Char(..)
+            | crate::AST::CtKey::Enum { .. } => add(cost, 16),
+            crate::AST::CtKey::Str(text) => add(cost, 16usize.saturating_add(text.len())),
+            crate::AST::CtKey::Tuple(fields) | crate::AST::CtKey::Struct { fields, .. } => {
+                add(cost, 16usize.saturating_add(fields.len().saturating_mul(8)));
+                for (name, value) in fields {
+                    add(cost, name.len());
+                    visit_map_key(value, cost);
+                }
+            }
+        }
+    }
+
+    let mut cost = 0;
+    visit(value, &mut cost);
+    cost <= IMPLICIT_FOLD_OUTPUT_BUDGET
+}
+
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,

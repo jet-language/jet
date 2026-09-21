@@ -289,8 +289,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch"
         | "DataWatchStatus" | "Group"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
-        | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderStatus"
-        | "DataLoader" | "DataSnapshot"
+        | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderKind"
+        | "DataLoaderStatus" | "DataLoader" | "DataSnapshot"
         | "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate"
         | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind"
         | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind"
@@ -2174,6 +2174,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("WebTableState", "selected_keys") => Some(Type::List(Box::new(Type::String))),
         ("WebTableState", "selection_anchor" | "focus_key") => Some(Type::Option(Box::new(Type::String))),
         ("WebTableState", "page_mode") => Some(Type::Named("WebTablePageMode".to_string())),
+        ("WebTablePage", "rows") => Some(Type::List(Box::new(Type::Named("T".to_string())))),
+        ("WebTablePage", "row_keys") => Some(Type::List(Box::new(Type::String))),
+        ("WebTablePage", "total_rows" | "page_index" | "page_size" | "page_count") => Some(Type::Int),
         ("WebVirtualWindow",
             "total_count" | "scroll_offset" | "viewport_size" | "estimated_item_size"
             | "overscan" | "start" | "end" | "total_size" | "measured_count") => Some(Type::Int),
@@ -2454,9 +2457,10 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
-    if type_name == "WebTablePage" && args.len() == 1 {
+    if type_name == "WebTablePage" && args.len() <= 1 {
+        let element = args.first().cloned().unwrap_or_else(|| Type::Named("T".to_string()));
         return match field {
-            "rows" => Some(Type::List(Box::new(args[0].clone()))),
+            "rows" => Some(Type::List(Box::new(element))),
             "row_keys" => Some(Type::List(Box::new(Type::String))),
             "total_rows" | "page_index" | "page_size" | "page_count" => Some(Type::Int),
             _ => None,
@@ -3994,6 +3998,46 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("response_code".to_string(), Type::Int),
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
+        ]),
+        "LocalDate" => Some(vec![
+            ("year".to_string(), Type::Int),
+            ("month".to_string(), Type::Int),
+            ("day".to_string(), Type::Int),
+        ]),
+        "LocalTime" => Some(vec![
+            ("hour".to_string(), Type::Int),
+            ("minute".to_string(), Type::Int),
+            ("second".to_string(), Type::Int),
+            ("nano".to_string(), Type::Int),
+        ]),
+        "DateTime" => Some(vec![
+            ("year".to_string(), Type::Int),
+            ("month".to_string(), Type::Int),
+            ("day".to_string(), Type::Int),
+            ("hour".to_string(), Type::Int),
+            ("minute".to_string(), Type::Int),
+            ("second".to_string(), Type::Int),
+            ("nano".to_string(), Type::Int),
+        ]),
+        "Zone" => Some(vec![
+            ("name".to_string(), Type::String),
+            ("offset_s".to_string(), Type::Int),
+        ]),
+        "ZonedDateTime" => Some(vec![
+            ("instant".to_string(), Type::Named("DateTime".to_string())),
+            ("zone".to_string(), Type::Named("Zone".to_string())),
+        ]),
+        "Instant" => Some(vec![("unix_ns".to_string(), Type::Int)]),
+        "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
+        "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
+        "Clock" => Some(vec![
+            ("unix_ms".to_string(), Type::Int),
+            ("fake".to_string(), Type::Bool),
+        ]),
+        "Period" => Some(vec![
+            ("years".to_string(), Type::Int),
+            ("months".to_string(), Type::Int),
+            ("days".to_string(), Type::Int),
         ]),
         _ => None,
     }

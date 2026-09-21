@@ -1,3 +1,9 @@
+package {
+    name: "tooling_data_plot"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Panic] } }
+}
+
 // D-DATA-PLOT1=A: deterministic line plots over grouped typed data.
 use core.data as data
 
@@ -28,8 +34,7 @@ fn run() {
     print("svg bytes: {svg.len()}")
 
     invalid_options :: DataLineOptions{title: "Sales", x_label: "month", y_label: "value", markers: false, reference: None, style: "zig", color: "#2f6f73", legend: ""}
-    invalid :: data.line_text(groups, invalid_options)
-    if invalid == {
+    if data.line_text(groups, invalid_options) == {
         .Ok(_) -> { print("invalid line: ok") }
         .Err(error) -> { print("invalid line: {error}") }
     }

@@ -2208,7 +2208,6 @@ struct ErasedScopeSnapshot {
     fx_autodiff_safe_panic: bool,
     fx_autodiff_unsafe_panic: bool,
     autodiff_safe_panic_context: bool,
-    fx_pending_diagnostics: Vec<Diagnostic>,
     fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
     fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
     memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
@@ -2341,7 +2340,6 @@ impl<'a> Checker<'a> {
             fx_autodiff_safe_panic: self.fx_autodiff_safe_panic,
             fx_autodiff_unsafe_panic: self.fx_autodiff_unsafe_panic,
             autodiff_safe_panic_context: self.autodiff_safe_panic_context,
-            fx_pending_diagnostics: self.fx_pending_diagnostics.clone(),
             fx_memory_events: self.fx_memory_events.clone(),
             fx_memory_open: self.fx_memory_open.clone(),
             memory_policy_stack: self.memory_policy_stack.clone(),
@@ -2470,7 +2468,6 @@ impl<'a> Checker<'a> {
         self.fx_autodiff_safe_panic = snapshot.fx_autodiff_safe_panic;
         self.fx_autodiff_unsafe_panic = snapshot.fx_autodiff_unsafe_panic;
         self.autodiff_safe_panic_context = snapshot.autodiff_safe_panic_context;
-        self.fx_pending_diagnostics = snapshot.fx_pending_diagnostics;
         self.fx_memory_events = snapshot.fx_memory_events;
         self.fx_memory_open = snapshot.fx_memory_open;
         self.memory_policy_stack = snapshot.memory_policy_stack;

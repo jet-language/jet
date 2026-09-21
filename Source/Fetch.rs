@@ -787,7 +787,8 @@ impl<'a> Resolver<'a> {
                 // Link into project build dir.
                 let link_dir = self
                     .project_root
-                    .join(".jet-build")
+                    .join(".jet")
+                    .join("build")
                     .join("deps")
                     .join(dep_name);
                 Store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
@@ -911,7 +912,8 @@ impl<'a> Resolver<'a> {
                 // Link into project build dir.
                 let link_dir = self
                     .project_root
-                    .join(".jet-build")
+                    .join(".jet")
+                    .join("build")
                     .join("deps")
                     .join(dep_name);
                 Store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
@@ -1222,7 +1224,8 @@ impl<'a> Resolver<'a> {
                 verify_registry_hangar_entry(dep_name, &store_path, &content_hash)?;
                 let link_dir = self
                     .project_root
-                    .join(".jet-build")
+                    .join(".jet")
+                    .join("build")
                     .join("deps")
                     .join(dep_name);
                 Store::copy_into_project(&store_path, &link_dir)

@@ -1,13 +1,14 @@
-use cranelift_module::Module;
-use std::collections::HashMap;
+use cranelift_module::{FuncOrDataId, Module};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::AtomicBool;
 use cranelift_jit::JITModule;
 use jet_foundation::{
     HotSwap::HotSwapDecision,
     JitBackend::RunOutcome,
     MIR::{
-        MirArtifactId, MirDecisionLedger, MirDecisionRow, MirFailureCarrier, MirFunction,
-        MirFunctionId, MirProgram, MirRuntimeValue, MirTypeKind,
+        MirArtifactId, MirCallee, MirDecisionLedger, MirDecisionRow, MirFailureCarrier,
+        MirFunction, MirFunctionId, MirOperation, MirProgram, MirRuntimeValue, MirSemanticOp,
+        MirTypeKind,
     },
     SchemaMigration::SchemaMigrationReceipt,
 };
@@ -15,11 +16,12 @@ use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
 use super::deopt::clear_deopt_state;
 use super::functions_compile::{
-    compile_program, install_finalized_iterable_hooks, CompiledMirProgram,
+    compile_program, install_finalized_iterable_hooks, redefine_mir_functions, CompiledMirProgram,
 };
-use super::runtime_host::{new_jit_module, ResidentModule};
+use super::runtime_host::{new_jit_module, ResidentHotSwapPlan, ResidentModule};
 use super::safety::artifact_entry;
 use super::tiers::{runtime_decision_rows, TierRow};
+use super::types_meta::mir_fn_name;
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
 use crate::net_http_rt::{console_http_router_from_mux, ConsoleHttpRouter};
 use crate::DB::ConsoleDbResource;
@@ -83,16 +85,31 @@ fn main_returns_result(program: &MirProgram, artifact: MirArtifactId) -> bool {
     )
 }
 
+fn main_return_name(function: &MirFunction) -> Option<&str> {
+    let return_type = function
+        .return_type
+        .result_parts()
+        .map_or(&function.return_type, |(ok, _)| ok);
+    return_type.nominal_name()
+}
+
 fn main_returns_app(program: &MirProgram, artifact: MirArtifactId) -> bool {
-    let Some(function) = entry_function(program, artifact) else {
-        return false;
-    };
-    match function.return_type.kind() {
-        MirTypeKind::Apply { name, .. } => {
-            name.name.contains("App") || name.name.contains("Page")
-        }
-        _ => false,
-    }
+    entry_function(program, artifact)
+        .and_then(main_return_name)
+        .is_some_and(|name| name.contains("App") || name.contains("Page"))
+}
+
+fn main_serves_app(program: &MirProgram, artifact: MirArtifactId) -> bool {
+    let serves_until_stopped = program
+        .artifacts
+        .iter()
+        .find(|plan| plan.id == artifact)
+        .and_then(|plan| plan.entry.as_ref())
+        .is_some_and(|entry| entry.serves_until_stopped);
+    serves_until_stopped
+        && entry_function(program, artifact)
+            .and_then(main_return_name)
+            .is_some_and(|name| name == "App")
 }
 
 fn main_returns_default_err(program: &MirProgram, artifact: MirArtifactId) -> bool {
@@ -147,6 +164,21 @@ fn install_cli_function_pointers(
 
 pub(crate) fn fresh_runtime(release_devtools_policy: ReleaseDevtoolsPolicy) -> JitRuntime {
     fresh_runtime_with_allocator_cap(release_devtools_policy, None)
+}
+/// Recover the checked hosted program-allocator cap carried through MIR.
+///
+/// MIR currently preserves the package allocator as its canonical Debug text.
+/// `Counting { cap: None }` is distinct from the absent fact: `Some(0)` keeps
+/// the uncapped counting wrapper, while `None` selects the hidden system heap.
+pub(crate) fn program_allocator_cap_bytes(program: &MirProgram) -> Option<u64> {
+    const PREFIX: &str = "Counting { cap: Some(ByteSize { bytes: ";
+    match program.facts.allocator.as_str() {
+        "Counting { cap: None }" => Some(0),
+        allocator => allocator
+            .strip_prefix(PREFIX)
+            .and_then(|value| value.strip_suffix(" }) }"))
+            .and_then(|value| value.parse().ok()),
+    }
 }
 
 pub(crate) fn fresh_runtime_with_allocator_cap(
@@ -317,11 +349,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.compute.clear();
     rt.memo_values.clear();
     crate::Math::clear_math_values();
-    let _ = std::mem::take(&mut rt.stream_consumers);
-    let _ = std::mem::take(&mut rt.stream_producers);
-    let _ = std::mem::take(&mut rt.stream_senders);
-    rt.next_stream_channel = -1;
-    rt.next_stream_sender = -1;
+    crate::Collections::drop_loop_stream_resources(rt);
     rt.source_frames.clear();
     rt.current_line = 0;
     rt.current_function.clear();
@@ -406,6 +434,7 @@ pub(crate) fn ensure_resident_module(
     let main_error_type = main_error_type(program, artifact);
     let main_error_is_packed = main_error_is_packed(program, artifact);
     let main_returns_app = main_returns_app(program, artifact);
+    let main_serves_app = main_serves_app(program, artifact);
     crate::CLI::prepare_cli_from_mir(program, artifact);
     crate::Ffi::bind_mir_ffi(program, artifact).map_err(|err| match err {
         crate::Ffi::BindError::Message(message) => message,
@@ -415,7 +444,12 @@ pub(crate) fn ensure_resident_module(
         let (mut module, host) = new_jit_module()?;
         let mut runtime = RESIDENT_RUNTIME
             .with(|slot| slot.borrow_mut().take())
-            .unwrap_or_else(|| fresh_runtime(release_devtools_policy.clone()));
+            .unwrap_or_else(|| {
+                fresh_runtime_with_allocator_cap(
+                    release_devtools_policy.clone(),
+                    program_allocator_cap_bytes(program),
+                )
+            });
         let compiled = compile_program(&mut module, &host, program, artifact, &mut runtime)?;
         install_cli_function_pointers(&module, &compiled)?;
         install_finalized_iterable_hooks(&module, &mut runtime, &compiled)?;
@@ -429,6 +463,7 @@ pub(crate) fn ensure_resident_module(
                 main_id: compiled.entry_id,
                 main_returns_result,
                 main_returns_app,
+                main_serves_app,
                 main_returns_default_err,
                 main_error_type,
                 main_error_is_packed,
@@ -457,6 +492,7 @@ pub(crate) fn ensure_resident_module(
             resident.main_id = compiled.entry_id;
             resident.main_returns_result = main_returns_result;
             resident.main_returns_app = main_returns_app;
+            resident.main_serves_app = main_serves_app;
             resident.main_returns_default_err = main_returns_default_err;
             resident.main_error_type = main_error_type;
             resident.main_error_is_packed = main_error_is_packed;
@@ -466,7 +502,7 @@ pub(crate) fn ensure_resident_module(
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result, main_returns_app) = RESIDENT_MODULE
+    let (code, main_returns_result, main_returns_app, main_serves_app) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow_mut().as_mut().map(|resident| {
                 resident
@@ -477,6 +513,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                     resident.module.get_finalized_function(resident.main_id),
                     resident.main_returns_result,
                     resident.main_returns_app,
+                    resident.main_serves_app,
                 )
             })
         })
@@ -497,16 +534,40 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         jet_codegen::scheduler::jet_observe_runtime_start_from_env(Vec::new());
         jet_codegen::scheduler::jet_scheduler_task_completion_begin();
         if cli_adapter {
-            let _ = crate::CLI::jet_jit_cli_main();
+            let handle = crate::CLI::jet_jit_cli_main();
+            if runtime.exit_code.is_none() {
+                if main_returns_result {
+                    if let Some(app) =
+                        super::runtime_host::report_unhandled_entry_result(handle)
+                    {
+                        if main_serves_app {
+                            crate::Web::serve_app(app);
+                        }
+                    }
+                } else if main_serves_app {
+                    crate::Web::serve_app(handle);
+                }
+            }
         } else if main_returns_result || main_returns_app {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
             let handle = entry();
             if main_returns_result {
-                super::runtime_host::report_unhandled_entry_result(handle);
+                if let Some(app) =
+                    super::runtime_host::report_unhandled_entry_result(handle)
+                {
+                    if main_serves_app {
+                        crate::Web::serve_app(app);
+                    }
+                }
+            } else if main_serves_app {
+                crate::Web::serve_app(handle);
             }
         } else {
             let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };
             entry();
+        }
+        if runtime.host_fault {
+            crate::Collections::drop_loop_stream_resources(runtime);
         }
         jet_codegen::scheduler::jet_scheduler_task_completion_drain();
         jet_codegen::scheduler::jet_scheduler_task_completion_end();
@@ -595,6 +656,212 @@ pub(crate) fn resident_run_fresh(
     }
     outcome
 }
+enum ResidentRedefineStatus {
+    Applied,
+    Unsupported,
+}
+
+fn resident_direct_call(operation: &MirOperation) -> Option<MirFunctionId> {
+    match operation {
+        MirOperation::Call {
+            callee:
+                MirCallee::User(function)
+                | MirCallee::Associated { function, .. }
+                | MirCallee::Method { function, .. },
+            ..
+        } => Some(*function),
+        _ => None,
+    }
+}
+
+fn resident_callable_argument(function: &MirFunction, args: &[jet_foundation::MIR::MirCallArg]) -> bool {
+    args.iter().any(|arg| {
+        function
+            .values
+            .iter()
+            .find(|(value, _, _, _)| *value == arg.value)
+            .is_some_and(|(_, ty, _, _)| ty.function_signature().is_some())
+    })
+}
+
+fn resident_selective_operation_supported(
+    program: &MirProgram,
+    function: &MirFunction,
+    operation: &MirOperation,
+) -> bool {
+    match operation {
+        MirOperation::Closure { .. }
+        | MirOperation::IndirectCall { .. }
+        | MirOperation::LoopIterInit { .. }
+        | MirOperation::Semantic(
+            MirSemanticOp::BuiltinMethod { .. }
+            | MirSemanticOp::ClosureMethod { .. }
+            | MirSemanticOp::HandleMethod { .. },
+        ) => false,
+        MirOperation::CoreCall { call, args, .. } => {
+            if resident_callable_argument(function, args) {
+                return false;
+            }
+            let Some(row) = program.core_calls.iter().find(|row| row.id == *call) else {
+                return false;
+            };
+            !matches!(
+                (row.module.as_str(), row.member.as_str()),
+                ("core.data", "csv" | "json")
+                    | ("core.encoding.csv", "decode" | "query")
+                    | ("core.encoding.json", "decode")
+            )
+        }
+        MirOperation::Call {
+            callee: MirCallee::Core(_),
+            args,
+            ..
+        } => !resident_callable_argument(function, args),
+        _ => true,
+    }
+}
+
+fn resident_selective_function_ids(
+    program: &MirProgram,
+    plan: &ResidentHotSwapPlan,
+) -> Result<Option<BTreeSet<MirFunctionId>>, String> {
+    if plan.changed_functions.is_empty() {
+        return Ok(None);
+    }
+    let mut selected_ids = BTreeSet::new();
+    for key in &plan.changed_functions {
+        let Some(function) = program.functions.iter().find(|function| function.key == *key) else {
+            return Ok(None);
+        };
+        selected_ids.insert(function.id);
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let current = selected_ids.iter().copied().collect::<Vec<_>>();
+        for selected in current {
+            let function = program
+                .functions
+                .iter()
+                .find(|function| function.id == selected)
+                .ok_or_else(|| format!("MIR function {:?} is missing", selected))?;
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if !resident_selective_operation_supported(
+                        program,
+                        function,
+                        &instruction.operation,
+                    ) {
+                        return Ok(None);
+                    }
+                    if let Some(callee) = resident_direct_call(&instruction.operation) {
+                        let Some(callee_function) =
+                            program.functions.iter().find(|function| function.id == callee)
+                        else {
+                            return Err(format!("MIR function {:?} is missing", callee));
+                        };
+                        if !callee_function.target_applicability.cranelift {
+                            return Err(format!(
+                                "MIR function {:?} calls function {:?} unavailable to Cranelift",
+                                selected, callee
+                            ));
+                        }
+                        changed |= selected_ids.insert(callee);
+                    }
+                }
+            }
+        }
+    }
+    Ok(Some(selected_ids))
+}
+
+fn install_selected_cli_function_pointers(
+    module: &JITModule,
+    selected_ids: &BTreeSet<MirFunctionId>,
+) -> Result<(), String> {
+    let function_pointer = |function_id: MirFunctionId| -> Result<*const u8, String> {
+        let Some(FuncOrDataId::Func(id)) = module.get_name(&mir_fn_name(function_id)) else {
+            return Err(format!("JIT CLI function {:?} was not compiled", function_id));
+        };
+        let ptr = module.get_finalized_function(id);
+        if ptr.is_null() {
+            return Err(format!(
+                "JIT CLI function {:?} has no finalized address",
+                function_id
+            ));
+        }
+        Ok(ptr)
+    };
+    if let Some(user_run) = crate::CLI::cli_user_run_target() {
+        if selected_ids.contains(&user_run) {
+            crate::CLI::install_cli_run_ptr(function_pointer(user_run)?);
+        }
+    }
+    for command in crate::CLI::cli_command_targets() {
+        if selected_ids.contains(&command) {
+            crate::CLI::install_cli_command_ptr(command, function_pointer(command)?);
+        }
+    }
+    Ok(())
+}
+
+fn resident_redefine(
+    program: &MirProgram,
+    plan: &ResidentHotSwapPlan,
+    resident: &mut ResidentModule,
+    runtime: &mut JitRuntime,
+) -> Result<ResidentRedefineStatus, String> {
+    let Some(selected_ids) = resident_selective_function_ids(program, plan)? else {
+        return Ok(ResidentRedefineStatus::Unsupported);
+    };
+    for function_id in &selected_ids {
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == *function_id)
+            .ok_or_else(|| format!("MIR function {:?} is missing", function_id))?;
+        if !matches!(
+            resident.module.get_name(&mir_fn_name(*function_id)),
+            Some(FuncOrDataId::Func(_))
+        ) {
+            return Ok(ResidentRedefineStatus::Unsupported);
+        }
+        if function.generator.is_some()
+            && !matches!(
+                resident
+                    .module
+                    .get_name(&format!("{}__generator", mir_fn_name(*function_id))),
+                Some(FuncOrDataId::Func(_))
+            )
+        {
+            return Ok(ResidentRedefineStatus::Unsupported);
+        }
+    }
+    redefine_mir_functions(
+        &mut resident.module,
+        &resident.host,
+        program,
+        &selected_ids,
+        runtime,
+    )?;
+    resident
+        .module
+        .finalize_definitions()
+        .map_err(|error| error.to_string())?;
+    install_selected_cli_function_pointers(&resident.module, &selected_ids)?;
+    runtime.snapshot_compile_strings();
+    install_program_source(runtime, program);
+    Ok(ResidentRedefineStatus::Applied)
+}
+
+fn take_resident_hot_swap_plan() -> Option<ResidentHotSwapPlan> {
+    RESIDENT_RUNTIME.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .and_then(|runtime| runtime.hot_swap_plan.take())
+    })
+}
+
 
 pub(crate) fn resident_hot_swap(
     program: &MirProgram,
@@ -605,13 +872,42 @@ pub(crate) fn resident_hot_swap(
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     crate::net_http_rt::clear_net_http_handles();
     crate::CoreHost::reset_jit_interrupts();
+
+    if let Some(plan) = take_resident_hot_swap_plan() {
+        let status = RESIDENT_MODULE.with(|mod_slot| {
+            let mut mod_guard = mod_slot.borrow_mut();
+            let Some(resident) = mod_guard.as_mut() else {
+                return Ok(ResidentRedefineStatus::Unsupported);
+            };
+            RESIDENT_RUNTIME.with(|rt_slot| {
+                let mut rt_guard = rt_slot.borrow_mut();
+                let Some(runtime) = rt_guard.as_mut() else {
+                    return Ok(ResidentRedefineStatus::Unsupported);
+                };
+                resident_redefine(program, &plan, resident, runtime)
+            })
+        })?;
+        if matches!(status, ResidentRedefineStatus::Applied) {
+            return resident_invoke();
+        }
+    }
+
     let runtime = RESIDENT_RUNTIME.with(|slot| slot.borrow_mut().take());
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| {
-        *slot.borrow_mut() = Some(runtime.unwrap_or_else(|| {
-            fresh_runtime_with_allocator_cap(release_devtools_policy.clone(), cap_bytes)
-        }))
+        *slot.borrow_mut() = Some(runtime.map_or_else(
+            || fresh_runtime_with_allocator_cap(release_devtools_policy.clone(), cap_bytes),
+            |mut runtime| {
+                runtime.program_allocator.release_hosted_reservations();
+                runtime.program_allocator = std::sync::Arc::new(cap_bytes.map_or_else(
+                    jet_codegen::program_allocator::JetProgramAllocator::system,
+                    jet_codegen::program_allocator::JetProgramAllocator::counting,
+                ));
+                runtime
+            },
+        ))
     });
+
     ensure_resident_module(program, artifact, release_devtools_policy)?;
     resident_invoke()
 }
@@ -624,17 +920,50 @@ pub fn discard_hot_swap_plan() {
     });
 }
 
-pub fn apply_hot_swap(_decision: &HotSwapDecision) -> Result<(), String> {
-    Ok(())
+pub fn apply_hot_swap(decision: &HotSwapDecision) -> Result<(), String> {
+    if !decision.is_compatible() {
+        return Err("incompatible hot-swap decision cannot redefine resident code".to_string());
+    }
+    let mut preserved_state_keys = Vec::new();
+    let mut fresh_state_keys = Vec::new();
+    for fact in decision.state_facts() {
+        if fact.is_preserved() {
+            preserved_state_keys.push(fact.key.clone());
+        } else {
+            fresh_state_keys.push(fact.key.clone());
+        }
+    }
+    let plan = ResidentHotSwapPlan {
+        module: decision.module.clone(),
+        changed_functions: decision.changed_functions.clone(),
+        preserved_state_keys,
+        fresh_state_keys,
+        rechecked_items: decision.rechecked().to_vec(),
+    };
+    RESIDENT_RUNTIME.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        let runtime = guard
+            .as_mut()
+            .ok_or_else(|| "resident runtime missing".to_string())?;
+        runtime.hot_swap_plan = Some(plan);
+        Ok(())
+    })
 }
 
 pub fn apply_hot_swap_with_program(
-    program: &MirProgram,
-    artifact: MirArtifactId,
+    _program: &MirProgram,
+    _artifact: MirArtifactId,
     _decision: &HotSwapDecision,
-    release_devtools_policy: &ReleaseDevtoolsPolicy,
+    _release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Result<Vec<SchemaMigrationReceipt>, String> {
-    ensure_resident_module(program, artifact, release_devtools_policy)?;
+    // The caller runs `resident_hot_swap` immediately after this staging hook.
+    // Compiling here would build the complete candidate MIR a second time;
+    // schema migration currently has no JIT-side receipts to apply.
+    RESIDENT_RUNTIME.with(|slot| {
+        if let Some(runtime) = slot.borrow_mut().as_mut() {
+            runtime.hot_swap_plan = None;
+        }
+    });
     Ok(Vec::new())
 }
 
@@ -694,7 +1023,12 @@ pub fn resident_boot_console(
     artifact: MirArtifactId,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Result<ResidentConsoleLease, String> {
-    let outcome = resident_run_fresh(program, None, artifact, release_devtools_policy)?;
+    let outcome = resident_run_fresh(
+        program,
+        program_allocator_cap_bytes(program),
+        artifact,
+        release_devtools_policy,
+    )?;
     let (startup_stdout, startup_stderr) = match outcome {
         RunOutcome::Ran { stdout, stderr, .. } => (stdout, stderr),
         RunOutcome::Problems(problems) => {

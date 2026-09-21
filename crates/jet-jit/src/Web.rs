@@ -483,6 +483,15 @@ fn web_encoded_callback(
     })
 }
 
+fn web_form_encoded_callback(
+    callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
+    body: &str,
+) -> Result<String, String> {
+    let tree = web_rt::jet_std::parse_json_typed_datatree(body)
+        .map_err(|_| "typed form action input is not valid JSON".to_string())?;
+    web_encoded_callback(callback, &[tree])
+}
+
 fn jet_jit_web_app_method(
     app: i64,
     method: i64,
@@ -587,21 +596,26 @@ fn jet_jit_web_app_method(
                 > = std::sync::Arc::new(move || web_encoded_callback(callback, &[]));
                 match method_name.as_str() {
                     "action" => app_handle.action(key, handler),
-                    "form" => app_handle.form(key, handler),
+                    "form" => app_handle.form(key, handler, binding),
                     _ => app_handle.data(key, handler),
                 }
             } else {
+                let is_form = method_name == "form";
                 let handler: std::sync::Arc<
                     dyn Fn(&String) -> Result<String, String> + Send + Sync + 'static,
                 > = std::sync::Arc::new(move |body: &String| {
-                    web_encoded_callback(
-                        callback,
-                        &[web_rt::jet_std::DataTree::Text(body.clone())],
-                    )
+                    if is_form {
+                        web_form_encoded_callback(callback, body)
+                    } else {
+                        web_encoded_callback(
+                            callback,
+                            &[web_rt::jet_std::DataTree::Text(body.clone())],
+                        )
+                    }
                 });
                 match method_name.as_str() {
                     "action" => app_handle.action(key, handler),
-                    "form" => app_handle.form(key, handler),
+                    "form" => app_handle.form(key, handler, binding),
                     _ => app_handle.data(key, handler),
                 }
             }

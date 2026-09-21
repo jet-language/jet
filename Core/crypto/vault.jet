@@ -1,0 +1,336 @@
+// core.crypto.vault — keyed secret storage with two-phase mutation.
+//
+// Prepare functions are pure plans. Commit functions apply a plan and are
+// the only vault operations that write. This split is the audit seam: an
+// operator can serialize a plan, review it, and commit it later.
+//
+// On-disk bytes are host (`host_vault_load` / `host_vault_save`). Naming
+// status, wrapping via `core.crypto.wrap`, and the prepare/commit pairing
+// are Jet. The file format is a line-oriented record store:
+// `name\tversion\tstatus\thexsecret\n`.
+pub struct KeyRef {
+    pub name: String
+    pub version: Int
+}
+
+pub enum KeyStatus {
+    Current
+    Retired
+    Revoked
+}
+
+pub struct ExpiringSecret {
+    pub secret: Secret
+    pub expires_at_ms: Int
+}
+
+pub struct MutationPlan {
+    pub json: String
+}
+
+pub struct Rotation {
+    pub from: KeyRef
+    pub to: KeyRef
+}
+
+pub struct VaultWrite {
+    pub path: String
+}
+
+pub struct WrappedImportPlan {
+    pub json: String
+}
+
+#Error
+pub enum VaultError {
+    NotFound
+    Revoked
+    Unauthorized
+    Corrupt
+}
+
+pub struct WrappedVaultKey {
+    pub bytes: [U8]
+}
+
+pub struct KeyUnlock {
+    pub bytes: [U8]
+}
+
+#Error
+pub struct KeyWrapError {
+    pub reason: String
+}
+
+pub fn load(path: String) !VaultError {
+    host_vault_load(path)
+    Ok()
+}
+
+pub fn get(key: KeyRef) -> Secret !VaultError {
+    rec :: find_key(key.name, key.version)
+    if rec == .None -> return Err(VaultError.NotFound)
+    r :: rec ?? VaultRec{name: "", version: 0, status: "revoked", secret_hex: ""}
+    if r.status == "revoked" -> return Err(VaultError.Revoked)
+    bytes :: hex_decode(r.secret_hex) ?? return Err(VaultError.Corrupt)
+    Ok(Secret{bytes: bytes})
+}
+
+pub fn current(name: String) -> KeyRef !VaultError {
+    recs :: all_named(name)
+    best := -1
+    ver := 0
+    loop r in recs {
+        if r.status == "current" && r.version >= ver {
+            ver = r.version
+            best = r.version
+        }
+    }
+    if best < 0 -> return Err(VaultError.NotFound)
+    Ok(KeyRef{name: name, version: best})
+}
+
+pub fn status(key: KeyRef) -> KeyStatus !VaultError {
+    rec :: find_key(key.name, key.version)
+    if rec == .None -> return Err(VaultError.NotFound)
+    r :: rec ?? VaultRec{name: "", version: 0, status: "", secret_hex: ""}
+    if r.status == {
+        "retired" -> Ok(KeyStatus.Retired)
+        "revoked" -> Ok(KeyStatus.Revoked)
+        else -> Ok(KeyStatus.Current)
+    }
+}
+
+pub fn versions(name: String) -> [KeyRef] !VaultError {
+    recs :: all_named(name)
+    if recs.len() == 0 -> return Err(VaultError.NotFound)
+    out := [KeyRef]{}
+    loop r in recs -> out.push(KeyRef{name: r.name, version: r.version})
+    Ok(out)
+}
+
+pub fn prepare_generate(name: String) -> MutationPlan !VaultError {
+    Ok(plan("generate", name, 0, ""))
+}
+
+pub fn prepare_store(name: String, secret: Secret) -> MutationPlan !VaultError {
+    Ok(plan("store", name, 0, hex_encode(secret.bytes)))
+}
+
+pub fn prepare_import_signing(name: String, bytes: [U8]) -> MutationPlan !VaultError {
+    Ok(plan("import-sign", name, 0, hex_encode(bytes)))
+}
+
+pub fn prepare_import_x25519(name: String, bytes: [U8]) -> MutationPlan !VaultError {
+    Ok(plan("import-x25519", name, 0, hex_encode(bytes)))
+}
+
+pub fn prepare_import_wrapped(plan: WrappedImportPlan) -> MutationPlan !VaultError {
+    Ok(MutationPlan{json: "import-wrapped|{plan.json}"})
+}
+
+pub fn prepare_rotate(name: String) -> MutationPlan !VaultError { Ok(plan("rotate", name, 0, "")) }
+
+pub fn prepare_retire(key: KeyRef) -> MutationPlan !VaultError {
+    Ok(plan("retire", key.name, key.version, ""))
+}
+
+pub fn prepare_revoke(key: KeyRef) -> MutationPlan !VaultError {
+    Ok(plan("revoke", key.name, key.version, ""))
+}
+
+pub fn commit_generate(plan: MutationPlan) -[FS]> KeyRef !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "generate" -> return Err(VaultError.Unauthorized)
+    sk :: random.bytes(32) ?? return Err(VaultError.Unauthorized)
+    write_new(p.name, hex_encode(sk), "current")
+}
+
+pub fn commit_store(plan: MutationPlan) -[FS]> KeyRef !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "store" -> return Err(VaultError.Unauthorized)
+    write_new(p.name, p.payload, "current")
+}
+
+pub fn commit_import_signing(plan: MutationPlan) -[FS]> KeyRef !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "import-sign" -> return Err(VaultError.Unauthorized)
+    write_new(p.name, p.payload, "current")
+}
+
+pub fn commit_import_x25519(plan: MutationPlan) -[FS]> KeyRef !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "import-x25519" -> return Err(VaultError.Unauthorized)
+    write_new(p.name, p.payload, "current")
+}
+
+pub fn commit_import_wrapped(plan: MutationPlan) -[FS]> KeyRef !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    write_new(p.name, p.payload, "current")
+}
+
+pub fn commit_rotate(plan: MutationPlan) -[FS]> Rotation !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "rotate" -> return Err(VaultError.Unauthorized)
+    old :: current(p.name)
+    rec :: find_key(old.name, old.version) ?? return Err(VaultError.NotFound)
+    set_status(old.name, old.version, "retired")
+    sk :: random.bytes(32) ?? return Err(VaultError.Unauthorized)
+    neu :: write_new(p.name, hex_encode(sk), "current")
+    Ok(Rotation{from: old, to: neu})
+}
+
+pub fn commit_retire(plan: MutationPlan) !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "retire" -> return Err(VaultError.Unauthorized)
+    set_status(p.name, p.version, "retired")
+    Ok()
+}
+
+pub fn commit_revoke(plan: MutationPlan) !VaultError {
+    p :: parse_plan(plan.json) ?? return Err(VaultError.Corrupt)
+    if p.op != "revoke" -> return Err(VaultError.Unauthorized)
+    set_status(p.name, p.version, "revoked")
+    Ok()
+}
+
+pub fn authorize_write(write: VaultWrite) !VaultError {
+    if write.path.len() == 0 -> return Err(VaultError.Unauthorized)
+    Ok()
+}
+
+pub fn authorize_wrapped_import(plan: WrappedImportPlan) !VaultError {
+    if plan.json.len() == 0 -> return Err(VaultError.Unauthorized)
+    Ok()
+}
+
+pub fn export_to_passphrase(key: KeyRef, passphrase: Secret) -> WrappedVaultKey !VaultError {
+    secret :: get(key)
+    wrapping :: pbkdf2_hmac(passphrase.bytes, key.name.bytes(), 100000, 32) ?? return Err(VaultError.Unauthorized)
+    wrapped :: wrap(secret, Secret{bytes: wrapping}) ?? return Err(VaultError.Unauthorized)
+    Ok(WrappedVaultKey{bytes: wrapped.bytes})
+}
+
+pub fn export_to_recipients(key: KeyRef, recipients: [X25519PublicKey]) -> WrappedVaultKey !VaultError {
+    secret :: get(key)
+    sealed :: seal(recipients, secret.bytes, [U8]{}) ?? return Err(VaultError.Unauthorized)
+    Ok(WrappedVaultKey{bytes: sealed.bytes})
+}
+
+pub struct VaultRec {
+    pub name: String
+    pub version: Int
+    pub status: String
+    pub secret_hex: String
+}
+
+pub struct PlanBits {
+    pub op: String
+    pub name: String
+    pub version: Int
+    pub payload: String
+}
+
+fn plan(op: String, name: String, version: Int, payload: String) -> MutationPlan {
+    {json: "{op}|{name}|{version}|{payload}"}
+}
+
+fn parse_plan(text: String) -> ?PlanBits {
+    parts :: split_bar(text)
+    if parts.len() < 3 -> return None
+    ver :: parse_int(parts[2]) ?? 0
+    payload := ""
+    if parts.len() > 3 -> payload = parts[3]
+    Val(PlanBits{op: parts[0], name: parts[1], version: ver, payload: payload})
+}
+
+fn write_new(name: String, secret_hex: String, status: String) -[FS]> KeyRef !VaultError {
+    next := 1
+    loop r in all_named(name) {
+        if r.version >= next -> next = r.version + 1
+    }
+    host_vault_put("{name}\t{next}\t{status}\t{secret_hex}")
+    Ok(KeyRef{name: name, version: next})
+}
+
+fn set_status(name: String, version: Int, status: String) -[FS]> { host_vault_set_status(name, version, status) }
+
+fn find_key(name: String, version: Int) -> ?VaultRec {
+    loop r in parse_recs(host_vault_dump()) {
+        if r.name == name && r.version == version -> return Val(r)
+    }
+    None
+}
+
+fn all_named(name: String) -> [VaultRec] {
+    out := [VaultRec]{}
+    loop r in parse_recs(host_vault_dump()) {
+        if r.name == name -> out.push(r)
+    }
+    out
+}
+
+fn parse_recs(text: String) -> [VaultRec] {
+    out := [VaultRec]{}
+    loop line in split_lines(text) {
+        if line.len() == 0 -> next
+        cols :: split_tab(line)
+        if cols.len() < 4 -> next
+        ver :: parse_int(cols[1]) ?? 0
+        out.push(VaultRec{name: cols[0], version: ver, status: cols[2], secret_hex: cols[3]})
+    }
+    out
+}
+
+fn split_bar(text: String) -> [String] { split_byte(text, 124) }
+
+fn split_tab(text: String) -> [String] { split_byte(text, 9) }
+
+fn split_byte(text: String, n: Int) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{n}) {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+        } else { cur.push(b) }
+    }
+    out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn split_lines(text: String) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{10}) {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+        } else {
+            if b != (U8{13}) -> cur.push(b)
+        }
+    }
+    if cur.len() > 0 -> out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn parse_int(text: String) -> ?Int {
+    n := 0
+    any := false
+    loop b in text.bytes() {
+        d :: b
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        any = true
+    }
+    if !any -> return None
+    Val(n)
+}
+
+fn host_vault_load(path: String) !VaultError { panic("host_vault_load") }
+
+fn host_vault_dump() -> String { panic("host_vault_dump") }
+
+fn host_vault_put(line: String) -[FS]> { panic("host_vault_put") }
+
+fn host_vault_set_status(name: String, version: Int, status: String) -[FS]> { panic("host_vault_set_status") }

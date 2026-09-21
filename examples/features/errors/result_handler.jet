@@ -1,22 +1,30 @@
 // D-RESULT-DECON2=B: one fixed exhaustive Result handler handles both payloads.
-fn classify(ok: Bool) Int -> if ok -> Ok(7) else -> Err("bad")
+fn classify(ok: Bool) -> Int { if ok -> Ok(7) else -> Err("bad") }
 
-fn choose<T>(value: ^T, ok: Bool) T -> if ok -> Ok(value) else -> Err("bad")
+fn choose<T>(value: ^T, ok: Bool) -> T { if ok -> Ok(value) else -> Err("bad") }
 
-fn choose_text(value: ^String, ok: Bool) String -> if ok -> Ok(value) else -> Err("bad")
+fn choose_text(value: ^String, ok: Bool) -> String { if ok -> Ok(value) else -> Err("bad") }
 
-fn owned(ok: Bool) String -> {
+fn owned(ok: Bool) -> String {
     return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T -> {
-    return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
+fn generic<T>(value: ^T, ok: Bool) -> T {
+    return choose<T>(^value, ok) ? success -> {
+        success
+    }
+    ! _failure -> {
+        return Err("bad")
+    }
 }
 
-fn nested(value: Int, ok: Bool) Int -> {
+fn nested(value: Int, ok: Bool) -> Int {
     return choose<Int>(^value, ok) ? success -> {
         choose<Int>(^success, ok) ? nested_success -> nested_success + 1 ! _nested_failure -> 0
-    } ! _failure -> 0
+    }
+    ! _failure -> {
+        0
+    }
 }
 
 fn run() {
@@ -25,11 +33,17 @@ fn run() {
         classify(true) ? ok -> {
             print("ok")
             print(ok)
-        } ! _error -> print("error")
+        }
+        ! _error -> {
+            print("error")
+        }
         classify(false) ? ok -> {
             print("ok")
             print(ok)
-        } ! _error -> print("error")
+        }
+        ! _error -> {
+            print("error")
+        }
         value :: classify(true) ? ok -> ok + 1 ! _error -> 0
         print("value")
         print(value)

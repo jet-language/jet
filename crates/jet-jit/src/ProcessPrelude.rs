@@ -418,8 +418,8 @@ pub(crate) mod process_prelude {
             pub detached: bool,
             pub timeout_ms: Option<i64>,
             pub output_limit: Option<i64>,
-            pub audit_spec: ProcessSpec,
-            pub audit_plan: Option<ProcessPlan>,
+            pub audit_spec: std::rc::Rc<ProcessSpec>,
+            pub audit_plan: Option<std::rc::Rc<ProcessPlan>>,
             pub started: std::time::Instant,
         }
 

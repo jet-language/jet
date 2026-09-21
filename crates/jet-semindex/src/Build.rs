@@ -643,10 +643,9 @@ fn fn_signature(
         parameter_index += 1;
     }
     let params = parameter_parts.join(", ");
-    // D-SIG-SHAPE1=B: the return type sits bare after the parameter list and
-    // `->` introduces the body; an effect ceiling rides the body-arrow slot as
-    // `-[IO]>`. The retired `=[…]=>` spelling must not reach a hover or a
-    // completion, which are user-facing surfaces.
+    // D-SIG-AFTER1=A: return type follows the one arrow. An effect ceiling
+    // splits that arrow as `-[IO]>`. The retired `=[…]=>` spelling must not
+    // reach a hover or a completion.
     //
     // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem deny-only: they
     // are never a positive ceiling a user writes, so rendering them here would
@@ -662,10 +661,7 @@ fn fn_signature(
                 .collect()
         })
         .unwrap_or_default();
-    let result = ret
-        .as_ref()
-        .map(|ty| format!(" {}", ty.name()))
-        .unwrap_or_default();
+    let result = ret.as_ref().map(|ty| ty.name()).unwrap_or_default();
     let ceiling = if let Some((param, _)) = effect_via {
         format!(" -[via {param}]>")
     } else if shown.is_empty() {
@@ -673,7 +669,18 @@ fn fn_signature(
     } else {
         format!(" -[{}]>", shown.join(", "))
     };
-    let mut signature = format!("fn {name}({params}){result}{ceiling}");
+    let suffix = if !ceiling.is_empty() {
+        if result.is_empty() {
+            ceiling
+        } else {
+            format!("{ceiling} {result}")
+        }
+    } else if !result.is_empty() {
+        format!(" -> {result}")
+    } else {
+        String::new()
+    };
+    let mut signature = format!("fn {name}({params}){suffix}");
     if let Some(map) = view_provenance {
         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
             signature.push_str(" ; view_source = ");
@@ -2607,7 +2614,45 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 collect_stmts(&t.body, mp, module, ctx)
             });
         }
-        Item::ExternRust(_) => {}
+        Item::ExternRust(block) => {
+            // Foreign bodies are outside the checked Jet source graph. Keep the
+            // declaration itself as the only navigation target: its signature
+            // is the checked wrapper/boundary contract, while `rust_path`
+            // remains compiler bridge metadata and never becomes a location.
+            for function in &block.functions {
+                let params = function
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.ty.clone()))
+                    .collect();
+                let param_contract = parameter_contract(&function.params);
+                let param_variadic = parameter_variadic(&function.params);
+                let param_access = function
+                    .params
+                    .iter()
+                    .map(|param| param.convention)
+                    .collect();
+                ctx.db.defs.push(SymDef {
+                    identity: format!("fn:{}::{}", ctx.scope_identity, function.name),
+                    name: function.name.clone(),
+                    def_span: function.name_span,
+                    module_path: mp.to_string(),
+                    kind: SymKind::Function {
+                        params,
+                        param_contract,
+                        param_variadic,
+                        ret: function.return_type.clone(),
+                        failure_contract: "unknown".to_string(),
+                        failure_source: "extern Jet boundary".to_string(),
+                        effects: None,
+                        effect_via: None,
+                        param_access,
+                        param_defaults: function.params.iter().map(|_| None).collect(),
+                        policies: Vec::new(),
+                    },
+                });
+            }
+        }
         Item::Module(m) => {
             ctx.db.defs.push(SymDef {
                 identity: module_identity(&ctx.scope_identity, &m.name),

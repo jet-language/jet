@@ -332,8 +332,8 @@ impl<'a> Checker<'a> {
     /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
     /// inline body requires the enclosing `#Unsafe("reason")` gate (I1/S58).
     /// Any other language name has no inline binder yet (E3220).
-    fn check_inline_foreign_fn(&mut self, f: &Func) {
-        let Some(inl) = &f.inline_foreign else {
+    fn check_inline_foreign_fn(&mut self, f: &mut Func) {
+        let Some(inl) = f.inline_foreign.as_ref().cloned() else {
             return;
         };
         // Systems-floor inline languages (card #501). All three are unsafe.
@@ -383,11 +383,14 @@ impl<'a> Checker<'a> {
             return;
         }
         if inl.lang == Syntax::ASM_LANG {
-            self.check_inline_asm(f, inl);
+            self.check_inline_asm(f);
         }
     }
 
-    fn check_inline_asm(&mut self, f: &Func, inl: &crate::AST::InlineForeign) {
+    fn check_inline_asm(&mut self, f: &mut Func) {
+        let Some(inl) = f.inline_foreign.as_ref().cloned() else {
+            return;
+        };
         if f.params.iter().any(|p| !inline_asm_integer(&p.ty))
             || f.return_type
                 .as_ref()
@@ -416,22 +419,40 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        let params: HashSet<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+
+        let params = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| (param.name.as_str(), index))
+            .collect::<HashMap<_, _>>();
         let target = self.layout_target().triple;
-        let target_is_x86_64 =
-            target.is_empty() || target.split('-').next() == Some("x86_64");
+        let target_arch = crate::AST::inline_asm_target_arch(&target);
         let mut used = HashSet::new();
+        let mut clobbers = Vec::new();
+        let mut seen_clobbers = HashSet::new();
         let mut return_anchors = 0usize;
+        let mut return_destination = None;
         let mut bad = None;
+
         for line in inl.source.lines() {
             let line = line.trim();
             if let Some(rest) = line.strip_prefix("; clobbers ") {
-                for reg in rest
+                for raw in rest
                     .split(|c: char| c == ',' || c.is_whitespace())
                     .filter(|s| !s.is_empty())
                 {
-                    if !target_is_x86_64 || !asm_register_known(reg) {
-                        bad = Some(format!("`{reg}` isn't an audited register on this target"));
+                    let register = raw.strip_prefix('%').unwrap_or(raw).to_ascii_lowercase();
+                    if target_arch.is_none()
+                        || !crate::AST::inline_asm_register_known(&target, &register)
+                    {
+                        bad = Some(format!("`{raw}` isn't an audited register on this target"));
+                    } else if !seen_clobbers.insert(register.clone()) {
+                        bad = Some(format!(
+                            "clobber register `{raw}` is listed more than once"
+                        ));
+                    } else {
+                        clobbers.push(register);
                     }
                 }
                 continue;
@@ -442,18 +463,33 @@ impl<'a> Checker<'a> {
                     .split_once("; -> return")
                     .map(|(body, _)| body.trim())
                     .and_then(asm_first_operand);
-                let valid_destination = destination.is_some_and(|operand| {
+                let checked_destination = destination.and_then(|operand| {
                     if let Some(name) = operand
                         .strip_prefix('{')
                         .and_then(|name| name.strip_suffix('}'))
                     {
-                        params.contains(name)
+                        params
+                            .get(name)
+                            .copied()
+                            .map(crate::AST::InlineAsmOutput::Parameter)
                     } else {
-                        let register = operand.strip_prefix('%').unwrap_or(operand);
-                        target_is_x86_64 && asm_register_known(register)
+                        let register =
+                            operand.strip_prefix('%').unwrap_or(operand).to_ascii_lowercase();
+                        target_arch
+                            .is_some_and(|_| crate::AST::inline_asm_register_known(&target, &register))
+                            .then_some(crate::AST::InlineAsmOutput::Register(register))
                     }
                 });
-                if !valid_destination {
+                if let Some(destination) = checked_destination {
+                    if return_destination.is_some() {
+                        bad = Some(
+                            "an assembly body can have only one checked return destination"
+                                .to_string(),
+                        );
+                    } else {
+                        return_destination = Some(destination);
+                    }
+                } else {
                     bad = Some(
                         "a value-returning assembly body needs a named output operand or an explicit audited target register"
                             .to_string(),
@@ -467,15 +503,18 @@ impl<'a> Checker<'a> {
                     break;
                 };
                 let name = &rest[open + 1..open + 1 + close];
-                if !params.contains(name) {
+                if !params.contains_key(name) {
                     bad = Some(format!("`{{{name}}}` doesn't name a Jet parameter"));
                 } else {
-                    used.insert(name);
+                    used.insert(name.to_string());
                 }
                 rest = &rest[open + close + 2..];
             }
         }
-        if let Some(name) = params.iter().find(|name| !used.contains(**name)) {
+        let unused_name = params.keys().copied().find(|name| {
+            used.iter().all(|used_name| used_name.as_str() != *name)
+        });
+        if let Some(name) = unused_name {
             bad = Some(format!(
                 "parameter `{name}` has no named `{{{name}}}` operand"
             ));
@@ -491,9 +530,16 @@ impl<'a> Checker<'a> {
                 "a void assembly body can't declare a `; -> return` anchor".to_string()
             });
         }
-        if !target_is_x86_64 {
+        if let Some(crate::AST::InlineAsmOutput::Register(register)) = &return_destination {
+            if clobbers.iter().any(|clobber| clobber == register) {
+                bad = Some(format!(
+                    "return register `{register}` cannot also be an early-written clobber"
+                ));
+            }
+        }
+        if target_arch.is_none() {
             bad = Some(format!(
-                "inline assembly selects x86-64 registers, but target `{target}` does not"
+                "inline assembly has no audited register set for target `{target}`"
             ));
         }
         if let Some(problem) = bad {
@@ -504,7 +550,16 @@ impl<'a> Checker<'a> {
                 "bind each Jet parameter as `{name}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`".to_string(),
                 Some(inl.source_span),
             ));
+            return;
         }
+        f.inline_foreign
+            .as_mut()
+            .expect("inline foreign checked above")
+            .asm_contract = Some(crate::AST::InlineAsmContract {
+            target,
+            output: return_destination,
+            clobbers,
+        });
     }
 
 
@@ -998,25 +1053,6 @@ fn inline_asm_integer_or_void(ty: &Type) -> bool {
     inline_asm_integer(ty) || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
-fn asm_register_known(reg: &str) -> bool {
-    matches!(
-        reg.to_ascii_lowercase().as_str(),
-        "rax"
-            | "rbx"
-            | "rcx"
-            | "rdx"
-            | "rsi"
-            | "rdi"
-            | "r8"
-            | "r9"
-            | "r10"
-            | "r11"
-            | "r12"
-            | "r13"
-            | "r14"
-            | "r15"
-    )
-}
 
 /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
 /// one supported shape (a direct `loop x in name { … }` loop).

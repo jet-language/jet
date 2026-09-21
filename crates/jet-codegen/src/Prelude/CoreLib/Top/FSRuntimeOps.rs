@@ -3,6 +3,16 @@
 // The surrounding engine supplies `jet_std`, `jet_fault_should_fail`, and the
 // raw `jet_fs_*` kernels. Error classification and fault policy live here.
 
+// JET_VETTED_UNSAFE_BEGIN: jet_fs_chown
+// AUDIT: this region is the checked POSIX chown ABI adapter. Safe Rust cannot
+// express the libc call; this adapter validates UID/GID bounds and a NUL-free
+// path before calling it, and callers receive only Result<(), IOError>.
+// Violating those checks could transfer ownership to an unintended path or ID.
+#[cfg(unix)]
+extern "C" {
+    fn chown(path: *const std::ffi::c_char, owner: u32, group: u32) -> i32;
+}
+
 pub(crate) fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
     let p = std::path::Path::new(path);
     let abs = if p.is_absolute() {
@@ -245,6 +255,78 @@ pub(crate) fn jet_fs_stat(path: &String) -> Result<JetFsStat, jet_std::IOError> 
         mode: mode_of(&meta),
     })
 }
+pub(crate) fn jet_std_fs_is_fifo(path: &String) -> Result<bool, jet_std::IOError> {
+    Ok((jet_fs_stat(path)?.mode & 0o170000) == 0o010000)
+}
+
+pub(crate) fn jet_std_fs_is_socket(path: &String) -> Result<bool, jet_std::IOError> {
+    Ok((jet_fs_stat(path)?.mode & 0o170000) == 0o140000)
+}
+
+pub(crate) fn jet_std_fs_mktemp_path(prefix: &String) -> String {
+    jet_std_fs_temp_path(prefix)
+}
+
+pub(crate) fn jet_std_fs_chown(
+    path: &String,
+    owner: i64,
+    group: i64,
+) -> Result<(), jet_std::IOError> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+
+        let owner = if owner == -1 {
+            u32::MAX
+        } else {
+            u32::try_from(owner).map_err(|_| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Write,
+                    Some(path.clone()),
+                    "owner must be -1 or a non-negative u32",
+                )
+            })?
+        };
+        let group = if group == -1 {
+            u32::MAX
+        } else {
+            u32::try_from(group).map_err(|_| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Write,
+                    Some(path.clone()),
+                    "group must be -1 or a non-negative u32",
+                )
+            })?
+        };
+        let c_path = CString::new(path.as_bytes()).map_err(|_| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Write,
+                Some(path.clone()),
+                "path contains an interior NUL",
+            )
+        })?;
+        if unsafe { chown(c_path.as_ptr(), owner, group) } == 0 {
+            Ok(())
+        } else {
+            Err(jet_std::io_error_at(
+                jet_std::IOOperation::Write,
+                path,
+                std::io::Error::last_os_error(),
+            ))
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, owner, group);
+        Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            None,
+            "chown is unavailable on this platform",
+        ))
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_fs_chown
+
 
 pub(crate) fn jet_std_fs_set_mode(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
@@ -309,6 +391,15 @@ pub(crate) fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_s
             std::os::windows::fs::symlink_file(from, to)
                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
         }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = from;
+        Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(to.clone()),
+            "symbolic links are unavailable on this platform",
+        ))
     }
 }
 

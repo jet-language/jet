@@ -3,7 +3,6 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
 }
-
 // D-SHARED-CYCLE1=C: beginner strong Shared cycles are rejected (E0221).
 // Expert intentional cycles use Shared.Weak back-edges. Free-when-strong-roots-
 // drop is proved by Prelude unit tests (JetShared Weak Arc semantics); this
@@ -18,7 +17,7 @@ struct Node {
     peer: ?Shared.Weak<Node>
 }
 
-fn peer_label(n: Node) String -> {
+fn peer_label(n: Node) -> String {
     if n.peer == .None -> return "none"
     if n.peer == .Val(weak) {
         if weak.upgrade() == .None -> return "gone"
@@ -28,7 +27,7 @@ fn peer_label(n: Node) String -> {
 }
 
 // One whole-value read under one lock, in the smallest possible scope.
-fn label_of(handle: Shared<Node>) String -> {
+fn label_of(handle: Shared<Node>) -> String {
     guard :: handle.guard_read()
     return peer_label(~guard.value)
 }

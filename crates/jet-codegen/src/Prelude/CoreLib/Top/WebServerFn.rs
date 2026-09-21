@@ -498,6 +498,7 @@ pub struct JetWebServerFunction {
     spec: JetWebServerFnSpec,
     handler: JetWebServerFnHandler,
     validator: Option<JetWebServerFnValidator>,
+    form_binding: Option<String>,
     middleware: Vec<JetWebServerFnMiddlewareEntry>,
     state: Arc<Mutex<JetWebServerFnState>>,
     idempotency_results: Arc<Mutex<BTreeMap<String, String>>>,
@@ -575,6 +576,7 @@ impl JetWebServerFunction {
             spec,
             handler,
             validator: None,
+            form_binding: None,
             middleware: Vec::new(),
             idempotency_results: Arc::new(Mutex::new(BTreeMap::new())),
         };
@@ -636,6 +638,14 @@ impl JetWebServerFunction {
 
     pub fn with_idempotency(mut self, declared: bool) -> Self {
         self.spec.idempotency_declared = declared;
+        self
+    }
+
+    pub fn with_form_binding(mut self, binding: String) -> Self {
+        let binding = binding.trim();
+        if !binding.is_empty() {
+            self.form_binding = Some(binding.to_string());
+        }
         self
     }
 
@@ -850,12 +860,25 @@ impl JetWebServerFunction {
                     "server function input is not valid JSON".to_string(),
                 ));
             }
+            if self.form_binding.is_some()
+                && (self.spec.input_type == "String"
+                    || self.spec.input_type.ends_with("::String"))
+            {
+                return Ok(jet_web_server_fn_json_string(body));
+            }
             return Ok(body.to_string());
         }
         if content_type
             .to_ascii_lowercase()
             .starts_with("application/x-www-form-urlencoded")
         {
+            if let Some(binding) = self.form_binding.as_deref() {
+                let normalized = jet_web_server_fn_form_json_typed(body, binding)?;
+                if self.spec.input_type == "String" || self.spec.input_type.ends_with("::String") {
+                    return Ok(jet_web_server_fn_json_string(&normalized));
+                }
+                return Ok(normalized);
+            }
             return jet_web_server_fn_form_json(body);
         }
         Err(JetWebServerFnError::UnsupportedMediaType)
@@ -1356,17 +1379,14 @@ fn jet_web_server_fn_form_decode(value: &str) -> Result<String, JetWebServerFnEr
     })
 }
 
-fn jet_web_server_fn_form_json(body: &str) -> Result<String, JetWebServerFnError> {
+fn jet_web_server_fn_form_fields(
+    body: &str,
+) -> Result<BTreeMap<String, Vec<String>>, JetWebServerFnError> {
     let mut fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if body.is_empty() {
-        return Ok("{}".to_string());
+        return Ok(fields);
     }
     for pair in body.split('&') {
-        if fields.len() >= JET_WEB_SERVER_FN_MAX_FORM_FIELDS {
-            return Err(JetWebServerFnError::InvalidInput(
-                "form input has too many fields".to_string(),
-            ));
-        }
         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
         let key = jet_web_server_fn_form_decode(raw_key)?;
         let value = jet_web_server_fn_form_decode(raw_value)?;
@@ -1375,9 +1395,18 @@ fn jet_web_server_fn_form_json(body: &str) -> Result<String, JetWebServerFnError
                 "form input contains an invalid field".to_string(),
             ));
         }
+        if fields.len() >= JET_WEB_SERVER_FN_MAX_FORM_FIELDS && !fields.contains_key(&key) {
+            return Err(JetWebServerFnError::InvalidInput(
+                "form input has too many fields".to_string(),
+            ));
+        }
         fields.entry(key).or_default().push(value);
     }
+    Ok(fields)
+}
 
+fn jet_web_server_fn_form_json(body: &str) -> Result<String, JetWebServerFnError> {
+    let fields = jet_web_server_fn_form_fields(body)?;
     let mut entries = Vec::with_capacity(fields.len());
     for (key, values) in fields {
         let value = if values.len() == 1 {
@@ -1393,6 +1422,103 @@ fn jet_web_server_fn_form_json(body: &str) -> Result<String, JetWebServerFnError
             )
         };
         entries.push(format!("{}:{value}", jet_web_server_fn_json_string(&key)));
+    }
+    Ok(format!("{{{}}}", entries.join(",")))
+}
+
+fn jet_web_server_fn_form_json_typed(
+    body: &str,
+    binding: &str,
+) -> Result<String, JetWebServerFnError> {
+    let schema = binding.strip_prefix("s=json:").ok_or_else(|| {
+        JetWebServerFnError::InvalidInput("form input has an invalid typed binding".to_string())
+    })?;
+    if schema.is_empty() {
+        return Err(JetWebServerFnError::InvalidInput(
+            "form input has an empty typed binding".to_string(),
+        ));
+    }
+    let mut schema_fields: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    for spec in schema.split(',') {
+        let (name, declared_type) = spec.split_once('=').ok_or_else(|| {
+            JetWebServerFnError::InvalidInput("form input has an invalid typed field".to_string())
+        })?;
+        let optional = declared_type.ends_with('?');
+        let field_type = declared_type.strip_suffix('?').unwrap_or(declared_type);
+        if name.is_empty() || field_type.is_empty() {
+            return Err(JetWebServerFnError::InvalidInput(
+                "form input has an invalid typed field".to_string(),
+            ));
+        }
+        if schema_fields
+            .insert(name.to_string(), (field_type.to_string(), optional))
+            .is_some()
+        {
+            return Err(JetWebServerFnError::InvalidInput(
+                "form input has a duplicate typed field".to_string(),
+            ));
+        }
+    }
+
+    let posted = jet_web_server_fn_form_fields(body)?;
+    for name in posted.keys() {
+        if !schema_fields.contains_key(name) {
+            return Err(JetWebServerFnError::InvalidInput(format!(
+                "form input contains unknown field `{name}`"
+            )));
+        }
+    }
+
+    let mut entries = Vec::with_capacity(schema_fields.len());
+    for (name, (field_type, optional)) in schema_fields {
+        let Some(values) = posted.get(&name) else {
+            if optional {
+                continue;
+            }
+            return Err(JetWebServerFnError::InvalidInput(format!(
+                "form input is missing required field `{name}`"
+            )));
+        };
+        if values.len() != 1 {
+            return Err(JetWebServerFnError::InvalidInput(format!(
+                "form input field `{name}` was posted more than once"
+            )));
+        }
+        let value = &values[0];
+        let json = match field_type.as_str() {
+            "Int" => value
+                .parse::<i64>()
+                .map(|parsed| parsed.to_string())
+                .map_err(|_| {
+                    JetWebServerFnError::InvalidInput(format!(
+                        "form input field `{name}` is not an integer"
+                    ))
+                })?,
+            "Float" => {
+                let parsed = value.parse::<f64>().map_err(|_| {
+                    JetWebServerFnError::InvalidInput(format!(
+                        "form input field `{name}` is not a number"
+                    ))
+                })?;
+                if !parsed.is_finite() {
+                    return Err(JetWebServerFnError::InvalidInput(format!(
+                        "form input field `{name}` is not a finite number"
+                    )));
+                }
+                parsed.to_string()
+            }
+            "Bool" => match value.as_str() {
+                "true" | "1" => "true".to_string(),
+                "false" | "0" => "false".to_string(),
+                _ => {
+                    return Err(JetWebServerFnError::InvalidInput(format!(
+                        "form input field `{name}` is not a boolean"
+                    )));
+                }
+            },
+            _ => jet_web_server_fn_json_string(value),
+        };
+        entries.push(format!("{}:{json}", jet_web_server_fn_json_string(&name)));
     }
     Ok(format!("{{{}}}", entries.join(",")))
 }

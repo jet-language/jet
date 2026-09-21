@@ -103,7 +103,7 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
     let binary_name = file_name
         .strip_suffix(".jet")
         .expect("Jet fixture extension");
-    let aot = Command::new(case_dir.join("build").join(binary_name))
+    let aot = Command::new(case_dir.join(".jet").join("build").join(binary_name))
         .current_dir(&case_dir)
         .output()
         .unwrap_or_else(|error| panic!("failed to run AOT binary for `{stem}`: {error}"));
@@ -363,7 +363,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
         String::from_utf8_lossy(&build.stderr)
     );
 
-    let aot = Command::new(scratch.join("build/computed_constants"))
+    let aot = Command::new(scratch.join(".jet/build/computed_constants"))
         .current_dir(&scratch.path)
         .output()
         .expect("run AOT computed constants example");
@@ -458,7 +458,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         "AOT job runner build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let aot_help = Command::new(scratch.join("build/job_runner"))
+    let aot_help = Command::new(scratch.join(".jet/build/job_runner"))
         .current_dir(&scratch.path)
         .output()
         .expect("run AOT job runner help");
@@ -478,7 +478,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         .env("NO_COLOR", "1")
         .output()
         .expect("show default job subcommand help");
-    let aot_jobs_help = Command::new(scratch.join("build/job_runner"))
+    let aot_jobs_help = Command::new(scratch.join(".jet/build/job_runner"))
         .arg("--help")
         .current_dir(&scratch.path)
         .output()
@@ -517,7 +517,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
             "default job `{job}` differs from golden"
         );
 
-        let aot_job = Command::new(scratch.join("build/job_runner"))
+        let aot_job = Command::new(scratch.join(".jet/build/job_runner"))
             .arg(job)
             .current_dir(&scratch.path)
             .output()
@@ -554,7 +554,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         "AOT CLI build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let binary = scratch.join("build/subcommands");
+    let binary = scratch.join(".jet/build/subcommands");
 
     for args in [["--help"].as_slice(), ["serve", "--help"].as_slice()] {
         let aot = Command::new(&binary)
@@ -742,7 +742,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
             String::from_utf8_lossy(&build.stderr)
         );
         let stem = name.strip_suffix(".jet").expect("fixture extension");
-        binaries.push((name, scratch.join("build").join(stem)));
+        binaries.push((name, scratch.join(".jet").join("build").join(stem)));
     }
 
     for (name, binary) in &binaries {
@@ -953,7 +953,7 @@ fn run() {
         "AOT build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let binary = scratch.join("build/builder_named");
+    let binary = scratch.join(".jet/build/builder_named");
     let args = ["bare-loses", "--name", "named-wins"];
     let aot = Command::new(&binary)
         .args(args)
@@ -1037,7 +1037,7 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
         "AOT measured test target build failed: {}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let aot = Command::new(scratch.join("build/main"))
+    let aot = Command::new(scratch.join(".jet/build/main"))
         .current_dir(&scratch.path)
         .output()
         .expect("run AOT measured test target");
@@ -1324,14 +1324,14 @@ fn build_stamp_release_rebuilds_have_identical_binary_bytes() {
             "clean release build failed:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let binary = fs::read(project.join("build/build_stamp"))
-            .expect("clean release build must publish build/build_stamp");
+        let binary = fs::read(project.join(".jet/build/build_stamp"))
+            .expect("clean release build must publish .jet/build/build_stamp");
         assert_eq!(
             fs::read(&lock_path).expect("read lock after clean release build"),
             lock_bytes,
             "locked release build changed the checked-in lock bytes"
         );
-        fs::remove_dir_all(project.join("build")).expect("remove first clean build output");
+        fs::remove_dir_all(project.join(".jet/build")).expect("remove first clean build output");
         binary
     };
 

@@ -1,0 +1,250 @@
+package {
+    name: "core.time.calendar"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Gregorian calendar tables, names, and month layouts."
+    license: "MIT"
+    outputs: {
+        calendar: .Library{ entry: calendar }
+    }
+}
+// core.time.calendar — Python `calendar` without locale tables.
+//
+// Weeks start on Monday (`MONDAY = 0`) unless a function takes `firstweekday`.
+// Day `0` in a month matrix is a slot outside the month. Names are English
+// and fixed; there is no locale override.
+@monday :: 0
+
+@tuesday :: 1
+
+@wednesday :: 2
+
+@thursday :: 3
+
+@friday :: 4
+
+@saturday :: 5
+
+@sunday :: 6
+
+pub fn isleap(year: Int) -> Bool { time.is_leap_year(year) }
+
+pub fn leapdays(y1: Int, y2: Int) -> Int {
+    a := y1
+    b := y2
+    if b < a {
+        t := a
+        a = b
+        b = t
+    }
+    n := 0
+    y := a
+    loop y < b {
+        if isleap(y) -> n = n + 1
+        y = y + 1
+    }
+    n
+}
+
+pub fn weekday(year: Int, month: Int, day: Int) -> Int {
+    // Sakamoto: 0 = Sunday. Convert to Monday = 0.
+    y := year
+    t := [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
+    if month < 3 -> y = y - 1
+    sun0 := (y + y / 4 - y / 100 + y / 400 + t[month - 1] + day) %% 7
+    (sun0 + 6) %% 7
+}
+
+pub fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) {
+    days :: time.days_in_month(year, month)
+    (weekday: weekday(year, month, 1), days: days)
+}
+
+pub fn monthcalendar(year: Int, month: Int) -> [[Int]] { monthcalendar_start(year, month, 0) }
+
+pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] {
+    range :: monthrange(year, month)
+    start := (range.weekday - firstweekday) %% 7
+    weeks := [[Int]]{}
+    week := [Int]{}
+    loop _ in 0..<start -> week.push(0)
+    d := 1
+    loop d <= range.days {
+        week.push(d)
+        if week.len() == 7 {
+            weeks.push(week)
+            week = [Int]{}
+        }
+        d = d + 1
+    }
+    if week.len() > 0 {
+        loop week.len() < 7 -> week.push(0)
+        weeks.push(week)
+    }
+    weeks
+}
+
+pub fn yearcalendar(year: Int) -> [[[Int]]] {
+    months := [[[Int]]]{}
+    m := 1
+    loop m <= 12 {
+        months.push(monthcalendar(year, m))
+        m = m + 1
+    }
+    months
+}
+
+pub fn day_name(weekday: Int) -> String {
+    if weekday == {
+        0 -> "Monday"
+        1 -> "Tuesday"
+        2 -> "Wednesday"
+        3 -> "Thursday"
+        4 -> "Friday"
+        5 -> "Saturday"
+        else -> "Sunday"
+    }
+}
+
+pub fn day_abbr(weekday: Int) -> String {
+    if weekday == {
+        0 -> "Mon"
+        1 -> "Tue"
+        2 -> "Wed"
+        3 -> "Thu"
+        4 -> "Fri"
+        5 -> "Sat"
+        else -> "Sun"
+    }
+}
+
+pub fn month_name(month: Int) -> String {
+    if month == {
+        1 -> "January"
+        2 -> "February"
+        3 -> "March"
+        4 -> "April"
+        5 -> "May"
+        6 -> "June"
+        7 -> "July"
+        8 -> "August"
+        9 -> "September"
+        10 -> "October"
+        11 -> "November"
+        else -> "December"
+    }
+}
+
+pub fn month_abbr(month: Int) -> String {
+    if month == {
+        1 -> "Jan"
+        2 -> "Feb"
+        3 -> "Mar"
+        4 -> "Apr"
+        5 -> "May"
+        6 -> "Jun"
+        7 -> "Jul"
+        8 -> "Aug"
+        9 -> "Sep"
+        10 -> "Oct"
+        11 -> "Nov"
+        else -> "Dec"
+    }
+}
+
+pub fn weekheader(width: Int, firstweekday: Int) -> [String] {
+    w := width
+    if w < 1 -> w = 1
+    out := [String]{}
+    i := 0
+    loop i < 7 {
+        name :: day_abbr((i + firstweekday) %% 7)
+        out.push(clip(name, w))
+        i = i + 1
+    }
+    out
+}
+
+pub fn formatmonth(year: Int, month: Int, width: Int) -> String {
+    w := width
+    if w < 2 -> w = 2
+    title :: "{month_name(month)} {year}"
+    out := "{center(title, w * 7 + 6)}\n{join_row(weekheader(w, 0), w)}\n"
+    loop week in monthcalendar(year, month) {
+        row := [String]{}
+        loop d in week {
+            if d == 0 -> row.push(pad("", w)) else -> row.push(pad("{d}", w))
+        }
+        out = "{out}{join_row(row, w)}\n"
+    }
+    out
+}
+
+pub fn formatyear(year: Int) -> String {
+    out := ""
+    m := 1
+    loop m <= 12 {
+        out = "{out}{formatmonth(year, m, 3)}\n"
+        m = m + 1
+    }
+    out
+}
+
+pub fn timegm(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int {
+    dt :: time.datetime(year, month, day, hour, minute, second, 0)
+    time.unix_seconds(dt)
+}
+
+fn clip(text: String, width: Int) -> String {
+    raw :: text.bytes()
+    if raw.len() <= width -> return pad(text, width)
+    out := [U8]{}
+    i := 0
+    loop i < width {
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn pad(text: String, width: Int) -> String {
+    raw :: text.bytes()
+    if raw.len() >= width -> return text
+    out := text
+    n := width - raw.len()
+    loop n > 0 {
+        out = " {out}"
+        n = n - 1
+    }
+    out
+}
+
+fn center(text: String, width: Int) -> String {
+    raw :: text.bytes()
+    if raw.len() >= width -> return text
+    left := (width - raw.len()) / 2
+    right := width - raw.len() - left
+    out := ""
+    loop left > 0 {
+        out = "{out} "
+        left = left - 1
+    }
+    out = "{out}{text}"
+    loop right > 0 {
+        out = "{out} "
+        right = right - 1
+    }
+    out
+}
+
+fn join_row(cells: [String], width: Int) -> String {
+    _ :: width
+    out := ""
+    i := 0
+    loop i < cells.len() {
+        if i > 0 -> out = "{out} "
+        out = "{out}{cells[i]}"
+        i = i + 1
+    }
+    out
+}

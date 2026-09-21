@@ -2,8 +2,8 @@
 """Generate the permanent core.time differential corpus.
 
 The seed and case order are fixed.  Python's datetime/date/calendar/zoneinfo
-modules are the independent oracle.  The generated Jet program is deliberately
-boring: one bound result and one protocol line per vector.
+modules are the independent oracle.  The generated Jet program loops over the committed table and prints one
+protocol line per vector, so frontend check cost stays small.
 
 Run ``python3 tools/datetime_accuracy.py`` to refresh the checked-in table,
 witnesses, and goldens, or ``python3 tools/datetime_accuracy.py --check`` to
@@ -289,8 +289,8 @@ class Corpus:
         self.source.append("}")
 
 
-def make_epoch_and_parse(corpus: Corpus, rng: random.Random) -> tuple[list[tuple[str, str]], list[str]]:
-    parse_values: list[tuple[str, str]] = []
+def make_epoch_and_parse(corpus: Corpus, rng: random.Random) -> tuple[list[int], list[str]]:
+    parse_values: list[int] = []
     malformed_inputs: list[str] = []
 
     for index in range(150):
@@ -318,7 +318,7 @@ def make_epoch_and_parse(corpus: Corpus, rng: random.Random) -> tuple[list[tuple
         parsed = corpus.declare(
             f"parsed_f5_{index:03d}", f'time.parse_rfc3339({text}) ?? panic("f5 parse")'
         )
-        parse_values.append((text, parsed))
+        parse_values.append(milliseconds)
         corpus.add(
             "F5",
             ident,
@@ -394,10 +394,10 @@ def add_epoch_edges(corpus: Corpus) -> None:
 def make_civil_and_arithmetic(
     corpus: Corpus,
     rng: random.Random,
-) -> tuple[list[tuple[str, str]], list[tuple[str, int, str]], list[tuple[str, int, str]]]:
+) -> tuple[list[tuple[str, str]], list[tuple[str, int]], list[tuple[str, int, str]]]:
     diff_pairs: list[tuple[str, str]] = []
-    add_day_cases: list[tuple[str, int, str]] = []
-    clamp_cases: list[tuple[str, str]] = []
+    add_day_cases: list[tuple[str, int]] = []
+    clamp_cases: list[tuple[str, int, str]] = []
 
     for index in range(7):
         value = date(2024, 2, 26) + timedelta(days=index)
@@ -432,7 +432,7 @@ def make_civil_and_arithmetic(
         d = corpus.declare(f"d_f3_ad_{index:03d}", f"date.new({year}, {month}, {day})")
         metadata = input_text(date=value.isoformat(), days=delta)
         corpus.add("F3", ident, "add_days", result.isoformat(), f"{d}.add_days({delta}).to_string()", metadata)
-        add_day_cases.append((d, delta, value.isoformat()))
+        add_day_cases.append((value.isoformat(), delta))
 
     for index in range(40):
         y1, m1, d1 = valid_date(rng)
@@ -446,7 +446,7 @@ def make_civil_and_arithmetic(
         metadata = input_text(a=left.isoformat(), b=right.isoformat())
         corpus.add("F3", ident_left, "diff_days", (left - right).days, f"{left_var}.diff_days({right_var})", metadata)
         corpus.add("F3", ident_right, "diff_days", (right - left).days, f"{right_var}.diff_days({left_var})", metadata)
-        diff_pairs.append((left_var, right_var))
+        diff_pairs.append((left.isoformat(), right.isoformat()))
 
     for index in range(50):
         year, month, day = valid_date(rng)
@@ -471,7 +471,7 @@ def make_civil_and_arithmetic(
         d = corpus.declare(f"d_clamp_{suffix}", f"date.new({year}, {month}, {day})")
         metadata = input_text(date=value.isoformat(), months=delta, table=True)
         corpus.add("F3", ident, "add_months", result.isoformat(), f"{d}.add_months({delta}).to_string()", metadata)
-        clamp_cases.append((d, delta, result.isoformat()))
+        clamp_cases.append((value.isoformat(), delta, result.isoformat()))
 
     for index in range(30):
         year, month, day = valid_date(rng)
@@ -506,6 +506,8 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
             transitions[name] = transition_seconds(zone)
 
     def add_view(family: str, ident: str, milliseconds: int, name: str, tag: str, metadata: str) -> None:
+        if "utc_ms=" not in metadata:
+            metadata = f"{metadata};utc_ms={milliseconds}"
         decl_name = safe_name(ident)
         dt = corpus.declare(f"dt_{decl_name}", f"time.from_unix_ms({milliseconds})")
         zoned = corpus.declare(f"z_{decl_name}", f"time.zoned({dt}, {zone_vars[name]})")
@@ -592,7 +594,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
             zoned = corpus.declare(f"z_{decl_name}", f"time.zoned({dt}, {zone_vars[name]})")
             absolute_var = corpus.declare(f"abs_{decl_name}", f"{zoned}.add_duration({day24})")
             period_var = corpus.declare(f"period_{decl_name}", f"{zoned}.add_period(time.period_days(1))")
-            metadata = input_text(zone=name, base_utc=base_utc.isoformat(), base_local=base_local.isoformat(), transition_bases=True)
+            metadata = input_text(zone=name, base_utc=base_utc.isoformat(), base_local=base_local.isoformat(), transition_bases=True, base_utc_ms=seconds * 1000)
             for tag, value, variable in (("duration", absolute, absolute_var), ("period", period, period_var)):
                 rendered = f"{value:%Y-%m-%d %H:%M:%S} {name} {offset_text(int(value.utcoffset().total_seconds()))}"
                 corpus.add("F6", ident, f"{tag}_format", rendered, f'{variable}.format("yyyy-MM-dd HH:mm:ss VV XXX")', metadata)
@@ -635,6 +637,7 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
             candidate_fold1_ms=target_candidates[1] * 1000,
             compatible_utc_ms=selected_seconds * 1000,
             python_fold=0,
+            base_utc_ms=base_seconds * 1000,
         )
         absolute = (base_utc + timedelta(hours=24)).astimezone(zone)
         for tag, value, variable in (("duration", absolute, absolute_var), ("period", selected, period_var)):
@@ -656,19 +659,19 @@ def make_zones_and_arithmetic(corpus: Corpus) -> None:
 
 def add_properties(
     corpus: Corpus,
-    parse_values: list[tuple[str, str]],
+    parse_values: list[int],
     diff_pairs: list[tuple[str, str]],
-    add_day_cases: list[tuple[str, int, str]],
+    add_day_cases: list[tuple[str, int]],
     clamp_cases: list[tuple[str, int, str]],
 ) -> None:
-    for index, (text, parsed) in enumerate(parse_values):
+    for index, milliseconds in enumerate(parse_values):
         corpus.add(
             "PROP",
             f"parse_format_{index:03d}",
             "parse_format_round_trip",
             "true",
-            f"({parsed}.format_rfc3339() == {text})",
-            input_text(source="F5", case=index),
+            "true",
+            input_text(source="F5", case=index, epoch_ms=milliseconds),
         )
     for index, (left, right) in enumerate(diff_pairs):
         corpus.add(
@@ -676,27 +679,27 @@ def add_properties(
             f"diff_days_{index:03d}",
             "diff_days_antisymmetry",
             "true",
-            f"({left}.diff_days({right}) == (0 - {right}.diff_days({left})))",
-            input_text(source="F3", pair=index),
+            "true",
+            input_text(source="F3", pair=index, a=left, b=right),
         )
-    for index, (value, delta, source_date) in enumerate(add_day_cases):
+    for index, (source_date, delta) in enumerate(add_day_cases):
         extra = 17 if index % 2 == 0 else -23
         corpus.add(
             "PROP",
             f"add_days_{index:03d}",
             "add_days_composition",
             "true",
-            f"({value}.add_days({delta}).add_days({extra}).to_string() == {value}.add_days({delta + extra}).to_string())",
+            "true",
             input_text(source_date=source_date, first=delta, second=extra),
         )
-    for index, (value, delta, expected) in enumerate(clamp_cases):
+    for index, (source_date, delta, expected) in enumerate(clamp_cases):
         corpus.add(
             "PROP",
             f"clamp_{index:03d}",
             "add_months_clamping",
             "true",
-            f"({value}.add_months({delta}).to_string() == {jet_string(expected)})",
-            input_text(source="F3 clamp", expected=expected),
+            "true",
+            input_text(source="F3 clamp", expected=expected, date=source_date, months=delta),
         )
 
 
@@ -720,6 +723,226 @@ def build_corpora() -> tuple[list[Corpus], str]:
     return [epoch, civil, zones], tzdb
 
 
+
+
+def _table_block(rows: list[Vector]) -> str:
+    body = "\n".join(f"{row.ident}\t{row.operation}\t{row.metadata}" for row in rows)
+    return f'    table :: """\n{body}\n    """'
+
+
+def compact_source(batch: str, rows: list[Vector]) -> str:
+    table = _table_block(rows)
+    if batch == "epoch_parse":
+        text = """use core.time as time
+
+fn parse_status(text: String) String -> {
+    if time.parse_rfc3339(text) == {
+        .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }
+        .Err(_) -> { return "rejected" }
+    }
+    return "rejected"
+}
+
+fn field(meta: String, key: String) String -> {
+    loop part in meta.split(";") {
+        pair :: part.split_once("=") ?? next
+        if pair.before == key -> return pair.after
+    }
+    return ""
+}
+
+fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+
+fn shown(op: String, meta: String) String -> {
+    if op == "parse_status" -> return parse_status(field(meta, "text"))
+    ms :: i(meta, "epoch_ms")
+    if op == "format" -> return time.from_unix_ms(ms).format_rfc3339()
+    if op == "to_timestamp" {
+        value :: time.from_unix_ms(ms).to_timestamp()
+        return "{value}"
+    }
+    if op == "roundtrip_ms" {
+        dt :: time.from_unix_ms(ms)
+        value :: time.from_unix_ms(dt.to_unix_ms()).to_unix_ms()
+        return "{value}"
+    }
+    if op == "format_parse_format" {
+        dt :: time.from_unix_ms(ms)
+        parsed :: time.parse_rfc3339(dt.format_rfc3339()) ?? panic("f5")
+        return parsed.format_rfc3339()
+    }
+    if op == "parse_format_round_trip" {
+        dt :: time.from_unix_ms(ms)
+        text :: dt.format_rfc3339()
+        parsed :: time.parse_rfc3339(text) ?? panic("parse")
+        return "{parsed.format_rfc3339() == text}"
+    }
+    panic(op)
+}
+
+fn run() {
+@@TABLE@@
+    loop line in table.lines() {
+        if line != "" {
+            id_rest :: line.split_once("\\t") ?? panic("row")
+            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
+            result :: shown(op_rest.before, op_rest.after)
+            print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
+        }
+    }
+}
+"""
+        return text.replace("@@TABLE@@", table) + "\n"
+    if batch == "civil_arithmetic":
+        text = """use core.time as date
+
+fn field(meta: String, key: String) String -> {
+    loop part in meta.split(";") {
+        pair :: part.split_once("=") ?? next
+        if pair.before == key -> return pair.after
+    }
+    return ""
+}
+
+fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+
+fn parse_date(iso: String) LocalDate -> {
+    y :: Int.parse(iso.before("-")) ?? panic("y")
+    rest :: iso.after("-")
+    m :: Int.parse(rest.before("-")) ?? panic("m")
+    d :: Int.parse(rest.after("-")) ?? panic("d")
+    return date.new(y, m, d)
+}
+
+fn civil_date(meta: String) LocalDate -> {
+    y :: field(meta, "year")
+    if y != "" -> return date.new(Int.parse(y) ?? panic("y"), i(meta, "month"), i(meta, "day"))
+    return parse_date(field(meta, "date"))
+}
+
+fn shown(id: String, op: String, meta: String) String -> {
+    if op == "diff_days" {
+        left :: parse_date(field(meta, "a"))
+        right :: parse_date(field(meta, "b"))
+        if id.split_once("diff_b") == {
+            return "{left.diff_days(right)}"
+        }
+        return "{right.diff_days(left)}"
+    }
+    if op == "diff_days_antisymmetry" {
+        left :: parse_date(field(meta, "a"))
+        right :: parse_date(field(meta, "b"))
+        return "{left.diff_days(right) == (0 - right.diff_days(left))}"
+    }
+    if op == "add_days_composition" {
+        first :: i(meta, "first")
+        second :: i(meta, "second")
+        src :: parse_date(field(meta, "source_date"))
+        return "{src.add_days(first).add_days(second).to_string() == src.add_days(first + second).to_string()}"
+    }
+    if op == "add_months_clamping" {
+        got :: parse_date(field(meta, "date")).add_months(i(meta, "months")).to_string()
+        want :: field(meta, "expected")
+        return "{got == want}"
+    }
+    d :: civil_date(meta)
+    if op == "weekday" -> return "{d.weekday()}"
+    if op == "iso_weekday" -> return "{d.iso_weekday()}"
+    if op == "day_of_year" -> return "{d.day_of_year()}"
+    if op == "iso_week" -> return "{d.iso_week()}"
+    if op == "days_in_month" -> return "{d.days_in_month()}"
+    if op == "is_leap_year" -> return "{d.is_leap_year()}"
+    if op == "quarter" -> return "{d.quarter_of_year()}"
+    if op == "add_days" -> return d.add_days(i(meta, "days")).to_string()
+    if op == "add_months" -> return d.add_months(i(meta, "months")).to_string()
+    if op == "path_vs_direct" {
+        a :: i(meta, "a")
+        b :: i(meta, "b")
+        return "path={d.add_months(a).add_months(b).to_string()}|direct={d.add_months(a + b).to_string()}"
+    }
+    panic(op)
+}
+
+fn run() {
+@@TABLE@@
+    loop line in table.lines() {
+        if line != "" {
+            id_rest :: line.split_once("\\t") ?? panic("row")
+            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
+            result :: shown(id_rest.before, op_rest.before, op_rest.after)
+            print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
+        }
+    }
+}
+"""
+        return text.replace("@@TABLE@@", table) + "\n"
+    text = """use core.time as time
+
+fn field(meta: String, key: String) String -> {
+    loop part in meta.split(";") {
+        pair :: part.split_once("=") ?? next
+        if pair.before == key -> return pair.after
+    }
+    return ""
+}
+
+fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+
+fn unix_ms(meta: String) Int -> {
+    raw :: field(meta, "utc_ms")
+    if raw != "" -> return Int.parse(raw) ?? panic("utc_ms")
+    resolved :: field(meta, "resolved_utc_ms")
+    if resolved != "" -> return Int.parse(resolved) ?? panic("resolved_utc_ms")
+    sec :: field(meta, "utc_seconds")
+    if sec != "" -> return (Int.parse(sec) ?? panic("sec")) * 1000
+    return i(meta, "base_utc_ms")
+}
+
+fn shown(op: String, meta: String) String -> {
+    zone :: time.zone(field(meta, "zone")) ?? panic("zone")
+    pattern :: "yyyy-MM-dd HH:mm:ss VV XXX"
+    if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)
+    if op == "view_offset" || op == "skipped_offset" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).offset_seconds()}"
+    if op == "view_dst" || op == "skipped_dst" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).is_dst()}"
+    if op == "duration_format" || op == "duration_offset" || op == "duration_dst" || op == "duration_utc_ms" {
+        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value :: zoned.add_duration(Duration.hours(24) ?? panic("duration"))
+        if op == "duration_format" -> return value.format(pattern)
+        if op == "duration_offset" -> return "{value.offset_seconds()}"
+        if op == "duration_dst" -> return "{value.is_dst()}"
+        return "{value.to_datetime().to_unix_ms()}"
+    }
+    if op == "period_format" || op == "period_offset" || op == "period_dst" || op == "period_utc_ms" || op == "period_candidate_valid" {
+        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value :: zoned.add_period(time.period_days(1))
+        if op == "period_format" -> return value.format(pattern)
+        if op == "period_offset" -> return "{value.offset_seconds()}"
+        if op == "period_dst" -> return "{value.is_dst()}"
+        if op == "period_utc_ms" -> return "{value.to_datetime().to_unix_ms()}"
+        ms :: value.to_datetime().to_unix_ms()
+        first :: i(meta, "candidate_fold0_ms")
+        second :: i(meta, "candidate_fold1_ms")
+        return "{(ms == first) || (ms == second)}"
+    }
+    panic(op)
+}
+
+fn run() {
+@@TABLE@@
+    loop line in table.lines() {
+        if line != "" {
+            id_rest :: line.split_once("\\t") ?? panic("row")
+            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
+            result :: shown(op_rest.before, op_rest.after)
+            print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
+        }
+    }
+}
+"""
+    return text.replace("@@TABLE@@", table) + "\n"
+
+
+
 def render(corpora: list[Corpus]) -> tuple[str, dict[str, str], dict[str, str]]:
     rows = [row for corpus in corpora for row in corpus.rows]
     header = [
@@ -733,7 +956,7 @@ def render(corpora: list[Corpus]) -> tuple[str, dict[str, str], dict[str, str]]:
         "# columns=batch<TAB>family<TAB>id<TAB>operation<TAB>inputs<TAB>oracle",
     ]
     vector = "\n".join(header + [row.table_line() for row in rows]) + "\n"
-    sources = {corpus.batch: "\n".join(corpus.source) + "\n" for corpus in corpora}
+    sources = {corpus.batch: compact_source(corpus.batch, corpus.rows) for corpus in corpora}
     goldens = {
         corpus.batch: "\n".join(row.protocol_line() for row in corpus.rows) + "\n"
         for corpus in corpora

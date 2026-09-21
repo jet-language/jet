@@ -34,6 +34,38 @@ toolchain that still supports edition *N*. New syntax that would break old code
 lands only behind a *newer* edition; pinning an older edition opts out of it.
 A toolchain advertises the editions it supports in `jet --version`.
 
+### Current release state (owner mandate)
+
+Jet is currently a **prerelease** toolchain. The package/compiler SemVer is
+independent of that release identity: `1.0.0` in build metadata does not mean
+that 1.0 has shipped. Breaking changes remain allowed before 1.0, and the
+post-1.0 compatibility promise below is not active yet. Present readiness and
+capability claims must come from current evidence, not from the version string
+or from the existence of a command.
+
+The executable source for this distinction is
+`crates/jet-pkg-model/src/Manifest.rs::current_release_status`. Both
+`jet version` and `jet --version` render its banner. `jet inspect claims
+--json` projects the bounded `manifest.capability_relation.rows` source and
+reports the same prerelease identity/disposition; local telemetry reports are
+diagnostic observations only and never release truth.
+
+The future policy remains ratified and unchanged. It becomes active only after
+the owner accepts a qualified 1.0 candidate; planned policy text is not
+evidence that the candidate is ready.
+
+Foreign-language command acceptance is not a release-capability claim. The
+current census keeps Ada/Pascal at the binder/manual-output boundary until
+real source conversion is demonstrated; C/C++ source import remains
+unavailable. Those dispositions belong to their existing migration/import
+owners and are not promoted by this version banner or by a telemetry report.
+
+Each counted census row retains its capability identity, execution mode,
+disposition, owner link, and candidate identity. A row without current evidence
+stays non-passing (`planned`, `implemented-unqualified`, `failed`, `stale`, or
+`unavailable`) instead of disappearing from the denominator.
+
+
 ### Enterprise LTS calendar (D-ADOPT-LTS1=A)
 
 D-ADOPT-LTS1 was ratified on 2026-08-01. Jet starts one LTS line each year.
@@ -122,19 +154,29 @@ and an interop battery against rustls and OpenSSL test vectors. Advanced client
 configuration lives under `core.net.tls`; server TLS is the D-TLSSERVE1 named
 option `Server.serve(addr, mux, tls: Server.tls(cert, key))`.
 
-## `jet --version` contract (E2-D1)
+## `jet version` / `jet --version` contract (E2-D1)
 
-`jet --version` prints, deterministically (golden-tested in `tests/release_gates.rs`):
+Both version entry points render the same deterministic banner
+(golden-tested in `tests/release_gates.rs`). The banner preserves the compiler
+SemVer while making current state explicit:
 
 ```
 Jet 1.0.0
-supported editions: 2026 (newest: 2026)
+release status: prerelease
+release disposition: current
+release readiness: not-ready
+1.0 compatibility policy: future-1.0 (planned; not active)
+supported editions: 2026, 2027, 2028 (newest: 2028)
 registry protocol: v1
 ```
 
-- compiler SemVer,
-- the supported edition range and the newest stable edition,
-- the registry-protocol compatibility version.
+The `1.0 compatibility policy` line describes ratified future law, not a
+shipped promise. A version string or banner cannot make a release ready.
+`jet inspect claims --json` is the machine-readable release-claim projection;
+it consumes one bounded `manifest.capability_relation.rows` source and must
+remain fail-closed for missing, stale, unavailable, failed, or unqualified
+rows. Telemetry reports may describe observations but do not qualify release
+readiness.
 
 ## Exit-code table (E2-M3, extends E2-M2)
 
@@ -158,9 +200,16 @@ bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
 - `edition:` field — parsed in `crates/jet-pkg-model/src/Manifest.rs`, surfaced on
   `manifest::PackageMeta`, recorded in `crates/jet-foundation/src/Syntax.rs` (`MANIFEST_FIELD_EDITION`,
   D-REL3).
+- Current release source — `manifest::current_release_status` in
+  `crates/jet-pkg-model/src/Manifest.rs`; the `jet version` and
+  `jet --version` banners use it.
+- Release-claim census — `jet inspect claims --json` projects
+  `manifest.capability_relation.rows`; telemetry reports are not release
+  evidence.
 - Supported editions — `manifest::SUPPORTED_EDITIONS`; the check is
-  `manifest::check_edition_support` (E2001), called from `crates/jet-driver/src/Loader.rs`.
-- Banner — `manifest::version_banner`, printed by `jet --version`.
+  `manifest::check_edition_support` (E2001), called from
+  `crates/jet-driver/src/Loader.rs`.
+- Banner — `manifest::version_banner`.
 - Diagnostics — E2001/E2002/L2001 in
   `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the diagnostic registry,
   snapshotted in `tests/release/`.

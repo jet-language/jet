@@ -61,6 +61,34 @@ fn is_allocator_result_type(ty: &MirType) -> bool {
     )
 }
 
+fn is_string_view_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            matches!(
+                args[0].kind(),
+                MirTypeKind::Apply { name, args }
+                    if args.is_empty() && name.name == "str"
+            )
+        }
+        MirTypeKind::Tagged { inner, .. } => is_string_view_type(inner),
+        _ => false,
+    }
+}
+
+fn is_view_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Apply { name, .. }
+            if matches!(name.name.as_str(), "View" | "ViewMut") =>
+        {
+            true
+        }
+        MirTypeKind::Tagged { inner, .. } => is_view_type(inner),
+        _ => false,
+    }
+}
+
 
 
 #[derive(Debug)]
@@ -369,7 +397,7 @@ fn mir_type_uses_atomic_word(ty: &MirType) -> bool {
                     .as_deref()
                     .is_some_and(mir_type_uses_atomic_word)
         }
-        MirTypeKind::SendFn { params, ret } => {
+        MirTypeKind::SendFn { params, ret, .. } => {
             params.iter().any(mir_type_uses_atomic_word)
                 || ret.as_deref().is_some_and(mir_type_uses_atomic_word)
         }
@@ -423,7 +451,7 @@ fn mir_type_has_inline_nominal_word(ty: &MirType) -> bool {
                     .as_deref()
                     .is_some_and(mir_type_has_inline_nominal_word)
         }
-        MirTypeKind::SendFn { params, ret } => {
+        MirTypeKind::SendFn { params, ret, .. } => {
             params.iter().any(mir_type_has_inline_nominal_word)
                 || ret
                     .as_deref()
@@ -475,7 +503,7 @@ fn mir_type_uses_shared_kernel(ty: &MirType) -> bool {
                     .as_deref()
                     .is_some_and(mir_type_uses_shared_kernel)
         }
-        MirTypeKind::SendFn { params, ret } => {
+        MirTypeKind::SendFn { params, ret, .. } => {
             params.iter().any(mir_type_uses_shared_kernel)
                 || ret.as_deref().is_some_and(mir_type_uses_shared_kernel)
         }
@@ -649,9 +677,16 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         emitter.emit_period_anchor_impls(out);
         emitter.emit_history_strategies(out);
         for trait_def in &program.traits {
+            let emit_compiler_rollback =
+                trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
             if emitter.module_selected(trait_def.module)
-                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_def.name)
-                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_def.key)
+                && (emit_compiler_rollback
+                    || (!crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
+                        &trait_def.name,
+                    )
+                        && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
+                            &trait_def.key,
+                        )))
             {
                 emitter.emit_trait_def(trait_def, &mut emitted_methods, out);
             }
@@ -2112,6 +2147,23 @@ impl<'a> RustEmitter<'a> {
             .cloned()
             .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id))
     }
+    fn native_host_field_type(&self, id: MirFieldId) -> Option<&MirType> {
+        let row = self
+            .program
+            .fields
+            .iter()
+            .find(|row| row.id == id)
+            .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id));
+        let Some(definition) = self.program.types.iter().find(|def| def.id == row.owner) else {
+            return None;
+        };
+        let native = crate::Codegen::core_rust_type_name(&definition.key).is_some()
+            || crate::Codegen::root_prelude_rust_type_name(&definition.key).is_some()
+            || crate::Codegen::core_ui_rust_type_name(&definition.key).is_some()
+            || crate::Codegen::compute_handle_rust_type(&definition.key).is_some()
+            || crate::Codegen::core_email_rust_type_name(&definition.key).is_some();
+        native.then_some(&row.field.ty)
+    }
 
     fn boxed_field(&self, id: MirFieldId) -> bool {
         let row = self
@@ -2220,12 +2272,20 @@ impl<'a> RustEmitter<'a> {
         }
         let range_type = self.type_name(type_id).ends_with("JetRange");
         let form_field_spec = self.type_def(type_id).key == "WebFormFieldSpec";
+        let async_policy = self.type_def(type_id).key == "AsyncPolicy";
         let fields = fields
             .iter()
             .map(|(field, value)| {
                 let field_name = self.field_name(*field);
                 let mut value = self.value_move(*value);
                 if range_type && matches!(field_name.as_str(), "start" | "end") {
+                    value = self.native_int_argument(value, None);
+                }
+                // `AsyncPolicy.capacity` is a public Jet `Int`, while the
+                // runtime policy stores the bounded host capacity as i64.
+                // Convert at this single prelude boundary so all tiers retain
+                // the same checked source carrier.
+                if async_policy && field_name == "capacity" {
                     value = self.native_int_argument(value, None);
                 }
                 // Prelude descriptors retain native Option at the ABI boundary.
@@ -2643,10 +2703,19 @@ impl<'a> RustEmitter<'a> {
                     )
                 }
             }
-            MirTypeKind::SendFn { params, ret } => {
+            MirTypeKind::SendFn {
+                params,
+                ret,
+                conventions,
+            } => {
                 let params = params
                     .iter()
-                    .map(|param| self.callable_parameter_type(param, MirAccess::Read))
+                    .enumerate()
+                    .map(|(index, param)| {
+                        let access =
+                            Self::callable_parameter_access(Some(conventions.as_slice()), index);
+                        self.callable_parameter_type(param, access)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let ret = ret
@@ -2860,6 +2929,25 @@ impl<'a> RustEmitter<'a> {
         if name.name == "RealtimeReceipt" {
             return format!("{}jet_std::JetRealtimeReceipt", self.config.root_prefix);
         }
+        if matches!(
+            name.name.as_str(),
+            "Cell" | "CellReadGuard" | "CellEditGuard"
+        ) {
+            let [element] = args else {
+                panic!("MIR Cell type must have exactly one value argument");
+            };
+            let carrier = self.rust_type(element);
+            let carrier_name = match name.name.as_str() {
+                "Cell" => "JetCell",
+                "CellReadGuard" => "JetCellReadGuard",
+                "CellEditGuard" => "JetCellEditGuard",
+                _ => unreachable!(),
+            };
+            return format!(
+                "{}jet_std::{carrier_name}<{carrier}>",
+                self.config.root_prefix
+            );
+        }
         if let Some(root_name) = crate::Codegen::file_handle_rust_type(&name.name) {
             return format!("{}{}", self.config.root_prefix, root_name);
         }
@@ -2888,6 +2976,9 @@ impl<'a> RustEmitter<'a> {
         if name.name == "IterCursor" {
             return "JetLoopIterCursor".to_string();
         }
+        if name.name == "ByteIterCursor" {
+            return "JetByteLoopIterCursor<'_>".to_string();
+        }
         if name.name == "Atomic" {
             if args.len() != 1 {
                 panic!("MIR Atomic type must have exactly one value argument");
@@ -2909,11 +3000,6 @@ impl<'a> RustEmitter<'a> {
                 panic!("MIR Task type must have exactly one value argument");
             };
             let carrier = self.rust_type(item);
-            let carrier = if item.result_parts().is_some() {
-                carrier
-            } else {
-                format!("Result<{carrier}, {}JetErr>", self.config.root_prefix)
-            };
             return format!("{}jet_std::JetTask<{carrier}>", self.config.root_prefix);
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
@@ -2979,6 +3065,11 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
             }
+        }
+        // D-DATAFLOW1=A: Jet retains the row type in MIR for typed stream
+        // operations, while the native stream handle is one opaque carrier.
+        if name.name == "DataStream" && !args.is_empty() {
+            return format!("{}jet_std::DataStream", self.config.root_prefix);
         }
         if let Some(core_name) = crate::Codegen::core_rust_type_name(&name.name) {
             // D-CONC-FAIL1=A: TaskFailure is Foundation's root carrier, unlike
@@ -3315,7 +3406,11 @@ impl<'a> RustEmitter<'a> {
                     .as_ref()
                     .map(|metadata| metadata.conventions.as_slice()),
             ),
-            MirTypeKind::SendFn { params, .. } => (params.as_slice(), None),
+            MirTypeKind::SendFn {
+                params,
+                conventions,
+                ..
+            } => (params.as_slice(), Some(conventions.as_slice())),
             other => panic!(
                 "MIR callable ABI requested for non-function type {}",
                 other.display_name()
@@ -4299,6 +4394,98 @@ impl<'a> RustEmitter<'a> {
             self.emit_model_web_bridge(out, definition, fact);
         }
     }
+    fn is_synthetic_rollback_trait(&self, definition: &MirTraitDef) -> bool {
+        definition.name == crate::Syntax::TRAIT_ROLLBACK && definition.methods.is_empty()
+    }
+
+    fn rollback_snapshot_type() -> MirType {
+        MirType::from_kind(MirTypeKind::Apply {
+            name: MirNominalRef {
+                id: MirTypeId(0),
+                name: "Snapshot".to_string(),
+            },
+            args: Vec::new(),
+        })
+    }
+
+    fn rollback_snapshot_return_type(function: &MirFunction, snapshot: &MirType) -> MirType {
+        if let Some((_, error)) = function.return_type.result_parts() {
+            MirType::from_kind(MirTypeKind::Result {
+                ok: Box::new(snapshot.clone()),
+                err: Box::new(error.clone()),
+            })
+        } else {
+            snapshot.clone()
+        }
+    }
+
+    fn synthetic_rollback_methods(&self, definition: &MirTraitDef) -> Vec<MirTraitMethod> {
+        let snapshot = Self::rollback_snapshot_type();
+        let mut methods = self
+            .program
+            .functions
+            .iter()
+            .filter_map(|function| {
+                let MirFunctionForm::TraitMethod {
+                    trait_ref,
+                    self_access,
+                    serde,
+                    ..
+                } = &function.form
+                else {
+                    return None;
+                };
+                if trait_ref.name != crate::Syntax::TRAIT_ROLLBACK
+                    || serde.is_some()
+                    || !self.module_selected(function.module_id)
+                    || !self.selected_for_target(function)
+                {
+                    return None;
+                }
+                let mut params = self.declared_params(function).to_vec();
+                if function.name == "restore" {
+                    for param in &mut params {
+                        if param.name == "snap" {
+                            param.ty = snapshot.clone();
+                        }
+                    }
+                }
+                let (return_type, declared_return) = if function.name == "snapshot" {
+                    (
+                        Self::rollback_snapshot_return_type(function, &snapshot),
+                        function
+                            .declared_return
+                            .as_ref()
+                            .map(|_| snapshot.clone()),
+                    )
+                } else {
+                    (function.return_type.clone(), function.declared_return.clone())
+                };
+                Some(MirTraitMethod {
+                    id: MirTraitMethodId(stable_id(
+                        "mir-trait-method",
+                        &format!("{}::{}", definition.key, function.key),
+                    )),
+                    name: function.name.clone(),
+                    span: function.span,
+                    self_access: *self_access,
+                    params,
+                    declared_return,
+                    return_type,
+                    failure: function.failure.clone(),
+                    effects: function.effects.clone(),
+                    is_pure: function.is_pure,
+                    return_view_provenance: function.return_view_provenance.clone(),
+                    declared_return_view_provenance: None,
+                    default: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        methods.sort_by(|left, right| left.name.cmp(&right.name));
+        methods.dedup_by(|left, right| left.name == right.name);
+        methods
+    }
+
     fn emit_trait_def(
         &self,
         definition: &MirTraitDef,
@@ -4314,10 +4501,52 @@ impl<'a> RustEmitter<'a> {
         for associated in &definition.associated_types {
             let _ = writeln!(out, "    type {};", mangle(&associated.name));
         }
-        for method in &definition.methods {
-            self.emit_trait_method(definition, method, emitted_methods, out);
+        if self.is_synthetic_rollback_trait(definition) {
+            for method in self.synthetic_rollback_methods(definition) {
+                self.emit_trait_method(definition, &method, emitted_methods, out);
+            }
+        } else {
+            for method in &definition.methods {
+                self.emit_trait_method(definition, method, emitted_methods, out);
+            }
         }
         let _ = writeln!(out, "}}\n");
+    }
+
+    fn synthetic_rollback_type(&self, definition: &MirTraitDef, ty: &MirType) -> String {
+        if !self.is_synthetic_rollback_trait(definition) {
+            return self.rust_type(ty);
+        }
+        if ty.nominal_name() == Some("Snapshot") {
+            return format!("Self::{}", mangle("Snapshot"));
+        }
+        if let Some((ok, error)) = ty.result_parts() {
+            let ok = if ok.nominal_name() == Some("Snapshot") {
+                format!("Self::{}", mangle("Snapshot"))
+            } else {
+                self.rust_type(ok)
+            };
+            return format!(
+                "{}JetOutcome<{}, {}>",
+                self.config.root_prefix,
+                ok,
+                self.rust_type(error)
+            );
+        }
+        self.rust_type(ty)
+    }
+
+    fn synthetic_rollback_parameter_type(
+        &self,
+        definition: &MirTraitDef,
+        param: &MirParam,
+    ) -> String {
+        let ty = self.synthetic_rollback_type(definition, &param.ty);
+        match param.access {
+            MirAccess::Write => format!("&mut {ty}"),
+            MirAccess::Read if self.parameter_borrowed(param) => format!("&{ty}"),
+            MirAccess::Read | MirAccess::Move => ty,
+        }
     }
 
     fn emit_trait_method(
@@ -4341,21 +4570,33 @@ impl<'a> RustEmitter<'a> {
             method
                 .params
                 .iter()
-                .map(|param| format!("{}: {}", mangle(&param.name), self.parameter_type(param))),
+                .map(|param| {
+                    format!(
+                        "{}: {}",
+                        mangle(&param.name),
+                        self.synthetic_rollback_parameter_type(definition, param)
+                    )
+                }),
         );
         let params = params.join(", ");
-        let ret = self.rust_type(&method.return_type);
+        let ret = self.synthetic_rollback_type(definition, &method.return_type);
         self.history_callback_lifetime.set(previous_lifetime);
         let generics = if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
             "<'__jet_callback>"
         } else {
             ""
         };
+        let method_name = if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
+            &definition.name,
+        ) {
+            method.name.clone()
+        } else {
+            mangle(&method.name)
+        };
         let Some(default_id) = method.default else {
             let _ = writeln!(
                 out,
-                "    fn {}{generics}({params}) -> {ret};",
-                mangle(&method.name)
+                "    fn {method_name}{generics}({params}) -> {ret};",
             );
             return;
         };
@@ -4443,7 +4684,13 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn global_expression(&self, name: &str) -> String {
-        let path = format!("{}{}", self.config.root_prefix, mangle_path(name));
+        let root = &self.config.root_prefix;
+        match name {
+            "transaction" => return format!("{root}jet_transaction()"),
+            "stm" => return format!("{root}jet_stm::begin()"),
+            _ => {}
+        }
+        let path = format!("{root}{}", mangle_path(name));
         if self
             .program
             .constants
@@ -4964,7 +5211,7 @@ impl<'a> RustEmitter<'a> {
                     **ret = self.normalize_trait_type(ret, owner);
                 }
             }
-            MirTypeKind::SendFn { params, ret } => {
+            MirTypeKind::SendFn { params, ret, .. } => {
                 for parameter in params {
                     *parameter = self.normalize_trait_type(parameter, owner);
                 }
@@ -6101,7 +6348,7 @@ impl<'a> RustEmitter<'a> {
                     children.push(ty);
                 }
             }
-            MirTypeKind::SendFn { params, ret } => {
+            MirTypeKind::SendFn { params, ret, .. } => {
                 children.extend(params);
                 if let Some(ty) = ret {
                     children.push(ty);
@@ -6172,7 +6419,7 @@ impl<'a> RustEmitter<'a> {
                         visit(ty, known, found);
                     }
                 }
-                MirTypeKind::SendFn { params, ret } => {
+                MirTypeKind::SendFn { params, ret, .. } => {
                     for ty in params {
                         visit(ty, known, found);
                     }
@@ -6334,9 +6581,14 @@ impl<'a> RustEmitter<'a> {
                 signature.ret = signature.ret.as_deref().map(|ty| Box::new(sub(ty)));
                 MirTypeKind::Fn(signature)
             }
-            MirTypeKind::SendFn { params, ret } => MirTypeKind::SendFn {
+            MirTypeKind::SendFn {
+                params,
+                ret,
+                conventions,
+            } => MirTypeKind::SendFn {
                 params: params.iter().map(sub).collect(),
                 ret: ret.as_deref().map(|ty| Box::new(sub(ty))),
+                conventions: conventions.clone(),
             },
             _ => return ty.clone(),
         };
@@ -6799,6 +7051,11 @@ impl<'a> RustEmitter<'a> {
             let _ = writeln!(
                 out,
                 "    pub fn {accessor}(self) -> {} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}",
+                self.rust_type(&field.ty)
+            );
+            let _ = writeln!(
+                out,
+                "    pub fn {accessor}_ref(&self) -> &{} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}",
                 self.rust_type(&field.ty)
             );
         }
@@ -7279,6 +7536,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_exports(&self, out: &mut String) {
+        if matches!(
+            self.artifact.kind,
+            MirArtifactKind::NativeLibrary | MirArtifactKind::SandboxPlugin
+        ) {
+            // Library and sandbox adapters own their checked boundary wrappers;
+            // the generic MIR export would duplicate their symbols and expose
+            // the internal failure carrier instead of the host ABI.
+            return;
+        }
         if self.config.target_kind == MirRustTarget::WebWasm {
             self.emit_web_exports(out);
             return;
@@ -10300,16 +10566,35 @@ impl<'a> RustEmitter<'a> {
         }
         let body_indent = if generator { 8 } else { 4 };
         let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
-        let _ = writeln!(
-            out,
-            "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
-            "",
-            stack_file,
-            stack_line,
-            function.name,
-            stack_source,
-            indent = body_indent
-        );
+        let retain_stack_frame = !matches!(function.failure, MirFailureCarrier::Infallible)
+            || function.is_unsafe
+            || function.scopes.iter().any(|scope| {
+                matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy)
+            });
+        if retain_stack_frame {
+            let _ = writeln!(
+                out,
+                "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
+                "",
+                stack_file,
+                stack_line,
+                function.name,
+                stack_source,
+                indent = body_indent
+            );
+        } else {
+            let _ = writeln!(out, "{:indent$}#[cfg(not(jet_release))]", "", indent = body_indent);
+            let _ = writeln!(
+                out,
+                "{:indent$}let _jet_stack_frame = jet_stack_enter({:?}, {}u32, {:?}, {:?});",
+                "",
+                stack_file,
+                stack_line,
+                function.name,
+                stack_source,
+                indent = body_indent
+            );
+        }
         let has_sentry_frame = function
             .scopes
             .iter()
@@ -10590,6 +10875,186 @@ impl<'a> RustEmitter<'a> {
         self.history_current_function.set(previous_function);
     }
 
+    fn canonical_cursor_read_place(
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<MirPlaceId> {
+        function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .find_map(|instruction| {
+                (instruction.result == Some(value)).then(|| match &instruction.operation {
+                    MirOperation::ReadPlace(place) => Some(*place),
+                    _ => None,
+                })?
+            })
+    }
+
+    fn canonical_cursor_value_matches(
+        function: &MirFunction,
+        value: MirValueId,
+        cursor: MirValueId,
+    ) -> bool {
+        fn matches(
+            function: &MirFunction,
+            value: MirValueId,
+            cursor: MirValueId,
+            cursor_place: Option<MirPlaceId>,
+            seen: &mut BTreeSet<MirValueId>,
+        ) -> bool {
+            if value == cursor {
+                return true;
+            }
+            if !seen.insert(value) {
+                return false;
+            }
+            let Some(instruction) = function
+                .blocks
+                .iter()
+                .flat_map(|block| block.instructions.iter())
+                .find(|instruction| instruction.result == Some(value))
+            else {
+                return false;
+            };
+            match &instruction.operation {
+                MirOperation::ReadPlace(place) => cursor_place == Some(*place),
+                MirOperation::LoopRangeValue { cursor: source, .. }
+                | MirOperation::LoopIterValue { cursor: source, .. } => *source == cursor,
+                MirOperation::Copy { value }
+                | MirOperation::Move { value }
+                | MirOperation::AttachTag { value, .. }
+                | MirOperation::Convert { value, .. } => {
+                    matches(function, *value, cursor, cursor_place, seen)
+                }
+                _ => false,
+            }
+        }
+
+        matches(
+            function,
+            value,
+            cursor,
+            Self::canonical_cursor_read_place(function, cursor),
+            &mut BTreeSet::new(),
+        )
+    }
+
+    /// Return the checked, canonical counted-loop bounds consumed by the
+    /// vector emitters.  Most loops retain an explicit `LoopRangeInit`; the
+    /// canonical scalar counted-loop form instead carries the same cursor
+    /// identity through a preheader write and an exclusive header comparison.
+    /// This deliberately reads only derived MIR facts and post-reconciliation
+    /// CFG shape, never raw TIR proof rows.
+    fn canonical_counted_bounds(
+        &self,
+        function: &MirFunction,
+        vector: &MirVectorFact,
+    ) -> Option<(MirValueId, MirValueId)> {
+        let cursor = vector.cursor?;
+        let row = function
+            .optimization
+            .loop_facts
+            .iter()
+            .find(|row| row.header == vector.loop_header && row.canonical)?;
+        if row.form != MirLoopForm::Counted {
+            return None;
+        }
+        if let Some((start, end)) = function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .find_map(|instruction| {
+                let MirOperation::LoopRangeInit {
+                    start,
+                    end,
+                    exclusive: true,
+                    ..
+                } = &instruction.operation
+                else {
+                    return None;
+                };
+                (instruction.result == Some(cursor)).then_some((*start, *end))
+            })
+        {
+            return Some((start, end));
+        }
+
+        let cursor_place = Self::canonical_cursor_read_place(function, cursor)?;
+        let place = function.places.iter().find(|place| place.id == cursor_place)?;
+        if !place.projections.is_empty() {
+            return None;
+        }
+        let header = function
+            .blocks
+            .iter()
+            .find(|block| block.id == row.header)?;
+        let MirTerminator::Branch { condition, .. } = header.terminator else {
+            return None;
+        };
+        let (end, comparison_cursor) = header
+            .instructions
+            .iter()
+            .find_map(|instruction| {
+                let MirOperation::Binary {
+                    op: MirBinaryOp::Lt,
+                    left,
+                    right,
+                    ..
+                } = &instruction.operation
+                else {
+                    return None;
+                };
+                (instruction.result == Some(condition)).then_some((*right, *left))
+            })?;
+        if Self::canonical_cursor_read_place(function, comparison_cursor) != Some(cursor_place)
+            || end == comparison_cursor
+        {
+            return None;
+        }
+
+        let mut starts = Vec::new();
+        for block in &function.blocks {
+            if block.id == row.header
+                || vector.body_blocks.contains(&block.id)
+                || vector.advance_block == Some(block.id)
+                || !matches!(
+                    &block.terminator,
+                    MirTerminator::Jump { target } if *target == row.header
+                )
+            {
+                continue;
+            }
+            for instruction in &block.instructions {
+                if let MirOperation::WritePlace { place, value } = &instruction.operation {
+                    if *place == cursor_place {
+                        starts.push(*value);
+                    }
+                }
+            }
+        }
+        let [start] = starts.as_slice() else {
+            return None;
+        };
+        let end_block = function
+            .blocks
+            .iter()
+            .find(|block| block.instructions.iter().any(|instruction| {
+                instruction.result == Some(end)
+            }))?;
+        if vector.body_blocks.contains(&end_block.id)
+            || vector.advance_block == Some(end_block.id)
+            || (end_block.id == row.header
+                && !end_block.instructions.iter().any(|instruction| {
+                    instruction.result == Some(end)
+                        && matches!(&instruction.operation, MirOperation::Constant(_))
+                }))
+        {
+            return None;
+        }
+        Some((*start, end))
+    }
+
     fn emit_acceleration_block(
         &self,
         function: &MirFunction,
@@ -10668,24 +11133,7 @@ impl<'a> RustEmitter<'a> {
         let Some(cursor) = vector.cursor else {
             return false;
         };
-        let Some(init) = function
-            .blocks
-            .iter()
-            .flat_map(|candidate| candidate.instructions.iter())
-            .find(|instruction| {
-                instruction.result == Some(cursor)
-                    && matches!(&instruction.operation, MirOperation::LoopRangeInit { .. })
-            })
-        else {
-            return false;
-        };
-        let MirOperation::LoopRangeInit {
-            start,
-            end,
-            exclusive: true,
-            ..
-        } = &init.operation
-        else {
+        let Some((start, end)) = self.canonical_counted_bounds(function, vector) else {
             return false;
         };
         let Some(exit) = row.exit else {
@@ -10703,8 +11151,8 @@ impl<'a> RustEmitter<'a> {
             function,
             vector,
             cursor,
-            *start,
-            *end,
+            start,
+            end,
             &outputs,
             &loop_places,
             parallel,
@@ -10769,6 +11217,28 @@ impl<'a> RustEmitter<'a> {
             source,
             "{pad}let __jet_accel_start = {start_expr};\n{pad}let __jet_accel_end = {end_expr};\n{pad}let __jet_accel_start_index = (__jet_accel_start as usize);\n{pad}let __jet_accel_range = (__jet_accel_start_index..(__jet_accel_end as usize));"
         );
+        if use_column_copy {
+            let Some(slots) = column_slots else {
+                return None;
+            };
+            for ((collection, field), slot) in slots {
+                let access = vector.accesses.iter().find(|access| {
+                    access.field == Some(*field)
+                        && access.column_index.is_some()
+                        && matches!(
+                            access.root,
+                            MirVectorAccessRoot::Value(value) if value == *collection
+                        )
+                })?;
+                let column_index = access.column_index?;
+                let collection = self.borrowed_value_reference(function, *collection, MirAccess::Read);
+                let _ = writeln!(
+                    source,
+                    "{pad}let __jet_accel_typed_column_{slot} = ({collection}).project_column({column_index}usize, |__cell| __cell.jet_col_{}_ref().clone());",
+                    self.field_name(*field)
+                );
+            }
+        }
         if use_column_copy {
             let Some(slots) = column_slots else {
                 return None;
@@ -10906,20 +11376,9 @@ impl<'a> RustEmitter<'a> {
             );
             let project = slots
                 .iter()
-                .map(|((collection, field), _column_slot)| {
-                    let access = vector.accesses.iter().find(|access| {
-                        access.field == Some(*field)
-                            && access.column_index.is_some()
-                            && matches!(
-                                access.root,
-                                MirVectorAccessRoot::Value(value) if value == *collection
-                            )
-                    })?;
-                    let column_index = access.column_index?;
+                .map(|((_collection, _field), slot)| {
                     Some(format!(
-                        "({}).column({column_index})[((__jet_accel_source_index) as usize)].clone().jet_col_{}()",
-                        self.value_read(*collection),
-                        self.field_name(*field)
+                        "__jet_accel_typed_column_{slot}[(__jet_accel_source_index as usize)].clone()"
                     ))
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -11031,7 +11490,7 @@ impl<'a> RustEmitter<'a> {
                     matches!(
                         projection,
                         MirProjection::Index { index: candidate, kind: MirIndexKind::FixedListProof, .. }
-                            if *candidate == cursor
+                            if Self::canonical_cursor_value_matches(function, *candidate, cursor)
                     )
                     .then_some(index)
                 });
@@ -11064,18 +11523,7 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         cursor: MirValueId,
     ) -> bool {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .any(|instruction| {
-                instruction.result == Some(value)
-                    && matches!(
-                        &instruction.operation,
-                        MirOperation::LoopRangeValue { cursor: candidate, .. }
-                            if *candidate == cursor
-                    )
-            })
+        Self::canonical_cursor_value_matches(function, value, cursor)
     }
     fn acceleration_column_slots(
         &self,
@@ -11158,7 +11606,15 @@ impl<'a> RustEmitter<'a> {
             }
             MirOperation::LoopRangeValue {
                 cursor: candidate, ..
+            }
+            | MirOperation::LoopIterValue {
+                cursor: candidate, ..
             } if *candidate == cursor => index_expr.to_string(),
+            MirOperation::ReadPlace(_)
+                if Self::canonical_cursor_value_matches(function, value, cursor) =>
+            {
+                index_expr.to_string()
+            }
             MirOperation::ReadPlace(place) => self.acceleration_place_expr(
                 function,
                 *place,
@@ -11186,11 +11642,15 @@ impl<'a> RustEmitter<'a> {
                 index,
                 kind: MirIndexKind::FixedListProof,
                 ..
-            } if *index == cursor && column_context.is_none() => format!(
-                "({})[(({} ) as usize)].clone()",
-                self.value_read(*base),
-                index_expr
-            ),
+            } if Self::canonical_cursor_value_matches(function, *index, cursor)
+                && column_context.is_none() =>
+            {
+                format!(
+                    "({})[(({} ) as usize)].clone()",
+                    self.value_read(*base),
+                    index_expr
+                )
+            }
             MirOperation::Field { base, field } => self.acceleration_field_expr(
                 function,
                 *base,
@@ -11257,7 +11717,7 @@ impl<'a> RustEmitter<'a> {
                 column_index,
                 index,
                 ..
-            }) if *index == cursor => {
+            }) if Self::canonical_cursor_value_matches(function, *index, cursor) => {
                 if let Some((columns, offset, slots)) = column_context {
                     if let Some(slot) = slots.get(&(*base, *column)) {
                         format!("({columns}[{offset}].{slot}).clone()")
@@ -11316,7 +11776,7 @@ impl<'a> RustEmitter<'a> {
             ..
         } = &base_instruction.operation
         {
-            if *index != cursor {
+            if !Self::canonical_cursor_value_matches(function, *index, cursor) {
                 return None;
             }
             if let Some((columns, offset, slots)) = column_context {
@@ -11387,7 +11847,7 @@ impl<'a> RustEmitter<'a> {
                     kind: MirIndexKind::FixedListProof,
                     index,
                     ..
-                } if *index == cursor
+                } if Self::canonical_cursor_value_matches(function, *index, cursor)
             )
         })?;
         if place.projections[..index_pos]
@@ -11562,24 +12022,7 @@ impl<'a> RustEmitter<'a> {
         let Some(width) = fact.lane_width else {
             return false;
         };
-        let Some(init) = function
-            .blocks
-            .iter()
-            .flat_map(|candidate| candidate.instructions.iter())
-            .find(|instruction| {
-                instruction.result == Some(cursor)
-                    && matches!(&instruction.operation, MirOperation::LoopRangeInit { .. })
-            })
-        else {
-            return false;
-        };
-        let MirOperation::LoopRangeInit {
-            start,
-            end,
-            exclusive: true,
-            ..
-        } = &init.operation
-        else {
+        let Some((start, end)) = self.canonical_counted_bounds(function, fact) else {
             return false;
         };
         let Some(exit) = fact
@@ -11591,9 +12034,9 @@ impl<'a> RustEmitter<'a> {
             return false;
         };
         let source = match width {
-            2 => self.vector_loop_source::<2>(function, fact, cursor, *start, *end, exit, indent),
-            4 => self.vector_loop_source::<4>(function, fact, cursor, *start, *end, exit, indent),
-            8 => self.vector_loop_source::<8>(function, fact, cursor, *start, *end, exit, indent),
+            2 => self.vector_loop_source::<2>(function, fact, cursor, start, end, exit, indent),
+            4 => self.vector_loop_source::<4>(function, fact, cursor, start, end, exit, indent),
+            8 => self.vector_loop_source::<8>(function, fact, cursor, start, end, exit, indent),
             _ => None,
         };
         let Some(source) = source else {
@@ -11672,6 +12115,14 @@ impl<'a> RustEmitter<'a> {
         )?;
         let pad = " ".repeat(indent);
         let mut out = String::new();
+        for (collection, field, column, slot) in self.vector_column_slots(fact) {
+            let collection = self.borrowed_value_reference(function, collection, MirAccess::Read);
+            let _ = writeln!(
+                out,
+                "{pad}let __jet_vec_column_{slot} = ({collection}).project_column({column}usize, |__cell| __cell.jet_col_{}_ref().clone());",
+                self.field_name(field)
+            );
+        }
         let start = self.value_read(start);
         let end = self.value_read(end);
         let _ = writeln!(out, "{pad}let __jet_vec_start = {start};");
@@ -11924,6 +12375,44 @@ impl<'a> RustEmitter<'a> {
         }
         Some(source)
     }
+    fn vector_column_slots(
+        &self,
+        fact: &MirVectorFact,
+    ) -> Vec<(MirValueId, MirFieldId, usize, usize)> {
+        let mut slots = BTreeMap::new();
+        for access in &fact.accesses {
+            let (MirVectorAccessRoot::Value(collection), Some(field), Some(column)) =
+                (access.root, access.field, access.column_index)
+            else {
+                continue;
+            };
+            if access.layout != MirVectorLayout::ColumnarDirect {
+                continue;
+            }
+            let slot = slots.len();
+            slots
+                .entry((collection, field))
+                .or_insert((column, slot));
+        }
+        slots
+            .into_iter()
+            .map(|((collection, field), (column, slot))| (collection, field, column, slot))
+            .collect()
+    }
+
+    fn vector_column_slot(
+        &self,
+        fact: &MirVectorFact,
+        collection: MirValueId,
+        field: MirFieldId,
+    ) -> Option<usize> {
+        self.vector_column_slots(fact)
+            .into_iter()
+            .find_map(|(candidate, candidate_field, _, slot)| {
+                (candidate == collection && candidate_field == field).then_some(slot)
+            })
+    }
+
     fn vector_default_int_type(ty: &MirType) -> bool {
         match ty.kind() {
             // Exact Int is an owned node, not a machine-vector lane.
@@ -12037,11 +12526,18 @@ impl<'a> RustEmitter<'a> {
             )),
             MirOperation::LoopRangeValue { cursor, .. }
             | MirOperation::LoopIterValue { cursor, .. }
-                if Some(*cursor) == fact.cursor =>
+                if fact.cursor.is_some_and(|fact_cursor| *cursor == fact_cursor) =>
             {
                 let index = self.vector_index_expr(function, fact, index_name, "lane as _");
                 Some(format!("core::array::from_fn(|lane| {index})"))
-            }
+            },
+            MirOperation::ReadPlace(place)
+                if fact.cursor == Some(value)
+                    && Self::canonical_cursor_read_place(function, value) == Some(*place) =>
+            {
+                let index = self.vector_index_expr(function, fact, index_name, "lane as _");
+                Some(format!("core::array::from_fn(|lane| {index})"))
+            },
             MirOperation::ReadPlace(place) | MirOperation::MovePlace { place } => {
                 self.vector_place_load(function, *place, fact, index_name, loop_places, width)
             }
@@ -12058,7 +12554,9 @@ impl<'a> RustEmitter<'a> {
             ),
             MirOperation::Index {
                 base, index, kind, ..
-            } if Some(*index) == fact.cursor && *kind == MirIndexKind::FixedListProof => {
+            } if fact.cursor.is_some_and(|cursor| {
+                Self::canonical_cursor_value_matches(function, *index, cursor)
+            }) && *kind == MirIndexKind::FixedListProof => {
                 self.vector_index_load(function, *base, fact, index_name, width)
             }
             MirOperation::Field { base, field } => self.vector_field_load(
@@ -12113,13 +12611,21 @@ impl<'a> RustEmitter<'a> {
                 column_index,
                 index,
                 ..
-            }) if Some(*index) == fact.cursor => {
-                let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
-                Some(format!(
-                    "core::array::from_fn(|lane| ({}) .column({column_index})[{index}].clone().jet_col_{}())",
-                    self.value_read(*base),
-                    self.field_name(*column)
-                ))
+            }) if fact.cursor.is_some_and(|cursor| {
+                Self::canonical_cursor_value_matches(function, *index, cursor)
+            }) => {
+                let index = self.value_read(*index);
+                if let Some(slot) = self.vector_column_slot(fact, *base, *column) {
+                    Some(format!(
+                        "core::array::from_fn(|lane| __jet_vec_column_{slot}[{index}].clone())"
+                    ))
+                } else {
+                    Some(format!(
+                        "core::array::from_fn(|lane| ({}) .column({column_index})[{index}].clone().jet_col_{}())",
+                        self.value_read(*base),
+                        self.field_name(*column)
+                    ))
+                }
             }
             MirOperation::Parameter { .. }
             | MirOperation::Capture { .. }
@@ -12269,7 +12775,9 @@ impl<'a> RustEmitter<'a> {
             matches!(
                 projection,
                 MirProjection::Index { index, kind, .. }
-                    if Some(*index) == fact.cursor && *kind == MirIndexKind::FixedListProof
+                    if fact.cursor.is_some_and(|cursor| {
+                        Self::canonical_cursor_value_matches(function, *index, cursor)
+                    }) && *kind == MirIndexKind::FixedListProof
             )
         })?;
         if place.projections[..index_pos]
@@ -12338,16 +12846,29 @@ impl<'a> RustEmitter<'a> {
             ..
         } = &base_instruction.operation
         {
-            if Some(*index) != fact.cursor {
+            if !fact.cursor.is_some_and(|cursor| {
+                Self::canonical_cursor_value_matches(function, *index, cursor)
+            }) {
                 return None;
             }
             let access = fact
                 .accesses
                 .iter()
-                .find(|access| access.field == Some(field))?;
+                .find(|access| {
+                    access.field == Some(field)
+                        && matches!(
+                            access.root,
+                            MirVectorAccessRoot::Value(value) if value == *collection
+                        )
+                })?;
             if access.layout == MirVectorLayout::ColumnarDirect {
                 let column = access.column_index?;
                 let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
+                if let Some(slot) = self.vector_column_slot(fact, *collection, field) {
+                    return Some(format!(
+                        "core::array::from_fn(|lane| __jet_vec_column_{slot}[{index}].clone())"
+                    ));
+                }
                 return Some(format!(
                     "core::array::from_fn(|lane| ({}) .column({column})[{index}].clone().jet_col_{}())",
                     self.value_read(*collection),
@@ -12660,6 +13181,106 @@ impl<'a> RustEmitter<'a> {
                 (instruction.result == Some(value)).then_some(&instruction.operation)
             })
     }
+    fn field_place_expression(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<String> {
+        match self.value_definition(function, value) {
+            Some(MirOperation::AddressOf { place, .. } | MirOperation::ReadPlace(place)) => {
+                let place = function
+                    .places
+                    .iter()
+                    .find(|candidate| candidate.id == *place)?;
+                Some(self.place_base(function, &place.base, false, &place.projections))
+            }
+            Some(MirOperation::Field { base, field }) => Some(format!(
+                "({}).{}",
+                self.field_place_expression(function, *base)?,
+                self.field_name(*field)
+            )),
+            Some(MirOperation::Parameter { .. }) => Some(self.parameter_place(function, value, false)),
+            Some(MirOperation::Capture { .. }) => Some(self.capture_place(function, value, false)),
+            _ => None,
+        }
+    }
+
+    fn borrowed_field_reference(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<String> {
+        let place = self.field_place_expression(function, value)?;
+        if is_view_type(self.value_type(function, value)) {
+            Some(format!("({place})"))
+        } else {
+            Some(format!("&({place})"))
+        }
+    }
+
+    fn literal_string_value(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<String> {
+        let Some(MirOperation::BuildString { parts }) = self.value_definition(function, value)
+        else {
+            return None;
+        };
+        let mut literal = String::new();
+        for part in parts {
+            let MirStringPart::Literal(value) = part else {
+                return None;
+            };
+            literal.push_str(value);
+        }
+        Some(literal)
+    }
+
+    fn borrowed_literal_symbol(symbol: &str) -> bool {
+        matches!(
+            symbol.rsplit("::").next().unwrap_or(symbol),
+            "jet_unicode_lower"
+                | "jet_unicode_upper"
+                | "jet_unicode_trim"
+                | "jet_unicode_trim_view"
+                | "jet_unicode_index_of"
+                | "jet_unicode_last_index_of"
+                | "jet_unicode_count"
+                | "jet_unicode_split_once"
+                | "jet_unicode_cut_last"
+        )
+    }
+
+    fn borrowed_literal_route(&self, route: MirPreludeCallId) -> bool {
+        Self::borrowed_literal_symbol(&self.prelude_symbol(route))
+    }
+
+    fn call_arg_for_function_with_literal(
+        &self,
+        function: &MirFunction,
+        arg: &MirCallArg,
+        borrowed: bool,
+        allow_literal: bool,
+    ) -> String {
+        if allow_literal
+            && borrowed
+            && arg.access == MirAccess::Read
+            && !arg.authority_boundary
+            && !arg.implicit_clone
+            && !arg.shared_auto_clone
+            && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
+            && arg.box_as_trait.is_none()
+            && arg.fn_coercion.is_none()
+        {
+            if let Some(value) = self.literal_string_value(function, arg.value) {
+                return format!("{value:?}");
+            }
+        }
+        self.call_arg_for_function(function, arg, borrowed)
+    }
+
 
     fn borrowed_value_reference(
         &self,
@@ -12673,6 +13294,11 @@ impl<'a> RustEmitter<'a> {
             } else {
                 format!("&({place})")
             };
+        }
+        if access == MirAccess::Read {
+            if let Some(reference) = self.borrowed_field_reference(function, value) {
+                return reference;
+            }
         }
         let mutable = access == MirAccess::Write;
         match self.value_definition(function, value) {
@@ -12841,10 +13467,12 @@ impl<'a> RustEmitter<'a> {
                 for (index, argument) in args.iter().enumerate() {
                     if argument.value == value {
                         found = true;
+                        let literal_route = self.literal_string_value(function, value).is_some()
+                            && !self.borrowed_literal_route(*route);
                         if !self.direct_borrow_call_arg(
                             argument,
                             self.core_call_argument_borrowed(*route, index),
-                        ) {
+                        ) || literal_route {
                             return false;
                         }
                     }
@@ -12901,6 +13529,14 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
                 found
+            }
+            MirOperation::Semantic(MirSemanticOp::CoreClosureCall { kind, values, .. })
+                if matches!(
+                    kind,
+                    MirCoreClosureKind::OnCommit | MirCoreClosureKind::OnRollback
+                ) =>
+            {
+                values.first().copied() == Some(value)
             }
             MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
                 call,
@@ -12962,14 +13598,14 @@ impl<'a> RustEmitter<'a> {
                 }
                 found
             }
-            MirOperation::Field { base, .. }
-                if *base == value && self.shared_guard_borrow_origin(function, *base) =>
-            {
-                true
-            }
             MirOperation::Deref { value: operand }
                 if *operand == value
                     && is_shared_guard_type(self.value_type(function, *operand)) =>
+            {
+                true
+            }
+            MirOperation::Field { base, .. }
+                if *base == value && self.shared_guard_borrow_origin(function, *base) =>
             {
                 true
             }
@@ -12985,7 +13621,20 @@ impl<'a> RustEmitter<'a> {
                 {
                     continue;
                 }
-                if !self.borrowed_operation_use(function, &instruction.operation, value) {
+                let borrowed = match &instruction.operation {
+                    MirOperation::Field { base, .. }
+                        if *base == value
+                            && instruction.result.is_some_and(|field| {
+                                self.field_place_expression(function, field).is_some()
+                            }) =>
+                    {
+                        instruction
+                            .result
+                            .is_some_and(|field| self.direct_borrow_only(function, field))
+                    }
+                    _ => self.borrowed_operation_use(function, &instruction.operation, value),
+                };
+                if !borrowed {
                     return false;
                 }
                 used = true;
@@ -13010,6 +13659,45 @@ impl<'a> RustEmitter<'a> {
             .map(|(_, _, _, ownership)| *ownership)
             .unwrap_or_else(|| panic!("MIR value ID {:?} has no ownership row", value))
     }
+    fn literal_borrow_only(&self, function: &MirFunction, value: MirValueId) -> bool {
+        if self.literal_string_value(function, value).is_none() {
+            return false;
+        }
+        let mut used = false;
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                if instruction.result == Some(value)
+                    || !instruction.operation.value_uses().contains(&value)
+                {
+                    continue;
+                }
+                let allowed = match &instruction.operation {
+                    MirOperation::CoreCall { route, args, .. }
+                    | MirOperation::Semantic(MirSemanticOp::HostCall { call: route, args })
+                    | MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call: route, args, ..
+                    }) => args.iter().enumerate().any(|(index, arg)| {
+                        arg.value == value
+                            && self.direct_borrow_call_arg(
+                                arg,
+                                self.core_call_argument_borrowed(*route, index),
+                            )
+                            && self.borrowed_literal_route(*route)
+                    }),
+                    _ => false,
+                };
+                if !allowed {
+                    return false;
+                }
+                used = true;
+            }
+            if block.terminator.value_uses().contains(&value) {
+                return false;
+            }
+        }
+        used
+    }
+
 
     fn value_transfer(&self, value: MirValueId) -> String {
         if self.history_binding(value).is_none()
@@ -13251,6 +13939,19 @@ impl<'a> RustEmitter<'a> {
             });
             let prefix = &place.projections[..place.projections.len() - 1];
             let base = self.place_base(function, &place.base, true, prefix);
+            let update_string = matches!(
+                &self.prelude_row(call).symbol,
+                MirSymbol::Prelude(symbol) if symbol == "jet_map_update_string"
+            );
+            if update_string {
+                let index = self.borrowed_value_reference(function, *index, MirAccess::Read);
+                let args = vec![
+                    format!("&mut ({base})"),
+                    index,
+                    format!("move |_| {{ {value} }}"),
+                ];
+                return self.prelude_call_args_exact(call, &args);
+            }
             let index = if matches!(kind, MirIndexKind::Map) {
                 self.value_read(*index)
             } else {
@@ -13263,20 +13964,30 @@ impl<'a> RustEmitter<'a> {
             ];
             if let Some(context) = context.as_ref() {
                 extras.push(format!("{:?}", context.function));
-                extras.push(format!("{:?}", context.source_line));
+                extras.push(format!("{}u32", context.source_line));
             }
             self.append_prelude_context(call, &mut args, &extras);
             return self.prelude_call_args_exact(call, &args);
+        }
+        let mut value = value.to_string();
+        if let Some(MirProjection::Field { field, .. }) = place.projections.last() {
+            if self.native_host_field_type(*field).is_some()
+                && value_id.is_some_and(|value| {
+                    matches!(self.value_type(function, value).kind(), MirTypeKind::Int)
+                })
+            {
+                value = self.native_int_argument(value, None);
+            }
         }
         let value = match place.projections.last() {
             Some(MirProjection::Field { field, .. }) if self.boxed_field(*field) => {
                 format!("Box::new({value})")
             }
-            _ => value.to_string(),
+            _ => value,
         };
         format!("{} = {value}", self.place_lvalue(function, id))
-    }
 
+}
     fn persist_renderable_type(&self, ty: &MirType) -> bool {
         match ty.kind() {
             MirTypeKind::Int
@@ -13352,7 +14063,18 @@ impl<'a> RustEmitter<'a> {
             &instruction.operation,
             MirOperation::Field { base, .. }
                 if self.shared_guard_borrow_origin(function, *base)
-        );
+        ) || matches!(
+            &instruction.operation,
+            MirOperation::Field { .. }
+        ) && instruction.result.is_some_and(|value| {
+            self.field_place_expression(function, value).is_some()
+                && self.direct_borrow_only(function, value)
+        }) || matches!(
+            &instruction.operation,
+            MirOperation::BuildString { .. }
+        ) && instruction.result.is_some_and(|value| {
+            self.literal_borrow_only(function, value)
+        });
         if direct_borrow_projection
             && instruction
                 .result
@@ -13783,6 +14505,8 @@ impl<'a> RustEmitter<'a> {
                 let value_ty = self.value_type(function, *value);
                 if is_allocator_result_type(value_ty) {
                     self.value_move(*value)
+                } else if is_string_view_type(value_ty) {
+                    format!("jet_string_view_copy({})", self.value_read(*value))
                 } else if matches!(value_ty.kind(), MirTypeKind::Int) {
                     self.value_read(*value)
                 } else {
@@ -13860,7 +14584,7 @@ impl<'a> RustEmitter<'a> {
                         })
                         .unwrap_or(emitted)
                 } else {
-                    emitted
+                    self.call_result_expression(function, callee, result, emitted)
                 }
             }
             MirOperation::CoreCall { call, route, args, type_args, data_plan, fallibility, .. } => {
@@ -13965,9 +14689,36 @@ impl<'a> RustEmitter<'a> {
                 self.loop_iter_init(function, *call, *collection, *step, *by_value, source_kind,
                     location.expect("MIR iterator cursor is missing its instruction source location"))
             }
-            MirOperation::LoopIterHasNext { call, cursor } => self.prelude_cursor_call(*call, *cursor, MirAccess::Read),
-            MirOperation::LoopIterValue { call, cursor } => self.prelude_cursor_call(*call, *cursor, MirAccess::Write),
-            MirOperation::LoopIterAdvance { call, cursor } => self.prelude_cursor_call(*call, *cursor, MirAccess::Write),
+            MirOperation::LoopIterHasNext { call, cursor } => {
+                if self.byte_loop_cursor(function, *cursor) {
+                    format!(
+                        "jet_loop_iter_bytes_has_next({})",
+                        self.value_slot_reference(*cursor, false)
+                    )
+                } else {
+                    self.prelude_cursor_call(*call, *cursor, MirAccess::Read)
+                }
+            }
+            MirOperation::LoopIterValue { call, cursor } => {
+                if self.byte_loop_cursor(function, *cursor) {
+                    format!(
+                        "jet_loop_iter_bytes_value({})",
+                        self.value_borrow_mut(*cursor)
+                    )
+                } else {
+                    self.prelude_cursor_call(*call, *cursor, MirAccess::Write)
+                }
+            }
+            MirOperation::LoopIterAdvance { call, cursor } => {
+                if self.byte_loop_cursor(function, *cursor) {
+                    format!(
+                        "jet_loop_iter_bytes_advance({})",
+                        self.value_borrow_mut(*cursor)
+                    )
+                } else {
+                    self.prelude_cursor_call(*call, *cursor, MirAccess::Write)
+                }
+            }
             MirOperation::ScopeEnter { scope, .. } => format!("{{ let _ = {}; }}", scope.0),
             MirOperation::ScopeExit { scope } => format!("{{ let _ = {}; }}", scope.0),
             MirOperation::Drop { value, kind } => self.drop_expression(function, *value, *kind),
@@ -14084,46 +14835,71 @@ impl<'a> RustEmitter<'a> {
         right: MirValueId,
         location: Option<&MirPanicLoc>,
     ) -> Option<String> {
-        if !matches!(
-            (
-                self.value_type(function, left).kind(),
-                self.value_type(function, right).kind(),
-            ),
-            (MirTypeKind::Int, MirTypeKind::Int)
-        ) {
+        fn exact_int_carrier(ty: &MirType) -> bool {
+            match ty.kind() {
+                MirTypeKind::Int => true,
+                MirTypeKind::InlineRange { base, .. }
+                | MirTypeKind::Tagged { inner: base, .. }
+                | MirTypeKind::Quantity { base, .. } => exact_int_carrier(base),
+                _ => false,
+            }
+        }
+
+        if !exact_int_carrier(self.value_type(function, left))
+            || !exact_int_carrier(self.value_type(function, right))
+        {
             return None;
         }
-        let (helper, contextual) = match op {
-            MirBinaryOp::Add => ("jet_int_owned_add", false),
-            MirBinaryOp::Sub => ("jet_int_owned_sub", false),
-            MirBinaryOp::Mul => ("jet_int_owned_mul", false),
-            MirBinaryOp::BitAnd => ("jet_int_owned_bit_and", false),
-            MirBinaryOp::BitOr => ("jet_int_owned_bit_or", false),
-            MirBinaryOp::BitXor => ("jet_int_owned_bit_xor", false),
-            MirBinaryOp::Div => ("jet_int_owned_div", true),
-            MirBinaryOp::FloorDiv => ("jet_int_owned_floor_div", true),
-            MirBinaryOp::Mod => ("jet_int_owned_mod", true),
-            MirBinaryOp::Rem => ("jet_int_owned_rem", true),
-            MirBinaryOp::Pow => ("jet_int_owned_pow", true),
-            MirBinaryOp::Shl => ("jet_int_owned_shl", true),
-            MirBinaryOp::Shr => ("jet_int_owned_shr", true),
+        let (owned_helper, hot_helper, contextual) = match op {
+            MirBinaryOp::Add => ("jet_int_owned_add", Some("jet_int_add_hot"), false),
+            MirBinaryOp::Sub => ("jet_int_owned_sub", Some("jet_int_sub_hot"), false),
+            MirBinaryOp::Mul => ("jet_int_owned_mul", Some("jet_int_mul_hot"), false),
+            MirBinaryOp::BitAnd => ("jet_int_owned_bit_and", Some("jet_int_bit_and_hot"), false),
+            MirBinaryOp::BitOr => ("jet_int_owned_bit_or", Some("jet_int_bit_or_hot"), false),
+            MirBinaryOp::BitXor => ("jet_int_owned_bit_xor", Some("jet_int_bit_xor_hot"), false),
+            MirBinaryOp::Div => ("jet_int_owned_div", Some("jet_int_div_hot"), true),
+            MirBinaryOp::FloorDiv => (
+                "jet_int_owned_floor_div",
+                Some("jet_int_floor_div_hot"),
+                true,
+            ),
+            MirBinaryOp::Mod => ("jet_int_owned_mod", Some("jet_int_mod_hot"), true),
+            MirBinaryOp::Rem => ("jet_int_owned_rem", Some("jet_int_rem_hot"), true),
+            MirBinaryOp::Pow => ("jet_int_owned_pow", None, true),
+            MirBinaryOp::Shl => ("jet_int_owned_shl", Some("jet_int_shl_hot"), true),
+            MirBinaryOp::Shr => ("jet_int_owned_shr", Some("jet_int_shr_hot"), true),
             _ => return None,
         };
         let left = self.value_slot_reference(left, false);
         let right = self.value_slot_reference(right, false);
-        let args = if contextual {
+        let location_args = || {
             let location = location
                 .unwrap_or_else(|| panic!("MIR exact Int arithmetic is missing source location"));
             format!(
-                "{left}, {right}, {:?}, {}u32",
+                "{:?}, {}u32",
                 self.source_file_path(location.file),
                 location.line
             )
+        };
+        if let Some(hot_helper) = hot_helper {
+            let args = if contextual {
+                format!("({left}).to_raw(), ({right}).to_raw(), {}", location_args())
+            } else {
+                format!("({left}).to_raw(), ({right}).to_raw()")
+            };
+            return Some(format!(
+                "{}jet_std::jet_int_owned_from_raw_result({}jet_std::{hot_helper}!({args}))",
+                self.config.root_prefix,
+                self.config.root_prefix
+            ));
+        }
+        let args = if contextual {
+            format!("{left}, {right}, {}", location_args())
         } else {
             format!("{left}, {right}")
         };
         Some(format!(
-            "{}jet_std::{helper}({args})",
+            "{}jet_std::{owned_helper}({args})",
             self.config.root_prefix
         ))
     }
@@ -14578,6 +15354,24 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         match dispatch {
             MirBinaryDispatch::Primitive => {
+                if op == MirBinaryOp::Add
+                    && matches!(
+                        self.value_type(function, left).kind(),
+                        MirTypeKind::String
+                    )
+                    && (matches!(
+                        self.value_type(function, right).kind(),
+                        MirTypeKind::String
+                    ) || is_string_view_type(self.value_type(function, right)))
+                {
+                    let left = self.value_read(left);
+                    let right = if is_string_view_type(self.value_type(function, right)) {
+                        self.value_read(right)
+                    } else {
+                        self.value_slot_reference(right, false)
+                    };
+                    return format!("(({left}) + ({right}))");
+                }
                 if matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne) {
                     if let Some(equal) = self.canonical_equality(function, left, right) {
                         return if op == MirBinaryOp::Eq {
@@ -14603,6 +15397,13 @@ impl<'a> RustEmitter<'a> {
                 let row = self.prelude_row(*call);
                 let symbol = self.prelude_symbol(*call);
                 let adapter = self.exact_prelude_adapter(&symbol);
+                if adapter.is_some() {
+                    if let Some(exact) =
+                        self.exact_int_binary(function, op, left, right, location.as_ref())
+                    {
+                        return exact;
+                    }
+                }
                 let mut args = [left, right]
                     .into_iter()
                     .enumerate()
@@ -15049,23 +15850,26 @@ impl<'a> RustEmitter<'a> {
         index: MirValueId,
         location: Option<MirPanicLoc>,
     ) -> String {
+        let route = self.prelude_row(accessor);
+        if route.family != MirPreludeFamily::ColumnarAccess
+            || route.module != "core.columnar"
+            || route.symbol.name() != "jet_columns_gather_cell"
+            || route.signature.arity != 3
+            || route.signature.max_arity != 3
+            || route.signature.borrow_mask.as_slice() != [true, false, false]
+        {
+            panic!("MIR columnar accessor has non-canonical Prelude route");
+        }
         let location = location.unwrap_or_else(|| {
             panic!("MIR columnar read is missing its instruction source location")
         });
         let file = format!("{:?}", self.source_file_path(location.file));
         let line = format!("{}u32", location.line);
-        let emitted = self.prelude_call_args_exact(
-            accessor,
-            &[
-                format!("&({}).views()", self.value_read(base)),
-                format!("{column_index}usize"),
-                self.index_operand(function, index, location),
-            ],
-        );
+        let base = self.borrowed_value_reference(function, base, MirAccess::Read);
+        let index = self.index_operand(function, index, location);
         format!(
-            "{{ match {emitted} {{ Ok(__cell) => __cell.jet_col_{}(), Err(__error) => {}jet_arithmetic_stop({file}, {line}, &__error.message()) }} }}",
-            self.field_name(column),
-            self.config.root_prefix
+            "({base}).cell({column_index}usize, {index}, {file}, {line}).jet_col_{}()",
+            self.field_name(column)
         )
     }
 
@@ -15174,6 +15978,87 @@ impl<'a> RustEmitter<'a> {
             }
         };
         self.history_instantiated_call(callee, type_args, invocation)
+    }
+
+    fn call_result_expression(
+        &self,
+        function: &MirFunction,
+        callee: &MirCallee,
+        result: Option<MirValueId>,
+        emitted: String,
+    ) -> String {
+        let Some(result) = result else {
+            return emitted;
+        };
+        if self.call_result_is_success(function, callee, result) {
+            format!("({emitted})?")
+        } else {
+            emitted
+        }
+    }
+
+    fn call_result_is_success(
+        &self,
+        function: &MirFunction,
+        callee: &MirCallee,
+        result: MirValueId,
+    ) -> bool {
+        let result_type = self.value_type(function, result);
+        match callee {
+            MirCallee::User(id) => {
+                Self::result_matches_failure(result_type, &self.function_row(*id).failure)
+            }
+            MirCallee::Associated { function: id, .. }
+            | MirCallee::Method { function: id, .. } => {
+                Self::result_matches_failure(result_type, &self.function_row(*id).failure)
+            }
+            MirCallee::TraitMethod { method, trait_ref, .. } => {
+                let definition = self
+                    .program
+                    .traits
+                    .iter()
+                    .find(|definition| definition.id == trait_ref.id)
+                    .unwrap_or_else(|| panic!("MIR trait {:?} is missing", trait_ref.id));
+                let method = definition
+                    .methods
+                    .iter()
+                    .find(|candidate| candidate.id == *method)
+                    .unwrap_or_else(|| panic!("MIR trait method {:?} is missing", method));
+                Self::result_matches_failure(result_type, &method.failure)
+            }
+            MirCallee::Indirect(value) => {
+                let Some(return_type) = (match self.value_type(function, *value).kind() {
+                    MirTypeKind::Fn(signature) => signature.ret.as_deref(),
+                    MirTypeKind::SendFn { ret, .. } => ret.as_deref(),
+                    _ => None,
+                }) else {
+                    return false;
+                };
+                Self::result_matches_return_carrier(result_type, return_type)
+            }
+            MirCallee::Core(_)
+            | MirCallee::Prelude(_)
+            | MirCallee::Foreign(_) => false,
+        }
+    }
+
+    fn result_matches_failure(result_type: &MirType, failure: &MirFailureCarrier) -> bool {
+        match failure {
+            MirFailureCarrier::Result { success, .. }
+            | MirFailureCarrier::Optional { value: success } => {
+                result_type.same_checked_type(success)
+            }
+            MirFailureCarrier::Infallible | MirFailureCarrier::Diverges { .. } => false,
+        }
+    }
+
+    fn result_matches_return_carrier(result_type: &MirType, return_type: &MirType) -> bool {
+        return_type
+            .result_parts()
+            .is_some_and(|(success, _)| result_type.same_checked_type(success))
+            || return_type
+                .option_inner()
+                .is_some_and(|success| result_type.same_checked_type(success))
     }
 
     fn associated_call(
@@ -15874,7 +16759,7 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::Fn(signature) => {
                 (signature.params.as_slice(), signature.ret.as_deref(), false)
             }
-            MirTypeKind::SendFn { params, ret } => (params.as_slice(), ret.as_deref(), true),
+            MirTypeKind::SendFn { params, ret, .. } => (params.as_slice(), ret.as_deref(), true),
             other => panic!(
                 "MIR compute.{member} callable has non-function type {}",
                 other.display_name()
@@ -16333,12 +17218,22 @@ impl<'a> RustEmitter<'a> {
                             )
                         })
             });
+        let stream_query = row.module == "core.data"
+            && row.member == "query"
+            && args.first().is_some_and(|arg| {
+                matches!(
+                    self.value_type(function, arg.value).kind(),
+                    MirTypeKind::Apply { name, .. } if name.name == "DataStream"
+                )
+            });
         let rendered_type_args = type_args
             .iter()
             .map(|ty| self.rust_type(ty))
             .collect::<Vec<_>>()
             .join(", ");
-        let symbol = if event_factory && !type_args.is_empty() {
+        let symbol = if stream_query {
+            format!("{}jet_data_query_stream", self.config.root_prefix)
+        } else if event_factory && !type_args.is_empty() {
             let (owner, method) = symbol
                 .rsplit_once("::")
                 .expect("core event factory symbol has an associated method");
@@ -16358,10 +17253,11 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                // `jet_ui_box` consumes its child vector. Its legacy registry
-                // row marks the argument as a read window for the other
-                // projections, but native Rust must preserve the kernel ABI.
-                let borrowed = if row.module == "core.ui" && row.member == "box" {
+                // A DataStream query consumes the one-shot stream even though
+                // the list query row shares the same checked Core signature.
+                let borrowed = if stream_query && index == 0 {
+                    false
+                } else if row.module == "core.ui" && row.member == "box" {
                     false
                 } else {
                     route_row
@@ -16371,7 +17267,13 @@ impl<'a> RustEmitter<'a> {
                         .copied()
                         .unwrap_or(false)
                 };
-                let native_int = row.module == "core.tasks"
+                // `core.reactive.signal` constructs `JetSignal<JetInt>` directly.
+                // Keep its checked Int on the exact carrier; the other native
+                // Int routes below intentionally narrow to host `i64`.
+                let exact_int_carrier =
+                    row.module == "core.reactive" && row.member == "signal";
+                let native_int = !exact_int_carrier
+                    && row.module == "core.tasks"
                     && row.member == crate::Syntax::INTERNAL_CHANNEL_BOUNDED_METHOD
                     && index == 0
                     && !borrowed
@@ -16387,12 +17289,19 @@ impl<'a> RustEmitter<'a> {
                     .as_ref()
                     .and_then(|(params, _)| params.get(index))
                     .map(|(_, ty)| ty);
+                if exact_int_carrier {
+                    let value = self.call_arg_for_function(function, arg, false);
+                    if let Some(value) = self.exact_int_argument(function, arg.value, value) {
+                        return value;
+                    }
+                }
                 let native_int = match declared {
                     Some(crate::AST::Type::Int)
-                        if matches!(
-                            self.value_type(function, arg.value).kind(),
-                            MirTypeKind::Int
-                        ) =>
+                        if !exact_int_carrier
+                            && matches!(
+                                self.value_type(function, arg.value).kind(),
+                                MirTypeKind::Int
+                            ) =>
                     {
                         let value = self.native_int_argument(
                             self.call_arg_for_function(function, arg, true),
@@ -16960,9 +17869,18 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
                 if matches!(target.kind(), MirTypeKind::Int) {
-                    let Some((signed, _)) = source.fixed_int() else {
+                    let Some((signed, bits)) = source.fixed_int() else {
                         panic!("MIR numeric cast to exact Int requires a fixed integer");
                     };
+                    // Fixed widths through 32 bits are already representable by
+                    // the native exact-Int carrier. Keep this widening inline;
+                    // consulting the BigInt constructor in every byte loop body
+                    // defeats the borrowed cursor's allocation-free path.
+                    if bits <= 32 {
+                        return format!(
+                            "jet_foundation::Numeric::JetInt::from_i64(({value}) as i64)"
+                        );
+                    }
                     let scalar = if signed { "i64" } else { "u64" };
                     format!(
                         "{}jet_std::jet_int_owned_from_{scalar}(({value}) as {scalar})",
@@ -17146,7 +18064,9 @@ impl<'a> RustEmitter<'a> {
         fallibility: &MirCallFallibility,
     ) -> String {
         match fallibility {
-            MirCallFallibility::Infallible => self.numeric_conversion_value(emitted, target),
+            MirCallFallibility::Infallible => {
+                self.numeric_conversion_value(emitted, target, false)
+            }
             MirCallFallibility::Failure(MirFailureCarrier::Result { success, .. }) => {
                 let Some((ok, _error)) = target.result_parts() else {
                     panic!("MIR numeric conversion Result carrier has a non-Result target");
@@ -17154,7 +18074,11 @@ impl<'a> RustEmitter<'a> {
                 if !ok.same_checked_type(success) {
                     panic!("MIR numeric conversion Result carrier disagrees with its target");
                 }
-                let success = self.numeric_conversion_value("__jet_conversion_value", ok);
+                let success = self.numeric_conversion_value(
+                    "__jet_conversion_value",
+                    ok,
+                    true,
+                );
                 format!(
                     "match {emitted} {{ \
                         Ok(__jet_conversion_value) => Ok({success}), \
@@ -17171,10 +18095,32 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn numeric_conversion_value(&self, raw: &str, target: &MirType) -> String {
+    fn numeric_conversion_value(
+        &self,
+        raw: &str,
+        target: &MirType,
+        result_success: bool,
+    ) -> String {
+        fn exact_int_carrier(ty: &MirType) -> bool {
+            match ty.kind() {
+                MirTypeKind::Int => true,
+                MirTypeKind::InlineRange { base, .. }
+                | MirTypeKind::Tagged { inner: base, .. }
+                | MirTypeKind::Quantity { base, .. } => exact_int_carrier(base),
+                _ => false,
+            }
+        }
+
         let base = self.distinct_base(target);
         let base_ty = base.unwrap_or(target);
-        let cast = format!("({raw}) as {}", self.rust_type(base_ty));
+        let cast = if result_success && exact_int_carrier(base_ty) {
+            format!(
+                "{}jet_std::jet_int_owned_from_i128(({raw}) as i128)",
+                self.config.root_prefix
+            )
+        } else {
+            format!("({raw}) as {}", self.rust_type(base_ty))
+        };
         if base.is_some() {
             format!("{}({cast})", self.rust_type(target))
         } else {
@@ -17227,6 +18173,7 @@ impl<'a> RustEmitter<'a> {
         &self,
         function: &MirFunction,
         call: MirPreludeCallId,
+
         start: MirValueId,
         end: MirValueId,
         step: Option<MirValueId>,
@@ -17252,6 +18199,24 @@ impl<'a> RustEmitter<'a> {
             ],
         )
     }
+    #[allow(dead_code)]
+    fn byte_loop_collection(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.value_type(function, value)
+            .list_element()
+            .is_some_and(|element| {
+                matches!(
+                    element.kind(),
+                    MirTypeKind::IntN {
+                        signed: false,
+                        bits: 8,
+                    }
+                )
+            })
+    }
+
+    fn byte_loop_cursor(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.value_type(function, value).nominal_name() == Some("ByteIterCursor")
+    }
     fn loop_iter_init(
         &self,
         function: &MirFunction,
@@ -17262,6 +18227,9 @@ impl<'a> RustEmitter<'a> {
         source_kind: &MirLoopSourceKind,
         location: MirPanicLoc,
     ) -> String {
+        let byte_loop = !by_value
+            && matches!(source_kind, MirLoopSourceKind::Plain)
+            && self.byte_loop_collection(function, collection);
         let collection = if by_value {
             self.value_move(collection)
         } else {
@@ -17275,6 +18243,12 @@ impl<'a> RustEmitter<'a> {
                 )
             })
             .unwrap_or_else(|| ("0".to_string(), "false".to_string()));
+        if byte_loop {
+            return format!(
+                "jet_loop_iter_bytes_init(({}).as_slice(), {}, {})",
+                collection, step, has_step
+            );
+        }
         self.prelude_call_args_exact(
             call,
             &[
@@ -17339,6 +18313,21 @@ impl<'a> RustEmitter<'a> {
         self.prelude_call_args_exact(call, &[cursor])
     }
 
+    /// Emit the checked byte reader through its infallible hot helper while
+    /// preserving the canonical bounds error on a miss.
+    fn reader_read_u8_fast(
+        &self,
+        function: &MirFunction,
+        receiver: MirValueId,
+    ) -> String {
+        let reader = self.borrowed_value_reference(function, receiver, MirAccess::Write);
+        format!(
+            "{{ let __jet_reader = {reader}; \
+               jet_reader_read_u8_fast(__jet_reader) \
+                   .ok_or_else(|| jet_reader_bounds_error(\"read_u8\", 1, &*__jet_reader)) }}"
+        )
+    }
+
     fn prelude_handle_method(
         &self,
         function: &MirFunction,
@@ -17399,7 +18388,8 @@ impl<'a> RustEmitter<'a> {
                                     | "clock.advance"
                                     | "Match.group_start"
                                     | "Match.group_end"
-                            )))
+                            ))
+                        || (route.module == "core.encoding.datatree" && route.member == "at"))
                         && index > 0
                         && !route.signature.borrow_mask[index]
                         && matches!(self.value_type(function, value_id).kind(), MirTypeKind::Int)
@@ -17408,9 +18398,22 @@ impl<'a> RustEmitter<'a> {
                         return self.native_int_argument(value, location);
                     }
                     if route.signature.borrow_mask[index] {
-                        let access = match self.value_definition(function, value_id) {
-                            Some(MirOperation::AddressOf { access, .. }) => *access,
-                            _ => MirAccess::Read,
+                        let reader_consumes = index == 0
+                            && route.module == "core.handle"
+                            && (route.member.starts_with("reader.read_")
+                                || matches!(
+                                    route.member.as_str(),
+                                    "reader.seek" | "reader.skip" | "reader.take"
+                                ));
+                        let access = if reader_consumes
+                            || (route.module == "core.transaction" && route.member == "commit")
+                        {
+                            MirAccess::Write
+                        } else {
+                            match self.value_definition(function, value_id) {
+                                Some(MirOperation::AddressOf { access, .. }) => *access,
+                                _ => MirAccess::Read,
+                            }
                         };
                         self.borrowed_value_reference(function, value_id, access)
                     } else {
@@ -17446,6 +18449,31 @@ impl<'a> RustEmitter<'a> {
             self.config.root_prefix,
         )
     }
+    fn exact_int_argument(
+        &self,
+        function: &MirFunction,
+        value_id: MirValueId,
+        value: String,
+    ) -> Option<String> {
+        fn lift(ty: &MirType, value: &str, root: &str) -> Option<String> {
+            match ty.kind() {
+                MirTypeKind::Int => Some(value.to_string()),
+                MirTypeKind::IntN { .. } => Some(format!(
+                    "{root}jet_std::jet_int_owned_from_i128(({value}) as i128)"
+                )),
+                MirTypeKind::InlineRange { base, .. }
+                | MirTypeKind::Tagged { inner: base, .. }
+                | MirTypeKind::Quantity { base, .. } => lift(base, value, root),
+                _ => None,
+            }
+        }
+        lift(
+            self.value_type(function, value_id),
+            &value,
+            &self.config.root_prefix,
+        )
+    }
+
 
     fn native_int_payload_value(
         &self,
@@ -17935,6 +18963,9 @@ impl<'a> RustEmitter<'a> {
             if let Some(place) = arg.place {
                 return self.place_reference(function, place, MirAccess::Read);
             }
+            if let Some(reference) = self.borrowed_field_reference(function, arg.value) {
+                return reference;
+            }
             if matches!(
                 self.value_definition(function, arg.value),
                 Some(
@@ -17949,6 +18980,40 @@ impl<'a> RustEmitter<'a> {
         }
         self.call_arg(arg, borrowed)
     }
+    fn cell_host_method(
+        &self,
+        function: &MirFunction,
+        route: &MirPreludeCall,
+        args: &[MirCallArg],
+    ) -> Option<String> {
+        let method = match route.member.as_str() {
+            "Cell.get" | "CellReadGuard.get" | "CellEditGuard.get" => "get",
+            "Cell.guard_read" => "guard_read",
+            "Cell.guard_edit" => "guard_edit",
+            "Cell.set" | "CellEditGuard.set" => "set",
+            "Cell.replace" => "replace",
+            "Cell.read" | "CellReadGuard.read" | "CellEditGuard.read" => "read",
+            "Cell.edit" | "CellEditGuard.edit" => "edit",
+            "Cell.get_or_set" => "get_or_set",
+            _ => return None,
+        };
+        let receiver = args
+            .first()
+            .unwrap_or_else(|| panic!("MIR Cell host method has no receiver"));
+        let receiver = self.borrowed_value_reference(function, receiver.value, MirAccess::Read);
+        let values = args
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(index, arg)| {
+                let borrowed = route.signature.borrow_mask[index];
+                self.call_arg_for_function(function, arg, borrowed)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("({receiver}).{method}({values})"))
+    }
+
     fn prelude_host_call(
         &self,
         function: &MirFunction,
@@ -17957,6 +19022,11 @@ impl<'a> RustEmitter<'a> {
         location: Option<&MirPanicLoc>,
     ) -> String {
         let route = self.prelude_row(call);
+        if route.module == "core.host" {
+            if let Some(rendered) = self.cell_host_method(function, route, args) {
+                return rendered;
+            }
+        }
         self.validate_prelude_count(route, args.len());
         let needs_numeric_adapter = route.module == "core.clock"
             && args.iter().enumerate().any(|(index, arg)| {
@@ -18065,7 +19135,7 @@ impl<'a> RustEmitter<'a> {
                         .join(", ")
                 )
             };
-            return format!("{symbol}{generic}({value})");
+            return format!("{owner}::<{owner_args}>::{method}{generic}({value})");
         }
         let symbol = format!("{owner}::<{owner_args}>::{method}");
         self.call_symbol_for_function(
@@ -18101,6 +19171,7 @@ impl<'a> RustEmitter<'a> {
             .map(|(name, _)| format!("{}{}", self.config.root_prefix, name))
             .unwrap_or(symbol);
         let forced_borrows = adapter.map(|(_, positions)| positions);
+        let allow_literal = Self::borrowed_literal_symbol(&symbol);
         let generic = if type_args.is_empty() {
             String::new()
         } else {
@@ -18117,15 +19188,25 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                self.call_arg_for_function(
-                    function,
-                    arg,
-                    borrow_mask
-                        .and_then(|mask| mask.get(index))
-                        .copied()
-                        .unwrap_or(false)
-                        || forced_borrows.is_some_and(|positions| positions.contains(&index)),
-                )
+                let borrowed = borrow_mask
+                    .and_then(|mask| mask.get(index))
+                    .copied()
+                    .unwrap_or(false)
+                    || forced_borrows.is_some_and(|positions| positions.contains(&index));
+                if symbol.rsplit("::").next().unwrap_or(symbol.as_str()) == "jet_fmt_display"
+                    && borrowed
+                    && arg.access == MirAccess::Read
+                    && is_string_view_type(self.value_type(function, arg.value))
+                {
+                    self.value_read(arg.value)
+                } else {
+                    self.call_arg_for_function_with_literal(
+                        function,
+                        arg,
+                        borrowed,
+                        allow_literal,
+                    )
+                }
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -18619,14 +19700,25 @@ impl<'a> RustEmitter<'a> {
         editable: bool,
         route: &MirPreludeCall,
     ) -> String {
-        let method = route.member.as_str();
+        let method = if route.module == "core.cell_guard"
+            && matches!(route.member.as_str(), "map_read" | "map_edit")
+        {
+            "map"
+        } else {
+            route.member.as_str()
+        };
         let borrow = if editable { "&mut " } else { "&" };
+        let cell_route = route.module == "core.cell_guard";
         for field in path {
             let field_name = self.field_name(*field);
-            expression = format!(
-                "({expression}).{method}({}i64, |__jet_guard_value| {borrow}__jet_guard_value.{field_name})",
-                field.0
-            );
+            let project =
+                format!("|__jet_guard_value| {borrow}__jet_guard_value.{field_name}");
+            let arguments = if cell_route {
+                format!("{method}({project})")
+            } else {
+                format!("{method}({}i64, {project})", field.0)
+            };
+            expression = format!("({expression}).{arguments}");
         }
         expression
     }
@@ -18672,17 +19764,27 @@ impl<'a> RustEmitter<'a> {
             editable,
             map_route,
         );
-        let method = split_route.member.as_str();
+        let method = if split_route.module == "core.cell_guard"
+            && matches!(split_route.member.as_str(), "split_read" | "split_edit")
+        {
+            "split"
+        } else {
+            split_route.member.as_str()
+        };
         let borrow = if editable { "&mut " } else { "&" };
         let first_field = self.field_name(first[common]);
         let second_field = self.field_name(second[common]);
         let project = format!(
             "|__jet_guard_value| ({borrow}__jet_guard_value.{first_field}, {borrow}__jet_guard_value.{second_field})"
         );
-        let split = format!(
-            "({prefix}).{method}({}i64, {}i64, {project})",
-            first[common].0, second[common].0
-        );
+        let split = if split_route.module == "core.cell_guard" {
+            format!("({prefix}).{method}({project})")
+        } else {
+            format!(
+                "({prefix}).{method}({}i64, {}i64, {project})",
+                first[common].0, second[common].0
+            )
+        };
         let first_mapped = self.map_guard_path(
             "__jet_split_first".to_string(),
             &first[common + 1..],
@@ -19381,31 +20483,10 @@ impl<'a> RustEmitter<'a> {
         {
             return format!("({value}).ok_or({}JetAbsent)", self.config.root_prefix);
         }
-        if matches!(ty.nominal_name(), Some("DataSummary" | "DataPivotCell"))
-            && field_name == "count"
-        {
-            return self
-                .native_int_result(&value, &MirType::from_kind(MirTypeKind::Int))
-                .expect("data count has a checked Int result");
-        }
-        if ty.nominal_name() == Some("AllocError") && field_name == "requested_bytes" {
-            return self
-                .native_int_result(&value, &MirType::from_kind(MirTypeKind::Int))
-                .expect("AllocError requested_bytes has a checked Int result");
-        }
-        // Native filesystem metadata keeps its host-facing Int fields as i64.
-        // Projecting those fields is the same checked Jet Int boundary as a
-        // native Prelude result; keep the conversion on the canonical field
-        // emitter so AOT matches the resident raw-int carrier.
-        if ty.nominal_name() == Some("Stat")
-            && matches!(
-                field_name.as_str(),
-                "size" | "modified_ms" | "created_ms" | "accessed_ms" | "mode"
-            )
-        {
-            return self
-                .native_int_result(&value, &MirType::from_kind(MirTypeKind::Int))
-                .expect("filesystem stat field has a checked Int result");
+        if let Some(field_ty) = self.native_host_field_type(field) {
+            if let Some(converted) = self.native_int_result(&value, field_ty) {
+                return converted;
+            }
         }
         // Prelude VJP continuations use native Rc<Fn> carriers. Projecting
         // one into a checked Jet function value must cross the callable ABI.
@@ -19478,6 +20559,186 @@ impl<'a> RustEmitter<'a> {
         }
         value
     }
+    fn named_task_group_all(
+        &self,
+        call: MirPreludeCallId,
+        kind: MirTaskGroupKind,
+        function: &MirFunction,
+        tasks: &[MirValueId],
+    ) -> Option<String> {
+        if !matches!(kind, MirTaskGroupKind::All) || tasks.len() != 1 {
+            return None;
+        }
+        let MirTypeKind::Tuple(fields) = self.value_type(function, tasks[0]).kind() else {
+            return None;
+        };
+        if fields.is_empty() {
+            return None;
+        }
+        let rust_fields = fields
+            .iter()
+            .map(|(_, ty)| self.rust_type(ty))
+            .collect::<Vec<_>>();
+        if rust_fields.iter().any(|ty| ty != &rust_fields[0]) {
+            return None;
+        }
+        let tuple = self.value_move(tasks[0]);
+        let pulls = (0..fields.len())
+            .map(|index| format!("__jet_named_tasks.{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let nexts = (0..fields.len())
+            .map(|_| {
+                "__jet_named_iter.next().expect(\"named task.all result field\")".to_string()
+            })
+            .collect::<Vec<_>>();
+        let result_tuple = if fields.len() == 1 {
+            format!("({},)", nexts[0])
+        } else {
+            format!("({})", nexts.join(", "))
+        };
+        let invoked = self.prelude_call_args(call, &[format!("vec![{pulls}]")]);
+        Some(format!(
+            "{{ let __jet_named_tasks = {tuple}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}"
+        ))
+    }
+
+    fn fixed_reader_take_pattern(
+        &self,
+        function: &MirFunction,
+        receiver_place: MirPlaceId,
+        parts: &[MirBinaryPatternPart],
+        fields: &[(String, MirType)],
+    ) -> Option<String> {
+        let mut bit_offset = 0usize;
+        let mut checks = Vec::new();
+        let mut captures = Vec::new();
+        for part in parts {
+            match part {
+                MirBinaryPatternPart::Literal(bytes) => {
+                    if bit_offset % 8 != 0 {
+                        return None;
+                    }
+                    let byte_offset = bit_offset / 8;
+                    let end = byte_offset.checked_add(bytes.len())?;
+                    for (index, byte) in bytes.iter().enumerate() {
+                        let position = byte_offset.checked_add(index)?;
+                        checks.push(format!("__jet_bytes[{position}] != {byte}u8"));
+                    }
+                    bit_offset = end.checked_mul(8)?;
+                }
+                MirBinaryPatternPart::Bits { width, little, .. } => {
+                    let width = usize::from(*width);
+                    if width == 0 || width > 64 {
+                        return None;
+                    }
+                    let end = bit_offset.checked_add(width)?;
+                    let load = if bit_offset % 8 == 0 && width % 8 == 0 {
+                        let offset = bit_offset / 8;
+                        let byte_count = width / 8;
+                        let endian = if *little { "le" } else { "be" };
+                        match width {
+                            8 => format!(
+                                "u8::from_{endian}_bytes([__jet_bytes[{offset}]])"
+                            ),
+                            16 | 32 | 64 => {
+                                let rust_ty = format!("u{width}");
+                                let bytes = (0..byte_count)
+                                    .map(|index| format!("__jet_bytes[{}]", offset + index))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("{rust_ty}::from_{endian}_bytes([{bytes}])")
+                            }
+                            _ => {
+                                let terms = (0..byte_count)
+                                    .map(|index| {
+                                        let shift = if *little {
+                                            index * 8
+                                        } else {
+                                            (byte_count - 1 - index) * 8
+                                        };
+                                        format!(
+                                            "(u64::from(__jet_bytes[{}]) << {shift})",
+                                            offset + index
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" | ");
+                                format!("({terms})")
+                            }
+                        }
+                    } else {
+                        let terms = (0..width)
+                            .map(|index| {
+                                let position = bit_offset + index;
+                                let byte = position / 8;
+                                let bit = 7 - (position % 8);
+                                let shift = width - index - 1;
+                                format!(
+                                    "(((u64::from(__jet_bytes[{byte}]) >> {bit}) & 1) << {shift})"
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                        let value = format!("({terms})");
+                        if *little && width % 8 == 0 {
+                            format!("({value}).swap_bytes() >> {}", 64 - width)
+                        } else {
+                            value
+                        }
+                    };
+                    captures.push(load);
+                    bit_offset = end;
+                }
+                MirBinaryPatternPart::Rest { .. } => return None,
+            }
+        }
+        if bit_offset % 8 != 0 {
+            return None;
+        }
+        let offset = bit_offset / 8;
+        if captures.len() != fields.len() || i64::try_from(offset).is_err() {
+            return None;
+        }
+        let captures = captures
+            .into_iter()
+            .zip(fields.iter())
+            .map(|(capture, (_, ty))| {
+                if !matches!(ty.kind(), MirTypeKind::IntN { .. }) {
+                    return None;
+                }
+                Some(format!("({capture}) as {}", self.rust_type(ty)))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let reader = self.place_reference(function, receiver_place, MirAccess::Write);
+        let checks = if checks.is_empty() {
+            "false".to_string()
+        } else {
+            checks.join(" || ")
+        };
+        let tuple = if captures.is_empty() {
+            "()".to_string()
+        } else {
+            format!("({},)", captures.join(", "))
+        };
+        Some(format!(
+            "{{ let __jet_reader = {reader}; \
+               match jet_reader_region_bounds(&*__jet_reader, {offset}i64) {{ \
+                   Some((__jet_start, __jet_end)) => {{ \
+                       let __jet_bytes = &__jet_reader.buf[__jet_start..__jet_end]; \
+                       if {checks} {{ \
+                           Err(jet_reader_pattern_miss(&*__jet_reader)) \
+                       }} else {{ \
+                           jet_reader_take_pattern_checked(\
+                               __jet_reader, __jet_start, __jet_end); \
+                           Ok({tuple}) \
+                       }} \
+                   }}, \
+                   None => Err(jet_reader_pattern_miss(&*__jet_reader)), \
+               }} }}"
+        ))
+    }
+
     fn semantic(
         &self,
         function: &MirFunction,
@@ -19849,6 +21110,9 @@ impl<'a> RustEmitter<'a> {
                         member => panic!("unknown MIR reflection handle method `{member}`"),
                     };
                 }
+                if route.member == "reader.read_u8" && args.is_empty() {
+                    return self.reader_read_u8_fast(function, *receiver);
+                }
                 let emitted = self.prelude_handle_method(
                     function,
                     *call,
@@ -19985,6 +21249,11 @@ impl<'a> RustEmitter<'a> {
                 let MirTypeKind::Tuple(fields) = ok.kind() else {
                     panic!("MIR Reader.take_pattern does not carry typed captures");
                 };
+                if let Some(fast) =
+                    self.fixed_reader_take_pattern(function, *receiver_place, parts, fields)
+                {
+                    return fast;
+                }
                 let tuple = if fields.is_empty() {
                     "()".to_string()
                 } else {
@@ -20041,6 +21310,11 @@ impl<'a> RustEmitter<'a> {
                 label,
             ),
             MirSemanticOp::TaskGroup { call, kind, tasks } => {
+                if let Some(emitted) =
+                    self.named_task_group_all(*call, *kind, function, tasks)
+                {
+                    return emitted;
+                }
                 let args = tasks
                     .iter()
                     .map(|value| self.value_move(*value))
@@ -20488,7 +21762,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.mutable_receiver_reference(function, values[0]));
                 args.push(self.value_move(closure));
             }
             MirCoreClosureKind::OnRollback => {
@@ -20501,7 +21775,7 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(format!("&({})", self.value_read(values[0])));
+                args.push(self.mutable_receiver_reference(function, values[0]));
                 args.push(self.value_move(closure));
             }
             MirCoreClosureKind::ReactiveDerived => {
@@ -20862,6 +22136,13 @@ impl<'a> RustEmitter<'a> {
                 );
             if atomic_wire
                 || (row.module == "core.builtin"
+                    && row.member == "string_slice"
+                    && index < 2
+                    && matches!(
+                        self.value_type(function, *value_id).kind(),
+                        MirTypeKind::Int
+                    ))
+                || ((row.module == "core.builtin"
                     && matches!(
                         row.member.as_str(),
                         "iter_take" | "iter_skip" | "iter_step_by" | "iter_chunks"
@@ -20873,7 +22154,7 @@ impl<'a> RustEmitter<'a> {
                     && matches!(
                         self.value_type(function, *value_id).kind(),
                         MirTypeKind::Int
-                    )
+                    ))
             {
                 self.native_int_argument(value, None)
             } else {

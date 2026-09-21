@@ -356,7 +356,7 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end.end),
                 }))
             }
-            // D-LIT-DOT1 migration arm: retired `Type.{ x, y }`.
+            // Retired `Type.{ x, y }`. Fmt rewrites; compile rejects.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(self.peek3().kind, TokKind::LBrace) =>
@@ -364,7 +364,7 @@ impl<'a> Parser<'a> {
                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
                 let dot_span = self.peek().span;
                 self.expect(TokKind::Dot, "in a struct pattern")?;
-                self.diags.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "E0320",
                     format!(
                         "struct pattern uses `{}{{…}}`, not `{}.{{…}}`",
@@ -373,7 +373,11 @@ impl<'a> Parser<'a> {
                     "literal heads place no dot before their brace (D-LIT-DOT1)".to_string(),
                     format!("write `{}{{…}}`", type_name),
                     Some(dot_span),
-                ));
+                );
+                if !self.migration_mode {
+                    return Err(diagnostic);
+                }
+                self.diags.push(diagnostic);
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
                 let (fields, rest) = self.struct_pattern_fields()?;
                 let end = self.peek().span;

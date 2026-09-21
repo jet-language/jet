@@ -94,6 +94,20 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "LateEventDisposition") {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
+        "WebFormFieldState" | "WebFormTyped" | "WebTableState" | "WebVirtualPlan"
+        | "WebTableSort" | "WebTableFilter" | "WebFormStatus" | "WebFormLifecycle"
+        | "WebFormValidationTiming" | "WebTableSortDirection" | "WebTablePageMode"))
+    {
+        return true;
+    }
+    if matches!(&ty, Type::Apply { name, args }
+        if matches!(name.as_str(), "WebTablePage" | "WebTable" | "WebTableColumn" | "WebTableRow")
+            && args.len() == 1
+            && is_subset_param_ty(&args[0], cx))
+    {
+        return true;
+    }
     // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.
     if let Type::Union(members) = &ty {
         return !members.is_empty() && members.iter().all(|m| is_subset_param_ty(m, cx));

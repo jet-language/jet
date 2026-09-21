@@ -129,8 +129,8 @@ outputs: .{
 
 ```
 $ jet build
-  built target/libflightlog.so, libflightlog.a, flightlog.h
-  built target/bindings/flightlog.py, Flightlog.swift
+  built .jet/build/libflightlog.so, .jet/build/libflightlog.a, .jet/build/flightlog.h
+  built .jet/build/bindings/flightlog.py, .jet/build/bindings/Flightlog.swift
 ```
 
 Jet owns the ownership rules at that boundary. The exported surface states who

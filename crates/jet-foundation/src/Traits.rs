@@ -2492,7 +2492,7 @@ impl TraitRegistry {
         ] {
             self.auto_debug.insert(ty.to_string());
         }
-        // D-TIME-ORDER1=A: time protocol hooks use the Prelude carrier's
+        // D-TIME-ORDER1=A: precise temporal carriers use their Prelude
         // canonical equality and order semantics on every execution tier.
         for ty in [
             "DateTime",
@@ -2505,6 +2505,9 @@ impl TraitRegistry {
             self.auto_equatable.insert(ty.to_string());
             self.auto_comparable.insert(ty.to_string());
         }
+        // D-DECIMAL1: Decimal ordering uses its exact Prelude comparison
+        // without changing the existing precise equality route.
+        self.auto_comparable.insert("Decimal".to_string());
         // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
         // an ordinary record. Values.rs owns the matching runtime protocols.
         self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());

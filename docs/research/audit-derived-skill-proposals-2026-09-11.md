@@ -204,10 +204,8 @@ Report contracts, schema/record examples, distinct coverage and failure classes,
 - Source family: `docs/audits/tier-census-2026-09-03.{md,json,tsv}`.
 - Source family: `docs/audits/example-core-census-2026-09-05.{md,json,tsv}`.
 - Source family: `docs/audits/effect-authority-census-2026-09-03.{md,json,tsv}`.
-- [scripts/agent/syntax-roundtrip-census.mjs](../../scripts/agent/syntax-roundtrip-census.mjs)
 - [scripts/agent/tier-census.mjs](../../scripts/agent/tier-census.mjs)
 - [scripts/agent/example-core-census.mjs](../../scripts/agent/example-core-census.mjs)
-- [scripts/agent/effect-authority-census.mjs](../../scripts/agent/effect-authority-census.mjs)
 
 ### Earlier conformance and capability ledgers
 

@@ -178,6 +178,7 @@ impl<'a> Parser<'a> {
                 marker_span,
                 source,
                 source_span,
+                asm_contract: None,
             }),
             undo: None,
             markers: Vec::new(),

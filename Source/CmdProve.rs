@@ -64,19 +64,34 @@ fn index_artifact(
     capture: RecordCapture,
     consumed: Vec<RecordLink>,
     produced: Vec<RecordLink>,
+    save_requested: bool,
 ) -> Result<RecordLink, String> {
-    let mut index = RecordIndex::load_for_project(".")
-        .map_err(|error| format!("could not load record index: {error}"))?;
-    let (recorded_sequence, saved) = if let Some(entry) = index.find(kind, &artifact_id, true) {
-        (entry.recorded_sequence, entry.saved)
+    let absolute = if path.is_absolute() {
+        path
     } else {
-        (
-            index
-                .next_recorded_sequence()
-                .map_err(|error| format!("could not allocate record sequence: {error}"))?,
-            false,
-        )
+        std::env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(path)
     };
+    let project_root = jet::build_project_root(&absolute.to_string_lossy())
+        .map_err(|diagnostics| format!("could not resolve record project root: {diagnostics:?}"))?;
+    let path = absolute
+        .strip_prefix(&project_root)
+        .map_err(|_| format!("record artifact is outside the project: {}", absolute.display()))?
+        .to_path_buf();
+    let mut index = RecordIndex::load_for_project(&project_root)
+        .map_err(|error| format!("could not load record index: {error}"))?;
+    let (recorded_sequence, existing_saved) =
+        if let Some(entry) = index.find(kind, &artifact_id, true) {
+            (entry.recorded_sequence, entry.saved)
+        } else {
+            (
+                index
+                    .next_recorded_sequence()
+                    .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+                false,
+            )
+        };
     let entry = RecordIndexEntry::new(identity, kind, artifact_id.clone(), path)
         .map_err(|error| format!("could not construct {kind} record: {error}"))?
         .with_links(consumed, produced)
@@ -84,7 +99,7 @@ fn index_artifact(
         .with_capture(capture)
         .with_size(size)
         .with_recorded_sequence(recorded_sequence)
-        .with_saved(saved);
+        .with_saved(existing_saved || save_requested);
     index
         .update_and_store(entry)
         .map_err(|error| format!("could not store {kind} record `{artifact_id}`: {error}"))?;
@@ -110,7 +125,7 @@ fn produced_receipt_links(target: &Target) -> Vec<RecordLink> {
     ) else {
         return Vec::new();
     };
-    let Ok(index) = RecordIndex::load_for_project(".") else {
+    let Ok(index) = RecordIndex::load_for_project(&target.authority_root) else {
         return Vec::new();
     };
     let Some(indexed) = index.find(RecordKind::Receipt, &claim_key, true) else {
@@ -167,7 +182,26 @@ fn write_authoritative_bytes(path: &Path, bytes: &[u8], label: &str) -> Result<u
         }
         file.write_all(bytes).map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
-        fs::hard_link(&tmp, path).map_err(|error| error.to_string())?;
+        match fs::hard_link(&tmp, path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(format!(
+                        "final {label} path is not a regular file: {}",
+                        path.display()
+                    ));
+                }
+                let existing = fs::read(path).map_err(|e| e.to_string())?;
+                if existing != bytes {
+                    return Err(format!(
+                        "refusing to overwrite differing {label} at {}",
+                        path.display()
+                    ));
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         fs::remove_file(&tmp).map_err(|error| error.to_string())?;
         #[cfg(unix)]
         if let Some(parent) = path.parent() {
@@ -202,7 +236,10 @@ fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<R
         report.build.toolchain.clone(),
         report.producer.as_str(),
     )?;
-    let path = PathBuf::from(format!(".jet/evidence/{report_id}.json"));
+    let path = target
+        .authority_root
+        .join(".jet/evidence")
+        .join(format!("{report_id}.json"));
     let bytes = report.encode()?;
     let size = write_authoritative_bytes(&path, &bytes, "evidence report")?;
     index_artifact(
@@ -214,6 +251,7 @@ fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<R
         RecordCapture::Safe,
         Vec::new(),
         Vec::new(),
+        true,
     )
 }
 fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
@@ -252,6 +290,7 @@ pub(crate) fn index_replay_artifact(
     path: &Path,
     identity: &crate::ProveReplay::ReplayIdentity,
     capture: RecordCapture,
+    save_requested: bool,
 ) -> Result<RecordLink, String> {
     let bytes = fs::read(path).map_err(|error| {
         format!(
@@ -272,51 +311,10 @@ pub(crate) fn index_replay_artifact(
         capture,
         Vec::new(),
         Vec::new(),
+        save_requested,
     )
 }
 
-fn generated_capture_path(
-    identity: &crate::ProveReplay::ReplayIdentity,
-    authority: &crate::ProveReplay::CaptureAuthority,
-    exit_code: i32,
-) -> Result<PathBuf, String> {
-    let directory = Path::new(".jet/replays");
-    let entries = fs::read_dir(directory)
-        .map_err(|error| format!("could not inspect replay directory: {error}"))?;
-    let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
-        "panic"
-    } else {
-        "exit"
-    };
-    let mut matches = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        if !entry
-            .file_type()
-            .map_err(|error| error.to_string())?
-            .is_file()
-            || path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
-        {
-            continue;
-        }
-        let path_text = path.to_string_lossy().into_owned();
-        let Ok(candidate) = crate::ProveReplay::prepare_replay(identity, &path_text) else {
-            continue;
-        };
-        if candidate.time_ms == authority.time_ms()
-            && candidate.expected_status == exit_code
-            && candidate.expected_outcome == outcome
-        {
-            matches.push(path);
-        }
-    }
-    matches.sort();
-    matches
-        .into_iter()
-        .next()
-        .ok_or_else(|| "capture finalized but its replay artifact could not be located".into())
-}
 fn validate_artifact_id(id: &str) -> Result<(), String> {
     if id.len() != 24 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("replay artifact id must be 24 lowercase hexadecimal bytes".into());
@@ -327,9 +325,10 @@ fn validate_artifact_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn saved_replay_path(id: &str) -> PathBuf {
+fn saved_replay_relative_path(id: &str) -> PathBuf {
     PathBuf::from(format!(".jet/records/saved/{id}"))
 }
+
 
 fn validate_replay_input_path(raw: &str) -> Result<PathBuf, String> {
     if raw.is_empty() {
@@ -353,8 +352,13 @@ fn validate_replay_input_path(raw: &str) -> Result<PathBuf, String> {
     }) {
         return Err("replay artifact path contains an unsafe component".into());
     }
+    let is_saved = path.parent() == Some(Path::new(".jet/records/saved"))
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| validate_artifact_id(name).is_ok());
     if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
-        && path != saved_replay_path(raw)
+        && !is_saved
     {
         return Err(
             "replay input must be a canonical index id or `.jetproof-replay` artifact path".into(),
@@ -377,8 +381,8 @@ fn resolve_indexed_replay(
         .find(|entry| entry.kind == RecordKind::Replay && entry.path == path))
 }
 
-fn load_record_index() -> Result<RecordIndex, String> {
-    RecordIndex::load_for_project(".")
+fn load_record_index(project_root: &Path) -> Result<RecordIndex, String> {
+    RecordIndex::load_for_project(project_root)
         .map_err(|error| format!("could not load record index: {error}"))
 }
 
@@ -430,7 +434,9 @@ fn save_replay_command(
     identity: &crate::ProveReplay::ReplayIdentity,
     raw: &str,
 ) -> Result<(String, PathBuf, u64), (&'static str, String)> {
-    let mut index = load_record_index().map_err(|error| ("E3622", error))?;
+    let project_root = jet::build_project_root(&identity.entry)
+        .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
+    let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
     let Some(entry) = resolve_indexed_replay(&index, raw).map_err(|error| ("E3621", error))? else {
         return Err((
             "E3621",
@@ -450,7 +456,7 @@ fn save_replay_command(
         ));
     }
     validate_artifact_id(&entry.artifact_id).map_err(|error| ("E3621", error))?;
-    let source_path = entry.path.clone();
+    let source_path = project_root.join(&entry.path);
     let source_text = source_path.to_string_lossy().into_owned();
     let prepared = if entry.saved {
         crate::ProveReplay::prepare_saved_replay(identity, &source_path)
@@ -488,7 +494,8 @@ fn save_replay_command(
             ),
         ));
     }
-    let destination = saved_replay_path(&entry.artifact_id);
+    let destination_relative = saved_replay_relative_path(&entry.artifact_id);
+    let destination = project_root.join(&destination_relative);
     let source_hash = jet::SHA256::sha256_hex(&source_bytes);
     write_authoritative_bytes(&destination, &source_bytes, "saved replay").map_err(|error| {
         (
@@ -520,20 +527,22 @@ fn save_replay_command(
         ));
     }
     let saved = index
-        .save_replay(
+        .save_replay_and_store(
             &entry.artifact_id,
             &record_identity,
-            destination.clone(),
+            destination_relative,
             saved_size,
         )
         .map_err(|error| ("E3621", error))?;
-    index.store().map_err(|error| ("E3623", error))?;
     Ok((saved.artifact_id, saved.path, saved.size))
 }
 
-fn ordinary_replay_for_id(id: &str) -> Result<Option<(PathBuf, u64)>, String> {
-    let directory = Path::new(".jet/replays");
-    let entries = match fs::read_dir(directory) {
+fn ordinary_replay_for_id(
+    project_root: &Path,
+    id: &str,
+) -> Result<Option<(PathBuf, u64)>, String> {
+    let directory = project_root.join(".jet/replays");
+    let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("could not inspect replay directory: {error}")),
@@ -556,8 +565,12 @@ fn ordinary_replay_for_id(id: &str) -> Result<Option<(PathBuf, u64)>, String> {
         }
         let bytes = fs::read(&path).map_err(|error| error.to_string())?;
         if replay_artifact_id(&bytes).ok().as_deref() == Some(id) {
+            let relative = path
+                .strip_prefix(project_root)
+                .map_err(|_| "replay artifact escaped its project root".to_string())?
+                .to_path_buf();
             candidates.push((
-                path,
+                relative,
                 u64::try_from(bytes.len())
                     .map_err(|_| "replay artifact is too large".to_string())?,
             ));
@@ -572,10 +585,12 @@ fn unsave_replay_command(
     identity: &crate::ProveReplay::ReplayIdentity,
 ) -> Result<(), (&'static str, String)> {
     validate_artifact_id(id).map_err(|error| ("E3621", error))?;
+    let project_root = jet::build_project_root(&identity.entry)
+        .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
     let record_identity = identity
         .record_identity()
         .map_err(|error| ("E3621", error))?;
-    let mut index = load_record_index().map_err(|error| ("E3622", error))?;
+    let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
     let Some(entry) = index.find(RecordKind::Replay, id, true) else {
         return Err(("E3623", format!("saved replay `{id}` is not indexed")));
     };
@@ -585,13 +600,14 @@ fn unsave_replay_command(
             format!("replay `{id}` belongs to a different target identity"),
         ));
     }
-    let expected_path = saved_replay_path(id);
-    if !entry.saved || entry.path != expected_path {
+    let expected_relative = saved_replay_relative_path(id);
+    if !entry.saved || entry.path != expected_relative {
         return Err((
             "E3623",
             format!("replay `{id}` is not an exact saved replay claim"),
         ));
     }
+    let expected_path = project_root.join(&expected_relative);
     let mut tombstone = None;
     match fs::symlink_metadata(&expected_path) {
         Ok(metadata) => {
@@ -619,23 +635,18 @@ fn unsave_replay_command(
             ))
         }
     }
-    let restored = ordinary_replay_for_id(id).map_err(|error| ("E3622", error))?;
+    let restored =
+        ordinary_replay_for_id(&project_root, id).map_err(|error| ("E3622", error))?;
     let mutation = if let Some((path, size)) = restored {
         let mut ordinary = entry.clone();
         ordinary.path = path;
         ordinary.size = size;
         ordinary.saved = false;
-        index.replace(ordinary)
+        index.replace_and_store(ordinary)
     } else {
-        index.remove_replay(id).map(|_| ())
+        index.remove_replay_and_store(id).map(|_| ())
     };
     if let Err(error) = mutation {
-        if let Some(tombstone) = tombstone {
-            let _ = fs::rename(tombstone, &expected_path);
-        }
-        return Err(("E3623", error));
-    }
-    if let Err(error) = index.store() {
         if let Some(tombstone) = tombstone {
             let _ = fs::rename(tombstone, &expected_path);
         }
@@ -813,7 +824,12 @@ fn parse_generated_failure_detail(detail: &str) -> Option<GeneratedFailure> {
 }
 
 fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedFailure> {
-    let text = fs::read_to_string(generated_failure_path(target, member)).ok()?;
+    let path = generated_failure_path(target, member);
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return None;
+    }
+    let text = fs::read_to_string(path).ok()?;
     let DataTree::Object(fields) = parse_json(&text).ok()? else {
         return None;
     };
@@ -1242,7 +1258,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     }
     let capture_opts = capture.clone();
     let capture_authority = if let Some(opts) = capture.as_ref() {
-        match crate::ProveReplay::prepare_safe_capture(opts, json) {
+        match crate::ProveReplay::prepare_safe_capture_at(opts, json, &target.authority_root) {
             Ok(authority) => Some(authority),
             Err(status) => exit(status),
         }
@@ -1262,7 +1278,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
     }
     if let Some(raw) = replay.take() {
-        let index = match load_record_index() {
+        let index = match load_record_index(&target.authority_root) {
             Ok(index) => index,
             Err(error) => {
                 emit_prove_cli_error(
@@ -1274,8 +1290,27 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
         };
         replay = match resolve_indexed_replay(&index, &raw) {
-            Ok(Some(entry)) => Some(entry.path.to_string_lossy().into_owned()),
-            Ok(None) => Some(raw),
+            Ok(Some(entry)) => Some(
+                target
+                    .authority_root
+                    .join(entry.path)
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            Ok(None) => {
+                let path = Path::new(&raw);
+                if path.starts_with(Path::new(".jet")) {
+                    Some(
+                        target
+                            .authority_root
+                            .join(path)
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                } else {
+                    Some(raw)
+                }
+            }
             Err(error) => {
                 crate::ProveReplay::emit_prove_diag(
                     "E3621",
@@ -1300,7 +1335,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 exit(ExitCodes::ICE);
             }
         };
-        let index = match load_record_index() {
+        let index = match load_record_index(&target.authority_root) {
             Ok(index) => index,
             Err(error) => {
                 emit_prove_cli_error(
@@ -1312,7 +1347,13 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
         };
         if let Some(entry) = index.saved_replays(&record_identity).into_iter().next() {
-            replay = Some(entry.path.to_string_lossy().into_owned());
+            replay = Some(
+                target
+                    .authority_root
+                    .join(entry.path)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
         }
     }
     let replay_path = replay.clone();
@@ -1556,7 +1597,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         let mut consumed = evidence_links;
         if let Some(path) = replay_path.as_ref() {
             let replay_link =
-                match index_replay_artifact(Path::new(path), &identity, RecordCapture::Safe) {
+                match index_replay_artifact(
+                    Path::new(path),
+                    &identity,
+                    RecordCapture::Safe,
+                    false,
+                ) {
                     Ok(link) => link,
                     Err(message) => {
                         emit_prove_cli_error(
@@ -1605,6 +1651,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             RecordCapture::Safe,
             consumed,
             produced,
+            true,
         ) {
             emit_prove_cli_error(
                 "E2105",
@@ -1615,33 +1662,18 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if failed == 0 && producer_exit != ExitCodes::ICE {
             if let Some(authority) = capture_authority.as_ref() {
-                if let Err(status) = crate::ProveReplay::finalize_safe_capture(
+                let path = match crate::ProveReplay::finalize_safe_capture_path(
                     &identity, authority, exit_code, json, None,
                 ) {
-                    exit(status);
-                }
-                let path = capture_opts
-                    .as_ref()
-                    .and_then(|opts| opts.path.as_ref())
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| {
-                        generated_capture_path(&identity, authority, exit_code).unwrap_or_else(
-                            |message| {
-                                emit_prove_cli_error(
-                                    "E2105",
-                                    format!("failed to locate replay artifact: {message}"),
-                                    json,
-                                );
-                                exit(ExitCodes::ICE);
-                            },
-                        )
-                    });
+                    Ok(path) => path,
+                    Err(status) => exit(status),
+                };
                 let capture = if capture_opts.as_ref().is_some_and(|opts| opts.sensitive) {
                     RecordCapture::Sensitive
                 } else {
                     RecordCapture::Safe
                 };
-                if let Err(message) = index_replay_artifact(&path, &identity, capture) {
+                if let Err(message) = index_replay_artifact(&path, &identity, capture, true) {
                     emit_prove_cli_error(
                         "E2105",
                         format!("failed to index replay artifact: {message}"),
@@ -1789,7 +1821,11 @@ fn prepare_replay_or_exit(
     path: &str,
     json: bool,
 ) -> crate::ProveReplay::ReplayAuthority {
-    let prepared = if path.starts_with(".jet/records/saved/") {
+    let is_saved = path.starts_with(".jet/records/saved/")
+        || jet::build_project_root(&identity.entry)
+            .ok()
+            .is_some_and(|root| Path::new(path).starts_with(root.join(".jet/records/saved")));
+    let prepared = if is_saved {
         crate::ProveReplay::prepare_saved_replay(identity, Path::new(path))
     } else {
         crate::ProveReplay::prepare_replay(identity, path)
@@ -4781,7 +4817,7 @@ fn write_jetproof(
         ".jet/proofs/{kind}/{name}/{}.jetproof",
         &report_id[..16.min(report_id.len())]
     );
-    let path = PathBuf::from(&rel);
+    let path = target.authority_root.join(&rel);
     let consumed_json = record_links_json(consumed);
     let produced_json = record_links_json(produced);
     let envelope = format!(
@@ -4830,7 +4866,22 @@ fn write_jetproof(
         file.write_all(envelope.as_bytes())
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
-        fs::hard_link(&tmp, &path).map_err(|e| e.to_string())?;
+        match fs::hard_link(&tmp, &path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(format!("final .jetproof path is not a regular file: {rel}"));
+                }
+                let existing = fs::read(&path).map_err(|e| e.to_string())?;
+                if existing != envelope.as_bytes() {
+                    return Err(format!(
+                        "refusing to overwrite differing .jetproof at {rel}"
+                    ));
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         fs::remove_file(&tmp).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         if let Some(parent) = path.parent() {
@@ -4855,36 +4906,45 @@ fn write_jetproof(
 
 fn ensure_artifact_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut current = PathBuf::from(".");
+    let mut current = if parent.is_absolute() {
+        PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
+    } else {
+        PathBuf::from(".")
+    };
     for component in parent.components() {
-        let std::path::Component::Normal(name) = component else {
-            continue;
-        };
-        current.push(name);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(
-                    "artifact parent is a symlink: {}",
-                    current.display()
-                ));
-            }
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(format!(
-                    "artifact parent is not a directory: {}",
-                    current.display()
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(|e| e.to_string())?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
-                        .map_err(|e| e.to_string())?;
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                current.push(name);
+                match fs::symlink_metadata(&current) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(format!(
+                            "artifact parent is a symlink: {}",
+                            current.display()
+                        ));
+                    }
+                    Ok(metadata) if !metadata.is_dir() => {
+                        return Err(format!(
+                            "artifact parent is not a directory: {}",
+                            current.display()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        fs::create_dir(&current).map_err(|e| e.to_string())?;
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                    Err(error) => return Err(error.to_string()),
                 }
             }
-            Err(error) => return Err(error.to_string()),
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err("artifact parent contains an unsafe component".into());
+            }
         }
     }
     Ok(())

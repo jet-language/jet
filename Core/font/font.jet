@@ -1,0 +1,108 @@
+package {
+    name: "core.font"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Font faces and glyph shaping."
+    license: "MIT"
+    outputs: {
+        font: .Library{ entry: font }
+    }
+}
+// core.font — a headless shaper plus an optional HarfBuzz host cell.
+//
+// `system` returns the fallback face. `shape` walks UTF-8 and emits one
+// glyph per scalar with Latin-1 / CJK advances (1em or 2em). Complex
+// scripts need HarfBuzz; that door is `host_shape`.
+pub enum FontStyle {
+    Body
+    Title
+    Monospace
+}
+
+pub enum GlyphShaper {
+    HarfBuzz
+    HeadlessFallback
+}
+
+pub struct FontFace {
+    pub family: String
+    pub style: FontStyle
+    pub size: Int
+    pub shaper: GlyphShaper
+}
+
+pub struct Glyph {
+    pub cp: Int
+    pub advance: Int
+    pub cluster: Int
+}
+
+pub struct GlyphRun {
+    pub face: FontFace
+    pub glyphs: [Glyph]
+    pub width: Int
+}
+
+/// Default UI face: 16px body, headless advances.
+pub fn system() -> FontFace {
+    {family: "Jet UI", style: FontStyle.Body, size: 16, shaper: GlyphShaper.HeadlessFallback}
+}
+
+/// Shape `text` with the system face.
+pub fn shape(text: String) -> GlyphRun { shape_with(system(), text) }
+
+/// Shape with an explicit face. HarfBuzz is requested only when the face
+/// names it; missing host support falls back to the same advance table.
+pub fn shape_with(face: FontFace, text: String) -> GlyphRun {
+    if face.shaper == GlyphShaper.HarfBuzz {
+        run :: host_shape(face.family, face.size, text)
+        if run.glyphs.len() > 0 -> return run
+    }
+    shape_fallback(face, text)
+}
+
+fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
+    glyphs := [Glyph]{}
+    width := 0
+    cluster := 0
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        pair :: decode_cp(raw, i)
+        adv := 1
+        if pair.cp >= 11008 -> adv = 2
+        if pair.cp < 32 -> adv = 0
+        glyphs.push(Glyph{cp: pair.cp, advance: adv, cluster: cluster})
+        width = width + adv
+        cluster = cluster + 1
+        i = pair.next
+    }
+    {face: face, glyphs: glyphs, width: width}
+}
+
+pub struct DecodePair {
+    pub cp: Int
+    pub next: Int
+}
+
+fn decode_cp(raw: [U8], i: Int) -> DecodePair {
+    if i >= raw.len() -> return ({cp: 0, next: i})
+    b :: raw[i]
+    n :: b
+    if n < 128 -> return ({cp: n, next: i + 1})
+    if n < 224 && i + 1 < raw.len() {
+        cp :: ((n - 192) * 64) + (raw[i + 1])
+        return {cp: cp, next: i + 2}
+    }
+    if n < 240 && i + 2 < raw.len() {
+        cp :: ((n - 224) * 4096) + ((raw[i + 1]) * 64) + (raw[i + 2])
+        return {cp: cp, next: i + 3}
+    }
+    if i + 3 < raw.len() {
+        cp :: ((n - 240) * 262144) + ((raw[i + 1]) * 4096) + ((raw[i + 2]) * 64) + (raw[i + 3])
+        return {cp: cp, next: i + 4}
+    }
+    {cp: 65533, next: i + 1}
+}
+
+fn host_shape(family: String, size: Int, text: String) -> GlyphRun { panic("host_shape") }

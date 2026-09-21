@@ -712,10 +712,57 @@ struct EnvironmentEntryIndex {
 }
 
 impl EnvironmentEntryIndex {
+    #[allow(dead_code)]
     fn from_entries(entries: &[StoreEntry]) -> Self {
         let mut by_selection = BTreeMap::new();
         for entry in entries {
             let selection = environment_entry_selection(entry);
+            let replace = by_selection
+                .get(&selection)
+                .is_none_or(|current: &StoreEntry| {
+                    (entry.last_used_at, entry.id.as_str())
+                        > (current.last_used_at, current.id.as_str())
+                });
+            if replace {
+                by_selection.insert(selection, entry.clone());
+            }
+        }
+        Self { by_selection }
+    }
+
+    /// Build only the receipt members that can be selected. Store metadata
+    /// hashes for unrelated entries cannot affect an environment stamp.
+    #[allow(dead_code)]
+    fn from_entries_for_selections(
+        entries: &[StoreEntry],
+        selections: &[EnvironmentSelection],
+    ) -> Self {
+        let wanted = selections.iter().cloned().collect::<BTreeSet<_>>();
+        let base_keys = selections
+            .iter()
+            .map(|selection| {
+                (
+                    selection.0.as_str(),
+                    selection.1.as_str(),
+                    selection.2.as_str(),
+                    selection.3.as_str(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let mut by_selection = BTreeMap::new();
+        for entry in entries {
+            if !base_keys.contains(&(
+                entry.reference.as_str(),
+                entry.name.as_str(),
+                entry.version.as_str(),
+                entry.envelope.output_hash.as_str(),
+            )) {
+                continue;
+            }
+            let selection = environment_entry_selection(entry);
+            if !wanted.contains(&selection) {
+                continue;
+            }
             let replace = by_selection
                 .get(&selection)
                 .is_none_or(|current: &StoreEntry| {
@@ -920,7 +967,7 @@ pub(crate) fn environment_entry_stamp(
     selections: &[EnvironmentSelection],
 ) -> std::io::Result<String> {
     let entries = list_read_only(roots);
-    let index = EnvironmentEntryIndex::from_entries(&entries);
+    let index = EnvironmentEntryIndex::from_entries_for_selections(&entries, selections);
     environment_entry_stamp_with_index(
         roots,
         project,
@@ -1015,7 +1062,7 @@ pub(crate) fn reuse_verified_environment(
     }
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let entries = list_read_only(roots);
-        let index = EnvironmentEntryIndex::from_entries(&entries);
+        let index = EnvironmentEntryIndex::from_entries_for_selections(&entries, selections);
         let actual_stamp = environment_entry_stamp_with_index(
             roots,
             project,

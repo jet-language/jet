@@ -108,6 +108,45 @@ fn run() {
     assert_eq!(stdout, "11\n1\n");
 }
 
+/// The canonical interpreter must restore nominal fields through a materialized
+/// callback receiver, not only through an address-backed place.
+#[test]
+fn rollback_trait_interpreter_restores_projected_fields() {
+    let mut bundle = jet::Loader::load_entry("examples/features/errors/rollback_trait.jet")
+        .expect("rollback trait fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        errors.is_empty(),
+        "rollback trait fixture should be semantically valid: {errors:#?}"
+    );
+
+    match common::run_interpreter_checked_bundle(
+        &bundle,
+        true,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        &common::development_policy(),
+    ) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            exit_code,
+            ..
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(
+                stdout,
+                include_str!("../examples/features/expected/errors/rollback_trait.out")
+            );
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("rollback trait interpreter failed: {diagnostics:?}");
+        }
+    }
+}
+
 /// Generated Rust contains `snapshot_custom` and `trait __jet_Rollback`.
 /// `unsafe` must not leak outside `mod jet_txn`.
 #[test]

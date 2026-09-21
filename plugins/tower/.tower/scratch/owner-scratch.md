@@ -16,7 +16,7 @@ myConst :: create_task(2, closed)
 myVar := Task{priority: 2, status: closed}
 myConst :: Task{create_task(2, closed)}
 ```
-
+I want a jet-native tool that functions like convexdb as an excellent, world class sync engine https://youtu.be/pRf8_40EDtM?si=f809dRgc4BAv-gfj
 
 Building A Programming Language Playlist -> Mine entire playlist
 https://youtube.com/playlist?list=PLET80Nvdg3mg&si=we8LZwmFSPfQnOkA

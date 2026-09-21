@@ -2,14 +2,17 @@
 // adapter owns a gzFile-backed reader and returns an explicit handle; Jet owns
 // that handle until the matching close call.  zlibVersion is a direct C import,
 // while b64encode is a real Rust-crate bridge.
-#Import module c.z {
-    fn zlibVersion() String = "zlibVersion"
-}
-extern rust "base64@0.22" {
-    fn b64encode(s: String) String = "base64::encode"
-}
 use c.z as zl
 use c.zreader as z
+
+#Import module c.z {
+    fn zlibVersion() -> String = "zlibVersion"
+}
+
+extern rust "base64@0.22" {
+    fn b64encode(s: String) -> String = "base64::encode"
+
+}
 
 fn run() {
     handle := z.jet_z_open("examples/features/foundations/bridges/sample.txt.gz")

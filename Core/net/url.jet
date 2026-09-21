@@ -1,0 +1,462 @@
+// core.net.url — RFC 3986 URLs and component escaping.
+//
+// `percent_encode` / `percent_decode` are the unreserved-set component
+// codecs (ALPHA / DIGIT / "-" / "." / "_" / "~"). They do not treat `/` as
+// unreserved; path encoding is a parse concern. `parse` and `from_parts`
+// stay host-backed so scheme/authority/IPv6 rules stay in one kernel.
+// `query` builds `application/x-www-form-urlencoded` from `[key, value]` rows.
+pub struct Url {
+    pub scheme: String
+    pub user: String
+    pub password: String
+    pub host: String
+    pub port: Int
+    pub path: String
+    pub query: String
+    pub fragment: String
+    pub raw: String
+}
+
+pub fn parse(text: String) -> Url {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return Err("empty Url")
+    colon := index_of(raw, 58)
+    if colon <= 0 -> return Err("Url needs a scheme")
+    scheme :: ascii_lower(slice(raw, 0, colon))
+    rest_i := colon + 1
+    user := ""
+    password := ""
+    host := ""
+    port := default_port(scheme)
+    path := ""
+    query := ""
+    fragment := ""
+    if rest_i + 1 < raw.len() && raw[rest_i] == (U8{47}) && raw[rest_i + 1] == (U8{47}) {
+        rest_i = rest_i + 2
+        auth_end := rest_i
+        loop auth_end < raw.len() {
+            n :: raw[auth_end]
+            if n == 47 || n == 63 || n == 35 -> break
+            auth_end = auth_end + 1
+        }
+        auth :: slice(raw, rest_i, auth_end)
+        at := index_of(auth.bytes(), 64)
+        hostport := auth
+        if at >= 0 {
+            info :: slice(auth.bytes(), 0, at)
+            col :: index_of(info.bytes(), 58)
+            if {
+                col >= 0 -> {
+                    user = slice(auth.bytes(), 0, col)
+                    password = slice(auth.bytes(), col + 1, info.bytes().len())
+                }
+                else -> user = info
+            }
+            hostport = slice(auth.bytes(), at + 1, auth.bytes().len())
+        }
+        hp :: hostport.bytes()
+        if {
+            hp.len() > 0 && hp[0] == (U8{91}) -> {
+                rb := index_of(hp, 93)
+                if rb < 0 -> return Err("unclosed IPv6 bracket")
+                host = slice(hp, 1, rb)
+                if rb + 1 < hp.len() && hp[rb + 1] == (U8{58}) {
+                    port = parse_int(slice(hp, rb + 2, hp.len())) ?? return Err("invalid port")
+                }
+            }
+            else -> {
+                col := index_of(hp, 58)
+                if {
+                    col >= 0 -> {
+                        host = slice(hp, 0, col)
+                        port = parse_int(slice(hp, col + 1, hp.len())) ?? return Err("invalid port")
+                    }
+                    else -> host = hostport
+                }
+            }
+        }
+        rest_i = auth_end
+    }
+    hash := raw.len()
+    qpos := raw.len()
+    loop i in rest_i..<raw.len() {
+        if raw[i] == (U8{35}) {
+            hash = i
+            break
+        }
+    }
+    loop i in rest_i..<hash {
+        if raw[i] == (U8{63}) {
+            qpos = i
+            break
+        }
+    }
+    path = slice(raw, rest_i, qpos)
+    if qpos < hash -> query = slice(raw, qpos + 1, hash)
+    if hash < raw.len() -> fragment = slice(raw, hash + 1, raw.len())
+    if path.bytes().len() == 0 && host.bytes().len() > 0 -> path = "/"
+    Ok({scheme: scheme, user: user, password: password, host: host, port: port, path: path, query: query, fragment: fragment, raw: text})
+}
+
+pub fn from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> Url {
+    q :: encode_query(query)
+    p := path
+    if p.bytes().len() == 0 -> p = "/"
+    frag := ""
+    if fragment.bytes().len() > 0 -> frag = "#{fragment}"
+    qs := ""
+    if q.bytes().len() > 0 -> qs = "?{q}"
+    parse("{scheme}://{host}{p}{qs}{frag}")
+}
+
+pub fn file(path: String) -> Url {
+    p := path
+    if p.bytes().len() == 0 -> p = "/"
+    parsed :: parse("file://{p}") ?? {scheme: "file", user: "", password: "", host: "", port: -1, path: p, query: "", fragment: "", raw: "file://{p}"}
+    parsed
+}
+
+pub fn data(mime: Mime, payload: String) -> Url {
+    enc :: percent_encode(payload)
+    raw :: "data:{mime.top}/{mime.sub},{enc}"
+    parse(raw) ?? {scheme: "data", user: "", password: "", host: "", port: -1, path: "{mime.top}/{mime.sub},{enc}", query: "", fragment: "", raw: raw}
+}
+
+fn default_port(scheme: String) -> Int {
+    if scheme == {
+        "http" | "ws" -> 80
+        "https" | "wss" -> 443
+        "ftp" -> 21
+        "ssh" -> 22
+        "smtp" -> 25
+        else -> -1
+    }
+}
+
+fn index_of(raw: [U8], b: Int) -> Int {
+    loop i in 0..<raw.len() {
+        n :: raw[i]
+        if n == b -> return i
+    }
+    -1
+}
+
+fn parse_int(text: String) -> ?Int {
+    if text.bytes().len() == 0 -> return None
+    n := 0
+    loop b in text.bytes() {
+        d :: b
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+    }
+    Val(n)
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn slice(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+pub fn query(pairs: [[String]]) -> String { encode_query(pairs) }
+
+fn encode_query(pairs: [[String]]) -> String {
+    out := ""
+    first := true
+    loop row in pairs {
+        if row.len() == 0 -> next
+        key :: percent_encode(row[0])
+        value := ""
+        if row.len() > 1 -> value = percent_encode(row[1])
+        if {
+            first -> {
+                out = "{key}={value}"
+                first = false
+            }
+            else -> out = "{out}&{key}={value}"
+        }
+    }
+    out
+}
+
+/// Percent-encode a query/path *component*. Unreserved bytes pass through;
+/// every other byte becomes `%HH` (uppercase hex).
+pub fn percent_encode(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        if unreserved(b) -> out.push(b) else {
+            n :: b
+            out.push(U8{37})
+            out.push(hex_nibble(n / 16))
+            out.push(hex_nibble(n % 16))
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+pub fn percent_decode(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop {
+        if {
+            i >= raw.len() -> break
+            raw[i] == (U8{37}) -> {
+                if i + 2 >= raw.len() -> return Err("truncated percent escape")
+                hi :: hex_value(raw[i + 1]) ?? return Err("invalid percent escape")
+                lo :: hex_value(raw[i + 2]) ?? return Err("invalid percent escape")
+                out.push(U8{hi * 16 + lo})
+                i = i + 3
+            }
+            else -> {
+                out.push(raw[i])
+                i = i + 1
+            }
+        }
+    }
+    Ok(String.from_bytes(out) ?? return Err("percent escape is not valid UTF-8"))
+}
+
+fn unreserved(b: U8) -> Bool {
+    n :: b
+    if n >= 65 && n <= 90 -> return true
+    if n >= 97 && n <= 122 -> return true
+    if n >= 48 && n <= 57 -> return true
+    n == 45 || n == 46 || n == 95 || n == 126
+}
+
+fn hex_nibble(n: Int) -> U8 {
+    if n < 10 -> return (U8{48 + n})
+    (U8{65 + (n - 10)})
+}
+
+fn hex_value(b: U8) -> ?Int {
+    n :: b
+    if n >= 48 && n <= 57 -> return Val(n - 48)
+    if n >= 65 && n <= 70 -> return Val(n - 55)
+    if n >= 97 && n <= 102 -> return Val(n - 87)
+    None
+}
+
+pub fn geturl(url: Url) -> String {
+    if url.raw.bytes().len() > 0 -> return url.raw
+    unparse(url)
+}
+
+pub fn unparse(url: Url) -> String {
+    auth := url.host
+    if url.port > 0 && url.port != default_port(url.scheme) -> auth = "{auth}:{url.port}"
+    if url.user.bytes().len() > 0 {
+        if url.password.bytes().len() > 0 -> auth = "{url.user}:{url.password}@{auth}" else {
+            auth = "{url.user}@{auth}"
+        }
+    }
+    path := url.path
+    if path.bytes().len() == 0 -> path = "/"
+    qs := ""
+    if url.query.bytes().len() > 0 -> qs = "?{url.query}"
+    frag := ""
+    if url.fragment.bytes().len() > 0 -> frag = "#{url.fragment}"
+    if url.scheme.bytes().len() == 0 -> return "{path}{qs}{frag}"
+    if {
+        auth.bytes().len() == 0 -> "{url.scheme}:{path}{qs}{frag}"
+        else -> "{url.scheme}://{auth}{path}{qs}{frag}"
+    }
+}
+
+/// RFC 3986 relative-resolution. `base` must already parse.
+pub fn urljoin(base: String, rel: String) -> String {
+    if rel.bytes().len() == 0 -> return base
+    if has_scheme(rel) -> return rel
+    parsed :: parse(base) ?? return rel
+    if starts_bytes(rel, "//") {
+        joined :: parse("{parsed.scheme}:{rel}") ?? return rel
+        return geturl(joined)
+    }
+    if starts_bytes(rel, "/") {
+        parsed2 :: Url{
+            scheme: parsed.scheme,
+            user: parsed.user,
+            password: parsed.password,
+            host: parsed.host,
+            port: parsed.port,
+            path: rel,
+            query: "",
+            fragment: "",
+            raw: "",
+        }
+        return unparse(parsed2)
+    }
+    dir :: dirname_url(parsed.path)
+    parsed2 :: Url{
+        scheme: parsed.scheme,
+        user: parsed.user,
+        password: parsed.password,
+        host: parsed.host,
+        port: parsed.port,
+        path: "{dir}{rel}",
+        query: "",
+        fragment: "",
+        raw: "",
+    }
+    unparse(parsed2)
+}
+
+pub fn parse_qsl(query: String) -> [[String]] {
+    rows := [[String]]{}
+    if query.bytes().len() == 0 -> return rows
+    raw :: query.bytes()
+    start := 0
+    if raw[0] == (U8{63}) -> start = 1
+    i := start
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{38}) {
+            piece :: slice(raw, start, i)
+            eq :: index_of(piece.bytes(), 61)
+            if {
+                eq >= 0 -> {
+                    k :: percent_decode(slice(piece.bytes(), 0, eq)) ?? slice(piece.bytes(), 0, eq)
+                    v :: percent_decode(slice(piece.bytes(), eq + 1, piece.bytes().len())) ?? slice(piece.bytes(), eq + 1, piece.bytes().len())
+                    rows.push([String]{k, v})
+                }
+                piece.bytes().len() > 0 -> {
+                    k :: percent_decode(piece) ?? piece
+                    rows.push([String]{k, ""})
+                }
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    rows
+}
+
+pub fn urlencode(pairs: [[String]]) -> String { encode_query(pairs) }
+
+pub fn split_fragment(url: String) -> (fragment: String, url: String) {
+    raw :: url.bytes()
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{35}) {
+            return (url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len()))
+        }
+        i = i + 1
+    }
+    (url: url, fragment: "")
+}
+
+/// Python `urllib.parse` spellings over the same RFC 3986 codec.
+pub fn quote(text: String) -> String { encode_component(text, true, false) }
+
+pub fn quote_from_bytes(data: [U8]) -> String {
+    encode_component(String.from_bytes(data) ?? "", true, false)
+}
+
+pub fn quote_plus(text: String) -> String { encode_component(text, false, true) }
+
+pub fn unquote(text: String) -> String { percent_decode(text) }
+
+pub fn unquote_to_bytes(text: String) -> [U8] {
+    decoded :: percent_decode(text) ?? return Err("invalid percent escape")
+    decoded.bytes()
+}
+
+pub fn unquote_plus(text: String) -> String {
+    percent_decode(form_decode(text))
+}
+
+pub fn urlparse(text: String) -> Url { parse(text) }
+
+pub fn urlsplit(text: String) -> Url { parse(text) }
+
+pub fn urlunparse(url: Url) -> String { unparse(url) }
+
+pub fn urlunsplit(url: Url) -> String { unparse(url) }
+
+pub fn urldefrag(text: String) -> (url: String, fragment: String) {
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{35}) {
+            return (url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len()))
+        }
+        i = i + 1
+    }
+    (url: text, fragment: "")
+}
+
+/// Query pairs in the same `[key, value]` row shape as `parse_qsl`.
+pub fn parse_qs(query: String) -> [[String]] { parse_qsl(query) }
+
+fn encode_component(text: String, allow_slash: Bool, plus_space: Bool) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if {
+            plus_space && n == 32 -> out.push(U8{43})
+            unreserved(b) || (allow_slash && n == 47) -> out.push(b)
+            else -> {
+                out.push(U8{37})
+                out.push(hex_nibble(n / 16))
+                out.push(hex_nibble(n % 16))
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn form_decode(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{43}) -> out.push(U8{32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn has_scheme(text: String) -> Bool {
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 58 -> return i > 0
+        if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 45 || n == 46) {
+            return false
+        }
+        i = i + 1
+    }
+    false
+}
+
+fn starts_bytes(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn dirname_url(path: String) -> String {
+    raw :: path.bytes()
+    if raw.len() == 0 -> return "/"
+    i := raw.len()
+    loop i > 0 {
+        i = i - 1
+        if raw[i] == (U8{47}) -> return slice(raw, 0, i + 1)
+    }
+    "/"
+}

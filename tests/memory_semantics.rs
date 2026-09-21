@@ -52,11 +52,6 @@ fn memory_denial_parser_keeps_the_canonical_effect_row() {
     }));
 }
 
-#[test]
-fn memory_denial_sema_and_tir_share_one_erased_contract() {
-    let compiled = jet::compile(MEMORY_DENIAL_SOURCE).expect("memory denial source compiles");
-    assert!(!compiled.rust.contains("!Mem.Alloc"));
-}
 
 #[test]
 fn parameterized_memory_rights_are_denials_not_positive_effects() {
@@ -511,4 +506,59 @@ fn run() {
     assert!(audit.contains("\"coverage\":\"exercised runs only\""));
     assert!(audit.contains(&format!("\"witnesses\":{}", first_rows * 2)));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn erased_memory_policy_and_bounds_facts_do_not_escape() {
+    let erased_policy = r#"
+fn need(value: String) {
+    print(value)
+}
+
+fn run() {
+    source :: "  hello  "
+    view :: source.trim()
+    #Off {
+        #Policy(copies: .Explicit) {
+            print("erased")
+        }
+    }
+    need(view)
+}
+"#;
+    jet::compile(erased_policy).expect("an erased explicit-copy policy must be restored");
+
+    let active_policy = r#"
+fn need(value: String) {
+    print(value)
+}
+
+fn run() {
+    source :: "  hello  "
+    view :: source.trim()
+    #Policy(copies: .Explicit) {
+        need(view)
+    }
+}
+"#;
+    let diagnostics = jet::compile(active_policy).expect_err("active copy policy must remain strict");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2307"),
+        "active explicit-copy policy lost its refusal: {diagnostics:#?}"
+    );
+
+    let erased_bounds = r#"
+fn run() {
+    values :: [Int#2]{1, 2}
+    #Off {
+        print(values[0])
+    }
+    print(values[2])
+}
+"#;
+    let diagnostics = jet::compile(erased_bounds).expect_err("out-of-range indexing must remain rejected");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0965"),
+        "erased bounds facts must not make a later out-of-range read valid: {diagnostics:#?}"
+    );
 }

@@ -36,15 +36,27 @@ fn run() {
 
     tui_backend :: ui.tui_backend()
     render_backend :: ~tui_backend
-    ui.reactive_render(() -> {
-        save_action :: ui.node_shortcut(ui.button("Save", on_click: () -> { save_requested.set(true) }), gui.save_shortcut())
+    ui.reactive_render(
+    () -> {
+        save_action :: ui.node_shortcut(
+        ui.button(
+        "Save",
+        on_click: () -> {
+            save_requested.set(true)
+        },
+        ),
+        gui.save_shortcut(),
+        )
         editor :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
-        tree :: ui.box([
+        tree :: ui.box(
+        [
             editor,
             save_action,
-        ])
+        ],
+        )
         ui.mount(render_backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
-    })
+    },
+    )
 
     focus :: gui.focus_group()
     tui_backend.set_focus_group(focus)
@@ -122,8 +134,9 @@ fn run() {
     boundary :: gui.grapheme_cursor_boundary(gui.body_of(edited_state), 3)
     shaped :: gui.shape_text("العربية हिन्दी é 👨‍👩‍👦", face)
     print("font shaping invoked; grapheme cursor boundary: {boundary}; glyphs: {shaped.glyphs.len()}")
-    if shaped.approximate -> print("font shaper reported approximate fallback")
-    else -> print("font shaper reported host-shaped run")
+    if shaped.approximate -> print("font shaper reported approximate fallback") else {
+        print("font shaper reported host-shaped run")
+    }
 
     // Real host calls. Result branches below preserve cancellation and failure
     // rather than marking a cancelled service as a completed save.
@@ -141,7 +154,7 @@ fn run() {
     _a11y :: gui.accessibility_metadata("Editor", "Multiline note editor")
 
     if _custom_filter == {
-        .Ok(filter) -> print("file filter ready: {filter.extensions.len()} extensions")
+        .Ok(filter) -> { print("file filter ready: {filter.extensions.len()} extensions") }
         .Err(_) -> {
             error_state :: gui.mark_error(edited_state, "file filter cancelled or failed")
             print("file filter outcome: {gui.status_label(error_state)}")
@@ -180,19 +193,19 @@ fn run() {
         .Err(_) -> print("filesystem grant outcome: cancelled or failed")
     }
     if _clipboard_write == {
-        .Ok(receipt) -> print("clipboard write characters: {receipt.characters}")
+        .Ok(receipt) -> { print("clipboard write characters: {receipt.characters}") }
         .Err(_) -> print("clipboard write outcome: cancelled or failed")
     }
     if _clipboard_read == {
-        .Ok(value) -> print("clipboard read scalars: {text.scalar_count(value.text)}")
+        .Ok(value) -> { print("clipboard read scalars: {text.scalar_count(value.text)}") }
         .Err(_) -> print("clipboard read outcome: cancelled or failed")
     }
     if _ime == {
-        .Ok(_) -> print("IME poll completed (event may be absent)")
+        .Ok(_) -> { print("IME poll completed (event may be absent)") }
         .Err(_) -> print("IME poll outcome: cancelled or failed")
     }
     if _drop == {
-        .Ok(_) -> print("drag/drop poll completed (event may be absent)")
+        .Ok(_) -> { print("drag/drop poll completed (event may be absent)") }
         .Err(_) -> print("drag/drop poll outcome: cancelled or failed")
     }
     if _shortcut == {
@@ -203,7 +216,7 @@ fn run() {
                 .Ok(binding) -> {
                     register_result :: gui.register_shortcut(binding)
                     if register_result == {
-                        .Ok(_) -> print("shortcut registration completed")
+                        .Ok(_) -> { print("shortcut registration completed") }
                         .Err(_) -> print("shortcut registration outcome: cancelled or failed")
                     }
                 }
@@ -211,7 +224,7 @@ fn run() {
             }
             dispatch_result :: gui.dispatch_shortcut(~shortcut)
             if dispatch_result == {
-                .Ok(_) -> print("shortcut dispatch completed")
+                .Ok(_) -> { print("shortcut dispatch completed") }
                 .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
             }
         }
@@ -222,7 +235,9 @@ fn run() {
             a11y_node :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
             accessible_tree :: ui.node_accessibility(a11y_node, ~metadata)
             if accessible_tree.accessibility == {
-                .Some(_) -> print("accessibility metadata on labeled node: {accessible_tree.label}")
+                .Some(_) -> {
+                    print("accessibility metadata on labeled node: {accessible_tree.label}")
+                }
                 .None -> panic("accessibility metadata missing")
             }
             accessibility_backend :: ui.null_backend()
@@ -230,7 +245,7 @@ fn run() {
             print("accessibility mount commands: {accessibility_backend.commands().len()}")
             attached :: gui.attach_accessibility(a11y_node, metadata)
             if attached == {
-                .Ok(_) -> print("host accessibility attachment completed")
+                .Ok(_) -> { print("host accessibility attachment completed") }
                 .Err(_) -> print("accessibility attachment outcome: cancelled or failed")
             }
         }

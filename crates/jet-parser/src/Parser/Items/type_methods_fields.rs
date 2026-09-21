@@ -18,24 +18,22 @@ impl<'a> Parser<'a> {
             _return_type_span,
             mut declared_effects,
             _effect_via,
-            prefix_effect_span,
+            _prefix_effect_span,
         ) = self.parse_callable_result_and_prefix_effects()?;
-        // A retired `-> Type` trait signature has no body marker after the
-        // result, so the shared callable lookahead cannot distinguish it
-        // from a concise body. Trait declarations have no concise-body
-        // form; recover that result here so fmt can emit bare `Type`.
+        // D-SIG-AFTER1=A: `-> Type` is the current trait result. A leftover
+        // bare `->` with no type is the old body marker; trait slots have no
+        // concise body, so ignore it.
         if return_type.is_none() && self.at_unified_arrow() {
             let arrow = self.expect_unified_arrow("before a trait result type")?;
             if self.type_starts_here() {
                 let (ty, _) = self.return_type()?;
-                self.diags.push(Self::retired_signature_shape(arrow.span));
                 return_type = Some(ty);
             } else {
                 self.pos = self.pos.saturating_sub(1);
+                let _ = arrow;
             }
         }
         let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
-        let effect_body_marker = prefix_effect_span.is_some() || self.func_effect_starts_here();
         if declared_effects.is_none() {
             declared_effects = self.parse_opt_effect_annotation()?;
         }
@@ -43,19 +41,8 @@ impl<'a> Parser<'a> {
             || declared_effects
                 .as_ref()
                 .is_some_and(|effects| effects.is_empty());
-        let body_marker_present = effect_body_marker || self.at_unified_arrow();
         if self.at_unified_arrow() {
             self.bump();
-        }
-        // D-LIB2: optional default body `{ … }` instead of `;`.
-        if !body_marker_present
-            && return_type
-                .as_ref()
-                .is_some_and(|ty| Self::return_type_has_value(ty))
-            && matches!(self.peek().kind, TokKind::LBrace)
-        {
-            self.diags
-                .push(Self::missing_callable_body_arrow(self.peek().span));
         }
         let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();

@@ -564,7 +564,7 @@ pub(crate) fn eval_comptime_items(
                 let Expr::Call(call) = expr else {
                     return;
                 };
-                if funcs.contains_key(&call.name) {
+                if funcs.contains_key(&call.name) && !core_item_imports.contains_key(&call.name) {
                     return;
                 }
                 let Some(item) = core_item_imports.get(&call.name) else {

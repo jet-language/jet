@@ -1,7 +1,7 @@
 use core.time as time
 
 trait BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) Bool
+    fn is_business_day(self, date: LocalDate) -> Bool
 }
 
 struct ExchangeCalendar {
@@ -9,7 +9,7 @@ struct ExchangeCalendar {
 }
 
 impl ExchangeCalendar.BusinessCalendar {
-    fn is_business_day(self, date: LocalDate) Bool -> {
+    fn is_business_day(self, date: LocalDate) -> Bool {
         if date.iso_weekday() > 5 -> return false
         loop holiday in self.holidays {
             if holiday == date -> return false
@@ -18,7 +18,7 @@ impl ExchangeCalendar.BusinessCalendar {
     }
 }
 
-fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) LocalDate -> {
+fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) -> LocalDate {
     current := start
     remaining := count
     step := 1
@@ -26,8 +26,7 @@ fn add_business_days(cal: ExchangeCalendar, start: LocalDate, count: Int) LocalD
     loop remaining != 0 {
         current = current.add_days(step)
         if cal.is_business_day(current) {
-            if remaining > 0 -> remaining -= 1
-            else -> remaining += 1
+            if remaining > 0 -> remaining -= 1 else -> remaining += 1
         }
     }
     return current
@@ -39,7 +38,7 @@ struct DailySchedule {
     minute: Int
 }
 
-fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) [ZonedDateTime] -> {
+fn occurrences(schedule: DailySchedule, start: LocalDate, days: Int) -> [ZonedDateTime] {
     out := [ZonedDateTime]{}
     local :: time.zoned_local(start, time.time(schedule.hour, schedule.minute, 0), schedule.zone) ?? panic("schedule start")
     current := local
@@ -68,9 +67,9 @@ struct JulianDate {
     nanoseconds: Int
 }
 
-fn date_key(date: LocalDate) Int -> date.year() * 10000 + date.month() * 100 + date.day()
+fn date_key(date: LocalDate) -> Int { date.year() * 10000 + date.month() * 100 + date.day() }
 
-fn normalize(seconds: Int, nanoseconds: Int, scale: String) AstroTime -> {
+fn normalize(seconds: Int, nanoseconds: Int, scale: String) -> AstroTime {
     s := seconds
     n := nanoseconds
     loop n >= 1_000_000_000 {
@@ -84,7 +83,7 @@ fn normalize(seconds: Int, nanoseconds: Int, scale: String) AstroTime -> {
     return AstroTime{seconds: s, nanoseconds: n, scale: scale}
 }
 
-fn leap_entries() [LeapEntry] -> {
+fn leap_entries() -> [LeapEntry] {
     return [LeapEntry]{
         LeapEntry{key: 19720101, offset_seconds: 10},
         LeapEntry{key: 19720701, offset_seconds: 11},
@@ -113,11 +112,11 @@ fn leap_entries() [LeapEntry] -> {
         LeapEntry{key: 20090101, offset_seconds: 34},
         LeapEntry{key: 20120701, offset_seconds: 35},
         LeapEntry{key: 20150701, offset_seconds: 36},
-        LeapEntry{key: 20170101, offset_seconds: 37}
+        LeapEntry{key: 20170101, offset_seconds: 37},
     }
 }
 
-fn tai_minus_utc(date: LocalDate) Int -> {
+fn tai_minus_utc(date: LocalDate) -> Int {
     offset := 0
     entries :: leap_entries()
     loop entry in entries {
@@ -128,13 +127,13 @@ fn tai_minus_utc(date: LocalDate) Int -> {
 
 // #2764 leaves direct LocalDate trait ABI on the compiler gate, so this
 // package keeps the calendar trait path explicit and package-owned.
-fn utc_carrier(dt: DateTime) AstroTime -> normalize(dt.to_unix_s(), dt.nanosecond(), "UTC")
+fn utc_carrier(dt: DateTime) -> AstroTime { normalize(dt.to_unix_s(), dt.nanosecond(), "UTC") }
 
-fn utc_to_tai(dt: DateTime) AstroTime -> {
+fn utc_to_tai(dt: DateTime) -> AstroTime {
     return normalize(dt.to_unix_s() + tai_minus_utc(dt.date()), dt.nanosecond(), "TAI")
 }
 
-fn tai_to_utc(value: AstroTime) DateTime -> {
+fn tai_to_utc(value: AstroTime) -> DateTime {
     offset := 0
     i := 0
     loop i < 3 {
@@ -146,20 +145,20 @@ fn tai_to_utc(value: AstroTime) DateTime -> {
     return time.from_unix_nanoseconds(total)
 }
 
-fn tai_to_tt(value: AstroTime) AstroTime -> normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT")
+fn tai_to_tt(value: AstroTime) -> AstroTime { normalize(value.seconds + 32, value.nanoseconds + 184_000_000, "TT") }
 
-fn tt_to_tai(value: AstroTime) AstroTime -> normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI")
+fn tt_to_tai(value: AstroTime) -> AstroTime { normalize(value.seconds - 32, value.nanoseconds - 184_000_000, "TAI") }
 
-fn utc_to_ut1(dt: DateTime, dut1_nanoseconds: Int) AstroTime -> {
+fn utc_to_ut1(dt: DateTime, dut1_nanoseconds: Int) -> AstroTime {
     return normalize(dt.to_unix_s(), dt.nanosecond() + dut1_nanoseconds, "UT1")
 }
 
-fn ut1_to_utc(value: AstroTime, dut1_nanoseconds: Int) DateTime -> {
+fn ut1_to_utc(value: AstroTime, dut1_nanoseconds: Int) -> DateTime {
     total :: value.seconds * 1_000_000_000 + value.nanoseconds - dut1_nanoseconds
     return time.from_unix_nanoseconds(total)
 }
 
-fn to_julian(value: AstroTime) JulianDate -> {
+fn to_julian(value: AstroTime) -> JulianDate {
     days :: value.seconds /% 86400
     seconds_of_day :: value.seconds - days * 86400
     fraction :: seconds_of_day * 1_000_000_000 + value.nanoseconds + 43_200_000_000_000
@@ -224,7 +223,9 @@ fn run() {
     overlap_later_text :: overlap_later.format("yyyy-MM-dd HH:mm:ss VV XXX")
     if !gap_compatible_text.starts_with("2024-03-10 03:30:00") -> panic("gap compatible resolution")
     if !gap_later_text.starts_with("2024-03-10 03:30:00") -> panic("gap later resolution")
-    if overlap_earlier.offset_seconds() == overlap_later.offset_seconds() -> panic("overlap disambiguation")
+    if overlap_earlier.offset_seconds() == overlap_later.offset_seconds() {
+        panic("overlap disambiguation")
+    }
     print("gap_compatible={gap_compatible_text}")
     print("gap_later={gap_later_text}")
     print("overlap_earlier={overlap_earlier_text}")

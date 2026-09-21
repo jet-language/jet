@@ -1102,9 +1102,9 @@ fn semantic_shape(
             let params = parameter_parts.join(", ");
             let prefix =
                 owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
-            // D-SIG-SHAPE1=B: return type bare after the parameter list, and an
-            // effect ceiling in the body-arrow slot as `-[IO]>`. The retired
-            // `=[…]=>` must not reach a hover, completion or symbol label.
+            // D-SIG-AFTER1=A: return type follows the one arrow. An effect
+            // ceiling splits that arrow as `-[IO]>`. The retired `=[…]=>` must
+            // not reach a hover, completion or symbol label.
             //
             // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem
             // deny-only, so they never belong in a rendered positive ceiling —
@@ -1123,7 +1123,7 @@ fn semantic_shape(
                 .unwrap_or_default();
             let result = ret
                 .as_ref()
-                .map(|ty| format!(" {}", display_type(&ty.name())))
+                .map(|ty| display_type(&ty.name()))
                 .unwrap_or_default();
             let ceiling = if let Some((param, _)) = effect_via {
                 format!(" -[via {param}]>")
@@ -1132,10 +1132,21 @@ fn semantic_shape(
             } else {
                 format!(" -[{}]>", shown.join(", "))
             };
+            let suffix = if !ceiling.is_empty() {
+                if result.is_empty() {
+                    ceiling
+                } else {
+                    format!("{ceiling} {result}")
+                }
+            } else if !result.is_empty() {
+                format!(" -> {result}")
+            } else {
+                String::new()
+            };
             (
                 SemanticSymbolKind::Function,
                 format!(
-                    "{prefix}({params}){result}{ceiling}\nfailure: {failure_contract} ({failure_source})"
+                    "{prefix}({params}){suffix}\nfailure: {failure_contract} ({failure_source})"
                 ),
             )
         }

@@ -149,12 +149,12 @@ impl<'a> Parser<'a> {
             }
             return Ok((member, member_span));
         }
-        // D-ITER1: `take` is `KwMove` in the lexer but is valid as a method name
-        // in dot position (`xs.take(n)`). Accept it as an identifier here.
-        if matches!(self.peek().kind, TokKind::KwMove) {
+        // `task` starts structured concurrency in expression-head position,
+        // but remains a valid Core record field/member name.
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_CONC_TASK) {
             let span = self.peek().span;
             self.bump();
-            return Ok((Syntax::KW_MOVE.to_string(), span));
+            return Ok((Syntax::KW_CONC_TASK.to_string(), span));
         }
         // D-TIME-IN1=C: the lexer reclassifies `in` after `.` as an ordinary
         // identifier. Accept the keyword too for parser clients that provide

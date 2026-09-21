@@ -1,0 +1,43 @@
+package {
+    name: "core.mod"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Load a compiled Jet compiled from disk."
+    license: "MIT"
+    outputs: {
+        mod: .Library{ entry: mod }
+    }
+}
+
+// core.mod — a compiled Jet unit (`.jetc` / object) as a handle.
+//
+// `load` is the host linker. The bytes on disk are opaque to this file.
+
+pub struct CompiledModule {
+    pub path: String
+    pub handle: Int
+}
+
+/// Load a compiled compiled from `path`.
+pub fn load(path: String) -[FS]> CompiledModule !IOError {
+    h :: host_mod_load(path)
+    if h <= 0 {
+        return Err(IOError{operation: "mod.load", message: "load failed", path: path, os_code: None})
+    }
+    Ok(CompiledModule{path: path, handle: h})
+}
+
+fn host_mod_load(path: String) -[FS]> Int { panic("host_mod_load") }
+
+
+pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule {
+    host_mod_unload(compiled.handle)
+    CompiledModule{path: compiled.path, handle: 0}
+}
+
+pub fn is_loaded(compiled: CompiledModule) -> Bool { compiled.handle > 0 }
+
+pub fn path(compiled: CompiledModule) -> String { compiled.path }
+
+fn host_mod_unload(handle: Int) -[FS]> { panic("host_mod_unload") }
+

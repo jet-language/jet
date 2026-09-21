@@ -1,0 +1,122 @@
+package {
+    name: "core.build"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Build graph and cache receipts."
+    license: "MIT"
+    outputs: {
+        build: .Library{ entry: build }
+    }
+}
+// core.build — an in-memory action graph plus a receipt diff.
+//
+// Nodes are keyed by action identity. `graph` starts empty. Edges are
+// input-file digests; `receipt_diff` compares two graphs by key and reports
+// added, removed, and digest-changed files. This is the typed surface; the
+// live compiler still owns the real cache.
+pub struct BuildGraphTarget {
+    pub name: String
+    pub kind: String
+}
+
+pub struct BuildGraphAction {
+    pub key: String
+    pub command: String
+}
+
+pub struct BuildGraphActionKey {
+    pub key: String
+}
+
+pub struct BuildGraphFile {
+    pub path: String
+    pub digest: String
+}
+
+pub struct BuildGraphNode {
+    pub key: String
+    pub command: String
+    pub inputs: [BuildGraphFile]
+}
+
+pub struct BuildGraphInputDigest {
+    pub path: String
+    pub digest: String
+}
+
+pub struct BuildGraphFileDelta {
+    pub path: String
+    pub before: String
+    pub after: String
+}
+
+pub struct BuildGraphKeyDelta {
+    pub key: String
+    pub kind: String
+}
+
+pub struct BuildGraphCacheDelta {
+    pub hits: Int
+    pub misses: Int
+    pub changed: Int
+}
+
+pub struct BuildGraphDiff {
+    pub added: [BuildGraphKeyDelta]
+    pub removed: [BuildGraphKeyDelta]
+    pub files: [BuildGraphFileDelta]
+    pub cache: BuildGraphCacheDelta
+}
+
+pub struct BuildGraph {
+    pub nodes: [BuildGraphNode]
+}
+
+/// Empty graph. Add nodes by constructing `BuildGraph` values; this helper
+/// is the documented constructor.
+pub fn graph() -> BuildGraph { {nodes: [BuildGraphNode]{}} }
+
+/// Compare two graphs. Keys present only on `after` are added; only on
+/// `before` are removed; shared keys with a different input digest are
+/// file deltas. Cache hits are shared unchanged keys.
+pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
+    added := [BuildGraphKeyDelta]{}
+    removed := [BuildGraphKeyDelta]{}
+    files := [BuildGraphFileDelta]{}
+    hits := 0
+    changed := 0
+    loop n in after.nodes {
+        prev :: find_node(before, n.key)
+        if prev == .None -> added.push(BuildGraphKeyDelta{key: n.key, kind: "added"}) else {
+            p :: prev ?? BuildGraphNode{key: "", command: "", inputs: [BuildGraphFile]{}}
+            if node_digest(p) == node_digest(n) -> hits = hits + 1 else {
+                changed = changed + 1
+                files.push(BuildGraphFileDelta{path: n.key, before: node_digest(p), after: node_digest(n)})
+            }
+        }
+    }
+    loop n in before.nodes {
+        if find_node(after, n.key) == .None {
+            removed.push(BuildGraphKeyDelta{key: n.key, kind: "removed"})
+        }
+    }
+    {
+        added: added,
+        removed: removed,
+        files: files,
+        cache: BuildGraphCacheDelta{hits: hits, misses: added.len(), changed: changed},
+    }
+}
+
+fn find_node(g: BuildGraph, key: String) -> ?BuildGraphNode {
+    loop n in g.nodes {
+        if n.key == key -> return Val(n)
+    }
+    None
+}
+
+fn node_digest(n: BuildGraphNode) -> String {
+    out := n.command
+    loop f in n.inputs -> out = "{out}|{f.path}:{f.digest}"
+    out
+}

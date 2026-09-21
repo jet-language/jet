@@ -15,8 +15,6 @@ missing completion marker is not failure by itself.
 OMP `task` is the first dispatch path. If it cannot run the required role,
 record the exact harness failure in `JET_OMP_FALLBACK_REASON` before a bounded
 fallback. Prompts do not select a model; role selection remains in `AGENTS.md`.
-Use `scripts/agent/lane-guardian.sh` for a long wave only when the owner
-requests it; it snapshots the tree and sheds the newest lane under pressure.
 
 ## Disk and memory
 
@@ -24,10 +22,7 @@ Use the one shared bounded checkout `target/`, with `CARGO_INCREMENTAL=0`.
 Keep scratch at `~/.cache/jet-test-scratch` and logs/briefs at
 `~/.cache/jet-luna`; `/tmp` is RAM-backed and must not hold Cargo targets,
 large logs, or test scratch. Monitor available RAM, swap, disk, and target size.
-Run `scripts/agent/tmp-guard.sh` when checking a failure or before a
-resource-heavy command. Use `scripts/agent/disk-report.sh` to inspect
-reclaimable footprint. Respect `JET_TARGET_CAP_GB` (120 GiB by default);
-`proof-parallel.sh` enforces the cap after the commit-bound closeout token.
+Respect `JET_TARGET_CAP_GB` (120 GiB by default).
 
 Run repository commands through `scripts/agent/jet-env`. For source checks,
 use the checkout-aware commands in the brief, for example:

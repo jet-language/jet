@@ -1,0 +1,771 @@
+package {
+    name: "core.text"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Unicode text, ASCII helpers, and display formatting."
+    license: "MIT"
+    outputs: {
+        text: .Library{ entry: text }
+    }
+}
+
+// core.text — strings as Unicode scalar sequences.
+//
+// Jet `String` is UTF-8. Counting, trimming, and case mapping are defined on
+// scalars, not raw bytes, except where a function is named `byte_*`. UTF-8
+// decode, Hangul NFD/NFC, UAX #29 grapheme/word segmentation (extended
+// grapheme clusters, WB simple alphanumerics), East-Asian width, and Latin-1
+// case mapping are Jet. Full Unicode case-fold tables beyond Latin-1 map
+// identity (C+F for ASCII/Latin-1 still applied).
+//
+// Predicates on the empty string are false (`is_alphabetic("")` is false).
+// `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
+
+module fmt
+module parse
+module wrap
+module html
+module combinators
+
+/// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
+pub struct Cursor {
+    pub offset: Int
+    pub line: Int
+    pub column: Int
+}
+
+/// Cursor at the start of `text` (offset 0, line 1, column 1).
+pub fn cursor(text: String) -> Cursor {
+    _ :: text
+    Cursor{offset: 0, line: 1, column: 1}
+}
+
+/// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
+pub fn cursor_advance(text: String, cur: Cursor) -> Cursor {
+    raw :: text.bytes()
+    if cur.offset >= raw.len() -> return cur
+    n :: raw[cur.offset]
+    width := 1
+    nn :: n
+    if nn >= 240 {
+        width = 4
+    } else if nn >= 224 {
+        width = 3
+    } else if nn >= 192 {
+        width = 2
+    }
+    next :: cur.offset + width
+    if nn == 10 -> return (Cursor{offset: next, line: cur.line + 1, column: 1})
+    Cursor{offset: next, line: cur.line, column: cur.column + 1}
+}
+
+/// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.
+pub fn byte_count(text: String) -> Int { text.bytes().len() }
+
+pub fn is_ascii(text: String) -> Bool {
+    loop b in text.bytes() {
+        if b > (U8{127}) -> return false
+    }
+    true
+}
+
+/// Unicode scalar count (replacement character U+FFFD counts as one).
+pub fn scalar_count(text: String) -> Int { decode_scalars(text).len() }
+
+pub fn scalars(text: String) -> [String] {
+    out := [String]{}
+    loop cp in decode_scalars(text) -> out.push(encode_cp(cp))
+    out
+}
+
+pub fn lower(text: String) -> String { map_case(text, false) }
+
+pub fn upper(text: String) -> String { map_case(text, true) }
+
+/// Unicode C+F case folding. Latin-1 folds through `lower`; other scalars identity.
+pub fn casefold(text: String) -> String { lower(text) }
+
+pub fn caseless_eq(left: String, right: String) -> Bool { casefold(left) == casefold(right) }
+
+pub fn nfc(text: String) -> String { compose(decompose(text, false)) }
+pub fn nfd(text: String) -> String { encode_cps(decompose(text, false)) }
+pub fn nfkc(text: String) -> String { compose(decompose(text, true)) }
+pub fn nfkd(text: String) -> String { encode_cps(decompose(text, true)) }
+
+pub fn graphemes(text: String) -> [String] { split_graphemes(text) }
+pub fn words(text: String) -> [String] { split_words(text) }
+pub fn sentences(text: String) -> [String] { split_sentences(text) }
+
+/// Debug spellings `U+XXXX` for each scalar.
+pub fn inspect(text: String) -> [String] {
+    out := [String]{}
+    loop cp in decode_scalars(text) -> out.push(hex_cp(cp))
+    out
+}
+
+/// `"index:scalar"` pairs, index in bytes.
+pub fn char_indices(text: String) -> [String] {
+    out := [String]{}
+    loop pair in decode_indexed(text) -> out.push("{pair.index}:{encode_cp(pair.cp)}")
+    out
+}
+
+pub fn display_width(text: String) -> Int {
+    w := 0
+    loop cp in decode_scalars(text) -> w = w + east_asian_width(cp)
+    w
+}
+
+pub fn grapheme_views(text: String) -> [String] { graphemes(text) }
+pub fn word_views(text: String) -> [String] { words(text) }
+pub fn line_views(text: String) -> [String] { split_lines(text) }
+pub fn byte_views(text: String) -> [String] {
+    out := [String]{}
+    loop b in text.bytes() -> out.push("{b}")
+    out
+}
+
+pub fn is_alphabetic(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    if is_ascii(text) {
+        loop b in text.bytes() {
+            if !ascii_alpha(b) -> return false
+        }
+        return true
+    }
+    loop cp in decode_scalars(text) {
+        if !is_alpha_cp(cp) -> return false
+    }
+    true
+}
+
+pub fn is_numeric(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop cp in decode_scalars(text) {
+        if !is_digit_cp(cp) -> return false
+    }
+    true
+}
+
+pub fn is_whitespace(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop cp in decode_scalars(text) {
+        if !is_space_cp(cp) -> return false
+    }
+    true
+}
+
+pub fn trim(text: String) -> String { trim_end(trim_start(text)) }
+
+pub fn trim_start(text: String) -> String {
+    raw :: text.bytes()
+    i := 0
+    loop {
+        if i >= raw.len() -> return ""
+        if !ascii_space(raw[i]) -> return slice_bytes(raw, i, raw.len())
+        i = i + 1
+    }
+}
+
+pub fn trim_end(text: String) -> String {
+    raw :: text.bytes()
+    i := raw.len()
+    loop {
+        if i <= 0 -> return ""
+        if !ascii_space(raw[i - 1]) -> return slice_bytes(raw, 0, i)
+        i = i - 1
+    }
+}
+
+/// Pad on the left until `width` bytes. Empty `fill` returns `text` unchanged.
+pub fn pad_start(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, true) }
+
+pub fn pad_end(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, false) }
+
+pub fn center(text: String, width: Int, fill: String) -> String {
+    extra :: width - text.bytes().len()
+    if extra <= 0 || fill.bytes().len() == 0 -> return text
+    left :: extra / 2
+    pad_end(pad_start(text, text.bytes().len() + left, fill), width, fill)
+}
+
+pub fn starts_any(text: String, prefixes: [String]) -> Bool {
+    loop p in prefixes {
+        if starts_with(text, p) -> return true
+    }
+    false
+}
+
+pub fn ends_any(text: String, suffixes: [String]) -> Bool {
+    loop s in suffixes {
+        if ends_with(text, s) -> return true
+    }
+    false
+}
+
+/// At most `n` parts. `n <= 0` yields an empty list.
+pub fn splitn(text: String, sep: String, n: Int) -> [String] { split_limit(text, sep, n, false) }
+
+pub fn rsplitn(text: String, sep: String, n: Int) -> [String] { split_limit(text, sep, n, true) }
+
+fn ascii_alpha(b: U8) -> Bool {
+    n :: b
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
+fn ascii_space(b: U8) -> Bool {
+    n :: b
+    n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 {
+            out.push(U8{n + 32})
+        } else {
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn ascii_upper(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 97 && n <= 122 {
+            out.push(U8{n - 32})
+        } else {
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn starts_with(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn ends_with(text: String, suffix: String) -> Bool {
+    a :: text.bytes()
+    b :: suffix.bytes()
+    if b.len() > a.len() -> return false
+    off :: a.len() - b.len()
+    loop i in 0..<b.len() {
+        if a[off + i] != b[i] -> return false
+    }
+    true
+}
+
+fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
+    raw :: text.bytes()
+    pad :: fill.bytes()
+    extra :: width - raw.len()
+    if extra <= 0 || pad.len() == 0 -> return text
+    added := [U8]{}
+    loop {
+        if added.len() >= extra -> break
+        loop b in pad {
+            if added.len() >= extra -> break
+            added.push(b)
+        }
+    }
+    out := [U8]{}
+    if left {
+        loop b in added -> out.push(b)
+        loop b in raw -> out.push(b)
+    } else {
+        loop b in raw -> out.push(b)
+        loop b in added -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
+    if n <= 0 -> return [String]{}
+    if n == 1 || sep.bytes().len() == 0 -> return [String]{text}
+    parts := [String]{}
+    rest := text
+    loop {
+        if parts.len() + 1 >= n {
+            parts.push(rest)
+            return parts
+        }
+        at :: find_sep(rest, sep, from_right)
+        if at < 0 {
+            parts.push(rest)
+            return parts
+        }
+        if from_right {
+            parts.push(slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len()))
+            rest = slice_bytes(rest.bytes(), 0, at)
+        } else {
+            parts.push(slice_bytes(rest.bytes(), 0, at))
+            rest = slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len())
+        }
+    }
+}
+
+fn find_sep(text: String, sep: String, from_right: Bool) -> Int {
+    hay :: text.bytes()
+    needle :: sep.bytes()
+    if needle.len() == 0 || needle.len() > hay.len() -> return -1
+    last :: hay.len() - needle.len()
+    if from_right {
+        i := last
+        loop {
+            if i < 0 -> return -1
+            if match_at(hay, needle, i) -> return i
+            i = i - 1
+        }
+    }
+    loop i in 0..<(last + 1) {
+        if match_at(hay, needle, i) -> return i
+    }
+    -1
+}
+
+fn match_at(hay: [U8], needle: [U8], start: Int) -> Bool {
+    loop i in 0..<needle.len() {
+        if hay[start + i] != needle[i] -> return false
+    }
+    true
+}
+
+pub struct IndexedCp {
+    pub index: Int
+    pub cp: Int
+}
+
+fn decode_scalars(text: String) -> [Int] {
+    pairs :: decode_indexed(text)
+    out := [Int]{}
+    loop p in pairs -> out.push(p.cp)
+    out
+}
+
+fn decode_indexed(text: String) -> [IndexedCp] {
+    raw :: text.bytes()
+    out := [IndexedCp]{}
+    i := 0
+    loop {
+        if i >= raw.len() -> return out
+        start :: i
+        n :: raw[i]
+        cp := 0
+        need := 0
+        if n < 128 {
+            cp = n
+            i = i + 1
+        } else if n >= 192 && n < 224 {
+            need = 1
+            cp = n & 31
+            i = i + 1
+        } else if n >= 224 && n < 240 {
+            need = 2
+            cp = n & 15
+            i = i + 1
+        } else if n >= 240 && n < 248 {
+            need = 3
+            cp = n & 7
+            i = i + 1
+        } else {
+            out.push(IndexedCp{index: start, cp: 65533})
+            i = i + 1
+            next
+        }
+        ok := true
+        loop k in 0..<need {
+            if i >= raw.len() {
+                ok = false
+                break
+            }
+            c :: raw[i]
+            if c < 128 || c >= 192 {
+                ok = false
+                break
+            }
+            cp = (cp << 6) | (c & 63)
+            i = i + 1
+        }
+        if !ok || cp > 1114111 || (cp >= 55296 && cp <= 57343) {
+            out.push(IndexedCp{index: start, cp: 65533})
+            next
+        }
+        out.push(IndexedCp{index: start, cp: cp})
+    }
+}
+
+fn encode_cp(cp: Int) -> String {
+    n := cp
+    if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
+    out := [U8]{}
+    if n < 128 {
+        out.push(U8{n})
+    } else if n < 2048 {
+        out.push(U8{192 | (n >> 6)})
+        out.push(U8{128 | (n & 63)})
+    } else if n < 65536 {
+        out.push(U8{224 | (n >> 12)})
+        out.push(U8{128 | ((n >> 6) & 63)})
+        out.push(U8{128 | (n & 63)})
+    } else {
+        out.push(U8{240 | (n >> 18)})
+        out.push(U8{128 | ((n >> 12) & 63)})
+        out.push(U8{128 | ((n >> 6) & 63)})
+        out.push(U8{128 | (n & 63)})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn encode_cps(cps: [Int]) -> String {
+    out := ""
+    loop cp in cps -> out = "{out}{encode_cp(cp)}"
+    out
+}
+
+fn map_case(text: String, to_upper: Bool) -> String {
+    out := ""
+    loop cp in decode_scalars(text) -> out = "{out}{encode_cp(case_cp(cp, to_upper))}"
+    out
+}
+
+fn case_cp(cp: Int, to_upper: Bool) -> Int {
+    if to_upper {
+        if cp >= 97 && cp <= 122 -> return cp - 32
+        if cp >= 224 && cp <= 254 && cp != 247 -> return cp - 32
+        if cp == 255 -> return 376
+        return cp
+    }
+    if cp >= 65 && cp <= 90 -> return cp + 32
+    if cp >= 192 && cp <= 222 && cp != 215 -> return cp + 32
+    if cp == 376 -> return 255
+    cp
+}
+
+fn is_alpha_cp(cp: Int) -> Bool {
+    if (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) -> return true
+    if (cp >= 192 && cp <= 214) || (cp >= 216 && cp <= 246) || (cp >= 248 && cp <= 255) -> return true
+    if cp >= 256 && cp <= 383 -> return true
+    if cp >= 880 && cp <= 1023 -> return true
+    if cp >= 1024 && cp <= 1279 -> return true
+    false
+}
+
+fn is_digit_cp(cp: Int) -> Bool {
+    if cp >= 48 && cp <= 57 -> return true
+    if cp >= 1632 && cp <= 1641 -> return true
+    if cp >= 1776 && cp <= 1785 -> return true
+    if cp >= 2406 && cp <= 2415 -> return true
+    if cp >= 65296 && cp <= 65305 -> return true
+    false
+}
+
+fn is_space_cp(cp: Int) -> Bool {
+    if cp == {
+        32 | 9 | 10 | 11 | 12 | 13 -> return true
+        160 | 5760 | 8239 | 8287 | 12288 -> return true
+        else -> { _ := 0 }
+    }
+    false
+}
+
+fn combining_class(cp: Int) -> Int {
+    if cp >= 768 && cp <= 879 -> return 230
+    if cp >= 7616 && cp <= 7679 -> return 230
+    if cp >= 8400 && cp <= 8432 -> return 230
+    if cp >= 65056 && cp <= 65071 -> return 230
+    0
+}
+
+fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
+
+@c_sbase :: 44032
+@c_lbase :: 4352
+@c_vbase :: 4449
+@c_tbase :: 4519
+@c_lcount :: 19
+@c_vcount :: 21
+@c_tcount :: 28
+@c_ncount :: 588
+@c_scount :: 11172
+
+fn hangul_decompose(cp: Int) -> [Int] {
+    sindex :: cp - @c_sbase
+    if sindex < 0 || sindex >= @c_scount -> return [Int]{cp}
+    l :: @c_lbase + sindex / @c_ncount
+    v :: @c_vbase + (sindex % @c_ncount) / @c_tcount
+    t :: @c_tbase + sindex % @c_tcount
+    if t == @c_tbase -> return [Int]{l, v}
+    [Int]{l, v, t}
+}
+
+fn hangul_compose(a: Int, b: Int) -> ?Int {
+    lindex :: a - @c_lbase
+    if lindex >= 0 && lindex < @c_lcount {
+        vindex :: b - @c_vbase
+        if vindex >= 0 && vindex < @c_vcount -> return Val(@c_sbase + (lindex * @c_vcount + vindex) * @c_tcount)
+    }
+    sindex :: a - @c_sbase
+    if sindex >= 0 && sindex < @c_scount && sindex % @c_tcount == 0 {
+        tindex :: b - @c_tbase
+        if tindex > 0 && tindex < @c_tcount -> return Val(a + tindex)
+    }
+    None
+}
+
+fn decompose(text: String, compat: Bool) -> [Int] {
+    raw := [Int]{}
+    loop cp in decode_scalars(text) {
+        if cp >= @c_sbase && cp < @c_sbase + @c_scount {
+            loop p in hangul_decompose(cp) -> raw.push(p)
+        } else {
+            // Compatibility: fullwidth ASCII to ASCII.
+            if compat && cp >= 65281 && cp <= 65374 {
+                raw.push(cp - 65248)
+            } else {
+                raw.push(cp)
+            }
+        }
+    }
+    canon_order(raw)
+}
+
+fn canon_order(cps: [Int]) -> [Int] {
+    out := [Int]{}
+    loop c in cps -> out.push(c)
+    i := 1
+    loop {
+        if i >= out.len() -> return out
+        cc :: combining_class(out[i])
+        prev :: combining_class(out[i - 1])
+        if cc != 0 && prev > cc {
+            tmp :: out[i]
+            out[i] = out[i - 1]
+            out[i - 1] = tmp
+            if i > 1 {
+                i = i - 1
+                next
+            }
+        }
+        i = i + 1
+    }
+}
+
+fn compose(cps: [Int]) -> String {
+    if cps.len() == 0 -> return ""
+    starter := cps[0]
+    pending := [Int]{}
+    i := 1
+    loop {
+        if i >= cps.len() {
+            out := [Int]{starter}
+            loop p in pending -> out.push(p)
+            return encode_cps(out)
+        }
+        c :: cps[i]
+        composed :: hangul_compose(starter, c)
+        if composed != None && pending.len() == 0 {
+            starter = composed ?? starter
+            i = i + 1
+            next
+        }
+        if combining_class(c) == 0 {
+            acc := [Int]{starter}
+            loop p in pending -> acc.push(p)
+            rest := [Int]{c}
+            loop j in (i + 1)..<cps.len() -> rest.push(cps[j])
+            return "{encode_cps(acc)}{compose(rest)}"
+        }
+        pending.push(c)
+        i = i + 1
+    }
+}
+
+fn split_graphemes(text: String) -> [String] {
+    cps :: decode_scalars(text)
+    if cps.len() == 0 -> return [String]{}
+    out := [String]{}
+    cluster := [Int]{cps[0]}
+    i := 1
+    loop {
+        if i >= cps.len() {
+            out.push(encode_cps(cluster))
+            return out
+        }
+        prev :: cluster[cluster.len() - 1]
+        cur :: cps[i]
+        if grapheme_break(prev, cur) {
+            out.push(encode_cps(cluster))
+            cluster = [Int]{cur}
+        } else {
+            cluster.push(cur)
+        }
+        i = i + 1
+    }
+}
+
+fn grapheme_break(prev: Int, cur: Int) -> Bool {
+    // GB3 CR × LF
+    if prev == 13 && cur == 10 -> return false
+    // GB4 / GB5
+    if prev == 13 || prev == 10 || is_control(prev) -> return true
+    if cur == 13 || cur == 10 || is_control(cur) -> return true
+    // GB6-8 Hangul
+    if is_l(prev) && (is_l(cur) || is_v(cur) || is_lv(cur) || is_lvt(cur)) -> return false
+    if (is_lv(prev) || is_v(prev)) && (is_v(cur) || is_t(cur)) -> return false
+    if (is_lvt(prev) || is_t(prev)) && is_t(cur) -> return false
+    // GB9 Extend / ZWJ
+    if is_extend(cur) || cur == 0x200D -> return false
+    // GB9a SpacingMark (approx: Mc)
+    if cur >= 0x0903 && cur <= 0x0903 -> return false
+    // GB11 ZWJ × Extended_Pictographic (approx: emoji)
+    if prev == 0x200D && is_emoji(cur) -> return false
+    // GB12/13 RI × RI
+    if is_ri(prev) && is_ri(cur) -> return false
+    true
+}
+
+fn is_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
+fn is_l(cp: Int) -> Bool { cp >= @c_lbase && cp < @c_lbase + @c_lcount }
+fn is_v(cp: Int) -> Bool { cp >= @c_vbase && cp < @c_vbase + @c_vcount }
+fn is_t(cp: Int) -> Bool { cp >= @c_tbase + 1 && cp < @c_tbase + @c_tcount }
+fn is_lv(cp: Int) -> Bool {
+    s :: cp - @c_sbase
+    s >= 0 && s < @c_scount && s % @c_tcount == 0
+}
+fn is_lvt(cp: Int) -> Bool {
+    s :: cp - @c_sbase
+    s >= 0 && s < @c_scount && s % @c_tcount != 0
+}
+fn is_ri(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
+fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }
+
+fn split_words(text: String) -> [String] {
+    out := [String]{}
+    cur := [Int]{}
+    in_word := false
+    loop cp in decode_scalars(text) {
+        w :: is_word_cp(cp)
+        if w {
+            if !in_word && cur.len() > 0 {
+                out.push(encode_cps(cur))
+                cur = [Int]{}
+            }
+            cur.push(cp)
+            in_word = true
+        } else {
+            if in_word && cur.len() > 0 {
+                out.push(encode_cps(cur))
+                cur = [Int]{}
+            }
+            if !is_space_cp(cp) -> cur.push(cp)
+            in_word = false
+        }
+    }
+    if cur.len() > 0 -> out.push(encode_cps(cur))
+    out
+}
+
+fn is_word_cp(cp: Int) -> Bool { is_alpha_cp(cp) || is_digit_cp(cp) || cp == 95 || cp == 39 }
+
+fn split_sentences(text: String) -> [String] {
+    out := [String]{}
+    cur := [Int]{}
+    loop cp in decode_scalars(text) {
+        cur.push(cp)
+        if cp == 46 || cp == 33 || cp == 63 {
+            out.push(encode_cps(cur))
+            cur = [Int]{}
+        }
+    }
+    if cur.len() > 0 -> out.push(encode_cps(cur))
+    out
+}
+
+fn split_lines(text: String) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    raw :: text.bytes()
+    i := 0
+    loop {
+        if i >= raw.len() {
+            out.push(String.from_bytes(cur) ?? "")
+            return out
+        }
+        n :: raw[i]
+        if n == 10 {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+            i = i + 1
+            next
+        }
+        if n == 13 {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+            i = i + 1
+            if i < raw.len() && raw[i] == (U8{10}) -> i = i + 1
+            next
+        }
+        cur.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn east_asian_width(cp: Int) -> Int {
+    if combining_class(cp) != 0 -> return 0
+    if cp < 32 || (cp >= 127 && cp <= 159) -> return 0
+    if (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2329 && cp <= 0x232A) -> return 2
+    if (cp >= 0x2E80 && cp <= 0xA4CF) && cp != 0x303F -> return 2
+    if cp >= 0xAC00 && cp <= 0xD7A3 -> return 2
+    if cp >= 0xF900 && cp <= 0xFAFF -> return 2
+    if cp >= 0xFE10 && cp <= 0xFE19 -> return 2
+    if cp >= 0xFE30 && cp <= 0xFE6F -> return 2
+    if cp >= 0xFF00 && cp <= 0xFF60 -> return 2
+    if cp >= 0xFFE0 && cp <= 0xFFE6 -> return 2
+    if cp >= 0x1F300 && cp <= 0x1FAFF -> return 2
+    1
+}
+
+fn hex_cp(cp: Int) -> String {
+    hex := "0123456789ABCDEF"
+    hb :: hex.bytes()
+    n := cp
+    digits := [U8]{}
+    if n == 0 -> digits.push(U8{48})
+    loop {
+        if n == 0 -> break
+        digits.push(hb[n % 16])
+        n = n / 16
+    }
+    // pad to 4
+    loop {
+        if digits.len() >= 4 -> break
+        digits.push(U8{48})
+    }
+    out := [U8]{85, 43} // U+
+    i := digits.len() - 1
+    loop {
+        if i < 0 -> return String.from_bytes(out) ?? ""
+        out.push(digits[i])
+        i = i - 1
+    }
+}

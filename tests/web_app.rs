@@ -249,7 +249,7 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     let port = free_port();
     let mut _server = spawn_server_with_program(
-        &repo_root().join("build/app_typed_args"),
+        &repo_root().join(".jet/build/app_typed_args"),
         &["--port=9000"],
         port,
     );

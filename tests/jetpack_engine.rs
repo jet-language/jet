@@ -1409,7 +1409,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert_ne!(hook_before_switch, hook_after_switch);
 
     let entered = run([
-        "enter",
+        "env",
         "--no-color",
         "--trust",
         "--offline",
@@ -5225,7 +5225,7 @@ fn no_nix_ad_hoc_package_reports_e1272() {
     let root = Scratch::new("root");
     let output = jetpack()
         .args([
-            "enter",
+            "env",
             "-p",
             "postgres",
             "--no-color",
@@ -5987,7 +5987,7 @@ fn provider_conformance_reports_loss_and_conflict_without_defaults() {
 }
 
 #[test]
-fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
+fn env_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
     // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/package.jet at all — the
     // ad-hoc package becomes an ordinary nixpkgs RefSpec, folded into an
     // otherwise-empty plan, trust-gated and realized exactly like a
@@ -6017,7 +6017,7 @@ fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
 }
 
 #[test]
-fn enter_dash_p_merges_with_project_declared_packages() {
+fn env_dash_p_merges_with_project_declared_packages() {
     // The project's own declared package (`hello`, a `core` ref) and the
     // ad-hoc `-p greet` (nixpkgs) both land on PATH in the same shell.
     let (base, proj, root) = core_hello_project("dashp-merge");
@@ -6044,7 +6044,7 @@ fn enter_dash_p_merges_with_project_declared_packages() {
 }
 
 #[test]
-fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
+fn env_without_env_jet_or_packages_is_still_nothing_to_do() {
     // The pre-U16 refusal is unchanged when there is truly nothing: no
     // env.jet and no `-p`.
     let root = Scratch::new("nothing-root");
@@ -6061,7 +6061,7 @@ fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
 }
 
 #[test]
-fn enter_flake_detection_ordering_project_env_wins_without_flag() {
+fn env_flake_detection_ordering_project_env_wins_without_flag() {
     // U16's ordering rule: a project that declares `env.*` (here the
     // Phase-1 directive surface) is never silently swapped for a foreign
     // flake.nix, even when one is present — only `--flake` forces it. Proven
@@ -6090,7 +6090,7 @@ fn enter_flake_detection_ordering_project_env_wins_without_flag() {
 }
 
 #[test]
-fn enter_flake_flag_requires_trust_before_native_projection() {
+fn env_flake_flag_requires_trust_before_native_projection() {
     // `--flake` forces the foreign-flake projection even though the project
     // declares `env.*`; the trust boundary runs before native evaluation.
     let (base, proj, root) = core_hello_project("flake-forced");
@@ -6111,11 +6111,11 @@ fn enter_flake_flag_requires_trust_before_native_projection() {
 }
 
 #[test]
-fn enter_flake_native_projection_runs_without_nix_on_path() {
-    // U16 product proof: `enter --flake --trust` uses the bounded native
+fn env_flake_native_projection_runs_without_nix_on_path() {
+    // U16 product proof: `env --flake --trust` uses the bounded native
     // evaluator with an empty PATH, so no installed Nix executable can be
     // discovered by the production path.
-    let project = Scratch::new("flake-native-enter");
+    let project = Scratch::new("flake-native-env");
     fs::write(
         project.join("flake.nix"),
         "{ devShells.x86_64-linux.default = { }; }",
@@ -6123,7 +6123,7 @@ fn enter_flake_native_projection_runs_without_nix_on_path() {
     .unwrap();
     let output = jetpack()
         .args([
-            "enter",
+            "env",
             "--flake",
             "--trust",
             "--no-color",
@@ -6220,8 +6220,8 @@ let marker = "flake-parts mkFlake"; in {
 }
 
 #[test]
-fn enter_flake_dynamic_projection_reports_e1256_without_nix() {
-    let project = Scratch::new("flake-dynamic-enter");
+fn env_flake_dynamic_projection_reports_e1256_without_nix() {
+    let project = Scratch::new("flake-dynamic-env");
     fs::write(
         project.join("flake.nix"),
         "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
@@ -6240,7 +6240,7 @@ fn enter_flake_dynamic_projection_reports_e1256_without_nix() {
 }
 
 #[test]
-fn enter_flake_with_no_foreign_flake_present_is_friendly() {
+fn env_flake_with_no_foreign_flake_present_is_friendly() {
     let root = Scratch::new("flake-none-root");
     let proj = Scratch::new("flake-none-proj");
     let output = jetpack()
@@ -6545,7 +6545,7 @@ fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
 
     let output = jetpack()
         .args([
-            "enter",
+            "env",
             "sync",
             "--trust",
             "--yes",
@@ -6584,7 +6584,7 @@ fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
     fs::write(blocked.join("generated/config.txt"), "user-owned\n").unwrap();
     let refused = jetpack()
         .args([
-            "enter",
+            "env",
             "sync",
             "--trust",
             "--yes",
@@ -6708,7 +6708,7 @@ fn env_info_json_discloses_typed_integration_projection() {
 }
 
 #[test]
-fn enter_requires_a_persisted_cloud_integration_grant() {
+fn env_requires_a_persisted_cloud_integration_grant() {
     let project = Scratch::new("cloud-integration-grant");
     let root = Scratch::new("cloud-integration-grant-root");
     let home = Scratch::new("cloud-integration-grant-home");
@@ -6741,7 +6741,7 @@ fn enter_requires_a_persisted_cloud_integration_grant() {
 }
 
 #[test]
-fn enter_requires_a_persisted_vault_integration_grant() {
+fn env_requires_a_persisted_vault_integration_grant() {
     let project = Scratch::new("vault-integration-grant");
     let root = Scratch::new("vault-integration-grant-root");
     let home = Scratch::new("vault-integration-grant-home");
@@ -9050,7 +9050,7 @@ fn two_process_reverse_package_order_does_not_deadlock() {
     let spawn = |project: &Path| {
         jetpack()
             .args([
-                "enter",
+                "env",
                 "--no-color",
                 "--trust",
                 "--",

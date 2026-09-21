@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runLiveReloadAxis as runLiveReloadAxisAdapter } from "./live-reload.mjs";
 import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./memory-safety-fuzz.mjs";
-import { applyStatusGate, projectStatus } from "./status.mjs";
+import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +44,9 @@ const COMPARISON_METRICS = [
   "tokens",
   "source_tokens",
 ];
+const WEB_WASM_LANGUAGES = new Set(["jet", "rust"]);
+const WEB_ARTIFACT_ASSET_PATTERN = /\.(?:js|mjs|wasm)$/i;
+const TIMER_SCHEMA = "jet.gauntlet.timer.v2";
 const MODE_PRIMARY_METRIC = {
   batch: "runtime_wall_seconds",
   "batch-steps": "runtime_wall_seconds",
@@ -112,7 +115,7 @@ const METRIC_APPLICABILITY_POLICY = {
   not_applicable: "explicit_structural_reason",
   missing: "unmeasured_and_publication_blocked",
 };
-const STRUCTURAL_NOT_APPLICABLE_BASES = new Set(["no_compile_phase"]);
+const STRUCTURAL_NOT_APPLICABLE_BASES = new Set(["no_compile_phase", "no_wasm_artifact"]);
 const PEER_MEASUREMENT_POLICY = {
   ratio_tiers: ["aot", "run"],
   trace_only_tiers: [],
@@ -129,12 +132,14 @@ const LOSS_OWNER_CATEGORY_BY_METRIC = {
   cold_build_seconds: "build",
   warm_build_seconds: "build",
   binary_bytes: "binary",
+  artifact_bytes: "binary",
+  wasm_bytes: "binary",
   loc: "source",
   source_bytes: "source",
   tokens: "source",
   source_tokens: "source",
 };
-const AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes"]);
+const AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"]);
 
 
 const SOURCE_METRICS = ["loc", "source_bytes", "tokens", "source_tokens"];
@@ -366,6 +371,10 @@ async function timedProcess(cwd, args, { full = false, timeoutMs = DEFAULT_TIMEO
   }
   if (result.code !== 0 && sample.exit_code === undefined) sample.exit_code = result.code;
   sample.stderr = result.stderr.toString("utf8").trim().slice(0, 500);
+  if (sample.schema !== TIMER_SCHEMA) {
+    sample.error = sample.error ?? `timer schema is ${JSON.stringify(sample.schema)}; expected ${TIMER_SCHEMA}`;
+    sample.exit_code = sample.exit_code ?? result.code;
+  }
   return sample;
 }
 
@@ -379,6 +388,10 @@ async function timedSequence(cwd, commands, { full = false } = {}) {
   }
   if (result.code !== 0 && sample.exit_code === undefined) sample.exit_code = result.code;
   sample.stderr = result.stderr.toString("utf8").trim().slice(0, 500);
+  if (sample.schema !== TIMER_SCHEMA) {
+    sample.error = sample.error ?? `timer schema is ${JSON.stringify(sample.schema)}; expected ${TIMER_SCHEMA}`;
+    sample.exit_code = sample.exit_code ?? result.code;
+  }
   return sample;
 }
 
@@ -574,27 +587,68 @@ function median(values) {
   const middle = Math.floor(numbers.length / 2);
   return numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
 }
+function finiteValues(samples, field) {
+  return (Array.isArray(samples) ? samples : [])
+    .map((sample) => sample?.[field])
+    .filter((value) => Number.isFinite(value));
+}
 
-function percentile(values, fraction) {
-  const numbers = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
-  if (!numbers.length) return null;
-  return numbers[Math.min(numbers.length - 1, Math.ceil(numbers.length * fraction) - 1)];
+function noiseSummary(values) {
+  const finite = values.filter((value) => Number.isFinite(value)).sort((left, right) => left - right);
+  if (!finite.length) return { count: 0, min: null, max: null, range: null, relative_range: null };
+  const middle = median(finite);
+  const min = finite[0];
+  const max = finite.at(-1);
+  return {
+    count: finite.length,
+    min,
+    max,
+    range: max - min,
+    relative_range: middle > 0 ? (max - min) / middle : null,
+  };
 }
 
 function summarizeSamples(samples) {
   const metrics = ["wall_seconds", "peak_rss_kb", "time_to_first_stdout_seconds"];
+  const rawMetrics = ["wall_time_ns", "time_to_first_stdout_ns"];
   const valid = Array.isArray(samples) && samples.length > 0 &&
-    samples.every((sample) => sample && sample.exit_code === 0 && metrics.every((metric) => positiveMetricValue(metric, sample[metric])));
+    samples.every((sample) => sample && sample.schema === TIMER_SCHEMA && sample.exit_code === 0 &&
+      metrics.every((metric) => positiveMetricValue(metric, sample[metric])) &&
+      rawMetrics.every((metric) => positiveMetricValue(metric, sample[metric])));
   const medians = Object.fromEntries(metrics.map((metric) => [
     metric,
     valid ? median(samples.map((sample) => sample[metric])) : null,
   ]));
-  return { samples, valid, median: medians };
+  const rawMedians = Object.fromEntries(rawMetrics.map((metric) => [
+    metric,
+    valid ? median(samples.map((sample) => sample[metric])) : null,
+  ]));
+  const noise = Object.fromEntries(metrics.concat(rawMetrics).map((metric) => [metric, noiseSummary(finiteValues(samples, metric))]));
+  return {
+    samples,
+    valid,
+    protocol: TIMER_SCHEMA,
+    raw_sample_fields: rawMetrics,
+    median: medians,
+    median_raw: rawMedians,
+    noise: {
+      method: "sample_range_over_median",
+      metrics: noise,
+    },
+    confidence: {
+      status: "not_computed",
+      method: "paired_confidence_required_for_strict_surface_claims",
+      level: null,
+      reason: "These are independent process samples; no confidence interval is inferred from a median.",
+    },
+  };
 }
 
 function validBuildSample(sample) {
-  return sample?.exit_code === 0 &&
+  return sample?.schema === TIMER_SCHEMA &&
+    sample?.exit_code === 0 &&
     positiveMetricValue("wall_seconds", sample.wall_seconds) &&
+    positiveMetricValue("wall_time_ns", sample.wall_time_ns) &&
     positiveMetricValue("peak_rss_kb", sample.peak_rss_kb);
 }
 
@@ -978,6 +1032,8 @@ function comparisonMetrics(mode) {
       "cold_build_seconds",
       "warm_build_seconds",
       "binary_bytes",
+      "artifact_bytes",
+      "wasm_bytes",
       "loc",
       "source_bytes",
       "tokens",
@@ -988,25 +1044,38 @@ function comparisonMetrics(mode) {
 }
 
 function metricApplicability(entry, language, metric) {
+  const base = baseLanguage(language);
   const languageFacts = entry?.metric_applicability?.[language];
   const fact = languageFacts && typeof languageFacts === "object" && Object.hasOwn(languageFacts, metric)
     ? languageFacts[metric]
     : languageFacts && typeof languageFacts === "object" && Object.hasOwn(languageFacts, "*")
       ? languageFacts["*"]
       : entry?.non_applicable?.[language];
-  if (fact === undefined) return { status: "required" };
-  if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
-    return { status: "invalid", reason: "metric applicability must be an object" };
+  if (fact !== undefined) {
+    if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
+      return { status: "invalid", reason: "metric applicability must be an object" };
+    }
+    if (fact.status !== undefined && fact.status !== "not_applicable") {
+      return { status: "invalid", reason: "metric applicability status must be not_applicable" };
+    }
+    return {
+      status: "not_applicable",
+      basis: fact.basis ?? null,
+      reason: fact.reason ?? null,
+      evidence: fact.evidence ?? null,
+    };
   }
-  if (fact.status !== undefined && fact.status !== "not_applicable") {
-    return { status: "invalid", reason: "metric applicability status must be not_applicable" };
+  if ((entry?.mode === "web" || entry?.mode === "web-app") &&
+    (metric === "wasm_bytes" || metric === "binary_bytes") &&
+    !WEB_WASM_LANGUAGES.has(base)) {
+    return {
+      status: "not_applicable",
+      basis: "no_wasm_artifact",
+      reason: `${language} web rail is script-only and has no Wasm binary artifact.`,
+      evidence: "Only Jet and Rust web rails declare Wasm artifacts; script rails are measured by artifact_bytes.",
+    };
   }
-  return {
-    status: "not_applicable",
-    basis: fact.basis ?? null,
-    reason: fact.reason ?? null,
-    evidence: fact.evidence ?? null,
-  };
+  return { status: "required" };
 }
 
 function applicabilityFactIssues(entry, language, scope, fact) {
@@ -1097,6 +1166,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
   }
   const reportContract = manifest.report_contract;
   const tierPolicyByMode = Object.fromEntries(Object.entries(TIER_POLICY).map(([mode, policy]) => [mode, Object.keys(policy)]));
+  const requiredMetricsByMode = Object.fromEntries(Object.keys(TIER_POLICY).map((mode) => [mode, comparisonMetrics(mode)]));
   if (reportContract?.id !== "gauntlet-report-v1" || reportContract.scope !== "full_matrix" ||
     !equalStringArrays(reportContract.required_jet_tiers ?? [], ["aot", "run"]) ||
     !equalStringArrays(reportContract.optional_jet_tiers ?? [], ["dev"]) ||
@@ -1110,6 +1180,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     reportContract.missing_metric_verdict !== "unmeasured" || reportContract.output_verification !== "byte_exact_utf8_or_declared_probe_sequence" ||
     reportContract.loss_owner_required_for !== "any_comparable_metric_loss" ||
     JSON.stringify(reportContract.peer_measurement) !== JSON.stringify(PEER_MEASUREMENT_POLICY) ||
+    JSON.stringify(manifest.integrated_gate?.required_metrics_by_mode) !== JSON.stringify(requiredMetricsByMode) ||
     JSON.stringify(reportContract.axis_schemas) !== JSON.stringify({
       live_reload: "gauntlet-axis-live-reload-v1",
       memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
@@ -1472,22 +1543,117 @@ async function copyRelativeFile(sourceDir, stageDir, relative) {
   return true;
 }
 
-async function artifactBytes(sourceDir) {
+async function webArtifactSizes(sourceDir, command = []) {
+  const isAsset = (name) => WEB_ARTIFACT_ASSET_PATTERN.test(name)
+    && !name.endsWith(".map")
+    && !/(?:^|[._-])(?:manifest|log)(?:[._-]|$)/i.test(name);
+  const files = new Map();
+  const record = async (file) => {
+    const identity = path.resolve(file);
+    if (files.has(identity)) return;
+    const name = path.basename(identity);
+    if (!isAsset(name)) return;
+    const bytes = (await fs.stat(identity)).size;
+    files.set(identity, {
+      path: path.relative(sourceDir, identity).split(path.sep).join("/"),
+      bytes,
+      kind: name.toLowerCase().endsWith(".wasm") ? "wasm" : "script",
+    });
+  };
   const roots = [];
-  for (const name of ["build", "dist", "out"]) if (await exists(path.join(sourceDir, name))) roots.push(path.join(sourceDir, name));
-  if (!roots.length) roots.push(sourceDir);
-  let total = 0;
-  async function walk(dir, rootOnly) {
+  for (const name of ["build", "dist", "out"]) {
+    const root = path.join(sourceDir, name);
+    if (await exists(root)) roots.push(root);
+  }
+  async function walk(dir) {
     for (const item of await fs.readdir(dir, { withFileTypes: true })) {
       const full = path.join(dir, item.name);
-      if (item.isDirectory()) await walk(full, rootOnly);
-      else if ((item.name.endsWith(".wasm") || item.name.endsWith(".js")) && (rootOnly || !["main.mjs", "runner.mjs"].includes(item.name))) total += (await fs.stat(full)).size;
+      if (item.isDirectory()) await walk(full);
+      else await record(full);
     }
   }
-  for (const root of roots) await walk(root, roots[0] !== sourceDir);
-  return total === 0 ? null : total;
+  for (const root of roots) await walk(root);
+
+  if (!roots.length) {
+    const declaredEntry = command
+      .find((value) => typeof value === "string" && !value.startsWith("-") && WEB_ARTIFACT_ASSET_PATTERN.test(value));
+    if (declaredEntry) {
+      const entry = path.resolve(sourceDir, declaredEntry);
+      const relative = path.relative(sourceDir, entry);
+      if (!relative.startsWith("..") && !path.isAbsolute(relative) && await exists(entry)) {
+        const harnessEntry = path.basename(entry) === "runner.mjs" ? entry : null;
+        const imports = [
+          /\bimport\s*(?:(?:[\s\S]*?\sfrom\s*)?["']([^"']+)["'])/g,
+          /\bexport\s+(?:[\s\S]*?\sfrom\s*)["']([^"']+)["']/g,
+          /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+          /\bnew\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/g,
+        ];
+        const candidates = async (base, specifier) => {
+          if (!specifier.startsWith(".")) return null;
+          const target = path.resolve(path.dirname(base), specifier);
+          const relativeTarget = path.relative(sourceDir, target);
+          if (relativeTarget.startsWith("..") || path.isAbsolute(relativeTarget)) return null;
+          const paths = [target, `${target}.js`, `${target}.mjs`, `${target}.wasm`,
+            path.join(target, "index.js"), path.join(target, "index.mjs")];
+          for (const candidate of paths) {
+            if (await exists(candidate)) return candidate;
+          }
+          return null;
+        };
+        const seen = new Set();
+        async function visit(file) {
+          const identity = path.resolve(file);
+          if (seen.has(identity)) return;
+          seen.add(identity);
+          if (identity !== harnessEntry) await record(identity);
+          if (!/\.(?:js|mjs)$/.test(path.basename(identity))) return;
+          const source = await fs.readFile(identity, "utf8");
+          for (const pattern of imports) {
+            for (const match of source.matchAll(pattern)) {
+              const dependency = await candidates(identity, match[1]);
+              if (dependency) await visit(dependency);
+            }
+          }
+        }
+        await visit(entry);
+      }
+    }
+  }
+  const measuredFiles = [...files.values()].sort((left, right) => left.path.localeCompare(right.path));
+  if (!measuredFiles.length) return null;
+  return {
+    artifact_bytes: measuredFiles.reduce((total, file) => total + file.bytes, 0),
+    wasm_bytes: measuredFiles.filter((file) => file.kind === "wasm").reduce((total, file) => total + file.bytes, 0),
+    files: measuredFiles,
+  };
 }
 
+async function measureRuns(cwd, command, count, { full = false, reset = null, receipt = null } = {}) {
+  const samples = [];
+  for (let i = 0; i < count; i += 1) {
+    if (reset) await reset();
+    const sample = await timedProcess(cwd, command, { full });
+    if (receipt) {
+      samples.push({
+        ...sample,
+        rail: receipt.rail,
+        artifact_bytes: receipt.artifact_bytes,
+        wasm_bytes: receipt.wasm_bytes,
+      });
+    } else {
+      samples.push(sample);
+    }
+  }
+  const summary = summarizeSamples(samples);
+  if (receipt) {
+    summary.artifact = {
+      artifact_bytes: receipt.artifact_bytes ?? null,
+      wasm_bytes: receipt.wasm_bytes ?? null,
+      files: receipt.files ?? [],
+    };
+  }
+  return summary;
+}
 async function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -1602,7 +1768,23 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   return {
     failure: finalFailure,
     startupSeconds,
+    startup_samples_seconds: [startupSeconds],
+    startup_noise: noiseSummary([startupSeconds]),
+    startup_confidence: {
+      status: "not_computed",
+      method: "independent_service_startup_sample",
+      level: null,
+      reason: "Only one fresh-process startup sample is retained; no confidence interval is inferred.",
+    },
     latencyMs: { median: median(latencies), p99: percentile(latencies, 0.99) },
+    latency_samples_ms: latencies,
+    latency_noise: noiseSummary(latencies),
+    latency_confidence: {
+      status: "not_computed",
+      method: "independent_service_probe_samples",
+      level: null,
+      reason: "Probe samples are retained, but strict sub-millisecond claims require paired confidence evidence.",
+    },
     rssKb,
     cleanExit: exit.code === 0,
     exitCode: exit.code,
@@ -1696,14 +1878,6 @@ async function startPeer(sourceDir, peer) {
   }
 }
 
-async function measureRuns(cwd, command, count, { full = false, reset = null } = {}) {
-  const samples = [];
-  for (let i = 0; i < count; i += 1) {
-    if (reset) await reset();
-    samples.push(await timedProcess(cwd, command, { full }));
-  }
-  return summarizeSamples(samples);
-}
 
 function ratioVerdict(ratio, peerLanguage = null) {
   if (!Number.isFinite(ratio) || ratio <= 0) return null;
@@ -1713,6 +1887,56 @@ function ratioVerdict(ratio, peerLanguage = null) {
     return "loss";
   }
   return ratio < 1 ? "win" : "loss";
+}
+
+function subMillisecondMetric(metric, jet, peer) {
+  const limit = metric.endsWith("_seconds") ? 0.001
+    : metric.startsWith("service_latency_ms_") ? 1
+      : null;
+  return limit !== null && [jet, peer].some((value) => positiveMetricValue(metric, value) && value < limit);
+}
+
+function runtimeMetricEvidence(runtime, metric) {
+  if (!runtime || runtime.protocol !== TIMER_SCHEMA || !Array.isArray(runtime.samples)) return null;
+  const field = metric === "runtime_first_stdout_seconds" ? "time_to_first_stdout_seconds" : "wall_seconds";
+  const rawField = metric === "runtime_first_stdout_seconds" ? "time_to_first_stdout_ns" : "wall_time_ns";
+  return {
+    protocol: TIMER_SCHEMA,
+    raw_samples: runtime.samples.map((sample) => ({
+      value: Number.isFinite(sample?.[field]) ? sample[field] : null,
+      raw_ns: Number.isFinite(sample?.[rawField]) ? sample[rawField] : null,
+    })),
+    median: runtime.median?.[field] ?? null,
+    noise: runtime.noise?.metrics?.[field] ?? null,
+    confidence: runtime.confidence ?? null,
+  };
+}
+
+function serviceMetricEvidence(metrics, metric) {
+  if (!metrics) return null;
+  const latencyMetric = metric.startsWith("service_latency_ms_");
+  const values = latencyMetric ? metrics.service_latency_samples_ms : metrics.service_startup_samples_seconds;
+  if (!Array.isArray(values)) return null;
+  return {
+    protocol: "jet.gauntlet.service-probe-v1",
+    raw_samples: values,
+    median: metrics[metric] ?? null,
+    noise: latencyMetric ? (metrics.service_latency_noise ?? null) : (metrics.service_startup_noise ?? null),
+    confidence: latencyMetric ? (metrics.service_latency_confidence ?? null) : (metrics.service_startup_confidence ?? null),
+  };
+}
+
+function comparisonEvidence(metric, jetValue, peerValue, jetRuntime, peerRuntime, jetMetrics, peerMetrics) {
+  if (!subMillisecondMetric(metric, jetValue, peerValue)) return null;
+  return {
+    metric,
+    jet: metric.startsWith("service_latency_ms_") || metric === "service_startup_seconds"
+      ? serviceMetricEvidence(jetMetrics, metric)
+      : runtimeMetricEvidence(jetRuntime, metric),
+    peer: metric.startsWith("service_latency_ms_") || metric === "service_startup_seconds"
+      ? serviceMetricEvidence(peerMetrics, metric)
+      : runtimeMetricEvidence(peerRuntime, metric),
+  };
 }
 
 function comparisons(entry, languages, rows, tiers = {}) {
@@ -1828,23 +2052,41 @@ function comparisons(entry, languages, rows, tiers = {}) {
           continue;
         }
         const jetValue = positiveMetricValue(metric, jetMetrics?.[metric]) ? jetMetrics[metric] : null;
-        const peerValue = positiveMetricValue(metric, peer?.metrics?.[metric]) ? peer.metrics[metric] : null;
+        const peerMetrics = peer?.metrics ?? {};
+        const peerValue = positiveMetricValue(metric, peerMetrics[metric]) ? peerMetrics[metric] : null;
         const ratio = tierReady && peer?.status === "ok" && peerValue !== null && jetValue !== null
           ? jetValue / peerValue
           : null;
-        const verdict = ratioVerdict(ratio, language);
+        const evidence = comparisonEvidence(
+          metric,
+          jetValue,
+          peerValue,
+          tier === "aot" ? matchedJet?.runtime : comparisonTiers[tier]?.runtime,
+          peer?.runtime,
+          jetMetrics,
+          peerMetrics,
+        );
+        const evidenceReady = !evidence ||
+          (evidence.jet?.confidence?.status === "available" && evidence.peer?.confidence?.status === "available" &&
+            evidence.jet?.noise && evidence.peer?.noise &&
+            evidence.jet.raw_samples?.length > 0 && evidence.peer.raw_samples?.length > 0);
+        const verdict = evidenceReady ? ratioVerdict(ratio, language) : null;
         tierComparison.metrics[metric] = {
-          status: verdict === null ? "unmeasured" : "measured",
+          status: verdict === null ? (evidence && !evidenceReady ? "inconclusive" : "unmeasured") : "measured",
           jet: jetValue,
           peer: peerValue,
           ratio,
           verdict,
+          evidence,
+          noise: evidence ? { jet: evidence.jet?.noise ?? null, peer: evidence.peer?.noise ?? null } : null,
+          confidence: evidence ? { jet: evidence.jet?.confidence ?? null, peer: evidence.peer?.confidence ?? null } : null,
           reason: verdict === null
-            ? (!tierReady ? `matched Jet ${jetConfiguration} ${tier} tier is unavailable`
-              : peer?.status !== "ok" ? "peer row is unavailable"
-                : jetValue === null ? `matched Jet ${jetConfiguration} metric is missing or invalid`
-                  : peerValue === null ? "peer metric is missing or invalid"
-                    : "invalid metric ratio")
+            ? (evidence && !evidenceReady ? "sub-millisecond comparison lacks paired confidence evidence"
+              : !tierReady ? `matched Jet ${jetConfiguration} ${tier} tier is unavailable`
+                : peer?.status !== "ok" ? "peer row is unavailable"
+                  : jetValue === null ? `matched Jet ${jetConfiguration} metric is missing or invalid`
+                    : peerValue === null ? "peer metric is missing or invalid"
+                      : "invalid metric ratio")
             : null,
         };
       }
@@ -2010,15 +2252,6 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       continue;
     }
     const artifact = build.artifact;
-    const webArtifactBytes = webMode ? await artifactBytes(stagedSource) : null;
-    if (webMode) {
-      row.metrics = {
-        ...row.metrics,
-        ...buildMetrics(row.build),
-        binary_bytes: webArtifactBytes,
-        artifactBytes: webArtifactBytes,
-      };
-    }
 
     if (entry.mode === "batch-steps") {
       const steps = entry.spec?.steps ?? [];
@@ -2060,8 +2293,14 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         runtime_peak_rss_kb: service.rssKb ?? null,
         binary_bytes: artifact && await exists(artifact) ? (await fs.stat(artifact)).size : null,
         service_startup_seconds: service.startupSeconds ?? null,
+        service_startup_samples_seconds: service.startup_samples_seconds ?? [],
+        service_startup_noise: service.startup_noise ?? null,
+        service_startup_confidence: service.startup_confidence ?? null,
         service_latency_ms_p50: service.latencyMs?.median ?? null,
         service_latency_ms_p99: service.latencyMs?.p99 ?? null,
+        service_latency_samples_ms: service.latency_samples_ms ?? [],
+        service_latency_noise: service.latency_noise ?? null,
+        service_latency_confidence: service.latency_confidence ?? null,
         startupSeconds: service.startupSeconds ?? null,
         latencyMs: service.latencyMs ?? { median: null, p99: null },
         rssKb: service.rssKb ?? null,
@@ -2090,11 +2329,20 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         row.verification = { status: "failed", kind: "byte_exact_stdout", reason: verification };
         continue;
       }
+      const webArtifact = await webArtifactSizes(stagedSource, command);
       row.status = "ok";
       row.verification = { status: "passed", kind: "byte_exact_stdout" };
       row.command = command;
       const runs = selectedRuns ?? (entry.perf ? 7 : 3);
-      row.runtime = await measureRuns(stagedSource, command, runs, { full });
+      row.runtime = await measureRuns(stagedSource, command, runs, {
+        full,
+        receipt: {
+          rail: language,
+          artifact_bytes: webArtifact?.artifact_bytes ?? null,
+          wasm_bytes: webArtifact?.wasm_bytes ?? null,
+          files: webArtifact?.files ?? [],
+        },
+      });
       if (row.runtime.valid !== true) {
         row.status = "broken";
         row.reason = "measured run samples are invalid";
@@ -2106,9 +2354,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         ...row.metrics,
         ...runtimeMetrics(row.runtime),
         ...buildMetrics(row.build),
-        binary_bytes: webArtifactBytes,
-        firstResultSeconds: row.runtime.median.time_to_first_stdout_seconds,
-        artifactBytes: webArtifactBytes,
+        binary_bytes: WEB_WASM_LANGUAGES.has(baseLanguage(language)) ? (webArtifact?.wasm_bytes ?? null) : null,
+        artifact_bytes: webArtifact?.artifact_bytes ?? null,
+        wasm_bytes: WEB_WASM_LANGUAGES.has(baseLanguage(language)) ? (webArtifact?.wasm_bytes ?? null) : null,
       };
       continue;
     }
@@ -2233,8 +2481,14 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
           runtime_first_stdout_seconds: null,
           runtime_peak_rss_kb: service.rssKb ?? null,
           service_startup_seconds: service.startupSeconds ?? null,
+          service_startup_samples_seconds: service.startup_samples_seconds ?? [],
+          service_startup_noise: service.startup_noise ?? null,
+          service_startup_confidence: service.startup_confidence ?? null,
           service_latency_ms_p50: service.latencyMs?.median ?? null,
           service_latency_ms_p99: service.latencyMs?.p99 ?? null,
+          service_latency_samples_ms: service.latency_samples_ms ?? [],
+          service_latency_noise: service.latency_noise ?? null,
+          service_latency_confidence: service.latency_confidence ?? null,
           binary_bytes: null,
         },
       };
@@ -2709,6 +2963,16 @@ function validateResultShape(result, matrix = null) {
             issues.push(`${name}/${language}/${tier}/${metric}: required not_applicable cell is missing`);
           }
           continue;
+        }
+        if (subMillisecondMetric(metric, item?.jet, item?.peer)) {
+          const evidenceReady = item?.evidence?.jet?.confidence?.status === "available" &&
+            item?.evidence?.peer?.confidence?.status === "available" &&
+            item?.evidence?.jet?.noise && item?.evidence?.peer?.noise &&
+            item?.evidence?.jet?.raw_samples?.length > 0 && item?.evidence?.peer?.raw_samples?.length > 0;
+          if (!evidenceReady || item?.status !== "measured" || item?.verdict === null) {
+            issues.push(`${name}/${language}/${tier}/${metric}: sub-millisecond comparison lacks strict confidence evidence`);
+            continue;
+          }
         }
         if (item?.status !== "measured" || !positiveMetricValue(metric, item?.jet) ||
           !positiveMetricValue(metric, item?.peer) || !Number.isFinite(item?.ratio) ||
@@ -3825,18 +4089,21 @@ async function main() {
   const resultPath = path.join(resultDir, resultName);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
   const statusPath = path.join(repoDir, "gauntlet/status.json");
-  if (fullScope || axisOnly) {
+  if (fullScope) {
     const status = projectStatus(report, resultPath);
+    applyStatusGate(status, matrix);
+    await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+    console.log(`status\t${statusPath}`);
+  } else if (axisOnly) {
+    const status = await rebuildStatusFromResults(resultDir);
     applyStatusGate(status, matrix);
     await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     console.log(`status\t${statusPath}`);
   } else {
     console.log(`status\tskipped partial scope; ${statusPath} was not overwritten`);
   }
-
-  console.log("entry\tlanguage\tstatus\truntime_s\tcold_build_s\tjet_verdicts\tmode_metrics");
   for (const result of results) {
-    for (const language of result.languages ?? ["-"]) {
+    for (const language of result.languages ?? []) {
       const row = result.rows?.[language];
       const comparison = result.comparisons?.[language];
       const primaryVerdict = comparison?.metrics?.[comparison.primary_metric]?.verdict ?? null;
@@ -3844,7 +4111,7 @@ async function main() {
       const metrics = result.entry.mode === "service"
         ? `startup=${row?.metrics?.startupSeconds ?? "-"},latency_ms=${row?.metrics?.latencyMs?.median ?? "-"}/${row?.metrics?.latencyMs?.p99 ?? "-"},rss_kb=${row?.metrics?.rssKb ?? "-"},clean_exit=${row?.metrics?.cleanExit ?? "-"}`
         : result.entry.mode === "web" || result.entry.mode === "web-app"
-          ? `artifact_bytes=${row?.metrics?.artifactBytes ?? "-"},first_result_s=${row?.metrics?.firstResultSeconds ?? "-"}`
+          ? `artifact_bytes=${row?.metrics?.artifact_bytes ?? "-"},wasm_bytes=${row?.metrics?.wasm_bytes ?? "-"},first_result_s=${row?.metrics?.runtime_first_stdout_seconds ?? "-"}`
           : "-";
       console.log(`${result.entry.name}\t${language}\t${row?.status ?? result.status}\t${row?.metrics?.runtime_wall_seconds ?? "-"}\t${row?.metrics?.cold_build_seconds ?? "-"}\t${verdicts || "-"}\t${metrics}`);
     }

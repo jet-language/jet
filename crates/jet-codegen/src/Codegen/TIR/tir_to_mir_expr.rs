@@ -48,6 +48,17 @@ fn shared_guard_value_type(ty: &Type) -> Option<Type> {
         _ => None,
     }
 }
+fn pin_inner_type(ty: &Type) -> Option<Type> {
+    match ty.without_user_tags() {
+        Type::Apply { name, args }
+            if name == crate::Syntax::TYPE_PIN && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
 
 
 fn zip_callback(
@@ -776,7 +787,15 @@ fn lower_local_value(
     ty: &Type,
 ) -> Result<MirValueId, LowerError> {
     let place = lower_local_place(ctx, local, MirAccess::Read)?;
-    let value = ctx.emit("local.read", Some(ty.clone()), MirOperation::ReadPlace(place))?;
+    let value_ty = if matches!(ty, Type::String) && ctx.place_is_string_view(place) {
+        Type::Apply {
+            name: "View".to_string(),
+            args: vec![Type::Named("str".to_string())],
+        }
+    } else {
+        ty.clone()
+    };
+    let value = ctx.emit("local.read", Some(value_ty), MirOperation::ReadPlace(place))?;
     ctx.local_values.insert(local.name.clone(), value);
     Ok(value)
 }
@@ -787,6 +806,22 @@ pub(super) fn lower_receiver_place(
     access: MirAccess,
 ) -> Result<Option<jet_foundation::MIR::MirPlaceId>, LowerError> {
     let place = match &expr.kind {
+        TExprKind::Borrow { place, .. } => {
+            let value = ctx.lower_child(expr)?;
+            let id = ctx.place_id("temporary", &format!("{}", value.0))?;
+            let span = ctx.span();
+            let ty = ctx.mir_type(&expr.ty)?;
+            ctx.places.push(MirPlace {
+                id,
+                span,
+                ty,
+                base: MirPlaceBase::Temporary(value),
+                projections: Vec::new(),
+                access,
+                persist_key: None,
+            });
+            Some(ctx.project_deref_place(id, place.ty.clone(), ctx.span())?)
+        }
         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
         TExprKind::Index {
             base,
@@ -808,6 +843,15 @@ pub(super) fn lower_receiver_place(
             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
                 return Ok(None);
             };
+            let base = if let Some(inner) = pin_inner_type(&recv.ty) {
+                if matches!(&recv.kind, TExprKind::Borrow { .. }) {
+                    base
+                } else {
+                    ctx.project_deref_place(base, inner, ctx.span())?
+                }
+            } else {
+                base
+            };
             Some(ctx.project_field_place(
                 base,
                 field,
@@ -816,8 +860,23 @@ pub(super) fn lower_receiver_place(
             )?)
         }
         TExprKind::SharedGuardValue { guard, .. } => {
-            let Some(base) = lower_receiver_place(ctx, guard, access)? else {
-                return Ok(None);
+            let base = if let Some(base) = lower_receiver_place(ctx, guard, access)? {
+                base
+            } else {
+                let value = ctx.lower_child(guard)?;
+                let id = ctx.place_id("temporary.shared-guard", &format!("{}", value.0))?;
+                let span = ctx.span();
+                let ty = ctx.mir_type(&guard.ty)?;
+                ctx.places.push(MirPlace {
+                    id,
+                    span,
+                    ty,
+                    base: MirPlaceBase::Temporary(value),
+                    projections: Vec::new(),
+                    access,
+                    persist_key: None,
+                });
+                id
             };
             Some(ctx.project_deref_place(base, expr.ty.clone(), ctx.span())?)
         }
@@ -994,6 +1053,86 @@ fn math_builtin_type_id(
     })
 }
 
+fn lower_math_swizzle_read(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    type_name: &str,
+    recv: &TExpr,
+    lanes: &[u8],
+    carrier: &TFailureCarrier,
+) -> Result<MirValueId, LowerError> {
+    if lanes.is_empty() {
+        return Err(ctx.error(ctx.span(), "checked swizzle has no lanes"));
+    }
+    let base = ctx.lower_child(recv)?;
+    let scalar_ty = crate::Sema::math_scalar_ty(type_name);
+    let lane_carrier = TFailureCarrier::from_checked_type(&scalar_ty);
+    let line = ctx.source_line();
+    let mut values = Vec::with_capacity(lanes.len());
+    for (ordinal, lane) in lanes.iter().enumerate() {
+        let index = ctx.emit(
+            &format!("math-swizzle-index-{ordinal}"),
+            Some(Type::Int),
+            MirOperation::Constant(MirConstant::Int {
+                value: i64::from(*lane),
+                width: None,
+                spelling: None,
+            }),
+        )?;
+        let call = ctx.intern_prelude_route(super::lane_index_route(
+            type_name,
+            &scalar_ty,
+            &lane_carrier,
+        )?)?;
+        let location = panic_location(ctx, line as usize);
+        let context = ctx.panic_context_at(line, None);
+        let value = ctx.emit(
+            "math-swizzle-lane",
+            Some(scalar_ty.clone()),
+            MirOperation::Index {
+                call,
+                base,
+                index,
+                kind: MirIndexKind::Lane,
+                access: MirAccess::Read,
+                location,
+                context,
+            },
+        )?;
+        values.push(value);
+    }
+    if values.len() == 1 {
+        return Ok(values[0]);
+    }
+    let result_type = match expr.ty.without_user_tags() {
+        Type::Named(name) => name.as_str(),
+        _ => {
+            return Err(ctx.error(
+                ctx.span(),
+                "checked multi-lane swizzle has no vector result type",
+            ))
+        }
+    };
+    let type_id = math_builtin_type_id(ctx, result_type)?;
+    let route = super::math_builtin_route(
+        result_type,
+        "new",
+        values.len(),
+        &expr.ty,
+        carrier,
+    )?;
+    let call = ctx.intern_prelude_route(route)?;
+    ctx.emit(
+        "math-swizzle-constructor",
+        Some(expr.ty.clone()),
+        MirOperation::Semantic(MirSemanticOp::MathBuiltin {
+            type_id,
+            call,
+            args: values,
+        }),
+    )
+}
+
 /// Lower one checked TIR expression into one canonical MIR value.
 ///
 /// Every `TExprKind` is named explicitly.  The match is intentionally not a
@@ -1119,19 +1258,36 @@ pub(super) fn lower_expr(
                 },
             )
         }
-        TExprKind::DistinctCtor { name, arg, .. } => {
+        TExprKind::DistinctCtor { name, arg, base } => {
             let value = ctx.lower_child(arg)?;
-            let target = ctx.mir_type(&crate::AST::Type::Named(name.clone()))?;
-            ctx.emit(
-                "distinct-constructor",
-                Some(expr.ty.clone()),
-                MirOperation::Convert {
-                    value,
-                    parameters: Vec::new(),
-                    target,
-                    conversion: MirConversion::Transparent,
-                },
-            )
+            let dest = crate::AST::Type::Named(name.clone());
+            let dest_mir = ctx.mir_type(&dest)?;
+            let arg_ty = arg.ty.without_user_tags();
+            let base_ty = base.without_user_tags();
+            let dest_ty = dest.without_user_tags();
+            if arg_ty != base_ty && arg_ty != dest_ty {
+                ctx.emit(
+                    "distinct-ctor-numeric",
+                    Some(expr.ty.clone()),
+                    MirOperation::Convert {
+                        value,
+                        parameters: Vec::new(),
+                        target: dest_mir,
+                        conversion: MirConversion::NumericCast,
+                    },
+                )
+            } else {
+                ctx.emit(
+                    "distinct-constructor",
+                    Some(expr.ty.clone()),
+                    MirOperation::Convert {
+                        value,
+                        parameters: Vec::new(),
+                        target: dest_mir,
+                        conversion: MirConversion::Transparent,
+                    },
+                )
+            }
         }
         TExprKind::RangeCheckedCtor { name, arg } => {
             let value = ctx.lower_child(arg)?;
@@ -1425,6 +1581,22 @@ pub(super) fn lower_expr(
                 },
             )
         }
+        TExprKind::Move(inner) => {
+            if let Some(place) = lower_receiver_place(ctx, inner, MirAccess::Move)? {
+                ctx.emit(
+                    "explicit-move-place",
+                    Some(expr.ty.clone()),
+                    MirOperation::MovePlace { place },
+                )
+            } else {
+                let value = ctx.lower_child(inner)?;
+                ctx.emit(
+                    "explicit-move",
+                    Some(expr.ty.clone()),
+                    MirOperation::Move { value },
+                )
+            }
+        }
         TExprKind::ResourceNew(inner) => {
             let value = ctx.lower_child(inner)?;
             ctx.emit("resource-new", Some(expr.ty.clone()), MirOperation::Move { value })
@@ -1615,7 +1787,14 @@ pub(super) fn lower_expr(
                 expr.ty.clone()
             };
             let field_id = ctx.field_id_for_type(&recv.ty, field)?;
-            let base = ctx.lower_child(recv)?;
+            let mut base = ctx.lower_child(recv)?;
+            if let Some(inner) = pin_inner_type(&recv.ty) {
+                base = ctx.emit(
+                    "pin-deref",
+                    Some(inner),
+                    MirOperation::Deref { value: base },
+                )?;
+            }
             let value = ctx.emit("field",
                 Some(stored_ty),
                 MirOperation::Field {
@@ -1807,6 +1986,9 @@ pub(super) fn lower_expr(
                 let Some((value, _)) = arg.as_deref() else {
                     return Err(ctx.error(ctx.span(), "DataTree.Object is missing its checked map payload"));
                 };
+                if let TExprKind::MapLit(entries) = &value.kind {
+                    return lower_ordered_object_encode(ctx, expr, entries);
+                }
                 return lower_container_encode(
                     ctx,
                     expr,
@@ -2135,18 +2317,7 @@ pub(super) fn lower_expr(
             recv,
             lanes,
             ..
-        } => {
-            let owner = ctx.type_id_for(type_name)?;
-            let base = ctx.lower_child(recv)?;
-            let members = lanes
-                .iter()
-                .map(|lane| ctx.field_id_for(owner, &lane.to_string()))
-                .collect::<Result<Vec<_>, _>>()?;
-            ctx.emit("project-members", 
-                Some(expr.ty.clone()),
-                MirOperation::ProjectMembers { base, members },
-            )
-        }
+        } => lower_math_swizzle_read(ctx, expr, type_name, recv, lanes, &carrier),
         TExprKind::Slice {
             base,
             start,
@@ -2516,9 +2687,18 @@ pub(super) fn lower_expr(
                 };
                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
             }
-            let route = op.prelude_route(&recv.ty, &expr.ty, &carrier).map_err(|error| {
-                ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}"))
-            })?;
+            if matches!(op, TBuiltinOp::Repeat) {
+                let Some(arg) = args.first() else {
+                    return Err(ctx.error(ctx.span(), "checked builtin requires a repeat count"));
+                };
+                lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
+            }
+            let route_receiver_ty = super::builtin_dispatch_ty(recv.ty.clone());
+            let route = op
+                .prelude_route(&route_receiver_ty, &expr.ty, &carrier)
+                .map_err(|error| {
+                    ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}"))
+                })?;
             if matches!(op, TBuiltinOp::MapFromKeys)
                 && matches!(recv.ty.without_user_tags(), Type::FixedList { .. })
             {
@@ -2723,6 +2903,37 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            if record.module == "core.http.server" && record.member == "json" {
+                let [status, value] = args.as_slice() else {
+                    return Err(ctx.error(
+                        ctx.span(),
+                        "HTTP server JSON MIR projection requires status and body operands",
+                    ));
+                };
+                let status = ctx.lower_core_call_arg(status, 0, record, false)?;
+                let encoded = TExpr {
+                    ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
+                    kind: value.kind.clone(),
+                };
+                let body = lower_serde_encode(ctx, &encoded, value)?;
+                let mut body = mir_value_arg(ctx, body);
+                body.source_index = Some(1);
+                let call = MirCoreCall::from_record(record).id;
+                let route = ctx.intern_core_route(record, fallibility)?;
+                let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
+                return ctx.emit(
+                    "http-server-json",
+                    Some(expr.ty.clone()),
+                    MirOperation::CoreCall {
+                        call,
+                        route,
+                        args: vec![status, body],
+                        type_args: Vec::new(),
+                        fallibility: lowered_fallibility,
+                        data_plan: None,
+                    },
+                );
+            }
             let data_plan = data_plan
                 .as_ref()
                 .map(|plan| lower_data_plan(ctx, plan))
@@ -2774,9 +2985,8 @@ pub(super) fn lower_expr(
                 .map(|(index, arg)| {
                     let widen = widen_to_vec.get(index).copied().unwrap_or(false);
                     let mut lowered = ctx.lower_core_call_arg(arg, index, record, widen)?;
-                    if record.module == "core.data.sketch.reservoir"
-                        && record.member == "new"
-                        && index == 0
+                    if record.signature.borrow_mask.get(index).copied() == Some(false)
+                        && matches!(arg.ty.without_user_tags(), Type::Int)
                     {
                         lowered.value = lower_builtin_native_int(ctx, lowered.value, &arg.ty)?;
                     }
@@ -2831,8 +3041,19 @@ pub(super) fn lower_expr(
                 || (record.module == "core.data.stream"
                     && matches!(record.member, "next" | "collect"))
             {
-                let row = data_row_type(&expr.ty)
-                    .or_else(|| args.first().and_then(|arg| data_row_type(&arg.ty)))
+                let row = if record.module == "core.data.stream"
+                    && matches!(record.member, "next" | "collect")
+                {
+                    // A stream row may itself be a list.  For `collect`, the
+                    // result's outer list is the materialized output, not the
+                    // stream's retained `T`; read the handle first.
+                    args.first()
+                        .and_then(|arg| data_row_type(&arg.ty))
+                        .or_else(|| data_row_type(&expr.ty))
+                } else {
+                    data_row_type(&expr.ty)
+                        .or_else(|| args.first().and_then(|arg| data_row_type(&arg.ty)))
+                }
                     .ok_or_else(|| {
                         ctx.error(
                             ctx.span(),
@@ -2862,7 +3083,9 @@ pub(super) fn lower_expr(
                 Vec::new()
             };
 
-            if record.module == "core.sys" && record.member == "stop" {
+            if (record.module == "core.sys" && record.member == "stop")
+                || (record.module == "core.process" && record.member == "exit")
+            {
                 ctx.emit_explicit_stop_cleanups()?;
             }
             // Exact Int uses the typed format ABI (`jet_fmt_decimal_int` /
@@ -3253,11 +3476,31 @@ pub(super) fn lower_expr(
                     ));
                 }
                 let receiver = ctx.lower_child(recv)?;
-                let mut args = args
+                let mut lowered_args = args
                     .iter()
                     .map(|arg| ctx.lower_plain_arg(arg))
                     .collect::<Result<Vec<_>, _>>()?;
-                for (index, arg) in args.iter_mut().enumerate() {
+                if matches!(
+                    &op,
+                    super::THandleOp::EventMethod { method }
+                        if method == "on_priority"
+                ) {
+                    let priority = args.get(1).ok_or_else(|| {
+                        ctx.error(
+                            ctx.span(),
+                            "checked event on_priority is missing its priority operand",
+                        )
+                    })?;
+                    let lowered_priority = lowered_args.get_mut(1).ok_or_else(|| {
+                        ctx.error(
+                            ctx.span(),
+                            "checked event on_priority priority operand was not lowered",
+                        )
+                    })?;
+                    lowered_priority.value =
+                        lower_builtin_native_int(ctx, lowered_priority.value, &priority.ty)?;
+                }
+                for (index, arg) in lowered_args.iter_mut().enumerate() {
                     arg.access = ctx.call_value_access(
                         arg.value,
                         route.signature.borrow_mask.get(index + 1).copied().unwrap_or(false),
@@ -3269,7 +3512,7 @@ pub(super) fn lower_expr(
                     Some(expr.ty.clone()),
                     MirOperation::Semantic(MirSemanticOp::ClosureMethod {
                         receiver,
-                        args,
+                        args: lowered_args,
                         call,
                     }),
                 );
@@ -3514,7 +3757,7 @@ pub(super) fn lower_expr(
             }
 
             if let Some(field) = http_field_projection(&recv.ty, op, args) {
-                return lower_http_field(ctx, expr, recv, field);
+                return lower_http_field(ctx, expr, recv, field, args);
             }
             if let Some(receiver) = http_text_method_receiver(&recv.ty, op) {
                 return lower_http_text_method(ctx, expr, recv, args, receiver);
@@ -3587,6 +3830,9 @@ pub(super) fn lower_expr(
                         | THandleOp::AllocReset
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
+                        | THandleOp::CSVWriterWrite
+                        | THandleOp::CSVWriterFlush
+                        | THandleOp::CSVWriterFinish
                         | THandleOp::ClockTick
                         | THandleOp::ClockAdvance
                         | THandleOp::ClockWait
@@ -5067,11 +5313,11 @@ fn lower_try_failure(
         }
         TTryConvert::Typed {
             fn_name: conversion_fn,
+            source,
             target,
-            ..
         } => {
             let function = ctx.function_id_for(conversion_fn)?;
-            ctx.emit(
+            let converted = ctx.emit(
                 "try-typed-error-conversion",
                 Some(target.clone()),
                 MirOperation::Call {
@@ -5079,7 +5325,31 @@ fn lower_try_failure(
                     args: vec![mir_value_arg_with_access(ctx, error, MirAccess::Move)],
                     type_args: Vec::new(),
                 },
-            )?
+            )?;
+            if matches!(
+                target,
+                Type::Named(name) if name == crate::Syntax::TYPE_ERR
+            ) {
+                let source_value = ctx.emit(
+                    "try-conversion-source",
+                    Some(Type::String),
+                    MirOperation::Constant(MirConstant::String(source.name())),
+                )?;
+                let target_value = ctx.emit(
+                    "try-conversion-target",
+                    Some(Type::String),
+                    MirOperation::Constant(MirConstant::String(target.name())),
+                )?;
+                let route = super::apply_conversion_route()?;
+                emit_static_call(
+                    ctx,
+                    &Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+                    route,
+                    vec![converted, source_value, target_value],
+                )?
+            } else {
+                converted
+            }
         }
         TTryConvert::WidenUnion { enum_name, tag } => {
             let type_id = ctx.type_id_for(enum_name)?;
@@ -6055,9 +6325,16 @@ fn lower_host_call(
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     match host {
         THostCall::CarrierFact { recv, field, notes } => {
-            let field_id = ctx.field_id_for_type(&recv.ty, field)?;
+            // D-FAIL-CARRIER1=A: `partial`/`notes` live on the error report, not
+            // on the Result wrapper. Looking the field up on `recv.ty` synthesizes
+            // a phantom Result owner and ICEs as a missing MIR type.
+            let report_ty = match recv.ty.without_user_tags() {
+                crate::AST::Type::Result { err, .. } => err.as_ref(),
+                other => other,
+            };
+            let field_id = ctx.field_id_for_type(report_ty, field)?;
             let receiver = ctx.lower_child(recv)?;
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
+            let carrier = super::TFailureCarrier::from_checked_type(&recv.ty);
             let call = ctx.intern_prelude_route(super::carrier_fact_route(
                 *notes,
                 &expr.ty,
@@ -6217,7 +6494,7 @@ fn lower_host_call(
                 result_ty,
                 &carrier,
             )?)?;
-            let split_call = if *edit_paths_disjoint && field_paths.len() == 2 {
+            let split_call = if field_paths.len() == 2 {
                 Some(ctx.intern_prelude_route(super::cell_guard_split_route(
                     *editable,
                     result_ty,
@@ -6947,21 +7224,22 @@ fn http_field_projection<'a>(
     op: &'a THandleOp,
     args: &[TExpr],
 ) -> Option<&'a str> {
-    if !args.is_empty() {
-        return None;
-    }
     let receiver = match recv.without_user_tags() {
         Type::Named(name) => name.as_str(),
         _ => return None,
     };
     match op {
-        THandleOp::HTTPReqField(field)
-            if receiver == "HTTPRequest" && matches!(*field, "method" | "path" | "body") =>
-        {
-            Some(*field)
+        THandleOp::HTTPReqField(field) if receiver == "HTTPRequest" => {
+            match (*field, args.len()) {
+                ("method" | "path" | "body" | "body_len", 0)
+                | ("under_limit", 1) => Some(*field),
+                _ => None,
+            }
         }
         THandleOp::HTTPRespField(field)
-            if receiver == "HTTPResponse" && matches!(*field, "status" | "body") =>
+            if receiver == "HTTPResponse"
+                && args.is_empty()
+                && matches!(*field, "status" | "body") =>
         {
             Some(*field)
         }
@@ -6969,9 +7247,12 @@ fn http_field_projection<'a>(
         | THandleOp::HTTPServerMethod { kind, method }
             if kind.as_str() == receiver =>
         {
+            if !args.is_empty() {
+                return None;
+            }
             match (receiver, method.as_str()) {
                 ("HTTPRequest", "method" | "path" | "body")
-                | ("HTTPResponse", "status" | "body") => Some(method.as_str()),
+                | ("HTTPResponse", "status" | "body" | "cookies") => Some(method.as_str()),
                 _ => None,
             }
         }
@@ -7033,27 +7314,50 @@ fn lower_http_shutdown_report_field(
     emit_static_call(ctx, &expr.ty, route, vec![base, index])
 }
 
-fn http_field_route(receiver: &str, field: &str) -> Option<TPreludeRoute> {
-    let (member, symbol) = match (receiver, field) {
-        ("HTTPRequest", "method") => ("request_method", "jet_http_srv_req_method"),
-        ("HTTPRequest", "path") => ("request_path", "jet_http_srv_req_path"),
-        ("HTTPRequest", "body") => ("request_body", "jet_http_srv_req_body"),
-        ("HTTPResponse", "status") => (
-            "response_status",
-            "jet_http_client_response_status_value",
-        ),
-        ("HTTPResponse", "body") => ("response_body", "jet_http_client_response_body"),
-        _ => return None,
-    };
+fn http_field_route(
+    receiver: &str,
+    field: &str,
+    args_len: usize,
+) -> Option<TPreludeRoute> {
+    let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) =
+        match (receiver, field, args_len) {
+            ("HTTPRequest", "method", 0) => {
+                ("request_method", "jet_http_srv_req_method", 1, &[true])
+            }
+            ("HTTPRequest", "path", 0) => ("request_path", "jet_http_srv_req_path", 1, &[true]),
+            ("HTTPRequest", "body", 0) => ("request_body", "jet_http_srv_req_body", 1, &[true]),
+            ("HTTPRequest", "body_len", 0) => {
+                ("request_body_len", "jet_http_srv_req_body_len", 1, &[true])
+            }
+            ("HTTPRequest", "under_limit", 1) => (
+                "request_under_limit",
+                "jet_http_srv_req_under_limit",
+                2,
+                &[true, false],
+            ),
+            ("HTTPResponse", "status", 0) => (
+                "response_status",
+                "jet_http_client_response_status_value",
+                1,
+                &[true],
+            ),
+            ("HTTPResponse", "body", 0) => {
+                ("response_body", "jet_http_client_response_body", 1, &[true])
+            }
+            ("HTTPResponse", "cookies", 0) => {
+                ("response_cookies", "jet_http_response_cookies", 1, &[true])
+            }
+            _ => return None,
+        };
     Some(TPreludeRoute {
         family: MirPreludeFamily::HandleMethod,
         module: "core.http".to_string(),
         member: member.to_string(),
         symbol: MirSymbol::Prelude(symbol.to_string()),
         signature: MirCallSignature {
-            arity: 1,
-            max_arity: 1,
-            borrow_mask: vec![true],
+            arity,
+            max_arity: arity,
+            borrow_mask: borrow_mask.to_vec(),
         },
         effect: None,
         fallibility: TFailureCarrier::Infallible,
@@ -7068,6 +7372,7 @@ fn lower_http_field(
     expr: &TExpr,
     recv: &TExpr,
     field: &str,
+    args: &[TExpr],
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let receiver = match recv.ty.without_user_tags() {
         Type::Named(name) => name.as_str(),
@@ -7078,14 +7383,16 @@ fn lower_http_field(
             ));
         }
     };
-    let route = http_field_route(receiver, field).ok_or_else(|| {
+    let route = http_field_route(receiver, field, args.len()).ok_or_else(|| {
         ctx.error(
             ctx.span(),
             format!("checked HTTP field `{receiver}.{field}` has no Prelude route"),
         )
     })?;
     let base = ctx.lower_child(recv)?;
-    emit_static_call(ctx, &expr.ty, route, vec![base])
+    let mut operands = vec![base];
+    operands.extend(lower_handle_method_args(ctx, args)?);
+    emit_static_call(ctx, &expr.ty, route, operands)
 }
 
 
@@ -7342,9 +7649,12 @@ fn lower_http_request_builder(
     args: &[TExpr],
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let receiver = ctx.lower_child(recv)?;
-    let mut operands = vec![receiver];
-    operands.extend(lower_handle_method_args(ctx, args)?);
-    emit_static_call(ctx, &expr.ty, http_request_json_builder_route(), operands)
+    let encoded = TExpr {
+        ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
+        kind: args[0].kind.clone(),
+    };
+    let body = lower_serde_encode(ctx, &encoded, &args[0])?;
+    emit_static_call(ctx, &expr.ty, http_request_json_builder_route(), vec![receiver, body])
 }
 
 fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str> {
@@ -7856,6 +8166,8 @@ fn lower_numeric_method(
             "count_zeros" => 1,
             "leading_zeros" => 2,
             "trailing_zeros" => 3,
+            "bit_count" => 4,
+            "bit_length" => 5,
             _ => return Err(ctx.error(ctx.span(), "unknown checked integer population operation")),
         };
         let exact = matches!(recv.ty.without_user_tags(), Type::Int);
@@ -8296,32 +8608,36 @@ fn lower_datatree_access(
 fn typed_codec_target(ty: &Type) -> bool {
     match ty.without_user_tags() {
         Type::Int
-        | Type::Float
-        | Type::Bool
-        | Type::String
-        | Type::Char
-        | Type::IntN { .. }
-        | Type::Float32
-        | Type::List(_)
-        | Type::FixedList { .. }
-        | Type::Option(_)
-        | Type::InlineRange { .. } => true,
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32
+            | Type::List(_)
+            | Type::FixedList { .. }
+            | Type::Option(_)
+            | Type::InlineRange { .. } => true,
         Type::Map { key, .. } => matches!(key.without_user_tags(), Type::String),
-        Type::Named(name) => matches!(
-            name.as_str(),
-            "Data"
-                | "DataTree"
-                | "U8"
-                | "I8"
-                | "I16"
-                | "I32"
-                | "I64"
-                | "I128"
-                | "U16"
-                | "U32"
-                | "U64"
-                | "U128"
-        ),
+        Type::Named(name) => {
+            matches!(
+                name.as_str(),
+                "Data"
+                    | "DataTree"
+                    | "U8"
+                    | "I8"
+                    | "I16"
+                    | "I32"
+                    | "I64"
+                    | "I128"
+                    | "U16"
+                    | "U32"
+                    | "U64"
+                    | "U128"
+            ) || name == "Secret"
+                || name.rsplit_once('.').is_some_and(|(_, leaf)| leaf == "Secret")
+        }
+        Type::Tagged { inner, .. } => typed_codec_target(inner),
         _ => false,
     }
 }
@@ -8519,6 +8835,67 @@ fn lower_optional_encode(
     ctx.emit("encode-option-result", Some(expr.ty.clone()), MirOperation::Phi {
         incoming: vec![(present_end, encoded), (absent_end, null)],
     })
+}
+
+fn lower_ordered_object_encode(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    entries: &[(TExpr, TExpr)],
+) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+    let tree_ty = Type::Named(crate::Syntax::TYPE_DATA.to_string());
+    let pair_ty = Type::Tuple(vec![
+        ("key".to_string(), Box::new(Type::String)),
+        ("value".to_string(), Box::new(tree_ty.clone())),
+    ]);
+    let pair_shape = vec![
+        ("key".to_string(), Type::String),
+        ("value".to_string(), tree_ty.clone()),
+    ];
+    let mut values = Vec::with_capacity(entries.len());
+    for (key, value) in entries {
+        let encoded = TExpr {
+            ty: tree_ty.clone(),
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(value.clone()),
+                op: THandleOp::SerdeEncode,
+                args: Vec::new(),
+            },
+        };
+        let pair = TExpr {
+            ty: pair_ty.clone(),
+            kind: TExprKind::TupleLit {
+                struct_name: crate::Codegen::Tuples::tuple_struct_name(&pair_shape),
+                fields: vec![
+                    ("key".to_string(), key.clone()),
+                    ("value".to_string(), encoded),
+                ],
+            },
+        };
+        values.push(ctx.lower_child(&pair)?);
+    }
+    let payload_ty = Type::List(Box::new(pair_ty));
+    let payload = ctx.emit(
+        "encode-ordered-object",
+        Some(payload_ty),
+        MirOperation::BuildList {
+            values,
+            trait_coercion: None,
+        },
+    )?;
+    let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
+    ctx.emit(
+        "encode-ordered-tree",
+        Some(expr.ty.clone()),
+        MirOperation::Enum {
+            type_id,
+            variant: "Object".to_string(),
+            args: vec![MirEnumArg {
+                field: None,
+                value: payload,
+                boxed: false,
+            }],
+        },
+    )
 }
 
 fn lower_container_encode(

@@ -1546,6 +1546,8 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
     }
     let phases = game_phase_names(options.phase.as_deref())?;
     let (root, source_entry) = resolve_game_root(options)?;
+    let generated_hint = source_entry.clone().unwrap_or_else(|| root.join("run.jet"));
+    let generated_root = generated_project_root(&generated_hint)?;
     let tree = collect_game_tree(&root)?;
     let facts = jet::Package::PackageFacts::load_checked(&root)
         .map_err(|error| format!("could not load package authority in `{}`: {error}", root.display()))?;
@@ -1630,7 +1632,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
             report,
             phases: vec![phase],
             input_paths: tree.iter().map(|file| root.join(&file.relative)).collect(),
-            root,
+            root: generated_root.clone(),
             output: None,
             success: false,
         });
@@ -1647,7 +1649,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
                 "dry-run cancellation planned".to_string(),
             )
         } else {
-            let (cancelled, invalidation) = cancel_game_stages(&root)?;
+            let (cancelled, invalidation) = cancel_game_stages(&generated_root)?;
             (cancelled, "cancelled", invalidation)
         };
         let phase = game_phase(
@@ -1679,7 +1681,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
             report,
             phases: vec![phase],
             input_paths: tree.iter().map(|file| root.join(&file.relative)).collect(),
-            root,
+            root: generated_root.clone(),
             output: None,
             success: true,
         });
@@ -1704,7 +1706,10 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
         } else if let Some(entry) = source_entry.as_ref() {
             if planned {
                 (
-                    root.join("build").join(crate::CmdCompile::stem(&entry.to_string_lossy())),
+                    generated_root
+                        .join(".jet")
+                        .join("build")
+                        .join(crate::CmdCompile::stem(&entry.to_string_lossy())),
                     Vec::new(),
                     false,
                     "dry-run build planned from source".into(),
@@ -1717,7 +1722,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
             }
         } else if planned {
             (
-                root.join("build").join("game"),
+                generated_root.join(".jet").join("build").join("game"),
                 Vec::new(),
                 false,
                 "dry-run build planned without a source entry".into(),
@@ -1788,7 +1793,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
     if phases.iter().any(|phase| phase == "cook") {
         let cook_started = Instant::now();
         let result = cook_game_assets(
-            &root,
+            &generated_root,
             &tree,
             &header,
             options.force_clean,
@@ -1805,7 +1810,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
             Some(if header.cook_mode == "fast" {
                 "on-the-fly cook (persistent cache bypassed)".into()
             } else {
-                root.join(".jet").join("game-cache").display().to_string()
+                generated_root.join(".jet").join("game-cache").display().to_string()
             }),
             Some(result.digest.clone()),
             Some(result.assets.iter().map(|asset| asset.bytes.len() as u64).sum()),
@@ -1833,7 +1838,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
         dedup_paths(&mut input_paths);
         let stage_started = Instant::now();
         let stage_path = stage_game_plan(
-            &root,
+            &generated_root,
             &game_plan,
             options.force_clean,
             options.resume,
@@ -1935,7 +1940,13 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
         if planned {
             export_invalidation = "dry-run native export planned".into();
         } else {
-            match export_game_output(&root, game_plan, target, &export_preset, options.force_clean) {
+            match export_game_output(
+                &generated_root,
+                game_plan,
+                target,
+                &export_preset,
+                options.force_clean,
+            ) {
                 Ok((path, facts)) => {
                     export_output = Some(path.clone());
                     export_digest = Some(facts.sha256.clone());
@@ -2109,7 +2120,7 @@ fn execute_game_package(options: &PackageOptions) -> Result<GameRun, String> {
         report,
         phases: phases_receipt,
         input_paths,
-        root,
+        root: generated_root,
         output,
         success,
     })
@@ -2208,6 +2219,14 @@ fn resolve_game_root(options: &PackageOptions) -> Result<(PathBuf, Option<PathBu
     let root = jet::Loader::find_manifest_root(&base).unwrap_or(base);
     let entry = find_game_entry(&root);
     Ok((root, entry))
+}
+fn generated_project_root(path: &Path) -> Result<PathBuf, String> {
+    jet::build_project_root(&path.to_string_lossy()).map_err(|diagnostics| {
+        format!(
+            "could not resolve generated project root for `{}`: {diagnostics:?}",
+            path.display()
+        )
+    })
 }
 
 fn find_game_entry(root: &Path) -> Option<PathBuf> {
@@ -2383,7 +2402,9 @@ fn build_game_entry(
             command_output_detail(&output.stdout, &output.stderr)
         ));
     }
-    let path = root
+    let generated_root = generated_project_root(entry)?;
+    let path = generated_root
+        .join(".jet")
         .join("build")
         .join(crate::CmdCompile::stem(&entry.to_string_lossy()));
     ensure_regular_game_file(&path, "built game executable")?;

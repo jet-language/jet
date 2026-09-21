@@ -64,9 +64,8 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
     ] {
         assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
     }
-    assert!(!root.join(".jet").exists(), "check emitted .jet state");
     assert!(
-        !root.join("build").exists(),
+        !root.join(".jet").join("build").exists(),
         "check emitted a build artifact"
     );
     std::fs::remove_dir_all(root).unwrap();
@@ -146,9 +145,8 @@ fn multiple_e2702_diagnostics_are_independent_json_lines() {
         assert!(line.contains("\"operation\":\"hkdf_sha256\""), "{line}");
         assert!(line.contains(&format!("\"actual\":{actual}")), "{line}");
     }
-    assert!(!root.join(".jet").exists(), "check emitted .jet state");
     assert!(
-        !root.join("build").exists(),
+        !root.join(".jet").join("build").exists(),
         "check emitted a build artifact"
     );
     std::fs::remove_dir_all(root).unwrap();
@@ -179,9 +177,8 @@ fn safe_raw_nonce_json_omits_inapplicable_bounds() {
     assert!(json.contains("\"operation\":\"seal\""), "{json}");
     assert!(!json.contains("\"expected\":"), "{json}");
     assert!(!json.contains("\"actual\":"), "{json}");
-    assert!(!root.join(".jet").exists(), "check emitted .jet state");
     assert!(
-        !root.join("build").exists(),
+        !root.join(".jet").join("build").exists(),
         "check emitted a build artifact"
     );
     std::fs::remove_dir_all(root).unwrap();

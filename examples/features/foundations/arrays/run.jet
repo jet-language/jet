@@ -1,8 +1,8 @@
 use core.compute as compute
 use core.files as files
-use "arrays" as arrays
+use "arrays"
 
-fn image_fixture_path() String -> {
+fn image_fixture_path() -> String {
     candidates :: [
         "examples/features/foundations/arrays/fixtures/rgb_2x2.ppm",
         "fixtures/rgb_2x2.ppm",
@@ -41,20 +41,80 @@ fn run() {
 
     // A ChunkedArray indexes real source Tensor storage and materializes only
     // the requested window before applying the callback.
-    chunk_source :: compute.from_list([
-        0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0,
-        8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
-        16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0,
-        24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
-        32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0,
-        40.0, 41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0,
-        48.0, 49.0, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0,
-        56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0,
-    ]) ?? panic("chunk source")
+    chunk_source :: compute.from_list(
+    [
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        8.0,
+        9.0,
+        10.0,
+        11.0,
+        12.0,
+        13.0,
+        14.0,
+        15.0,
+        16.0,
+        17.0,
+        18.0,
+        19.0,
+        20.0,
+        21.0,
+        22.0,
+        23.0,
+        24.0,
+        25.0,
+        26.0,
+        27.0,
+        28.0,
+        29.0,
+        30.0,
+        31.0,
+        32.0,
+        33.0,
+        34.0,
+        35.0,
+        36.0,
+        37.0,
+        38.0,
+        39.0,
+        40.0,
+        41.0,
+        42.0,
+        43.0,
+        44.0,
+        45.0,
+        46.0,
+        47.0,
+        48.0,
+        49.0,
+        50.0,
+        51.0,
+        52.0,
+        53.0,
+        54.0,
+        55.0,
+        56.0,
+        57.0,
+        58.0,
+        59.0,
+        60.0,
+        61.0,
+        62.0,
+        63.0,
+    ],
+    ) ?? panic("chunk source")
     plan := arrays.chunked(chunk_source, 8)
     if arrays.chunk_count(plan) != 8 -> panic("chunk count")
     indexed_tensor :: arrays.read_chunk(plan, 1)
-    if compute.to_list(indexed_tensor) != [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0] -> panic("indexed chunk")
+    if compute.to_list(indexed_tensor) != [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0] {
+        panic("indexed chunk")
+    }
     first_tensor :: arrays.map_chunk(&plan, 0, arrays.double)
     tail_tensor :: arrays.map_chunk(&plan, 7, arrays.double)
     first :: compute.to_list(first_tensor)
@@ -78,12 +138,16 @@ fn run() {
     image :: arrays.decode_ppm(fixture) ?? panic("image decode")
     source_pixels :: compute.to_list(image.pixels)
     if image.width != 2 || image.height != 2 || image.channels != 3 -> panic("image metadata")
-    if source_pixels != [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] -> panic("image pixels")
+    if source_pixels != [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] {
+        panic("image pixels")
+    }
 
     resized :: arrays.resize_nearest(image, 4, 4)
     resized_pixels :: compute.to_list(resized.pixels)
     corner :: compute.get(resized.pixels, [3, 3, 2]) ?? panic("resized corner")
-    if resized.width != 4 || resized.height != 4 || resized.channels != 3 -> panic("resized metadata")
+    if resized.width != 4 || resized.height != 4 || resized.channels != 3 {
+        panic("resized metadata")
+    }
     if corner != 1.0 -> panic("resized nearest corner")
     if resized_pixels.len() != 48 -> panic("resized storage")
 
@@ -103,7 +167,7 @@ fn run() {
     if compute.to_list(round_trip.pixels) != resized_pixels -> panic("round-trip pixels")
 
     print("dense=shape:{compute.shape(matrix)} transpose:{compute.to_list(transposed)} sum:{compute.to_list(summed)}")
-    print("labels=col:c2:{col_two} row:r1/col:c2:{south_margin} missing:{missing == None}")
+    print("labels=col:c2:{col_two} row:r1/col:c2:{south_margin} missing:{missing == .None}")
     print("chunks=count:{arrays.chunk_count(plan)} first:{first} tail:{tail} mapped:{mapped.len()} reads:{all_plan.reads}")
     print("image=decoded:{image.width}x{image.height}x{image.channels} dtype:{image.dtype} color:{image.color_space} resized:{resized.width}x{resized.height}x{resized.channels} corner:{corner}")
     print("gray={gray_pixels} output=ppm:{written == output} round_trip:{compute.to_list(round_trip.pixels) == resized_pixels}")

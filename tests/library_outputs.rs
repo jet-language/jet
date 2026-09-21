@@ -177,7 +177,7 @@ fn guest_import_library_calls_native_c_and_cpp_hosts() {
         compiler_text(&build)
     );
 
-    let target = scratch.path.join("target");
+    let target = scratch.path.join(".jet/build");
     let archive = target.join("libguestimport.a");
     let header = target.join("guestimport.h");
     assert!(archive.is_file(), "guest import build missed {}", archive.display());
@@ -268,7 +268,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
         compiler_text(&build)
     );
 
-    let target = scratch.path.join("target");
+    let target = scratch.path.join(".jet/build");
     let shared = if cfg!(target_os = "macos") {
         target.join("libloadable.dylib")
     } else if cfg!(target_os = "windows") {
@@ -294,9 +294,9 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     assert_eq!(
         artifact.stamp.exports,
         vec![
-            jet::JetLibExport::new("on_tick", jet::JetLibScalar::Int, 1),
-            jet::JetLibExport::new("is_enabled", jet::JetLibScalar::Bool, 1),
             jet::JetLibExport::new("greet", jet::JetLibScalar::Text, 1),
+            jet::JetLibExport::new("is_enabled", jet::JetLibScalar::Bool, 1),
+            jet::JetLibExport::new("on_tick", jet::JetLibScalar::Int, 1),
         ]
     );
     jet::JetLib::validate_load_metadata(&artifact.stamp)
@@ -409,7 +409,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     copy_tree(&fixture, &panic_scratch.path);
     fs::write(
         panic_scratch.path.join("library.jet"),
-        "#Export(c) pub fn panic_now(value: Int) Int -> panic(\"foreign panic {value}\")\n",
+        "#Export(c) pub fn panic_now(value: Int) -> Int { panic(\"foreign panic {value}\")\nreturn 0 }\n",
     )
     .unwrap();
     let panic_build = run_jet(&panic_scratch.path, &["build", "--lib", "library.jet"]);
@@ -419,11 +419,11 @@ fn library_build_load_and_foreign_call_are_one_surface() {
         compiler_text(&panic_build)
     );
     let panic_shared = if cfg!(target_os = "macos") {
-        panic_scratch.path.join("target/libloadable.dylib")
+        panic_scratch.path.join(".jet/build/libloadable.dylib")
     } else if cfg!(target_os = "windows") {
-        panic_scratch.path.join("target/libloadable.dll")
+        panic_scratch.path.join(".jet/build/libloadable.dll")
     } else {
-        panic_scratch.path.join("target/libloadable.so")
+        panic_scratch.path.join(".jet/build/libloadable.so")
     };
     assert!(
         panic_shared.is_file(),
@@ -551,7 +551,7 @@ fn guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic() {
         compiler_text(&build)
     );
 
-    let target = scratch.path.join("target");
+    let target = scratch.path.join(".jet/build");
     let shared = if cfg!(target_os = "macos") {
         target.join("libembedding.dylib")
     } else if cfg!(target_os = "windows") {
@@ -649,7 +649,7 @@ fn component_build_load_and_foreign_call_are_one_surface() {
         "Component build failed:\n{}",
         compiler_text(&build)
     );
-    let component = scratch.path.join("build/library.wasm");
+    let component = scratch.path.join(".jet/build/library.wasm");
     assert!(
         component.is_file(),
         "Component build missed {}",
@@ -873,9 +873,9 @@ fn locked_named_library_build_selects_the_requested_output() {
         "locked named Library build failed:\n{}",
         compiler_text(&build)
     );
-    assert!(scratch.path.join("target/libloadable.a").is_file());
-    assert!(scratch.path.join("target/loadable.h").is_file());
-    assert!(scratch.path.join("target/loadable.jetlib").is_file());
+    assert!(scratch.path.join(".jet/build/libloadable.a").is_file());
+    assert!(scratch.path.join(".jet/build/loadable.h").is_file());
+    assert!(scratch.path.join(".jet/build/loadable.jetlib").is_file());
 }
 
 #[test]
@@ -895,16 +895,16 @@ fn default_library_rejects_cross_target_before_publication() {
     let text = compiler_text(&rejected);
     assert!(text.contains("E1341"), "missing unsupported-target diagnostic:\n{text}");
     let shared = if cfg!(target_os = "macos") {
-        scratch.path.join("target/libloadable.dylib")
+        scratch.path.join(".jet/build/libloadable.dylib")
     } else if cfg!(target_os = "windows") {
-        scratch.path.join("target/libloadable.dll")
+        scratch.path.join(".jet/build/libloadable.dll")
     } else {
-        scratch.path.join("target/libloadable.so")
+        scratch.path.join(".jet/build/libloadable.so")
     };
     assert!(
-        !scratch.path.join("target/libloadable.a").exists()
-            && !scratch.path.join("target/loadable.h").exists()
-            && !scratch.path.join("target/loadable.jetlib").exists()
+        !scratch.path.join(".jet/build/libloadable.a").exists()
+            && !scratch.path.join(".jet/build/loadable.h").exists()
+            && !scratch.path.join(".jet/build/loadable.jetlib").exists()
             && !shared.exists(),
         "unsupported Library target published artifacts"
     );

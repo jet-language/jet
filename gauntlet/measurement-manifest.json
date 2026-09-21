@@ -74,7 +74,7 @@
       "not_applicable": "explicit_structural_reason",
       "missing": "unmeasured_and_publication_blocked"
     },
-    "aot_only_metrics": ["cold_build_seconds", "warm_build_seconds", "binary_bytes"],
+    "aot_only_metrics": ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"],
     "peer_measurement": {
       "ratio_tiers": ["aot", "run"],
       "trace_only_tiers": [],
@@ -186,6 +186,8 @@
         "cold_build_seconds",
         "warm_build_seconds",
         "binary_bytes",
+        "artifact_bytes",
+        "wasm_bytes",
         "loc",
         "source_bytes",
         "tokens",
@@ -198,6 +200,8 @@
         "cold_build_seconds",
         "warm_build_seconds",
         "binary_bytes",
+        "artifact_bytes",
+        "wasm_bytes",
         "loc",
         "source_bytes",
         "tokens",
@@ -217,15 +221,37 @@
       "target": "jet run --interpret",
       "input": "100000-element integer reduction: total starts at 0 and consumes range 0..<100000",
       "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
-      "warmups": 3,
-      "trials": 9,
-      "output_oracle": "stdout must exactly equal performance-surface:compound_assign_vs_binary_assign:4999950000"
+      "warmups": 10,
+      "trials": 100,
+      "output_oracle": "performance-surface:compound_assign_vs_binary_assign:4999950000"
+    },
+    "pair_measurement": {
+      "inputs": {
+        "iterations": 100000,
+        "range": "0..<100000",
+        "expected_sum": 4999950000
+      },
+      "tier": "interpreter",
+      "target": "jet run --interpret",
+      "artifact_binding": "one_artifact_sha256",
+      "environment_binding": "one_host_toolchain_affinity_identity",
+      "sampling": "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+      "output_validation": "exact_utf8_stdout_bytes"
     },
     "comparator": {
       "direction": "lower_is_better",
       "surface_over_plain": "<1",
       "equality": "loss",
-      "missing": "failure"
+      "missing": "failure",
+      "confidence": {
+        "method": "paired_index_bootstrap",
+        "confidence": 0.95,
+        "resamples": 10000,
+        "seed": 2977,
+        "quantile": "nearest_rank_one_based",
+        "lower_rank": 250,
+        "upper_rank": 9750
+      }
     },
     "pairs": [
       {
@@ -238,6 +264,10 @@
         "evidence_key": "compound_assign_vs_binary_assign",
         "surface_field": "surface_wall_time_ms",
         "plain_field": "plain_wall_time_ms",
+        "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "input_range": "0..<100000",
+        "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
         "measured": {
           "surface_wall_time_ms": 2251.736,
           "plain_wall_time_ms": 2232.34,

@@ -1,0 +1,14 @@
+// core.time.expiring — clock-bound helpers without a crypto dependency.
+//
+// Vault leases (`ExpiringSecret`) live in `core.crypto.vault`. This module is
+// the time-side comparison so callers can ask "has this millisecond deadline
+// passed?" without importing the vault.
+/// True when `now_ms` is at or after `expires_at_ms`. Equal counts as expired
+/// so a lease that ends on a tick is not usable on that tick.
+pub fn expired(expires_at_ms: Int, now_ms: Int) -> Bool { now_ms >= expires_at_ms }
+
+/// Remaining milliseconds, clamped at 0.
+pub fn remaining_ms(expires_at_ms: Int, now_ms: Int) -> Int {
+    if expires_at_ms <= now_ms -> return 0
+    expires_at_ms - now_ms
+}

@@ -2,8 +2,7 @@
 //!
 //! Each `#[test]` named in `tests/fixtures/feature-claims/manifest.json` must
 //! contain the exact lane marker `FEATURE_CLAIM: <claim-id> / <lane-id>`
-//! in its body. Proven claims run these via
-//! `check-feature-ledger.mjs --verify-focused`.
+//! in its body.
 
 mod common;
 

@@ -787,7 +787,8 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             }
             // Shared Prelude unit enums lower through their registered variant names.
             if matches!(resolved_type,
-                "FontStyle" | "GlyphShaper" | "WebFormValueType" | "WebFormControl")
+                "FontStyle" | "GlyphShaper" | "WebFormValueType" | "WebFormControl"
+                    | "WebFormValidationTiming" | "WebTableSortDirection" | "WebTablePageMode")
             {
                 return args.is_empty()
                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_type)

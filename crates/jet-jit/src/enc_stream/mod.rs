@@ -630,7 +630,7 @@ fn take_file_writer(handle: i64) -> Result<runtime::JetFileWriter, String> {
     out.unwrap_or_else(|| Err("no active JIT runtime".into()))
 }
 
-fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, String> {
+pub(crate) fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, String> {
     let mut out: Option<Result<runtime::JetFileReader, String>> = None;
     Concurrency::with_runtime_mut(|rt| {
         let idx = match (handle as usize).checked_sub(1) {
@@ -709,6 +709,76 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
     });
     lim
 }
+fn read_xml_parse_options(
+    handle: i64,
+) -> Result<runtime::jet_std::XMLParseOptions, String> {
+    if handle <= 0 {
+        return Ok(runtime::jet_std::XMLParseOptions::safe());
+    }
+    let options = crate::Encoding::xml_parse_options_from_heap(handle)?;
+    let entities = match options.entities {
+        jet_foundation::XmlPull::EntityPolicy::Preserve => {
+            runtime::jet_std::XMLEntityPolicy::Preserve
+        }
+        jet_foundation::XmlPull::EntityPolicy::Reject => {
+            runtime::jet_std::XMLEntityPolicy::Reject
+        }
+        jet_foundation::XmlPull::EntityPolicy::Resolve(values) => {
+            runtime::jet_std::XMLEntityPolicy::Resolve(values)
+        }
+    };
+    let limits = options.limits;
+    let as_i64 = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
+    Ok(runtime::jet_std::XMLParseOptions {
+        entities,
+        limits: runtime::jet_std::XMLLimits {
+            max_depth: as_i64(limits.max_depth),
+            max_nodes: as_i64(limits.max_nodes),
+            max_attributes_per_element: as_i64(limits.max_attributes_per_element),
+            max_name_bytes: as_i64(limits.max_name_bytes),
+            max_text_bytes: as_i64(limits.max_text_bytes),
+            max_entity_declarations: as_i64(limits.max_entity_declarations),
+            max_entity_depth: as_i64(limits.max_entity_depth),
+            max_entity_replacement_bytes: as_i64(limits.max_entity_replacement_bytes),
+        },
+    })
+}
+
+fn read_xml_render_options(
+    handle: i64,
+) -> Result<runtime::jet_std::XMLRenderOptions, String> {
+    if handle <= 0 {
+        return Ok(runtime::jet_std::XMLRenderOptions::safe());
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        Some((|| {
+            let discriminant = |field: i64, option_name: &str| -> Result<i64, String> {
+                let raw = rt
+                    .heap
+                    .record_get_int(handle, field)
+                    .ok_or_else(|| format!("invalid XML render option `{option_name}`"))?;
+                Ok(rt.heap.record_get_int(raw, 0).unwrap_or(raw))
+            };
+            let encoding = match discriminant(0, "encoding")? {
+                0 => runtime::jet_std::XMLEncoding::UTF8,
+                1 => runtime::jet_std::XMLEncoding::UTF8BOM,
+                2 => runtime::jet_std::XMLEncoding::UTF16LE,
+                3 => runtime::jet_std::XMLEncoding::UTF16BE,
+                value => return Err(format!("invalid XMLEncoding discriminant {value}")),
+            };
+            let lexical = match discriminant(1, "lexical")? {
+                0 => runtime::jet_std::XMLLexicalPolicy::PreserveValid,
+                1 => runtime::jet_std::XMLLexicalPolicy::Deterministic,
+                value => {
+                    return Err(format!("invalid XMLLexicalPolicy discriminant {value}"))
+                }
+            };
+            Ok(runtime::jet_std::XMLRenderOptions { encoding, lexical })
+        })())
+    })
+    .unwrap_or_else(|| Err("XML render options require an active runtime".to_string()))
+}
+
 
 fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std::DataTree {
     tree.clone()
@@ -907,7 +977,7 @@ fn option_bits(opt: Option<i64>) -> u64 {
 // ── core.files create / open ─────────────────────────────────────────────────
 
 pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = crate::CoreHost::clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -928,7 +998,7 @@ pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
 }
 
 pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = crate::CoreHost::clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -953,7 +1023,7 @@ pub(crate) fn jet_jit_fs_append(path: i64) -> i64 {
 }
 
 pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = crate::CoreHost::clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
@@ -1162,7 +1232,7 @@ pub(crate) fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64, options: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -1172,7 +1242,10 @@ pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
     } else {
         read_limits(limits)
     };
-    let xml = runtime::jet_std::XMLRenderOptions::safe();
+    let xml = match read_xml_render_options(options) {
+        Ok(xml) => xml,
+        Err(reason) => return result_err_encoding(&crate::Encoding::xml_shape_error(reason)),
+    };
     match runtime::enc_xml_writer(w, lim, xml) {
         Ok(writer) => {
             let h = Concurrency::with_runtime_mut(|rt| {
@@ -1184,7 +1257,7 @@ pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) fn jet_jit_xml_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_xml_reader(file: i64, limits: i64, options: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -1194,7 +1267,10 @@ pub(crate) fn jet_jit_xml_reader(file: i64, limits: i64) -> i64 {
     } else {
         read_limits(limits)
     };
-    let xml = runtime::jet_std::XMLParseOptions::safe();
+    let xml = match read_xml_parse_options(options) {
+        Ok(xml) => xml,
+        Err(reason) => return result_err_encoding(&crate::Encoding::xml_shape_error(reason)),
+    };
     match runtime::enc_xml_reader(r, lim, xml) {
         Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
@@ -1491,7 +1567,7 @@ host_fns! {
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.returns.push(AbiParam::new(types::I64));
-        // json.writer(file, limits, canonical:bool as i8) — use i64 for all.
+        // json.writer(file, limits, canonical) and XML constructors' options use i64 handles.
         let mut sig_ternary = Signature::new(cc);
         sig_ternary.params.push(AbiParam::new(types::I64));
         sig_ternary.params.push(AbiParam::new(types::I64));
@@ -1514,8 +1590,8 @@ host_fns! {
     csv_reader: "jet_jit_csv_reader" => jet_jit_csv_reader: sig_quinary;
     cbor_writer: "jet_jit_cbor_writer" => jet_jit_cbor_writer: sig_binary;
     cbor_reader: "jet_jit_cbor_reader" => jet_jit_cbor_reader: sig_binary;
-    xml_writer: "jet_jit_xml_writer" => jet_jit_xml_writer: sig_binary;
-    xml_reader: "jet_jit_xml_reader" => jet_jit_xml_reader: sig_binary;
+    xml_writer: "jet_jit_xml_writer" => jet_jit_xml_writer: sig_ternary;
+    xml_reader: "jet_jit_xml_reader" => jet_jit_xml_reader: sig_ternary;
     json_writer_write: "jet_jit_json_writer_write" => jet_jit_json_writer_write: sig_binary;
     json_writer_write_enc: "jet_enc_json_writer_write" => jet_jit_json_writer_write: sig_binary;
     json_writer_flush: "jet_jit_json_writer_flush" => jet_jit_json_writer_flush: sig_unary;

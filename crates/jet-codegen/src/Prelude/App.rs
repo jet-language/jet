@@ -1118,11 +1118,22 @@ mod jet_app_impl {
             self.clone()
         }
 
-        fn register_action<F>(&self, name: String, handler: F, kind: &str) -> JetApp
+        fn register_action<F>(
+            &self,
+            name: String,
+            handler: F,
+            kind: &str,
+            binding: Option<String>,
+        ) -> JetApp
         where
             F: JetAppActionHandler,
         {
             let function = handler.into_server_function(name.clone());
+            let function = if let Some(binding) = binding {
+                function.with_form_binding(binding)
+            } else {
+                function
+            };
             let mut state = self.lock();
             if let Some(route) = state.routes.last_mut() {
                 if matches!(kind, "form" | "action") && route.facts.form.is_none() {
@@ -1135,26 +1146,25 @@ mod jet_app_impl {
             drop(state);
             self.clone()
         }
-
         pub fn action<F>(&self, name: String, handler: F) -> JetApp
         where
             F: JetAppActionHandler,
         {
-            self.register_action(name, handler, "action")
+            self.register_action(name, handler, "action", None)
         }
 
-        pub fn form<F>(&self, name: String, handler: F) -> JetApp
+        pub fn form<F>(&self, name: String, handler: F, binding: String) -> JetApp
         where
             F: JetAppActionHandler,
         {
-            self.register_action(name, handler, "form")
+            self.register_action(name, handler, "form", Some(binding))
         }
 
         pub fn data<F>(&self, name: String, handler: F) -> JetApp
         where
             F: JetAppActionHandler,
         {
-            self.register_action(name, handler, "data")
+            self.register_action(name, handler, "data", None)
         }
 
         /// Attach a loader to the route registered immediately before it.
@@ -1868,11 +1878,16 @@ source.onmessage = () => location.reload();
         app.action(name, handler)
     }
 
-    pub fn jet_app_form<F>(app: &JetApp, name: String, handler: F) -> JetApp
+    pub fn jet_app_form<F>(
+        app: &JetApp,
+        name: String,
+        handler: F,
+        binding: String,
+    ) -> JetApp
     where
         F: JetAppActionHandler,
     {
-        app.form(name, handler)
+        app.form(name, handler, binding)
     }
 
     pub fn jet_app_data<F>(app: &JetApp, name: String, handler: F) -> JetApp

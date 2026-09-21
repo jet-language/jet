@@ -1,0 +1,353 @@
+package {
+    name: "core.files.path"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Object paths that beat Python pathlib."
+    license: "MIT"
+    outputs: {
+        path: .Library{ entry: path }
+    }
+}
+
+// core.files.path — pathlib-style paths that beat Python's `pathlib`.
+//
+// Construction and string math are pure. Existence queries are `-[FS]>`.
+// Join never inserts duplicate separators. `..` and `.` collapse through
+// `files.collapse`. Windows drive letters (`C:`) count as absolute.
+//
+// Beyond PurePath/Path: `join_many`, `parents`, `is_relative_to`, `rglob`
+// `ensure_dir`, `read_lines`/`write_lines`, `samefile`, `with_segments`
+// `as_uri`, suffix lists, and POSIX/Windows separator conversion.
+
+pub struct Path {
+    pub raw: String
+}
+
+pub fn of(raw: String) -> Path { Path{raw: raw} }
+
+/// Construct a path from its platform-neutral textual spelling.
+pub fn path(raw: String) -> Path { of(raw) }
+
+pub fn from_parts(parts: [String]) -> Path {
+    acc := ""
+    loop p in parts {
+        if acc.bytes().len() == 0 {
+            acc = p
+        } else {
+            acc = files.join(acc, p)
+        }
+    }
+    Path{raw: acc}
+}
+
+pub fn cwd() -[FS]> Path !IOError {
+    p :: files.cwd()
+    Ok(Path{raw: p})
+}
+
+pub fn home() -[FS]> Path !IOError {
+    p :: files.home()
+    Ok(Path{raw: p})
+}
+
+pub fn join(base: Path, other: String) -> Path { Path{raw: files.join(base.raw, other)} }
+
+pub fn join_path(base: Path, other: Path) -> Path { Path{raw: files.join(base.raw, other.raw)} }
+
+pub fn join_many(base: Path, parts: [String]) -> Path {
+    acc := base
+    loop p in parts -> acc = join(acc, p)
+    acc
+}
+
+pub fn parent(path: Path) -> Path { Path{raw: files.dirname(path.raw)} }
+
+pub fn parents(path: Path) -> [Path] {
+    out := [Path]{}
+    cur := parent(path)
+    seen := path.raw
+    loop {
+        if cur.raw == seen || cur.raw.bytes().len() == 0 -> return out
+        out.push(cur)
+        if cur.raw == "/" || (cur.raw.bytes().len() == 2 && ends_colon(cur.raw)) -> return out
+        seen = cur.raw
+        nxt := parent(cur)
+        if nxt.raw == cur.raw -> return out
+        cur = nxt
+    }
+}
+
+pub fn name(path: Path) -> String { files.basename(path.raw) }
+
+pub fn stem(path: Path) -> String { files.stem(path.raw) }
+
+pub fn suffix(path: Path) -> String { files.suffix(path.raw) }
+
+pub fn suffixes(path: Path) -> [String] {
+    n :: files.basename(path.raw)
+    raw :: n.bytes()
+    out := [String]{}
+    i := 0
+    start := -1
+    loop i < raw.len() {
+        if raw[i] == (U8{46}) {
+            if start >= 0 -> out.push(files_slice(raw, start, i))
+            start = i
+        }
+        i = i + 1
+    }
+    if start >= 0 -> out.push(files_slice(raw, start, raw.len()))
+    out
+}
+
+pub fn with_name(path: Path, name: String) -> Path { Path{raw: files.with_name(path.raw, name)} }
+
+pub fn with_suffix(path: Path, suffix: String) -> Path { Path{raw: files.with_suffix(path.raw, suffix)} }
+
+pub fn with_stem(path: Path, stem: String) -> Path { Path{raw: files.with_name(path.raw, "{stem}{files.suffix(path.raw)}")} }
+
+pub fn with_segments(path: Path, segments: [String]) -> Path { from_parts(segments) }
+
+pub fn parts(path: Path) -> [String] { files.split_slash(path.raw) }
+
+pub fn drive(path: Path) -> String {
+    raw :: path.raw.bytes()
+    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
+        return files_slice(raw, 0, 2)
+    }
+    ""
+}
+
+pub fn root(path: Path) -> String {
+    if is_absolute(path) {
+        d :: drive(path)
+        if d.bytes().len() > 0 -> return "{d}/"
+        return "/"
+    }
+    ""
+}
+
+pub fn anchor(path: Path) -> String {
+    d :: drive(path)
+    r :: root(path)
+    if d.bytes().len() > 0 -> return r
+    r
+}
+
+pub fn is_absolute(path: Path) -> Bool { files.is_absolute(path.raw) }
+
+pub fn is_relative(path: Path) -> Bool { !files.is_absolute(path.raw) }
+
+pub fn is_empty(path: Path) -> Bool { path.raw.bytes().len() == 0 || path.raw == "." }
+
+pub fn as_posix(path: Path) -> String {
+    out := [U8]{}
+    loop b in path.raw.bytes() {
+        if b == (U8{92}) {
+            out.push(U8{47})
+        } else {
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? path.raw
+}
+
+pub fn as_windows(path: Path) -> String {
+    out := [U8]{}
+    loop b in path.raw.bytes() {
+        if b == (U8{47}) {
+            out.push(U8{92})
+        } else {
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? path.raw
+}
+
+pub fn as_uri(path: Path) -> String {
+    posix :: as_posix(resolve_pure(path))
+    if starts_slash(posix) -> return "file://{posix}"
+    "file:///{posix}"
+}
+
+pub fn collapse(path: Path) -> Path { Path{raw: files.collapse(path.raw)} }
+
+pub fn resolve_pure(path: Path) -> Path { collapse(path) }
+
+pub fn resolve(path: Path) -[FS]> Path !IOError {
+    abs :: files.absolute(path.raw)
+    Ok(Path{raw: abs})
+}
+
+pub fn absolute(path: Path) -[FS]> Path !IOError { resolve(path) }
+
+pub fn expanduser(path: Path) -[FS]> Path !IOError {
+    raw :: files.expanduser(path.raw)
+    Ok(Path{raw: raw})
+}
+
+pub fn relative_to(path: Path, start: Path) -> Path { Path{raw: files.relative(path.raw, start.raw)} }
+
+pub fn is_relative_to(path: Path, start: Path) -> Bool {
+    rel :: files.relative(path.raw, start.raw)
+    !starts_dotdot(rel)
+}
+
+pub fn match_glob(path: Path, pattern: String) -> Bool { files.fnmatch(name(path), pattern) }
+
+pub fn match_path(path: Path, pattern: String) -> Bool { files.fnmatch(as_posix(path), pattern) }
+
+pub fn exists(path: Path) -[FS]> Bool { files.exists(path.raw) }
+
+pub fn is_dir(path: Path) -[FS]> Bool { files.is_dir(path.raw) }
+
+pub fn is_file(path: Path) -[FS]> Bool { files.is_file(path.raw) }
+
+pub fn is_symlink(path: Path) -[FS]> Bool { files.is_symlink(path.raw) }
+
+pub fn stat(path: Path) -[FS]> Stat !IOError { files.stat(path.raw) }
+
+pub fn size(path: Path) -[FS]> Int !IOError {
+    s :: files.stat(path.raw)
+    Ok(s.size)
+}
+
+pub fn mtime(path: Path) -[FS]> Int !IOError {
+    s :: files.stat(path.raw)
+    Ok(s.mtime)
+}
+
+pub fn samefile(a: Path, b: Path) -[FS]> Bool !IOError {
+    sa :: files.stat(a.raw)
+    sb :: files.stat(b.raw)
+    Ok(sa.size == sb.size && sa.mtime == sb.mtime && as_posix(a) == as_posix(b))
+}
+
+pub fn read_text(path: Path) -[FS]> String !IOError { files.read(path.raw) }
+
+pub fn read_bytes(path: Path) -[FS]> [U8] !IOError { files.read_bytes(path.raw) }
+
+pub fn read_lines(path: Path) -[FS]> [String] !IOError { files.read_lines(path.raw) }
+
+pub fn write_text(path: Path, text: String) !IOError { files.write(path.raw, text) }
+
+pub fn write_bytes(path: Path, bytes: [U8]) !IOError { files.write_bytes(path.raw, bytes) }
+
+pub fn write_lines(path: Path, lines: [String]) !IOError { files.write_lines(path.raw, lines) }
+
+pub fn append_text(path: Path, text: String) !IOError { files.append_all(path.raw, text) }
+
+pub fn mkdir(path: Path, parents: Bool) !IOError {
+    if parents -> return files.create_dir_all(path.raw)
+    files.create_dir(path.raw)
+}
+
+pub fn ensure_dir(path: Path) !IOError { files.create_dir_all(path.raw) }
+
+pub fn rmdir(path: Path) !IOError { files.remove_dir(path.raw) }
+
+pub fn rmtree(path: Path) !IOError { files.remove_all(path.raw) }
+
+pub fn unlink(path: Path) !IOError { files.remove(path.raw) }
+
+pub fn rename(path: Path, to: Path) !IOError { files.rename(path.raw, to.raw) }
+
+pub fn replace(path: Path, to: Path) !IOError { files.relocate(path.raw, to.raw) }
+
+pub fn touch(path: Path) !IOError { files.touch(path.raw) }
+
+pub fn chmod(path: Path, mode: Int) !IOError { files.set_mode(path.raw, mode) }
+
+pub fn symlink_to(path: Path, target: Path) !IOError { files.symlink(target.raw, path.raw) }
+
+pub fn hardlink_to(path: Path, target: Path) !IOError { files.hard_link(target.raw, path.raw) }
+
+pub fn readlink(path: Path) -[FS]> Path !IOError {
+    t :: files.read_link(path.raw)
+    Ok(Path{raw: t})
+}
+
+pub fn copy_file(path: Path, to: Path) !IOError { files.copy(path.raw, to.raw) }
+
+pub fn copy_into(path: Path, dir: Path) -[FS]> Path !IOError {
+    dest :: join(dir, name(path))
+    files.copy(path.raw, dest.raw)
+    Ok(dest)
+}
+
+pub fn glob(path: Path, pattern: String) -[FS]> [Path] !IOError {
+    full :: files.join(path.raw, pattern)
+    names :: files.glob(full)
+    out := [Path]{}
+    loop n in names -> out.push(Path{raw: n})
+    Ok(out)
+}
+
+pub fn rglob(path: Path, pattern: String) -[FS]> [Path] !IOError {
+    entries :: files.walk_files(path.raw, None)
+    out := [Path]{}
+    loop e in entries {
+        p :: Path{raw: e.path}
+        if files.fnmatch(name(p), pattern) -> out.push(p)
+    }
+    Ok(out)
+}
+
+pub fn iterdir(path: Path) -[FS]> [Path] !IOError {
+    entries :: files.list_dir(path.raw)
+    out := [Path]{}
+    loop e in entries -> out.push(Path{raw: e.path})
+    Ok(out)
+}
+
+pub fn walk(path: Path) -[FS]> [Path] !IOError {
+    entries :: files.walk(path.raw, None)
+    out := [Path]{}
+    loop e in entries -> out.push(Path{raw: e.path})
+    Ok(out)
+}
+
+pub fn which(name: String) -[FS, Env]> ?Path {
+    found :: files.which(name) ?? return None
+    Val(Path{raw: found})
+}
+
+pub fn open_read(path: Path) -[FS]> FileReader !IOError { files.open(path.raw) }
+
+pub fn open_write(path: Path) -[FS]> FileWriter !IOError { files.create(path.raw) }
+
+pub fn show(path: Path) -> String { path.raw }
+
+pub fn equals(a: Path, b: Path) -> Bool { as_posix(a) == as_posix(b) }
+
+fn files_slice(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn is_letter(b: U8) -> Bool {
+    n :: b
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
+fn ends_colon(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    raw[raw.len() - 1] == (U8{58})
+}
+
+fn starts_slash(text: String) -> Bool {
+    raw :: text.bytes()
+    raw.len() > 0 && raw[0] == (U8{47})
+}
+
+fn starts_dotdot(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() < 2 -> return false
+    raw[0] == (U8{46}) && raw[1] == (U8{46})
+}

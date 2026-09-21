@@ -16,6 +16,7 @@
 // the exact same Rust as the untagged version, at zero runtime cost.
 struct Reservation {
     state { Pending, Confirmed, CheckedIn }
+
     guest: String
 }
 
@@ -26,13 +27,19 @@ struct Workflow {
 }
 
 impl Workflow {
-    #Transition(_, Pending) fn begin() Workflow -> Workflow{}
-    #Transition(Pending, Success) fn succeed(self: ^Workflow) Workflow -> self
-    #Transition(Pending, Failure) fn fail(self: ^Workflow) Workflow -> self
-    #Transition(Pending, Cancelled) fn cancel(self: ^Workflow) Workflow -> self
-    #State(Success) fn success_report(self) String -> "success"
-    #State(Failure) fn failure_report(self) String -> "failure"
-    #State(Cancelled) fn cancel_report(self) String -> "cancelled"
+    #Transition(_, Pending) fn begin() -> Workflow { Workflow{} }
+
+    #Transition(Pending, Success) fn succeed(self: ^Workflow) -> Workflow { self }
+
+    #Transition(Pending, Failure) fn fail(self: ^Workflow) -> Workflow { self }
+
+    #Transition(Pending, Cancelled) fn cancel(self: ^Workflow) -> Workflow { self }
+
+    #State(Success) fn success_report(self) -> String { "success" }
+
+    #State(Failure) fn failure_report(self) -> String { "failure" }
+
+    #State(Cancelled) fn cancel_report(self) -> String { "cancelled" }
 }
 
 // Self-loops and reopen edges keep their source state nonterminal.
@@ -41,11 +48,15 @@ struct Session {
 }
 
 impl Session {
-    #Transition(_, Open) fn open() Session -> Session{}
-    #Transition(Open, Open) fn heartbeat(self: ^Session) Session -> self
-    #Transition(Open, Closed) fn close(self: ^Session) Session -> self
-    #Transition(Closed, Reopened) fn reopen(self: ^Session) Session -> self
-    #State(Reopened) fn audit(self) String -> "reopened"
+    #Transition(_, Open) fn open() -> Session { Session{} }
+
+    #Transition(Open, Open) fn heartbeat(self: ^Session) -> Session { self }
+
+    #Transition(Open, Closed) fn close(self: ^Session) -> Session { self }
+
+    #Transition(Closed, Reopened) fn reopen(self: ^Session) -> Session { self }
+
+    #State(Reopened) fn audit(self) -> String { "reopened" }
 }
 
 // No entry means no initial state and no reachability warning.
@@ -54,14 +65,14 @@ struct Unseeded {
 }
 
 impl Unseeded {
-    #Transition(Raw, Done) fn finish(self: ^Unseeded) Unseeded -> self
+    #Transition(Raw, Done) fn finish(self: ^Unseeded) -> Unseeded { self }
 }
 
 impl Reservation {
     // Entry transition: a fresh booking starts life in `Pending`.
-    #Transition(_, Pending) fn book(guest: String) Reservation -> {guest: ~guest}
+    #Transition(_, Pending) fn book(guest: String) -> Reservation { {guest: ~guest} }
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation -> {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
         // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
         // state and returns the next. Calling `pay` on anything but a pending
@@ -70,14 +81,14 @@ impl Reservation {
         return self
     }
 
-    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) Reservation -> {
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
         // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self
     }
 
     // A plain guarded read: only legal once checked in. No state change.
-    #State(CheckedIn) fn room_key(self) String -> "key for {self.guest}"
+    #State(CheckedIn) fn room_key(self) -> String { "key for {self.guest}" }
 }
 
 fn run_terminal_outcomes() {

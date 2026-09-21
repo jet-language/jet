@@ -6,7 +6,7 @@
 // inside that arm. A cartesian product of separate `if self ==` tables
 // would consume a non-copy payload and then use `self` again (E0121).
 derive T.Equatable {
-    fn equal(self, rhs: T) Bool -> {
+    fn equal(self, rhs: T) -> Bool {
         @if T.@kind == "enum" {
             @loop left in T.@fields {
                 if self == {
@@ -57,7 +57,7 @@ derive T.Equatable {
 }
 
 derive T.Comparable {
-    fn compare(self, rhs: T) Ordering -> {
+    fn compare(self, rhs: T) -> Ordering {
         @if T.@kind == "enum" {
             @loop left in T.@fields {
                 if self == {

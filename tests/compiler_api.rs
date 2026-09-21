@@ -895,7 +895,7 @@ fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
         );
     }
     if common::have_rustc() {
-        let build_dir = root.join("build");
+        let build_dir = root.join(".jet").join("build");
         let _ = fs::remove_dir_all(&build_dir);
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .arg("build")

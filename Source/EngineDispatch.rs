@@ -153,6 +153,16 @@ pub fn dispatch_in(engine: &str, verb: &str, argv: &[String], cwd: Option<&Path>
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
+    // The shell-entry verbs are the only root dispatches whose selected
+    // command can safely own this process. Other engine verbs retain the
+    // parent-PID marker used by JetOS authority checks.
+    #[cfg(unix)]
+    if engine == jet::Syntax::JETPACK_BINARY_NAME && matches!(verb, "env" | "use") {
+        use std::os::unix::process::CommandExt;
+        let error = command.exec();
+        crate::cli_error!("E2105", "couldn't run `{}`: {}", bin.display(), error);
+        return ExitCodes::USER_ERROR;
+    }
     match command.status() {
         Ok(status) => status.code().unwrap_or(ExitCodes::USER_ERROR),
         Err(e) => {

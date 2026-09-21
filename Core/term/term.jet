@@ -1,0 +1,305 @@
+package {
+    name: "core.term"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Stdio, prompts, and terminal style."
+    license: "MIT"
+    outputs: {
+        term: .Library{ entry: term }
+    }
+}
+// core.term — the connected terminal.
+//
+// `print` / `eprint` write UTF-8. `input` / `readline` / `read_until` read
+// lines. `input_secret` disables echo. `style` is a no-op when stdout is not
+// a TTY unless `style_force` is used. Width and height are 0 when unknown.
+//
+// ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
+pub struct Reader {
+    pub fd: Int
+}
+
+pub struct Writer {
+    pub fd: Int
+}
+
+pub struct StdinHandle {
+    pub fd: Int
+}
+
+pub struct Stdout {
+    pub fd: Int
+}
+
+pub struct Stderr {
+    pub fd: Int
+}
+
+pub enum Key {
+    Char(String)
+    Escape
+    Backspace
+    Tab
+    Up
+    Down
+    Left
+    Right
+    Unknown
+}
+
+pub fn print(text: String) -[IO]> { host_write_fd(1, text.bytes()) }
+
+pub fn eprint(text: String) -[IO]> { host_write_fd(2, text.bytes()) }
+
+pub fn input() -[IO]> ?String {
+    line :: host_read_line(0)
+    if line.len() == 0 && host_eof(0) -> return None
+    Val(chomp(line))
+}
+
+pub fn input_secret(prompt: String) -[IO]> String !IOError {
+    host_write_fd(2, prompt.bytes())
+    host_set_echo(0, false)
+    line :: host_read_line(0)
+    host_set_echo(0, true)
+    host_write_fd(2, [U8]{10})
+    Ok(chomp(line))
+}
+
+pub fn read_all_input() -[IO]> String !IOError {
+    out := [U8]{}
+    loop {
+        chunk :: host_read_fd(0, 4096)
+        if chunk.len() == 0 -> return Ok(String.from_bytes(out) ?? "")
+        loop b in chunk -> out.push(b)
+    }
+}
+
+pub fn readline() -[IO]> String !IOError { Ok(chomp(host_read_line(0))) }
+
+pub fn read_until(delimiter: String) -[IO]> String !IOError {
+    if delimiter.bytes().len() == 0 -> return read_all_input()
+    out := [U8]{}
+    needle :: delimiter.bytes()
+    loop {
+        b :: host_read_fd(0, 1)
+        if b.len() == 0 -> return Ok(String.from_bytes(out) ?? "")
+        out.push(b[0])
+        if ends_with_bytes(out, needle) {
+            cut := out.len() - needle.len()
+            return Ok(slice_bytes(out, 0, cut))
+        }
+    }
+}
+
+pub fn binread(n: Int) -[IO]> [U8] !IOError { Ok(host_read_fd(0, n)) }
+
+pub fn binwrite(handle: Writer, bytes: [U8]) !IOError {
+    host_write_fd(handle.fd, bytes)
+    Ok()
+}
+
+pub fn confirm(prompt: String) -[IO]> Bool {
+    host_write_fd(1, "{prompt} [y/N] ".bytes())
+    line :: ascii_lower(chomp(host_read_line(0)))
+    line == "y" || line == "yes"
+}
+
+pub fn choose(prompt: String, options: [String]) -[IO]> String !IOError {
+    if options.len() == 0 {
+        return Err(IOError{operation: "choose", message: "no options", path: "", os_code: None})
+    }
+    host_write_fd(1, "{prompt}\n".bytes())
+    loop i in 0..<options.len() { host_write_fd(1, "  {i + 1}) {options[i]}\n".bytes()) }
+    line :: chomp(host_read_line(0))
+    n :: parse_int(line) ?? 0
+    if n >= 1 && n <= options.len() -> return Ok(options[n - 1])
+    loop o in options {
+        if o == line -> return Ok(o)
+    }
+    Ok(options[0])
+}
+
+pub fn stdin() -> StdinHandle { {fd: 0} }
+
+pub fn stdout() -> Stdout { {fd: 1} }
+
+pub fn stderr() -> Stderr { {fd: 2} }
+
+pub fn buffered() -> StdinHandle { {fd: 0} }
+
+pub fn terminal_width() -[IO]> Int {
+    s :: host_winsize()
+    s.w
+}
+
+pub fn terminal_height() -[IO]> Int {
+    s :: host_winsize()
+    s.h
+}
+
+pub fn style(text: String, spec: String) -[IO]> String {
+    if !host_isatty(1) -> return text
+    style_force(text, spec)
+}
+
+pub fn style_force(text: String, spec: String) -> String {
+    codes :: sgr(spec)
+    if codes.len() == 0 -> return text
+    esc :: String.from_bytes([U8]{27}) ?? ""
+    "{esc}[{codes}m{text}{esc}[0m"
+}
+
+pub fn progress(label: String) -[IO]> {
+    cr :: String.from_bytes([U8]{13}) ?? "\n"
+    host_write_fd(2, "{cr}{label}".bytes())
+    host_flush_fd(2)
+}
+
+pub fn read_key() -[IO]> Key {
+    b :: host_read_fd(0, 1)
+    if b.len() == 0 -> return Key.Unknown
+    n :: b[0]
+    if n == {
+        10 | 13 -> return Key.Enter
+        9 -> return Key.Tab
+        127 | 8 -> return Key.Backspace
+        else -> { _ := 0 }
+    }
+    if n == 27 {
+        rest :: host_read_fd(0, 2)
+        if rest.len() >= 2 && rest[0] == (U8{91}) {
+            c :: rest[1]
+            if c == {
+                65 -> return Key.Up
+                66 -> return Key.Down
+                67 -> return Key.Right
+                68 -> return Key.Left
+                else -> { _ := 0 }
+            }
+        }
+        return Key.Escape
+    }
+    Key.Char(String.from_bytes([U8]{b[0]}) ?? "")
+}
+
+pub struct WinSize {
+    pub w: Int
+    pub h: Int
+}
+
+fn sgr(spec: String) -> String {
+    parts := [String]{}
+    cur := [U8]{}
+    loop b in spec.bytes() {
+        if b == (U8{32}) || b == (U8{44}) || b == (U8{59}) {
+            token :: ascii_lower(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+            code :: token_code(token)
+            if code.len() > 0 -> parts.push(code)
+        } else { cur.push(b) }
+    }
+    token :: ascii_lower(String.from_bytes(cur) ?? "")
+    code :: token_code(token)
+    if code.len() > 0 -> parts.push(code)
+    out := ""
+    loop i in 0..<parts.len() {
+        if i > 0 -> out = "{out};"
+        out = "{out}{parts[i]}"
+    }
+    out
+}
+
+fn token_code(token: String) -> String {
+    if token == {
+        "bold" -> "1"
+        "dim" -> "2"
+        "italic" -> "3"
+        "underline" -> "4"
+        "inverse" | "reverse" -> "7"
+        "strike" | "strikethrough" -> "9"
+        "black" -> "30"
+        "red" -> "31"
+        "green" -> "32"
+        "yellow" -> "33"
+        "blue" -> "34"
+        "magenta" -> "35"
+        "cyan" -> "36"
+        "white" -> "37"
+        "bg-black" -> "40"
+        "bg-red" -> "41"
+        "bg-green" -> "42"
+        "bg-yellow" -> "43"
+        "bg-blue" -> "44"
+        "bg-magenta" -> "45"
+        "bg-cyan" -> "46"
+        "bg-white" -> "47"
+        "reset" -> "0"
+        else -> ""
+    }
+}
+
+fn chomp(text: String) -> String {
+    raw :: text.bytes()
+    n := raw.len()
+    if n > 0 && raw[n - 1] == (U8{10}) -> n = n - 1
+    if n > 0 && raw[n - 1] == (U8{13}) -> n = n - 1
+    slice_bytes(raw, 0, n)
+}
+
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn ends_with_bytes(hay: [U8], needle: [U8]) -> Bool {
+    if needle.len() > hay.len() -> return false
+    off :: hay.len() - needle.len()
+    loop i in 0..<needle.len() {
+        if hay[off + i] != needle[i] -> return false
+    }
+    true
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn parse_int(text: String) -> ?Int {
+    n := 0
+    any := false
+    loop b in text.bytes() {
+        d :: b
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        any = true
+    }
+    if !any -> return None
+    Val(n)
+}
+
+fn host_write_fd(fd: Int, bytes: [U8]) -[IO]> { panic("host_write_fd") }
+
+fn host_read_fd(fd: Int, n: Int) -[IO]> [U8] { panic("host_read_fd") }
+
+fn host_read_line(fd: Int) -[IO]> String { panic("host_read_line") }
+
+fn host_eof(fd: Int) -[IO]> Bool { panic("host_eof") }
+
+fn host_set_echo(fd: Int, on: Bool) -[IO]> { panic("host_set_echo") }
+
+fn host_isatty(fd: Int) -[IO]> Bool { panic("host_isatty") }
+
+fn host_winsize() -[IO]> WinSize { panic("host_winsize") }
+
+fn host_flush_fd(fd: Int) -[IO]> { panic("host_flush_fd") }

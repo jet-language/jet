@@ -6,7 +6,6 @@
 use core.http.server as http_server
 use core.net as net
 use core.net.tls as tls
-use core.tasks as tasks
 
 fn run() !(HTTPError | IOError | NetError | RangeError | TaskFailure) {
     cert :: """
@@ -82,22 +81,22 @@ fn run() !(HTTPError | IOError | NetError | RangeError | TaskFailure) {
     -----END CERTIFICATE-----
     """
     mux :: http_server.mux()
-    mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
-    server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key))
-    addr :: server.local_addr()
-    serving :: task { server.serve() }
-    roots :: tls.RootCertificates.from_pem(ca.bytes())
-    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots))
-    config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13)
-    tcp :: net.tcp_connect(addr)
+    mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
+    server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key)) ?? panic("bind")
+    addr :: server.local_addr() ?? panic("address")
+    serving :: task { server.serve() ?? panic("serve") }
+    roots :: tls.RootCertificates.from_pem(ca.bytes()) ?? panic("roots")
+    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("version")
+    tcp :: net.tcp_connect(addr) ?? panic("connect")
     budget :: 2s
-    secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget)
+    secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget) ?? panic("tls")
     peer :: secure.peer_identity()
     print(peer.verified_server_name)
     print(peer.cipher_suite.starts_with("TLS13_"))
     print(peer.tls_version)
-    secure.close()
+    secure.close() ?? panic("close")
     grace :: 200ms
-    _ :: server.shutdown(grace)
-    serving.join()
+    _ :: server.shutdown(grace) ?? panic("shutdown")
+    serving.join() ?? panic("server")
 }

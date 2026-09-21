@@ -3,13 +3,12 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Browser, Exec, IO, Mem.Alloc] } }
 }
-
 // D-UITREE1: one canonical UiNode tree. A signal change re-runs the render
 // effect, while the diff paints only canonical leaves whose content changed.
 use core.ui as ui
 use core.reactive as reactive
 
-fn repaint(old: [UiNode], updated: [UiNode]) Int -> {
+fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
     backend := ui.null_backend()
     n := 0
     i := 0
@@ -34,12 +33,14 @@ fn run() {
     leaves := reactive.signal(initial)
     backend := ui.tui_backend()
     render_backend := ~backend
-    ui.reactive_render(() -> {
+    ui.reactive_render(
+    () -> {
         tree :: ui.box(leaves.get())
         size :: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
         render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
         render_backend.paint(tree)
-    })
+    },
+    )
     empty :: [UiNode]{}
     before :: leaves.get()
     print("initial repaints: {repaint(empty, before)}")

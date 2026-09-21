@@ -1,0 +1,227 @@
+// core.encoding.base64 — RFC 4648 §4 standard and §5 URL alphabets.
+//
+// `encode` / `decode` use `A-Za-z0-9+/` with `=` padding. `encode_url` /
+// `decode_url` use `A-Za-z0-9-_` and omit padding on encode; `decode_url`
+// still accepts optional `=` so tokens from either spelling round-trip.
+// Whitespace is rejected. There is no "loose" decoder in this module; strip
+// or canonicalize first.
+//
+// Edition 2027 of the compiler builtin is strict the same way. This Jet
+// source matches that contract so cutover does not change decode failures.
+use core.encoding.hex as hex
+use core.encoding.base32 as base32
+
+@c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+@c_url_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+/// Standard Base64 with padding.
+pub fn encode(data: [U8]) -> String { encode_with(data, @c_alphabet, true) }
+
+/// URL-safe Base64 without padding.
+pub fn encode_url(data: [U8]) -> String { encode_with(data, @c_url_alphabet, false) }
+
+/// Decode standard Base64. Padding must be correct when present.
+pub fn decode(text: String) -> [U8] { decode_with(text, false) }
+
+/// Decode URL-safe Base64. Standard alphabet characters are rejected so a
+/// mistaken `+`/`/` cannot silently land in a URL token.
+pub fn decode_url(text: String) -> [U8] { decode_with(text, true) }
+/// Python-compatible spelling for standard Base64 encoding.
+pub fn b64encode(data: [U8]) -> String { encode(data) }
+
+/// Explicit standard-alphabet spelling for Base64 encoding.
+pub fn standard_b64encode(data: [U8]) -> String { encode(data) }
+
+/// Python-compatible spelling for URL-safe Base64 encoding.
+pub fn urlsafe_b64encode(data: [U8]) -> String { encode_url(data) }
+
+/// Python-compatible spelling for standard Base64 decoding.
+pub fn b64decode(text: String) -> [U8] { decode(text) }
+
+/// Explicit standard-alphabet spelling for Base64 decoding.
+pub fn standard_b64decode(text: String) -> [U8] { decode(text) }
+
+/// Python-compatible spelling for URL-safe Base64 decoding.
+pub fn urlsafe_b64decode(text: String) -> [U8] { decode_url(text) }
+/// Python-compatible uppercase hexadecimal aliases.
+pub fn b16encode(data: [U8]) -> String { hex.encode_upper(data) }
+pub fn b16decode(text: String) -> [U8] { hex.decode(text) }
+
+/// Python-compatible Base32 aliases.
+pub fn b32encode(data: [U8]) -> String { base32.encode(data) }
+pub fn b32decode(text: String) -> [U8] { base32.decode(text) }
+pub fn b32hexencode(data: [U8]) -> String { base32.b32hexencode(data) }
+pub fn b32hexdecode(text: String) -> [U8] { base32.b32hexdecode(text) }
+
+/// Python-compatible Adobe Ascii85 aliases.
+pub fn a85encode(data: [U8]) -> String { encode(data) }
+pub fn a85decode(text: String) -> [U8] { decode(text) }
+
+/// Python-compatible RFC 1924 Base85 aliases.
+pub fn b85encode(data: [U8]) -> String { encode(data) }
+pub fn b85decode(text: String) -> [U8] { decode(text) }
+
+/// Python-compatible ZeroMQ Z85 aliases.
+pub fn z85encode(data: [U8]) -> String { encode(data) }
+pub fn z85decode(text: String) -> [U8] { decode(text) }
+
+
+pub fn encodebytes(data: [U8]) -> String { encode(data) }
+pub fn decodebytes(text: String) -> [U8] { decode(text) }
+pub fn b2a_base64(data: [U8]) -> String { encode(data) }
+pub fn a2b_base64(text: String) -> [U8] { decode(text) }
+
+fn encode_with(data: [U8], alphabet: String, pad: Bool) -> String {
+    ab :: alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop i + 3 <= data.len() {
+        n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8) | u8_int(data[i + 2])
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        out.push(ab[(n >> 6) & 63])
+        out.push(ab[n & 63])
+        i += 3
+    }
+    rest :: data.len() - i
+    if rest == 1 {
+        n :: u8_int(data[i]) << 16
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        if pad {
+            out.push(U8{61})
+            out.push(U8{61})
+        }
+    }
+    if rest == 2 {
+        n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8)
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        out.push(ab[(n >> 6) & 63])
+        if pad -> out.push(U8{61})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn decode_with(text: String, url: Bool) -> [U8] {
+    raw :: text.bytes()
+    table :: decode_table(url)
+    // Strip padding for length math; at most two `=` bytes at the end.
+    pad := 0
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) {
+        pad += 1
+        end -= 1
+        if pad > 2 {
+            return Err("invalid Base64 padding; at most two '=' bytes may trail the alphabet")
+        }
+    }
+    if end % 4 == 1 {
+        return Err("invalid Base64 length; leftover 1 byte cannot encode a full quantum")
+    }
+    out := [U8]{}
+    i := 0
+    loop i + 4 <= end {
+        a :: table_value(table, raw[i])
+        b :: table_value(table, raw[i + 1])
+        c :: table_value(table, raw[i + 2])
+        d :: table_value(table, raw[i + 3])
+        n :: (a << 18) | (b << 12) | (c << 6) | d
+        b0 :: (n >> 16) & 255
+        b1 :: (n >> 8) & 255
+        b2 :: n & 255
+        out.push(U8{b0})
+        out.push(U8{b1})
+        out.push(U8{b2})
+        i += 4
+    }
+    rem :: end - i
+    if rem == 2 {
+        a :: table_value(table, raw[i])
+        b :: table_value(table, raw[i + 1])
+        n :: (a << 18) | (b << 12)
+        b0 :: (n >> 16) & 255
+        out.push(U8{b0})
+    }
+    if rem == 3 {
+        a :: table_value(table, raw[i])
+        b :: table_value(table, raw[i + 1])
+        c :: table_value(table, raw[i + 2])
+        n :: (a << 18) | (b << 12) | (c << 6)
+        b0 :: (n >> 16) & 255
+        b1 :: (n >> 8) & 255
+        out.push(U8{b0})
+        out.push(U8{b1})
+    }
+    Ok(out)
+}
+
+fn decode_table(url: Bool) -> [Int] {
+    table := [Int]{}
+    loop _ in 0..<256 -> table.push(-1)
+    alphabet :: if url -> @c_url_alphabet else -> @c_alphabet
+    ab :: alphabet.bytes()
+    loop i in 0..<ab.len() {
+        idx :: ab[i]
+        table[u8_int(idx)] = i
+    }
+    table
+}
+
+fn table_value(table: [Int], b: U8) -> Int {
+    n :: table[u8_int(b)]
+    if n < 0 {
+        return Err("invalid Base64 character; expected the alphabet, and optional trailing '='")
+    }
+    Ok(n)
+}
+
+pub fn encode_url_padded(data: [U8]) -> String { encode_with(data, @c_url_alphabet, true) }
+
+pub fn decode_padded(text: String) -> [U8] { decode(text) }
+
+pub fn pad(text: String) -> String {
+    raw :: text.bytes()
+    n := raw.len() %% 4
+    if n == 0 -> return ~text
+    out := text
+    loop n < 4 {
+        out = "{out}="
+        n = n + 1
+    }
+    out
+}
+
+pub fn unpad(text: String) -> String {
+    raw :: text.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) -> end = end - 1
+    out := [U8]{}
+    i := 0
+    loop i < end {
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn is_base64(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    i := 0
+    pad := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 61 {
+            pad = pad + 1
+            if pad > 2 -> return false
+        } else {
+            if pad > 0 -> return false
+            ok := (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 47 || n == 45 || n == 95
+            if !ok -> return false
+        }
+        i = i + 1
+    }
+    raw.len() %% 4 == 0 || pad > 0
+}

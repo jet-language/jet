@@ -1,4 +1,4 @@
-#[path = "target/bindings/projection_rust.rs"]
+#[path = ".jet/build/bindings/projection_rust.rs"]
 mod projection;
 
 fn main() {

@@ -614,8 +614,8 @@ pub struct ProcessChild {
     // Keep the limit on the child so `spawn().wait()` enforces the same
     // bound as `run()`, before captured bytes can grow without bound.
     pub output_limit: Option<i64>,
-    pub audit_spec: ProcessSpec,
-    pub audit_plan: Option<ProcessPlan>,
+    pub audit_spec: std::rc::Rc<ProcessSpec>,
+    pub audit_plan: Option<std::rc::Rc<ProcessPlan>>,
     pub started: std::time::Instant,
 }
 
@@ -3605,6 +3605,12 @@ impl JetBigInt {
             "count_zeros" => width - ones,
             "leading_zeros" => bits.iter().rev().take_while(|bit| !**bit).count(),
             "trailing_zeros" => bits.iter().take_while(|bit| !**bit).count(),
+            "bit_count" => self
+                .unsigned_bits(self.bit_width())
+                .into_iter()
+                .filter(|bit| *bit)
+                .count(),
+            "bit_length" => self.bit_width(),
             _ => return None,
         };
         i64::try_from(count).ok()
@@ -4222,6 +4228,14 @@ pub fn jet_int_checked_widen(value: i64, target_f32: bool, file: &str, line: u32
 }
 
 pub fn jet_int_bit_count(value: i64, width: u32, method: &str) -> i64 {
+    if !jet_int_is_tagged(value) {
+        let magnitude = value.unsigned_abs();
+        match method {
+            "bit_count" => return i64::from(magnitude.count_ones()),
+            "bit_length" => return i64::from(64 - magnitude.leading_zeros()),
+            _ => {}
+        }
+    }
     jet_int_value(value).bit_count(width, method).unwrap_or(0)
 }
 
@@ -4321,6 +4335,195 @@ macro_rules! jet_int_mul_hot {
     }};
 }
 pub use crate::jet_int_mul_hot;
+#[macro_export]
+macro_rules! jet_int_div_hot {
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
+        let __jet_left = $left;
+        let __jet_right = $right;
+        if $crate::jet_std::jet_int_is_small(__jet_left)
+            && $crate::jet_std::jet_int_is_small(__jet_right)
+            && __jet_right != 0
+        {
+            if let Some(__jet_quotient) = __jet_left.checked_div(__jet_right) {
+                __jet_quotient
+            } else {
+                $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).0
+            }
+        } else {
+            $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).0
+        }
+    }};
+}
+pub use crate::jet_int_div_hot;
+
+#[macro_export]
+macro_rules! jet_int_rem_hot {
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
+        let __jet_left = $left;
+        let __jet_right = $right;
+        if $crate::jet_std::jet_int_is_small(__jet_left)
+            && $crate::jet_std::jet_int_is_small(__jet_right)
+            && __jet_right != 0
+        {
+            if let Some(__jet_remainder) = __jet_left.checked_rem(__jet_right) {
+                __jet_remainder
+            } else {
+                $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).1
+            }
+        } else {
+            $crate::jet_std::jet_int_div_rem_slow(__jet_left, __jet_right, $file, $line).1
+        }
+    }};
+}
+pub use crate::jet_int_rem_hot;
+
+#[macro_export]
+macro_rules! jet_int_floor_div_hot {
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
+        let __jet_left = $left;
+        let __jet_right = $right;
+        if $crate::jet_std::jet_int_is_small(__jet_left)
+            && $crate::jet_std::jet_int_is_small(__jet_right)
+            && __jet_right != 0
+        {
+            match (
+                __jet_left.checked_div(__jet_right),
+                __jet_left.checked_rem(__jet_right),
+            ) {
+                (Some(__jet_quotient), Some(__jet_remainder)) => {
+                    let __jet_value =
+                        if __jet_remainder != 0 && (__jet_left < 0) != (__jet_right < 0) {
+                            __jet_quotient.checked_sub(1)
+                        } else {
+                            Some(__jet_quotient)
+                        };
+                    if let Some(__jet_value) = __jet_value.filter(|value| {
+                        ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                            .contains(value)
+                    }) {
+                        __jet_value
+                    } else {
+                        $crate::jet_std::jet_int_floor_div_slow(
+                            __jet_left,
+                            __jet_right,
+                            $file,
+                            $line,
+                        )
+                    }
+                }
+                _ => $crate::jet_std::jet_int_floor_div_slow(
+                    __jet_left,
+                    __jet_right,
+                    $file,
+                    $line,
+                ),
+            }
+        } else {
+            $crate::jet_std::jet_int_floor_div_slow(__jet_left, __jet_right, $file, $line)
+        }
+    }};
+}
+pub use crate::jet_int_floor_div_hot;
+
+#[macro_export]
+macro_rules! jet_int_mod_hot {
+    ($left:expr, $right:expr, $file:expr, $line:expr) => {{
+        let __jet_left = $left;
+        let __jet_right = $right;
+        if $crate::jet_std::jet_int_is_small(__jet_left)
+            && $crate::jet_std::jet_int_is_small(__jet_right)
+            && __jet_right != 0
+        {
+            match __jet_left.checked_rem(__jet_right) {
+                Some(__jet_remainder) => {
+                    let __jet_value =
+                        if __jet_remainder != 0 && (__jet_left < 0) != (__jet_right < 0) {
+                            __jet_remainder.checked_add(__jet_right)
+                        } else {
+                            Some(__jet_remainder)
+                        };
+                    if let Some(__jet_value) = __jet_value.filter(|value| {
+                        ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                            .contains(value)
+                    }) {
+                        __jet_value
+                    } else {
+                        $crate::jet_std::jet_int_mod_slow(
+                            __jet_left,
+                            __jet_right,
+                            $file,
+                            $line,
+                        )
+                    }
+                }
+                None => $crate::jet_std::jet_int_mod_slow(
+                    __jet_left,
+                    __jet_right,
+                    $file,
+                    $line,
+                ),
+            }
+        } else {
+            $crate::jet_std::jet_int_mod_slow(__jet_left, __jet_right, $file, $line)
+        }
+    }};
+}
+pub use crate::jet_int_mod_hot;
+
+#[macro_export]
+macro_rules! jet_int_shl_hot {
+    ($value:expr, $count:expr, $file:expr, $line:expr) => {{
+        let __jet_value = $value;
+        let __jet_count = $count;
+        if $crate::jet_std::jet_int_is_small(__jet_value)
+            && $crate::jet_std::jet_int_is_small(__jet_count)
+        {
+            if let Some(__jet_result) = u32::try_from(__jet_count)
+                .ok()
+                .and_then(|count| __jet_value.checked_shl(count))
+                .filter(|value| {
+                    ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                        .contains(value)
+                })
+            {
+                __jet_result
+            } else {
+                $crate::jet_std::jet_int_shl_slow(__jet_value, __jet_count, $file, $line)
+            }
+        } else {
+            $crate::jet_std::jet_int_shl_slow(__jet_value, __jet_count, $file, $line)
+        }
+    }};
+}
+pub use crate::jet_int_shl_hot;
+
+#[macro_export]
+macro_rules! jet_int_shr_hot {
+    ($value:expr, $count:expr, $file:expr, $line:expr) => {{
+        let __jet_value = $value;
+        let __jet_count = $count;
+        if $crate::jet_std::jet_int_is_small(__jet_value)
+            && $crate::jet_std::jet_int_is_small(__jet_count)
+        {
+            if let Some(__jet_result) = u32::try_from(__jet_count)
+                .ok()
+                .and_then(|count| __jet_value.checked_shr(count))
+                .filter(|value| {
+                    ($crate::jet_std::JET_INT_SMALL_MIN..=$crate::jet_std::JET_INT_SMALL_MAX)
+                        .contains(value)
+                })
+            {
+                __jet_result
+            } else {
+                $crate::jet_std::jet_int_shr_slow(__jet_value, __jet_count, $file, $line)
+            }
+        } else {
+            $crate::jet_std::jet_int_shr_slow(__jet_value, __jet_count, $file, $line)
+        }
+    }};
+}
+pub use crate::jet_int_shr_hot;
+
 
 // These macros have no fallback by design. The TIR emitter may select them
 // only after its interval/cost fact proves both operands and the result stay
@@ -4566,21 +4769,37 @@ pub fn jet_int_not(value: i64) -> i64 {
     jet_int_sub(jet_int_neg(value), jet_int_from_i64(1))
 }
 
-pub fn jet_int_shl(value: i64, count: i64, file: &str, line: u32) -> i64 {
+#[cold]
+#[inline(never)]
+pub fn jet_int_shl_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
     jet_int_value(value)
         .shl(&jet_int_value(count))
         .map(jet_int_pack)
         .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
 }
 
-pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
+#[inline(always)]
+pub fn jet_int_shl(value: i64, count: i64, file: &str, line: u32) -> i64 {
+    jet_int_shl_hot!(value, count, file, line)
+}
+
+#[cold]
+#[inline(never)]
+pub fn jet_int_shr_slow(value: i64, count: i64, file: &str, line: u32) -> i64 {
     jet_int_value(value)
         .shr(&jet_int_value(count))
         .map(jet_int_pack)
         .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
 }
 
-fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+#[inline(always)]
+pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
+    jet_int_shr_hot!(value, count, file, line)
+}
+
+#[cold]
+#[inline(never)]
+pub fn jet_int_div_rem_slow(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
     // D-FLOORDIV1: plain `Int` `/`, `%` and `/%` stop with THE
     // canonical arithmetic wording, never a second copy typed here. This site
     // carried the invented "division by zero" while `Core.rs`'s fixed-width
@@ -4591,25 +4810,32 @@ fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64
     if jet_int_is_zero(divisor) {
         crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
     }
-    if jet_int_is_small(value) && jet_int_is_small(divisor) {
-        if let (Some(quotient), Some(remainder)) =
-            (value.checked_div(divisor), value.checked_rem(divisor))
-        {
-            return (quotient, remainder);
-        }
-    }
     let (quotient, remainder) = jet_int_value(value)
         .div_rem(&jet_int_value(divisor))
         .expect("checked division by zero");
     (jet_int_pack(quotient), jet_int_pack(remainder))
 }
 
-pub fn jet_int_rem(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_div_rem(value, divisor, file, line).1
+#[inline(always)]
+pub fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+    if jet_int_is_small(value) && jet_int_is_small(divisor) && divisor != 0 {
+        if let (Some(quotient), Some(remainder)) =
+            (value.checked_div(divisor), value.checked_rem(divisor))
+        {
+            return (quotient, remainder);
+        }
+    }
+    jet_int_div_rem_slow(value, divisor, file, line)
 }
 
+#[inline(always)]
+pub fn jet_int_rem(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    jet_int_rem_hot!(value, divisor, file, line)
+}
+
+#[inline(always)]
 pub fn jet_int_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    jet_int_div_rem(value, divisor, file, line).0
+    jet_int_div_hot!(value, divisor, file, line)
 }
 
 fn jet_int_div_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
@@ -4637,8 +4863,10 @@ pub fn jet_int_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i6
     jet_int_div_rem_euclid(value, divisor, file, line).1
 }
 
-pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
+#[cold]
+#[inline(never)]
+pub fn jet_int_floor_div_slow(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    let (quotient, remainder) = jet_int_div_rem_slow(value, divisor, file, line);
     if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
         jet_int_sub(quotient, jet_int_from_i64(1))
     } else {
@@ -4646,14 +4874,26 @@ pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64
     }
 }
 
-pub fn jet_int_mod(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
-    let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
+#[inline(always)]
+pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    jet_int_floor_div_hot!(value, divisor, file, line)
+}
+
+#[cold]
+#[inline(never)]
+pub fn jet_int_mod_slow(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    let (quotient, remainder) = jet_int_div_rem_slow(value, divisor, file, line);
     if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
         jet_int_add(remainder, divisor)
     } else {
         let _ = quotient;
         remainder
     }
+}
+
+#[inline(always)]
+pub fn jet_int_mod(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+    jet_int_mod_hot!(value, divisor, file, line)
 }
 
 pub fn jet_int_pow(value: i64, exponent: i64, file: &str, line: u32) -> i64 {
@@ -4823,7 +5063,7 @@ pub fn jet_int_owned_from_native_result(
 }
 
 #[inline(always)]
-fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numeric::JetInt {
+pub(crate) fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numeric::JetInt {
     // SAFETY: raw arithmetic adapters below pass freshly owned carrier results.
     unsafe { jet_foundation::Numeric::JetInt::from_raw_owned(value) }
 }
@@ -4835,6 +5075,28 @@ fn jet_int_owned_raw(value: &jet_foundation::Numeric::JetInt) -> i64 {
 
 pub fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
     jet_foundation::Numeric::JetInt::from_i64(value)
+}
+
+#[inline(always)]
+pub(crate) fn jet_int_owned_from_i128(value: i128) -> jet_foundation::Numeric::JetInt {
+    if let Ok(value) = i64::try_from(value) {
+        return jet_foundation::Numeric::JetInt::from_i64(value);
+    }
+    let negative = value < 0;
+    let magnitude = value.unsigned_abs();
+    let high = (magnitude >> 64) as u64;
+    let low = magnitude as u64;
+    let mut big = jet_foundation::Numeric::CtBigInt::from_u64(high);
+    if high != 0 {
+        let radix = jet_foundation::Numeric::CtBigInt::from_u64(u64::MAX)
+            .add(&jet_foundation::Numeric::CtBigInt::from_int(1));
+        big = big.mul(&radix);
+    }
+    big = big.add(&jet_foundation::Numeric::CtBigInt::from_u64(low));
+    if negative {
+        big = big.neg();
+    }
+    jet_foundation::Numeric::JetInt::from_big(big)
 }
 
 pub fn jet_int_owned_from_u64(value: u64) -> jet_foundation::Numeric::JetInt {
@@ -4927,6 +5189,7 @@ pub fn jet_int_owned_not(
 
 macro_rules! jet_int_owned_binary_context {
     ($owned:ident, $raw:ident) => {
+        #[inline(always)]
         pub fn $owned(
             left: &jet_foundation::Numeric::JetInt,
             right: &jet_foundation::Numeric::JetInt,
@@ -4950,6 +5213,7 @@ jet_int_owned_binary_context!(jet_int_owned_floor_div, jet_int_floor_div);
 jet_int_owned_binary_context!(jet_int_owned_mod, jet_int_mod);
 jet_int_owned_binary_context!(jet_int_owned_pow, jet_int_pow);
 
+#[inline(always)]
 pub fn jet_int_owned_shl(
     value: &jet_foundation::Numeric::JetInt,
     count: &jet_foundation::Numeric::JetInt,
@@ -4964,6 +5228,7 @@ pub fn jet_int_owned_shl(
     ))
 }
 
+#[inline(always)]
 pub fn jet_int_owned_shr(
     value: &jet_foundation::Numeric::JetInt,
     count: &jet_foundation::Numeric::JetInt,
@@ -4989,9 +5254,18 @@ pub fn jet_int_owned_checked_widen(
 
 pub fn jet_int_owned_bit_count(
     value: &jet_foundation::Numeric::JetInt,
+    operation: i64,
     width: i64,
-    method: &str,
 ) -> i64 {
+    let method = match operation {
+        0 => "count_ones",
+        1 => "count_zeros",
+        2 => "leading_zeros",
+        3 => "trailing_zeros",
+        4 => "bit_count",
+        5 => "bit_length",
+        _ => panic!("checked integer population operation"),
+    };
     jet_int_bit_count(jet_int_owned_raw(value), width as u32, method)
 }
 
@@ -5093,6 +5367,22 @@ impl JetFraction {
         Some(Self {
             numerator: numerator.div_rem(&divisor)?.0,
             denominator: denominator.div_rem(&divisor)?.0,
+        })
+    }
+    /// Construct a Fraction whose operands are already coprime. Decimal's
+    /// small path reduces its i128 numerator/denominator before converting
+    /// to limbs, so it does not pay the general gcd/division pass again.
+    fn from_reduced_bigints(mut numerator: JetBigInt, mut denominator: JetBigInt) -> Option<Self> {
+        if denominator.is_zero() {
+            return None;
+        }
+        if denominator.negative {
+            numerator = numerator.neg();
+            denominator = denominator.neg();
+        }
+        Some(Self {
+            numerator,
+            denominator,
         })
     }
 
@@ -5214,11 +5504,12 @@ impl super::JetDisplay for JetFraction {
 }
 
 // D-DECIMAL1: exact base-10 decimal (scaled integer + scale).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 enum JetDecimalMagnitude {
     Small(i128),
     Big(JetBigInt),
 }
+
 
 fn jet_decimal_bigint_from_i128(value: i128) -> JetBigInt {
     let negative = value < 0;
@@ -5363,10 +5654,22 @@ fn jet_decimal_parse(s: &str) -> Result<(bool, JetDecimalMagnitude, u32), String
     ))
 }
 
+#[inline(always)]
 fn jet_decimal_small_to_f64(value: i128, scale: u32) -> f64 {
     debug_assert!(value >= 0);
     if value == 0 {
         return 0.0;
+    }
+    // A fixed-scale small Decimal is the common exact-to-approximate crossing.
+    // Keep the machine operation on the scalar rail when both operands are
+    // exactly representable as binary64; larger/less-frequent values retain
+    // the correctly-rounded limb ratio below.
+    if scale == 0 {
+        return value as f64;
+    }
+    const MAX_EXACT_F64_INTEGER: u128 = (1u128 << 53) - 1;
+    if scale <= 15 && (value as u128) <= MAX_EXACT_F64_INTEGER {
+        return (value as f64) / 10f64.powi(scale as i32);
     }
     let mut magnitude = value as u128;
     let mut limbs = [0u32; 5];
@@ -5380,15 +5683,37 @@ fn jet_decimal_small_to_f64(value: i128, scale: u32) -> f64 {
     jet_ratio_limbs_to_f64(&limbs[..length], &denominator, false)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 
 pub struct JetDecimal {
     negative: bool,
     magnitude: JetDecimalMagnitude,
     scale: u32,
 }
+impl PartialEq for JetDecimal {
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        self.equal(other)
+    }
+}
+
+impl Eq for JetDecimal {}
+impl PartialOrd for JetDecimal {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.compare_value(other))
+    }
+}
+
+impl Ord for JetDecimal {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.compare_value(other)
+    }
+}
 
 impl JetDecimal {
+    #[inline(always)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         let (negative, magnitude, scale) = jet_decimal_parse(s)?;
         Ok(Self {
@@ -5497,6 +5822,80 @@ impl JetDecimal {
         value.checked_mul(10i128.checked_pow(places)?)
     }
 
+    fn small_fraction(numerator: i128, denominator: i128) -> Option<JetFraction> {
+        if denominator == 0 {
+            return None;
+        }
+        let negative = numerator.is_negative() != denominator.is_negative();
+        let numerator_abs = numerator.unsigned_abs();
+        let denominator_abs = denominator.unsigned_abs();
+        let mut left = numerator_abs;
+        let mut right = denominator_abs;
+        while right != 0 {
+            let remainder = left % right;
+            left = right;
+            right = remainder;
+        }
+        let numerator_abs = numerator_abs / left;
+        let denominator_abs = denominator_abs / left;
+        let numerator_abs = i128::try_from(numerator_abs).ok()?;
+        let denominator_abs = i128::try_from(denominator_abs).ok()?;
+        let numerator = if negative {
+            numerator_abs.checked_neg()?
+        } else {
+            numerator_abs
+        };
+        JetFraction::from_reduced_bigints(
+            jet_decimal_bigint_from_i128(numerator),
+            jet_decimal_bigint_from_i128(denominator_abs),
+        )
+    }
+
+    fn compare_value(&self, other: &JetDecimal) -> std::cmp::Ordering {
+        let left_zero = self.is_zero();
+        let right_zero = other.is_zero();
+        match (left_zero, right_zero) {
+            (true, true) => return std::cmp::Ordering::Equal,
+            (true, false) => {
+                return if other.negative {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                };
+            }
+            (false, true) => {
+                return if self.negative {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
+            (false, false) => {}
+        }
+        if self.negative != other.negative {
+            return if self.negative {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+        }
+        let scale = self.scale.max(other.scale);
+        if let (Some(left), Some(right)) = (self.signed_small(), other.signed_small()) {
+            if let (Some(left), Some(right)) = (
+                Self::scale_small(left, scale - self.scale),
+                Self::scale_small(right, scale - other.scale),
+            ) {
+                return left.cmp(&right);
+            }
+        }
+        self.scaled_bigint(scale).compare(&other.scaled_bigint(scale))
+    }
+
+    #[inline(always)]
+    pub fn equal(&self, other: &JetDecimal) -> bool {
+        self.compare_value(other) == std::cmp::Ordering::Equal
+    }
+
     fn from_signed_small_preserving_scale(value: i128, scale: u32) -> Option<Self> {
         let negative = value < 0;
         let magnitude = if negative {
@@ -5583,14 +5982,17 @@ impl JetDecimal {
         Self::from_signed_bigint_preserving_scale(left.add(&right), scale)
     }
 
+    #[inline(always)]
     pub fn add(&self, other: &JetDecimal) -> JetDecimal {
         self.add_with_sign(other, false)
     }
 
+    #[inline(always)]
     pub fn sub(&self, other: &JetDecimal) -> JetDecimal {
         self.add_with_sign(other, true)
     }
 
+    #[inline(always)]
     pub fn mul(&self, other: &JetDecimal) -> JetDecimal {
         let mut scale = self.scale + other.scale;
         let minimum_scale = self.scale.max(other.scale);
@@ -5634,10 +6036,19 @@ impl JetDecimal {
         JetDecimal::from_bigint(value.abs(), scale, negative)
     }
 
+    #[inline(always)]
     pub fn to_fraction(&self) -> Option<JetFraction> {
+        if let Some(value) = self.signed_small() {
+            if let Some(denominator) = 10i128.checked_pow(self.scale) {
+                if let Some(fraction) = Self::small_fraction(value, denominator) {
+                    return Some(fraction);
+                }
+            }
+        }
         JetFraction::from_bigints(self.signed_bigint(), Self::scale_factor(self.scale))
     }
 
+    #[inline(always)]
     pub fn to_float(&self) -> f64 {
         let magnitude = match &self.magnitude {
             JetDecimalMagnitude::Small(value) => jet_decimal_small_to_f64(*value, self.scale),
@@ -5651,6 +6062,22 @@ impl JetDecimal {
     }
 
     pub fn div(&self, other: &JetDecimal) -> Option<JetFraction> {
+        if other.is_zero() {
+            return None;
+        }
+        if let (Some(left), Some(right)) = (self.signed_small(), other.signed_small()) {
+            let numerator = 10i128
+                .checked_pow(other.scale)
+                .and_then(|scale| left.checked_mul(scale));
+            let denominator = 10i128
+                .checked_pow(self.scale)
+                .and_then(|scale| right.checked_mul(scale));
+            if let (Some(numerator), Some(denominator)) = (numerator, denominator) {
+                if let Some(fraction) = Self::small_fraction(numerator, denominator) {
+                    return Some(fraction);
+                }
+            }
+        }
         self.to_fraction()?.div(&other.to_fraction()?)
     }
 
@@ -5839,6 +6266,7 @@ impl JetDecimal {
         }
     }
 
+    #[inline(always)]
     pub fn to_string_rep(&self) -> String {
         if self.is_zero() {
             let fraction_len = self.scale as usize;

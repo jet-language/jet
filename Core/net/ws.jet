@@ -1,0 +1,95 @@
+// core.net.ws — WebSocket client upgrade.
+//
+// Handshake is HTTP/1.1 in Jet. Framing after 101 is host-backed.
+pub struct WsSocket {
+    pub fd: Int
+    pub url: String
+}
+
+pub fn connect(url: String) -[Net]> WsSocket !IOError {
+    tls := contains(url, "wss://") || contains(url, "https://")
+    host := host_of(url)
+    path := path_of(url)
+    port := 80
+    if tls -> port = 443
+    fd := 0
+    if tls -> fd = host_tls_client(host, port) else -> fd = host_tcp_connect(host, port, 0)
+    key :: "dGhlIHNhbXBsZSBub25jZQ=="
+    if path.bytes().len() == 0 -> path = "/"
+    crlf :: String.from_bytes([U8]{13, 10}) ?? "\n"
+    req :: "GET {path} HTTP/1.1{crlf}Host: {host}{crlf}Upgrade: websocket{crlf}Connection: Upgrade{crlf}Sec-WebSocket-Key: {key}{crlf}Sec-WebSocket-Version: 13{crlf}{crlf}"
+    _ :: host_tcp_write(fd, req.bytes())
+    resp :: host_tcp_read(fd, 4096)
+    text :: String.from_bytes(resp) ?? ""
+    if !contains(text, "101") {
+        return Err(IOError{operation: "ws", message: "upgrade refused", address: url, name: url, os_code: None})
+    }
+    Ok(WsSocket{fd: fd, url: url})
+}
+
+pub fn upgrade(stream: TcpStream) -[Net]> WsSocket !IOError { Ok(WsSocket{fd: stream.fd, url: ""}) }
+
+fn host_of(url: String) -> String {
+    raw :: url.bytes()
+    i := 0
+    loop i + 2 < raw.len() {
+        if raw[i] == (U8{47}) && raw[i + 1] == (U8{47}) {
+            j := i + 2
+            loop j < raw.len() {
+                n :: raw[j]
+                if n == 47 || n == 58 || n == 63 -> break
+                j = j + 1
+            }
+            out := [U8]{}
+            k := i + 2
+            loop k < j {
+                out.push(raw[k])
+                k = k + 1
+            }
+            return String.from_bytes(out) ?? ""
+        }
+        i = i + 1
+    }
+    ""
+}
+
+fn path_of(url: String) -> String {
+    raw :: url.bytes()
+    slash := 0
+    seen := 0
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{47}) {
+            seen = seen + 1
+            if seen == 3 -> return String.from_bytes(raw[i..raw.len() - 1]) ?? "/"
+        }
+    }
+    "/"
+}
+
+fn contains(text: String, needle: String) -> Bool {
+    a :: text.bytes()
+    b :: needle.bytes()
+    if b.len() == 0 -> return true
+    if b.len() > a.len() -> return false
+    loop i in 0..<(a.len() - b.len() + 1) {
+        ok := true
+        loop j in 0..<b.len() {
+            if a[i + j] != b[j] {
+                ok = false
+                break
+            }
+        }
+        if ok -> return true
+    }
+    false
+}
+
+fn host_tcp_connect(host: String, port: Int, timeout_ms: Int) -[Net]> Int !IOError {
+    panic("host_tcp_connect")
+}
+
+fn host_tcp_write(fd: Int, bytes: [U8]) -[Net]> Int !IOError { panic("host_tcp_write") }
+
+fn host_tcp_read(fd: Int, n: Int) -[Net]> [U8] !IOError { panic("host_tcp_read") }
+
+fn host_tls_client(host: String, port: Int) -[Net]> Int !IOError { panic("host_tls_client") }

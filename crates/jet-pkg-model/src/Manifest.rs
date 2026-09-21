@@ -24,22 +24,36 @@ pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReleaseStatus {
     channel: &'static str,
+    disposition: &'static str,
     readiness: &'static str,
     policy: &'static str,
+    policy_disposition: &'static str,
     policy_active: bool,
 }
 
 impl ReleaseStatus {
+    /// The current release identity (`prerelease` until the owner ships 1.0).
     pub const fn channel(self) -> &'static str {
         self.channel
+    }
+
+    /// How the current release identity should be treated by consumers.
+    pub const fn disposition(self) -> &'static str {
+        self.disposition
     }
 
     pub const fn readiness(self) -> &'static str {
         self.readiness
     }
 
+    /// The ratified policy that will apply at 1.0 and after it.
     pub const fn policy(self) -> &'static str {
         self.policy
+    }
+
+    /// Whether the policy is current or still a future target.
+    pub const fn policy_disposition(self) -> &'static str {
+        self.policy_disposition
     }
 
     pub const fn policy_active(self) -> bool {
@@ -48,16 +62,24 @@ impl ReleaseStatus {
 }
 
 const CURRENT_RELEASE_CHANNEL: &str = "prerelease";
+const CURRENT_RELEASE_DISPOSITION: &str = "current";
 const CURRENT_RELEASE_READINESS: &str = "not-ready";
 const RELEASE_COMPATIBILITY_POLICY: &str = "future-1.0";
+const RELEASE_COMPATIBILITY_POLICY_DISPOSITION: &str = "planned";
 const RELEASE_COMPATIBILITY_POLICY_ACTIVE: bool = false;
 
 /// One executable source for the current release/readiness projection.
+///
+/// `jet version`, `jet --version`, and machine-readable inspection all consume
+/// this value. The package SemVer is not evidence that the future policy has
+/// shipped.
 pub const fn current_release_status() -> ReleaseStatus {
     ReleaseStatus {
         channel: CURRENT_RELEASE_CHANNEL,
+        disposition: CURRENT_RELEASE_DISPOSITION,
         readiness: CURRENT_RELEASE_READINESS,
         policy: RELEASE_COMPATIBILITY_POLICY,
+        policy_disposition: RELEASE_COMPATIBILITY_POLICY_DISPOSITION,
         policy_active: RELEASE_COMPATIBILITY_POLICY_ACTIVE,
     }
 }
@@ -145,7 +167,7 @@ pub fn e2001(requested: &str) -> Diagnostic {
 }
 
 /// The `jet --version` banner (E2-D1). Deterministic and golden-testable: it
-/// states the compiler SemVer, current prerelease/readiness state, the
+/// states the compiler SemVer, current prerelease identity/disposition, the
 /// future-only 1.0 compatibility policy, the supported edition range, and
 /// registry-protocol compatibility. The package SemVer remains independent
 /// from the current release channel.
@@ -158,12 +180,14 @@ pub fn version_banner() -> String {
         "not active"
     };
     format!(
-        "{lang} {ver}\nrelease status: {channel}\nrelease readiness: {readiness}\n1.0 compatibility policy: {policy} ({policy_state})\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
+        "{lang} {ver}\nrelease status: {channel}\nrelease disposition: {disposition}\nrelease readiness: {readiness}\n1.0 compatibility policy: {policy} ({policy_disposition}; {policy_state})\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
         lang = Syntax::LANG_NAME,
         ver = COMPILER_VERSION,
         channel = release.channel(),
+        disposition = release.disposition(),
         readiness = release.readiness(),
         policy = release.policy(),
+        policy_disposition = release.policy_disposition(),
         policy_state = policy_state,
         editions = editions,
         latest = latest_edition(),
@@ -181,12 +205,17 @@ mod tests {
     fn current_release_status_is_separate_from_package_semver() {
         let status = super::current_release_status();
         assert_eq!(status.channel(), "prerelease");
+        assert_eq!(status.disposition(), "current");
         assert_eq!(status.readiness(), "not-ready");
         assert_eq!(status.policy(), "future-1.0");
+        assert_eq!(status.policy_disposition(), "planned");
         assert!(!status.policy_active());
         assert!(version_banner().contains("release status: prerelease"));
+        assert!(version_banner().contains("release disposition: current"));
         assert!(version_banner().contains("release readiness: not-ready"));
-        assert!(version_banner().contains("1.0 compatibility policy: future-1.0 (not active)"));
+        assert!(version_banner().contains(
+            "1.0 compatibility policy: future-1.0 (planned; not active)"
+        ));
     }
 
     #[test]

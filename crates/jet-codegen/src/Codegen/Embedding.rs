@@ -252,12 +252,17 @@ fn component_signature(
     }
 }
 
-fn scalar_signature(
-    params: &[jet_foundation::MIR::MirParam],
-    return_type: &MirType,
-) -> Option<ExportScalar> {
+fn scalar_signature(function: &jet_foundation::MIR::MirFunction) -> Option<ExportScalar> {
+    let return_type = match &function.failure {
+        // The generated callable always carries the checked failure rail, but
+        // a native scalar boundary publishes its success value.
+        MirFailureCarrier::Result { success, .. } => success,
+        MirFailureCarrier::Infallible => &function.return_type,
+        MirFailureCarrier::Optional { .. } | MirFailureCarrier::Diverges { .. } => return None,
+    };
     let scalar = mir_scalar(return_type)?;
-    params
+    function
+        .params
         .iter()
         .all(|param| mir_scalar(&param.ty) == Some(scalar))
         .then_some(scalar)
@@ -276,7 +281,7 @@ fn export_function(
     if !matches!(function.form, MirFunctionForm::TopLevel) || !function.capture_params.is_empty() {
         return None;
     }
-    let scalar = scalar_signature(&function.params, &function.return_type);
+    let scalar = scalar_signature(function);
     let component = allow_component
         .then(|| component_signature(program, function, allow_library_views))
         .flatten();

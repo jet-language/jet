@@ -86,6 +86,7 @@ impl<S: JetRow> JetColumnList<S> {
     /// `xs[i]` — gather the logical record at `i` through THE shared read, then
     /// join it back into `S`. The bounds stop is the shared list stop, so this
     /// reports identically to an array-of-structs `xs[i]`.
+    #[inline(always)]
     pub fn gather_at(&self, index: i64, file: &str, line: u32) -> S {
         match self.columns.gather(index) {
             Ok(cells) => S::jet_row_join(cells),
@@ -95,6 +96,7 @@ impl<S: JetRow> JetColumnList<S> {
 
     /// `xs[i].field` — the fused read, straight out of one column, with no
     /// whole-record gather. `field` is the column's declaration-order index.
+    #[inline(always)]
     pub fn cell(&self, field: usize, index: i64, file: &str, line: u32) -> S::Cell {
         match self.columns.gather_cell(field, index) {
             Ok(cell) => cell,
@@ -102,16 +104,23 @@ impl<S: JetRow> JetColumnList<S> {
         }
     }
 
-    /// Borrow one stored column for a contiguous field scan.  The caller must
-    /// already have a canonical field index; `JetColumns` remains the one
-    /// bounds/ownership boundary for the storage.
+    /// Borrow one stored column for a contiguous field scan. The caller must
+    /// already have the canonical field index; `JetColumns` remains the one
+    /// bounds/ownership boundary for storage.
+    #[inline(always)]
     pub fn column(&self, field: usize) -> &[S::Cell] {
         self.columns.column(field)
     }
 
-    /// Borrow the canonical column view used by the shared gather kernels.
-    pub fn views(&self) -> Vec<&[S::Cell]> {
-        self.columns.views()
+    /// Project one canonical field once for an eligible typed scan.  The
+    /// closure unwraps the generated cell enum during this setup pass; callers
+    /// index the returned contiguous typed storage inside the loop.
+    #[inline]
+    pub fn project_column<T, F>(&self, field: usize, project: F) -> Vec<T>
+    where
+        F: FnMut(&S::Cell) -> T,
+    {
+        self.columns.project(field, project)
     }
 
 

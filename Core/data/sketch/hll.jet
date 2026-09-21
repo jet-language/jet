@@ -1,0 +1,69 @@
+// HyperLogLog. 256 registers, 8-bit rho. Cardinality via α m² / Σ 2^{-M[j]}.
+
+pub struct Hll {
+    pub m: Int
+    pub regs: [Int]
+}
+
+pub fn new() -> Hll {
+    regs := [Int]{}
+    loop i in 0..<256 -> regs.push(0)
+    Hll{m: 256, regs: regs}
+}
+
+pub fn add(hll: Hll, key: String) -> Hll {
+    x :: hash64(key)
+    idx :: x & (hll.m - 1)
+    w :: x >> 8
+    rho := 1
+    loop {
+        if rho >= 56 || ((w >> (rho - 1)) & 1) == 1 -> break
+        rho = rho + 1
+    }
+    regs := [Int]{}
+    loop r in hll.regs -> regs.push(r)
+    if rho > regs[idx] -> regs[idx] = rho
+    Hll{m: hll.m, regs: regs}
+}
+
+pub fn count(hll: Hll) -> Float {
+    s := 0.0
+    loop r in hll.regs {
+        p := 1.0
+        loop i in 0..<r -> p = p * 0.5
+        s = s + p
+    }
+    m :: (Float{hll.m})
+    e :: 0.7213 / (1.0 + 1.079 / m) * m * m / s
+    e
+}
+
+fn hash64(key: String) -> Int {
+    h := 14695981039346656037
+    loop b in key.bytes() {
+        h = (h ~| (b & 255)) * 1099511628211
+    }
+    h
+}
+
+pub fn merge(a: Hll, b: Hll) -> Hll {
+    m := a.m
+    if b.m < m -> m = b.m
+    regs := [Int]{}
+    i := 0
+    loop i < m {
+        av := 0
+        bv := 0
+        if i < a.regs.len() -> av = a.regs[i]
+        if i < b.regs.len() -> bv = b.regs[i]
+        if av > bv {
+            regs.push(av)
+        } else {
+            regs.push(bv)
+        }
+        i = i + 1
+    }
+    Hll{m: m, regs: regs}
+}
+
+pub fn cardinality(h: Hll) -> Float { count(h) }

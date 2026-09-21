@@ -98,6 +98,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::Drop(arg)
             | TExprKind::Close(arg)
             | TExprKind::ResourceNew(arg)
+            | TExprKind::Move(arg)
             | TExprKind::Deref(arg)
             | TExprKind::Clone(arg)
             | TExprKind::ExplicitCopy(arg)
@@ -1787,6 +1788,16 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
         let annotated = annotate_return_todo(return_expr, env.ret_ty.as_ref());
         let mut value = lower_owned_expr(annotated.as_ref().unwrap_or(return_expr), cx, env);
         super::expressions::suppress_module_call_target_return(&mut value);
+        // An HTTPHandler is an Arc-backed callable at the Rust boundary. Sema
+        // permits its source spelling to return an inline handler lambda, so
+        // force the same Send representation before returning through that
+        // nominal handle type.
+        if env.ret_ty.as_ref().is_some_and(|want| {
+            matches!(want, Type::Named(name) if name == "HTTPHandler")
+                && matches!(&value.ty, Type::Fn { .. })
+        }) {
+            value = force_thread_callback_value(value, cx);
+        }
         if let Some(want) = &env.ret_ty {
             if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
                 value.ty = want.clone();
@@ -4671,7 +4682,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 }
                 let mut scoped = clone_env(env);
                 let handle = name.as_ref().map(|name| {
-                    let slot = TLocal::user(name);
+                    let slot = TLocal::user(name).as_mutable();
                     scoped.bind(
                         name,
                         slot.clone(),
@@ -4679,7 +4690,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     );
                     slot
                 });
-                let synthesized_handle = TLocal::generated("txn");
+                let synthesized_handle = TLocal::generated("txn").as_mutable();
                 let txn_undo_needed = Rc::new(Cell::new(false));
                 scoped.txn_handle =
                     Some(handle.clone().unwrap_or_else(|| synthesized_handle.clone()));

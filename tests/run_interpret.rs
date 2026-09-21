@@ -184,7 +184,7 @@ fn argv_agrees_on_every_native_tier() {
         String::from_utf8_lossy(&build.stderr)
     );
     let aot_run = |label: &str, args: &[&str]| {
-        let output = Command::new(dir.join("build/main"))
+        let output = Command::new(dir.join(".jet/build/main"))
             .args(args)
             .current_dir(&dir)
             .output()

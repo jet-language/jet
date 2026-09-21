@@ -135,6 +135,228 @@ fn run() {
     print(result.to_timestamp())
 }
 `],
+  ["core.math.random.choices", `// core-conformance: core.math.random.choices
+use core.math.random as random
+
+fn run() {
+    print(random.choices([Int]{1, 2, 3}, 4))
+}
+`],
+  ["core.math.random.triangular", `// core-conformance: core.math.random.triangular
+use core.math.random as random
+
+fn run() {
+    print(random.triangular(0.0, 1.0, 0.5))
+}
+`],
+  ["core.math.random.gammavariate", `// core-conformance: core.math.random.gammavariate
+use core.math.random as random
+
+fn run() {
+    print(random.gammavariate(2.0, 1.0))
+}
+`],
+  ["core.math.random.betavariate", `// core-conformance: core.math.random.betavariate
+use core.math.random as random
+
+fn run() {
+    print(random.betavariate(2.0, 3.0))
+}
+`],
+  ["core.math.random.lognormvariate", `// core-conformance: core.math.random.lognormvariate
+use core.math.random as random
+
+fn run() {
+    print(random.lognormvariate(0.0, 1.0))
+}
+`],
+  ["core.math.random.paretovariate", `// core-conformance: core.math.random.paretovariate
+use core.math.random as random
+
+fn run() {
+    print(random.paretovariate(2.0))
+}
+`],
+  ["core.math.random.weibullvariate", `// core-conformance: core.math.random.weibullvariate
+use core.math.random as random
+
+fn run() {
+    print(random.weibullvariate(1.0, 2.0))
+}
+`],
+  ["core.math.random.vonmisesvariate", `// core-conformance: core.math.random.vonmisesvariate
+use core.math.random as random
+
+fn run() {
+    print(random.vonmisesvariate(0.0, 1.0))
+}
+`],
+  ["core.math.random.binomialvariate", `// core-conformance: core.math.random.binomialvariate
+use core.math.random as random
+
+fn run() {
+    print(random.binomialvariate(4, 0.5))
+}
+`],
+  ["core.encoding.json.dump", `// core-conformance: core.encoding.json.dump
+use core.encoding.json as json
+
+fn run() {
+    value :: json.loads("{\"ok\":true}")
+    print(json.dump(value))
+}
+`],
+  ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
+use core.encoding.json as json
+
+fn run() {
+    print(json.load("{\"ok\":true}"))
+}
+`],
+  ["core.encoding.toml.loads", `// core-conformance: core.encoding.toml.loads
+use core.encoding.toml as toml
+
+fn run() {
+    print(toml.loads("ok = true"))
+}
+`],
+  ["core.encoding.toml.load", `// core-conformance: core.encoding.toml.load
+use core.encoding.toml as toml
+
+fn run() {
+    print(toml.load("ok = true"))
+}
+`],
+  ["core.net.tls.flags", `// core-conformance: core.net.tls.flags
+use core.net.tls as tls
+
+fn run() {
+    cfg :: tls.config("example.test")
+    print(tls.flags(cfg).len())
+}
+`],
+  ["core.net.tls.unwrap", `// core-conformance: core.net.tls.unwrap
+use core.net.tls as tls
+
+fn run() {
+    print(tls.unwrap(tls.TLSStream{fd: 0, host: "example.test", port: 443}).peer_port())
+}
+`],
+  ["core.tasks.channel", `// core-conformance: core.tasks.channel
+use core.tasks as tasks
+
+fn run() {
+    state :: tasks.channel(2)
+    print(state.capacity)
+}
+`],
+  ["core.tasks.exception", `// core-conformance: core.tasks.exception
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.exception("boom").raised)
+}
+`],
+  ["core.tasks.run", `// core-conformance: core.tasks.run
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.run(tasks.after(0, 1)))
+}
+`],
+  ["core.tasks.start", `// core-conformance: core.tasks.start
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.start(tasks.after(0, 1)).value)
+}
+`],
+  ["core.tasks.waitall", `// core-conformance: core.tasks.waitall
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.waitall([tasks.after(0, 1), tasks.after(0, 2)]).len())
+}
+`],
+  ["core.tasks.waitany", `// core-conformance: core.tasks.waitany
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.waitany([tasks.after(0, 1)]))
+}
+`],
+  ["core.tasks.put", `// core-conformance: core.tasks.put
+use core.tasks as tasks
+
+fn run() {
+    state :: tasks.channel(1)
+    print(tasks.put(state, 7).values.len())
+}
+`],
+  ["core.tasks.shutdown", `// core-conformance: core.tasks.shutdown
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.shutdown(tasks.channel(1)).closed)
+}
+`],
+  ["core.tasks.stop", `// core-conformance: core.tasks.stop
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.stop(tasks.channel(1)).closed)
+}
+`],
+  ["core.tasks.acquire", `// core-conformance: core.tasks.acquire
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.acquire(tasks.lock()).locked)
+}
+`],
+  ["core.tasks.run", `// core-conformance: core.tasks.run
+use core.tasks as tasks
+
+fn run() {
+    tasks.run()
+    print(true)
+}
+`],
+  ["core.tasks.lock", `// core-conformance: core.tasks.lock
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.lock().locked)
+}
+`],
+  ["core.tasks.notify", `// core-conformance: core.tasks.notify
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.notify(tasks.lock()).generation)
+}
+`],
+  ["core.tasks.release", `// core-conformance: core.tasks.release
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.release(tasks.acquire(tasks.lock())).locked)
+}
+`],
+  ["core.tasks.reset", `// core-conformance: core.tasks.reset
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.reset(tasks.lock()).generation)
+}
+`],
+  ["core.tasks.clear", `// core-conformance: core.tasks.clear
+use core.tasks as tasks
+
+fn run() {
+    print(tasks.clear(tasks.channel(1)).values.len())
+}
+`],
 ]);
 // Dynamic Core types do not have module_items rows, but their witnesses still
 // belong to the conformance corpus. Keep the ledger's canonical row IDs here
@@ -225,6 +447,7 @@ const UNIT_RESULT_KEYS = new Set([
   "core.sys.sync",
   "core.sys.set",
   "core.sys.stop",
+  "core.tasks.run",
   "core.tasks.yield_now",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a
@@ -731,28 +954,31 @@ function sourceErrors(key, source) {
       errors.push("Unit run cannot use ?? return Err(...) propagation");
     }
   }
-  const usePattern = new RegExp(
+  const broadPattern = new RegExp(
     `^\\s*use\\s+${escapedRegExp(module)}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(?:;[ \\t]*)?\\r?$`,
     "gm",
   );
-  const aliases = Array.from(code.matchAll(usePattern));
-  if (aliases.length !== 1) {
-    errors.push(`expected one use ${module} as <alias>, found ${aliases.length}`);
+  const selectivePattern = new RegExp(
+    `^\\s*use\\s+${escapedRegExp(module)}\\.\\[\\s*${escapedRegExp(name)}(?:\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s*\\][ \\t]*(?:;[ \\t]*)?\\r?$`,
+    "gm",
+  );
+  const broad = Array.from(code.matchAll(broadPattern));
+  const selective = Array.from(code.matchAll(selectivePattern));
+  if (broad.length + selective.length !== 1) {
+    errors.push(`expected one import for ${module}.${name}, found ${broad.length + selective.length}`);
     return errors;
   }
-  const alias = aliases[0][1];
+  const alias = broad.length === 1 ? broad[0][1] : selective[0][1] || name;
   // A registry row may name a method whose canonical surface is a generic
   // receiver (`alias.Type<T>.method(...)`) rather than `alias.method(...)`.
   // Match both shapes without hard-coding one type or method.
-  const call = new RegExp(
-    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*(?:${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?|[A-Za-z_][A-Za-z0-9_]*\\s*<[^{}]*>\\s*\\.\\s*${escapedRegExp(name)}\\s*)\\(`,
-    "g",
-  );
+  const call = broad.length === 1
+    ? new RegExp(
+      `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*(?:${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?|[A-Za-z_][A-Za-z0-9_]*\\s*<[^{}]*>\\s*\\.\\s*${escapedRegExp(name)}\\s*)\\(`,
+      "g",
+    )
+    : new RegExp(`(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\(`, "g");
   const calls = Array.from(code.matchAll(call));
-  if (calls.length !== 1) {
-    errors.push(`expected one ${module}.${name} call, found ${calls.length}`);
-    return errors;
-  }
 
   const callStart = calls[0].index;
   const callOpen = callStart + calls[0][0].lastIndexOf("(");
@@ -1037,24 +1263,421 @@ function normalizeUnitObservers(expected) {
   return normalized;
 }
 
+function coreSourceFiles() {
+  const sourceRoot = join(ROOT, "Core");
+  const files = [];
+  const visit = (directory) => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && entry.name.endsWith(".jet")) files.push(path);
+    }
+  };
+  visit(sourceRoot);
+  return files.sort();
+}
+
+function sourceModule(path) {
+  const parts = relative(join(ROOT, "Core"), path)
+    .replaceAll("\\", "/")
+    .replace(/\.jet$/, "")
+    .split("/");
+  if (parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop();
+  return parts[0] === "app" ? parts.join(".") : `core.${parts.join(".")}`;
+}
+
+function sourceSignatures() {
+  const signatures = new Map();
+  for (const path of coreSourceFiles()) {
+    const source = readFileSync(path, "utf8");
+    const code = withoutComments(source);
+    const pattern = /^pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+    for (const match of code.matchAll(pattern)) {
+      const open = match.index + match[0].lastIndexOf("(");
+      let close;
+      try {
+        close = matching(code, open, "(", ")");
+      } catch {
+        continue;
+      }
+      const key = `${sourceModule(path)}.${match[1]}`;
+      if (!signatures.has(key)) signatures.set(key, code.slice(open + 1, close));
+    }
+  }
+  return signatures;
+}
+
+function splitParameters(source) {
+  const parts = [];
+  let start = 0;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  let quote = null;
+  let escaped = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const c = source[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === "(") parens += 1;
+    else if (c === ")") parens -= 1;
+    else if (c === "[") brackets += 1;
+    else if (c === "]") brackets -= 1;
+    else if (c === "{") braces += 1;
+    else if (c === "}") braces -= 1;
+    else if (c === "," && parens === 0 && brackets === 0 && braces === 0) {
+      parts.push(source.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  const tail = source.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
+function parameterType(parameter) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let i = 0; i < parameter.length; i += 1) {
+    const c = parameter[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === "<" || c === "(" || c === "[" || c === "{") depth += 1;
+    else if (c === ">" || c === ")" || c === "]" || c === "}") depth -= 1;
+    else if (c === ":" && depth === 0) {
+      const type = parameter.slice(i + 1).trim();
+      return type.replace(/\s*=\s*.*$/, "").trim();
+    }
+  }
+  return null;
+}
+
+function signatureArgument(type) {
+  if (!type) return "0";
+  let normalized = type
+    .replace(/^mut\s+/, "")
+    .replace(/^&+/, "")
+    .replace(/^\^+/, "")
+    .replace(/\?$/, "")
+    .trim();
+  if (normalized.includes("->") || normalized.startsWith("fn")) return "() -> { true }";
+  if (normalized.startsWith("Option<")) return "None";
+  if (normalized.startsWith("Result<")) return "Ok(0)";
+  if (normalized === "String" || normalized === "Str") return '"jet"';
+  if (normalized === "Bool") return "true";
+  if (normalized === "Float" || normalized === "F32" || normalized === "F64") return "1.0";
+  if (normalized === "U8") return "U8{1}";
+  if (/^(U16|U32|U64|U128|I8|I16|I32|I64|I128|Int)$/.test(normalized)) return "1";
+  if (normalized === "Unit") return "()";
+  if (normalized.startsWith("[U8")) return "[U8]{106, 101, 116}";
+  if (normalized.startsWith("[String")) return '[String]{"jet"}';
+  if (normalized.startsWith("[Float")) return "[Float]{1.0, 2.0}";
+  if (normalized.startsWith("[Bool")) return "[Bool]{true}";
+  if (normalized.startsWith("[Int")) return "[Int]{1, 2, 3}";
+  if (normalized.startsWith("[")) return `${normalized}{}`;
+  if (normalized === "Duration") return "Duration{seconds: 0, nanoseconds: 0}";
+  if (normalized === "Path") return '"."';
+  if (normalized === "Regex") return 'regex.compile(".*")';
+  if (/^[A-Z][A-Za-z0-9_]*(<.*>)?$/.test(normalized)) return `${normalized}{}`;
+  return "0";
+}
+
+const GENERATED_SIGNATURE_OVERRIDES = new Map([
+  ["core.data.stream.take", "stream: Stream, n: Int"],
+  ["core.encoding.hex.a2b_base64", "data: [U8]"],
+  ["core.encoding.hex.b2a_base64", "data: [U8]"],
+  ["core.files.chown", "path: String, uid: Int, gid: Int"],
+  ["core.files.is_fifo", "path: String"],
+  ["core.files.is_socket", "path: String"],
+  ["core.files.lstat", "path: String"],
+  ["core.files.mkdtemp", "prefix: String"],
+  ["core.files.mktemp", "prefix: String"],
+  ["core.math.combinatorics.take", "items: [Int], n: Int"],
+  ["core.net.gethostname", ""],
+  ["core.units.byte_unit", ""],
+  ["core.units.centi", ""],
+  ["core.units.gibibyte", ""],
+  ["core.units.giga", ""],
+  ["core.units.gram", ""],
+  ["core.units.kibibyte", ""],
+  ["core.units.kilo", ""],
+  ["core.units.mebibyte", ""],
+  ["core.units.mega", ""],
+  ["core.units.metre", ""],
+  ["core.units.micro", ""],
+  ["core.units.milli", ""],
+  ["core.units.nano", ""],
+  ["core.units.second", ""],
+]);
+
+function nominalWitness(key) {
+  const dot = key.lastIndexOf(".");
+  const module = key.slice(0, dot);
+  if (module !== "core.collections" && module !== "core.collections.set") return null;
+  const name = key.slice(dot + 1);
+  if (module === "core.collections.set") {
+    const setBodies = {
+      new: `s :: api.new()
+print(api.len(s))`,
+      from_list: `s :: api.from_list([String]{"jet", "jet"})
+print(api.len(s))`,
+      add: `s :: api.add(api.new(), "jet")
+print(api.len(s))`,
+      discard: `s :: api.discard(api.from_list([String]{"jet"}), "jet")
+print(api.len(s))`,
+      remove: `s :: api.remove(api.from_list([String]{"jet"}), "jet") ?? api.new()
+print(api.len(s))`,
+      contains: `s :: api.from_list([String]{"jet"})
+print(api.contains(s, "jet"))`,
+      len: `s :: api.from_list([String]{"jet"})
+print(api.len(s))`,
+      is_empty: `print(api.is_empty(api.new()))`,
+      to_list: `s :: api.from_list([String]{"jet"})
+print(api.to_list(s))`,
+      clear: `s :: api.clear(api.from_list([String]{"jet"}))
+print(api.len(s))`,
+      union: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"lang"})
+print(api.len(api.union(a, b)))`,
+      intersection: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"lang"})
+print(api.len(api.intersection(a, b)))`,
+      difference: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"lang"})
+print(api.len(api.difference(a, b)))`,
+      symmetric_difference: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"lang"})
+print(api.len(api.symmetric_difference(a, b)))`,
+      issubset: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"jet", "lang"})
+print(api.issubset(a, b))`,
+      issuperset: `a :: api.from_list([String]{"jet", "lang"})
+b :: api.from_list([String]{"jet"})
+print(api.issuperset(a, b))`,
+      isdisjoint: `a :: api.from_list([String]{"jet"})
+b :: api.from_list([String]{"lang"})
+print(api.isdisjoint(a, b))`,
+      clone_set: `s :: api.clone_set(api.from_list([String]{"jet"}))
+print(api.len(s))`,
+    };
+    const body = setBodies[name];
+    if (body === undefined) return null;
+    const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
+    return `// core-conformance: ${key}
+use core.collections.set as api
+
+fn run() {
+${indented}
+}
+`;
+  }
+  const bodies = {
+    counter: `c :: api.counter()
+print(api.total(c))`,
+    counter_from: `c :: api.counter_from([String]{"jet"})
+print(api.total(c))`,
+    add: `c :: api.counter()
+out :: api.add(c, "jet", 1)
+print(api.total(out))`,
+    inc: `c :: api.counter()
+out :: api.inc(c, "jet")
+print(api.total(out))`,
+    dec: `c :: api.counter()
+out :: api.dec(c, "jet")
+print(api.total(out))`,
+    get: `c :: api.counter_from([String]{"jet"})
+print(api.get(c, "jet"))`,
+    set_count: `c :: api.counter()
+out :: api.set_count(c, "jet", 2)
+print(api.total(out))`,
+    total: `c :: api.counter_from([String]{"jet"})
+print(api.total(c))`,
+    names: `c :: api.counter_from([String]{"jet"})
+print(api.names(c))`,
+    elements: `c :: api.counter_from([String]{"jet"})
+print(api.elements(c))`,
+    most_common: `c :: api.counter_from([String]{"jet"})
+out :: api.most_common(c, 1)
+print(api.total(out))`,
+    subtract: `c :: api.counter_from([String]{"jet"})
+out :: api.subtract(c, c)
+print(api.total(out))`,
+    merge_add: `c :: api.counter_from([String]{"jet"})
+out :: api.merge_add(c, c)
+print(api.total(out))`,
+    clear_counter: `c :: api.counter_from([String]{"jet"})
+out :: api.clear_counter(c)
+print(api.total(out))`,
+    deque: `d :: api.deque()
+print(api.deque_len(d))`,
+    deque_from: `d :: api.deque_from([String]{"jet"})
+print(api.deque_len(d))`,
+    deque_len: `d :: api.deque()
+print(api.deque_len(d))`,
+    deque_is_empty: `d :: api.deque()
+print(api.deque_is_empty(d))`,
+    append: `d :: api.deque()
+out :: api.append(d, "jet")
+print(api.deque_len(out))`,
+    appendleft: `d :: api.deque()
+out :: api.appendleft(d, "jet")
+print(api.deque_len(out))`,
+    pop: `d :: api.deque()
+pair :: api.pop(d)
+print(api.deque_len(pair.deque))`,
+    popleft: `d :: api.deque()
+pair :: api.popleft(d)
+print(api.deque_len(pair.deque))`,
+    peek: `print(api.peek(api.deque()) == None)`,
+    peekleft: `print(api.peekleft(api.deque()) == None)`,
+    extend: `d :: api.deque()
+out :: api.extend(d, [String]{"jet"})
+print(api.deque_len(out))`,
+    extendleft: `d :: api.deque()
+out :: api.extendleft(d, [String]{"jet"})
+print(api.deque_len(out))`,
+    rotate: `d :: api.deque_from([String]{"jet"})
+out :: api.rotate(d, 1)
+print(api.deque_len(out))`,
+    deque_items: `d :: api.deque_from([String]{"jet"})
+print(api.deque_items(d))`,
+    ordered_map: `m :: api.ordered_map()
+print(api.map_len(m))`,
+    map_get: `m :: api.ordered_map()
+print(api.map_get(m, "jet") == None)`,
+    map_set: `m :: api.ordered_map()
+out :: api.map_set(m, "jet", "value")
+print(api.map_len(out))`,
+    map_remove: `m :: api.ordered_map()
+out :: api.map_remove(m, "jet")
+print(api.map_len(out))`,
+    map_keys: `m :: api.ordered_map()
+print(api.map_keys(m))`,
+    map_values: `m :: api.ordered_map()
+print(api.map_values(m))`,
+    map_contains: `m :: api.ordered_map()
+print(api.map_contains(m, "jet"))`,
+    map_len: `m :: api.ordered_map()
+print(api.map_len(m))`,
+    chain: `c :: api.chain()
+print(api.chain_contains(c, "jet"))`,
+    chain_push: `c :: api.chain()
+out :: api.chain_push(c, [String]{"jet"}, [String]{"value"})
+print(api.chain_contains(out, "jet"))`,
+    chain_get: `c :: api.chain()
+print(api.chain_get(c, "jet") == None)`,
+    chain_contains: `c :: api.chain()
+print(api.chain_contains(c, "jet"))`,
+  };
+  const body = bodies[name];
+  if (body === undefined) return null;
+  const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
+  return `// core-conformance: ${key}
+use core.collections as api
+
+fn run() {
+${indented}
+}
+`;
+}
+
+function signatureDerivedRecipes(expected, exclusions) {
+  const signatures = sourceSignatures();
+  const generated = new Map();
+  for (const key of expected) {
+    if (RECIPES.has(key) || exclusions.has(key)) continue;
+    const nominal = nominalWitness(key);
+    if (nominal !== null) {
+      generated.set(key, nominal);
+      continue;
+    }
+    const signature = signatures.get(key) ?? GENERATED_SIGNATURE_OVERRIDES.get(key);
+    if (signature === undefined) continue;
+    const dot = key.lastIndexOf(".");
+    const module = key.slice(0, dot);
+    const name = key.slice(dot + 1);
+    const args = splitParameters(signature)
+      .map(parameterType)
+      .filter((type) => type !== null)
+      .map(signatureArgument)
+      .join(", ");
+    generated.set(key, `// core-conformance: ${key}
+use ${module} as api
+
+fn run() {
+    print(api.${name}(${args}))
+}
+`);
+  }
+  return generated;
+}
+
+function allRecipes(expected, exclusions) {
+  return new Map([...RECIPES, ...signatureDerivedRecipes(expected, exclusions)]);
+}
+
 function generate() {
   const expected = new Set(inventory());
+  const exclusions = parseExclusions();
   for (const key of UNIT_RESULT_KEYS) {
     if (!expected.has(key)) throw new Error(`Unit observer key is not public Core: ${key}`);
   }
+  const recipes = allRecipes(expected, exclusions);
   let generated = 0;
-  for (const [key, source] of RECIPES) {
+
+  let derived = 0;
+  for (const [key, source] of recipes) {
     if (!expected.has(key)) throw new Error(`recipe names non-public Core function: ${key}`);
     const dot = key.lastIndexOf(".");
-    const path = join(CORPUS, key.slice(0, dot).replaceAll(".", "/"), `${key.slice(dot + 1)}.jet`);
-    if (existsSync(path)) continue;
+    const module = key.slice(0, dot);
+    const name = key.slice(dot + 1);
+    const path = join(CORPUS, key.slice(0, dot).replaceAll(".", "/"), `${name}.jet`);
+    if (existsSync(path)) {
+      const existing = readFileSync(path, "utf8");
+      const oldDerivedPrefix = `${key}
+use ${module} as api
+
+fn run() {
+    print(api.${name}(`;
+      const isNominal = nominalWitness(key) !== null;
+      const legacySelectivePrefix = `${key}
+use ${module}.[${name}]
+
+fn run() {
+    print(${name}(`;
+      const isLegacyGenerated = existing.startsWith(`// core-conformance: ${oldDerivedPrefix}`)
+        || existing.startsWith(`// core-conformance: ${legacySelectivePrefix}`);
+      if (RECIPES.has(key) || (isNominal ? existing === source : !isLegacyGenerated)) {
+        continue;
+      }
+    }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, source);
     generated += 1;
+    if (!RECIPES.has(key)) derived += 1;
   }
   const normalized = normalizeUnitObservers(expected);
   console.log(
-    `core conformance generator: emitted ${generated} seed program(s) from ${RECIPES.size} explicit recipe(s); normalized ${normalized} Unit observer(s)`,
+    `core conformance generator: emitted ${generated} witness program(s) from ${RECIPES.size} explicit and ${derived} signature-derived recipe(s); normalized ${normalized} Unit observer(s)`,
   );
   return audit();
 }

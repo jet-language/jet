@@ -49,6 +49,14 @@ mod ambient_random_kernel {
     pub(crate) fn seed(seed: i64) {
         jet_std_random_seed(seed);
     }
+    pub(crate) fn getrandbits(bits: i64) -> i64 {
+        jet_std_random_getrandbits(bits)
+    }
+
+    pub(crate) fn randrange(start: i64, stop: i64) -> i64 {
+        jet_std_random_randrange(start, stop)
+    }
+
 
     pub(crate) fn bool_p(p: f64) -> bool {
         jet_std_random_bool(p)
@@ -77,6 +85,42 @@ mod ambient_random_kernel {
     pub(crate) fn sample<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
         jet_std_random_sample(items, count)
     }
+    pub(crate) fn choices<T: Clone>(items: &Vec<T>, count: i64) -> Vec<T> {
+        jet_std_random_choices(items, count)
+    }
+
+    pub(crate) fn triangular(low: f64, high: f64, mode: f64) -> f64 {
+        jet_std_random_triangular(low, high, mode)
+    }
+
+    pub(crate) fn gamma(alpha: f64, beta: f64) -> f64 {
+        jet_std_random_gamma(alpha, beta)
+    }
+
+    pub(crate) fn beta(alpha: f64, beta: f64) -> f64 {
+        jet_std_random_beta(alpha, beta)
+    }
+
+    pub(crate) fn lognormal(mean: f64, sigma: f64) -> f64 {
+        jet_std_random_lognormal(mean, sigma)
+    }
+
+    pub(crate) fn pareto(alpha: f64) -> f64 {
+        jet_std_random_pareto(alpha)
+    }
+
+    pub(crate) fn weibull(alpha: f64, beta: f64) -> f64 {
+        jet_std_random_weibull(alpha, beta)
+    }
+
+    pub(crate) fn vonmises(mu: f64, kappa: f64) -> f64 {
+        jet_std_random_vonmises(mu, kappa)
+    }
+
+    pub(crate) fn binomial(n: i64, p: f64) -> i64 {
+        jet_std_random_binomial(n, p)
+    }
+
 
     pub(crate) fn int(low: i64, high: i64) -> i64 {
         jet_std_random_int(low, high)
@@ -189,10 +233,57 @@ fn list_is_float(list: i64) -> bool {
             && rt.heap.list_get_float(list, 0).is_some()
     })
 }
+fn jet_jit_random_choices(items: i64, count: i64) -> i64 {
+    let values =
+        read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
+    let choices = ambient_random_kernel::choices(&values, count);
+    alloc_list(choices, |heap, list, value| heap.list_push_int(list, value))
+}
+
+fn jet_jit_random_triangular(low: f64, high: f64, mode: f64) -> f64 {
+    ambient_random_kernel::triangular(low, high, mode)
+}
+
+fn jet_jit_random_gamma(alpha: f64, beta: f64) -> f64 {
+    ambient_random_kernel::gamma(alpha, beta)
+}
+
+fn jet_jit_random_beta(alpha: f64, beta: f64) -> f64 {
+    ambient_random_kernel::beta(alpha, beta)
+}
+
+fn jet_jit_random_lognormal(mean: f64, sigma: f64) -> f64 {
+    ambient_random_kernel::lognormal(mean, sigma)
+}
+
+fn jet_jit_random_pareto(alpha: f64) -> f64 {
+    ambient_random_kernel::pareto(alpha)
+}
+
+fn jet_jit_random_weibull(alpha: f64, beta: f64) -> f64 {
+    ambient_random_kernel::weibull(alpha, beta)
+}
+
+fn jet_jit_random_vonmises(mu: f64, kappa: f64) -> f64 {
+    ambient_random_kernel::vonmises(mu, kappa)
+}
+
+fn jet_jit_random_binomial(n: i64, p: f64) -> i64 {
+    ambient_random_kernel::binomial(n, p)
+}
+
 
 fn jet_jit_random_seed(n: i64) {
     ambient_random_kernel::seed(n);
 }
+fn jet_jit_random_getrandbits(k: i64) -> i64 {
+    ambient_random_kernel::getrandbits(k)
+}
+
+fn jet_jit_random_randrange(start: i64, stop: i64) -> i64 {
+    ambient_random_kernel::randrange(start, stop)
+}
+
 
 fn jet_jit_random_int(low: i64, high: i64) -> i64 {
     ambient_random_kernel::int(low, high)
@@ -593,6 +684,11 @@ host_fns! {
         sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
         sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
         sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_f64_f64_f64_f64 = Signature::new(cc);
+        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::F64));
         sig_f64.returns.push(AbiParam::new(types::F64));
@@ -605,6 +701,10 @@ host_fns! {
         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_f64_i64 = Signature::new(cc);
+        sig_i64_f64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_f64_i64.params.push(AbiParam::new(types::F64));
+        sig_i64_f64_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_i64_i64_i64_i64 = Signature::new(cc);
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
@@ -632,6 +732,17 @@ host_fns! {
 
     }
     seed: "jet_jit_random_seed" => jet_jit_random_seed: sig_void_i64;
+    getrandbits: "jet_jit_random_getrandbits" => jet_jit_random_getrandbits: sig_i64_i64;
+    randrange: "jet_jit_random_randrange" => jet_jit_random_randrange: sig_i64_i64_i64;
+    choices: "jet_jit_random_choices" => jet_jit_random_choices: sig_i64_i64_i64;
+    triangular: "jet_jit_random_triangular" => jet_jit_random_triangular: sig_f64_f64_f64_f64;
+    gamma: "jet_jit_random_gamma" => jet_jit_random_gamma: sig_f64_f64_f64;
+    beta: "jet_jit_random_beta" => jet_jit_random_beta: sig_f64_f64_f64;
+    lognormal: "jet_jit_random_lognormal" => jet_jit_random_lognormal: sig_f64_f64_f64;
+    pareto: "jet_jit_random_pareto" => jet_jit_random_pareto: sig_f64;
+    weibull: "jet_jit_random_weibull" => jet_jit_random_weibull: sig_f64_f64_f64;
+    vonmises: "jet_jit_random_vonmises" => jet_jit_random_vonmises: sig_f64_f64_f64;
+    binomial: "jet_jit_random_binomial" => jet_jit_random_binomial: sig_i64_f64_i64;
     int: "jet_jit_random_int" => jet_jit_random_int: sig_i64_i64_i64;
     float: "jet_jit_random_float" => jet_jit_random_float: sig_noarg_f64;
     bool_p: "jet_jit_random_bool" => jet_jit_random_bool: sig_f64_i8;

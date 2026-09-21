@@ -925,7 +925,7 @@ fn quiet_suppresses_sbom_write_confirmation() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(
-        dir.join("build/main.spdx").is_file(),
+        dir.join(".jet/build/main.spdx").is_file(),
         "--quiet must not change what --sbom writes"
     );
 }

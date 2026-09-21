@@ -5,7 +5,7 @@ enum Payload {
     Count(Int)
 }
 
-fn describe(value: Int | String) String -> {
+fn describe(value: Int | String) -> String {
     copied :: ~value
     if copied == {
         .Int(n) -> { return "n={n}" }
@@ -14,24 +14,36 @@ fn describe(value: Int | String) String -> {
     return "unknown"
 }
 
-fn take_number(n: Int | String) String -> describe(n)
+fn take_number(n: Int | String) -> String { describe(n) }
 
-fn as_named(value: Int | String) Payload -> {
+fn as_named(value: Int | String) -> Payload {
     copied :: ~value
     if copied == {
-        .Int(n) -> { return .Count(n) }
-        .String(s) -> { return .Name(s) }
+        .Int(n) -> {
+            return .Count(n)
+
+        }
+        .String(s) -> {
+            return .Name(s)
+
+        }
     }
 }
 
-fn from_named(payload: Payload) Int | String -> {
+fn from_named(payload: Payload) -> Int | String {
     if payload == {
-        .Count(n) -> { return n }
-        .Name(s) -> { return s }
+        .Count(n) -> {
+            return n
+
+        }
+        .Name(s) -> {
+            return s
+
+        }
     }
 }
 
-fn hold(v: Int | String) Int | String -> ~v
+fn hold(v: Int | String) -> Int | String { ~v }
 
 #Codable
 struct Box {

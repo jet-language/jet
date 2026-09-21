@@ -14,7 +14,7 @@
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{
     AccessConvention, ExternFn, ExternRustBlock, FfiHandleFact, FfiLinkClosure, ForeignLanguage,
-    Item, ProgramBundle, Type,
+    InlineAsmContract, InlineAsmOutput, Item, ProgramBundle, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -24,7 +24,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v7-asm-output-contract";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v10-asm-early-clobber";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -67,6 +67,8 @@ pub struct InlineEntry {
     pub lang: String,
     pub source: String,
     pub param_names: Vec<String>,
+    /// Sema-normalized assembly target/output/clobber facts.
+    pub asm_contract: Option<InlineAsmContract>,
 }
 
 #[derive(Clone)]
@@ -159,6 +161,7 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 lang: inline.lang.clone(),
                                 source: inline.source.clone(),
                                 param_names: f.params.iter().map(|p| p.name.clone()).collect(),
+                                asm_contract: inline.asm_contract.clone(),
                             }),
                             c_abi: false,
                             generated: false,
@@ -307,8 +310,26 @@ pub fn prepare_for_target(
     target: &str,
 ) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let entries = collect_externs(bundle);
-    // D-REGEXENGINE1=A: core.regex is std-only in the generated prelude now, so
-    // it never asks for a hidden bridge crate.
+    // Reject stale or cross-target assembly contracts before any target-specific
+    // link discovery or bridge generation. Web has no native provider either:
+    // a wasm build must report the same checked-target diagnostic, not silently
+    // discard a reachable native body.
+    if let Some(diagnostic) = inline_asm_target_diagnostic(&entries, target) {
+        return Err(vec![diagnostic]);
+    }
+    // Native inline bodies have no Web lowering. Keep their declarations out
+    // of the wasm bridge rather than handing an inapplicable row to a native
+    // emitter that cannot produce a Web artifact.
+    let entries = if target.split('-').next() == Some("wasm32") {
+        entries
+            .into_iter()
+            .filter(|entry| entry.inline.is_none())
+            .collect::<Vec<_>>()
+    } else {
+        entries
+    };
+    // The regex runtime is std-only in the generated prelude, so
+    // this bridge never asks for a hidden regex dependency.
     let needs_regex = false;
     let needs_archive = bundle
         .used_core
@@ -422,9 +443,6 @@ pub fn prepare_for_target(
         return Ok(None);
     }
 
-    if let Some(diagnostic) = inline_asm_target_diagnostic(&entries, target) {
-        return Err(vec![diagnostic]);
-    }
     let native_link_args = if entries.iter().any(|entry| entry.c_abi) {
         c_link_args
     } else {
@@ -453,65 +471,176 @@ pub fn prepare_for_target(
     )
     .map(Some)
 }
-
 fn inline_asm_target_diagnostic(entries: &[ExternEntry], target: &str) -> Option<Diagnostic> {
-    let asm = entries.iter().find(|entry| {
+    for asm in entries.iter().filter(|entry| {
         entry
             .inline
             .as_ref()
             .is_some_and(|inline| inline.lang == "asm")
-    })?;
-    if target.split('-').next() != Some("x86_64") {
-        return Some(Diagnostic::error(
-            "E3223",
-            format!(
-                "{} selects x86-64 registers, but target `{target}` does not",
-                asm.line_hint
-            ),
-            "inline assembly is validated and compiled for the driver's selected target, not the host architecture"
-                .to_string(),
-            "select an x86_64 target or provide an assembly body for the selected target".to_string(),
-            None,
-        ));
-    }
-    let inline = asm.inline.as_ref()?;
-    let returns_value = asm
-        .return_type
-        .as_ref()
-        .is_some_and(|ty| inline_rust_type(ty) != "()");
-    if returns_value
-        && !inline.source.lines().any(|line| {
-            line.contains("; -> return")
-                && (asm_output_register(line).is_some()
-                    || asm_output_param(line, &inline.param_names).is_some())
-        })
-    {
-        return Some(Diagnostic::error(
-            "E3223",
-            format!("{} has no checked output destination", asm.line_hint),
-            "a value-returning assembly body must identify its result with the first named output operand or an explicit target register"
-                .to_string(),
-            "write the result as `{name} ... ; -> return` or `mov rax, ... ; -> return` for the selected target"
-                .to_string(),
-            None,
-        ));
+    }) {
+        let inline = asm.inline.as_ref()?;
+        let Some(contract) = inline.asm_contract.as_ref() else {
+            return Some(Diagnostic::error(
+                "E3223",
+                format!("{} has no checked assembly contract", asm.line_hint),
+                "assembly output and clobbers must be normalized by sema before native bridge generation"
+                    .to_string(),
+                "fix the inline assembly operand contract and re-run sema".to_string(),
+                None,
+            ));
+        };
+        if inline.param_names != asm.param_names || inline.param_names.len() != asm.params.len() {
+            return Some(Diagnostic::error(
+                "E3223",
+                format!("{} has a stale assembly parameter map", asm.line_hint),
+                "the native bridge must consume the sema-checked parameter order and names"
+                    .to_string(),
+                "re-run sema so the inline assembly contract is normalized for this declaration"
+                    .to_string(),
+                None,
+            ));
+        }
+        if contract.target != target {
+            return Some(Diagnostic::error(
+                "E3223",
+                format!(
+                    "{} was checked for `{}`, not selected target `{target}`",
+                    asm.line_hint, contract.target
+                ),
+                "inline assembly is validated and compiled for the driver's selected target, not the host architecture"
+                    .to_string(),
+                "select the checked target or provide an assembly body for the selected target"
+                    .to_string(),
+                None,
+            ));
+        }
+        if crate::AST::inline_asm_target_arch(target).is_none() {
+            return Some(Diagnostic::error(
+                "E3223",
+                format!(
+                    "{} has no audited inline-assembly register set for target `{target}`",
+                    asm.line_hint
+                ),
+                "inline assembly needs a target-specific register namespace before native bridge generation"
+                    .to_string(),
+                "select a supported native target or provide a target-specific assembly body"
+                    .to_string(),
+                None,
+            ));
+        }
+        let returns_value = asm
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| inline_rust_type(ty) != "()");
+        match (&contract.output, returns_value) {
+            (None, true) => {
+                return Some(Diagnostic::error(
+                    "E3223",
+                    format!("{} has no checked output destination", asm.line_hint),
+                    "a value-returning assembly body must identify its result with the sema-checked output operand"
+                        .to_string(),
+                    "mark one named output or explicit target register with `; -> return`"
+                        .to_string(),
+                    None,
+                ));
+            }
+            (Some(_), false) => {
+                return Some(Diagnostic::error(
+                    "E3223",
+                    format!("{} declares an output for a unit return", asm.line_hint),
+                    "a void assembly body must not expose a result destination".to_string(),
+                    "remove the `; -> return` anchor from the body".to_string(),
+                    None,
+                ));
+            }
+            _ => {}
+        }
+        if let Some(output) = &contract.output {
+            match output {
+                InlineAsmOutput::Parameter(index) if *index >= asm.params.len() => {
+                    return Some(Diagnostic::error(
+                        "E3223",
+                        format!(
+                            "{} names output parameter index {index}, but the function has {} parameters",
+                            asm.line_hint,
+                            asm.params.len()
+                        ),
+                        "the checked output operand must refer to a declared Jet parameter"
+                            .to_string(),
+                        "use a named parameter in the `; -> return` anchor".to_string(),
+                        None,
+                    ));
+                }
+                InlineAsmOutput::Register(register)
+                    if !crate::AST::inline_asm_register_known(target, register) =>
+                {
+                    return Some(Diagnostic::error(
+                        "E3223",
+                        format!(
+                            "{} names register `{register}`, which is not valid for target `{target}`",
+                            asm.line_hint
+                        ),
+                        "fixed assembly registers are checked against the selected target namespace"
+                            .to_string(),
+                        "use a register valid for the selected target".to_string(),
+                        None,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        let mut seen_clobbers = BTreeSet::new();
+        for clobber in &contract.clobbers {
+            let normalized = clobber
+                .strip_prefix('%')
+                .unwrap_or(clobber)
+                .to_ascii_lowercase();
+            if !crate::AST::inline_asm_register_known(target, &normalized) {
+                return Some(Diagnostic::error(
+                    "E3223",
+                    format!(
+                        "{} names clobber register `{clobber}`, which is not valid for target `{target}`",
+                        asm.line_hint
+                    ),
+                    "fixed assembly clobbers are checked against the selected target namespace"
+                        .to_string(),
+                    "use a register valid for the selected target".to_string(),
+                    None,
+                ));
+            }
+            if !seen_clobbers.insert(normalized.clone()) {
+                return Some(Diagnostic::error(
+                    "E3223",
+                    format!("{} repeats clobber register `{clobber}`", asm.line_hint),
+                    "the checked assembly contract must contain each discarded output exactly once"
+                        .to_string(),
+                    "remove duplicate names from `; clobbers …`".to_string(),
+                    None,
+                ));
+            }
+            if matches!(
+                &contract.output,
+                Some(InlineAsmOutput::Register(output))
+                    if output
+                        .strip_prefix('%')
+                        .unwrap_or(output)
+                        .eq_ignore_ascii_case(&normalized)
+            ) {
+                return Some(Diagnostic::error(
+                    "E3223",
+                    format!(
+                        "{} uses `{clobber}` as both result and an early-written clobber",
+                        asm.line_hint
+                    ),
+                    "an early-written clobber cannot overwrite the fixed result destination"
+                        .to_string(),
+                    "choose a distinct result register or clobber register".to_string(),
+                    None,
+                ));
+            }
+        }
     }
     None
-}
-
-fn asm_first_operand(line: &str) -> Option<&str> {
-    let (_, operands) = line.split_once(|character: char| character.is_ascii_whitespace())?;
-    operands
-        .split(',')
-        .next()
-        .map(str::trim)
-        .filter(|operand| !operand.is_empty())
-}
-
-fn asm_output_param(line: &str, param_names: &[String]) -> Option<usize> {
-    let operand = asm_first_operand(line)?;
-    let name = operand.strip_prefix('{')?.strip_suffix('}')?;
-    param_names.iter().position(|candidate| candidate == name)
 }
 
 #[cfg(test)]
@@ -532,6 +661,11 @@ mod inline_asm_target_tests {
                 lang: "asm".into(),
                 source: "mov rax, {value}; -> return".into(),
                 param_names: vec!["value".into()],
+                asm_contract: Some(crate::AST::InlineAsmContract {
+                    target: "x86_64-unknown-linux-gnu".into(),
+                    output: Some(InlineAsmOutput::Register("rax".into())),
+                    clobbers: Vec::new(),
+                }),
             }),
             c_abi: false,
             generated: false,
@@ -553,8 +687,13 @@ mod inline_asm_target_tests {
     #[test]
     fn inline_asm_uses_checked_output_and_discarded_clobber_operands() {
         let mut entry = entry();
-        entry.inline.as_mut().unwrap().source =
-            "add {value}, 1 ; -> return\n; clobbers rbx, rbx".into();
+        let inline = entry.inline.as_mut().unwrap();
+        inline.source = "add {value}, 1 ; -> return\n; clobbers rbx, rbx".into();
+        inline.asm_contract = Some(crate::AST::InlineAsmContract {
+            target: "x86_64-unknown-linux-gnu".into(),
+            output: Some(InlineAsmOutput::Parameter(0)),
+            clobbers: vec!["rbx".into()],
+        });
         let inline = entry.inline.as_ref().unwrap();
         let wrapper = emit_asm_wrapper(&entry, inline);
 
@@ -567,14 +706,85 @@ mod inline_asm_target_tests {
             "duplicate clobbers must normalize to one output operand: {wrapper}"
         );
     }
+    #[test]
+    fn inline_asm_fixed_output_is_early_clobber() {
+        let entry = entry();
+        let inline = entry.inline.as_ref().unwrap();
+        let wrapper = emit_asm_wrapper(&entry, inline);
+
+        assert!(wrapper.contains("out(\"rax\") __jet_result"), "{wrapper}");
+        assert!(!wrapper.contains("lateout(\"rax\")"), "{wrapper}");
+        assert!(wrapper.contains("#[no_mangle]"), "{wrapper}");
+        assert!(
+            wrapper.contains("jet_inline_jet_ffi_add_one"),
+            "{wrapper}"
+        );
+    }
+
+    #[test]
+    fn inline_asm_contract_changes_invalidate_bridge_identity() {
+        fn key(entry: &ExternEntry, target: &str) -> String {
+            cache_key_full(
+                std::slice::from_ref(entry),
+                &BTreeMap::new(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                &[],
+                false,
+                &[],
+                &FfiLinkClosure::default(),
+                target,
+                None,
+                &[],
+                None,
+            )
+        }
+
+        let original = entry();
+        let mut changed = original.clone();
+        changed.inline.as_mut().unwrap().source.push_str(" ; body");
+        assert_ne!(
+            key(&original, "x86_64-unknown-linux-gnu"),
+            key(&changed, "x86_64-unknown-linux-gnu")
+        );
+        assert_ne!(
+            key(&original, "x86_64-unknown-linux-gnu"),
+            key(&original, "aarch64-unknown-linux-gnu")
+        );
+
+        let mut changed_contract = original.clone();
+        changed_contract
+            .inline
+            .as_mut()
+            .unwrap()
+            .asm_contract
+            .as_mut()
+            .unwrap()
+            .clobbers
+            .push("rbx".into());
+        assert_ne!(
+            key(&original, "x86_64-unknown-linux-gnu"),
+            key(&changed_contract, "x86_64-unknown-linux-gnu")
+        );
+    }
+
 
     #[test]
     fn inline_asm_requires_an_explicit_return_destination() {
         let mut entry = entry();
         entry.inline.as_mut().unwrap().source = "rdtsc ; -> return".into();
+        entry.inline.as_mut().unwrap().asm_contract = None;
         let diagnostic = inline_asm_target_diagnostic(&[entry], "x86_64-unknown-linux-gnu")
-            .expect("implicit rax fallback must be rejected");
-        assert!(diagnostic.what.contains("no checked output destination"));
+            .expect("missing normalized output contract must be rejected");
+        assert!(diagnostic.what.contains("no checked assembly contract"));
     }
 }
 
@@ -3481,11 +3691,40 @@ fn cache_key_full(
         identity.field("generated", &[e.generated as u8]);
         identity.field("c_module", &[e.c_module as u8]);
         if let Some(inline) = &e.inline {
+            if inline.lang == "asm" {
+                identity.field("asm_lowering", b"out-early-clobber-v2-exported-symbol");
+            }
             identity.field("inline_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
             identity.field("inline_language", inline.lang.as_bytes());
             identity.field("inline_source", inline.source.as_bytes());
             for name in &inline.param_names {
                 identity.field("inline_parameter", name.as_bytes());
+            }
+            if let Some(contract) = &inline.asm_contract {
+                identity.field("asm_target", contract.target.as_bytes());
+                match &contract.output {
+                    Some(InlineAsmOutput::Parameter(index)) => {
+                        identity.field("asm_output", format!("parameter:{index}").as_bytes());
+                    }
+                    Some(InlineAsmOutput::Register(register)) => {
+                        let normalized = register
+                            .strip_prefix('%')
+                            .unwrap_or(register)
+                            .to_ascii_lowercase();
+                        identity.field(
+                            "asm_output",
+                            format!("register:{normalized}").as_bytes(),
+                        );
+                    }
+                    None => identity.field("asm_output", b"none"),
+                }
+                for register in &contract.clobbers {
+                    let normalized = register
+                        .strip_prefix('%')
+                        .unwrap_or(register)
+                        .to_ascii_lowercase();
+                    identity.field("asm_clobber", normalized.as_bytes());
+                }
             }
         }
         for (c, t) in &e.params {
@@ -5101,6 +5340,14 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
 }
 
 fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
+    let Some(contract) = inline.asm_contract.as_ref() else {
+        return String::new();
+    };
+    if inline.param_names != entry.param_names
+        || inline.param_names.len() != entry.params.len()
+    {
+        return String::new();
+    }
     let params = entry
         .params
         .iter()
@@ -5112,36 +5359,34 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .as_ref()
         .map(inline_rust_type)
         .unwrap_or_else(|| "()".to_string());
-    let mut instructions = Vec::new();
-    let mut clobbers = Vec::new();
-    let mut return_line = None;
-    for line in inline
+    let normalize_register = |register: &str| {
+        register
+            .strip_prefix('%')
+            .unwrap_or(register)
+            .to_ascii_lowercase()
+    };
+    let (output_param, return_reg) = match contract.output.as_ref() {
+        Some(InlineAsmOutput::Parameter(index)) => (Some(*index), None),
+        Some(InlineAsmOutput::Register(register)) => (None, Some(normalize_register(register))),
+        None => (None, None),
+    };
+    if (ret == "()") != contract.output.is_none()
+        || output_param.is_some_and(|index| {
+            index >= entry.params.len()
+                || inline.param_names.get(index) != entry.param_names.get(index)
+        })
+    {
+        return String::new();
+    }
+
+    let instructions = inline
         .source
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty())
-    {
-        if let Some(rest) = line.strip_prefix("; clobbers ") {
-            clobbers.extend(
-                rest.split(|c: char| c == ',' || c.is_whitespace())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string),
-            );
-            continue;
-        }
-        let clean = line.replace("; -> return", "").trim().to_string();
-        if line.contains("; -> return") {
-            return_line = Some(clean.clone());
-        }
-        instructions.push(clean);
-    }
-    let return_reg = return_line.as_deref().and_then(asm_output_register);
-    let output_param = return_line
-        .as_deref()
-        .and_then(|line| asm_output_param(line, &inline.param_names));
-    if ret != "()" && output_param.is_none() && return_reg.is_none() {
-        return String::new();
-    }
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("; clobbers "))
+        .map(|line| line.replace("; -> return", "").trim().to_string())
+        .collect::<Vec<_>>();
     let mut operands = Vec::new();
     let mut result_expr = "()".to_string();
     if ret != "()" {
@@ -5151,8 +5396,10 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
                 inline.param_names[index]
             ));
             result_expr = format!("p{index}");
-        } else if let Some(reg) = return_reg {
-            operands.push(format!("lateout(\"{reg}\") __jet_result"));
+        } else if let Some(reg) = return_reg.as_deref() {
+            // The body may write a fixed result register before consuming all
+            // named inputs, so keep it early-clobber-safe.
+            operands.push(format!("out(\"{reg}\") __jet_result"));
             result_expr = "__jet_result".to_string();
         }
     }
@@ -5162,8 +5409,9 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         }
     }
     let mut seen_clobbers = HashSet::new();
-    for reg in clobbers {
-        if Some(reg.as_str()) != return_reg && seen_clobbers.insert(reg.clone()) {
+    for reg in &contract.clobbers {
+        let reg = normalize_register(reg);
+        if return_reg.as_deref() != Some(reg.as_str()) && seen_clobbers.insert(reg.clone()) {
             operands.push(format!("out(\"{reg}\") _"));
         }
     }
@@ -5182,21 +5430,22 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .chain(operands)
         .collect::<Vec<_>>()
         .join(",\n            ");
+    let symbol = format!("jet_inline_{}", entry.wrapper_name);
+    let args = (0..entry.params.len())
+        .map(|i| format!("p{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret_decl = if ret == "()" {
+        String::new()
+    } else {
+        format!(" -> {ret}")
+    };
     format!(
-        "pub fn {}({}){} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_args}\n        ); }}\n    {result_expr}\n}}\n",
+        "#[no_mangle]\npub unsafe extern \"C\" fn {symbol}({}){ret_decl} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_args}\n        ); }}\n    {result_expr}\n}}\npub fn {}({}){ret_decl} {{ unsafe {{ {symbol}({args}) }} }}\n",
+        params.join(", "),
         entry.wrapper_name,
         params.join(", "),
-        if ret == "()" { String::new() } else { format!(" -> {ret}") },
     )
-}
-
-fn asm_output_register(line: &str) -> Option<&str> {
-    let operand = asm_first_operand(line)?;
-    let register = operand.strip_prefix('%').unwrap_or(operand);
-    register
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric())
-        .then_some(register)
 }
 
 fn rust_string(value: &str) -> String {
@@ -6294,6 +6543,7 @@ dependencies = [
                 lang: "c".into(),
                 source: "void edit(int64_t* value) { *value += 1; }".into(),
                 param_names: vec!["value".into()],
+                asm_contract: None,
             }),
             c_abi: false,
             generated: false,
@@ -6442,6 +6692,7 @@ dependencies = [
                 lang: "c".into(),
                 source: "int64_t probe(int64_t value) { return value; }".into(),
                 param_names: vec!["value".into()],
+                asm_contract: None,
             }),
             c_abi: false,
             generated: false,

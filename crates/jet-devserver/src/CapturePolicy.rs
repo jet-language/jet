@@ -8,10 +8,8 @@
 use jet_foundation::SHA256::sha256_hex;
 use std::fmt;
 
-/// Default project capture budget: 256 MiB across at most 200 indexed records.
+/// Default project capture budget: 256 MiB of disposable artifact bytes.
 pub const DEFAULT_CAPTURE_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-/// Default project capture record count.
-pub const DEFAULT_CAPTURE_BUDGET_RECORDS: usize = 200;
 /// The phrase a terminal-facing adapter must turn into typed consent.
 pub const SENSITIVE_CAPTURE_CONSENT_PHRASE: &str = "capture sensitive";
 /// The explicit one-session opt-out spelling owned by the CLI adapter.
@@ -254,10 +252,7 @@ impl PackageCapturePolicy {
     pub const fn off() -> Self {
         Self {
             capture: PackageCaptureSetting::Off,
-            budget: CaptureBudget::new_unchecked(
-                DEFAULT_CAPTURE_BUDGET_BYTES,
-                DEFAULT_CAPTURE_BUDGET_RECORDS,
-            ),
+            budget: CaptureBudget::new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES),
         }
     }
 
@@ -301,35 +296,27 @@ impl NoCaptureOverrideFact {
     }
 }
 
-/// Retention budget applied to record artifacts, not the small index file.
+/// Retention budget applied to disposable record artifacts, not the small index file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CaptureBudget {
     pub max_bytes: u64,
-    pub max_records: usize,
 }
 
 impl Default for CaptureBudget {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_CAPTURE_BUDGET_BYTES,
-            max_records: DEFAULT_CAPTURE_BUDGET_RECORDS,
         }
     }
 }
 
 impl CaptureBudget {
-    pub const fn new_unchecked(max_bytes: u64, max_records: usize) -> Self {
-        Self {
-            max_bytes,
-            max_records,
-        }
+    pub const fn new_unchecked(max_bytes: u64) -> Self {
+        Self { max_bytes }
     }
 
-    pub fn new(max_bytes: u64, max_records: usize) -> Result<Self, CaptureBudgetError> {
-        let budget = Self {
-            max_bytes,
-            max_records,
-        };
+    pub fn new(max_bytes: u64) -> Result<Self, CaptureBudgetError> {
+        let budget = Self { max_bytes };
         budget.validate()?;
         Ok(budget)
     }
@@ -337,9 +324,6 @@ impl CaptureBudget {
     pub fn validate(self) -> Result<(), CaptureBudgetError> {
         if self.max_bytes == 0 {
             return Err(CaptureBudgetError::ZeroByteLimit);
-        }
-        if self.max_records == 0 {
-            return Err(CaptureBudgetError::ZeroRecordLimit);
         }
         Ok(())
     }
@@ -365,14 +349,12 @@ impl CaptureBudget {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CaptureBudgetError {
     ZeroByteLimit,
-    ZeroRecordLimit,
     ArithmeticOverflow,
     EmptyArtifactId,
     DuplicateArtifactId(String),
     IncomingArtifactTooLarge { bytes: u64, limit: u64 },
     NoEvictableRecords {
         retained_bytes: u64,
-        retained_records: usize,
         budget: CaptureBudget,
     },
 }
@@ -381,7 +363,6 @@ impl fmt::Display for CaptureBudgetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroByteLimit => formatter.write_str("capture budget byte limit must be greater than zero"),
-            Self::ZeroRecordLimit => formatter.write_str("capture budget record limit must be greater than zero"),
             Self::ArithmeticOverflow => formatter.write_str("capture budget arithmetic overflowed"),
             Self::EmptyArtifactId => formatter.write_str("record artifact id cannot be empty"),
             Self::DuplicateArtifactId(id) => write!(formatter, "record artifact id `{id}` is duplicated"),
@@ -390,12 +371,11 @@ impl fmt::Display for CaptureBudgetError {
             }
             Self::NoEvictableRecords {
                 retained_bytes,
-                retained_records,
                 budget,
             } => write!(
                 formatter,
-                "capture budget cannot retain {retained_records} records/{retained_bytes} bytes within {}/{}",
-                budget.max_records, budget.max_bytes
+                "capture budget cannot retain {retained_bytes} disposable bytes within {}",
+                budget.max_bytes
             ),
         }
     }
@@ -406,9 +386,8 @@ impl std::error::Error for CaptureBudgetError {}
 /// The minimum RecordIndex view needed by the policy's deterministic planner.
 ///
 /// The root `RecordIndexEntry` adapter should return its canonical `id`,
-/// `recorded_sequence`, `size`, and `saved` fields here.  `evictable` can
-/// additionally preserve index-owned rules such as retaining referenced rows;
-/// the planner always applies `!saved()` independently.
+/// `recorded_sequence`, `size`, and `saved` fields here. `evictable` carries
+/// the index-owned disposable-history policy; saved rows must return `false`.
 pub trait RecordIndexRetention {
     fn artifact_id(&self) -> &str;
     fn recorded_sequence(&self) -> u64;
@@ -429,19 +408,17 @@ pub struct CaptureEviction {
     pub size_bytes: u64,
 }
 
-/// A complete retention decision that is guaranteed to fit its budget.
+/// A complete retention decision that is guaranteed to fit its byte budget.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CaptureEvictionPlan {
     pub budget: CaptureBudget,
     pub evicted: Vec<CaptureEviction>,
     pub retained_bytes: u64,
-    pub retained_records: usize,
 }
 
 impl CaptureEvictionPlan {
     pub const fn fits(&self) -> bool {
         self.retained_bytes <= self.budget.max_bytes
-            && self.retained_records <= self.budget.max_records
     }
 
     pub fn evicted_ids(&self) -> impl Iterator<Item = &str> {
@@ -484,9 +461,11 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
         if !seen.insert(id.to_string()) {
             return Err(CaptureBudgetError::DuplicateArtifactId(id.to_string()));
         }
-        retained_bytes = retained_bytes
-            .checked_add(record.size_bytes())
-            .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
+        if record.evictable() {
+            retained_bytes = retained_bytes
+                .checked_add(record.size_bytes())
+                .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
+        }
     }
 
     if let Some(incoming_record) = incoming {
@@ -498,25 +477,22 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
             return Err(CaptureBudgetError::DuplicateArtifactId(id.to_string()));
         }
         let size_bytes = incoming_record.size_bytes();
-        if size_bytes > budget.max_bytes {
-            return Err(CaptureBudgetError::IncomingArtifactTooLarge {
-                bytes: size_bytes,
-                limit: budget.max_bytes,
-            });
+        if incoming_record.evictable() {
+            if size_bytes > budget.max_bytes {
+                return Err(CaptureBudgetError::IncomingArtifactTooLarge {
+                    bytes: size_bytes,
+                    limit: budget.max_bytes,
+                });
+            }
+            retained_bytes = retained_bytes
+                .checked_add(size_bytes)
+                .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
         }
-        retained_bytes = retained_bytes
-            .checked_add(size_bytes)
-            .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
     }
 
-    let incoming_count = if incoming.is_some() { 1 } else { 0 };
-    let mut retained_records = records
-        .len()
-        .checked_add(incoming_count)
-        .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
     let mut evictable = records
         .iter()
-        .filter(|record| !record.saved() && record.evictable())
+        .filter(|record| record.evictable())
         .collect::<Vec<_>>();
     evictable.sort_by(|left, right| {
         left.recorded_sequence()
@@ -526,14 +502,11 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
 
     let mut evicted = Vec::new();
     for record in evictable {
-        if retained_bytes <= budget.max_bytes && retained_records <= budget.max_records {
+        if retained_bytes <= budget.max_bytes {
             break;
         }
         retained_bytes = retained_bytes
             .checked_sub(record.size_bytes())
-            .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
-        retained_records = retained_records
-            .checked_sub(1)
             .ok_or(CaptureBudgetError::ArithmeticOverflow)?;
         evicted.push(CaptureEviction {
             artifact_id: record.artifact_id().to_string(),
@@ -542,10 +515,9 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
         });
     }
 
-    if retained_bytes > budget.max_bytes || retained_records > budget.max_records {
+    if retained_bytes > budget.max_bytes {
         return Err(CaptureBudgetError::NoEvictableRecords {
             retained_bytes,
-            retained_records,
             budget,
         });
     }
@@ -554,7 +526,6 @@ fn plan_eviction_inner<I: RecordIndexRetention>(
         budget,
         evicted,
         retained_bytes,
-        retained_records,
     };
     debug_assert!(plan.fits());
     Ok(plan)
@@ -1026,15 +997,13 @@ impl CapturePolicy {
         }
     }
 
+
     pub const fn development() -> Self {
         Self::new(
             CaptureMode::Development,
             PackageCapturePolicy::new(
                 PackageCaptureSetting::Default,
-                CaptureBudget::new_unchecked(
-                    DEFAULT_CAPTURE_BUDGET_BYTES,
-                    DEFAULT_CAPTURE_BUDGET_RECORDS,
-                ),
+                CaptureBudget::new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES),
             ),
             NoCaptureOverrideFact::none(),
         )
@@ -1045,42 +1014,15 @@ impl CapturePolicy {
             CaptureMode::Release,
             PackageCapturePolicy::new(
                 PackageCaptureSetting::Default,
-                CaptureBudget::new_unchecked(
-                    DEFAULT_CAPTURE_BUDGET_BYTES,
-                    DEFAULT_CAPTURE_BUDGET_RECORDS,
-                ),
+                CaptureBudget::new_unchecked(DEFAULT_CAPTURE_BUDGET_BYTES),
             ),
             NoCaptureOverrideFact::none(),
         )
     }
 
-    pub const fn budget(self) -> CaptureBudget {
+    pub const fn budget(&self) -> CaptureBudget {
         self.package.budget
     }
-
-    pub const fn capture_enabled_by_default(self) -> bool {
-        self.mode.default_capture_enabled()
-            && self.package.allows_development_capture()
-            && !self.no_capture.active
-    }
-
-    pub fn with_no_capture(mut self, fact: NoCaptureOverrideFact) -> Self {
-        self.no_capture = fact;
-        self
-    }
-
-    pub const fn with_explicit_capture(mut self, explicit: bool) -> Self {
-        self.explicit_capture = explicit;
-        self
-    }
-
-    pub fn with_package(mut self, package: PackageCapturePolicy) -> Self {
-        self.package = package;
-        self
-    }
-
-    /// Fill policy-owned consent fields into the attempt's scope.  A consent
-    /// created from this exact result is bound to mode, source classes, budget,
     /// authorities, hosts, streams, disclosures, and destination.
     pub fn consent_scope(&self, attempt: &CaptureAttempt) -> CaptureConsentScope {
         let mut scope = attempt.base_consent_scope();

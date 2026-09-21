@@ -255,6 +255,30 @@ impl JetByteBuffer {
         }
         text.split(sep.as_str()).map(|s| s.to_string()).collect()
     }
+    pub(crate) fn partition(
+        &self,
+        separator: &JetByteBuffer,
+    ) -> JetOutcome<Vec<JetByteBuffer>, String> {
+        if separator.bytes.is_empty() {
+            return Err("byte partition separator must not be empty".to_string());
+        }
+        let Some(index) = self
+            .bytes
+            .windows(separator.bytes.len())
+            .position(|window| window == separator.bytes.as_slice())
+        else {
+            return Ok(vec![
+                self.clone(),
+                JetByteBuffer::new(),
+                JetByteBuffer::new(),
+            ]);
+        };
+        Ok(vec![
+            JetByteBuffer::from(&self.bytes[..index].to_vec()),
+            separator.clone(),
+            JetByteBuffer::from(&self.bytes[index + separator.bytes.len()..].to_vec()),
+        ])
+    }
     pub(crate) fn join(&self, parts: &Vec<String>) -> JetByteBuffer {
         JetByteBuffer::from(&parts.join(&self.as_text()).into_bytes())
     }

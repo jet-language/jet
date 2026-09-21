@@ -266,11 +266,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Duration", "sign", 0) => THandleOp::DurationSign,
         ("Duration", "total_in", 1) => THandleOp::DurationTotalIn,
         ("Duration", "round", 1..=3) => THandleOp::DurationRound,
-        ("Decimal", "add" | "sub" | "mul" | "equal", 1) => THandleOp::PreciseMethod {
+        ("Decimal", "add" | "sub" | "mul" | "equal" | "compare", 1) => THandleOp::PreciseMethod {
             type_name: "Decimal".to_string(),
             method: method.to_string(),
         },
-        ("Decimal", "to_string", 0) => THandleOp::PreciseMethod {
+        ("Decimal", "to_float" | "to_string", 0) => THandleOp::PreciseMethod {
             type_name: "Decimal".to_string(),
             method: method.to_string(),
         },
@@ -376,6 +376,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HTTPRequest", "method", 0) => THandleOp::HTTPReqField("method"),
         ("HTTPRequest", "path", 0) => THandleOp::HTTPReqField("path"),
         ("HTTPRequest", "body", 0) => THandleOp::HTTPReqField("body"),
+        ("HTTPRequest", "body_len", 0) => THandleOp::HTTPReqField("body_len"),
+        ("HTTPRequest", "under_limit", 1) => THandleOp::HTTPReqField("under_limit"),
         ("HTTPRequest", "header", 1) => THandleOp::HTTPReqHeader,
         ("HTTPRequest", "param", 1) => THandleOp::HTTPReqParam,
         ("HTTPRequest", "trailers", 0) => THandleOp::HTTPReqTrailers,

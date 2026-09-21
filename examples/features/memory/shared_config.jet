@@ -1,3 +1,9 @@
+package {
+    name: "memory_shared_config"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Panic, Time.Wait] } }
+}
+
 // D-CONC-SHARE1=A (amends D-MEM1 stage S6 / D-SHARED-API1=A): `Shared<T>` is a
 // lock-guarded shared value — "a copyable door". `shared x` builds the cell
 // (`T` inferred from `x`). A field read is one locked read and a field write is
@@ -10,7 +16,7 @@ struct AppConfig {
     hits: Int
 }
 
-fn handle(id: Int, config: Shared<AppConfig>) String -> {
+fn handle(id: Int, config: Shared<AppConfig>) -> String {
     label :: config.name
     return "request {id} on {label}"
 }

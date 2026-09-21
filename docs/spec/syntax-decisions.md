@@ -7353,7 +7353,34 @@ present exactly when a non-unit success result is declared, or the callable is
 a lambda. Unit bodies — plain or fallible — keep bare braces: D-FAIL-UNIT1=A
 is preserved. Braced value-returning functions gain the arrow. This amends
 D-SIG-SHAPE1=B and subsumes D-BODY-ARROW1=B. `task { … }` remains
-D-CONC-SPAWN1=D's task-specific lowering outside this grammar.
+D-CONC-SPAWN1=D's task-specific lowering outside this grammar. Amended by
+D-SIG-AFTER1=A.
+
+**2026-09-18 — D-SIG-AFTER1=A** *(card #3503, delivery #3510/#3511)*: the
+return type follows the one arrow, and named function and method bodies always
+use braces.
+
+```
+fn double(n: Int) -> Int { n * 2 }
+fn origin() -> Point { Point{x: 0, y: 0} }
+fn parse(s: String) -> Int !ParseError { s.to_int() }
+fn save(path: String, text: String) !IOError { files.write(path, text)? }
+fn load(path: String) -[IO]> String {
+    text :: files.read(path)?
+    text.trim()
+}
+fn run() { print(double(21)) }
+fn announce() -[IO]> { print("hi") }
+handler: fn(Request) -[IO]> Response
+```
+
+Unit stays `fn run() { }` and `fn announce() -[IO]> { }`. A fallible unit keeps
+the arrowless form. A plain `->` with no type, and `-> Unit`, are illegal.
+Function types read the same way. Control one-liners (`if c -> x`,
+`loop x in xs -> f(x)`, arm tables) and lambdas keep `->` as the body arrow.
+Bare type after the parameter list is a teaching diagnostic (E0068). This
+amends D-SIG-SHAPE1=B and D-CALLABLE-ONE1=A. D-EFFECT-ROW2=B,
+D-FAIL-UNIT1=A, and D-FAILURE-FOUNDATION1=A stay.
 
 **2026-08-21 — D-LAMBDA-IFACE1=A** *(card #2144)*: a lambda may write any
 suffix of the callable interface — return type, error, effect row — in the
@@ -8020,6 +8047,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-SHARED-CYCLE1` | C | `c0uhvn0v` |
 | `D-SHAREDGUARD1` | A | `c0zywkq7` |
 | `D-SHAREDGUARD2` | A | `c0zywkq7` |
+| `D-SIG-AFTER1` | A | `c05em550` |
 | `D-SIG-SHAPE1` | B | `c0mopaxh` |
 | `D-SOA-TIER1` | A | `c0m0jmc6` |
 | `D-SPREAD1` | A | `c00707ob` |
@@ -8296,8 +8324,8 @@ a target and says so; explicit `--record` and `--capture-sensitive` keep their E
 No format change to .jetproof (D-JPROOF1) or .jetproof-replay (D-JREPLAY1). Index: .jet/records/index.jsonl,
 one line per artifact, keyed by target.inputSha256 and report_id or artifact_id. Example row: `{target: 9f3a…,
 tool: prove, engine: dev-tir-v1, kind: replay, id: c10aee50}`; a different engine is a second row, and one
-changed source byte changes target. Retention: 256 MB and 200 records per project by default, oldest evicted,
-settable in package.jet under dev: .{ records: .{ budget: … } }. `jet build --verify` follows the one contract
+changed source byte changes target. Retention: 256 MB per project by default, oldest disposable
+groups are evicted, settable in package.jet under dev: .{ records: .{ budget: … } }. `jet build --verify` follows the one contract
 shared with D-BUILD-NOCHANGE1. Choosing B amends two clauses for `jet dev` only: D-JREPLAY1's invocation unit
 and D-RUN-RECORD1's unchanged-preflight clause. One `jet dev` invocation is one consent scope over many runs,
 and the dev tier captures the safe form by default. Consent is a digest over target identity, capture mode,

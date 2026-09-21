@@ -1,3 +1,9 @@
+package {
+    name: "tooling_data_stream_bounds"
+    version: "0.1.0"
+    authority: { holds: { allow: [FS, IO, Mem.Alloc, Panic] } }
+}
+
 // D-DATAFLOW1=A: bounded typed pull stream + typed DataError.
 use core.data as data
 use core.files as files
@@ -16,28 +22,21 @@ fn run() {
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
     first :: reader.next() ?? panic("next")
-    if first == {
-        .Val(row) -> { print("first: {row.service} {row.latency_ms}") }
-        .None -> { panic("expected row") }
-    }
-    groups :: data.query(reader)
+    print("first: {first.service} {first.latency_ms}")
+    if data.query(reader)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)
-        .collect()
-    if groups == {
+        .collect() == {
         .Ok(rows) -> { print("unexpected ok {rows.len()}") }
         .Err(error) -> { print("{error}") }
     }
-    empty_vals :: [Float]{}
-    empty :: data.mean(empty_vals)
-    if empty == {
+    if data.mean([Float]{}) == {
         .Ok(v) -> { print("unexpected mean {v}") }
         .Err(error) -> { print("{error}") }
     }
-    bad_q :: data.quantile([1.0, 2.0], 1.5)
-    if bad_q == {
+    if data.quantile([1.0, 2.0], 1.5) == {
         .Ok(v) -> { print("unexpected q {v}") }
         .Err(error) -> { print("{error}") }
     }

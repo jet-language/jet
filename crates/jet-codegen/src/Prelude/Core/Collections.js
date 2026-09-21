@@ -208,6 +208,20 @@ function jet_list_remove_slot(xs, index) {
   return jet_option_some(xs.splice(position, 1)[0]);
 }
 
+function jet_map_from_keys_kernel(keys, defaultValue) {
+  const map = new Map();
+  for (const key of keys) map.set(key, defaultValue);
+  return map;
+}
+
+function jet_map_from_keys_int(keys, defaultValue) {
+  return jet_map_from_keys_kernel(keys, defaultValue);
+}
+
+function jet_map_from_keys_composite(keys, defaultValue) {
+  return jet_map_from_keys_kernel(keys, defaultValue);
+}
+
 function jet_map_insert(map, key, value) {
   map.set(key, value);
   return null;
@@ -217,6 +231,12 @@ function jet_map_add_new(map, key, value) {
   if (map.has(key)) return false;
   map.set(key, value);
   return true;
+}
+
+function jet_map_setdefault(map, key, value) {
+  if (map.has(key)) return map.get(key);
+  map.set(key, value);
+  return value;
 }
 
 function jet_map_try_insert(map, key, value) {

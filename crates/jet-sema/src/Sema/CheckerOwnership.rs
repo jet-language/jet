@@ -5034,6 +5034,13 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn report_cell_guard_storage(&mut self, what: String, span: Span) {
+        if self.diags.iter().any(|diagnostic| {
+            diagnostic.code == "E0217"
+                && diagnostic.span == Some(span)
+                && diagnostic.what == what
+        }) {
+            return;
+        }
         self.diags.push(Diagnostic::error(
             "E0217",
             what,

@@ -163,7 +163,7 @@ fn realized_library_is_consumed_with_use() {
         &consumer.join("main.jet"),
         "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
     );
-    fs::create_dir_all(consumer.join("build")).unwrap();
+    fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 
     let out = Command::new(jet_bin())
         .args(["run", "main.jet"])
@@ -216,7 +216,7 @@ fn executable_is_not_importable() {
         &consumer.join("main.jet"),
         "use deploy;\nfn run() {\n    print(\"hi\");\n}\n",
     );
-    fs::create_dir_all(consumer.join("build")).unwrap();
+    fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 
     let out = Command::new(jet_bin())
         .args(["run", "main.jet"])
@@ -266,7 +266,7 @@ fn unrealized_library_points_at_build_when_preparation_is_refused() {
         &consumer.join("main.jet"),
         "use jsonutil;\nfn run() {\n    print(jsonutil.parse(\"x\"));\n}\n",
     );
-    fs::create_dir_all(consumer.join("build")).unwrap();
+    fs::create_dir_all(consumer.join(".jet/build")).unwrap();
 
     let out = Command::new(jet_bin())
         .args(["run", "main.jet", "--no-prepare"])

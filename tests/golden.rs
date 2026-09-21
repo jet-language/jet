@@ -118,15 +118,24 @@ fn statement_attributes_codegen_shape() {
                 )
             )
         });
+    let core_end = out
+        .rust
+        .rfind("// jet:cached-core-end")
+        .expect("generated output has cached-core boundary");
+    let entry_end = out
+        .rust
+        .find("// jet-mir-entry")
+        .expect("generated output has MIR entry boundary");
+    let generated_entry = &out.rust[core_end..entry_end];
     assert!(
-        !out.rust.contains("\"off\"") && !out.rust.contains("\"off block\""),
-        "`#Off` body must not appear in generated Rust:\n{}",
-        out.rust
+        !generated_entry.contains("\"off\"") && !generated_entry.contains("\"off block\""),
+        "`#Off` body must not appear in generated entry:\n{}",
+        generated_entry
     );
     assert!(
-        out.rust.contains("#[cfg(not(jet_release))]") && out.rust.contains("debug"),
+        generated_entry.contains("#[cfg(not(jet_release))]") && generated_entry.contains("debug"),
         "`#DebugOnly` body must be cfg-gated for release:\n{}",
-        out.rust
+        generated_entry
     );
 }
 

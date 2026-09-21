@@ -2018,7 +2018,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage" },
     FlagSpec { long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact" },
     FlagSpec { long: "--rust", help: "With emit: Print generated Rust source" },
-    FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into build/generated/" },
+    FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into `.jet/generated/`" },
     FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
     FlagSpec { long: "--release", help: "With build/run/dev/jobs/test: Optimize for release" },

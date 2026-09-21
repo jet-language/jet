@@ -858,13 +858,13 @@ fn async_event_emit(event_id: i64, payload: CtValue) -> CtValue {
         let mut v = slot.borrow_mut();
         let idx = event_id.saturating_sub(1) as usize;
         let Some(Some(event)) = v.get_mut(idx) else {
-            terminal = Some(("Closed", false));
+            terminal = Some(("Closed", false, 0, 0, 0));
             return;
         };
         if event.cancelled {
-            terminal = Some(("Cancelled", false));
+            terminal = Some(("Cancelled", false, 0, 0, 0));
         } else if event.closed {
-            terminal = Some(("Closed", false));
+            terminal = Some(("Closed", false, 0, 0, 0));
         } else if event.queued.len() < event.capacity {
             set_task_phase(task_id, AsyncPhase::Queued, Some(true));
             event.queued.push_back(task_id);
@@ -875,26 +875,26 @@ fn async_event_emit(event_id: i64, payload: CtValue) -> CtValue {
                     event.blocked.push_back(task_id);
                 }
                 AsyncOverflow::DropNewest => {
-                    terminal = Some(("DroppedNewest", false));
+                    terminal = Some(("DroppedNewest", false, 0, 0, 1));
                 }
                 AsyncOverflow::DropOldest => {
                     displaced = event.queued.pop_front();
                     set_task_phase(task_id, AsyncPhase::Queued, Some(true));
                     event.queued.push_back(task_id);
                     if displaced.is_none() {
-                        terminal = Some(("DroppedNewest", false));
+                        terminal = Some(("DroppedNewest", false, 0, 0, 1));
                     }
                 }
             }
         }
     });
-    if let Some((state, accepted)) = terminal {
+    if let Some((state, accepted, delivered, queued, dropped)) = terminal {
         ASYNC_TASKS.with(|slot| {
             if let Some(Some(task)) = slot.borrow_mut().get_mut(task_id as usize) {
                 task.accepted = accepted;
             }
         });
-        task_report(task_id, state, 0, Vec::new(), 0, 0, 1);
+        task_report(task_id, state, 0, Vec::new(), delivered, queued, dropped);
     }
     if let Some(displaced) = displaced {
         task_report(displaced, "DroppedOldest", 0, Vec::new(), 0, 1, 1);
@@ -909,6 +909,21 @@ fn handler_failure(value: CtValue) -> Option<CtValue> {
         _ => None,
     }
 }
+fn normalize_handler_failure(value: CtValue) -> CtValue {
+    match value {
+        CtValue::Struct { type_name, fields } if type_name == "Err" => {
+            let message = fields
+                .iter()
+                .find_map(|(name, value)| (name == "message").then_some(value.clone()));
+            match message {
+                Some(CtValue::Str(message)) => CtValue::Str(message),
+                _ => CtValue::Struct { type_name, fields },
+            }
+        }
+        value => value,
+    }
+}
+
 
 fn dispatch_failure(value: CtValue) -> CtValue {
     CtValue::Enum {
@@ -1004,7 +1019,7 @@ fn run_async_task(
         match invoke(handler, vec![payload.clone()]) {
             Ok(value) => {
                 if let Some(error) = handler_failure(value) {
-                    failures.push(dispatch_failure(error));
+                    failures.push(dispatch_failure(normalize_handler_failure(error)));
                     if failure_policy == AsyncFailurePolicy::StopFirst {
                         break;
                     }

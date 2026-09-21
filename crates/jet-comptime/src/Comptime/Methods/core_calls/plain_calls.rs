@@ -1028,7 +1028,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
         }
         // --- core.encoding.json ---
-        ("core.encoding.json", "parse") => {
+        ("core.encoding.json", "parse" | "loads") => {
             let text = as_string(one(0)?, span)?;
             match crate::Comptime::JSONInterp::parse_json(text) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
@@ -1047,7 +1047,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 span,
             ))
         }
-        ("core.encoding.json", "to_string") => {
+        ("core.encoding.json", "to_string" | "dumps") => {
             let v = one(0)?;
             Ok(CtValue::Str(crate::Comptime::JSONInterp::render_json_pretty(
                 v, false, 0,
@@ -1883,11 +1883,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
-        ("core.encoding.base64", "encode") => {
+        ("core.encoding.base64", "encode" | "b64encode" | "standard_b64encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(base64_encode(bytes)))
         }
-        ("core.encoding.base64", "decode") => {
+        ("core.encoding.base64", "decode" | "b64decode" | "standard_b64decode") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
             let allow_missing_padding = args_bool(2, false)?;
@@ -1908,13 +1908,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // `jet_std_b64url_*`, EncodingCodecs.rs — the same alphabet with
         // `+`/`/` swapped for `-`/`_` and no padding) ---
         // parity: include path=crates/jet-codegen/src/Prelude/Core/EncodingBase.rs
-        ("core.encoding.base64", "encode_url") => {
+        ("core.encoding.base64", "encode_url" | "urlsafe_b64encode") => {
             let bytes = as_bytes(one(0)?, span)?;
             Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
                 &bytes,
             )))
         }
-        ("core.encoding.base64", "decode_url") => {
+        ("core.encoding.base64", "decode_url" | "urlsafe_b64decode") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
             let allow_padding = args_bool(2, false)?;
@@ -2127,6 +2127,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         }
         // D-SYNC1=A / D-DBPOLICY1=A / I9.
         ("core.sync", method) => crate::Comptime::SyncLite::apply(method, &args, span),
+        // D-CORE-COLLECTIONS1=A / I9: nominal collection calls marshal through
+        // the shared Prelude kernel used by AOT.
+        ("core.collections" | "core.collections.set", method) => {
+            crate::Comptime::CollectionEval::apply_core_collections(module, method, &args, span)
+        }
         ("core.reactive", "signal" | "derived" | "computed" | "effect") => {
             crate::Comptime::AppLite::apply_suite(module, method, &args, span, resolved_ret)
         }

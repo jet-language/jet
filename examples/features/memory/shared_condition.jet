@@ -3,7 +3,6 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
 }
-
 // D-SHAREDGUARD1=A: a Shared<T> edit guard waits on a Condition with a
 // predicate; the wait returns once the predicate holds, and a notify wakes
 // waiters. One task and no panic, so every tier prints the same line.
@@ -18,7 +17,7 @@ fn mark_ready(state: Shared<State>, changed: Condition) {
     changed.notify_one()
 }
 
-fn take_ticket(state: Shared<State>, changed: Condition) Int -> {
+fn take_ticket(state: Shared<State>, changed: Condition) -> Int {
     guard :: state.guard_edit()
     // A cancelled or failed wait hands out no ticket.
     guard.wait(changed, value -> value.ready) ?? return 0

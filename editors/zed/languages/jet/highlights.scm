@@ -68,41 +68,26 @@
 ; keyword.control: after break defer else if in loop return task task.all task.any task.group task.race
 [
   "break"
-  "defer"
   "else"
   "if"
   "in"
   "loop"
   "return"
-  "task"
 ] @keyword.control
 
 ; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
 [
-  "Test"
-  "add"
-  "alias"
-  "as"
-  "change"
   "derive"
-  "distinct"
   "enum"
   "extern"
   "fn"
   "impl"
-  "marker"
-  "migration"
   "module"
   "pub"
-  "remove"
-  "rename"
-  "rust"
-  "state"
   "struct"
   "tag"
   "trait"
   "use"
-  "via"
 ] @keyword
 
 ; keyword.ownership: uninit
@@ -140,7 +125,7 @@
 ; builtin: assert assert_eq channel check freeze input join print
 ; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every Extern FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
-; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
+; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Config / manifest keys (pkg.jet, env.jet)
@@ -148,3 +133,14 @@
 
 ; All other identifiers
 (identifier) @variable
+
+; Interpolations are string text. Later captures win in Zed, so these must
+; follow @function.call / @variable or `{escape(level)}` paints as Jet syntax.
+(string_interpolation) @string
+(string_interpolation (identifier) @string)
+(string_interpolation (call_expr name: (identifier) @string))
+(string_interpolation (field_expr field: (identifier) @string))
+(string_interpolation (field_expr (identifier) @string))
+(string_interpolation (integer_literal) @string)
+(string_interpolation (float_literal) @string)
+(escape_sequence) @string

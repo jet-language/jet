@@ -5,6 +5,7 @@
 //! those modules stay unsupported or REPL-native-denied. `jet-jit` installs
 //! hooks only around `MirBridge::run_bundle` for runtime-tier deopt.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -161,6 +162,18 @@ pub type AmbientMirExternCall = fn(
     Vec<MirRuntimeValue>,
     Span,
 ) -> Option<Result<MirRuntimeValue, Diagnostic>>;
+pub type AmbientWorkerContext = Arc<dyn Any + Send + Sync>;
+
+#[derive(Clone, Default)]
+pub struct AmbientRuntimeSnapshot {
+    core_call: Option<AmbientCoreCall>,
+    core_closure_call: Option<AmbientCoreClosureCall>,
+    handle: Option<AmbientHandle>,
+    extern_call: Option<AmbientExternCall>,
+    mir_handle_call: Option<AmbientMirHandle>,
+    mir_extern_call: Option<AmbientMirExternCall>,
+    worker_context: Option<AmbientWorkerContext>,
+}
 thread_local! {
     static CORE_CALL: Cell<Option<AmbientCoreCall>> = const { Cell::new(None) };
     static CORE_CLOSURE_CALL: Cell<Option<AmbientCoreClosureCall>> = const { Cell::new(None) };
@@ -168,6 +181,7 @@ thread_local! {
     static EXTERN_CALL: Cell<Option<AmbientExternCall>> = const { Cell::new(None) };
     static MIR_HANDLE_CALL: Cell<Option<AmbientMirHandle>> = const { Cell::new(None) };
     static MIR_EXTERN_CALL: Cell<Option<AmbientMirExternCall>> = const { Cell::new(None) };
+    static WORKER_CONTEXT: RefCell<Option<AmbientWorkerContext>> = const { RefCell::new(None) };
     static PACKAGE_READ_CONTEXT: RefCell<Option<PackageReadContext>> = const { RefCell::new(None) };
 }
 struct AmbientHooksGuard {
@@ -182,6 +196,30 @@ impl Drop for AmbientHooksGuard {
         HANDLE.with(|slot| slot.set(self.handle));
         EXTERN_CALL.with(|slot| slot.set(self.extern_call));
     }
+}
+struct AmbientWorkerContextGuard(Option<AmbientWorkerContext>);
+
+impl Drop for AmbientWorkerContextGuard {
+    fn drop(&mut self) {
+        WORKER_CONTEXT.with(|slot| {
+            slot.replace(self.0.take());
+        });
+    }
+}
+
+pub fn with_ambient_worker_context<R>(
+    context: Option<AmbientWorkerContext>,
+    body: impl FnOnce() -> R,
+) -> R {
+    let previous = WORKER_CONTEXT.with(|slot| slot.replace(context));
+    let _guard = AmbientWorkerContextGuard(previous);
+    body()
+}
+
+pub fn ambient_worker_context<T: Any + Send + Sync>() -> Option<Arc<T>> {
+    WORKER_CONTEXT
+        .with(|slot| slot.borrow().clone())
+        .and_then(|context| Arc::downcast::<T>(context).ok())
 }
 #[derive(Debug, Default)]
 struct PackageReadContext {
@@ -362,9 +400,41 @@ pub fn try_ambient_mir_handle(
         .and_then(|hook| hook(operation, handle, args, span))
 }
 
-/// Copy the current callbacks into a worker thread before evaluating a
-/// runtime fragment. The callbacks are function pointers, so this preserves
-/// the ambient authority without sharing mutable host state.
+/// Capture every ambient callback and the thread-safe host context so a checked
+/// runtime closure can preserve the same authority on a scheduler worker.
+pub fn ambient_runtime_snapshot() -> AmbientRuntimeSnapshot {
+    AmbientRuntimeSnapshot {
+        core_call: CORE_CALL.with(|slot| slot.get()),
+        core_closure_call: CORE_CLOSURE_CALL.with(|slot| slot.get()),
+        handle: HANDLE.with(|slot| slot.get()),
+        extern_call: EXTERN_CALL.with(|slot| slot.get()),
+        mir_handle_call: MIR_HANDLE_CALL.with(|slot| slot.get()),
+        mir_extern_call: MIR_EXTERN_CALL.with(|slot| slot.get()),
+        worker_context: WORKER_CONTEXT.with(|slot| slot.borrow().clone()),
+    }
+}
+
+pub fn with_ambient_runtime_snapshot<R>(
+    snapshot: AmbientRuntimeSnapshot,
+    body: impl FnOnce() -> R,
+) -> R {
+    with_ambient(
+        snapshot.core_call,
+        snapshot.handle,
+        snapshot.extern_call,
+        || {
+            with_ambient_core_closure(snapshot.core_closure_call, || {
+                with_ambient_mir_handle(snapshot.mir_handle_call, || {
+                    with_ambient_mir_extern(snapshot.mir_extern_call, || {
+                        with_ambient_worker_context(snapshot.worker_context, body)
+                    })
+                })
+            })
+        },
+    )
+}
+
+/// Copy the legacy callbacks into a compiler-stack worker.
 pub fn ambient_hooks() -> (
     Option<AmbientCoreCall>,
     Option<AmbientHandle>,

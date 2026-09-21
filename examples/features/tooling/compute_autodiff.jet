@@ -1,7 +1,13 @@
+package {
+    name: "tooling_compute_autodiff"
+    version: "0.1.0"
+    authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Panic, Rand, Secret, Time] } }
+}
+
 // D-COMPUTE-AUTODIFF1 / #1141–#1143: gradient/VJP/JVP, sparse CSR, SIMD tile, profile.
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) Tensor -> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")

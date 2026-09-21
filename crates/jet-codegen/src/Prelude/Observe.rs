@@ -614,10 +614,10 @@ pub fn jet_observe_runtime_start_with_decision_ledger(
     if !JET_DEVTOOLS_LOCAL_RAIL_ENABLED {
         return;
     }
-    let Some(registry) = jet_observe_registry().cloned() else { return };
     if !jet_observe_live_enabled() {
         return;
     }
+    let Some(registry) = jet_observe_registry().cloned() else { return };
     let Some(identity) = identity else {
         return;
     };

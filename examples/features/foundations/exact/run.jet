@@ -1,9 +1,10 @@
 use core.encoding.json as json
-use "exact" as exact
+use "exact"
 
 // #2774 remains visible here on purpose: AOT currently folds this exact
 // division incorrectly, while the runtime path stays mathematically exact.
 @ten :: 10
+
 @third :: @ten / 3
 
 fn run() {
@@ -30,29 +31,43 @@ fn run() {
     rational_reverse_times :: two * first
     rational_minus_int :: first - two
     rational_div_int :: first / two
-    if rational_plus_int.numerator != 5 || rational_plus_int.denominator != 2 -> panic("rational plus Int")
+    if rational_plus_int.numerator != 5 || rational_plus_int.denominator != 2 {
+        panic("rational plus Int")
+    }
     if rational_reverse_plus != rational_plus_int -> panic("commutative rational add")
-    if rational_times_int.numerator != 1 || rational_times_int.denominator != 1 -> panic("rational times Int")
+    if rational_times_int.numerator != 1 || rational_times_int.denominator != 1 {
+        panic("rational times Int")
+    }
     if rational_reverse_times != rational_times_int -> panic("commutative rational multiply")
     print("rational mixed {rational_plus_int} {rational_times_int} {rational_minus_int} {rational_div_int}")
 
     big_first :: exact.rational(123456789012345678901234567890, 7) ?? panic("big first")
     big_second :: exact.rational(1, 7) ?? panic("big second")
     big_sum :: big_first + big_second
-    if big_sum.numerator != 123456789012345678901234567891 || big_sum.denominator != 7 -> panic("big rational precision")
+    if big_sum.numerator != 123456789012345678901234567891 || big_sum.denominator != 7 {
+        panic("big rational precision")
+    }
     print("big rational {big_sum}")
 
     decimal_a :: ScaledDecimal{coefficient: 12340, scale: 3}
     decimal_b :: ScaledDecimal{coefficient: 6, scale: 1}
     decimal_sum :: decimal_a + decimal_b
     decimal_product :: decimal_a * decimal_b
-    if decimal_sum.coefficient != 12940 || decimal_sum.scale != 3 -> panic("scaled decimal addition")
-    if decimal_product.coefficient != 74040 || decimal_product.scale != 4 -> panic("scaled decimal multiplication")
+    if decimal_sum.coefficient != 12940 || decimal_sum.scale != 3 {
+        panic("scaled decimal addition")
+    }
+    if decimal_product.coefficient != 74040 || decimal_product.scale != 4 {
+        panic("scaled decimal multiplication")
+    }
     if decimal_sum < decimal_product -> panic("scaled decimal comparison")
     scaled_plus_int :: decimal_a + two
     scaled_times_int :: two * decimal_a
-    if scaled_plus_int.coefficient != 14340 || scaled_plus_int.scale != 3 -> panic("scaled decimal plus Int")
-    if scaled_times_int.coefficient != 24680 || scaled_times_int.scale != 3 -> panic("scaled decimal times Int")
+    if scaled_plus_int.coefficient != 14340 || scaled_plus_int.scale != 3 {
+        panic("scaled decimal plus Int")
+    }
+    if scaled_times_int.coefficient != 24680 || scaled_times_int.scale != 3 {
+        panic("scaled decimal times Int")
+    }
     print("scaled decimal {decimal_sum} {decimal_product} {decimal_sum.coefficient == 12940 && decimal_sum.scale == 3}")
     print("scaled mixed {scaled_plus_int} {scaled_times_int}")
     scaled_wire :: json.to_string(decimal_sum)
@@ -66,7 +81,9 @@ fn run() {
     literal_rational :: exact.accept_rational(7)
     literal_decimal :: exact.add_decimals(0.10, 0.20)
     literal_money :: exact.accept_money(19)
-    if literal_rational.numerator != 7 || literal_rational.denominator != 1 -> panic("Rational literal")
+    if literal_rational.numerator != 7 || literal_rational.denominator != 1 {
+        panic("Rational literal")
+    }
     if literal_decimal.coefficient != 30 || literal_decimal.scale != 2 -> panic("Decimal literals")
     if literal_money.cents != 19 -> panic("Money literal")
     print("literals {literal_rational} {literal_decimal} {literal_money}")

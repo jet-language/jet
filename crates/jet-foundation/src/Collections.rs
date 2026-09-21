@@ -294,20 +294,20 @@ pub fn view_iter_elem(ty: &Type) -> Option<&Type> {
 const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
-    "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
-    "close collect compare compare_exchange concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros ",
-    "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
+    "close collect compare compare_exchange concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros bit_count bit_length ",
+    "encode cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
     "cut_last div_euclid rem_euclid ",
     "checked_add checked_sub checked_mul checked_div checked_rem saturating_add saturating_sub saturating_mul ",
     "wrapping_add wrapping_sub wrapping_mul ",
-    "flat_map flatten float float_range flush fold from from_bytes from_bytes_lossy from_keys from_text functions generate ",
+    "flat_map flatten float float_range flush fold from from_bytes from_bytes_lossy from_keys fromkeys from_text functions generate ",
     "generated_lines get get_buffer get_disjoint_write get_or_set group_by guard_edit guard_read has has_key has_method hex ",
     "hole home ids implements index_of indexed indexes init insert int intersection intersperse ",
-    "is_active is_alphabetic is_ascii is_disjoint is_empty is_finite is_infinite is_lower is_nan is_numeric is_sorted is_sorted_by ",
-    "is_subset is_superset is_upper is_whitespace item items join key keys last last_index_of lazy ",
-    "leading_zeros left legacy len lines listener_count map match matches max max_by merge ",
+    "is_active is_alphabetic is_ascii is_disjoint is_empty is_finite is_infinite is_lower is_upper is_numeric is_sorted is_sorted_by ",
+    "is_subset is_superset is_whitespace isalnum isalpha isascii isdecimal isdigit isidentifier islower isprintable isspace istitle isnumeric ",
+    "isdisjoint issubset issuperset discard difference_update intersection_update symmetric_difference_update maketrans translate format format_map ",
+    "item items join key keys last last_index_of lazy lower upper title casefold startswith endswith removeprefix removesuffix splitlines center ljust rjust zfill ",
     "min load min_by min_max min_max_by new new_random next normal normalize notes notify_all notify_one ",
     "now observe on on_priority once or_err origin packages pad_end pad_start para_filter para_fold para_map ",
     "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop publish ",
@@ -1246,7 +1246,9 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
     }
     // D-NUMOPS1: integer bit-population queries (count -> Int).
     if matches!(ty, Type::Int | Type::IntN { .. }) && nargs == 0 {
-        if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
+        if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+        | "bit_count" | "bit_length" = method
+        {
             return Some(Some(Type::Int));
         }
     }
@@ -1478,7 +1480,7 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             key_span: None,
             value: Box::new(Type::Int),
         })),
-        (Type::Named(n), "from_keys", 2) if n == Syntax::TYPE_MAP => Some(Some(Type::Map {
+        (Type::Named(n), "from_keys" | "fromkeys", 2) if n == Syntax::TYPE_MAP => Some(Some(Type::Map {
             key: Box::new(Type::Int),
             key_span: None,
             value: Box::new(Type::Int),
@@ -1523,7 +1525,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("push" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
+        ("push" | "append" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
         ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
@@ -1538,9 +1540,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("extend", 1) => Some(None),
         ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("pop" | "get" | "first" | "last" | "index_of", 0 | 1) => {
+        ("pop" | "get" | "first" | "last", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
         }
+        ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("index", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("contains", 1) => Some(Some(Type::Bool)),
         ("join", 1) => Some(Some(Type::String)),
         ("sum" | "product", 0) => Some(Some(inner.clone())),
@@ -1881,12 +1885,13 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("clear", 0) => Some(None),
-        ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("add" | "replace", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("try_insert", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::Option(Box::new(value.clone()))),
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
         })),
         ("add_new", 2) => Some(Some(Type::Bool)),
+        ("setdefault", 2) => Some(Some(value.clone())),
         ("get" | "remove" | "pop", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("has_key", 1) => Some(Some(Type::Bool)),
         ("contains_value", 1) => Some(Some(Type::Bool)),
@@ -1900,6 +1905,7 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
             key_span: None,
             value: Box::new(value.clone()),
         })),
+        ("update", 1) => Some(None),
         ("each", 1) => Some(None),
         // #1477: remaining Map ledger surface.
         ("copy", 0) => Some(Some(Type::Map {
@@ -1909,7 +1915,7 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         })),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("first", 0) => Some(Some(Type::Option(Box::new(key.clone())))),
-        ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
+        ("to_list" | "items", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
             ("key".to_string(), Box::new(key.clone())),
             ("value".to_string(), Box::new(value.clone())),
         ]))))),
@@ -1948,30 +1954,72 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             ok: Box::new(Type::Named("Unit".to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
         })),
-        ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         (
-            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_ascii_lower"
-            | "to_ascii_upper" | "to_title" | "to_string",
+            "contains" | "starts_with" | "ends_with" | "startswith" | "endswith",
+            1,
+        ) => Some(Some(Type::Bool)),
+        (
+            "trim"
+                | "trim_start"
+                | "trim_end"
+                | "to_upper"
+                | "to_lower"
+                | "to_ascii_lower"
+                | "to_ascii_upper"
+                | "to_title"
+                | "to_string"
+                | "lower"
+                | "upper"
+                | "title"
+                | "casefold",
             0,
         ) => Some(Some(Type::String)),
-        ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii", 0) => {
-            Some(Some(Type::Bool))
-        }
-        // #1476 remaining String surface.
-        ("is_lower" | "is_upper", 0) => Some(Some(Type::Bool)),
-        ("capitalize" | "swapcase" | "copy" | "reverse" | "normalize", 0) => {
-            Some(Some(Type::String))
-        }
-        ("remove_prefix" | "remove_suffix", 1) => Some(Some(Type::String)),
+        (
+            "is_alphabetic"
+                | "is_numeric"
+                | "is_whitespace"
+                | "is_ascii"
+                | "isalnum"
+                | "isalpha"
+                | "isascii"
+                | "isdecimal"
+                | "isdigit"
+                | "isidentifier"
+                | "is_lower"
+                | "islower"
+                | "isnumeric"
+                | "isprintable"
+                | "isspace"
+                | "istitle"
+                | "is_upper"
+                | "isupper",
+            0,
+        ) => Some(Some(Type::Bool)),
+        (
+            "capitalize" | "swapcase" | "copy" | "reverse" | "normalize",
+            0,
+        ) => Some(Some(Type::String)),
+        ("removeprefix" | "removesuffix", 1) => Some(Some(Type::String)),
+        ("center" | "ljust" | "rjust", 2) => Some(Some(Type::String)),
+        ("zfill", 1) => Some(Some(Type::String)),
+        ("strip" | "lstrip" | "rstrip", 0) => Some(Some(Type::String)),
+        ("expandtabs", 1) => Some(Some(Type::String)),
+        ("find" | "rfind", 1) => Some(Some(Type::Int)),
+        ("rindex", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("partition" | "rpartition", 1) => Some(Some(Type::Tuple(vec![
+            ("head".to_string(), Box::new(Type::String)),
+            ("sep".to_string(), Box::new(Type::String)),
+            ("tail".to_string(), Box::new(Type::String)),
+        ]))),
         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("compare", 1) => Some(Some(Type::Int)),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("rsplit", 1) => Some(Some(iter_ty(Type::String))),
-        ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
+        ("bytes" | "encode", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
         ("slice", 1) => Some(Some(Type::String)),
         ("pad_start" | "pad_end", 2) => Some(Some(Type::String)),
-        ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("index_of" | "index", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("count", 1) => Some(Some(Type::Int)),
         ("split_once" | crate::Syntax::METHOD_CUT_LAST, 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
             ("before".to_string(), Box::new(Type::String)),
@@ -1982,7 +2030,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("after" | "before", 1) => Some(Some(Type::String)),
         ("split", 1) => Some(Some(iter_ty(Type::String))),
         // c97/D-STRPARSE1: split text into its lines (mirrors `split`).
-        ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("lines" | "splitlines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
         // c97/D-STRPARSE1: fallible integer parse. Same `Int !ParseError` result
@@ -1990,7 +2038,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
         // the one parse mechanism `Int.parse`/`Float.parse` already run —
         // same `Int !ParseError` result, reached one call shorter from text.
-        ("to_int", 0) => Some(Some(Type::Result {
+        ("parse" | "to_int", 0) => Some(Some(Type::Result {
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
@@ -2547,18 +2595,21 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
         ("intersection" | "difference" | "symmetric_difference", 1) => Some(Some(set_of_elem())),
-        ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
+        ("is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: remaining Set surface (non-closure).
         ("copy" | "to_set", 0) => Some(Some(set_of_elem())),
+        ("discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update", 1) => Some(None),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("capacity", 0) => Some(Some(Type::Int)),
         ("first", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
         // #1478: ledger closes on Set's remaining order-agnostic surface.
         // `values` is the lazy alias of `to_list` (I8, mirrors `Map.values`).
         ("values", 0) => Some(Some(iter_ty(elem.clone()))),
-        // D-ONCE-VERB1=A: Set.pop removes and returns a matching value.
-        ("pop", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // D-ONCE-VERB1=A: Set.pop/take remove and return a matching value.
+        ("pop" | "take", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // Rust HashSet::replace inserts the value and returns the displaced equal value.
+        ("replace", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
         ("all", 1) => Some(Some(Type::Bool)),
         ("each", 1) => Some(None),
         ("filter", 1) => Some(Some(Type::List(Box::new(elem.clone())))),
@@ -2671,6 +2722,10 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("index_of" | "last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("partition", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::List(Box::new(buf()))),
+            err: Box::new(Type::String),
+        })),
         ("join", 1) => Some(Some(buf())),
         ("replace", 2) => Some(Some(buf())),
         ("equal" | "compare", 1) => Some(Some(if method == "equal" {
@@ -2744,7 +2799,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::List(_) | Type::FixedList { .. } => matches!(
             method,
             "push"
-                | "try_push"
+                | "append"
                 | "try_reserve"
                 | "pop"
                 | "insert"
@@ -2763,12 +2818,31 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         ),
         Type::Map { .. } => matches!(
             method,
-            "add" | "try_insert" | "add_new" | "remove" | "pop" | "pop_first" | "clear"
+            "add"
+                | "try_insert"
+                | "add_new"
+                | "setdefault"
+                | "remove"
+                | "pop"
+                | "pop_first"
+                | "clear"
+                | "update"
         ),
         Type::String => method == "try_push",
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
-            matches!(method, "add" | "remove" | "pop" | "clear")
+            matches!(
+                method,
+                "add"
+                    | "remove"
+                    | "discard"
+                    | "update"
+                    | "difference_update"
+                    | "intersection_update"
+                    | "symmetric_difference_update"
+                    | "pop"
+                    | "clear"
+            )
         }
         Type::Apply { name, .. } if name == Syntax::TYPE_RANK => {
             matches!(method, "add" | "remove" | "clear")
@@ -3089,10 +3163,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::List(inner) => match method {
             "try_new" => Some(vec![]),
             "try_with_capacity" => Some(vec![Type::Int]),
-            "push" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
+            "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
             "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
             "get" | "index_of" => Some(vec![Type::Int]),
+            "index" => Some(vec![(**inner).clone()]),
             "remove" => Some(vec![
                 (**inner).clone(),
                 Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
@@ -3302,7 +3377,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "add" | "try_insert" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "pop" | "has_key" => Some(vec![(**key).clone()]),
             "contains_value" => Some(vec![(**value).clone()]),
-            "merge" | "equal" | "intersection" => Some(vec![Type::Map {
+            "merge" | "equal" | "intersection" | "update" => Some(vec![Type::Map {
                 key: Box::new((**key).clone()),
                 key_span: None,
                 value: Box::new((**value).clone()),
@@ -3348,14 +3423,32 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::String => match method {
             "try_push" => Some(vec![Type::String]),
-            "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "count"
-            | "split_once" | crate::Syntax::METHOD_CUT_LAST => Some(vec![Type::String]),
+            "contains"
+            | "starts_with"
+            | "startswith"
+            | "ends_with"
+            | "endswith"
+            | "split"
+            | "rsplit"
+            | "index_of"
+            | "index"
+            | "rindex"
+            | "count"
+            | "find"
+            | "rfind"
+            | "partition"
+            | "rpartition"
+            | "split_once"
+            | crate::Syntax::METHOD_CUT_LAST
+            | "removeprefix"
+            | "removesuffix" => Some(vec![Type::String]),
+            "expandtabs" => Some(vec![Type::Int]),
             "from_bytes" | "from_bytes_lossy" => Some(vec![Type::List(Box::new(u8t()))]),
             "replace" => Some(vec![Type::String, Type::String]),
             "pad_start" | "pad_end" => Some(vec![Type::Int, Type::String]),
             "slice" => Some(vec![Type::Int, Type::Int]),
             "repeat" => Some(vec![Type::Int]),
-            _ => Some(vec![]),
+            _ => None,
         },
         Type::Int | Type::Float => match method {
             "parse" => Some(vec![Type::String]),
@@ -3517,6 +3610,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "last_index_of" => {
                 Some(vec![Type::String])
             }
+            "partition" => Some(vec![Type::Named(Syntax::TYPE_BYTES.to_string())]),
             "replace" => Some(vec![Type::String, Type::String]),
             "join" => Some(vec![Type::List(Box::new(Type::String))]),
             "equal" | "compare" | "copy_to" | "write_to" => {
@@ -3694,7 +3788,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Apply { name, args } if name == "Set" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
-                "add" | "has" | "remove" => Some(vec![elem.clone()]),
+                "add" | "has" | "remove" | "discard" => Some(vec![elem.clone()]),
                 "equal" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
                     args: vec![elem.clone()],
@@ -3703,9 +3797,16 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 | "intersection"
                 | "difference"
                 | "symmetric_difference"
+                | "update"
+                | "difference_update"
+                | "intersection_update"
+                | "symmetric_difference_update"
                 | "is_subset"
+                | "issubset"
                 | "is_superset"
-                | "is_disjoint" => Some(vec![Type::Apply {
+                | "issuperset"
+                | "is_disjoint"
+                | "isdisjoint" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
                     args: vec![elem.clone()],
                 }]),
@@ -3930,6 +4031,7 @@ mod tests {
     fn list_mutation_borrows_match_for_growable_and_fixed_lists() {
         let methods = [
             ("push", BuiltinReceiverBorrow::TwoPhaseWrite),
+            ("append", BuiltinReceiverBorrow::TwoPhaseWrite),
             ("try_push", BuiltinReceiverBorrow::TwoPhaseWrite),
             ("try_reserve", BuiltinReceiverBorrow::TwoPhaseWrite),
             ("pop", BuiltinReceiverBorrow::TwoPhaseWrite),

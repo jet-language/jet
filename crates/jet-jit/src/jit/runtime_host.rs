@@ -1106,6 +1106,7 @@ pub(crate) struct RuntimeTypeDescriptor {
     pub(crate) serde_deny_unknown: bool,
     pub(crate) cli: Option<jet_foundation::MIR::MirCliEntry>,
     pub(crate) fields: Vec<RuntimeFieldDescriptor>,
+    pub(crate) migration: Option<jet_foundation::SchemaMigration::SchemaMigrationPlan>,
     pub(crate) variants: Vec<RuntimeVariantDescriptor>,
 }
 
@@ -1553,6 +1554,7 @@ fn runtime_type_descriptor(ty: &MirType) -> Option<RuntimeTypeDescriptor> {
         serde_deny_unknown: false,
         cli: None,
         fields,
+        migration: None,
         variants: Vec::new(),
     })
 }
@@ -1586,12 +1588,14 @@ pub(crate) fn runtime_type_descriptors(program: &MirProgram) -> Vec<RuntimeTypeD
             serde_deny_unknown: false,
             cli: None,
             fields: Vec::new(),
+            migration: None,
             variants: Vec::new(),
         });
         let descriptor = descriptors
             .get_mut(&definition.id.0)
             .expect("enum/struct descriptor row was just inserted");
         descriptor.name = definition.name.clone();
+        descriptor.migration = program.codec_migrations.get(&definition.name).cloned();
         descriptor.canonical = definition.key.clone();
         descriptor.cli = definition.cli.clone();
         descriptor.serde_tag = definition.serde.iter().find_map(|attribute| {
@@ -1771,7 +1775,7 @@ pub(crate) fn runtime_type_descriptors_for_function(
                     collect(ret, descriptors);
                 }
             }
-            MirTypeKind::SendFn { params, ret } => {
+            MirTypeKind::SendFn { params, ret, .. } => {
                 params.iter().for_each(|param| collect(param, descriptors));
                 if let Some(ret) = ret {
                     collect(ret, descriptors);
@@ -2599,8 +2603,51 @@ pub(crate) fn sequence_get_raw(
     rt.heap.list_get_raw(source, i64::try_from(index).ok()?)
 }
 
+pub(crate) fn sequence_set_int(
+    rt: &mut JitRuntime,
+    source: i64,
+    offset: usize,
+    value: i64,
+) -> Option<()> {
+    if let Some(view_index) = view_index(rt, source) {
+        let (owner, start, end) = match rt.view_slots.get(view_index)? {
+            JitViewSlot::Sequence { source, start, end } => (*source, *start, *end),
+            _ => return None,
+        };
+        let absolute = start.checked_add(offset)?;
+        if absolute >= end {
+            return None;
+        }
+        return sequence_set_int(rt, owner, absolute, value);
+    }
+    rt.heap.list_set_int(source, i64::try_from(offset).ok()?, value)
+}
+
+pub(crate) fn sequence_set_float(
+    rt: &mut JitRuntime,
+    source: i64,
+    offset: usize,
+    value: f64,
+) -> Option<()> {
+    if let Some(view_index) = view_index(rt, source) {
+        let (owner, start, end) = match rt.view_slots.get(view_index)? {
+            JitViewSlot::Sequence { source, start, end } => (*source, *start, *end),
+            _ => return None,
+        };
+        let absolute = start.checked_add(offset)?;
+        if absolute >= end {
+            return None;
+        }
+        return sequence_set_float(rt, owner, absolute, value);
+    }
+    rt.heap.list_set_float(source, i64::try_from(offset).ok()?, value)
+}
+
 
 pub(crate) fn view_string(rt: &JitRuntime, handle: i64) -> Option<String> {
+    if let Some(value) = rt.heap.clone_string(handle) {
+        return Some(value);
+    }
     let index = view_index(rt, handle)?;
     match rt.view_slots.get(index)? {
         JitViewSlot::String {
@@ -3193,6 +3240,7 @@ fn merge_runtime_type_descriptor(
         && merge_runtime_optional(&mut current.ok, incoming.ok)
         && merge_runtime_optional(&mut current.err, incoming.err)
         && merge_runtime_optional(&mut current.serde_tag, incoming.serde_tag)
+        && merge_runtime_optional(&mut current.migration, incoming.migration)
         && merge_runtime_optional(&mut current.cli, incoming.cli)
         && merge_runtime_rows(&mut current.fields, incoming.fields)
         && merge_runtime_rows(&mut current.variants, incoming.variants)
@@ -3964,6 +4012,7 @@ pub(crate) struct ResidentModule {
     pub(crate) main_id: FuncId,
     pub(crate) main_returns_result: bool,
     pub(crate) main_returns_app: bool,
+    pub(crate) main_serves_app: bool,
     pub(crate) main_returns_default_err: bool,
     pub(crate) main_error_type: Option<String>,
     pub(crate) main_error_is_packed: bool,
@@ -4397,6 +4446,7 @@ fn persist_builtin_descriptor(type_name: &str) -> Option<RuntimeTypeDescriptor> 
         serde_deny_unknown: false,
         cli: None,
         fields: Vec::new(),
+        migration: None,
         variants: Vec::new(),
     })
 }
@@ -4445,6 +4495,12 @@ fn persist_descriptor(
     rt.runtime_type_descriptor_by_name(type_name)
         .cloned()
         .or_else(|| persist_builtin_descriptor(type_name))
+}
+pub(crate) fn checked_runtime_type_descriptor(
+    rt: &JitRuntime,
+    type_name: &str,
+) -> Option<RuntimeTypeDescriptor> {
+    persist_descriptor(rt, type_name)
 }
 
 fn persist_child_descriptor(
@@ -5168,6 +5224,40 @@ fn persist_encode_raw(
         ),
     }
 }
+/// Marshal one local `Cell` payload through the same checked descriptor codec
+/// used by the resident persistence/history boundaries.  Cell deliberately
+/// keeps only its schema handle; the descriptor registry remains the canonical
+/// source for recursive aggregate carriers.
+pub(crate) fn decode_jit_cell_value(
+    rt: &mut JitRuntime,
+    raw: i64,
+    type_id: u64,
+) -> Result<MirRuntimeValue, String> {
+    let descriptor = rt
+        .runtime_type_descriptor(type_id)
+        .cloned()
+        .ok_or_else(|| format!("Cell value descriptor {type_id} is unavailable"))?;
+    let mut state = PersistDecodeState::default();
+    persist_decode_raw(rt, raw, &descriptor, &mut state, 0)
+}
+
+/// Marshal one local `Cell` payload through the checked descriptor codec.
+///
+/// This is the inverse of [`decode_jit_cell_value`]; keeping both directions
+/// here prevents Cell from growing a second aggregate serialization ABI.
+pub(crate) fn encode_jit_cell_value(
+    rt: &mut JitRuntime,
+    value: &MirRuntimeValue,
+    type_id: u64,
+) -> Result<i64, String> {
+    let descriptor = rt
+        .runtime_type_descriptor(type_id)
+        .cloned()
+        .ok_or_else(|| format!("Cell value descriptor {type_id} is unavailable"))?;
+    let mut state = PersistEncodeState::default();
+    persist_encode_raw(rt, value, &descriptor, &mut state, 0)
+}
+
 
 fn persist_text(rt: &JitRuntime, handle: i64) -> Option<String> {
     rt.heap
@@ -6435,25 +6525,18 @@ fn runtime_clone_result(
     value: i64,
     descriptor: &RuntimeTypeDescriptor,
 ) -> Result<i64, String> {
-    if let Some(result) = jit_result(runtime, value) {
-        let payload_type = if result.ok { descriptor.ok } else { descriptor.err };
-        let payload = payload_type
-            .map(|type_id| runtime_clone_value(runtime, result.bits as i64, type_id))
-            .transpose()?
-            .unwrap_or(result.bits as i64);
-        return Ok(alloc_jit_result(runtime, result.ok, payload as u64));
-    }
-    if descriptor.kind == RuntimeValueKind::Option {
-        if value == 0 {
-            return Ok(0);
-        }
-        let payload_type = descriptor
-            .ok
-            .ok_or_else(|| format!("JIT copy `{}` has no option payload descriptor", descriptor.name))?;
-        let payload = runtime_clone_value(runtime, value.wrapping_sub(1), payload_type)?;
-        return Ok(payload.wrapping_add(1));
-    }
-    Err(format!("JIT copy `{}` value is not a result", descriptor.name))
+    let result = jit_result(runtime, value)
+        .ok_or_else(|| format!("JIT copy `{}` value is not a result", descriptor.name))?;
+    let payload_type = if result.ok { descriptor.ok } else { descriptor.err }
+        .ok_or_else(|| {
+            format!(
+                "JIT copy `{}` has no {} payload descriptor",
+                descriptor.name,
+                if result.ok { "success" } else { "failure" }
+            )
+        })?;
+    let payload = runtime_clone_value(runtime, result.bits as i64, payload_type)?;
+    Ok(alloc_jit_result(runtime, result.ok, payload as u64))
 }
 
 fn jet_jit_typed_clone(value: i64, type_id: i64) -> i64 {
@@ -7940,6 +8023,9 @@ fn jet_jit_numeric_int_bit_count(value: i64, op: i64, width: i64) -> i64 {
         0 => "count_ones",
         1 => "count_zeros",
         2 => "leading_zeros",
+        3 => "trailing_zeros",
+        4 => "bit_count",
+        5 => "bit_length",
         _ => "trailing_zeros",
     };
     Concurrency::with_runtime_mut(|rt| {
@@ -7951,7 +8037,10 @@ fn jet_jit_numeric_int_bit_count(value: i64, op: i64, width: i64) -> i64 {
 
 fn jet_jit_struct_new(n: i64) -> i64 {
     STRUCT_NEW_COUNT.with(|count| count.set(count.get() + 1));
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
+    Concurrency::with_runtime_mut(|rt| {
+        let value = rt.heap.alloc_record(n as usize);
+        value
+    })
 }
 fn jet_jit_trait_object_tag(record: i64, type_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -8244,37 +8333,59 @@ fn jet_jit_err_with_context_frame(
 
 fn jet_jit_entry_error_exit(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(error) = jit_error(rt, handle) else {
-            rt.set_host_fault("error propagation exit has an invalid default Err carrier");
+        if let Some(error) = jit_error(rt, handle) {
+            let report = jet_foundation::Outcome::jet_error_report(&error).render();
+            rt.set_rendered_runtime_stop(report, 1);
             return;
-        };
-        let report = jet_foundation::Outcome::jet_error_report(&error).render();
+        }
+        // `T ![FieldError]` and other non-default carriers reach the edge as
+        // heap records/lists. Rendering them is a user-level stop, not an ICE.
+        let rendered = show_entry_error_handle(rt, handle)
+            .unwrap_or_else(|| format!("unhandled error"));
+        let report = jet_foundation::Outcome::jet_journey_report(&rendered);
         rt.set_rendered_runtime_stop(report, 1);
     });
+}
+
+fn show_entry_error_handle(rt: &mut JitRuntime, handle: i64) -> Option<String> {
+    let type_id = rt.trait_object_types.get(&handle).copied()?;
+    debug_nominal_handle(rt, handle, type_id.0, 0)
 }
 
 /// AOT `main` matches `run()`'s Result and calls `jet_entry_error_exit_jet`.
 /// Resident JIT must do the same with the returned result handle, or an
 /// unhandled `Err` from `fn run` is discarded and the process exits 0.
-pub(crate) fn report_unhandled_entry_result(handle: i64) {
+///
+/// The successful payload is returned so an App entry can cross the same
+/// runtime boundary as the generated AOT main.
+pub(crate) fn report_unhandled_entry_result(handle: i64) -> Option<i64> {
     let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| jit_result_parts(rt, handle)) else {
-        return;
+        return None;
     };
-    if !ok {
+    if ok {
+        Some(bits as i64)
+    } else {
         jet_jit_entry_error_exit(bits as i64);
+        None
     }
 }
 
 /// Apply a declared error conversion to the existing shared carrier. The JIT
 /// owns only handle/string marshalling; the Prelude preserves every existing
 /// structured field and adds the crossing identity/history.
-fn jet_jit_err_apply_conversion(handle: i64, source: i64, target: i64) {
+fn jet_jit_err_apply_conversion(handle: i64, source: i64, target: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let source = rt.heap.clone_string(source).unwrap_or_default();
-        let target = rt.heap.clone_string(target).unwrap_or_default();
-        if let Some(error) = rt.errors.get_mut(handle.saturating_sub(1) as usize) {
-            jet_foundation::Outcome::jet_err_apply_conversion(error, source, target);
-        }
+        let (Some(source), Some(target), Some(mut error)) = (
+            rt.heap.clone_string(source),
+            rt.heap.clone_string(target),
+            jit_error(rt, handle),
+        ) else {
+            rt.set_host_fault("declared conversion has an invalid default Err carrier");
+            return 0;
+        };
+        jet_foundation::Outcome::jet_err_apply_conversion(&mut error, source, target);
+        rt.errors.push(error);
+        rt.errors.len() as i64
     })
 }
 
@@ -10470,6 +10581,11 @@ pub(crate) fn invoke_jit_callable_zero(handler: &JitCallableSlot) {
         }
     }
 }
+thread_local! {
+    static TRANSACTION_STACK: std::cell::RefCell<Vec<i64>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Allocate the scalar carrier for one lexical transaction.
 fn jet_jit_transaction_new() -> i64 {
     with_runtime_result(0, |rt| {
@@ -10483,8 +10599,44 @@ fn jet_jit_transaction_new() -> i64 {
             undo: Vec::new(),
             committed: false,
         }));
-        index as i64 + 1
+        let handle = index as i64 + 1;
+        TRANSACTION_STACK.with(|stack| stack.borrow_mut().push(handle));
+        handle
     })
+}
+
+/// Drop the current lexical transaction. Uncommitted transactions run rollback
+/// hooks LIFO and drop commit hooks un-run.
+fn jet_jit_transaction_scope_exit() -> i64 {
+    let handle = TRANSACTION_STACK.with(|stack| stack.borrow_mut().pop()).unwrap_or(0);
+    if handle == 0 {
+        return 1;
+    }
+    let (committed, undo) = with_runtime_result((true, Vec::new()), |rt| {
+        let Some(index) = transaction_index(handle) else {
+            rt.set_host_fault("resident transaction exit received an invalid transaction");
+            return (true, Vec::new());
+        };
+        let Some(Some(state)) = rt.transactions.get_mut(index) else {
+            rt.set_host_fault("resident transaction exit received an unknown transaction");
+            return (true, Vec::new());
+        };
+        let committed = state.committed;
+        let undo = if committed {
+            state.undo.clear();
+            Vec::new()
+        } else {
+            std::mem::take(&mut state.undo)
+        };
+        state.hooks.clear();
+        (committed, undo)
+    });
+    if !committed {
+        for hook in undo.into_iter().rev() {
+            invoke_jit_callable_zero(&hook);
+        }
+    }
+    i64::from(committed)
 }
 
 
@@ -10908,20 +11060,17 @@ pub(crate) fn register_jit_atexit(handler: i64) -> bool {
 /// ABI is either `extern "C" fn()` or `extern "C" fn(i64)` when it carries
 /// the resident environment handle.
 pub(crate) fn run_jit_atexit_handlers(rt: &mut JitRuntime) {
-    jet_foundation::Outcome::jet_runtime_drain_atexit(&mut rt.atexit_handlers, |handler| {
-        // SAFETY: `fn_ptr`, `env`, and `has_env` are written together by the
-        // checked JIT callable binder. The callback signature is the zero-arg
-        // `atexit` signature, with the environment word prepended only for a
-        // captured closure.
-        unsafe {
-            if handler.has_env {
-                let callback: extern "C" fn(i64) = std::mem::transmute(handler.fn_ptr as usize);
-                callback(handler.env);
-            } else {
-                let callback: extern "C" fn() = std::mem::transmute(handler.fn_ptr as usize);
-                callback();
+    let mut pending = std::mem::take(&mut rt.atexit_handlers);
+    jet_foundation::Outcome::jet_runtime_drain_atexit(&mut pending, |handler| {
+        // Generic Core calls wrap `fn()` values in a universal thunk whose
+        // `env` is the inner callable handle (negative), not a capture record.
+        if handler.env < 0 {
+            if let Some(inner) = jit_callable_slot(rt, handler.env) {
+                invoke_jit_callable_zero(&inner);
+                return;
             }
         }
+        invoke_jit_callable_zero(&handler);
     });
 }
 
@@ -11018,7 +11167,10 @@ pub(crate) fn bind_jit_callable_handle(
 }
 
 fn jet_jit_callable_bind(fn_ptr: i64, env: i64, has_env: i8) -> i64 {
-    with_runtime_result(0, |rt| bind_jit_callable(rt, fn_ptr, env, has_env != 0))
+    with_runtime_result(0, |rt| {
+        let handle = bind_jit_callable(rt, fn_ptr, env, has_env != 0);
+        handle
+    })
 }
 /// Attach the checked universal View callback thunk to an existing callable
 /// slot.  The compiler proves the thunk's source signature before it reaches
@@ -11203,7 +11355,8 @@ fn jet_jit_callable_bind_raw_many(handle: i64, thunk_ptr: i64) -> i8 {
 /// whitelist — only an already-bound handle passes, everything else is a defect.
 fn jet_jit_callable_normalize(value: i64) -> i64 {
     with_runtime_result(0, |rt| {
-        if jit_callable_slot(rt, value).is_some() {
+        let valid = jit_callable_slot(rt, value).is_some();
+        if valid {
             value
         } else {
             callable_defect(rt, "resident callable value was never bound");
@@ -11525,6 +11678,20 @@ fn jet_jit_result_is_ok(handle: i64) -> i8 {
 fn jet_jit_result_get_i64(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |result| result.bits as i64))
 }
+fn jet_jit_result_unwrap_callback(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match jit_result_parts(rt, handle) {
+        Some((true, bits)) => bits as i64,
+        Some((false, _)) => {
+            rt.set_host_fault("MIR source-success callback returned a failure carrier");
+            0
+        }
+        None => {
+            rt.set_host_fault("MIR source-success callback returned an invalid failure carrier");
+            0
+        }
+    })
+}
+
 
 fn jet_jit_result_get_f64(handle: i64) -> f64 {
     Concurrency::with_runtime_mut(|rt| f64::from_bits(jit_result(rt, handle).map_or(0, |r| r.bits)))
@@ -11623,6 +11790,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         cranelift_module::default_libcall_names(),
     )
     .map_err(|e| e.to_string())?;
+    builder.hotswap(true);
     register_host_symbols(&mut builder);
     Collections::register_collections_symbols(&mut builder);
     Compute::register_compute_symbols(&mut builder);
@@ -14667,6 +14835,7 @@ host_fns! {
         sig_err_apply_conversion
             .params
             .extend([AbiParam::new(types::I64); 3]);
+        sig_err_apply_conversion.returns.push(AbiParam::new(types::I64));
         let mut sig_err_add_context = Signature::new(cc);
         sig_err_add_context
             .params
@@ -15204,6 +15373,7 @@ host_fns! {
     err_with_context_frame: "jet_err_with_context_frame" => jet_jit_err_with_context_frame: sig_err_with_context_frame;
     entry_error_exit: "jet_entry_error_exit_jet" => jet_jit_entry_error_exit: sig_i64;
     err_apply_conversion: "jet_jit_err_apply_conversion" => jet_jit_err_apply_conversion: sig_err_apply_conversion;
+    row_err_apply_conversion: "jet_err_apply_conversion" => jet_jit_err_apply_conversion: sig_err_apply_conversion;
     err_add_context: "jet_jit_err_add_context" => jet_jit_err_add_context: sig_err_add_context;
     err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
@@ -15242,10 +15412,12 @@ host_fns! {
     transaction_on_commit: "jet_transaction_on_commit" => jet_jit_transaction_on_commit: sig_str_binary_i64;
     transaction_on_rollback: "jet_transaction_on_rollback" => jet_jit_transaction_on_rollback: sig_str_binary_i64;
     transaction_commit: "jet_transaction_commit" => jet_jit_transaction_commit: sig_str_unary_i64;
+    transaction_scope_exit: "jet_jit_transaction_scope_exit" => jet_jit_transaction_scope_exit: sig_str_begin;
     unit_convert_rounded_measurement: "jet_std::jet_unit_conversion_rounded_measurement" => jet_jit_unit_convert_rounded_measurement: sig_unit_convert_rounded_measurement;
     unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
     result_is_ok: "jet_jit_result_is_ok" => jet_jit_result_is_ok: sig_result_query_i8;
     result_get_i64: "jet_jit_result_get_i64" => jet_jit_result_get_i64: sig_result_query_i64;
+    result_unwrap_callback: "jet_jit_result_unwrap_callback" => jet_jit_result_unwrap_callback: sig_result_query_i64;
     result_get_f64: "jet_jit_result_get_f64" => jet_jit_result_get_f64: sig_result_query_f64;
     result_get_i8: "jet_jit_result_get_i8" => jet_jit_result_get_i8: sig_result_query_i8;
     result_get_i32: "jet_jit_result_get_i32" => jet_jit_result_get_i32: sig_result_query_i32;

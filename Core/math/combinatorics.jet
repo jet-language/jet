@@ -1,0 +1,444 @@
+package {
+    name: "core.math.combinatorics"
+    version: "0.1.0"
+    edition: "2026"
+    description: "core.math.combinatorics core library."
+    license: "MIT"
+    outputs: {
+        combinatorics: .Library{ entry: combinatorics }
+    }
+}
+use core.math as math
+// core.math.combinatorics — counting, ranking, and generation.
+//
+// `permutations` / `combinations` / `product` materialise the full
+// collection (Python `itertools` without lazy iterators). Counts use
+// exact `Int`. Generation is return-based so array values stay consistent.
+pub fn factorial(n: Int) -> ?Int { math.factorial(n) }
+
+pub fn binomial(n: Int, k: Int) -> ?Int { math.binomial(n, k) }
+
+pub fn permutations_count(n: Int, k: Int) -> ?Int {
+    if n < 0 || k < 0 || k > n -> return None
+    acc := 1
+    i := 0
+    loop i < k {
+        acc = acc * (n - i)
+        i = i + 1
+    }
+    Val(acc)
+}
+
+pub fn combinations_count(n: Int, k: Int) -> ?Int { math.binomial(n, k) }
+
+pub fn permutations(items: [Int], k: Int) -> [[Int]] {
+    n :: items.len()
+    if k < 0 || k > n -> return [[Int]]{}
+    used := [Bool]{}
+    loop i in 0..<n -> used.push(false)
+    perm_rec(items, k, used, [Int]{})
+}
+
+pub fn combinations(items: [Int], k: Int) -> [[Int]] {
+    n :: items.len()
+    if k < 0 || k > n -> return [[Int]]{}
+    comb_rec(items, k, 0, [Int]{})
+}
+
+pub fn combinations_with_replacement(items: [Int], k: Int) -> [[Int]] {
+    if k < 0 -> return [[Int]]{}
+    comb_rep_rec(items, k, 0, [Int]{})
+}
+
+pub fn product(items: [Int], repeat: Int) -> [[Int]] {
+    if repeat <= 0 -> return [[Int]]{[Int]{}}
+    out := [[Int]]{[Int]{}}
+    r := 0
+    loop r < repeat {
+        nxt := [[Int]]{}
+        loop row in out {
+            loop x in items {
+                cloned := [Int]{}
+                loop v in row -> cloned.push(v)
+                cloned.push(x)
+                nxt.push(cloned)
+            }
+        }
+        out = nxt
+        r = r + 1
+    }
+    out
+}
+
+pub fn cartesian(left: [Int], right: [Int]) -> [[Int]] {
+    out := [[Int]]{}
+    loop a in left {
+        loop b in right -> out.push([Int]{a, b})
+    }
+    out
+}
+
+fn perm_rec(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
+    if cur.len() == k {
+        cloned := [Int]{}
+        loop v in cur -> cloned.push(v)
+        return [[Int]]{cloned}
+    }
+    out := [[Int]]{}
+    i := 0
+    loop i < items.len() {
+        if !used[i] {
+            next_used := [Bool]{}
+            loop u in used -> next_used.push(u)
+            next_used[i] = true
+            next_cur := [Int]{}
+            loop v in cur -> next_cur.push(v)
+            next_cur.push(items[i])
+            kids :: perm_rec(items, k, next_used, next_cur)
+            loop row in kids -> out.push(row)
+        }
+        i = i + 1
+    }
+    out
+}
+
+fn comb_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
+    if cur.len() == k {
+        cloned := [Int]{}
+        loop v in cur -> cloned.push(v)
+        return [[Int]]{cloned}
+    }
+    out := [[Int]]{}
+    i := start
+    loop i < items.len() {
+        next_cur := [Int]{}
+        loop v in cur -> next_cur.push(v)
+        next_cur.push(items[i])
+        kids :: comb_rec(items, k, i + 1, next_cur)
+        loop row in kids -> out.push(row)
+        i = i + 1
+    }
+    out
+}
+
+fn comb_rep_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
+    if cur.len() == k {
+        cloned := [Int]{}
+        loop v in cur -> cloned.push(v)
+        return [[Int]]{cloned}
+    }
+    out := [[Int]]{}
+    i := start
+    loop i < items.len() {
+        next_cur := [Int]{}
+        loop v in cur -> next_cur.push(v)
+        next_cur.push(items[i])
+        kids :: comb_rep_rec(items, k, i, next_cur)
+        loop row in kids -> out.push(row)
+        i = i + 1
+    }
+    out
+}
+
+pub fn npr(n: Int, k: Int) -> ?Int { permutations_count(n, k) }
+
+pub fn ncr(n: Int, k: Int) -> ?Int { combinations_count(n, k) }
+
+pub fn multinomial(parts: [Int]) -> ?Int {
+    n := 0
+    loop p in parts {
+        if p < 0 -> return None
+        n = n + p
+    }
+    acc := 1
+    loop p in parts {
+        c :: math.binomial(n, p) ?? return None
+        acc = acc * c
+        n = n - p
+    }
+    Val(acc)
+}
+
+pub fn falling_factorial(n: Int, k: Int) -> ?Int { permutations_count(n, k) }
+
+pub fn rising_factorial(n: Int, k: Int) -> ?Int {
+    if k < 0 -> return None
+    acc := 1
+    i := 0
+    loop i < k {
+        acc = acc * (n + i)
+        i = i + 1
+    }
+    Val(acc)
+}
+
+pub fn pairwise(items: [Int]) -> [[Int]] {
+    out := [[Int]]{}
+    if items.len() < 2 -> return out
+    i := 0
+    loop i < items.len() - 1 {
+        out.push([Int]{items[i], items[i + 1]})
+        i = i + 1
+    }
+    out
+}
+
+pub fn batched(items: [Int], n: Int) -> [[Int]] {
+    out := [[Int]]{}
+    if n <= 0 -> return out
+    batch := [Int]{}
+    loop x in items {
+        batch.push(x)
+        if batch.len() == n {
+            out.push(batch)
+            batch = [Int]{}
+        }
+    }
+    if batch.len() > 0 -> out.push(batch)
+    out
+}
+
+pub fn chain(left: [Int], right: [Int]) -> [Int] {
+    out := [Int]{}
+    loop x in left -> out.push(x)
+    loop x in right -> out.push(x)
+    out
+}
+
+pub fn chain_from(groups: [[Int]]) -> [Int] {
+    out := [Int]{}
+    loop g in groups {
+        loop x in g -> out.push(x)
+    }
+    out
+}
+
+pub fn compress(items: [Int], mask: [Bool]) -> [Int] {
+    out := [Int]{}
+    i := 0
+    loop i < items.len() {
+        if i < mask.len() && mask[i] -> out.push(items[i])
+        i = i + 1
+    }
+    out
+}
+
+pub fn drop(items: [Int], n: Int) -> [Int] {
+    out := [Int]{}
+    i := 0
+    loop i < items.len() {
+        if i >= n -> out.push(items[i])
+        i = i + 1
+    }
+    out
+}
+
+pub fn takewhile(items: [Int], pred_nonneg: Bool) -> [Int] {
+    out := [Int]{}
+    loop x in items {
+        ok := x >= 0
+        if {
+            pred_nonneg && !ok -> return ~out
+            !pred_nonneg && ok -> return ~out
+        }
+        out.push(x)
+    }
+    out
+}
+
+pub fn dropwhile(items: [Int], pred_nonneg: Bool) -> [Int] {
+    out := [Int]{}
+    skipping := true
+    loop x in items {
+        ok := x >= 0
+        keep := false
+        if pred_nonneg && ok -> keep = true
+        if !pred_nonneg && !ok -> keep = true
+        if skipping && keep -> next
+        skipping = false
+        out.push(x)
+    }
+    out
+}
+
+pub fn unique(items: [Int]) -> [Int] {
+    out := [Int]{}
+    loop x in items {
+        seen := false
+        loop y in out {
+            if y == x -> seen = true
+        }
+        if !seen -> out.push(x)
+    }
+    out
+}
+
+pub fn repeat(value: Int, times: Int) -> [Int] {
+    out := [Int]{}
+    i := 0
+    loop i < times {
+        out.push(value)
+        i = i + 1
+    }
+    out
+}
+
+pub fn count_from(start: Int, step: Int, n: Int) -> [Int] {
+    out := [Int]{}
+    v := start
+    i := 0
+    loop i < n {
+        out.push(v)
+        v = v + step
+        i = i + 1
+    }
+    out
+}
+pub fn count(start: Int, step: Int, n: Int) -> [Int] { count_from(start, step, n) }
+
+pub fn filterfalse(items: [Int], pred_nonneg: Bool) -> [Int] {
+    out := [Int]{}
+    loop x in items {
+        selected := if pred_nonneg -> x < 0 else -> x >= 0
+        if selected -> out.push(x)
+    }
+    out
+}
+
+pub fn islice(items: [Int], start: Int, stop: Int, step: Int) -> [Int] {
+    out := [Int]{}
+    stride := step
+    if stride <= 0 -> return out
+    i := start
+    if i < 0 -> i = 0
+    limit := stop
+    if limit > items.len() -> limit = items.len()
+    loop i < limit {
+        out.push(items[i])
+        i += stride
+    }
+    out
+}
+
+pub fn groupby(items: [Int]) -> [[Int]] {
+    out := [[Int]]{}
+    if items.len() == 0 -> return out
+    group := [Int]{items[0]}
+    i := 1
+    loop i < items.len() {
+        if {
+            items[i] == items[i - 1] -> group.push(items[i])
+            else -> {
+                out.push(group)
+                group = [Int]{items[i]}
+            }
+        }
+        i += 1
+    }
+    out.push(group)
+    out
+}
+
+pub fn starmap(items: [[Int]]) -> [Int] {
+    out := [Int]{}
+    loop row in items {
+        total := 0
+        loop value in row -> total += value
+        out.push(total)
+    }
+    out
+}
+
+pub fn tee(items: [Int], copies: Int) -> [[Int]] {
+    out := [[Int]]{}
+    if copies <= 0 -> return out
+    loop _ in 0..<copies {
+        clone := [Int]{}
+        loop value in items -> clone.push(value)
+        out.push(clone)
+    }
+    out
+}
+
+pub fn cycle(items: [Int], times: Int) -> [Int] {
+    out := [Int]{}
+    t := 0
+    loop t < times {
+        loop x in items -> out.push(x)
+        t = t + 1
+    }
+    out
+}
+
+pub fn zip_longest(left: [Int], right: [Int], fill: Int) -> [[Int]] {
+    out := [[Int]]{}
+    n := left.len()
+    if right.len() > n -> n = right.len()
+    i := 0
+    loop i < n {
+        a := fill
+        b := fill
+        if i < left.len() -> a = left[i]
+        if i < right.len() -> b = right[i]
+        out.push([Int]{a, b})
+        i = i + 1
+    }
+    out
+}
+
+pub fn accumulate(items: [Int]) -> [Int] {
+    out := [Int]{}
+    acc := 0
+    loop x in items {
+        acc = acc + x
+        out.push(acc)
+    }
+    out
+}
+
+pub fn powerset(items: [Int]) -> [[Int]] {
+    out := [[Int]]{[Int]{}}
+    loop x in items {
+        nxt := [[Int]]{}
+        loop row in out {
+            cloned := [Int]{}
+            loop v in row -> cloned.push(v)
+            nxt.push(cloned)
+            grown := [Int]{}
+            loop v in row -> grown.push(v)
+            grown.push(x)
+            nxt.push(grown)
+        }
+        out = nxt
+    }
+    out
+}
+
+pub fn windows(items: [Int], size: Int) -> [[Int]] {
+    out := [[Int]]{}
+    if size <= 0 || size > items.len() -> return out
+    i := 0
+    loop i + size <= items.len() {
+        row := [Int]{}
+        j := 0
+        loop j < size {
+            row.push(items[i + j])
+            j = j + 1
+        }
+        out.push(row)
+        i = i + 1
+    }
+    out
+}
+
+pub fn reverse(items: [Int]) -> [Int] {
+    out := [Int]{}
+    i := items.len() - 1
+    loop i >= 0 {
+        out.push(items[i])
+        i = i - 1
+    }
+    out
+}
+
+pub fn flatten(groups: [[Int]]) -> [Int] { chain_from(groups) }

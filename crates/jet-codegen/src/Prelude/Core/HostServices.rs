@@ -21,6 +21,7 @@ pub enum JetUiCapability {
     DragDrop,
     Shortcuts,
     Accessibility,
+    FontShaping,
 }
 
 impl JetUiCapability {
@@ -32,6 +33,7 @@ impl JetUiCapability {
             Self::DragDrop => "UI.DragDrop",
             Self::Shortcuts => "UI.Shortcuts",
             Self::Accessibility => "UI.Accessibility",
+            Self::FontShaping => "UI.FontShaping",
         }
     }
 
@@ -43,10 +45,11 @@ impl JetUiCapability {
             Self::DragDrop => 1 << 3,
             Self::Shortcuts => 1 << 4,
             Self::Accessibility => 1 << 5,
+            Self::FontShaping => 1 << 6,
         }
     }
 
-    const fn ordered() -> [Self; 6] {
+    const fn ordered() -> [Self; 7] {
         [
             Self::FileDialog,
             Self::Clipboard,
@@ -54,6 +57,7 @@ impl JetUiCapability {
             Self::DragDrop,
             Self::Shortcuts,
             Self::Accessibility,
+            Self::FontShaping,
         ]
     }
 }
@@ -77,7 +81,7 @@ impl JetUiCapabilityFacts {
     }
 
     pub const fn all() -> Self {
-        Self { bits: (1 << 6) - 1 }
+        Self { bits: (1 << 7) - 1 }
     }
 
     pub const fn with(self, capability: JetUiCapability) -> Self {
@@ -2391,7 +2395,13 @@ impl JetUiHost for JetUiHeadlessHost {
         face: &JetFontFace,
     ) -> Result<JetGlyphRun, JetUiHostError> {
         let _ = self;
-        jet_font_shape_with_fallback(text, face)
+        match jet_font_shape_with_fallback(text, face) {
+            Ok(run) => Ok(run),
+            Err(JetUiHostError::CapabilityUnavailable {
+                capability: JET_FONT_SHAPING_CAPABILITY,
+            }) => Ok(jet_font_shape_fallback(text, face)),
+            Err(error) => Err(error),
+        }
     }
 }
 

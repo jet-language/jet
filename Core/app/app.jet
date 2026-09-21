@@ -1,0 +1,65 @@
+package {
+    name: "app"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Application-level live query and auth re-exports."
+    license: "MIT"
+    outputs: {
+        app: .Library{ entry: app }
+    }
+}
+// app — the process-level twin of `core.web` live queries and session auth.
+//
+// Types match the `core.web` spellings so a binary can import `app` without
+// pulling the HTML renderer. Nothing here opens a socket.
+pub struct Auth {
+    pub kind: String
+    pub client_id: String
+}
+
+pub struct Session {
+    pub id: String
+    pub user: String
+}
+
+pub struct LiveQuery {
+    pub key: String
+    pub data: String
+    pub generation: Int
+    pub subscribers: Int
+}
+
+pub fn auth() -> Auth { {kind: "session", client_id: ""} }
+
+pub fn auth_oauth(client_id: String) -> Auth { {kind: "oauth", client_id: client_id} }
+
+pub fn auth_routes(auth: Auth) -> [String] {
+    if auth.kind == "oauth" -> return [String]{"/auth/login", "/auth/callback", "/auth/logout"}
+    [String]{"/login", "/logout"}
+}
+
+pub fn auth_show(auth: Auth) -> String { "{auth.kind}:{auth.client_id}" }
+
+pub fn live(topic: String) -> LiveQuery { {key: topic, data: "", generation: 1, subscribers: 0} }
+
+pub fn live_get(q: LiveQuery) -> String { q.data }
+
+pub fn live_show(q: LiveQuery) -> String { "{q.key}@{q.generation}" }
+
+pub fn live_stats(q: LiveQuery) -> String { "live=1 subscribers={q.subscribers}" }
+
+pub fn subscribe(q: LiveQuery) -> LiveQuery {
+    {key: q.key, data: q.data, generation: q.generation, subscribers: q.subscribers + 1}
+}
+
+pub fn sync(q: LiveQuery, data: String) -> LiveQuery {
+    {key: q.key, data: data, generation: q.generation + 1, subscribers: q.subscribers}
+}
+
+pub fn invalidate(q: LiveQuery) -> LiveQuery {
+    {key: q.key, data: q.data, generation: q.generation + 1, subscribers: q.subscribers}
+}
+
+pub fn transact_invalidate(q: LiveQuery) -> LiveQuery { invalidate(q) }
+
+pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery { sync(q, payload) }

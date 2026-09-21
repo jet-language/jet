@@ -17,9 +17,10 @@ enum JetHTTPError {
     InvalidHeader,
     InvalidStatus,
     BodyConsumed,
-    BodyTooLarge { limit: i64 },
     InvalidFraming,
     UnsupportedEncoding,
+    Cancelled,
+    BodyTooLarge { limit: i64 },
     Resolve { host: String },
     Connect { address: String },
     TLS { stage: String },
@@ -31,10 +32,9 @@ enum JetHTTPError {
     /// D-HTTP-CORS1=A: a policy value was refused when it was built. `reason`
     /// carries the user-facing copy that says what to change.
     Policy { reason: String },
-    Cancelled,
     ResourceUnavailable { resource: String },
-    UnsupportedTarget { operation: JetHTTPOperation },
     Internal { incident_id: String },
+    UnsupportedTarget { operation: JetHTTPOperation },
 }
 
 enum JetHTTPErrorSurfacePayload {
@@ -61,7 +61,7 @@ struct JetHTTPErrorSurfaceParts {
 }
 
 /// Canonical CoreLib shape used by engine adapters to marshal `HTTPError`.
-/// Ordinals follow the ratified surface enum order, not Rust declaration order.
+/// Ordinals follow the ratified surface and declaration order.
 fn jet_http_error_surface_parts(error: JetHTTPError) -> JetHTTPErrorSurfaceParts {
     let unit = |variant, ordinal| JetHTTPErrorSurfaceParts {
         variant,
@@ -121,6 +121,75 @@ fn jet_http_error_surface_parts(error: JetHTTPError) -> JetHTTPErrorSurfaceParts
         }
     }
 }
+fn jet_http_error_from_surface_parts(
+    ordinal: i64,
+    payload: i64,
+    text: Option<String>,
+) -> Option<JetHTTPError> {
+    Some(match ordinal {
+        0 => JetHTTPError::InvalidMethod,
+        1 => JetHTTPError::InvalidUrl,
+        2 => JetHTTPError::InvalidHeader,
+        3 => JetHTTPError::InvalidStatus,
+        4 => JetHTTPError::BodyConsumed,
+        5 => JetHTTPError::InvalidFraming,
+        6 => JetHTTPError::UnsupportedEncoding,
+        7 => JetHTTPError::Cancelled,
+        8 => JetHTTPError::BodyTooLarge { limit: payload },
+        9 => JetHTTPError::Resolve { host: text? },
+        10 => JetHTTPError::Connect { address: text? },
+        11 => JetHTTPError::TLS { stage: text? },
+        12 => JetHTTPError::Timeout { phase: text? },
+        13 => JetHTTPError::Proxy { stage: text? },
+        14 => JetHTTPError::Redirect { reason: text? },
+        15 => JetHTTPError::Protocol { version: text? },
+        16 => JetHTTPError::IO { operation: text? },
+        17 => JetHTTPError::Policy { reason: text? },
+        18 => JetHTTPError::ResourceUnavailable { resource: text? },
+        19 => JetHTTPError::Internal { incident_id: text? },
+        20 => JetHTTPError::UnsupportedTarget {
+            operation: match payload {
+                0 => JetHTTPOperation::ClientConnect,
+                1 => JetHTTPOperation::ServerBind,
+                2 => JetHTTPOperation::ServeListener,
+                _ => return None,
+            },
+        },
+        _ => return None,
+    })
+}
+fn jet_http_error_from_surface_name(
+    variant: &str,
+    payload: i64,
+    text: Option<String>,
+) -> Option<JetHTTPError> {
+    let ordinal = match variant {
+        "InvalidMethod" => 0,
+        "InvalidUrl" => 1,
+        "InvalidHeader" => 2,
+        "InvalidStatus" => 3,
+        "BodyConsumed" => 4,
+        "InvalidFraming" => 5,
+        "UnsupportedEncoding" => 6,
+        "Cancelled" => 7,
+        "BodyTooLarge" => 8,
+        "Resolve" => 9,
+        "Connect" => 10,
+        "TLS" => 11,
+        "Timeout" => 12,
+        "Proxy" => 13,
+        "Redirect" => 14,
+        "Protocol" => 15,
+        "IO" => 16,
+        "Policy" => 17,
+        "ResourceUnavailable" => 18,
+        "Internal" => 19,
+        "UnsupportedTarget" => 20,
+        _ => return None,
+    };
+    jet_http_error_from_surface_parts(ordinal, payload, text)
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetHTTPMethod(String);
@@ -612,19 +681,30 @@ impl Iterator for JetHTTPBodyChunks {
         if self.done {
             return None;
         }
+        let bridge = match &self.source {
+            JetHTTPBodySource::Bridge { handle, read, .. } => Some((*handle, *read)),
+            _ => None,
+        };
+        if let Some((handle, read)) = bridge {
+            return match read(handle, self.max_chunk) {
+                Ok(Some(bytes)) => Some(Ok(bytes)),
+                Ok(None) => {
+                    self.done = true;
+                    self.drained.store(true, std::sync::atomic::Ordering::Release);
+                    None
+                }
+                Err(error) => {
+                    self.done = true;
+                    Some(Err(error))
+                }
+            };
+        }
         let mut chunk = vec![0; self.max_chunk];
         let read = match &mut self.source {
             JetHTTPBodySource::Bytes(reader) => std::io::Read::read(reader, &mut chunk),
             JetHTTPBodySource::File(file) => std::io::Read::read(file, &mut chunk),
             JetHTTPBodySource::Reader { reader, .. } => reader.read(&mut chunk),
-            JetHTTPBodySource::Bridge { handle, read, .. } => match read(*handle, self.max_chunk) {
-                Ok(Some(bytes)) => return Some(Ok(bytes)),
-                Ok(None) => Ok(0),
-                Err(error) => {
-                    self.done = true;
-                    return Some(Err(error));
-                }
-            },
+            JetHTTPBodySource::Bridge { .. } => unreachable!("bridge body source handled above"),
         };
         match read {
             Ok(0) => {
@@ -1050,4 +1130,85 @@ impl<'a> IntoIterator for &'a JetHTTPHeaders {
     fn into_iter(self) -> Self::IntoIter {
         self.entries.iter()
     }
+}
+/// Fast pure helpers for the source-level `core.http` surface. Keep these
+/// string-only operations independent of the opaque HTTP handle carriers.
+pub fn jet_http_reason_phrase(code: i64) -> String {
+    let phrase = match code {
+        100 => "Continue",
+        101 => "Switching Protocols",
+        102 => "Processing",
+        103 => "Early Hints",
+        200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        203 => "Non-Authoritative Information",
+        204 => "No Content",
+        205 => "Reset Content",
+        206 => "Partial Content",
+        207 => "Multi-Status",
+        208 => "Already Reported",
+        226 => "IM Used",
+        300 => "Multiple Choices",
+        301 => "Moved Permanently",
+        302 => "Found",
+        303 => "See Other",
+        304 => "Not Modified",
+        305 => "Use Proxy",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        402 => "Payment Required",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        406 => "Not Acceptable",
+        407 => "Proxy Authentication Required",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        410 => "Gone",
+        411 => "Length Required",
+        412 => "Precondition Failed",
+        413 => "Payload Too Large",
+        414 => "URI Too Long",
+        415 => "Unsupported Media Type",
+        416 => "Range Not Satisfiable",
+        417 => "Expectation Failed",
+        418 => "I'm a teapot",
+        421 => "Misdirected Request",
+        422 => "Unprocessable Entity",
+        423 => "Locked",
+        424 => "Failed Dependency",
+        425 => "Too Early",
+        426 => "Upgrade Required",
+        428 => "Precondition Required",
+        429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
+        451 => "Unavailable For Legal Reasons",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        505 => "HTTP Version Not Supported",
+        506 => "Variant Also Negotiates",
+        507 => "Insufficient Storage",
+        508 => "Loop Detected",
+        510 => "Not Extended",
+        511 => "Network Authentication Required",
+        _ if code >= 500 => "Error",
+        _ if code >= 400 => "Bad Request",
+        _ if code >= 300 => "Redirect",
+        _ => "OK",
+    };
+    phrase.to_string()
+}
+
+pub fn jet_http_basic_auth(user: &String, password: &String) -> String {
+    format!("Basic {user}:{password}")
+}
+
+pub fn jet_http_bearer_auth(token: &String) -> String {
+    format!("Bearer {token}")
 }

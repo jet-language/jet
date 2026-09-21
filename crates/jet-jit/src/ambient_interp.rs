@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use jet_codegen::Comptime::{
     AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall, AmbientHandle,
@@ -242,10 +242,22 @@ fn http_mux_invocation(
     if route.handler_param_names.len() > 1 {
         return Err("HTTP mux handler accepts at most one request parameter".to_string());
     }
+    let mut request = request.clone();
+    if let MirRuntimeValue::Struct { fields, .. } = &mut request {
+        let params = crate::net_http_rt::jet_http_route_params_path(&route.parsed_pattern, path)?
+            .into_iter()
+            .map(|(name, value)| (MirConstKey::String(name), MirRuntimeValue::String(value)))
+            .collect();
+        if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "params") {
+            *value = MirRuntimeValue::Map(params);
+        } else {
+            fields.push(("params".to_string(), MirRuntimeValue::Map(params)));
+        }
+    }
     let args = if route.handler_param_names.is_empty() {
         Vec::new()
     } else {
-        vec![request.clone()]
+        vec![request]
     };
     Ok(MirRuntimeValue::Struct {
         type_name: "HTTPRouteInvocation".to_string(),
@@ -678,6 +690,63 @@ fn http_read_one(stream: &mut TcpStream) -> Result<String, String> {
     }
     String::from_utf8(bytes).map_err(|_| "HTTP request is not UTF-8".to_string())
 }
+fn http_client_send(request: &MirRuntimeValue) -> Result<MirRuntimeValue, String> {
+    let method = match http_request_field(request, "method") {
+        Some(MirRuntimeValue::String(value)) => value,
+        _ => return Err("HTTP client request has no method".to_string()),
+    };
+    let url = match http_request_field(request, "url") {
+        Some(MirRuntimeValue::String(value)) => value,
+        _ => return Err("HTTP client request has no URL".to_string()),
+    };
+    let authority_and_path = url
+        .strip_prefix("http://")
+        .ok_or_else(|| "interpreter HTTP client requires an http:// URL".to_string())?;
+    let (authority, path) = authority_and_path
+        .split_once('/')
+        .map(|(authority, path)| (authority, format!("/{path}")))
+        .unwrap_or((authority_and_path, "/".to_string()));
+    let address = if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{authority}:80")
+    };
+    let body = match http_request_field(request, "body") {
+        Some(MirRuntimeValue::Bytes(value)) => value.clone(),
+        Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+        _ => Vec::new(),
+    };
+    let mut wire = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    )
+    .into_bytes();
+    if let Some(MirRuntimeValue::Map(headers)) = http_request_field(request, "headers") {
+        for (name, value) in headers {
+            if let (MirConstKey::String(name), MirRuntimeValue::String(value)) = (name, value) {
+                wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+            }
+        }
+    }
+    wire.extend_from_slice(b"\r\n");
+    wire.extend_from_slice(&body);
+    let mut stream =
+        TcpStream::connect(address).map_err(|error| format!("HTTP connect failed: {error}"))?;
+    stream
+        .write_all(&wire)
+        .map_err(|error| format!("HTTP write failed: {error}"))?;
+    let raw = http_read_one(&mut stream)?;
+    let (head, body) = raw
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "HTTP response has no header terminator".to_string())?;
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<i64>().ok())
+        .ok_or_else(|| "HTTP response has no valid status".to_string())?;
+    Ok(http_response(status, body))
+}
 
 fn http_response_wire(response: &MirRuntimeValue) -> Result<Vec<u8>, String> {
     let status = match http_request_field(response, "status") {
@@ -857,38 +926,42 @@ struct InterpreterAmbientState {
 /// or deopt scope.
 #[derive(Clone, Default)]
 pub struct InterpreterAmbientContext {
-    state: Rc<RefCell<InterpreterAmbientState>>,
+    state: Arc<Mutex<InterpreterAmbientState>>,
 }
 
 impl InterpreterAmbientContext {
+    fn state(&self) -> MutexGuard<'_, InterpreterAmbientState> {
+        self.state.lock().expect("interpreter ambient state poisoned")
+    }
+
     /// Register a typed plain Core-call adapter.
     pub fn register_core_call(&mut self, callback: AmbientCoreCall) {
-        self.state.borrow_mut().core_calls.push(callback);
+        self.state().core_calls.push(callback);
     }
 
     /// Register a typed closure-taking Core-call adapter.
     pub fn register_core_closure_call(&mut self, callback: AmbientCoreClosureCall) {
-        self.state.borrow_mut().core_closure_calls.push(callback);
+        self.state().core_closure_calls.push(callback);
     }
 
     /// Register a typed receiver/handle adapter.
     pub fn register_handle(&mut self, callback: AmbientHandle) {
-        self.state.borrow_mut().handles.push(callback);
+        self.state().handles.push(callback);
     }
 
     /// Register a typed foreign-call adapter.
     pub fn register_extern(&mut self, callback: AmbientExternCall) {
-        self.state.borrow_mut().extern_calls.push(callback);
+        self.state().extern_calls.push(callback);
     }
 
     /// Register a typed canonical MIR foreign adapter.
     pub fn register_mir_extern(&mut self, callback: AmbientMirExternCall) {
-        self.state.borrow_mut().mir_extern_calls.push(callback);
+        self.state().mir_extern_calls.push(callback);
     }
 
     /// Register a typed MIR handle operation adapter.
     pub fn register_mir_handle(&mut self, callback: AmbientMirHandle) {
-        self.state.borrow_mut().mir_handles.push(callback);
+        self.state().mir_handles.push(callback);
     }
 
     /// Install the selected checked target profile for interpreter hardware
@@ -898,31 +971,31 @@ impl InterpreterAmbientContext {
         profile_id: impl Into<String>,
         facts: TargetHardwareFacts,
     ) {
-        self.state.borrow_mut().hardware_host = Some(InterpreterHardwareHost::new(profile_id, facts));
+        self.state().hardware_host = Some(InterpreterHardwareHost::new(profile_id, facts));
     }
 
     fn core_call(&self, index: usize) -> Option<AmbientCoreCall> {
-        self.state.borrow().core_calls.get(index).copied()
+        self.state().core_calls.get(index).copied()
     }
 
     fn core_closure_call(&self, index: usize) -> Option<AmbientCoreClosureCall> {
-        self.state.borrow().core_closure_calls.get(index).copied()
+        self.state().core_closure_calls.get(index).copied()
     }
 
     fn handle(&self, index: usize) -> Option<AmbientHandle> {
-        self.state.borrow().handles.get(index).copied()
+        self.state().handles.get(index).copied()
     }
 
     fn extern_call(&self, index: usize) -> Option<AmbientExternCall> {
-        self.state.borrow().extern_calls.get(index).copied()
+        self.state().extern_calls.get(index).copied()
     }
 
     fn mir_extern_call(&self, index: usize) -> Option<AmbientMirExternCall> {
-        self.state.borrow().mir_extern_calls.get(index).copied()
+        self.state().mir_extern_calls.get(index).copied()
     }
 
     fn mir_handle(&self, index: usize) -> Option<AmbientMirHandle> {
-        self.state.borrow().mir_handles.get(index).copied()
+        self.state().mir_handles.get(index).copied()
     }
 
     fn mir_hardware(
@@ -933,11 +1006,11 @@ impl InterpreterAmbientContext {
         span: Span,
     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
         let mut host = {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state();
             state.hardware_host.take()?
         };
         let result = host.dispatch(operation, handle, args, span);
-        self.state.borrow_mut().hardware_host = Some(host);
+        self.state().hardware_host = Some(host);
         result
     }
     fn mir_lines(
@@ -960,14 +1033,14 @@ impl InterpreterAmbientContext {
                     span,
                 )));
             }
-            let Some(mut reader) = self.state.borrow_mut().line_readers.remove(&handle) else {
+            let Some(mut reader) = self.state().line_readers.remove(&handle) else {
                 return Some(Err(line_reader_diag(
                     "line iterator next used an unknown interpreter handle",
                     span,
                 )));
             };
             let result = reader.next();
-            self.state.borrow_mut().line_readers.insert(handle, reader);
+            self.state().line_readers.insert(handle, reader);
             return Some(match result {
                 Ok(Some(line)) => Ok(AmbientMirHandleResult::Value(
                     MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(line))),
@@ -976,9 +1049,7 @@ impl InterpreterAmbientContext {
                 Err(error) => Err(line_reader_diag(error, span)),
             });
         }
-        self.state
-            .borrow_mut()
-            .mir_lines(operation, handle, args, span)
+        self.state().mir_lines(operation, handle, args, span)
     }
 
     fn mir_http_router(
@@ -1002,7 +1073,7 @@ impl InterpreterAmbientContext {
                 )));
             }
             let routes = {
-                let state = self.state.borrow();
+                let state = self.state();
                 let Some(router) = state.http_routers.get(&handle) else {
                     return Some(Err(http_router_diag(
                         "HTTPRouter OpenAPI export used an unknown interpreter handle",
@@ -1028,9 +1099,90 @@ impl InterpreterAmbientContext {
                 Err(error) => Err(http_router_diag(error, span)),
             });
         }
-        self.state
-            .borrow_mut()
-            .mir_http_router(operation, handle, args, span)
+        self.state().mir_http_router(operation, handle, args, span)
+    }
+
+    fn mir_http_serve_once(
+        &self,
+        handle: Option<i64>,
+        args: &[MirRuntimeValue],
+        span: Span,
+    ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+        let Some(listener_id) = handle else {
+            return Some(Err(http_router_diag("HTTP serve has no listener handle", span)));
+        };
+        let [MirRuntimeValue::Int(mux_id)] = args else {
+            return Some(Err(http_router_diag("HTTP serve expects one mux handle", span)));
+        };
+        let listener = {
+            let state = self.state();
+            let Some(listener) = state.http_transport.listeners.get(&listener_id) else {
+                return Some(Err(http_router_diag("HTTP serve used an unknown listener", span)));
+            };
+            match listener.try_clone() {
+                Ok(listener) => listener,
+                Err(error) => {
+                    return Some(Err(http_router_diag(
+                        format!("HTTP listener clone failed: {error}"),
+                        span,
+                    )))
+                }
+            }
+        };
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => {
+                    return Some(Err(http_router_diag(
+                        format!("HTTP accept failed: {error}"),
+                        span,
+                    )))
+                }
+            }
+        };
+        let raw = match http_read_one(&mut stream) {
+            Ok(raw) => raw,
+            Err(error) => return Some(Err(http_router_diag(error, span))),
+        };
+        let request = http_parse_request_carrier(&raw);
+        let mut state = self.state();
+        let dispatch =
+            state.mir_http_mux("http_mux.dispatch", Some(*mux_id), vec![request], span)?;
+        match dispatch {
+            Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Struct {
+                mut fields, ..
+            })) => {
+                let pending = state.http_transport.next_pending.max(1);
+                state.http_transport.next_pending = pending.saturating_add(1).max(1);
+                fields.push(("__stream".to_string(), MirRuntimeValue::Int(pending)));
+                state
+                    .http_transport
+                    .pending
+                    .insert(pending, InterpreterHttpPending { stream });
+                Some(Ok(AmbientMirHandleResult::Value(
+                    MirRuntimeValue::Struct {
+                        type_name: "HTTPRouteInvocation".to_string(),
+                        fields,
+                    },
+                )))
+            }
+            Ok(AmbientMirHandleResult::Value(response)) => {
+                let wire = http_response_wire(&response).unwrap_or_else(|_| {
+                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_vec()
+                });
+                let _ = stream.write_all(&wire);
+                Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+            }
+            Ok(_) => Some(Err(http_router_diag(
+                "HTTP mux dispatch returned an invalid carrier",
+                span,
+            ))),
+            Err(error) => Some(Err(error)),
+        }
     }
 
     fn mir_http_mux(
@@ -1040,9 +1192,29 @@ impl InterpreterAmbientContext {
         args: Vec<MirRuntimeValue>,
         span: Span,
     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
-        self.state
-            .borrow_mut()
-            .mir_http_mux(operation, handle, args, span)
+        if operation == "http_mux.serve_once" {
+            return self.mir_http_serve_once(handle, &args, span);
+        }
+        if operation == "http_client.send" {
+            if handle.is_some() {
+                return Some(Err(http_router_diag(
+                    "HTTP client send received an unexpected handle",
+                    span,
+                )));
+            }
+            let [request] = args.as_slice() else {
+                return Some(Err(http_router_diag(
+                    "HTTP client send expects one request",
+                    span,
+                )));
+            };
+            return Some(
+                http_client_send(request)
+                    .map(AmbientMirHandleResult::Value)
+                    .map_err(|error| http_router_diag(error, span)),
+            );
+        }
+        self.state().mir_http_mux(operation, handle, args, span)
     }
 }
 
@@ -1805,6 +1977,15 @@ impl Drop for ContextGuard {
         });
     }
 }
+fn active_context() -> Option<InterpreterAmbientContext> {
+    ACTIVE_CONTEXT
+        .with(|slot| slot.borrow().as_ref().cloned())
+        .or_else(|| {
+            jet_codegen::Comptime::ambient_worker_context::<InterpreterAmbientContext>()
+                .map(|context| (*context).clone())
+        })
+}
+
 
 /// Run `body` with one canonical typed ambient context installed.
 ///
@@ -1822,29 +2003,31 @@ pub fn with_interpreter_ambient<R>(
         context.register_mir_handle(crate::Process::ambient_mir_handle);
         let previous = ACTIVE_CONTEXT.with(|slot| slot.replace(Some(context.clone())));
         let _context_guard = ContextGuard { previous };
-        jet_codegen::Comptime::with_ambient(
-            Some(dispatch_core_call),
-            Some(dispatch_handle),
-            Some(dispatch_extern),
-            || {
-                jet_codegen::Comptime::with_ambient_core_closure(
-                    Some(dispatch_core_closure),
-                    || {
-                        jet_codegen::Comptime::with_ambient_mir_handle(
-                            Some(dispatch_mir_handle),
-                            || {
-                                jet_codegen::Comptime::with_ambient_mir_extern(
-                                    Some(dispatch_mir_extern),
-                                    || {
-                                        body(&mut context)
-                                    },
-                                )
-                            },
-                        )
-                    },
-                )
-            },
-        )
+        let worker_context: jet_codegen::Comptime::AmbientWorkerContext =
+            Arc::new(context.clone());
+        jet_codegen::Comptime::with_ambient_worker_context(Some(worker_context), || {
+            jet_codegen::Comptime::with_ambient(
+                Some(dispatch_core_call),
+                Some(dispatch_handle),
+                Some(dispatch_extern),
+                || {
+                    jet_codegen::Comptime::with_ambient_core_closure(
+                        Some(dispatch_core_closure),
+                        || {
+                            jet_codegen::Comptime::with_ambient_mir_handle(
+                                Some(dispatch_mir_handle),
+                                || {
+                                    jet_codegen::Comptime::with_ambient_mir_extern(
+                                        Some(dispatch_mir_extern),
+                                        || body(&mut context),
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+        })
     })
 }
 fn dispatch_core_closure(
@@ -1860,11 +2043,7 @@ fn dispatch_core_closure(
 ) -> Option<Result<MirRuntimeValue, Diagnostic>> {
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.core_closure_call(index))
-        });
+        let callback = active_context().and_then(|context| context.core_closure_call(index));
         let Some(callback) = callback else {
             break;
         };
@@ -1891,15 +2070,13 @@ fn dispatch_mir_handle(
     args: Vec<MirRuntimeValue>,
     span: Span,
 ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
-    let hardware = ACTIVE_CONTEXT
-        .with(|slot| slot.borrow().as_ref().cloned())
-        .and_then(|context| context.mir_hardware(operation, handle, args.clone(), span));
+    let hardware =
+        active_context().and_then(|context| context.mir_hardware(operation, handle, args.clone(), span));
     if hardware.is_some() {
         return hardware;
     }
-    let lines = ACTIVE_CONTEXT
-        .with(|slot| slot.borrow().as_ref().cloned())
-        .and_then(|context| context.mir_lines(operation, handle, args.clone(), span));
+    let lines =
+        active_context().and_then(|context| context.mir_lines(operation, handle, args.clone(), span));
     if lines.is_some() {
         return lines;
     }
@@ -1911,8 +2088,7 @@ fn dispatch_mir_handle(
             | "http_router.dispatch"
             | "http_router.parse"
     ) {
-        return ACTIVE_CONTEXT
-            .with(|slot| slot.borrow().as_ref().cloned())
+        return active_context()
             .and_then(|context| context.mir_http_router(operation, handle, args, span));
     }
     if matches!(
@@ -1922,20 +2098,16 @@ fn dispatch_mir_handle(
             | "http_mux.dispatch"
             | "http_mux.serve_once"
             | "http_mux.respond"
+            | "http_client.send"
             | "tcp_listener.new"
             | "tcp_listener.local_addr"
     ) {
-        return ACTIVE_CONTEXT
-            .with(|slot| slot.borrow().as_ref().cloned())
+        return active_context()
             .and_then(|context| context.mir_http_mux(operation, handle, args, span));
     }
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.mir_handle(index))
-        });
+        let callback = active_context().and_then(|context| context.mir_handle(index));
         let Some(callback) = callback else {
             break;
         };
@@ -1958,11 +2130,7 @@ fn dispatch_core_call(
 ) -> Option<Result<CtValue, Diagnostic>> {
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.core_call(index))
-        });
+        let callback = active_context().and_then(|context| context.core_call(index));
         let Some(callback) = callback else {
             break;
         };
@@ -1989,11 +2157,7 @@ fn dispatch_handle(
 ) -> Option<Result<CtValue, Diagnostic>> {
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.handle(index))
-        });
+        let callback = active_context().and_then(|context| context.handle(index));
         let Some(callback) = callback else {
             break;
         };
@@ -2013,11 +2177,7 @@ fn dispatch_extern(
 ) -> Option<Result<CtValue, Diagnostic>> {
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.extern_call(index))
-        });
+        let callback = active_context().and_then(|context| context.extern_call(index));
         let Some(callback) = callback else {
             break;
         };
@@ -2036,11 +2196,7 @@ fn dispatch_mir_extern(
 ) -> Option<Result<MirRuntimeValue, Diagnostic>> {
     let mut index = 0;
     loop {
-        let callback = ACTIVE_CONTEXT.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|context| context.mir_extern_call(index))
-        });
+        let callback = active_context().and_then(|context| context.mir_extern_call(index));
         let Some(callback) = callback else {
             break;
         };

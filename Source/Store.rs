@@ -2,8 +2,8 @@
 //!
 //! Store layout: `~/.jet/store/<name>-<version>-<fingerprint>/`
 //! Full plan fingerprint is the path suffix. Lookups use the lockfile,
-//! not dirname parsing. Hardlinks into project `.jet-build/deps/` on
-//! same device; falls back to copy cross-device. Append-only; `jet clean`
+//! not dirname parsing. Hardlinks into project `.jet/build/deps/`
+//! on same device; falls back to copy cross-device. Append-only; `jet clean`
 //! removes unreferenced entries (stub in M12.1).
 
 use crate::Diagnostics::Diagnostic;
@@ -2159,7 +2159,7 @@ pub fn ensure_git_dep(
 }
 
 /// Link a store entry into a project's local deps dir via hardlinks (or copy).
-/// `link_root` is typically `<project>/.jet-build/deps/<name>/`.
+/// `link_root` is typically `<project>/.jet/build/deps/<name>/`.
 pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Diagnostic> {
     let source = open_directory_authority(store_entry)
         .map_err(|error| io_error("checking store entry", store_entry, error))?;

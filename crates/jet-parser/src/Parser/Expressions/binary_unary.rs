@@ -767,18 +767,22 @@ impl<'a> Parser<'a> {
                 let start = self.peek().span.start;
                 self.struct_lit_inferred(start)
             }
-            // D-LIT-DOT1 migration arm: accept the retired `.{ … }` form
-            // long enough for `jet fmt` to rewrite the corpus.
+            // D-LIT-DOT1: `.{ … }` is retired. `jet fmt` still rewrites it;
+            // compile (`jet` / `jetpack`) does not accept it.
             TokKind::Dot if matches!(self.peek2().kind, TokKind::LBrace) => {
-                let dot_start = self.bump().span.start; // consume `.`
-                self.diags.push(Diagnostic::error(
+                let dot = self.bump();
+                let diagnostic = Diagnostic::error(
                     "E0320",
                     "inferred record construction uses `{…}`, not `.{…}`".to_string(),
                     "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
                     "write `{…}`".to_string(),
-                    Some(self.toks[self.pos.saturating_sub(1)].span),
-                ));
-                self.struct_lit_inferred(dot_start)
+                    Some(dot.span),
+                );
+                if !self.migration_mode {
+                    return Err(diagnostic);
+                }
+                self.diags.push(diagnostic);
+                self.struct_lit_inferred(dot.span.start)
             }
             // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit.
             // Sema fills the empty, unspellable identifier from the ordinary
@@ -846,9 +850,9 @@ impl<'a> Parser<'a> {
                 } else if matches!(self.peek().kind, TokKind::Dot)
                     && matches!(self.peek2().kind, TokKind::LBrace)
                 {
-                    // Migration arm for retired `.Variant.{ … }`.
+                    // Retired `.Variant.{ … }`. Fmt rewrites; compile rejects.
                     let dot = self.bump();
-                    self.diags.push(Diagnostic::error(
+                    let diagnostic = Diagnostic::error(
                         "E0320",
                         format!(
                             "enum payload uses `.{}{{…}}`, not `.{}.{{…}}`",
@@ -857,7 +861,11 @@ impl<'a> Parser<'a> {
                         "D-LIT-DOT1 drops the constructor dot before payload fields".to_string(),
                         format!("write `.{}{{…}}`", variant),
                         Some(dot.span),
-                    ));
+                    );
+                    if !self.migration_mode {
+                        return Err(diagnostic);
+                    }
+                    self.diags.push(diagnostic);
                     self.enum_lit_named_fields()?
                 } else if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // consume `(`

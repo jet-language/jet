@@ -1,7 +1,6 @@
 // MurmurHash3_x86_32 port. The C source reads little-endian 32-bit blocks;
 // Reader.read_u32_le states that byte order without a private load helper.
-
-pub fn hash(data: [U8], seed: U32) U32 -[]> {
+pub fn hash(data: [U8], seed: U32) -[]> U32 {
     #Arithmetic(.Wrapping) {
         reader :: Reader.over(data)
         nblocks :: data.len() /% 4
@@ -23,9 +22,9 @@ pub fn hash(data: [U8], seed: U32) U32 -[]> {
         tail :: nblocks * 4
         tail_len :: data.len() % 4
         k1 := U32{0}
-        if tail_len == 3 { k1 ~|= (U32.from_u8(data[tail + 2]) << 16) }
-        if tail_len >= 2 { k1 ~|= (U32.from_u8(data[tail + 1]) << 8) }
-        if tail_len >= 1 { k1 ~|= U32.from_u8(data[tail]) }
+        if tail_len == 3 -> k1 ~|= (U32.from_u8(data[tail + 2]) << 16)
+        if tail_len >= 2 -> k1 ~|= (U32.from_u8(data[tail + 1]) << 8)
+        if tail_len >= 1 -> k1 ~|= U32.from_u8(data[tail])
         if tail_len != 0 {
             k1 = k1 * c1
             k1 = k1.rotate_left(15)

@@ -698,7 +698,7 @@ fn host_fault(message: &str) {
 /// file already uses, so a cancel or a deadline lands on the tier's pending
 /// interrupt channel and the scheduler's own hook keeps the converted unwind
 /// off stderr. Anything else is an engine defect and takes the ICE rail.
-fn contain_seam_unwind<F>(f: F)
+pub(crate) fn contain_seam_unwind<F>(f: F)
 where
     F: FnOnce(),
 {
@@ -1057,7 +1057,27 @@ fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
             host_fault("jit stream sender send: missing stream sender");
             return JitWaitStatus::Panicked as i64;
         };
-        return wait_status(|| i64::from(sender.send_stream(v)));
+        // Do not put cancel on the pending-exit channel: Yield lowering
+        // branches on this status and must reach return-path defers. A trap
+        // check after the host call would jump stop_block and skip them.
+        match jet_scheduler_wait_without_unwind(|| sender.send_stream(v)) {
+            JetSchedulerWait::Ready(true) => {
+                WAIT_VALUE.with(|slot| slot.set(1));
+                return JitWaitStatus::Ready as i64;
+            }
+            JetSchedulerWait::Ready(false) | JetSchedulerWait::Cancelled => {
+                WAIT_VALUE.with(|slot| slot.set(0));
+                return JitWaitStatus::Interrupted as i64;
+            }
+            JetSchedulerWait::Deadline(rendered) => {
+                record_deadline_interrupt(rendered);
+                return JitWaitStatus::Interrupted as i64;
+            }
+            JetSchedulerWait::Panicked(message) => {
+                trap_scheduler_report_or_panic(&message);
+                return JitWaitStatus::Panicked as i64;
+            }
+        }
     }
     let tx = with_runtime_mut(|rt| {
         let Some(index) = usize::try_from(s).ok() else {
@@ -1262,8 +1282,15 @@ fn store_task(
 }
 
 fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
+    task_ids_from_carrier(rt, list).0
+}
+
+/// D-CONC-ALLNAMED1=A: named `task.all` carries a tuple/record of task
+/// handles. The combinator host still joins a list of ids, then the payload
+/// must be the same record shape so field reads (`results.first`) land.
+fn task_ids_from_carrier(rt: &mut super::JitRuntime, list: i64) -> (Vec<i64>, bool) {
     if let Some(ids) = rt.heap.clone_int_list(list) {
-        return ids;
+        return (ids, false);
     }
     if let Some(fields) = rt.heap.clone_record_values(list) {
         let Some(ids) = fields
@@ -1275,26 +1302,43 @@ fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
             .collect::<Option<Vec<_>>>()
         else {
             rt.set_host_fault("jit task combinator: bad task handle");
-            return Vec::new();
+            return (Vec::new(), true);
         };
-        return ids;
+        return (ids, true);
     }
     let Some(length) = crate::runtime_host::sequence_len(rt, list) else {
         rt.set_host_fault("jit task combinator: bad list handle");
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let Some(ids) = (0..length)
         .map(|index| crate::runtime_host::sequence_get_int(rt, list, index))
         .collect::<Option<Vec<_>>>()
     else {
         rt.set_host_fault("jit task combinator: bad list element");
-        return Vec::new();
+        return (Vec::new(), false);
     };
-    ids
+    (ids, false)
 }
 
 fn store_i64_list(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
     rt.heap.alloc_int_list(values)
+}
+
+fn store_i64_record(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
+    rt.heap.alloc_record_values(
+        values
+            .into_iter()
+            .map(jet_rt::JetVal::Int)
+            .collect(),
+    )
+}
+
+fn store_task_all_payload(rt: &mut super::JitRuntime, values: Vec<i64>, named: bool) -> u64 {
+    if named {
+        store_i64_record(rt, values) as u64
+    } else {
+        store_i64_list(rt, values) as u64
+    }
 }
 
 fn take_task_entries(
@@ -1860,22 +1904,22 @@ fn jet_jit_task_join_result(task: i64) -> i64 {
 /// handle; the list remains the successful payload and TaskFailure is packed
 /// only at this ABI boundary.
 fn jet_jit_task_all(task_list: i64) -> i64 {
-    let entries = with_runtime_mut(|rt| {
-        let ids = task_ids_from_list(rt, task_list);
-        take_task_entries(rt, &ids)
+    let (entries, named) = with_runtime_mut(|rt| {
+        let (ids, named) = task_ids_from_carrier(rt, task_list);
+        (take_task_entries(rt, &ids), named)
     });
     wait_task_result(
         || jet_scheduler_all(entries),
-        |rt, values| store_i64_list(rt, values) as u64,
+        move |rt, values| store_task_all_payload(rt, values, named),
     )
 }
 
 /// D-CONC-FAIL1=A: flatten each private task-body Result before exposing the
 /// shared task-group Result rail.
 fn jet_jit_task_all_result(task_list: i64) -> i64 {
-    let entries = with_runtime_mut(|rt| {
-        let ids = task_ids_from_list(rt, task_list);
-        take_task_entries(rt, &ids)
+    let (entries, named) = with_runtime_mut(|rt| {
+        let (ids, named) = task_ids_from_carrier(rt, task_list);
+        (take_task_entries(rt, &ids), named)
     });
     wait_task_result(
         || {
@@ -1895,7 +1939,7 @@ fn jet_jit_task_all_result(task_list: i64) -> i64 {
                 )
             })
         },
-        |rt, values| store_i64_list(rt, values) as u64,
+        move |rt, values| store_task_all_payload(rt, values, named),
     )
 }
 

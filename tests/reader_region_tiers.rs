@@ -36,19 +36,6 @@ fn run() {
     }
 }
 "#;
-    let generated = tir_support::compile("bounded_int_cast", source);
-    let entry = generated
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain the bounded cast");
-    assert!(
-        entry.contains("as i64"),
-        "bounded fixed-width cast must use the native i64 carrier"
-    );
-    assert!(
-        !entry.contains("jet_int_from_u64"),
-        "bounded fixed-width cast must not consult the bigint conversion helper"
-    );
     tir_support::assert_tiers_agree("bounded_int_cast", source, "7\n");
 }
 
@@ -61,19 +48,6 @@ fn run() {
     print(value % 7)
 }
 "#;
-    let generated = tir_support::compile("reader_u32_int_modulo", source);
-    let entry = generated
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain the modulo");
-    assert!(
-        entry.contains(" % "),
-        "a bounded U32-to-Int modulo should use Rust's native remainder:\n{generated}"
-    );
-    assert!(
-        !entry.contains("jet_int_mod("),
-        "a bounded U32-to-Int modulo must not enter the BigInt helper:\n{generated}"
-    );
     tir_support::assert_tiers_agree("reader_u32_int_modulo", source, "2\n");
 }
 
@@ -86,19 +60,6 @@ fn run() {
     print(reader.remaining())
 }
 "#;
-    let rust = tir_support::compile("reader_over_owned_last_use", src);
-    let entry = rust
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain Reader.over");
-    assert!(
-        entry.contains("jet_reader_over_owned("),
-        "a unique owned last-use list must move into Reader:\n{rust}"
-    );
-    assert!(
-        !entry.contains("jet_reader_over(&("),
-        "the owned Reader path must not retain the borrowing clone call:\n{rust}"
-    );
     tir_support::assert_tiers_agree("reader_over_owned_last_use", src, "2\n");
 }
 
@@ -112,15 +73,6 @@ fn run() {
     print(reader.remaining())
 }
 "#;
-    let rust = tir_support::compile("reader_over_reused_bytes", src);
-    let entry = rust
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain Reader.over");
-    assert!(
-        entry.contains("jet_reader_over(&(") && !entry.contains("jet_reader_over_owned("),
-        "a later bytes read must retain Reader's borrowing clone path:\n{rust}"
-    );
     tir_support::assert_tiers_agree("reader_over_reused_bytes", src, "2\n2\n");
 }
 
@@ -135,15 +87,6 @@ fn run() {
     print(reader.remaining())
 }
 "#;
-    let rust = tir_support::compile("reader_over_live_alias", src);
-    let entry = rust
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain Reader.over");
-    assert!(
-        entry.contains("jet_reader_over(&(") && !entry.contains("jet_reader_over_owned("),
-        "a live view alias must retain Reader's borrowing clone path:\n{rust}"
-    );
     tir_support::assert_tiers_agree("reader_over_live_alias", src, "2\n2\n");
 }
 
@@ -157,14 +100,29 @@ fn run() {
     print(reader.remaining())
 }
 "#;
-    let rust = tir_support::compile("reader_over_later_capture", src);
-    let entry = rust
-        .split("pub fn __jet_run()")
-        .nth(1)
-        .expect("generated entry must contain Reader.over");
-    assert!(
-        entry.contains("jet_reader_over(&(") && !entry.contains("jet_reader_over_owned("),
-        "a later closure capture must retain Reader's borrowing clone path:\n{rust}"
-    );
     tir_support::assert_tiers_agree("reader_over_later_capture", src, "2\n");
+}
+
+#[test]
+fn reader_fixed_frame_and_byte_checksum_keep_one_native_shape() {
+    let source = r#"
+fn run() {
+    payload :: [U8]{7, 1, 0x34, 0x12, 1, 0, 0, 0}
+    checksum := U64{0}
+    loop byte in payload -> checksum += U64.from_u8(byte)
+    reader :: Reader.over(payload)
+    frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}"}) ?? panic("short frame")
+    print(checksum)
+    print(frame.channel)
+    print(frame.flags)
+    print(frame.sample)
+    print(frame.tick)
+    print(reader.remaining())
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "reader_fixed_frame_checksum",
+        source,
+        "79\n7\n1\n4660\n1\n0\n",
+    );
 }

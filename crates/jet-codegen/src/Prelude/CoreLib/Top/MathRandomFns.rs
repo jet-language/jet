@@ -125,6 +125,20 @@ fn jet_std_random_seed(n: i64) {
     }
     JET_RNG.with(|cell| cell.set(n as u64));
 }
+fn jet_std_random_getrandbits(k: i64) -> i64 {
+    let bits = k.clamp(0, 63) as u32;
+    if bits == 0 {
+        0
+    } else {
+        (jet_rng_next() >> (64 - bits)) as i64
+    }
+}
+fn jet_std_random_randrange(start: i64, stop: i64) -> i64 {
+    if stop <= start {
+        return start;
+    }
+    jet_std_random_int(start, stop - 1)
+}
 fn jet_std_random_int(low: i64, high: i64) -> i64 {
     if high <= low {
         return low;
@@ -164,6 +178,99 @@ fn jet_std_random_exponential(lambda: f64) -> f64 {
         return 0.0;
     }
     -jet_std_random_float_open().ln() / lambda
+}
+fn jet_std_random_choices<T: Clone>(xs: &Vec<T>, n: i64) -> Vec<T> {
+    let mut out = Vec::new();
+    if xs.is_empty() {
+        return out;
+    }
+    for _ in 0..n.max(0) {
+        if let Some(value) = jet_std_random_pick(xs) {
+            out.push(value);
+        }
+    }
+    out
+}
+fn jet_std_random_triangular(low: f64, high: f64, mode: f64) -> f64 {
+    if high <= low {
+        return low;
+    }
+    let peak = mode.clamp(low, high);
+    let u = jet_std_random_float();
+    let cut = (peak - low) / (high - low);
+    if u <= cut {
+        low + (u * (high - low) * (peak - low)).sqrt()
+    } else {
+        high - ((1.0 - u) * (high - low) * (high - peak)).sqrt()
+    }
+}
+fn jet_std_random_gamma(alpha: f64, beta: f64) -> f64 {
+    if alpha <= 0.0 || beta <= 0.0 {
+        return 0.0;
+    }
+    if alpha < 1.0 {
+        return jet_std_random_gamma(alpha + 1.0, beta)
+            * (jet_std_random_float_open().ln() / alpha).exp();
+    }
+    let d = alpha - 1.0 / 3.0;
+    let c = 1.0 / (9.0 * d).sqrt();
+    loop {
+        let x = jet_std_random_normal(0.0, 1.0);
+        let v0 = 1.0 + c * x;
+        if v0 <= 0.0 {
+            continue;
+        }
+        let v = v0 * v0 * v0;
+        let u = jet_std_random_float_open();
+        if u < 1.0 - 0.0331 * x.powi(4)
+            || u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln())
+        {
+            return beta * d * v;
+        }
+    }
+}
+fn jet_std_random_beta(alpha: f64, beta: f64) -> f64 {
+    if alpha <= 0.0 || beta <= 0.0 {
+        return 0.0;
+    }
+    let a = jet_std_random_gamma(alpha, 1.0);
+    let b = jet_std_random_gamma(beta, 1.0);
+    if a + b <= 0.0 { 0.0 } else { a / (a + b) }
+}
+fn jet_std_random_lognormal(mean: f64, sigma: f64) -> f64 {
+    jet_std_random_normal(mean, sigma).exp()
+}
+fn jet_std_random_pareto(alpha: f64) -> f64 {
+    if alpha <= 0.0 {
+        0.0
+    } else {
+        (-jet_std_random_float_open().ln() / alpha).exp()
+    }
+}
+fn jet_std_random_weibull(alpha: f64, beta: f64) -> f64 {
+    if alpha <= 0.0 || beta <= 0.0 {
+        0.0
+    } else {
+        alpha * (-jet_std_random_float_open().ln()).powf(1.0 / beta)
+    }
+}
+fn jet_std_random_vonmises(mu: f64, kappa: f64) -> f64 {
+    if kappa <= 0.0 {
+        std::f64::consts::TAU * jet_std_random_float()
+    } else {
+        mu + jet_std_random_normal(0.0, 1.0 / kappa.sqrt())
+    }
+}
+fn jet_std_random_binomial(n: i64, p: f64) -> i64 {
+    if n <= 0 || p <= 0.0 {
+        return 0;
+    }
+    if p >= 1.0 {
+        return n;
+    }
+    (0..n)
+        .filter(|_| jet_std_random_float() < p)
+        .count() as i64
 }
 fn jet_std_random_pick<T: Clone>(xs: &Vec<T>) -> Option<T> {
     if xs.is_empty() {

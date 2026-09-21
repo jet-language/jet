@@ -514,6 +514,10 @@ fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
 pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
     xs.contains(needle)
 }
+#[inline(always)]
+fn jet_list_index_of<T: PartialEq>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(xs.iter().position(|item| item == needle).map(|index| index as i64))
+}
 
 #[inline(always)]
 fn jet_list_get_opt<T: Clone>(xs: &[T], index: i64) -> JetOutcome<T, JetAbsent> {
@@ -1170,6 +1174,40 @@ fn jet_set_pop_kernel<C: JetSetPopKernel>(
     jet_outcome_of(set.pop_value(value))
 }
 
+trait JetSetReplaceKernel {
+    type Item;
+
+    fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item>;
+}
+
+impl<T: Eq + std::hash::Hash> JetSetReplaceKernel for std::collections::HashSet<T> {
+    type Item = T;
+
+    fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item> {
+        self.replace(value)
+    }
+}
+
+impl<T: PartialEq> JetSetReplaceKernel for Vec<T> {
+    type Item = T;
+
+    fn replace_value(&mut self, value: Self::Item) -> Option<Self::Item> {
+        if let Some(index) = self.iter().position(|item| *item == value) {
+            Some(std::mem::replace(&mut self[index], value))
+        } else {
+            self.push(value);
+            None
+        }
+    }
+}
+
+fn jet_set_replace_kernel<C: JetSetReplaceKernel>(
+    set: &mut C,
+    value: C::Item,
+) -> JetOutcome<C::Item, JetAbsent> {
+    jet_outcome_of(set.replace_value(value))
+}
+
 trait JetDequePopFrontKernel {
     type Item;
 
@@ -1505,6 +1543,63 @@ fn jet_loop_iter_init_checked<C: JetLoopSource>(
         step: step as usize,
         exhausted,
     })
+}
+
+struct JetByteLoopIterCursor<'a> {
+    iter: std::slice::Iter<'a, u8>,
+    current: Option<u8>,
+    step: usize,
+    exhausted: bool,
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_init<'a>(
+    bytes: &'a [u8],
+    step_value: i64,
+    has_step: bool,
+) -> JetByteLoopIterCursor<'a> {
+    let step = if has_step { step_value } else { 1 };
+    if step <= 0 {
+        jet_panic("<core.prelude>", 0, "iterator loop stride must be positive");
+    }
+    let mut iter = bytes.iter();
+    let current = iter.next().copied();
+    let exhausted = current.is_none();
+    JetByteLoopIterCursor {
+        iter,
+        current,
+        step: step as usize,
+        exhausted,
+    }
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_has_next(cursor: &JetByteLoopIterCursor<'_>) -> bool {
+    cursor.current.is_some()
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_value(cursor: &mut JetByteLoopIterCursor<'_>) -> u8 {
+    cursor
+        .current
+        .take()
+        .unwrap_or_else(|| jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion"))
+}
+
+#[inline(always)]
+fn jet_loop_iter_bytes_advance(cursor: &mut JetByteLoopIterCursor<'_>) {
+    if cursor.exhausted {
+        return;
+    }
+    for _ in 1..cursor.step {
+        if cursor.iter.next().is_none() {
+            cursor.current = None;
+            cursor.exhausted = true;
+            return;
+        }
+    }
+    cursor.current = cursor.iter.next().copied();
+    cursor.exhausted = cursor.current.is_none();
 }
 
 fn jet_loop_iter_has_next(cursor: &JetLoopIterCursor) -> bool {
@@ -1945,52 +2040,96 @@ impl JetLoopSource for &mut JetRange {
 /// Lazy `String.split` — yields owned pieces on pull (no intermediate Vec of parts).
 /// Empty `sep` matches `jet_string_split` / Rust `str::split("")`: leading empty,
 /// one Char string per scalar, trailing empty.
-fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
-    let s = s.clone();
-    let sep = sep.to_string();
-    if sep.is_empty() {
-        // Index into owned `s` — `s.chars()` would borrow and break `'static` JetIter.
-        let mut offset = 0usize;
-        // 0 = leading empty; 1 = chars; 2 = done after trailing empty.
-        let mut phase = 0u8;
-        return JetIter(Box::new(std::iter::from_fn(move || match phase {
-            0 => {
-                phase = 1;
-                Some(String::new())
-            }
-            1 => {
-                if offset >= s.len() {
-                    phase = 2;
-                    return Some(String::new());
+///
+/// Keep one-scalar separators in their scalar form.  The old path converted
+/// every separator to an owned `String` before building the iterator; that was
+/// an avoidable allocation for the line-oriented `" "`/`"\n"` shapes that
+/// dominate text pipelines.  A multi-scalar separator still owns its pattern
+/// because `JetIter` is intentionally `'static`.
+enum JetStringSplitSeparator {
+    Empty,
+    Scalar(char),
+    Text(String),
+}
+
+struct JetStringSplitIter {
+    source: String,
+    separator: JetStringSplitSeparator,
+    offset: usize,
+    phase: u8,
+    done: bool,
+}
+
+impl Iterator for JetStringSplitIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &self.separator {
+            JetStringSplitSeparator::Empty => match self.phase {
+                0 => {
+                    self.phase = 1;
+                    Some(String::new())
                 }
-                let ch = s[offset..].chars().next().expect("offset in bounds");
-                let len = ch.len_utf8();
-                let out = s[offset..offset + len].to_string();
-                offset += len;
-                Some(out)
+                1 => {
+                    if self.offset >= self.source.len() {
+                        self.phase = 2;
+                        return Some(String::new());
+                    }
+                    let ch = self.source[self.offset..]
+                        .chars()
+                        .next()
+                        .expect("offset in bounds");
+                    let width = ch.len_utf8();
+                    let out = self.source[self.offset..self.offset + width].to_owned();
+                    self.offset += width;
+                    Some(out)
+                }
+                _ => None,
+            },
+            separator => {
+                if self.done {
+                    return None;
+                }
+                let start = self.offset;
+                let found = match separator {
+                    JetStringSplitSeparator::Scalar(ch) => self.source[start..]
+                        .find(*ch)
+                        .map(|relative| (relative, ch.len_utf8())),
+                    JetStringSplitSeparator::Text(separator) => self.source[start..]
+                        .find(separator)
+                        .map(|relative| (relative, separator.len())),
+                    JetStringSplitSeparator::Empty => unreachable!("empty separator handled above"),
+                };
+                match found {
+                    Some((relative, separator_len)) => {
+                        let end = start + relative;
+                        self.offset = end + separator_len;
+                        Some(self.source[start..end].to_owned())
+                    }
+                    None => {
+                        self.done = true;
+                        Some(self.source[start..].to_owned())
+                    }
+                }
             }
-            _ => None,
-        })));
+        }
     }
-    let mut start = 0usize;
-    let mut done = false;
-    JetIter(Box::new(std::iter::from_fn(move || {
-        if done {
-            return None;
-        }
-        match s[start..].find(&sep) {
-            Some(rel) => {
-                let end = start + rel;
-                let part = s[start..end].to_string();
-                start = end + sep.len();
-                Some(part)
-            }
-            None => {
-                done = true;
-                Some(s[start..].to_string())
-            }
-        }
-    })))
+}
+
+fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
+    let mut chars = sep.chars();
+    let separator = match (chars.next(), chars.next()) {
+        (None, _) => JetStringSplitSeparator::Empty,
+        (Some(ch), None) => JetStringSplitSeparator::Scalar(ch),
+        (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
+    };
+    JetIter(Box::new(JetStringSplitIter {
+        source: s.clone(),
+        separator,
+        offset: 0,
+        phase: 0,
+        done: false,
+    }))
 }
 
 /// Run a synchronous consumer over `String.split` pieces. This is the direct
@@ -2958,4 +3097,690 @@ fn jet_priority_queue_remove_slot_kernel<T: Ord>(
     let removed = items.remove(i as usize);
     *pq = items.into_iter().collect();
     Ok(jet_present(removed))
+}
+// D-CORE-COLLECTIONS1=A: nominal string containers share one target-neutral
+// kernel.  AOT calls these symbols directly; the comptime adapter below
+// marshals the same values through this module rather than reimplementing
+// Counter, Deque, OrderedMap, or Chain semantics.
+#[derive(Clone, Debug)]
+pub(crate) struct JetCounter {
+    pub keys: Vec<String>,
+    pub counts: Vec<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetDeque {
+    pub items: Vec<String>,
+    pub head: i64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetOrderedMap {
+    pub keys: Vec<String>,
+    pub values: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetLayer {
+    pub keys: Vec<String>,
+    pub values: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetChain {
+    pub layers: Vec<JetLayer>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct JetStringSet {
+    pub items: Vec<String>,
+}
+
+fn jet_coll_counter_text(counter: &JetCounter) -> String {
+    format!(
+        "Counter{{keys: {}, counts: {}}}",
+        counter.keys.jet_show(),
+        counter.counts.jet_show()
+    )
+}
+
+fn jet_coll_deque_text(deque: &JetDeque) -> String {
+    format!(
+        "Deque{{items: {}, head: {}}}",
+        deque.items.jet_show(),
+        deque.head
+    )
+}
+
+fn jet_coll_ordered_map_text(map: &JetOrderedMap) -> String {
+    format!(
+        "OrderedMap{{keys: {}, values: {}}}",
+        map.keys.jet_show(),
+        map.values.jet_show()
+    )
+}
+
+fn jet_coll_layer_text(layer: &JetLayer) -> String {
+    format!(
+        "Layer{{keys: {}, values: {}}}",
+        layer.keys.jet_show(),
+        layer.values.jet_show()
+    )
+}
+
+fn jet_coll_chain_text(chain: &JetChain) -> String {
+    let layers = chain
+        .layers
+        .iter()
+        .map(jet_coll_layer_text)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Chain{{layers: [{}]}}", layers)
+}
+
+impl JetShow for JetCounter {
+    fn jet_show(&self) -> String {
+        jet_coll_counter_text(self)
+    }
+}
+impl JetDisplay for JetCounter {
+    fn jet_display(&self) -> String {
+        jet_coll_counter_text(self)
+    }
+}
+impl JetDebug for JetCounter {
+    fn jet_debug(&self) -> String {
+        jet_coll_counter_text(self)
+    }
+}
+
+impl JetShow for JetDeque {
+    fn jet_show(&self) -> String {
+        jet_coll_deque_text(self)
+    }
+}
+impl JetDisplay for JetDeque {
+    fn jet_display(&self) -> String {
+        jet_coll_deque_text(self)
+    }
+}
+impl JetDebug for JetDeque {
+    fn jet_debug(&self) -> String {
+        jet_coll_deque_text(self)
+    }
+}
+
+impl JetShow for JetOrderedMap {
+    fn jet_show(&self) -> String {
+        jet_coll_ordered_map_text(self)
+    }
+}
+impl JetDisplay for JetOrderedMap {
+    fn jet_display(&self) -> String {
+        jet_coll_ordered_map_text(self)
+    }
+}
+impl JetDebug for JetOrderedMap {
+    fn jet_debug(&self) -> String {
+        jet_coll_ordered_map_text(self)
+    }
+}
+
+impl JetShow for JetLayer {
+    fn jet_show(&self) -> String {
+        jet_coll_layer_text(self)
+    }
+}
+impl JetDisplay for JetLayer {
+    fn jet_display(&self) -> String {
+        jet_coll_layer_text(self)
+    }
+}
+impl JetDebug for JetLayer {
+    fn jet_debug(&self) -> String {
+        jet_coll_layer_text(self)
+    }
+}
+
+impl JetShow for JetChain {
+    fn jet_show(&self) -> String {
+        jet_coll_chain_text(self)
+    }
+}
+impl JetDisplay for JetChain {
+    fn jet_display(&self) -> String {
+        jet_coll_chain_text(self)
+    }
+}
+impl JetShow for JetStringSet {
+    fn jet_show(&self) -> String {
+        self.items.jet_show()
+    }
+}
+impl JetDisplay for JetStringSet {
+    fn jet_display(&self) -> String {
+        self.items.jet_show()
+    }
+}
+impl JetDebug for JetStringSet {
+    fn jet_debug(&self) -> String {
+        self.items.jet_show()
+    }
+}
+impl JetDebug for JetChain {
+    fn jet_debug(&self) -> String {
+        jet_coll_chain_text(self)
+    }
+}
+
+pub(crate) fn jet_coll_counter() -> JetCounter {
+    JetCounter {
+        keys: Vec::new(),
+        counts: Vec::new(),
+    }
+}
+
+pub(crate) fn jet_coll_counter_from(keys: &[String]) -> JetCounter {
+    let mut counter = jet_coll_counter();
+    for key in keys {
+        counter = jet_coll_counter_add(&counter, key, 1);
+    }
+    counter
+}
+
+pub(crate) fn jet_coll_counter_add(
+    counter: &JetCounter,
+    key: &String,
+    amount: i64,
+) -> JetCounter {
+    let mut keys = Vec::with_capacity(counter.keys.len() + usize::from(amount != 0));
+    let mut counts = Vec::with_capacity(counter.counts.len() + usize::from(amount != 0));
+    let mut found = false;
+    for (stored_key, stored_count) in counter.keys.iter().zip(&counter.counts) {
+        if stored_key == key {
+            let next = *stored_count + amount;
+            if next != 0 {
+                keys.push(stored_key.clone());
+                counts.push(next);
+            }
+            found = true;
+        } else {
+            keys.push(stored_key.clone());
+            counts.push(*stored_count);
+        }
+    }
+    if !found && amount != 0 {
+        keys.push(key.clone());
+        counts.push(amount);
+    }
+    JetCounter { keys, counts }
+}
+
+pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &String) -> JetCounter {
+    jet_coll_counter_add(counter, key, 1)
+}
+
+pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &String) -> JetCounter {
+    jet_coll_counter_add(counter, key, -1)
+}
+
+pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
+    counter
+        .keys
+        .iter()
+        .zip(&counter.counts)
+        .find_map(|(stored_key, count)| (stored_key == key).then_some(*count))
+        .unwrap_or(0)
+}
+
+pub(crate) fn jet_coll_counter_set_count(
+    counter: &JetCounter,
+    key: &String,
+    count: i64,
+) -> JetCounter {
+    let current = jet_coll_counter_get(counter, key);
+    jet_coll_counter_add(counter, key, count - current)
+}
+
+pub(crate) fn jet_coll_counter_total(counter: &JetCounter) -> i64 {
+    counter.counts.iter().sum()
+}
+
+pub(crate) fn jet_coll_counter_names(counter: &JetCounter) -> Vec<String> {
+    counter.keys.clone()
+}
+
+pub(crate) fn jet_coll_counter_elements(counter: &JetCounter) -> Vec<String> {
+    let mut out = Vec::new();
+    for (key, count) in counter.keys.iter().zip(&counter.counts) {
+        for _ in 0..(*count).max(0) {
+            out.push(key.clone());
+        }
+    }
+    out
+}
+
+pub(crate) fn jet_coll_counter_most_common(counter: &JetCounter, k: i64) -> JetCounter {
+    let limit = if k < 0 || k as usize > counter.keys.len() {
+        counter.keys.len()
+    } else {
+        k as usize
+    };
+    let mut used = vec![false; counter.keys.len()];
+    let mut keys = Vec::with_capacity(limit);
+    let mut counts = Vec::with_capacity(limit);
+    for _ in 0..limit {
+        let mut best = None;
+        for (index, count) in counter.counts.iter().enumerate() {
+            if !used[index]
+                && best.is_none_or(|best_index| *count > counter.counts[best_index])
+            {
+                best = Some(index);
+            }
+        }
+        let Some(index) = best else {
+            break;
+        };
+        used[index] = true;
+        keys.push(counter.keys[index].clone());
+        counts.push(counter.counts[index]);
+    }
+    JetCounter { keys, counts }
+}
+
+pub(crate) fn jet_coll_counter_subtract(
+    left: &JetCounter,
+    right: &JetCounter,
+) -> JetCounter {
+    let mut out = left.clone();
+    for (key, count) in right.keys.iter().zip(&right.counts) {
+        out = jet_coll_counter_add(&out, key, -*count);
+    }
+    out
+}
+
+pub(crate) fn jet_coll_counter_merge_add(left: &JetCounter, right: &JetCounter) -> JetCounter {
+    let mut out = left.clone();
+    for (key, count) in right.keys.iter().zip(&right.counts) {
+        out = jet_coll_counter_add(&out, key, *count);
+    }
+    out
+}
+
+pub(crate) fn jet_coll_counter_clear(_counter: &JetCounter) -> JetCounter {
+    jet_coll_counter()
+}
+
+pub(crate) fn jet_coll_deque() -> JetDeque {
+    JetDeque {
+        items: Vec::new(),
+        head: 0,
+    }
+}
+
+pub(crate) fn jet_coll_deque_from(items: &[String]) -> JetDeque {
+    JetDeque {
+        items: items.to_vec(),
+        head: 0,
+    }
+}
+
+fn jet_coll_deque_live_len(deque: &JetDeque) -> usize {
+    if deque.head <= 0 {
+        deque.items.len()
+    } else {
+        deque.items.len().saturating_sub(deque.head as usize)
+    }
+}
+
+fn jet_coll_deque_compact(deque: &JetDeque) -> JetDeque {
+    if deque.head <= 0 {
+        return deque.clone();
+    }
+    let start = (deque.head as usize).min(deque.items.len());
+    JetDeque {
+        items: deque.items[start..].to_vec(),
+        head: 0,
+    }
+}
+
+fn jet_coll_deque_maybe_compact(deque: &JetDeque) -> JetDeque {
+    if deque.head >= 32 && deque.head.saturating_mul(2) >= deque.items.len() as i64 {
+        jet_coll_deque_compact(deque)
+    } else {
+        deque.clone()
+    }
+}
+
+pub(crate) fn jet_coll_deque_len(deque: &JetDeque) -> i64 {
+    jet_coll_deque_live_len(deque) as i64
+}
+
+pub(crate) fn jet_coll_deque_is_empty(deque: &JetDeque) -> bool {
+    jet_coll_deque_live_len(deque) == 0
+}
+
+pub(crate) fn jet_coll_deque_append(deque: &JetDeque, value: &String) -> JetDeque {
+    let mut out = deque.clone();
+    out.items.push(value.clone());
+    out
+}
+
+pub(crate) fn jet_coll_deque_appendleft(deque: &JetDeque, value: &String) -> JetDeque {
+    let deque = jet_coll_deque_compact(deque);
+    let mut items = Vec::with_capacity(deque.items.len() + 1);
+    items.push(value.clone());
+    items.extend(deque.items);
+    JetDeque { items, head: 0 }
+}
+
+pub(crate) fn jet_coll_deque_pop(
+    deque: &JetDeque,
+) -> (JetDeque, JetOutcome<String, JetAbsent>) {
+    if jet_coll_deque_live_len(deque) == 0 {
+        return (deque.clone(), Err(JetAbsent));
+    }
+    let last = deque.items.len() - 1;
+    let value = deque.items[last].clone();
+    let start = (deque.head.max(0) as usize).min(last);
+    (
+        JetDeque {
+            items: deque.items[start..last].to_vec(),
+            head: 0,
+        },
+        Ok(value),
+    )
+}
+
+pub(crate) fn jet_coll_deque_popleft(
+    deque: &JetDeque,
+) -> (JetDeque, JetOutcome<String, JetAbsent>) {
+    if jet_coll_deque_live_len(deque) == 0 {
+        return (deque.clone(), Err(JetAbsent));
+    }
+    let head = deque.head.max(0) as usize;
+    let value = deque.items[head].clone();
+    let next = JetDeque {
+        items: deque.items.clone(),
+        head: deque.head + 1,
+    };
+    (jet_coll_deque_maybe_compact(&next), Ok(value))
+}
+
+pub(crate) fn jet_coll_deque_peek(deque: &JetDeque) -> Option<String> {
+    if jet_coll_deque_live_len(deque) == 0 {
+        None
+    } else {
+        Some(deque.items[deque.items.len() - 1].clone())
+    }
+}
+
+pub(crate) fn jet_coll_deque_peekleft(deque: &JetDeque) -> Option<String> {
+    if jet_coll_deque_live_len(deque) == 0 {
+        None
+    } else {
+        Some(deque.items[deque.head.max(0) as usize].clone())
+    }
+}
+
+pub(crate) fn jet_coll_deque_extend(deque: &JetDeque, values: &[String]) -> JetDeque {
+    let mut out = deque.clone();
+    out.items.extend(values.iter().cloned());
+    out
+}
+
+pub(crate) fn jet_coll_deque_extendleft(deque: &JetDeque, values: &[String]) -> JetDeque {
+    let mut out = deque.clone();
+    for value in values.iter().rev() {
+        out = jet_coll_deque_appendleft(&out, value);
+    }
+    out
+}
+
+pub(crate) fn jet_coll_deque_rotate(deque: &JetDeque, amount: i64) -> JetDeque {
+    let len = jet_coll_deque_live_len(deque);
+    if len == 0 {
+        return deque.clone();
+    }
+    let mut out = deque.clone();
+    if amount >= 0 {
+        for _ in 0..amount.rem_euclid(len as i64) {
+            let (next, value) = jet_coll_deque_pop(&out);
+            let Ok(value) = value else {
+                return out;
+            };
+            out = jet_coll_deque_appendleft(&next, &value);
+        }
+    } else {
+        for _ in 0..amount.wrapping_neg().rem_euclid(len as i64) {
+            let (next, value) = jet_coll_deque_popleft(&out);
+            let Ok(value) = value else {
+                return out;
+            };
+            out = jet_coll_deque_append(&next, &value);
+        }
+    }
+    out
+}
+
+pub(crate) fn jet_coll_deque_items(deque: &JetDeque) -> Vec<String> {
+    jet_coll_deque_compact(deque).items
+}
+
+pub(crate) fn jet_coll_ordered_map() -> JetOrderedMap {
+    JetOrderedMap {
+        keys: Vec::new(),
+        values: Vec::new(),
+    }
+}
+
+pub(crate) fn jet_coll_map_get(
+    map: &JetOrderedMap,
+    key: &String,
+) -> Option<String> {
+    map.keys
+        .iter()
+        .position(|stored_key| stored_key == key)
+        .map(|index| map.values[index].clone())
+}
+
+pub(crate) fn jet_coll_map_set(
+    map: &JetOrderedMap,
+    key: &String,
+    value: &String,
+) -> JetOrderedMap {
+    let mut keys = Vec::with_capacity(map.keys.len() + 1);
+    let mut values = Vec::with_capacity(map.values.len() + 1);
+    let mut found = false;
+    for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
+        if stored_key == key {
+            keys.push(key.clone());
+            values.push(value.clone());
+            found = true;
+        } else {
+            keys.push(stored_key.clone());
+            values.push(stored_value.clone());
+        }
+    }
+    if !found {
+        keys.push(key.clone());
+        values.push(value.clone());
+    }
+    JetOrderedMap { keys, values }
+}
+
+pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &String) -> JetOrderedMap {
+    let mut keys = Vec::with_capacity(map.keys.len());
+    let mut values = Vec::with_capacity(map.values.len());
+    for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
+        if stored_key != key {
+            keys.push(stored_key.clone());
+            values.push(stored_value.clone());
+        }
+    }
+    JetOrderedMap { keys, values }
+}
+
+pub(crate) fn jet_coll_map_keys(map: &JetOrderedMap) -> Vec<String> {
+    map.keys.clone()
+}
+
+pub(crate) fn jet_coll_map_values(map: &JetOrderedMap) -> Vec<String> {
+    map.values.clone()
+}
+
+pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &String) -> bool {
+    jet_coll_map_get(map, key).is_some()
+}
+
+pub(crate) fn jet_coll_map_len(map: &JetOrderedMap) -> i64 {
+    map.keys.len() as i64
+}
+
+pub(crate) fn jet_coll_chain() -> JetChain {
+    JetChain { layers: Vec::new() }
+}
+
+pub(crate) fn jet_coll_chain_push(
+    chain: &JetChain,
+    keys: &[String],
+    values: &[String],
+) -> JetChain {
+    let mut layers = Vec::with_capacity(chain.layers.len() + 1);
+    layers.push(JetLayer {
+        keys: keys.to_vec(),
+        values: values.to_vec(),
+    });
+    layers.extend(chain.layers.iter().cloned());
+    JetChain { layers }
+}
+
+pub(crate) fn jet_coll_chain_get(
+    chain: &JetChain,
+    key: &String,
+) -> Option<String> {
+    for layer in &chain.layers {
+        if let Some(index) = layer.keys.iter().position(|stored_key| stored_key == key) {
+            return Some(layer.values[index].clone());
+        }
+    }
+    None
+}
+
+pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &String) -> bool {
+    jet_coll_chain_get(chain, key).is_some()
+}
+pub(crate) fn jet_coll_set() -> JetStringSet {
+    JetStringSet { items: Vec::new() }
+}
+
+pub(crate) fn jet_coll_set_from_list(items: &[String]) -> JetStringSet {
+    let mut set = jet_coll_set();
+    for item in items {
+        set = jet_coll_set_add(&set, item);
+    }
+    set
+}
+
+pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &String) -> JetStringSet {
+    if jet_coll_set_contains(set, item) {
+        return set.clone();
+    }
+    let mut items = set.items.clone();
+    items.push(item.clone());
+    JetStringSet { items }
+}
+
+pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStringSet {
+    JetStringSet {
+        items: set.items.iter().filter(|value| *value != item).cloned().collect(),
+    }
+}
+
+pub(crate) fn jet_coll_set_remove(
+    set: &JetStringSet,
+    item: &String,
+) -> Option<JetStringSet> {
+    if !jet_coll_set_contains(set, item) {
+        return None;
+    }
+    Some(jet_coll_set_discard(set, item))
+}
+
+pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &String) -> bool {
+    set.items.iter().any(|value| value == item)
+}
+
+pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {
+    set.items.len() as i64
+}
+
+pub(crate) fn jet_coll_set_is_empty(set: &JetStringSet) -> bool {
+    set.items.is_empty()
+}
+
+pub(crate) fn jet_coll_set_items(set: &JetStringSet) -> Vec<String> {
+    set.items.clone()
+}
+
+pub(crate) fn jet_coll_set_clear(_set: &JetStringSet) -> JetStringSet {
+    jet_coll_set()
+}
+
+pub(crate) fn jet_coll_set_union(left: &JetStringSet, right: &JetStringSet) -> JetStringSet {
+    let mut out = left.clone();
+    for item in &right.items {
+        out = jet_coll_set_add(&out, item);
+    }
+    out
+}
+
+pub(crate) fn jet_coll_set_intersection(
+    left: &JetStringSet,
+    right: &JetStringSet,
+) -> JetStringSet {
+    JetStringSet {
+        items: left
+            .items
+            .iter()
+            .filter(|item| jet_coll_set_contains(right, item))
+            .cloned()
+            .collect(),
+    }
+}
+
+pub(crate) fn jet_coll_set_difference(left: &JetStringSet, right: &JetStringSet) -> JetStringSet {
+    JetStringSet {
+        items: left
+            .items
+            .iter()
+            .filter(|item| !jet_coll_set_contains(right, item))
+            .cloned()
+            .collect(),
+    }
+}
+
+pub(crate) fn jet_coll_set_symmetric_difference(
+    left: &JetStringSet,
+    right: &JetStringSet,
+) -> JetStringSet {
+    jet_coll_set_union(
+        &jet_coll_set_difference(left, right),
+        &jet_coll_set_difference(right, left),
+    )
+}
+
+pub(crate) fn jet_coll_set_issubset(left: &JetStringSet, right: &JetStringSet) -> bool {
+    left.items.iter().all(|item| jet_coll_set_contains(right, item))
+}
+
+pub(crate) fn jet_coll_set_issuperset(left: &JetStringSet, right: &JetStringSet) -> bool {
+    jet_coll_set_issubset(right, left)
+}
+
+pub(crate) fn jet_coll_set_isdisjoint(left: &JetStringSet, right: &JetStringSet) -> bool {
+    left.items.iter().all(|item| !jet_coll_set_contains(right, item))
+}
+
+pub(crate) fn jet_coll_set_clone(set: &JetStringSet) -> JetStringSet {
+    set.clone()
 }

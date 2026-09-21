@@ -1139,14 +1139,12 @@ pub enum BuildPanic {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DevRecordsBudget {
     pub max_bytes: u64,
-    pub max_records: usize,
 }
 
 impl Default for DevRecordsBudget {
     fn default() -> Self {
         Self {
             max_bytes: 256 * 1024 * 1024,
-            max_records: 200,
         }
     }
 }
@@ -1282,7 +1280,6 @@ fn parse_dev_records_budget(value: &str) -> Result<DevRecordsBudget, PackagePars
     let body = record_body(value, "dev.records.budget")?;
     let mut budget = DevRecordsBudget::default();
     let mut seen_size = false;
-    let mut seen_count = false;
     for (key, raw) in key_value_entries(body)? {
         match key.as_str() {
             "size" => {
@@ -1294,20 +1291,9 @@ fn parse_dev_records_budget(value: &str) -> Result<DevRecordsBudget, PackagePars
                 seen_size = true;
                 budget.max_bytes = parse_dev_record_bytes(&raw)?;
             }
-            "count" => {
-                if seen_count {
-                    return Err(err(
-                        "dev.records.budget field `count` is declared more than once",
-                    ));
-                }
-                seen_count = true;
-                budget.max_records = raw.trim().replace('_', "").parse::<usize>().ok().filter(|n| *n > 0).ok_or_else(|| {
-                    err("dev.records.budget.count must be a positive whole number")
-                })?;
-            }
             other => {
                 return Err(err(format!(
-                    "dev.records.budget has unknown field `{other}` (allowed: size, count)"
+                    "dev.records.budget has unknown field `{other}` (allowed: size)"
                 )));
             }
         }

@@ -1,19 +1,5 @@
-use crate::Syntax;
-
 /// Canonical Core module member names (completion, help, diagnostics).
 pub fn core_module_items(module: &str) -> Vec<String> {
-    if module == "core.compiler.lang" {
-        return crate::Policy::RULE_ARG_DECLARATIONS
-            .iter()
-            .map(|declaration| declaration.name.to_string())
-            .collect();
-    }
-    if module == Syntax::CORE_MEM_MODULE {
-        return Syntax::CORE_MEM_GATE_TIERS
-            .iter()
-            .map(|(item, _)| (*item).to_string())
-            .collect();
-    }
     jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .find(|declaration| declaration.module == module)

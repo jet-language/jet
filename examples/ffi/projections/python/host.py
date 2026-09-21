@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, "target/bindings")
+sys.path.insert(0, ".jet/build/bindings")
 from projection_python import (
     PROJECTION_PYTHON_CLOSED,
     PROJECTION_PYTHON_EXPIRED_VIEW,
@@ -8,7 +8,7 @@ from projection_python import (
     load,
     project_component,
 )
-library = load("target/libprojection_python.so")
+library = load(".jet/build/libprojection_python.so")
 document = ResourceDocument(library)
 assert document.open(bytes((10, 20, 30))) == PROJECTION_PYTHON_OK
 status, stale = document.bytes()

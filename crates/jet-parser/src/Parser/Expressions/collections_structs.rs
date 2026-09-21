@@ -304,7 +304,13 @@ impl<'a> Parser<'a> {
             if self.at_state_section() {
                 return Err(self.reject_state_section("anonymous shape"));
             }
-            let (field, field_span) = self.expect_ident("for a field name")?;
+            let (field, field_span) =
+                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_CONC_TASK) {
+                    let token = self.bump();
+                    (Syntax::KW_CONC_TASK.to_string(), token.span)
+                } else {
+                    self.expect_ident("for a field name")?
+                };
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
                 self.expr()?
@@ -634,13 +640,25 @@ impl<'a> Parser<'a> {
             TokKind::LBrace if self.brace_starts_record() => {
                 return self.struct_pattern_rhs().map(Some);
             }
-            // Migration arm for the retired `.{ … }` pattern.
+            // Retired `.{ … }` pattern. Fmt rewrites; compile rejects.
             TokKind::Dot
                 if matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.kind),
                     Some(TokKind::LBrace)
                 ) =>
             {
+                let dot = self.peek().span;
+                let diagnostic = Diagnostic::error(
+                    "E0320",
+                    "inferred record patterns use `{…}`, not `.{…}`".to_string(),
+                    "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+                    "write `{ kind: …, field, .. }`".to_string(),
+                    Some(dot),
+                );
+                if !self.migration_mode {
+                    return Err(diagnostic);
+                }
+                self.diags.push(diagnostic);
                 return self.struct_pattern_rhs().map(Some);
             }
             // D-ENUMDOT1: bare unit `Variant | …` starts an or-pattern (lone

@@ -49,10 +49,16 @@ fn spawn_observed(tag: &str, source: &str) -> Option<Running> {
         String::from_utf8_lossy(&build.stderr)
     );
     let binary = dir
+        .join(".jet")
         .join("build")
         .join(format!("main{}", std::env::consts::EXE_SUFFIX));
     let mut child = Command::new(binary)
         .env("JET_OBSERVE", "1")
+        .env("JET_DEVTOOLS_RELAY_SESSION_ID", "event-observation-session")
+        .env("JET_DEVTOOLS_RELAY_SOURCE_ID", "observed")
+        .env("JET_DEVTOOLS_RELAY_BUILD_ID", "event-observation-build")
+        .env("JET_DEVTOOLS_RELAY_REVISION", "event-observation-revision")
+        .env("JET_DEVTOOLS_RELAY_WORLD_ID", "event-observation-world")
         .env("JET_SCHEDULER_THREADS", "2")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -106,7 +112,7 @@ fn canvas_runtime(running: &Running) -> String {
     .expect("Canvas should project the validated live Event sequence");
     graph
         .split_once("\"runtime_events\":")
-        .and_then(|(_, tail)| tail.split_once(",\"interfaces\""))
+        .and_then(|(_, tail)| tail.split_once(",\"event_dispatchers\""))
         .map(|(runtime, _)| runtime.to_string())
         .expect("Canvas runtime event facts")
 }
@@ -242,7 +248,7 @@ fn fail_async(n: Int) !Err {
 fn run() {
     print("READY")
     drop_scope :: event.scope()
-    dropped :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    dropped :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     dropped.on_priority(drop_scope, 23, (n: Int) -> {
@@ -261,12 +267,12 @@ fn run() {
     newest.join() ?? panic("newest")
 
     fail_scope :: event.scope()
-    failing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    failing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     failing.on(fail_scope, (n: Int) -> fail_async(n))
     failing.emit_async(4).join() ?? panic("failing")
 
     close_scope :: event.scope()
-    closing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    closing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (close_started_tx, close_started_rx) :: channel<Int>()
     (close_release_tx, close_release_rx) :: channel<Int>()
     closing.on(close_scope, (n: Int) -> {
@@ -351,11 +357,11 @@ use core.time as time
 fn run() {
     rejected_scope :: event.scope()
     rejected_scope.cancel()
-    rejected :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    rejected :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     rejected.on(rejected_scope, (n: Int) -> {})
 
     once_scope :: event.scope()
-    once_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    once_event :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     once_sub :: once_event.once(once_scope, (n: Int) -> {})
     once_event.emit_async(1).join() ?? panic("join")
     once_sub.unsubscribe()
@@ -439,7 +445,7 @@ use core.time as time
 
 fn run() {
     scope :: event.scope()
-    concurrent :: event.async_result<Int, String>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    concurrent :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
     concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
     loop i in 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500ms)
@@ -473,17 +479,20 @@ fn async_event_jit_callback_result_contract_matches_other_tiers() {
     let source = r#"
 use core.event as event
 
-fn fail(_n: Int) !Err {
-    return Err("explicit callback failure")
+#Error
+enum EventFailure { Explicit }
+
+fn fail(_n: Int) !EventFailure {
+    return Err(EventFailure.Explicit)
 }
 
 fn run() {
     scope :: event.scope()
-    async_event :: event.async_result<Int, String>(
+    async_event :: event.async_result<Int, EventFailure>(
         AsyncPolicy{ capacity: 2, overflow: .Block },
         .Collect
     ) ?? panic("policy")
-    async_event.on(scope, (n: Int) -> {})
+    async_event.on(scope, (_n: Int) -> {})
     async_event.on(scope, (n: Int) -> fail(n))
 
     report :: async_event.emit_async(1).join() ?? panic("dispatch")

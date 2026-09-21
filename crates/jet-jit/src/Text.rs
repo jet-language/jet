@@ -323,6 +323,17 @@ fn list_from_strings(items: Vec<String>) -> i64 {
         list
     })
 }
+fn list_from_bytes(bytes: &[u8]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &byte in bytes {
+            rt.heap
+                .list_push_int(list, i64::from(byte))
+                .expect("jit text byte list");
+        }
+        list
+    })
+}
 
 fn list_of_strings(list: i64) -> Vec<String> {
     Concurrency::with_runtime_mut(|rt| {
@@ -395,6 +406,225 @@ fn jet_jit_text_splitn(s: i64, pat: i64, n: i64) -> i64 {
         &clone_string(pat),
         n,
     ))
+}
+fn jet_jit_text_parse_split(s: i64, separator: i64) -> i64 {
+    list_from_strings(text_rt::jet_text_parse_split(
+        &clone_string(s),
+        &clone_string(separator),
+    ))
+}
+fn jet_jit_text_parse_rsplit(s: i64, separator: i64, maxsplit: i64) -> i64 {
+    list_from_strings(text_rt::jet_text_parse_rsplit(
+        &clone_string(s),
+        &clone_string(separator),
+        maxsplit,
+    ))
+}
+fn jet_jit_text_parse_split_once(s: i64, separator: i64) -> i64 {
+    let (found, before, after) = text_rt::jet_text_parse_split_once(
+        &clone_string(s),
+        &clone_string(separator),
+    );
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(3);
+        let before_id = rt.heap.alloc_string(before);
+        let after_id = rt.heap.alloc_string(after);
+        let _ = rt.heap.record_set_bool(record, 0, found);
+        let _ = rt.heap.record_set_string(record, 1, before_id);
+        let _ = rt.heap.record_set_string(record, 2, after_id);
+        record
+    })
+}
+fn jet_jit_text_parse_partition(s: i64, separator: i64) -> i64 {
+    let (head, sep, tail) = text_rt::jet_text_parse_partition(
+        &clone_string(s),
+        &clone_string(separator),
+    );
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(3);
+        let head_id = rt.heap.alloc_string(head);
+        let sep_id = rt.heap.alloc_string(sep);
+        let tail_id = rt.heap.alloc_string(tail);
+        let _ = rt.heap.record_set_string(record, 0, head_id);
+        let _ = rt.heap.record_set_string(record, 1, sep_id);
+        let _ = rt.heap.record_set_string(record, 2, tail_id);
+        record
+    })
+}
+fn jet_jit_text_parse_rpartition(s: i64, separator: i64) -> i64 {
+    let (head, sep, tail) = text_rt::jet_text_parse_rpartition(
+        &clone_string(s),
+        &clone_string(separator),
+    );
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(3);
+        let head_id = rt.heap.alloc_string(head);
+        let sep_id = rt.heap.alloc_string(sep);
+        let tail_id = rt.heap.alloc_string(tail);
+        let _ = rt.heap.record_set_string(record, 0, head_id);
+        let _ = rt.heap.record_set_string(record, 1, sep_id);
+        let _ = rt.heap.record_set_string(record, 2, tail_id);
+        record
+    })
+}
+fn jet_jit_text_parse_split_ws(s: i64) -> i64 {
+    list_from_strings(text_rt::jet_text_parse_split_ws(&clone_string(s)))
+}
+fn jet_jit_text_parse_bool(s: i64) -> i64 {
+    text_rt::jet_text_parse_bool(&clone_string(s))
+        .map_or(0, |value| i64::from(value) + 1)
+}
+fn jet_jit_text_parse_int(s: i64) -> i64 {
+    text_rt::jet_text_parse_int(&clone_string(s)).map_or(0, |value| value.wrapping_add(1))
+}
+fn jet_jit_text_parse_int_base(s: i64, base: i64) -> i64 {
+    text_rt::jet_text_parse_int_base(&clone_string(s), base)
+        .map_or(0, |value| value.wrapping_add(1))
+}
+fn jet_jit_text_wrap(s: i64, width: i64) -> i64 {
+    list_from_strings(text_rt::jet_text_wrap(&clone_string(s), width))
+}
+fn jet_jit_text_fill(s: i64, width: i64) -> i64 {
+    alloc_string(text_rt::jet_text_fill(&clone_string(s), width))
+}
+fn jet_jit_text_indent_with(s: i64, prefix: i64, predicate_nonblank: i64) -> i64 {
+    alloc_string(text_rt::jet_text_indent_with(
+        &clone_string(s),
+        &clone_string(prefix),
+        predicate_nonblank != 0,
+    ))
+}
+fn jet_jit_text_wrap_paragraphs(s: i64, width: i64) -> i64 {
+    alloc_string(text_rt::jet_text_wrap_paragraphs(&clone_string(s), width))
+}
+fn jet_jit_text_hanging_indent(s: i64, first: i64, rest: i64, width: i64) -> i64 {
+    alloc_string(text_rt::jet_text_hanging_indent(
+        &clone_string(s),
+        &clone_string(first),
+        &clone_string(rest),
+        width,
+    ))
+}
+fn jet_jit_text_shorten(s: i64, width: i64, placeholder: i64) -> i64 {
+    alloc_string(text_rt::jet_text_shorten(
+        &clone_string(s),
+        width,
+        &clone_string(placeholder),
+    ))
+}
+fn jet_jit_text_indent(s: i64, prefix: i64) -> i64 {
+    alloc_string(text_rt::jet_text_indent(
+        &clone_string(s),
+        &clone_string(prefix),
+    ))
+}
+fn jet_jit_text_dedent(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_dedent(&clone_string(s)))
+}
+fn jet_jit_text_expand_tabs(s: i64, tabsize: i64) -> i64 {
+    alloc_string(text_rt::jet_text_expand_tabs(&clone_string(s), tabsize))
+}
+fn jet_jit_text_html_escape(s: i64, quote: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_escape(
+        &clone_string(s),
+        quote != 0,
+    ))
+}
+fn jet_jit_text_html_escape_quoted(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_escape_quoted(&clone_string(s)))
+}
+fn jet_jit_text_html_escape_text(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_escape_text(&clone_string(s)))
+}
+fn jet_jit_text_html_unescape(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_unescape(&clone_string(s)))
+}
+fn jet_jit_text_html_strip_tags(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_strip_tags(&clone_string(s)))
+}
+fn jet_jit_text_html_unescape_and_strip(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_html_unescape_and_strip(&clone_string(s)))
+}
+fn jet_jit_text_parse_float(s: i64) -> i64 {
+    text_rt::jet_text_parse_float(&clone_string(s))
+        .map_or(0, |value| value.to_bits().wrapping_add(1) as i64)
+}
+fn jet_jit_text_parse_kv(s: i64, separator: i64) -> i64 {
+    let (key, ok, value) = text_rt::jet_text_parse_kv(
+        &clone_string(s),
+        &clone_string(separator),
+    );
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(3);
+        let key_id = rt.heap.alloc_string(key);
+        let value_id = rt.heap.alloc_string(value);
+        let _ = rt.heap.record_set_string(record, 0, key_id);
+        let _ = rt.heap.record_set_bool(record, 1, ok);
+        let _ = rt.heap.record_set_string(record, 2, value_id);
+        record
+    })
+}
+fn jet_jit_text_parse_find(s: i64, needle: i64) -> i64 {
+    text_rt::jet_text_parse_find(&clone_string(s), &clone_string(needle))
+}
+fn jet_jit_text_parse_rfind(s: i64, needle: i64) -> i64 {
+    text_rt::jet_text_parse_rfind(&clone_string(s), &clone_string(needle))
+}
+fn jet_jit_text_parse_count(s: i64, needle: i64) -> i64 {
+    text_rt::jet_text_parse_count(&clone_string(s), &clone_string(needle))
+}
+fn jet_jit_text_parse_replace_n(s: i64, old: i64, new: i64, count: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_replace_n(
+        &clone_string(s),
+        &clone_string(old),
+        &clone_string(new),
+        count,
+    ))
+}
+fn jet_jit_text_parse_join(parts: i64, separator: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_join(
+        &list_of_strings(parts),
+        &clone_string(separator),
+    ))
+}
+fn jet_jit_text_parse_splitlines(s: i64, keepends: i64) -> i64 {
+    list_from_strings(text_rt::jet_text_parse_splitlines(
+        &clone_string(s),
+        keepends != 0,
+    ))
+}
+fn jet_jit_text_parse_capwords(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_capwords(&clone_string(s)))
+}
+fn jet_jit_text_parse_find_from(s: i64, needle: i64, start: i64) -> i64 {
+    text_rt::jet_text_parse_find_from(&clone_string(s), &clone_string(needle), start)
+}
+fn jet_jit_text_parse_rfind_from(s: i64, needle: i64, end: i64) -> i64 {
+    text_rt::jet_text_parse_rfind_from(&clone_string(s), &clone_string(needle), end)
+}
+fn jet_jit_text_parse_index(s: i64, needle: i64) -> i64 {
+    text_rt::jet_text_parse_index(&clone_string(s), &clone_string(needle))
+}
+fn jet_jit_text_parse_contains(s: i64, needle: i64) -> i8 {
+    i8::from(text_rt::jet_text_parse_contains(
+        &clone_string(s),
+        &clone_string(needle),
+    ))
+}
+fn jet_jit_text_parse_lstrip(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_lstrip(&clone_string(s)))
+}
+fn jet_jit_text_parse_rstrip(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_rstrip(&clone_string(s)))
+}
+fn jet_jit_text_parse_strip(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_strip(&clone_string(s)))
+}
+fn jet_jit_text_parse_escape_c(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_escape_c(&clone_string(s)))
+}
+fn jet_jit_text_parse_unescape_c(s: i64) -> i64 {
+    alloc_string(text_rt::jet_text_parse_unescape_c(&clone_string(s)))
 }
 
 fn jet_jit_string_lines(s: i64) -> i64 {
@@ -720,6 +950,120 @@ fn jet_jit_text_ends_any(s: i64, suffixes: i64) -> i8 {
     i8::from(text_rt::ends_any(&clone_string(s), &suffixes))
 }
 
+fn jet_jit_text_rindex(s: i64, needle: i64) -> i64 {
+    clone_string(s)
+        .rfind(clone_string(needle).as_str())
+        .map(|index| index as i64)
+        .unwrap_or(-1)
+}
+
+fn jet_jit_text_encode(s: i64) -> i64 {
+    let text = clone_string(s);
+    list_from_bytes(text.as_bytes())
+}
+
+fn jet_jit_text_isdecimal(s: i64) -> i8 {
+    let text = clone_string(s);
+    i8::from(!text.is_empty() && text.chars().all(|character| character.is_ascii_digit()))
+}
+
+fn jet_jit_text_isnumeric(s: i64) -> i8 {
+    let text = clone_string(s);
+    i8::from(!text.is_empty() && text.chars().all(char::is_numeric))
+}
+
+fn jet_jit_text_isalnum(s: i64) -> i8 {
+    let text = clone_string(s);
+    i8::from(!text.is_empty() && text.chars().all(char::is_alphanumeric))
+}
+
+fn jet_jit_text_isdigit(s: i64) -> i8 {
+    let text = clone_string(s);
+    i8::from(!text.is_empty() && text.chars().all(|character| character.is_ascii_digit()))
+}
+
+fn jet_jit_text_isidentifier(s: i64) -> i8 {
+    let text = clone_string(s);
+    let mut chars = text.chars();
+    let valid = match chars.next() {
+        Some(first) => {
+            (first == '_' || first.is_alphabetic())
+                && chars.all(|character| character == '_' || character.is_alphanumeric())
+        }
+        None => false,
+    };
+    i8::from(valid)
+}
+
+fn jet_jit_text_istitle(s: i64) -> i8 {
+    let text = clone_string(s);
+    let mut has_cased = false;
+    let mut expect_upper = true;
+    let mut valid = true;
+    for character in text.chars() {
+        if character.is_uppercase() {
+            has_cased = true;
+            expect_upper = false;
+        } else if character.is_lowercase() {
+            has_cased = true;
+            if expect_upper {
+                valid = false;
+                break;
+            }
+        } else if character.is_alphabetic() {
+            valid = false;
+            break;
+        } else {
+            expect_upper = true;
+        }
+    }
+    i8::from(valid && has_cased)
+}
+
+fn jet_jit_text_isprintable(s: i64) -> i8 {
+    i8::from(clone_string(s).chars().all(|character| !character.is_control()))
+}
+
+fn jet_jit_text_expandtabs(s: i64, tabsize: i64) -> i64 {
+    let text = clone_string(s);
+    let width = tabsize.max(0);
+    let mut column = 0i64;
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\t' if width > 0 => {
+                let spaces = width - column.rem_euclid(width);
+                out.extend(std::iter::repeat(' ').take(spaces as usize));
+                column += spaces;
+            }
+            '\t' => {}
+            '\n' | '\r' => {
+                out.push(character);
+                column = 0;
+            }
+            _ => {
+                out.push(character);
+                column += 1;
+            }
+        }
+    }
+    alloc_string(out)
+}
+fn jet_jit_text_zfill(s: i64, width: i64) -> i64 {
+    let text = clone_string(s);
+    let length = text.chars().count() as i64;
+    if width <= length {
+        return alloc_string(text);
+    }
+    let (sign, body) = if let Some(rest) = text.strip_prefix('+') {
+        ("+", rest)
+    } else if let Some(rest) = text.strip_prefix('-') {
+        ("-", rest)
+    } else {
+        ("", text.as_str())
+    };
+    alloc_string(format!("{sign}{}{}", "0".repeat((width - length) as usize), body))
+}
 fn jet_jit_text_char_indices(s: i64) -> i64 {
     list_from_strings(text_rt::char_indices(&clone_string(s)))
 }
@@ -1169,7 +1513,27 @@ host_fns! {
             ternary.params.push(AbiParam::new(types::I64));
         }
         ternary.returns.push(AbiParam::new(types::I64));
+        let mut quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            quaternary.params.push(AbiParam::new(types::I64));
+        }
+        quaternary.returns.push(AbiParam::new(types::I64));
     }
+    wrap: "jet_text_wrap" => jet_jit_text_wrap: binary;
+    fill: "jet_text_fill" => jet_jit_text_fill: binary;
+    shorten: "jet_text_shorten" => jet_jit_text_shorten: ternary;
+    indent: "jet_text_indent" => jet_jit_text_indent: binary;
+    indent_with: "jet_text_indent_with" => jet_jit_text_indent_with: ternary;
+    wrap_paragraphs: "jet_text_wrap_paragraphs" => jet_jit_text_wrap_paragraphs: binary;
+    hanging_indent: "jet_text_hanging_indent" => jet_jit_text_hanging_indent: quaternary;
+    dedent: "jet_text_dedent" => jet_jit_text_dedent: unary;
+    expand_tabs: "jet_text_expand_tabs" => jet_jit_text_expand_tabs: binary;
+    html_escape: "jet_text_html_escape" => jet_jit_text_html_escape: binary;
+    html_escape_quoted: "jet_text_html_escape_quoted" => jet_jit_text_html_escape_quoted: unary;
+    html_escape_text: "jet_text_html_escape_text" => jet_jit_text_html_escape_text: unary;
+    html_unescape: "jet_text_html_unescape" => jet_jit_text_html_unescape: unary;
+    html_strip_tags: "jet_text_html_strip_tags" => jet_jit_text_html_strip_tags: unary;
+    html_unescape_and_strip: "jet_text_html_unescape_and_strip" => jet_jit_text_html_unescape_and_strip: unary;
     unicode_lower: "jet_unicode_lower" => jet_jit_text_lower: unary;
     unicode_upper: "jet_unicode_upper" => jet_jit_text_upper: unary;
     ascii_lower: "jet_text_ascii_lower" => jet_jit_text_ascii_lower: unary;
@@ -1179,6 +1543,33 @@ host_fns! {
     unicode_byte_count: "jet_text_unicode_byte_count" => jet_jit_text_unicode_byte_count: unary;
     rsplitn: "jet_text_rsplitn" => jet_jit_text_rsplitn: ternary;
     splitn: "jet_text_splitn" => jet_jit_text_splitn: ternary;
+    parse_split: "jet_text_parse_split" => jet_jit_text_parse_split: binary;
+    parse_rsplit: "jet_text_parse_rsplit" => jet_jit_text_parse_rsplit: ternary;
+    parse_split_once: "jet_text_parse_split_once" => jet_jit_text_parse_split_once: binary;
+    parse_partition: "jet_text_parse_partition" => jet_jit_text_parse_partition: binary;
+    parse_rpartition: "jet_text_parse_rpartition" => jet_jit_text_parse_rpartition: binary;
+    parse_split_ws: "jet_text_parse_split_ws" => jet_jit_text_parse_split_ws: unary;
+    parse_bool: "jet_text_parse_bool" => jet_jit_text_parse_bool: unary;
+    parse_int: "jet_text_parse_int" => jet_jit_text_parse_int: unary;
+    parse_int_base: "jet_text_parse_int_base" => jet_jit_text_parse_int_base: binary;
+    parse_kv: "jet_text_parse_kv" => jet_jit_text_parse_kv: binary;
+    parse_float: "jet_text_parse_float" => jet_jit_text_parse_float: unary;
+    parse_find: "jet_text_parse_find" => jet_jit_text_parse_find: binary;
+    parse_rfind: "jet_text_parse_rfind" => jet_jit_text_parse_rfind: binary;
+    parse_count: "jet_text_parse_count" => jet_jit_text_parse_count: binary;
+    parse_replace_n: "jet_text_parse_replace_n" => jet_jit_text_parse_replace_n: quaternary;
+    parse_join: "jet_text_parse_join" => jet_jit_text_parse_join: binary;
+    parse_splitlines: "jet_text_parse_splitlines" => jet_jit_text_parse_splitlines: binary;
+    parse_capwords: "jet_text_parse_capwords" => jet_jit_text_parse_capwords: unary;
+    parse_find_from: "jet_text_parse_find_from" => jet_jit_text_parse_find_from: ternary;
+    parse_rfind_from: "jet_text_parse_rfind_from" => jet_jit_text_parse_rfind_from: ternary;
+    parse_index: "jet_text_parse_index" => jet_jit_text_parse_index: binary;
+    parse_contains: "jet_text_parse_contains" => jet_jit_text_parse_contains: binary_i8;
+    parse_lstrip: "jet_text_parse_lstrip" => jet_jit_text_parse_lstrip: unary;
+    parse_rstrip: "jet_text_parse_rstrip" => jet_jit_text_parse_rstrip: unary;
+    parse_strip: "jet_text_parse_strip" => jet_jit_text_parse_strip: unary;
+    parse_escape_c: "jet_text_parse_escape_c" => jet_jit_text_parse_escape_c: unary;
+    parse_unescape_c: "jet_text_parse_unescape_c" => jet_jit_text_parse_unescape_c: unary;
     string_lines: "jet_string_lines" => jet_jit_string_lines: unary;
     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
@@ -1237,12 +1628,32 @@ host_fns! {
     checked_unicode_cut_last: "jet_unicode_cut_last" => jet_jit_text_cut_last: binary;
     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
+    direct_center: "jet_text_center" => jet_jit_text_center: ternary;
+    method_center_ref: "jet_text_center_ref" => jet_jit_text_center: ternary;
+    method_pad_end_ref: "jet_text_pad_end_ref" => jet_jit_text_pad_end: ternary;
+    method_pad_start_ref: "jet_text_pad_start_ref" => jet_jit_text_pad_start: ternary;
+    string_center_i64: "jet_text_center_i64" => jet_jit_text_center: ternary;
+    string_pad_end_i64: "jet_text_pad_end_i64" => jet_jit_text_pad_end: ternary;
+    string_pad_start_i64: "jet_text_pad_start_i64" => jet_jit_text_pad_start: ternary;
     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
     ends_any: "jet_text_ends_any" => jet_jit_text_ends_any: binary_i8;
     inspect: "jet_jit_text_inspect" => jet_jit_text_inspect: unary;
     char_indices: "jet_jit_text_char_indices" => jet_jit_text_char_indices: unary;
+    parse_rindex: "jet_text_rindex" => jet_jit_text_rindex: binary;
+    parse_encode: "jet_text_encode" => jet_jit_text_encode: unary;
+    parse_isdecimal: "jet_text_isdecimal" => jet_jit_text_isdecimal: unary_i8;
+    parse_isnumeric: "jet_text_isnumeric" => jet_jit_text_isnumeric: unary_i8;
+    parse_isalnum: "jet_text_isalnum" => jet_jit_text_isalnum: unary_i8;
+    parse_isdigit: "jet_text_isdigit" => jet_jit_text_isdigit: unary_i8;
+    parse_isidentifier: "jet_text_isidentifier" => jet_jit_text_isidentifier: unary_i8;
+    parse_istitle: "jet_text_istitle" => jet_jit_text_istitle: unary_i8;
+    parse_isprintable: "jet_text_isprintable" => jet_jit_text_isprintable: unary_i8;
+    parse_expandtabs: "jet_text_expandtabs" => jet_jit_text_expandtabs: binary;
+    parse_zfill: "jet_text_zfill" => jet_jit_text_zfill: binary;
+    parse_zfill_int: "jet_text_zfill_int" => jet_jit_text_zfill: binary;
     regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
     regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
+    parse_zfill_ref: "jet_text_zfill_ref" => jet_jit_text_zfill: binary;
     regex_literal: "jet_jit_regex_literal" => jet_jit_regex_literal: unary;
     direct_regex_flags: "jet_std::jet_regex_flags" => jet_jit_regex_flags: ternary;
     direct_regex_escape: "jet_std::jet_regex_escape" => jet_jit_regex_escape: unary;

@@ -7,9 +7,9 @@ import {
     label,
     project_component,
     load,
-} from "./target/bindings/projection_javascript.mjs";
+} from "./.jet/build/bindings/projection_javascript.mjs";
 
-const library = load(process.env.JET_NODE_ADDON ?? "./target/libprojection_javascript.node");
+const library = load(process.env.JET_NODE_ADDON ?? "./.jet/build/libprojection_javascript.node");
 const document = new ResourceDocument(library);
 if (document.open(Uint8Array.from([10, 20, 30])) !== RESOURCE_OK) process.exitCode = 1;
 const staleResult = document.bytes();

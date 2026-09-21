@@ -1269,14 +1269,7 @@ fn compile_latency_samples(
             target,
             profile,
         )?;
-        reset_compile_cache(&warm)?;
-        for name in ["build", ".jet-compile-cache"] {
-            let source = edit_trial.join(name);
-            if source.is_dir() {
-                copy_cache_tree(&source, &warm.join(name))
-                    .map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
-            }
-        }
+        restore_compile_cache(&edit_trial, &warm)?;
     } else {
         copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
         let copied_source_tree_sha256 =
@@ -1704,20 +1697,84 @@ fn copy_compile_project(source: &Path, destination: &Path) -> Result<(), String>
     copy_dir(source, destination, &mut total)
 }
 
+fn compile_cache_root(root: &Path) -> Result<Option<PathBuf>, String> {
+    let jet_dir = root.join(".jet");
+    let metadata = match std::fs::symlink_metadata(&jet_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot inspect compile workload state: {error}")),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "compile workload state `{}` is not a real directory",
+            jet_dir.display()
+        ));
+    }
+    Ok(Some(jet_dir.join("build")))
+}
+
+fn ensure_compile_cache_root(root: &Path) -> Result<PathBuf, String> {
+    let jet_dir = root.join(".jet");
+    match std::fs::symlink_metadata(&jet_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(format!(
+                "compile workload state `{}` is not a real directory",
+                jet_dir.display()
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&jet_dir)
+                .map_err(|error| format!("cannot create compile workload state: {error}"))?;
+        }
+        Err(error) => return Err(format!("cannot inspect compile workload state: {error}")),
+    }
+    let cache = jet_dir.join("build");
+    match std::fs::symlink_metadata(&cache) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(format!(
+                "compile workload cache `{}` is not a real directory",
+                cache.display()
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&cache)
+                .map_err(|error| format!("cannot create compile workload cache: {error}"))?;
+        }
+        Err(error) => return Err(format!("cannot inspect compile workload cache: {error}")),
+    }
+    Ok(cache)
+}
+
 fn reset_compile_cache(root: &Path) -> Result<(), ProviderFailure> {
-    for cache in [root.join("build"), root.join(".jet-compile-cache")] {
-        match std::fs::remove_dir_all(cache) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(ProviderFailure::operation(
-                    FailureClass::Execution,
-                    format!("cannot reset compile workload cache: {error}"),
-                ))
-            }
+    let Some(cache) = compile_cache_root(root).map_err(|error| {
+        ProviderFailure::operation(FailureClass::Execution, error)
+    })? else {
+        return Ok(());
+    };
+    match std::fs::symlink_metadata(&cache) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(ProviderFailure::operation(
+                FailureClass::Execution,
+                format!("compile workload cache `{}` is not a real directory", cache.display()),
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ProviderFailure::operation(
+                FailureClass::Execution,
+                format!("cannot inspect compile workload cache: {error}"),
+            ))
         }
     }
-    Ok(())
+    std::fs::remove_dir_all(&cache).map_err(|error| {
+        ProviderFailure::operation(
+            FailureClass::Execution,
+            format!("cannot reset compile workload cache: {error}"),
+        )
+    })
 }
 
 /// Give an `Edit` trial the exact cache state the primed clean build left
@@ -1727,14 +1784,31 @@ fn reset_compile_cache(root: &Path) -> Result<(), ProviderFailure> {
 /// measured rebuild into a cache hit.
 fn restore_compile_cache(warm: &Path, trial: &Path) -> Result<(), ProviderFailure> {
     reset_compile_cache(trial)?;
-    for name in ["build", ".jet-compile-cache"] {
-        let source = warm.join(name);
-        if !source.is_dir() {
-            continue;
+    let Some(source) = compile_cache_root(warm)
+        .map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?
+    else {
+        return Ok(());
+    };
+    let metadata = match std::fs::symlink_metadata(&source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ProviderFailure::operation(
+                FailureClass::Execution,
+                format!("cannot inspect compile workload cache: {error}"),
+            ))
         }
-        copy_cache_tree(&source, &trial.join(name))
-            .map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(ProviderFailure::operation(
+            FailureClass::Execution,
+            format!("compile workload cache `{}` is not a real directory", source.display()),
+        ));
     }
+    let destination = ensure_compile_cache_root(trial)
+        .map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
+    copy_cache_tree(&source, &destination)
+        .map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
     Ok(())
 }
 

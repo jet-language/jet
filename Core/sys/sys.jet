@@ -1,0 +1,440 @@
+package {
+    name: "core.sys"
+    version: "0.1.0"
+    edition: "2026"
+    description: "This process and its environment."
+    license: "MIT"
+    outputs: {
+        sys: .Library{ entry: sys }
+    }
+}
+// core.sys — this process and its environment.
+//
+// `get` / `set` / `unset` / `vars` are the environment. `name` / `family` /
+// `arch` / `cpu_count` are static facts about the host. POSIX identity and
+// job-control calls (`getuid`, `kill`, `fork`, …) fail with `IOError` on
+// platforms that do not provide them; they are never silently skipped.
+// `success` is `code == 0`. `expand` performs `$VAR` / `${VAR}` / `%VAR%`
+// substitution without running a shell.
+//
+// The OS door is private `host_*` cells. Expansion, decoding, and the
+// home/temp fallbacks are Jet.
+#Error
+pub enum EnvError {
+    UnknownEncoding
+    Invalid
+}
+
+pub fn get(name: String) -[Env]> ?String { host_env_get(name) }
+
+pub fn set(name: String, value: String) -[Env]> { host_env_set(name, value) }
+
+pub fn unset(name: String) -[Env]> { host_env_unset(name) }
+
+pub fn vars() -[Env]> [String] { host_env_vars() }
+
+/// Decode an environment value. `utf-8` / `utf8` / `ascii` / `latin-1` /
+/// `iso-8859-1` are accepted. Anything else is `UnknownEncoding`.
+pub fn decode(name: String, value: String, encoding: String) -> String !EnvError {
+    enc := ascii_lower(encoding)
+    if enc == "utf-8" || enc == "utf8" || enc == "utf_8" -> return Ok(value)
+    if enc == "ascii" || enc == "us-ascii" {
+        loop b in value.bytes() {
+            n :: b
+            if n > 127 -> return Err(EnvError.Invalid)
+        }
+        return Ok(value)
+    }
+    if enc == "latin-1" || enc == "latin1" || enc == "iso-8859-1" || enc == "iso8859-1" {
+        return Ok(value)
+    }
+    Err(EnvError.UnknownEncoding)
+}
+
+/// `$VAR`, `${VAR}`, and Windows `%VAR%`. Unknown names become empty.
+/// `$$` and `%%` emit a single delimiter. Nested expansion is not applied.
+pub fn expand(text: String) -[Env]> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop {
+        if i >= raw.len() -> return String.from_bytes(out) ?? text
+        n :: raw[i]
+        if n == 36 {
+            if i + 1 < raw.len() && raw[i + 1] == (U8{36}) {
+                out.push(U8{36})
+                i = i + 2
+                next
+            }
+            name := ""
+            if {
+                i + 1 < raw.len() && raw[i + 1] == (U8{123}) -> {
+                    j := i + 2
+                    loop {
+                        if j >= raw.len() {
+                            out.push(U8{36})
+                            i = i + 1
+                            break
+                        }
+                        if raw[j] == (U8{125}) {
+                            name = slice_ascii(raw, i + 2, j)
+                            i = j + 1
+                            break
+                        }
+                        j = j + 1
+                    }
+                }
+                else -> {
+                    j := i + 1
+                    loop {
+                        if j >= raw.len() || !is_ident(raw[j]) -> break
+                        j = j + 1
+                    }
+                    if j == i + 1 {
+                        out.push(U8{36})
+                        i = i + 1
+                        next
+                    }
+                    name = slice_ascii(raw, i + 1, j)
+                    i = j
+                }
+            }
+            if name.len() > 0 {
+                val :: host_env_get(name) ?? ""
+                loop b in val.bytes() -> out.push(b)
+            }
+            next
+        }
+        if n == 37 {
+            j := i + 1
+            loop {
+                if j >= raw.len() -> break
+                if raw[j] == (U8{37}) -> break
+                j = j + 1
+            }
+            if j < raw.len() && raw[j] == (U8{37}) && j > i + 1 {
+                name :: slice_ascii(raw, i + 1, j)
+                val :: host_env_get(name) ?? ""
+                loop b in val.bytes() -> out.push(b)
+                i = j + 1
+                next
+            }
+        }
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+pub fn current_dir() -[FS]> String !IOError { host_cwd() }
+
+pub fn set_current_dir(path: String) !IOError {
+    host_chdir(path)
+    Ok()
+}
+
+pub fn home_dir() -[Env]> ?String {
+    h :: host_env_get("HOME")
+    if h != None -> return h
+    host_env_get("USERPROFILE")
+}
+
+pub fn temp_dir() -[Env]> String {
+    t :: host_env_get("TMPDIR") ?? host_env_get("TEMP") ?? host_env_get("TMP") ?? "/tmp"
+    t
+}
+
+pub fn executable() -[Env]> String { host_executable() }
+
+pub fn name() -[Env]> String { host_os_name() }
+
+pub fn family() -[Env]> String {
+    n :: ascii_lower(host_os_name())
+    if n == "linux" || n == "darwin" || n == "freebsd" || n == "openbsd" || n == "netbsd" || n == "android" {
+        return "unix"
+    }
+    if starts(n, "windows") -> return "windows"
+    if n == "macos" || n == "osx" -> return "unix"
+    n
+}
+
+pub fn arch() -[Env]> String { host_arch() }
+
+pub fn cpu_count() -[Env]> Int {
+    n :: host_cpu_count()
+    if n < 1 -> return 1
+    n
+}
+
+pub fn pid() -[Env]> Int { host_pid() }
+
+pub fn getpid() -[Env]> Int { pid() }
+
+pub fn getppid() -[Env]> Int { host_ppid() }
+
+pub fn hostname() -[Env]> String { host_hostname() }
+
+pub fn username() -[Env]> String {
+    u :: host_env_get("USER") ?? host_env_get("USERNAME") ?? host_username()
+    u
+}
+
+pub fn release() -[Env]> String { host_os_release() }
+
+pub fn version() -[Env]> String { host_os_version() }
+
+pub fn getuid() -[Env]> Int { host_getuid() }
+
+pub fn geteuid() -[Env]> Int { host_geteuid() }
+
+pub fn getgid() -[Env]> Int { host_getgid() }
+
+pub fn getegid() -[Env]> Int { host_getegid() }
+
+pub fn getgroups() -[Env]> [Int] { host_getgroups() }
+
+pub fn getpgrp() -[Env]> Int { host_getpgrp() }
+
+pub fn getpgid(pid: Int) -[Env]> Int !IOError { host_getpgid(pid) }
+
+pub fn getsid(pid: Int) -[Env]> Int !IOError { host_getsid(pid) }
+
+pub fn getpriority(pid: Int) -[Env]> Int !IOError { host_getpriority(pid) }
+
+pub fn setpriority(pid: Int, priority: Int) !IOError {
+    host_setpriority(pid, priority)
+    Ok()
+}
+
+pub fn uptime() -[Time]> Float { host_uptime() }
+
+pub fn loadavg() -[Env]> (fifteen: Float, five: Float, one: Float) { host_loadavg() }
+
+pub fn times() -[Env]> (child_system: Float, child_user: Float, system: Float, user: Float) {
+    host_times()
+}
+
+pub fn sync() -[FS]> { host_sync() }
+
+pub fn umask(mask: Int) -[FS]> Int { host_umask(mask) }
+
+pub fn exitcode(code: Int) -> Int { code }
+
+pub fn success(code: Int) -> Bool { code == 0 }
+
+pub fn utime(path: String, atime: Int, mtime: Int) !IOError {
+    host_utime(path, atime, mtime)
+    Ok()
+}
+
+pub fn stop(pid: Int) { host_kill(pid, 19) }
+
+pub fn fork() -> Int !IOError { host_fork() }
+
+pub fn setuid(uid: Int) !IOError {
+    host_setuid(uid)
+    Ok()
+}
+
+pub fn setgid(gid: Int) !IOError {
+    host_setgid(gid)
+    Ok()
+}
+
+pub fn setpgid(pid: Int, pgid: Int) !IOError {
+    host_setpgid(pid, pgid)
+    Ok()
+}
+
+pub fn setpgrp() !IOError {
+    host_setpgid(0, 0)
+    Ok()
+}
+
+pub fn setsid() -> Int !IOError { host_setsid() }
+
+pub fn initgroups(user: String, gid: Int) !IOError {
+    host_initgroups(user, gid)
+    Ok()
+}
+
+pub fn kill(pid: Int, signal: Int) !IOError {
+    host_kill(pid, signal)
+    Ok()
+}
+
+pub fn wait() -> Int !IOError { host_wait(-1) }
+
+pub fn waitpid(pid: Int) -> Int !IOError { host_wait(pid) }
+
+pub fn pipe() -[FS]> [Int] !IOError { host_pipe() }
+
+pub fn close_fd(fd: Int) -[FS]> { host_close_fd(fd) }
+
+pub fn mkfifo(path: String, mode: Int) !IOError {
+    host_mkfifo(path, mode)
+    Ok()
+}
+
+pub fn atexit(hook: Int) { host_atexit(hook) }
+
+pub fn on_interrupt(hook: Int) { host_on_interrupt(hook) }
+
+fn host_env_get(name: String) -[Env]> ?String { panic("host_env_get") }
+
+fn host_env_set(name: String, value: String) -[Env]> { panic("host_env_set") }
+
+fn host_env_unset(name: String) -[Env]> { panic("host_env_unset") }
+
+fn host_env_vars() -[Env]> [String] { panic("host_env_vars") }
+
+fn host_cwd() -[FS]> String !IOError { panic("host_cwd") }
+
+fn host_chdir(path: String) !IOError { panic("host_chdir") }
+
+fn host_executable() -[Env]> String { panic("host_executable") }
+
+fn host_os_name() -[Env]> String { panic("host_os_name") }
+
+fn host_arch() -[Env]> String { panic("host_arch") }
+
+fn host_cpu_count() -[Env]> Int { panic("host_cpu_count") }
+
+fn host_pid() -[Env]> Int { panic("host_pid") }
+
+fn host_ppid() -[Env]> Int { panic("host_ppid") }
+
+fn host_hostname() -[Env]> String { panic("host_hostname") }
+
+fn host_username() -[Env]> String { panic("host_username") }
+
+fn host_os_release() -[Env]> String { panic("host_os_release") }
+
+fn host_os_version() -[Env]> String { panic("host_os_version") }
+
+fn host_getuid() -[Env]> Int { panic("host_getuid") }
+
+fn host_geteuid() -[Env]> Int { panic("host_geteuid") }
+
+fn host_getgid() -[Env]> Int { panic("host_getgid") }
+
+fn host_getegid() -[Env]> Int { panic("host_getegid") }
+
+fn host_getgroups() -[Env]> [Int] { panic("host_getgroups") }
+
+fn host_getpgrp() -[Env]> Int { panic("host_getpgrp") }
+
+fn host_getpgid(pid: Int) -[Env]> Int !IOError { panic("host_getpgid") }
+
+fn host_getsid(pid: Int) -[Env]> Int !IOError { panic("host_getsid") }
+
+fn host_getpriority(pid: Int) -[Env]> Int !IOError { panic("host_getpriority") }
+
+fn host_setpriority(pid: Int, priority: Int) !IOError { panic("host_setpriority") }
+
+fn host_uptime() -[Time]> Float { panic("host_uptime") }
+
+fn host_loadavg() -[Env]> (fifteen: Float, five: Float, one: Float) { panic("host_loadavg") }
+
+fn host_times() -[Env]> (child_system: Float, child_user: Float, system: Float, user: Float) {
+    panic("host_times")
+}
+
+fn host_sync() -[FS]> { panic("host_sync") }
+
+fn host_umask(mask: Int) -[FS]> Int { panic("host_umask") }
+
+fn host_utime(path: String, atime: Int, mtime: Int) !IOError { panic("host_utime") }
+
+fn host_kill(pid: Int, signal: Int) !IOError { panic("host_kill") }
+
+fn host_fork() -> Int !IOError { panic("host_fork") }
+
+fn host_setuid(uid: Int) !IOError { panic("host_setuid") }
+
+fn host_setgid(gid: Int) !IOError { panic("host_setgid") }
+
+fn host_setpgid(pid: Int, pgid: Int) !IOError { panic("host_setpgid") }
+
+fn host_setsid() -> Int !IOError { panic("host_setsid") }
+
+fn host_initgroups(user: String, gid: Int) !IOError { panic("host_initgroups") }
+
+fn host_wait(pid: Int) -> Int !IOError { panic("host_wait") }
+
+fn host_pipe() -[FS]> [Int] !IOError { panic("host_pipe") }
+
+fn host_close_fd(fd: Int) -[FS]> { panic("host_close_fd") }
+
+fn host_mkfifo(path: String, mode: Int) !IOError { panic("host_mkfifo") }
+
+fn host_atexit(hook: Int) { panic("host_atexit") }
+
+fn host_on_interrupt(hook: Int) { panic("host_on_interrupt") }
+
+fn is_ident(b: U8) -> Bool {
+    n :: b
+    if n >= 65 && n <= 90 -> return true
+    if n >= 97 && n <= 122 -> return true
+    if n >= 48 && n <= 57 -> return true
+    n == 95
+}
+
+fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn starts(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+pub fn platform() -> String { "{name()}-{arch()}" }
+
+pub fn is_windows() -> Bool { family() == "windows" }
+
+pub fn is_unix() -> Bool {
+    f :: family()
+    f == "unix" || f == "posix" || f == "linux" || f == "darwin"
+}
+
+pub fn is_linux() -> Bool { name() == "linux" }
+
+pub fn is_macos() -> Bool { name() == "darwin" || name() == "macos" }
+
+pub fn uname() -> String { "{sysname()} {release()} {machine()}" }
+
+pub fn sysname() -> String { name() }
+
+pub fn machine() -> String { arch() }
+
+pub fn getenv(name: String, fallback: String) -[Env]> String { get(name) ?? fallback }
+
+pub fn pathsep() -> String {
+    if is_windows() -> ";"
+    ":"
+}
+
+pub fn linesep() -> String {
+    if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? "\n"
+    "\n"
+}

@@ -119,7 +119,7 @@ fn run() {
     input :: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
     groups :: data.query(reader)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)

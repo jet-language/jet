@@ -30,7 +30,7 @@ pub struct ImageArray {
     pub color_space: String
 }
 
-pub fn find_text(xs: [String], needle: String) ?Int -> {
+pub fn find_text(xs: [String], needle: String) -> ?Int {
     i := 0
     loop i < xs.len() {
         if xs[i] == needle -> return Val(i)
@@ -39,11 +39,11 @@ pub fn find_text(xs: [String], needle: String) ?Int -> {
     return None
 }
 
-pub fn coordinate(name: String, labels: [String]) Coordinate -> {
+pub fn coordinate(name: String, labels: [String]) -> Coordinate {
     return Coordinate{name: name, labels: labels}
 }
 
-pub fn labeled(values: Tensor, dims: [String], coords: [Coordinate]) LabeledArray -> {
+pub fn labeled(values: Tensor, dims: [String], coords: [Coordinate]) -> LabeledArray {
     if compute.rank(values) != dims.len() -> panic("labeled rank and dimensions differ")
     if dims.len() != coords.len() -> panic("labeled dimensions and coordinates differ")
     shape :: compute.shape(values)
@@ -57,15 +57,15 @@ pub fn labeled(values: Tensor, dims: [String], coords: [Coordinate]) LabeledArra
 // Look up one coordinate and read the corresponding Tensor cell.  Other axes
 // remain at zero, which makes this useful for both axis inspection and the
 // two-dimensional cell helper below.
-pub fn lookup(array: LabeledArray, dim: String, label: String) ?Float -> {
+pub fn lookup(array: LabeledArray, dim: String, label: String) -> ?Float {
     dim_index :: find_text(array.dims, dim)
-    if dim_index == None -> return None
+    if dim_index == .None -> return None
     axis := dim_index ?? 0
     if axis >= array.coords.len() -> return None
     coordinate :: array.coords[axis]
     if coordinate.name != dim -> return None
     label_index :: find_text(coordinate.labels, label)
-    if label_index == None -> return None
+    if label_index == .None -> return None
 
     indexes := [Int]{}
     loop _i in 0..<array.dims.len() -> indexes.push(0)
@@ -76,10 +76,10 @@ pub fn lookup(array: LabeledArray, dim: String, label: String) ?Float -> {
 
 // Read a fully labeled row/column cell.  The labels are resolved before any
 // Tensor access, so a missing dimension or coordinate is an ordinary None.
-pub fn cell(array: LabeledArray, row_label: String, col_label: String) ?Float -> {
+pub fn cell(array: LabeledArray, row_label: String, col_label: String) -> ?Float {
     row_axis :: find_text(array.dims, "row")
     col_axis :: find_text(array.dims, "col")
-    if row_axis == None || col_axis == None -> return None
+    if row_axis == .None || col_axis == .None -> return None
     row_index := row_axis ?? 0
     col_index := col_axis ?? 0
     if row_index >= array.coords.len() || col_index >= array.coords.len() -> return None
@@ -89,7 +89,7 @@ pub fn cell(array: LabeledArray, row_label: String, col_label: String) ?Float ->
     if row_coordinate.name != "row" || col_coordinate.name != "col" -> return None
     row_label_index :: find_text(row_coordinate.labels, row_label)
     col_label_index :: find_text(col_coordinate.labels, col_label)
-    if row_label_index == None || col_label_index == None -> return None
+    if row_label_index == .None || col_label_index == .None -> return None
 
     indexes := [Int]{}
     loop _i in 0..<array.dims.len() -> indexes.push(0)
@@ -99,7 +99,7 @@ pub fn cell(array: LabeledArray, row_label: String, col_label: String) ?Float ->
     return Val(value)
 }
 
-pub fn chunked(source: Tensor, chunk_size: Int) ChunkedArray -> {
+pub fn chunked(source: Tensor, chunk_size: Int) -> ChunkedArray {
     if chunk_size <= 0 -> panic("chunk size must be positive")
     if compute.rank(source) != 1 -> panic("chunk source must be one-dimensional")
     return ChunkedArray{
@@ -110,14 +110,14 @@ pub fn chunked(source: Tensor, chunk_size: Int) ChunkedArray -> {
     }
 }
 
-pub fn chunk_count(plan: ChunkedArray) Int -> {
+pub fn chunk_count(plan: ChunkedArray) -> Int {
     if plan.chunk_size <= 0 -> panic("chunk size must be positive")
     return (plan.length + plan.chunk_size - 1) /% plan.chunk_size
 }
 
 // Read one real window from the source Tensor.  The returned Tensor is the
 // materialized chunk; no nested list stands in for compute storage.
-pub fn read_chunk(plan: ChunkedArray, index: Int) Tensor -> {
+pub fn read_chunk(plan: ChunkedArray, index: Int) -> Tensor {
     if index < 0 || index >= chunk_count(plan) -> panic("chunk index out of bounds")
     start := index * plan.chunk_size
     values := [Float]{}
@@ -132,7 +132,7 @@ pub fn read_chunk(plan: ChunkedArray, index: Int) Tensor -> {
     return compute.from_list(values) ?? panic("chunk")
 }
 
-pub fn map_chunk(plan: &ChunkedArray, index: Int, f: fn(Float) Float -[]>) Tensor -> {
+pub fn map_chunk(plan: &ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tensor {
     plan.reads += 1
     chunk :: read_chunk(plan, index)
     values :: compute.to_list(chunk)
@@ -141,7 +141,7 @@ pub fn map_chunk(plan: &ChunkedArray, index: Int, f: fn(Float) Float -[]>) Tenso
     return compute.from_list(mapped) ?? panic("mapped chunk")
 }
 
-pub fn map_all(plan: &ChunkedArray, f: fn(Float) Float -[]>) Tensor -> {
+pub fn map_all(plan: &ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
     mapped := [Float]{}
     loop index in 0..<chunk_count(plan) {
         chunk :: map_chunk(plan, index, f)
@@ -151,7 +151,7 @@ pub fn map_all(plan: &ChunkedArray, f: fn(Float) Float -[]>) Tensor -> {
     return compute.from_list(mapped) ?? panic("mapped chunks")
 }
 
-fn ppm_tokens(source: String) [String] -> {
+fn ppm_tokens(source: String) -> [String] {
     tokens := [String]{}
     loop line in source.split("\n") {
         cleaned :: line.trim()
@@ -167,7 +167,7 @@ fn ppm_tokens(source: String) [String] -> {
 
 // Decode the small, standards-compatible ASCII PPM (P3) fixture used by the
 // executable.  Pixel samples are normalized into the canonical Float Tensor.
-pub fn decode_ppm(source: String) ImageArray !String -> {
+pub fn decode_ppm(source: String) -> ImageArray !String {
     tokens :: ppm_tokens(source)
     if tokens.len() < 4 -> return Err("PPM header is incomplete")
     if tokens[0] != "P3" -> return Err("PPM magic must be P3")
@@ -191,17 +191,19 @@ pub fn decode_ppm(source: String) ImageArray !String -> {
 
     flat :: compute.from_list(values) ?? panic("PPM Tensor")
     pixels :: compute.reshape(flat, [height, width, 3]) ?? panic("PPM reshape")
-    return Ok(ImageArray{
+    return Ok(
+    ImageArray{
         pixels: pixels,
         width: width,
         height: height,
         channels: 3,
         dtype: "f64",
         color_space: "sRGB",
-    })
+    },
+    )
 }
 
-pub fn resize_nearest(image: ImageArray, new_width: Int, new_height: Int) ImageArray -> {
+pub fn resize_nearest(image: ImageArray, new_width: Int, new_height: Int) -> ImageArray {
     if new_width <= 0 || new_height <= 0 -> panic("resize dimensions must be positive")
     out :: compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
     y := 0
@@ -230,7 +232,7 @@ pub fn resize_nearest(image: ImageArray, new_width: Int, new_height: Int) ImageA
     }
 }
 
-pub fn grayscale(image: ImageArray) ImageArray -> {
+pub fn grayscale(image: ImageArray) -> ImageArray {
     if image.channels < 3 -> panic("RGB image required")
     out :: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
     y := 0
@@ -258,7 +260,7 @@ pub fn grayscale(image: ImageArray) ImageArray -> {
 
 // Encode image Tensor data to a real P3 file.  Grayscale values are expanded
 // to three equal samples so the output can be decoded by the same path.
-pub fn encode_ppm(image: ImageArray) String -> {
+pub fn encode_ppm(image: ImageArray) -> String {
     lines := [String]{
         "P3",
         "{image.width} {image.height}",

@@ -1,3 +1,9 @@
+package {
+    name: "tooling_data_bridges"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc] } }
+}
+
 // D-DATA-BRIDGE1 / D-DATA-STATUS1: honest Python/R/GPU bridge facts (#708).
 use core.data as data
 
@@ -11,8 +17,7 @@ fn show_bridge(step: String) {
 }
 
 fn probe_bridge(name: String) {
-    asked :: data.require_bridge(name)
-    if asked == {
+    if data.require_bridge(name) == {
         .Ok(_) -> { print("{name}: available") }
         .Err(error) -> { print("{name}: {error}") }
     }
@@ -25,8 +30,7 @@ fn run() {
     probe_bridge("py")
     probe_bridge("r")
     probe_bridge("gpu")
-    bad :: data.require_bridge("nope")
-    if bad == {
+    if data.require_bridge("nope") == {
         .Ok(_) -> { print("nope: unexpectedly ok") }
         .Err(error) -> { print("nope: {error}") }
     }

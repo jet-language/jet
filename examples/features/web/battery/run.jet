@@ -4,24 +4,24 @@ use core.http.server as server
 use core.net as net
 use core.web as core_web
 
-fn app_home() WebPage -> {
+fn app_home() -> WebPage {
     count :: battery.count_orders("/tmp/jet-web-battery.sqlite") ?? return core_web.page("Orders unavailable", "<p>database read failed</p>")
     return battery.ssr_orders_page(count, "alice")
 }
 
-fn app_orders() WebPage -> {
+fn app_orders() -> WebPage {
     count :: battery.count_orders("/tmp/jet-web-battery.sqlite") ?? return core_web.page("Orders unavailable", "<p>database read failed</p>")
     return battery.ssr_orders_page(count, "alice")
 }
 
-fn app_orders_loader() String -> "orders:list"
+fn app_orders_loader() -> String { "orders:list" }
 
-fn app_create_action(input: battery.NewOrder) String -> {
+fn app_create_action(input: battery.NewOrder) -> String {
     inserted :: battery.insert_order("/tmp/jet-web-battery.sqlite", input.item, input.quantity) ?? return "database write failed"
     return "created={inserted}"
 }
 
-fn app_graph() App -> {
+fn app_graph() -> App {
     return core_web
         .app()
         .ssr()
@@ -47,7 +47,7 @@ struct OrderSearch {
     limit: Int
 }
 
-fn app_order_detail(id: Int, search: OrderSearch) WebPage -> {
+fn app_order_detail(id: Int, search: OrderSearch) -> WebPage {
     return core_web.page(
         "Order",
         "<main><h1>Order {id}</h1><p>limit={search.limit}</p></main>"
@@ -55,17 +55,17 @@ fn app_order_detail(id: Int, search: OrderSearch) WebPage -> {
 }
 
 
-fn list_orders(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn list_orders(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse !HTTPError {
     count :: battery.count_orders(path) ?? return Ok(battery.status_response(500, "database read failed"))
     body :: "<h1>Orders</h1><p>request-path={req.path()}</p><p>orders={count}</p><p>cache={cache_version.get()}</p>"
     return Ok(battery.ok_response(body))
 }
-fn detail_order(id: Int) HTTPResponse !HTTPError -> {
+fn detail_order(id: Int) -> HTTPResponse !HTTPError {
     if id < 1 -> return Ok(battery.not_found_response("bad order id"))
     return Ok(battery.ok_response("<h1>Order {id}</h1><p>{battery.order_detail_path(id)}</p>"))
 }
 
-fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse !HTTPError {
     item :: req.form("item") ?? return Ok(battery.invalid_response("missing item"))
     quantity_text :: req.form("quantity") ?? return Ok(battery.invalid_response("missing quantity"))
     view :: battery.validate_order_form(item, quantity_text)
@@ -76,7 +76,7 @@ fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPRe
     return Ok(battery.created_response("created order rows={inserted}"))
 }
 
-fn login(session_cell: Cell<String>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn login(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse !HTTPError {
     input :: req.json<Login>() ?? return Ok(battery.invalid_response("invalid login"))
     state :: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
     session_cell.set(state.session_id)
@@ -84,7 +84,7 @@ fn login(session_cell: Cell<String>, req: HTTPRequest) HTTPResponse !HTTPError -
     return Ok(response.header("set-cookie", state.cookie))
 }
 
-fn protected(session_cell: Cell<String>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn protected(session_cell: Cell<String>, req: HTTPRequest) -> HTTPResponse !HTTPError {
     cookie :: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
     status :: battery.protected_status(session_cell.get(), cookie)
     if status != 200 -> return Ok(battery.status_response(status, "login required"))

@@ -1,25 +1,31 @@
+package {
+    name: "serde_encoding_csv_stream"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+}
+
 // D-ENCSTREAM-SURFACE1=A: bounded CSV reader/writer lifecycle.
 use core.encoding as encoding
 use core.encoding.csv as csv
 use core.files as files
 
-fn write_catalog(path: Path) Bool !(EncodingError | IOError) -> {
-    output :: files.create(path)
-    writer :: csv.writer(^output, encoding.EncodingLimits.safe())
-    writer.write(["ok", "true"])
-    writer.flush()
-    writer.finish()
+fn write_catalog(path: Path) -> Bool !(EncodingError | IOError) {
+    output :: files.create(path) ?? return Err(err)
+    writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    writer.write(["ok", "true"]) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-csv")
+    scratch :: files.temp_dir("jet-encoding-csv") ?? return
     path :: Path.from(scratch.path).join("catalog.csv")
-    write_catalog(path)
-    input :: files.open(path)
-    reader :: csv.reader(^input)
+    write_catalog(path) ?? return
+    input :: files.open(path) ?? return
+    reader :: csv.reader(^input) ?? return
     loop _record in reader -> print("record")
     print("eof")
 }

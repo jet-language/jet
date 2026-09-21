@@ -1,0 +1,240 @@
+// core.http.client — configured HTTP client.
+//
+// Redirect policy, extra headers, cookies, retries, and basic auth belong
+// here. The client stores a typed `Headers` bag and follows `3xx` responses
+// until `redirects` is exhausted. Timeouts are carried as milliseconds on
+// `Session`; the host exchange still owns the clock.
+
+pub struct Client {
+    pub method: String
+    pub url: String
+    pub headers: Headers
+    pub redirects: Int
+}
+
+pub struct Proxy { pub url: String }
+pub enum RedirectPolicy {
+    Disabled
+    Limited
+    All
+}
+
+pub struct Session {
+    pub headers: Headers
+    pub cookies: [Cookie]
+    pub timeout_ms: Int
+    pub retries: Int
+    pub redirects: Int
+    pub user: String
+    pub password: String
+    pub proxy: String
+}
+
+pub fn get(url: String) -[Net]> HTTPResponse !HTTPError { http.get(url) }
+
+pub fn post(url: String, body: String) -[Net]> HTTPResponse !HTTPError { http.post(url, body) }
+
+pub fn put(url: String, body: String) -[Net]> HTTPResponse !HTTPError { http.put(url, body) }
+
+pub fn patch(url: String, body: String) -[Net]> HTTPResponse !HTTPError { http.patch(url, body) }
+
+pub fn delete(url: String) -[Net]> HTTPResponse !HTTPError { http.delete(url) }
+
+pub fn head(url: String) -[Net]> HTTPResponse !HTTPError { http.head(url) }
+
+pub fn request(method: String, url: String) -[Net]> Client {
+    Client{
+        method: method,
+        url: url,
+        headers: http.headers(),
+        redirects: 5,
+    }
+}
+
+pub fn header(client: Client, line: String) -> Client {
+    parsed :: http.headers_parse([String]{line})
+    h := client.headers
+    loop f in parsed.fields -> h = http.headers_append(h, f.name, f.value)
+    Client{method: client.method, url: client.url, headers: h, redirects: client.redirects}
+}
+
+pub fn set_header(client: Client, name: String, value: String) -> Client {
+    Client{
+        method: client.method,
+        url: client.url,
+        headers: http.headers_set(client.headers, name, value),
+        redirects: client.redirects,
+    }
+}
+
+pub fn timeout_redirects(client: Client, n: Int) -> Client {
+    limit := n
+    if limit < 0 -> limit = 0
+    Client{method: client.method, url: client.url, headers: client.headers, redirects: limit}
+}
+
+pub fn send(client: Client, body: String) -[Net]> HTTPResponse !HTTPError {
+    resp := http.exchange(client.method, client.url, body, http.headers_encode(client.headers))
+    hops := 0
+    loop hops < client.redirects {
+        if !http.is_redirect(resp.status) -> return Ok(resp)
+        loc :: http.headers_get(resp.headers, "Location") ?? return Ok(resp)
+        resp = http.exchange("GET", loc, "", [String]{})
+        hops = hops + 1
+    }
+    Err(HTTPError.Redirect)
+}
+
+pub fn session() -> Session {
+    Session{
+    headers: http.headers(),
+    cookies: [Cookie]{},
+    timeout_ms: 30000,
+    retries: 0,
+    redirects: 5,
+    user: "",
+    password: "",
+    proxy: "",
+    }
+}
+
+pub fn session_header(s: Session, name: String, value: String) -> Session {
+    Session{
+        headers: http.headers_set(s.headers, name, value),
+        cookies: s.cookies,
+        timeout_ms: s.timeout_ms,
+        retries: s.retries,
+        redirects: s.redirects,
+        user: s.user,
+        password: s.password,
+        proxy: s.proxy,
+    }
+}
+
+pub fn session_timeout(s: Session, ms: Int) -> Session {
+    t := ms
+    if t < 0 -> t = 0
+    Session{headers: s.headers, cookies: s.cookies, timeout_ms: t, retries: s.retries, redirects: s.redirects, user: s.user, password: s.password, proxy: s.proxy}
+}
+
+pub fn session_retries(s: Session, n: Int) -> Session {
+    r := n
+    if r < 0 -> r = 0
+    Session{headers: s.headers, cookies: s.cookies, timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: s.user, password: s.password, proxy: s.proxy}
+}
+
+pub fn session_redirects(s: Session, n: Int) -> Session {
+    r := n
+    if r < 0 -> r = 0
+    Session{headers: s.headers, cookies: s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: s.user, password: s.password, proxy: s.proxy}
+}
+
+pub fn session_auth(s: Session, user: String, password: String) -> Session {
+    Session{headers: s.headers, cookies: s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy}
+}
+
+pub fn session_proxy(s: Session, url: String) -> Session {
+    Session{headers: s.headers, cookies: s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user, password: s.password, proxy: url}
+}
+
+pub fn session_cookie(s: Session, cookie: Cookie) -> Session {
+    cookies := [Cookie]{}
+    replaced := false
+    loop c in s.cookies {
+        if c.name == cookie.name {
+            cookies.push(cookie)
+            replaced = true
+        } else {
+            cookies.push(c)
+        }
+    }
+    if !replaced -> cookies.push(cookie)
+    Session{headers: s.headers, cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user, password: s.password, proxy: s.proxy}
+}
+
+pub fn cookie_header(cookies: [Cookie]) -> String {
+    s := ""
+    first := true
+    loop c in cookies {
+        if first {
+            s = "{c.name}={c.value}"
+            first = false
+        } else {
+            s = "{s}; {c.name}={c.value}"
+        }
+    }
+    s
+}
+
+fn session_headers(s: Session) -> Headers {
+    h := s.headers
+    if s.user.bytes().len() > 0 -> h = http.headers_set(h, "Authorization", http.basic_auth(s.user, s.password))
+    jar :: cookie_header(s.cookies)
+    if jar.bytes().len() > 0 -> h = http.headers_set(h, "Cookie", jar)
+    if s.timeout_ms > 0 -> h = http.headers_set(h, "X-Jet-Timeout-Ms", "{s.timeout_ms}")
+    if s.proxy.bytes().len() > 0 -> h = http.headers_set(h, "X-Jet-Proxy", s.proxy)
+    h
+}
+
+pub fn session_request(s: Session, method: String, url: String, body: String) -[Net]> HTTPResponse !HTTPError {
+    h :: session_headers(s)
+    attempt := 0
+    last := http.exchange(method, url, body, http.headers_encode(h))
+    loop {
+        if !http.is_server_error(last.status) || attempt >= s.retries -> break
+        attempt = attempt + 1
+        last = http.exchange(method, url, body, http.headers_encode(h))
+    }
+    hops := 0
+    resp := last
+    loop hops < s.redirects {
+        if !http.is_redirect(resp.status) -> return Ok(resp)
+        loc :: http.headers_get(resp.headers, "Location") ?? return Ok(resp)
+        resp = http.exchange("GET", loc, "", http.headers_encode(h))
+        hops = hops + 1
+    }
+    Err(HTTPError.Redirect)
+}
+
+pub fn session_get(s: Session, url: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "GET", url, "") }
+
+pub fn session_post(s: Session, url: String, body: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "POST", url, body) }
+
+pub fn session_put(s: Session, url: String, body: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "PUT", url, body) }
+
+pub fn session_patch(s: Session, url: String, body: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "PATCH", url, body) }
+
+pub fn session_delete(s: Session, url: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "DELETE", url, "") }
+
+pub fn session_head(s: Session, url: String) -[Net]> HTTPResponse !HTTPError { session_request(s, "HEAD", url, "") }
+
+pub fn session_json(s: Session, url: String, body: String) -[Net]> HTTPResponse !HTTPError {
+    h :: session_header(s, "Content-Type", "application/json")
+    h2 :: session_header(h, "Accept", "application/json")
+    session_post(h2, url, body)
+}
+
+pub fn session_form(s: Session, url: String, body: String) -[Net]> HTTPResponse !HTTPError {
+    h :: session_header(s, "Content-Type", "application/x-www-form-urlencoded")
+    session_post(h, url, body)
+}
+
+pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
+    if policy == {
+        RedirectPolicy.Disabled -> return 0
+        RedirectPolicy.All -> return 20
+        else -> { _ := 0 }
+    }
+    if fallback < 0 -> return 0
+    fallback
+}
+
+pub fn with_proxy(client: Client, proxy: Proxy) -> Client { set_header(client, "X-Jet-Proxy", proxy.url) }
+
+pub fn user_agent(client: Client, name: String) -> Client { set_header(client, "User-Agent", name) }
+
+pub fn bearer(client: Client, token: String) -> Client { set_header(client, "Authorization", http.bearer_auth(token)) }
+
+pub fn accept(client: Client, mime: String) -> Client { set_header(client, "Accept", mime) }
+
+pub fn content_type(client: Client, mime: String) -> Client { set_header(client, "Content-Type", mime) }

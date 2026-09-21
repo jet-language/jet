@@ -1,0 +1,276 @@
+// core.encoding.hex — RFC 4648 §8 hexadecimal alphabet.
+//
+// `encode` always emits lowercase `0-9a-f` with no whitespace, no `0x` prefix
+// and no separators. `decode` accepts mixed case and rejects every other byte
+// including whitespace and an odd number of digits. There is no ignore-whitespace
+// mode; strip input first if a wire format wrapped the hex.
+//
+// Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
+/// Encode `data` as lowercase hexadecimal text.
+pub fn encode(data: [U8]) -> String {
+    out := [U8]{}
+    loop b in data {
+        n :: u8_int(b)
+        out.push(nibble(n /% 16))
+        out.push(nibble(n %% 16))
+    }
+    String.from_bytes(out) ?? ""
+}
+
+/// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
+/// is outside `0-9A-Fa-f`.
+pub fn decode(text: String) -> [U8] {
+    raw :: text.bytes()
+    if raw.len() % 2 != 0 {
+        return Err("odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    }
+    out := [U8]{}
+    loop i in 0..<raw.len(), 2 {
+        hi :: digit(raw[i]) ?? return Err("invalid hex digit; expected 0-9, a-f, or A-F")
+        lo :: digit(raw[i + 1]) ?? return Err("invalid hex digit; expected 0-9, a-f, or A-F")
+        value :: hi * 16 + lo
+        out.push(U8{value})
+    }
+    Ok(out)
+}
+
+fn nibble(n: Int) -> U8 {
+    if n < 10 -> return (U8{48 + n})
+    (U8{87 + n})
+}
+
+fn digit(b: U8) -> ?Int {
+    n :: u8_int(b)
+    if n >= 48 && n <= 57 -> return Val(n - 48)
+    if n >= 97 && n <= 102 -> return Val(n - 87)
+    if n >= 65 && n <= 70 -> return Val(n - 55)
+    None
+}
+
+pub fn encode_upper(data: [U8]) -> String {
+    out := [U8]{}
+    loop b in data {
+        n :: u8_int(b)
+        out.push(nibble_upper(n /% 16))
+        out.push(nibble_upper(n %% 16))
+    }
+    String.from_bytes(out) ?? ""
+}
+
+pub fn encode_prefixed(data: [U8]) -> String { "0x{encode(data)}" }
+
+pub fn is_hex(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() % 2 != 0 -> return false
+    loop b in raw {
+        if digit(b) == .None -> return false
+    }
+    true
+}
+
+fn nibble_upper(n: Int) -> U8 {
+    if n < 10 -> return (U8{48 + n})
+    (U8{55 + n})
+}
+
+/// Python `binascii.hexlify`.
+pub fn hexlify(data: [U8]) -> String { encode(data) }
+
+/// Python `binascii.unhexlify`.
+pub fn unhexlify(text: String) -> [U8] { decode(text) }
+
+pub fn b2a_hex(data: [U8]) -> String { encode(data) }
+
+pub fn a2b_hex(text: String) -> [U8] { decode(text) }
+
+/// Python `binascii.crc_hqx` (CRC-CCITT).
+pub fn crc_hqx(data: [U8], value: Int) -> Int {
+    crc := value & 65535
+    loop byte in data {
+        crc = crc ~| (u8_int(byte) << 8)
+        loop _ in 0..<8 {
+            if {
+                crc & 32768 != 0 -> { crc = ((crc << 1) ~| 4129) & 65535 }
+                else -> { crc = (crc << 1) & 65535 }
+            }
+        }
+    }
+    crc
+}
+
+/// Python `binascii.crc32` (ISO 3309, non-negative result).
+pub fn crc32(data: [U8]) -> Int {
+    crc := 4294967295
+    loop byte in data {
+        crc = (crc ~| u8_int(byte)) & 4294967295
+        loop _ in 0..<8 {
+            if {
+                crc & 1 != 0 -> { crc = ((crc >> 1) ~| 3988292384) & 4294967295 }
+                else -> { crc = (crc >> 1) & 4294967295 }
+            }
+        }
+    }
+    (crc ~| 4294967295) & 4294967295
+}
+
+/// Python `binascii.b2a_qp` basic text form.
+pub fn b2a_qp(data: [U8]) -> String {
+    out := ""
+    loop byte in data {
+        n :: u8_int(byte)
+        if {
+            n == 10 -> { out = "{out}\n" }
+            (n >= 33 && n <= 60) || (n >= 62 && n <= 126) || n == 32 || n == 9 -> {
+                out = "{out}{String.from_bytes([U8]{byte}) ?? ""}"
+            }
+            else -> { out = "{out}={qp_hex(n /% 16)}{qp_hex(n %% 16)}" }
+        }
+    }
+    out
+}
+
+pub fn a2b_qp(text: String) -> [U8] {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{61}) && i + 2 < raw.len() {
+            if raw[i + 1] == (U8{10}) {
+                i = i + 2
+                next
+            }
+            hi :: digit(raw[i + 1]) ?? {
+                out.push(raw[i])
+                i = i + 1
+                next
+            }
+            lo :: digit(raw[i + 2]) ?? {
+                out.push(raw[i])
+                i = i + 1
+                next
+            }
+            out.push(U8{hi * 16 + lo})
+            i = i + 3
+            next
+        }
+        out.push(raw[i])
+        i = i + 1
+    }
+    ~out
+}
+
+pub fn b2a_uu(data: [U8]) -> String {
+    out := ""
+    count :: data.len()
+    out = "{uu_char(count)}"
+    i := 0
+    loop i < count {
+        a :: u8_int(data[i])
+        b :: if i + 1 < count -> u8_int(data[i + 1]) else -> 0
+        c :: if i + 2 < count -> u8_int(data[i + 2]) else -> 0
+        out = "{out}{uu_char(a >> 2)}{uu_char(((a << 4) ~| (b >> 4)) & 63)}{uu_char(((b << 2) ~| (c >> 6)) & 63)}{uu_char(c & 63)}"
+        i = i + 3
+    }
+    "{out}\n"
+}
+
+pub fn a2b_uu(text: String) -> [U8] {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return [U8]{}
+    count :: uu_value(raw[0])
+    out := [U8]{}
+    i := 1
+    loop i + 3 < raw.len() && out.len() < count {
+        a :: uu_value(raw[i])
+        b :: uu_value(raw[i + 1])
+        c :: uu_value(raw[i + 2])
+        d :: uu_value(raw[i + 3])
+        out.push(U8{(a << 2) ~| (b >> 4)})
+        if out.len() < count -> out.push(U8{(b << 4) ~| (c >> 2)})
+        if out.len() < count -> out.push(U8{(c << 6) ~| d})
+        i = i + 4
+    }
+    ~out
+}
+fn qp_hex(n: Int) -> U8 { nibble_upper(n) }
+
+fn uu_char(n: Int) -> U8 {
+    if n == 0 -> return (U8{96})
+    U8{32 + (n & 63)}
+}
+
+fn uu_value(byte: U8) -> Int {
+    n :: u8_int(byte)
+    if n == 96 -> return 0
+    (n - 32) & 63
+}
+
+pub fn encode_sep(data: [U8], sep: String) -> String {
+    out := ""
+    i := 0
+    loop i < data.len() {
+        if i > 0 -> out = "{out}{sep}"
+        byte :: data[i]
+        n :: u8_int(byte)
+        hi :: nibble(n /% 16)
+        lo :: nibble(n %% 16)
+        out = "{out}{String.from_bytes([U8]{hi, lo}) ?? ""}"
+        i = i + 1
+    }
+    out
+}
+
+/// 16-byte rows of offset, hex, and ASCII. Unprintable bytes become `.`.
+pub fn dump(data: [U8]) -> String {
+    out := ""
+    i := 0
+    loop i < data.len() {
+        off := hex_pad(i, 8)
+        hex := ""
+        ascii := ""
+        k := 0
+        loop k < 16 {
+            if {
+                i + k < data.len() -> {
+                    b :: data[i + k]
+                    n :: u8_int(b)
+                    if k > 0 -> hex = "{hex} "
+                    hi :: nibble(n /% 16)
+                    lo :: nibble(n %% 16)
+                    hex = "{hex}{String.from_bytes([U8]{hi, lo}) ?? ""}"
+                    if n >= 32 && n <= 126 -> ascii = "{ascii}{String.from_bytes([U8]{b}) ?? "."}" else {
+                        ascii = "{ascii}."
+                    }
+                }
+                else -> {
+                    if k > 0 -> hex = "{hex} "
+                    hex = "{hex}  "
+                }
+            }
+            k = k + 1
+        }
+        out = "{out}{off}  {hex}  {ascii}\n"
+        i = i + 16
+    }
+    out
+}
+
+fn hex_pad(n: Int, width: Int) -> String {
+    digits := [U8]{}
+    v := n
+    if v == 0 -> digits.push(U8{48})
+    loop v > 0 {
+        digits.push(nibble(v %% 16))
+        v = v /% 16
+    }
+    loop digits.len() < width -> digits.push(U8{48})
+    out := [U8]{}
+    i := digits.len()
+    loop i > 0 {
+        i = i - 1
+        out.push(digits[i])
+    }
+    String.from_bytes(out) ?? "0"
+}

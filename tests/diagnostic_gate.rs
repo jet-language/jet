@@ -133,7 +133,7 @@ fn warnings_never_choose_execution_exit_code() {
         let project = diagnostic_gate_project(&format!("diag_gate_{name}_build"), source, false);
         let build = run_cli(&project, "build", &["build", "main.jet"]);
         assert_warning_status(&build, &format!("{name} build"), code);
-        let direct = Command::new(project.join("build/main"))
+        let direct = Command::new(project.join(".jet/build/main"))
             .current_dir(&project.path)
             .output()
             .unwrap_or_else(|error| panic!("{name} direct binary: {error}"));

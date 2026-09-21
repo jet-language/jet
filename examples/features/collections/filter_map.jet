@@ -1,7 +1,7 @@
 // D-FAILCOMP1=A: filter_map and try_collect — failure-aware collection adapters.
 // `String` is a value, not an error family. Use the implicit default `Err`
 // contract for this small parser and keep the failure text in its message.
-fn parse_int(s: String) Int !Err -> {
+fn parse_int(s: String) -> Int !Err {
     n :: Int.parse(s) ?? return Err("not a number: {s}")
     return Ok(n)
 }
@@ -15,7 +15,7 @@ fn run() {
     // result list is the input shape consumed by try_collect.
     good_results :: [Int !Err]{parse_int("1"), parse_int("2"), parse_int("4")}
     if good_results.try_collect() == {
-        .Ok(vs) -> print(vs)
+        .Ok(vs) -> { print(vs) }
         .Err(e) -> print("unexpected: {e.message}")
     }
     bad_results :: [Int !Err]{parse_int("1"), parse_int("oops"), parse_int("3")}

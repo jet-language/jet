@@ -152,8 +152,22 @@ fn index_compile_artifact(
     capture: RecordCapture,
     consumed: Vec<RecordLink>,
     produced: Vec<RecordLink>,
+    protected: bool,
 ) -> Result<(), String> {
-    let mut index = RecordIndex::load_for_project(".")
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(path)
+    };
+    let project_root = jet::build_project_root(&absolute.to_string_lossy())
+        .map_err(|diagnostics| format!("could not resolve record project root: {diagnostics:?}"))?;
+    let path = absolute
+        .strip_prefix(&project_root)
+        .map_err(|_| format!("record artifact is outside the project: {}", absolute.display()))?
+        .to_path_buf();
+    let mut index = RecordIndex::load_for_project(&project_root)
         .map_err(|error| format!("could not load record index: {error}"))?;
     let (recorded_sequence, saved) = if let Some(entry) = index.find(kind, &artifact_id, true) {
         (entry.recorded_sequence, entry.saved)
@@ -172,7 +186,7 @@ fn index_compile_artifact(
         .with_capture(capture)
         .with_size(size)
         .with_recorded_sequence(recorded_sequence)
-        .with_saved(saved);
+        .with_saved(saved || protected);
     index
         .update_and_store(entry)
         .map_err(|error| format!("could not store {kind} record `{artifact_id}`: {error}"))
@@ -210,40 +224,16 @@ fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
     Ok(artifact_id.to_string())
 }
 
-fn project_relative_record_path(path: &Path) -> Result<PathBuf, String> {
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-    let relative = if path.is_absolute() {
-        path.strip_prefix(&cwd)
-            .map_err(|_| format!("record artifact is outside the project: {}", path.display()))?
-            .to_path_buf()
-    } else {
-        path.to_path_buf()
-    };
-    if relative.as_os_str().is_empty()
-        || relative.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir
-                    | Component::ParentDir
-                    | Component::RootDir
-                    | Component::Prefix(_)
-            )
-        })
-    {
-        return Err(format!(
-            "record artifact path is not project-relative: {}",
-            path.display()
-        ));
-    }
-    Ok(relative)
-}
 
 fn index_named_capture(
     capture: &crate::ProveReplay::NamedCapture,
-    name: &str,
+    _name: &str,
     capture_mode: RecordCapture,
 ) -> Result<(), String> {
-    let path = PathBuf::from(format!(".jet/replays/{name}.jetproof-replay"));
+    let path = capture
+        .artifact_path()
+        .ok_or_else(|| "named capture has no artifact path".to_string())?
+        .to_path_buf();
     let bytes = fs::read(&path).map_err(|error| {
         format!(
             "could not read replay artifact `{}`: {error}",
@@ -263,6 +253,7 @@ fn index_named_capture(
         capture_mode,
         Vec::new(),
         Vec::new(),
+        true,
     )
 }
 
@@ -286,7 +277,6 @@ fn index_production_receipt(context: &crate::ProductionReceipt::Context) -> Resu
     }
     let bytes = fs::read(&absolute_path)
         .map_err(|error| format!("could not read production receipt: {error}"))?;
-    let path = project_relative_record_path(&absolute_path)?;
     let identity = context.record_identity()?;
     let artifact_id = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
     let size =
@@ -295,11 +285,12 @@ fn index_production_receipt(context: &crate::ProductionReceipt::Context) -> Resu
         identity,
         RecordKind::Receipt,
         artifact_id,
-        path,
+        absolute_path,
         size,
         RecordCapture::Safe,
         Vec::new(),
         Vec::new(),
+        true,
     )
 }
 
@@ -335,12 +326,14 @@ pub(crate) fn run_build_verify(artifact_id: &str, mode: OutputMode) -> ! {
         }
         exit(ExitCodes::USER_ERROR);
     };
-    let index = RecordIndex::load_for_project(".")
+    let project_root = jet::build_project_root(".")
+        .unwrap_or_else(|diagnostics| fail(format!("could not resolve record project root: {diagnostics:?}")));
+    let index = RecordIndex::load_for_project(&project_root)
         .unwrap_or_else(|error| fail(format!("could not load record index: {error}")));
     let indexed = index
         .find(RecordKind::Receipt, artifact_id, true)
         .unwrap_or_else(|| fail(format!("receipt `{artifact_id}` is not indexed")));
-    let receipt_path = PathBuf::from(".").join(&indexed.path);
+    let receipt_path = project_root.join(&indexed.path);
     let receipt = jet::ReceiptStore::read_path(&receipt_path)
         .unwrap_or_else(|error| fail(format!("could not read indexed receipt: {error}")));
 
@@ -364,7 +357,11 @@ pub(crate) fn run_build_verify(artifact_id: &str, mode: OutputMode) -> ! {
 
     let target =
         indexed_receipt_target(&receipt, &indexed.identity).unwrap_or_else(|error| fail(error));
-    let artifact = receipt_artifact_path(&receipt, &target);
+    let project_root = match jet::build_project_root(&target.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => fail(format!("could not resolve target project root: {diagnostics:?}")),
+    };
+    let artifact = receipt_artifact_path(&receipt, &project_root, &target);
     let before = fs::read(&artifact).unwrap_or_else(|error| {
         fail(format!(
             "recorded build output `{}` is unavailable: {error}",
@@ -439,7 +436,11 @@ fn indexed_receipt_target(
         })
 }
 
-fn receipt_artifact_path(receipt: &jet::ReceiptStore::Receipt, target: &Path) -> PathBuf {
+fn receipt_artifact_path(
+    receipt: &jet::ReceiptStore::Receipt,
+    project_root: &Path,
+    target: &Path,
+) -> PathBuf {
     let output = String::from_utf8_lossy(&receipt.stdout);
     output
         .lines()
@@ -452,7 +453,7 @@ fn receipt_artifact_path(receipt: &jet::ReceiptStore::Receipt, target: &Path) ->
         })
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| build_artifact_path(&target.to_string_lossy(), None))
+        .unwrap_or_else(|| build_artifact_path(project_root, &target.to_string_lossy(), None))
 }
 
 fn rebuild_indexed_target(target: &Path, mode: OutputMode) -> Result<(), String> {
@@ -2254,6 +2255,17 @@ pub(crate) fn prepare_project_environment(cmd: &str, start: &Path, mode: OutputM
     else {
         return;
     };
+    // `jet run examples/...` discovers the repository env through a relative
+    // source path.  A relative root can be the empty `PathBuf` at the repo
+    // root; passing that to `Command::current_dir` makes the nested Jetpack
+    // launch fail with ENOENT even though the binary exists.
+    let project_root = if project_root.is_absolute() {
+        project_root
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(&project_root))
+            .unwrap_or(project_root)
+    };
     if cmd != "run" {
         let (_, command) = current_jet_invocation();
         crate::emit_cli_row_with_detail(
@@ -3074,6 +3086,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             (source, Some(snapshot))
         }
     };
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, file, &src, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     progress.minor("source", &format!("{} bytes", src.len()));
     // Explicit `jet check <file>` must reject project imports before the
     // immutable source-closure loader attempts to resolve them.
@@ -3395,7 +3414,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         && !src.contains("core.game")
     {
         if let Some(ref key) = native_key {
-            let out = bin_path(file);
+            let out = bin_path(&project_root, file);
             if native_store.as_ref().is_some_and(|store| {
                 matches!(
                     store.restore_file(key, &out),
@@ -3606,7 +3625,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         native_key.as_ref().is_some_and(|key| {
             native_store.as_ref().is_some_and(|store| {
                 matches!(
-                    store.restore_file(key, &bin_path(file)),
+                    store.restore_file(key, &bin_path(&project_root, file)),
                     Ok(ArtifactRestore::Hit { .. })
                 )
             })
@@ -4097,6 +4116,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     exit(ExitCodes::ICE);
                 });
                 let paths = match build_library(
+                    &project_root,
                     &rust_code,
                     library,
                     config,
@@ -4156,9 +4176,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 return;
             }
             let artifact_path = if is_web || is_plugin {
-                bin_path(file)
+                bin_path(&project_root, file)
             } else {
-                build_artifact_path(file, programmable_build_target.as_deref())
+                build_artifact_path(&project_root, file, programmable_build_target.as_deref())
             };
             let budget_profile = profile.budget_name().to_string();
             let hardened_profile = matches!(profile, BuildProfile::Hardened);
@@ -4203,9 +4223,18 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             }
             if !mode.quiet && !mode.json {
                 let artifact = if is_web {
-                    "build/app.wasm + build/app.js".to_string()
+                    format!(
+                        "{} + {}",
+                        build_output_root(&project_root).join("app.wasm").display(),
+                        build_output_root(&project_root).join("app.js").display()
+                    )
                 } else if is_plugin {
-                    format!("build/{}.wasm (sandbox)", stem(file))
+                    format!(
+                        "{} (sandbox)",
+                        build_output_root(&project_root)
+                            .join(format!("{}.wasm", stem(file)))
+                            .display()
+                    )
                 } else {
                     artifact_path.display().to_string()
                 };
@@ -4246,9 +4275,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         }
         "run" => {
             let out = if is_web || is_plugin {
-                bin_path(file)
+                bin_path(&project_root, file)
             } else {
-                build_artifact_path(file, programmable_build_target.as_deref())
+                build_artifact_path(&project_root, file, programmable_build_target.as_deref())
             };
             // AOT children inherit stdout/stderr. Render their lints before
             // building/spawning so diagnostics keep the same order as the
@@ -4351,6 +4380,13 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, file, &src, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     // D-DEVR-PROD1=A / I9: the native `fn dev()` entry uses the same receipt
     // context as `jet run`, while the compiled program remains the adapter.
     let production_receipt = crate::ProductionReceipt::prepare(file, &src, program_args);
@@ -4385,7 +4421,7 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let bin = bin_path(file);
+    let bin = bin_path(&project_root, file);
     let dev_profile_name = match &profile {
         BuildProfile::Named { name, .. } => Some(name.clone()),
         BuildProfile::Release => Some("release".to_string()),
@@ -4410,7 +4446,7 @@ pub(crate) fn run_dev_entry(
         mode,
         false,
         // `jet dev` is an interactive live-reload loop (entry-swapped codegen);
-        // not worth a content-cache entry. Still race-safe via `build`'s
+        // not worth a content-cache entry. Still race-safe via `.jet/build`'s
         // per-process temp path.
         None,
     );
@@ -4427,6 +4463,8 @@ pub(crate) fn run_dev_entry(
     // a different version, and cwd-sensitive wrappers (the repo's own nix
     // devshell `jet` resolves target/debug/jet relative to cwd) break
     // outright when the rebuild runs from a staging directory.
+    // JET_PROJECT_ROOT is the same selected absolute root used by the parent
+    // build, so generated devserver output cannot fall back to cwd/.jet/build.
     let jet_bin = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| jet::Syntax::BINARY_NAME.to_string());
@@ -4435,6 +4473,7 @@ pub(crate) fn run_dev_entry(
         .args(program_args)
         .env("JET_DEV_FILE", &dev_file)
         .env("JET_BIN", &jet_bin)
+        .env("JET_PROJECT_ROOT", &project_root)
         .env("JET_DEV_SETTING_COUNT", setting_overrides.len().to_string());
     if let Some(profile) = dev_profile_name {
         command.env("JET_DEV_PROFILE", profile);
@@ -5172,9 +5211,10 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         // in the generated package authority before `jet dev` builds it.
         manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Browser");
     } else {
-        // The native starter reads argv, so its package authority must carry
-        // the same Exec effect as the generated source.
+        // The native starter reads argv and mounts the same UI tree for Web,
+        // so its package authority carries both effects used by the source.
         manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Exec");
+        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Browser");
     }
     fs::write(dir.join(jet::Syntax::PACKAGE_FILE), manifest_text).unwrap_or_else(|e| {
         crate::cli_error!(
@@ -5202,7 +5242,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     let run_src = if web {
         "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\") {\n                count.set(count.get() + 1)\n            }\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
     } else {
-        "#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) String -> \"hello, {name}\"\n\nfn run(args: GreetingArgs) { print(greeting(args.name)) }\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n"
+        "use core.ui as ui\n\n#CLI\nstruct GreetingArgs {\n    #Doc(\"name to greet\") name: String{\"world\"}\n}\n\nfn greeting(name: String) -> String { \"hello, {name}\" }\n\nfn run(args: GreetingArgs) {\n    message :: greeting(args.name)\n    print(message)\n    backend :: ui.null_backend()\n    ui.reactive_render(() -> {\n        tree :: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    })\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}\n"
     };
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
         crate::cli_error!(
@@ -5239,7 +5279,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     }
     fs::write(
         dir.join(".gitignore"),
-        "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n",
+        ".jet/build/\n.jet/lock\n.jet/cache/\n",
     )
     .unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write .gitignore: {}", e);
@@ -5476,7 +5516,7 @@ fn test_target_facts(
                     .map(str::to_string)
             }));
     }
-    if !opts.fresh {
+    if !opts.fresh && std::env::var_os("JET_RECEIPT_BYPASS").is_none() {
         if let Some(cached) = test_result_cache_read(path, opts, package) {
             facts.status = Some(if cached.ok { "pass" } else { "fail" });
         }
@@ -5678,7 +5718,14 @@ fn test_result_cache_write(
 }
 
 fn test_result_cache_write_allowed(opts: &TestRunOpts) -> bool {
-    !opts.docs && !opts.coverage && !opts.measure && !opts.update_snapshots && opts.record.is_none()
+    // Receipt-bypass child invocations are explicitly no-history runs. Do not
+    // create persistent test-result state in their disposable scratch roots.
+    !opts.docs
+        && !opts.coverage
+        && !opts.measure
+        && !opts.update_snapshots
+        && opts.record.is_none()
+        && std::env::var_os("JET_RECEIPT_BYPASS").is_none()
 }
 fn emit_test_capture(result: &TestResultCache, policy: TestCapturePolicy, mode: OutputMode) {
     if mode.json {
@@ -6012,7 +6059,11 @@ fn write_test_evidence_bytes(path: &Path, bytes: &[u8]) -> Result<u64, String> {
     let Some(parent) = path.parent() else {
         return Err("test evidence report has no parent directory".to_string());
     };
-    let mut current = PathBuf::from(".");
+    let mut current = if parent.is_absolute() {
+        PathBuf::from(std::path::MAIN_SEPARATOR.to_string())
+    } else {
+        PathBuf::from(".")
+    };
     for component in parent.components() {
         let std::path::Component::Normal(name) = component else {
             continue;
@@ -6108,6 +6159,21 @@ pub(crate) fn persist_evidence_report_for_inputs(
     report: &jet_foundation::Evidence::EvidenceReport,
     target_inputs_sha256: &str,
 ) -> Result<(), String> {
+    persist_evidence_report_for_inputs_with_retention(report, target_inputs_sha256, true)
+}
+
+fn persist_optional_evidence_report_for_inputs(
+    report: &jet_foundation::Evidence::EvidenceReport,
+    target_inputs_sha256: &str,
+) -> Result<(), String> {
+    persist_evidence_report_for_inputs_with_retention(report, target_inputs_sha256, false)
+}
+
+fn persist_evidence_report_for_inputs_with_retention(
+    report: &jet_foundation::Evidence::EvidenceReport,
+    target_inputs_sha256: &str,
+    protected: bool,
+) -> Result<(), String> {
     let report_id = report.identity.report_id.as_str();
     if report_id.is_empty()
         || report_id.contains('/')
@@ -6117,7 +6183,11 @@ pub(crate) fn persist_evidence_report_for_inputs(
     {
         return Err(format!("evidence report has an unsafe id `{report_id}`"));
     }
-    let path = PathBuf::from(".jet/evidence").join(format!("{report_id}.json"));
+    let project_root = jet::build_project_root(".")
+        .map_err(|diagnostics| format!("could not resolve evidence project root: {diagnostics:?}"))?;
+    let path = project_root
+        .join(".jet/evidence")
+        .join(format!("{report_id}.json"));
     let bytes = report.encode()?;
     let size = write_test_evidence_bytes(&path, &bytes)?;
     let identity = RecordIdentity::new(
@@ -6134,9 +6204,11 @@ pub(crate) fn persist_evidence_report_for_inputs(
         RecordCapture::Safe,
         Vec::new(),
         Vec::new(),
+        protected,
     )?;
     Ok(())
 }
+
 
 fn finish_test_evidence(
     report_path: &Path,
@@ -6184,7 +6256,6 @@ fn finish_test_evidence(
         }
         return Ok(None);
     }
-    persist_evidence_report(&report)?;
     let projection = jet::Package::ClaimsProjection::from_records(&report.records);
     let floor = jet::Loader::package_facts_for_entry(Path::new(file))
         .ok()
@@ -6260,6 +6331,20 @@ fn finish_test_evidence(
         .with_field("claims", claims)
         .with_field("summaries", summaries);
     status.ok = status.ok && child_ok && floor_met;
+    if preserve_report {
+        if let Err(error) = persist_evidence_report(&report) {
+            return Err(error);
+        }
+    } else {
+        let target_inputs_sha256 = report.revision.source.clone();
+        jet::ReceiptStore::enqueue_optional_history("writing test evidence", move || {
+            if let Err(error) =
+                persist_optional_evidence_report_for_inputs(&report, &target_inputs_sha256)
+            {
+                jet::ReceiptStore::optional_history_notice("writing test evidence", &error);
+            }
+        });
+    }
     if mode.json {
         write_mode_machine(mode, &format!("{}\n", status.json()));
     }
@@ -6649,6 +6734,13 @@ fn run_generated_test(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let project_root = match jet::build_project_root(path) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, path, &source, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     let (rust_code, ffi_link) =
         match jet::compile_fuzz_with_path(path, opts.generated_test_name.as_deref()) {
             Ok(output) => output,
@@ -6672,7 +6764,7 @@ fn run_generated_test(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
     } else {
         BuildProfile::Default
     };
-    let bin = fuzz_bin_path(source_path);
+    let bin = fuzz_bin_path(&project_root, source_path);
     build(
         path,
         &rust_code,
@@ -6898,9 +6990,9 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
 }
 
 /// D-TESTKIT1=A gap #2: walk every subdirectory under
-/// `dir`, collecting `.ext` files. `build/` and dotdirs (`.git`, `.jet`'s own
-/// cache, etc.) are skipped, as are reserved package/env/workspace/config
-/// files. The test runner owns this target walk.
+/// `dir`, collecting `.ext` files. The canonical `.jet/build/` output tree and
+/// other dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped, as are reserved
+/// package/env/workspace/config files. The test runner owns this target walk.
 pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -6982,6 +7074,13 @@ fn run_test_target(
         Ok(s) => s,
         Err(e) => {
             crate::cli_error!("E2105", "couldn't read `{}`: {}", shown, e);
+            return TestTargetOutcome::Ran(false);
+        }
+    };
+    let project_root = match jet::build_project_root(&shown) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, &shown, &src, &diagnostics);
             return TestTargetOutcome::Ran(false);
         }
     };
@@ -7242,9 +7341,9 @@ fn run_test_target(
     };
     // Test harnesses are one-shot process-private executables. Concurrent
     // `jet test` invocations may target the same file; sharing
-    // `build/test_<stem>` lets one process replace an executable while another
-    // is launching it (ETXTBSY on Linux, sharing violations on Windows).
-    let bin = test_bin_path(path);
+    // `.jet/build/test_<stem>` lets one process replace an executable while
+    // another is launching it (ETXTBSY on Linux, sharing violations on Windows).
+    let bin = test_bin_path(&project_root, path);
     let cache_key = native_cache_key(
         shown.as_ref(),
         profile.budget_name(),
@@ -8002,16 +8101,24 @@ fn run_doctests(
     if blocks.is_empty() {
         return true;
     }
+    let project_root = match jet::build_project_root(shown) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, shown, src, &diagnostics);
+            return false;
+        }
+    };
     let mut all_ok = true;
     let mut rewritten = src.to_string();
     let mut did_rewrite = false;
     for (n, block) in blocks.iter().enumerate() {
         let label = format!("doctest at {}:{}", shown, block.fence_line);
         let program = jet::Doctest::synth_program(block);
-        // Write the synthetic program to a temp file next to the build dir so the
-        // normal compile+build pipeline can consume it.
-        let _ = fs::create_dir_all("build");
-        let tmp = PathBuf::from("build").join(format!(
+        // Write the synthetic program under the canonical project build root so
+        // the normal compile+build pipeline can consume it.
+        let build_root = project_root.join(".jet").join("build");
+        let _ = fs::create_dir_all(&build_root);
+        let tmp = build_root.join(format!(
             "{}__doctest_{}.{}.jet",
             stem(shown),
             n,
@@ -8059,7 +8166,7 @@ fn run_doctests(
             }
         };
         let bin = tmp.with_extension("");
-        let generated_rs = PathBuf::from("build").join(format!("{}.rs", stem(&tmp_shown)));
+        let generated_rs = build_root.join(format!("{}.rs", stem(&tmp_shown)));
         build(
             &tmp_shown,
             &rust_code,
@@ -9784,8 +9891,12 @@ pub(crate) fn stem(file: &str) -> String {
         .replace('.', "_")
 }
 
-fn bin_path(file: &str) -> PathBuf {
-    PathBuf::from("build").join(stem(file))
+fn build_output_root(project_root: &Path) -> PathBuf {
+    project_root.join(".jet").join("build")
+}
+
+fn bin_path(project_root: &Path, file: &str) -> PathBuf {
+    build_output_root(project_root).join(stem(file))
 }
 
 fn programmable_build_target_name(output: &jet::Driver::BuildCompileOutput) -> Option<String> {
@@ -9795,9 +9906,13 @@ fn programmable_build_target_name(output: &jet::Driver::BuildCompileOutput) -> O
     (target.kind == jet::Comptime::Build::TargetKind::Executable).then(|| target.name.clone())
 }
 
-fn build_artifact_path(file: &str, target_name: Option<&str>) -> PathBuf {
+fn build_artifact_path(
+    project_root: &Path,
+    file: &str,
+    target_name: Option<&str>,
+) -> PathBuf {
     let Some(target_name) = target_name else {
-        return bin_path(file);
+        return bin_path(project_root, file);
     };
     let path = Path::new(target_name);
     let mut components = path.components();
@@ -9805,21 +9920,21 @@ fn build_artifact_path(file: &str, target_name: Option<&str>) -> PathBuf {
         (components.next(), components.next()),
         (Some(Component::Normal(_)), None)
     ) {
-        return bin_path(file);
+        return bin_path(project_root, file);
     }
-    PathBuf::from("build").join(target_name)
+    build_output_root(project_root).join(target_name)
 }
 
-fn test_bin_path(path: &Path) -> PathBuf {
-    PathBuf::from("build").join(format!(
+fn test_bin_path(project_root: &Path, path: &Path) -> PathBuf {
+    build_output_root(project_root).join(format!(
         ".test_{}.{}",
         stem(&path.to_string_lossy()),
         std::process::id()
     ))
 }
 
-fn fuzz_bin_path(path: &Path) -> PathBuf {
-    PathBuf::from("build").join(format!(
+fn fuzz_bin_path(project_root: &Path, path: &Path) -> PathBuf {
+    build_output_root(project_root).join(format!(
         ".fuzz_{}.{}",
         stem(&path.to_string_lossy()),
         std::process::id()
@@ -10656,6 +10771,115 @@ pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
     exit(ExitCodes::USER_ERROR);
 }
 
+/// Per-`jet dev --target=web` rustc incremental session.
+///
+/// The process directory survives every rebuild, while stale sibling process
+/// directories are removed only after verifying that their PID is gone. The
+/// session drops its own directories on normal return/panic so the persistent
+/// cache cannot accumulate one tree per dev process.
+struct WebRustcIncrementalSession {
+    root: PathBuf,
+    pid: u32,
+    process_roots: BTreeMap<PathBuf, PathBuf>,
+    reused_dirs: u64,
+}
+
+impl WebRustcIncrementalSession {
+    fn new(build_root: &Path) -> Self {
+        Self {
+            root: build_root.join(".jet-web-incremental"),
+            pid: std::process::id(),
+            process_roots: BTreeMap::new(),
+            reused_dirs: 0,
+        }
+    }
+
+    fn prepare_dir(
+        &mut self,
+        identity: &str,
+        emit_maps: bool,
+        has_ffi: bool,
+    ) -> Result<PathBuf, String> {
+        let identity_root = self.root.join(identity);
+        fs::create_dir_all(&identity_root).map_err(|error| {
+            format!(
+                "error: couldn't prepare Web rustc incremental cache {}: {error}",
+                identity_root.display()
+            )
+        })?;
+        self.prune_stale_siblings(&identity_root);
+        let process_root = identity_root.join(self.pid.to_string());
+        fs::create_dir_all(&process_root).map_err(|error| {
+            format!(
+                "error: couldn't prepare Web rustc process cache {}: {error}",
+                process_root.display()
+            )
+        })?;
+        self.process_roots
+            .insert(process_root.clone(), identity_root);
+        let dir = process_root
+            .join(if emit_maps { "debug" } else { "release" })
+            .join(if has_ffi { "ffi" } else { "plain" });
+        fs::create_dir_all(&dir).map_err(|error| {
+            format!(
+                "error: couldn't prepare Web rustc incremental cache {}: {error}",
+                dir.display()
+            )
+        })?;
+        if fs::read_dir(&dir)
+            .ok()
+            .and_then(|mut entries| entries.next())
+            .is_some()
+        {
+            self.reused_dirs = self.reused_dirs.saturating_add(1);
+        }
+        Ok(dir)
+    }
+
+    #[cfg(test)]
+    fn reused_dirs(&self) -> u64 {
+        self.reused_dirs
+    }
+
+    fn prune_stale_siblings(&self, identity_root: &Path) {
+        let proc_root = Path::new("/proc");
+        if !proc_root.is_dir() {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(identity_root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            if pid != self.pid && !proc_root.join(pid.to_string()).is_dir() {
+                let _ = fs::remove_dir_all(path);
+            }
+        }
+    }
+
+    fn cleanup(&mut self) {
+        for (process_root, identity_root) in std::mem::take(&mut self.process_roots) {
+            let _ = fs::remove_dir_all(process_root);
+            let _ = fs::remove_dir(identity_root);
+        }
+    }
+}
+
+impl Drop for WebRustcIncrementalSession {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 /// `jet dev <file>.jet --target=web`: the root retains only the R5 build
 /// executor and process watch loop. HTTP, Canvas routes, terminal/browser
 /// status, client leases, and last-good swapping live in `jet-devserver`.
@@ -10675,18 +10899,35 @@ pub(crate) fn run_dev_web(
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            let source = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &source, &diagnostics);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let static_root = build_output_root(&project_root);
+    let mut rustc_incremental_session = WebRustcIncrementalSession::new(&static_root);
 
     let host = match if canvas {
         let options = canvas_options.as_ref().cloned().unwrap_or_default();
         jet_devserver::WebHost::WebHost::bind_web_with_canvas_options_and_policy(
             file,
+            &static_root,
             verbose,
             port,
             &options,
             release_policy.clone(),
         )
     } else {
-        jet_devserver::WebHost::WebHost::bind_with_policy(file, verbose, port, release_policy)
+        jet_devserver::WebHost::WebHost::bind_with_policy(
+            file,
+            &static_root,
+            verbose,
+            port,
+            release_policy,
+        )
     } {
         Ok(host) => host,
         Err(message) => {
@@ -10708,10 +10949,23 @@ pub(crate) fn run_dev_web(
         Ok(guard) => guard,
         Err(error) => {
             write_mode_diagnostic(mode, &format!("{error}\n"));
+            rustc_incremental_session.cleanup();
             exit(ExitCodes::USER_ERROR);
         }
     };
-    if rebuild_dev_web(file, profile, mode, verbose, false, &host, setting_overrides).is_err() {
+    if rebuild_dev_web(
+        file,
+        profile,
+        mode,
+        verbose,
+        false,
+        &host,
+        setting_overrides,
+        &mut rustc_incremental_session,
+    )
+    .is_err()
+    {
+        rustc_incremental_session.cleanup();
         exit(ExitCodes::USER_ERROR);
     }
     if canvas {
@@ -10729,31 +10983,51 @@ pub(crate) fn run_dev_web(
                 mode,
                 &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
             );
+            rustc_incremental_session.cleanup();
             exit(ExitCodes::USER_ERROR);
         }
     };
     loop {
         thread::sleep(Duration::from_millis(jet_devserver::WATCH_POLL_INTERVAL_MS));
         if let Some(code) = host.exit_code() {
+            rustc_incremental_session.cleanup();
             exit(code);
         }
         if let Some(receipt) = watch.poll() {
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
-            let _ = rebuild_dev_web(file, profile, mode, verbose, true, &host, setting_overrides);
+            let _ = rebuild_dev_web(
+                file,
+                profile,
+                mode,
+                verbose,
+                true,
+                &host,
+                setting_overrides,
+                &mut rustc_incremental_session,
+            );
             if let Err(diagnostic) = watch.acknowledge(&receipt) {
                 write_mode_diagnostic(
                     mode,
                     &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
                 );
+                rustc_incremental_session.cleanup();
                 exit(ExitCodes::USER_ERROR);
             }
         }
         match resident_session.take_project_rebuild() {
             Ok(Some(request)) => {
-                let result =
-                    rebuild_dev_web(file, profile, mode, verbose, true, &host, setting_overrides);
+                let result = rebuild_dev_web(
+                    file,
+                    profile,
+                    mode,
+                    verbose,
+                    true,
+                    &host,
+                    setting_overrides,
+                    &mut rustc_incremental_session,
+                );
                 if let Err(error) = resident_session.finish_project_rebuild(&request, result) {
                     write_mode_diagnostic(mode, &format!("{error}\n"));
                 }
@@ -10765,7 +11039,6 @@ pub(crate) fn run_dev_web(
         }
     }
 }
-
 fn rebuild_dev_web(
     file: &str,
     profile: &BuildProfile,
@@ -10774,11 +11047,23 @@ fn rebuild_dev_web(
     is_rebuild: bool,
     host: &jet_devserver::WebHost::WebHost,
     setting_overrides: &BTreeMap<String, String>,
+    rustc_incremental_session: &mut WebRustcIncrementalSession,
 ) -> Result<(), String> {
     let _source_transaction = host.lock_source_transaction();
     let started = Instant::now();
     host.mark_building();
     let src = fs::read_to_string(file).unwrap_or_default();
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            let message = jet::render_diagnostics(file, &src, &diagnostics);
+            if !is_rebuild {
+                report_problems(mode, file, &src, &diagnostics);
+            }
+            host.mark_error("E2105".to_string(), message.clone(), is_rebuild);
+            return Err(message);
+        }
+    };
     let out = match jet::compile_web_with_gates_and_profile_and_settings(
         file,
         jet::Policy::GateSet::default(),
@@ -10806,7 +11091,8 @@ fn rebuild_dev_web(
         return Err(message);
     };
 
-    let staging = PathBuf::from("build").join(".jet-dev-staging");
+    let build_root = build_output_root(&project_root);
+    let staging = build_root.join(".jet-dev-staging");
     let staging_authority =
         match jet_devserver::WebHost::WebOutputAuthority::open_or_create(&staging) {
             Ok(authority) => authority,
@@ -10825,6 +11111,7 @@ fn rebuild_dev_web(
         model_runtime,
         verbose,
         &staging_authority,
+        Some(rustc_incremental_session),
         true,
         mode,
     ) {
@@ -10832,7 +11119,7 @@ fn rebuild_dev_web(
         host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
         return Err(message);
     }
-    if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, Path::new("build")) {
+    if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, &build_root) {
         let message = format!("couldn't finalize web build: {error}");
         write_mode_diagnostic(mode, &format!("{message}\n"));
         host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
@@ -10843,8 +11130,8 @@ fn rebuild_dev_web(
     Ok(())
 }
 
-/// Where `write_web_artifacts` put each `build/*` file it wrote — returned so
-/// a caller can print/report the exact locations without recomputing the
+/// Where `write_web_artifacts` put each `.jet/build/*` file it wrote — returned
+/// so a caller can print/report the exact locations without recomputing the
 /// path-join logic a second time (I8: the join logic lives in exactly one
 /// place).
 pub(crate) struct WebBuildPaths {
@@ -10941,6 +11228,7 @@ pub(crate) fn write_web_artifacts(
     model_runtime: bool,
     verbose: bool,
     output: &jet_devserver::WebHost::WebOutputAuthority,
+    incremental_session: Option<&mut WebRustcIncrementalSession>,
     emit_maps: bool,
     mode: OutputMode,
 ) -> Result<WebBuildPaths, String> {
@@ -11087,12 +11375,75 @@ pub(crate) fn write_web_artifacts(
         .create_temp_file("jet-web-rustc", ".wasm")
         .map_err(|e| format!("error: couldn't create a wasm temporary: {e}"))?;
     let wasm_temp_path = wasm_temp.path().to_path_buf();
-    let wasm_source = wasm_rs_path.to_str().ok_or_else(|| {
-        format!(
-            "error: web source path is not valid UTF-8: {}",
-            wasm_rs_path.display()
-        )
-    })?;
+    let rustc_profile_flags = if emit_maps {
+        // Exact Jet statement lines need rustc's Wasm line table.
+        vec![
+            "-C".to_string(),
+            "opt-level=0".to_string(),
+            "-C".to_string(),
+            "debuginfo=2".to_string(),
+        ]
+    } else {
+
+        vec!["-O".to_string()]
+    };
+    let incremental_dir = incremental_session
+        .map(|session| session.prepare_dir(&web.rustc_incremental_identity, emit_maps, ffi.is_some()))
+        .transpose()?;
+    // The existing runtime marker split is below the generated program: the
+    // invariant Prelude/Core closure is compiled for this exact Wasm/profile
+    // flag set, while the changed program source is always compiled below.
+    let mut runtime_flags = vec![
+        std::ffi::OsString::from("--target"),
+        std::ffi::OsString::from("wasm32-unknown-unknown"),
+    ];
+    runtime_flags.extend(
+        rustc_profile_flags
+            .iter()
+            .cloned()
+            .map(std::ffi::OsString::from),
+    );
+    let inline_runtime = || jet_store::runtime::PreparedRuntime::inline(&web.wasm_rust);
+    let prepared_runtime = if ffi.is_some() {
+        // Rust FFI glue can make runtime items depend on the external crate;
+        // preserve the safe inline path rather than sharing a partial closure.
+        inline_runtime()
+    } else {
+        match Store::from_env() {
+            Ok(store) => jet_store::runtime::prepare(
+                &store,
+                std::ffi::OsStr::new("rustc"),
+                &web.wasm_rust,
+                &runtime_flags,
+                &[],
+            )
+            .unwrap_or_else(|_| inline_runtime()),
+            Err(_) => inline_runtime(),
+        }
+    };
+    let mut _prepared_source = None;
+    let mut split_source_path = wasm_rs_path.clone();
+    if prepared_runtime.is_split() {
+        if let Some(dir) = incremental_dir.as_ref() {
+            let source_path = dir.join("app_wasm.rs");
+            fs::write(&source_path, prepared_runtime.rust().as_bytes()).map_err(|error| {
+                format!(
+                    "error: couldn't write the prepared Web rustc source {}: {error}",
+                    source_path.display()
+                )
+            })?;
+            split_source_path = source_path;
+        } else {
+            let mut source = output
+                .create_temp_file("jet-web-rustc", ".rs")
+                .map_err(|e| format!("error: couldn't create a prepared Wasm source: {e}"))?;
+            source
+                .write_all(prepared_runtime.rust().as_bytes())
+                .map_err(|e| format!("error: couldn't write a prepared Wasm source: {e}"))?;
+            split_source_path = source.path().to_path_buf();
+            _prepared_source = Some(source);
+        }
+    }
     let wasm_destination = wasm_temp_path.to_str().ok_or_else(|| {
         format!(
             "error: web wasm temporary path is not valid UTF-8: {}",
@@ -11100,56 +11451,82 @@ pub(crate) fn write_web_artifacts(
         )
     })?;
 
-    let mut rustc = Command::new("rustc");
-    rustc.args([
-        "--edition",
-        "2021",
-        "--target",
-        "wasm32-unknown-unknown",
-        "--crate-type",
-        "cdylib",
-        "--crate-name",
-    ]);
-    rustc.arg(jet::Syntax::sanitize_crate_name(
-        wasm_rs_path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .unwrap_or("out"),
-    ));
-    if emit_maps {
-        // Exact Jet statement lines need rustc's Wasm line table.
-        rustc.args(["-C", "opt-level=0", "-C", "debuginfo=2"]);
-    } else {
-        rustc.arg("-O");
-    }
-    if model_runtime {
-        let rlib = jet_rt_rlib(Some("wasm32-unknown-unknown"), !emit_maps)?;
-        let dependencies = rlib.parent().ok_or_else(|| {
+    let run_rustc = |source_path: &Path,
+                     prepared: Option<&jet_store::runtime::PreparedRuntime>|
+     -> Result<std::process::Output, String> {
+        let wasm_source = source_path.to_str().ok_or_else(|| {
             format!(
-                "runtime rlib `{}` has no dependency directory",
-                rlib.display()
+                "error: web source path is not valid UTF-8: {}",
+                source_path.display()
             )
         })?;
-        rustc
-            .arg("--extern")
-            .arg(format!("jet_rt={}", rlib.display()))
-            .arg("-L")
-            .arg(format!("dependency={}", dependencies.display()));
-    }
-    rustc.args([wasm_source, "-o", wasm_destination]);
-    if let Some(link) = ffi {
-        rustc
-            .arg("--extern")
-            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc
-                .arg("-L")
-                .arg(format!("dependency={}", deps_dir.display()));
+        let mut rustc = Command::new("rustc");
+        rustc.args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "--crate-name",
+        ]);
+        rustc.arg(jet::Syntax::sanitize_crate_name(
+            wasm_rs_path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("out"),
+        ));
+        rustc.args(&rustc_profile_flags);
+        if let Some(dir) = incremental_dir.as_ref() {
+            rustc.arg("-C").arg(format!("incremental={}", dir.display()));
         }
+        if let Some(prepared) = prepared {
+            prepared.add_rustc_args(&mut rustc);
+        }
+        if model_runtime {
+            let rlib = jet_rt_rlib(Some("wasm32-unknown-unknown"), !emit_maps)?;
+            let dependencies = rlib.parent().ok_or_else(|| {
+                format!(
+                    "runtime rlib `{}` has no dependency directory",
+                    rlib.display()
+                )
+            })?;
+            rustc
+                .arg("--extern")
+                .arg(format!("jet_rt={}", rlib.display()))
+                .arg("-L")
+                .arg(format!("dependency={}", dependencies.display()));
+        }
+        rustc.args([wasm_source, "-o", wasm_destination]);
+        if let Some(link) = ffi {
+            rustc
+                .arg("--extern")
+                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+                rustc
+                    .arg("-L")
+                    .arg(format!("dependency={}", deps_dir.display()));
+            }
+        }
+        rustc
+            .output()
+            .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))
+    };
+
+    let mut used_split = prepared_runtime.is_split();
+    let mut rustc = run_rustc(
+        &split_source_path,
+        used_split.then_some(&prepared_runtime),
+    )?;
+    if !rustc.status.success() && used_split {
+        // The split is an optimization below the source-of-truth artifact.
+        // If rustc rejects it, retry the exact complete generated source once.
+        if verbose {
+            step("runtime split bypassed (inline retry)".to_string());
+        }
+        used_split = false;
+        rustc = run_rustc(&wasm_rs_path, None)?;
     }
-    let rustc = rustc
-        .output()
-        .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
 
     if !rustc.status.success() {
         return Err(jet::Diagnostics::render_ice_report(
@@ -11157,6 +11534,14 @@ pub(crate) fn write_web_artifacts(
             &String::from_utf8_lossy(&rustc.stderr),
             true,
         ));
+    }
+    if used_split {
+        let status = if prepared_runtime.cache_hit() {
+            "reused invariant wasm modules"
+        } else {
+            "stored invariant wasm modules"
+        };
+        step(format!("runtime   -> {status}"));
     }
 
     // rustc may atomically replace its output path. Reopen the path instead of
@@ -13203,6 +13588,7 @@ fn normalize_static_archive(path: &Path) -> Result<(), LibraryBuildError> {
 }
 
 fn build_library(
+    project_root: &Path,
     rust_code: &str,
     artifacts: &jet::Codegen::LibraryArtifacts,
     config: &jet::LibraryExport::LibraryConfig,
@@ -13212,7 +13598,7 @@ fn build_library(
     mode: OutputMode,
 ) -> Result<LibraryBuildPaths, LibraryBuildError> {
     let stem = library_stem(&config.name);
-    let target = PathBuf::from("target");
+    let target = build_output_root(project_root);
     validate_library_output_root(&target)?;
     clean_library_outputs(&target, &stem)?;
     let stage = new_library_stage(&target, &stem)?;
@@ -13448,6 +13834,7 @@ fn build_inner(
             write_mode_status(mode, &format!("[build] {msg}\n"));
         }
     };
+    let model_runtime = runtime_bundle.is_some_and(|bundle| !bundle.model_outputs().is_empty());
     let native_store = Store::from_env().ok();
     let output_names = bin
         .file_name()
@@ -13464,10 +13851,16 @@ fn build_inner(
         .as_ref()
         .and_then(|store| store.latest_build_record(&record_program).ok().flatten());
 
+    let output_root = bin
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
     let output_authority =
-        jet_devserver::WebHost::WebOutputAuthority::open_or_create(Path::new("build"))
+        jet_devserver::WebHost::WebOutputAuthority::open_or_create(&output_root)
             .unwrap_or_else(|error| {
-                let message = format!("error: couldn't create the build folder safely: {error}");
+                let message =
+                    format!("error: couldn't create the `.jet/build` folder safely: {error}");
                 write_mode_diagnostic(mode, &format!("{message}\n"));
                 exit(ExitCodes::USER_ERROR);
             });
@@ -13496,7 +13889,6 @@ fn build_inner(
             exit(ExitCodes::ICE);
         });
         let emit_maps = !profile.is_release();
-        let model_runtime = runtime_bundle.is_some_and(|bundle| !bundle.model_outputs().is_empty());
         let paths = match write_web_artifacts(
             file,
             web,
@@ -13504,6 +13896,7 @@ fn build_inner(
             model_runtime,
             verbose,
             &output_authority,
+            None,
             emit_maps,
             mode,
         ) {
@@ -13547,7 +13940,7 @@ fn build_inner(
             );
             exit(ExitCodes::ICE);
         });
-        let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build"), mode) {
+        let paths = match write_plugin_artifacts(file, plugin, verbose, &output_root, mode) {
             Ok(p) => p,
             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
                 write_mode_diagnostic(
@@ -13830,7 +14223,7 @@ fn build_inner(
         }
         jet_store::runtime::PreparedRuntime::inline(rust_code)
     };
-    let model_runtime = runtime_bundle.is_some_and(|bundle| !bundle.model_outputs().is_empty());
+    
     let model_rlib = if model_runtime {
         match jet_rt_rlib(cross_target, profile.is_release()) {
             Ok(path) => Some(path),
@@ -13843,28 +14236,28 @@ fn build_inner(
         None
     };
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
-    // path, never straight onto the shared `build/<stem>` display path. Two
+    // path, never straight onto the shared `.jet/build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to
     // share a file stem would otherwise race — process A could `store_cached`
-    // its hash against process B's freshly-overwritten `build/<stem>`, mapping
-    // A's key to B's binary in the shared content cache. `process::id()`
+    // its hash against process B's freshly-overwritten `.jet/build/<stem>`,
+    // mapping A's key to B's binary in the shared content cache. `process::id()`
     // disambiguates the processes; we `store_cached` from this private path
     // (safe — only ever racing another process computing the *same* key, i.e.
     // the same content) and only then rename into the shared display path.
-    let bin_name = bin
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("out")
-        .to_string();
-    // Private per-process working directory: rustc writes the output binary,
-    // the generated `.rs`, AND all its intermediate codegen-unit object files
-    // (`*.rcgu.o`) here. Two concurrent builds that share a file stem would
-    // otherwise collide in the shared `build/` dir — on the binary, on the
-    // source file mid-compile, and on the crate-name-derived intermediates —
-    // corrupting each other's compile and (per §0) the shared content cache.
-    // The results are published to the shared display paths only after a clean
-    // compile; `store_cached` reads from this private path.
-    let work = PathBuf::from("build").join(format!(".work.{}.{}", bin_name, std::process::id()));
+    // The private work path also keeps rustc's generated source and intermediates
+    // out of the visible artifact directory.
+    let bin_name = match bin.file_name().and_then(|name| name.to_str()) {
+        Some(name) if !name.is_empty() => name.to_owned(),
+        _ => {
+            crate::cli_error!(
+                "E2105",
+                "build output `{}` has no UTF-8 file name",
+                bin.display()
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let work = output_root.join(format!(".work.{}.{}", bin_name, std::process::id()));
     if let Err(e) = fs::create_dir_all(&work) {
         crate::cli_error!("E2105", "couldn't create the build work dir: {}", e);
         exit(ExitCodes::USER_ERROR);
@@ -13911,9 +14304,9 @@ fn build_inner(
         jet::SHA256::sha256_hex(&bytes)
     });
     // Pin the crate name to the file stem — the name rustc used to infer from
-    // `build/<stem>.rs` — so the private working-dir source name doesn't leak
-    // into codegen. Everything here is decided once and replayed per attempt:
-    // one rustc invocation over one prepared program.
+    // `.jet/build/<stem>.rs` — so the private working-dir source name doesn't
+    // leak into codegen. Everything here is decided once and replayed per
+    // attempt: one rustc invocation over one prepared program.
     let run_rustc = |prepared: &jet_store::runtime::PreparedRuntime| -> std::process::Output {
         #[cfg(debug_assertions)]
         let rust = if std::env::var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
@@ -13994,8 +14387,8 @@ fn build_inner(
     }
 
     if !out.status.success() {
-        // Preserve the shared `build/<stem>.rs` artifact (written above) for the
-        // ICE bug report, but drop this process's private working dir.
+        // Preserve the shared `.jet/build/<stem>.rs` artifact (written above)
+        // for the ICE bug report, but drop this process's private working dir.
         let _ = fs::remove_dir_all(&work);
         let stderr = String::from_utf8_lossy(&out.stderr);
         // I2: a *missing C library* is a user/system problem, not generated-code
@@ -14075,7 +14468,7 @@ fn build_inner(
         }
     }
     // Then publish the private binary onto the shared, human-readable display
-    // path (`build/<stem>`) that `jet run`/`jet build` hand back. A same-dir
+    // path (`.jet/build/<stem>`) that `jet run`/`jet build` hand back. A same-dir
     // rename is atomic; last writer wins the convenience slot, which was never
     // a content identity. Fall back to copy if rename crosses a filesystem.
     if fs::rename(&tmp_bin, &bin).is_err() {
@@ -14250,6 +14643,13 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
             return ExitCodes::USER_ERROR;
         }
     };
+    let project_root = match jet::build_project_root(file) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            report_problems(mode, file, &src, &diagnostics);
+            return ExitCodes::USER_ERROR;
+        }
+    };
     let out = match jet::compile_for_debug(file) {
         Ok(o) => o,
         Err(diags) => {
@@ -14264,7 +14664,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
             return ExitCodes::USER_ERROR;
         }
     };
-    let bin = PathBuf::from("build").join(format!("{}_dbg", stem(file)));
+    let bin = build_output_root(&project_root).join(format!("{}_dbg", stem(file)));
     build(
         file,
         &out.rust,
@@ -14282,7 +14682,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
         // `jet debug` builds carry a line-map and launch interactively; not cached.
         None,
     );
-    // `build()` always writes the generated Rust to `build/<stem>.rs` (the
+    // `build()` always writes the generated Rust to `.jet/build/<stem>.rs` (the
     // debug binary path is the only caller-chosen path) — lldb's `-f` flag
     // matches by basename, so this is what `Inferior::set_breakpoint` needs.
     let rust_file = format!("{}.rs", stem(file));
@@ -14435,11 +14835,12 @@ mod profile_tests {
         let optimized = BuildProfile::Default.config().rustc_args(false);
         assert!(optimized.contains(&"opt-level=2".to_string()));
         assert!(!optimized.contains(&"-O".to_string()));
-        assert!(optimized.contains(&"lto=thin".to_string()));
+        assert!(optimized.contains(&"lto=fat".to_string()));
+        assert!(optimized.contains(&"codegen-units=1".to_string()));
         assert!(optimized.contains(&"strip=symbols".to_string()));
         assert!(!optimized
             .iter()
-            .any(|arg| arg.starts_with("codegen-units=")));
+            .any(|arg| arg == "lto=thin"));
 
         let debug = BuildProfile::Debug.config().rustc_args(false);
         assert!(debug.contains(&"codegen-units=256".to_string()));
@@ -14454,6 +14855,9 @@ mod profile_tests {
             BuildProfile::Fast.cache_tag(),
             BuildProfile::Default.cache_tag()
         );
+        assert!(BuildProfile::Default
+            .cache_tag()
+            .contains("size-opt"));
         assert!(BuildProfile::Fast
             .config()
             .settings_tag()
@@ -15210,3 +15614,34 @@ mod web_output_boundary_tests {
     }
 }
 
+
+#[cfg(test)]
+mod web_rustc_incremental_session_tests {
+    use super::WebRustcIncrementalSession;
+
+    #[test]
+    fn changed_web_build_reuses_identity_path_and_populated_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-web-rustc-session-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut session = WebRustcIncrementalSession::new(&root);
+        let first = session
+            .prepare_dir("stable-web-identity", true, false)
+            .expect("baseline incremental directory");
+        let marker = first.join("rustc-incremental-marker");
+        std::fs::write(&marker, b"populated").expect("baseline rustc output");
+
+        let second = session
+            .prepare_dir("stable-web-identity", true, false)
+            .expect("changed-function incremental directory");
+        assert_eq!(first, second);
+        assert!(second.join("rustc-incremental-marker").is_file());
+        assert_eq!(session.reused_dirs(), 1);
+
+        session.cleanup();
+        assert!(!first.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

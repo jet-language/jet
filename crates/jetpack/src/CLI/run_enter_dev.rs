@@ -14,7 +14,7 @@ use super::trust_env_build::{
     compose_env, compose_env_scoped_with_warm, validate_integration_facts,
 };
 use super::workspace_sources::{
-    builtin_table, cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
+    builtin_table, cwd_table, fixtures_for, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
 use crate::Bridge;
 use crate::EnvFile;
@@ -24,6 +24,7 @@ use crate::MemberSelect::{self, SelectRequest};
 use crate::Output::Theme;
 use crate::Lock;
 use crate::RefSpec;
+use crate::Provider;
 use crate::Secrets;
 use crate::Shell::{self, Env, ShellKind};
 use crate::Store;
@@ -1941,11 +1942,14 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         secret_identity.as_deref(),
     );
     let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
-    let warm = if flags.prep {
+    let receipt_matches_plan = previous_receipt
+        .as_ref()
+        .is_some_and(|receipt| env_entry_matches_plan(receipt, &plan));
+    let mut warm = if flags.prep {
         None
     } else {
         previous_receipt.as_ref().and_then(|receipt| {
-            if !env_entry_matches_plan(receipt, &plan) {
+            if !receipt_matches_plan {
                 return None;
             }
             Store::reuse_verified_environment(
@@ -1960,7 +1964,21 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             .flatten()
         })
     };
-    let warm_reused = warm.is_some();
+    if warm.is_none() && !flags.prep && receipt_matches_plan {
+        if let Some(receipt) = previous_receipt.as_ref() {
+            let expectations =
+                environment_member_expectations(&roots, &project_dir, &flags, &plan);
+            warm = Store::reuse_verified_environment_members(
+                &roots,
+                &receipt.packages,
+                &expectations,
+            )
+            .ok()
+            .flatten();
+        }
+    }
+    let warm_complete = warm_realizations_complete(&plan, &warm);
+    let warm_reused = warm_complete;
     // Do not replay a locked Nix bundle until the receipt has had a chance to
     // prove an exact warm entry. Replay imports and journals the bundle; doing
     // that before this check both spends the warm-path cost and changes the
@@ -2009,6 +2027,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         RealizeScope::Project,
         true,
         warm,
+        !warm_reused,
     ) {
         Ok(result) => result,
         Err(code) => return code,
@@ -2054,6 +2073,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     mark("announced");
 
     let code = match &parsed.command {
+        Some(cmd) if !cmd.is_empty() && warm_reused => Shell::exec_command(&env, cmd),
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
     };
@@ -2235,11 +2255,23 @@ fn environment_entry_definition_fingerprint(
     plan: &RunPlan,
     secret_identity: Option<&str>,
 ) -> (String, Option<String>) {
-    let hook_fingerprint = EnvHook::definition_fingerprint_with_selections(
-        project_dir,
-        requested_preset,
-        requested_environment,
-    );
+    // Typed plans already carry the exact source graph and lifecycle facts
+    // used by the activation fingerprint. Reuse them instead of evaluating
+    // env.jet a second time; legacy pkg.* plans keep the parser-backed path.
+    let hook_fingerprint = if plan.environment.source_files.is_empty() {
+        EnvHook::definition_fingerprint_with_selections(
+            project_dir,
+            requested_preset,
+            requested_environment,
+        )
+    } else {
+        EnvHook::definition_fingerprint_from_facts(
+            project_dir,
+            requested_preset,
+            requested_environment,
+            &plan.environment,
+        )
+    };
     environment_entry_definition_fingerprint_with_hook(
         requested_preset,
         requested_environment,
@@ -2279,6 +2311,62 @@ fn environment_entry_definition_fingerprint_with_hook(
         crate::SHA256::sha256_hex(&canonical),
         hook_fingerprint.map(str::to_owned),
     )
+}
+
+fn environment_member_expectations(
+    roots: &Store::Roots,
+    project_dir: &Path,
+    flags: &Flags,
+    plan: &RunPlan,
+) -> BTreeMap<String, Store::CacheExpectation> {
+    let fixtures = if flags.offline {
+        fixtures_for(flags)
+    } else {
+        flags.fixtures.clone()
+    };
+    let store_dir = roots.hangar_dir();
+    let context = Provider::Ctx {
+        fixtures: fixtures.as_deref(),
+        store_dir: &store_dir,
+        offline: flags.offline,
+        project_dir: Some(project_dir),
+        nix_index: None,
+        nix_roots: Some(roots),
+    };
+
+    let mut expectations = BTreeMap::new();
+    for spec in &plan.refs {
+        if let Some(expectation) = Provider::cache_expectation(spec, &plan.table, &context) {
+            expectations.insert(spec.raw.clone(), expectation);
+        }
+    }
+    for adapter in &plan.adapters {
+        let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+        if let Ok(expectation) =
+            Provider::adapter_cache_expectation(adapter, &plan.table, &context)
+        {
+            expectations.insert(reference, expectation);
+        }
+    }
+    expectations
+}
+fn warm_realizations_complete(
+    plan: &RunPlan,
+    warm: &Option<Vec<Store::VerifiedRealization>>,
+) -> bool {
+    let Some(realized) = warm else {
+        return false;
+    };
+    plan.refs.iter().all(|spec| {
+        realized
+            .iter()
+            .any(|entry| entry.original_reference() == spec.raw)
+    }) && plan.adapters.iter().all(|adapter| {
+        let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+        realized
+            .iter()
+            .any(|entry| entry.original_reference() == reference)
+    })
 }
 
 fn env_entry_plan_references(plan: &RunPlan) -> Vec<String> {
@@ -2498,6 +2586,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         &warm_references,
         parsed.flags.local_nix_catalog.is_some(),
     );
+    let warm_reused = warm_realizations_complete(&plan, &warm);
     let env = match compose_env_scoped_with_warm(
         theme,
         &roots,
@@ -2506,6 +2595,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         RealizeScope::Use,
         true,
         warm,
+        false,
     )
     {
         Ok((env, _)) => env,
@@ -2516,6 +2606,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     }
     let code = match &parsed.command {
+        Some(command) if !command.is_empty() && warm_reused => Shell::exec_command(&env, command),
         Some(command) if !command.is_empty() => Shell::run_command(&env, command),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
     };
@@ -3718,9 +3809,12 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             secret_identity.as_deref(),
             target_hash.as_deref(),
         );
+        let receipt_matches_plan = previous_receipt
+            .as_ref()
+            .is_some_and(|receipt| env_entry_matches_plan(receipt, &plan));
         let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
-        let warm = previous_receipt.as_ref().and_then(|receipt| {
-            if !env_entry_matches_plan(receipt, &plan) {
+        let mut warm = previous_receipt.as_ref().and_then(|receipt| {
+            if !receipt_matches_plan {
                 return None;
             }
             Store::reuse_verified_environment(
@@ -3734,7 +3828,20 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             .ok()
             .flatten()
         });
-        let warm_reused = warm.is_some();
+        if warm.is_none() && receipt_matches_plan {
+            if let Some(receipt) = previous_receipt.as_ref() {
+                let expectations =
+                    environment_member_expectations(&roots, &root, &parsed.flags, &plan);
+                warm = Store::reuse_verified_environment_members(
+                    &roots,
+                    &receipt.packages,
+                    &expectations,
+                )
+                .ok()
+                .flatten();
+            }
+        }
+        let warm_reused = warm_realizations_complete(&plan, &warm);
         // Locked Nix replay is cold-path preparation. Do not import/journal it
         // before the exact receipt warm check above; the replay mutates the WAL
         // stamp that authenticates the receipt.
@@ -3759,6 +3866,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             RealizeScope::Project,
             false,
             warm,
+            !warm_reused,
         ) {
             Ok(result) => result,
             Err(_) => {

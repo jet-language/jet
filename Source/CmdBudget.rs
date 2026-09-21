@@ -64,14 +64,23 @@ pub(crate) fn run(raw: &[String]) -> i32 {
             )
         }
     };
-    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
-    let entry = project_entry(&root);
+    let source_root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let entry = project_entry(&source_root);
     if !entry.is_file() {
         return tool_failure(
             &options,
             "no project entry exists; add run.jet inside a project",
         );
     }
+    let root = match jet::build_project_root(&entry.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            return tool_failure(
+                &options,
+                &format!("could not resolve project root: {diagnostics:?}"),
+            )
+        }
+    };
 
     let measured_start = timestamp_now();
     // Preflight owns no artifact write: parse/load/sema must finish first.
@@ -270,8 +279,12 @@ pub(crate) fn run_build_gates(
         }
     };
     let entry = entry.as_path();
-    let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
-        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let root = match jet::build_project_root(&entry.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            return build_gate_tool_failure(&format!("could not resolve project root: {diagnostics:?}"))
+        }
+    };
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, effect_facts) =
         jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
@@ -1668,8 +1681,12 @@ pub(crate) fn run_dev_refresh(
             return build_gate_tool_failure(&format!("cannot resolve dev entry: {error}"))
         }
     };
-    let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
-        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let root = match jet::build_project_root(&entry.to_string_lossy()) {
+        Ok(root) => root,
+        Err(diagnostics) => {
+            return build_gate_tool_failure(&format!("could not resolve project root: {diagnostics:?}"))
+        }
+    };
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, effect_facts) =
         jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
@@ -2259,7 +2276,7 @@ fn build_selected_artifact(root: &Path, entry: &Path) -> Result<(PathBuf, u64, S
         .file_stem()
         .and_then(|v| v.to_str())
         .ok_or("selected artifact entry has no UTF-8 stem")?;
-    let artifact = root.join("build").join(if cfg!(windows) {
+    let artifact = root.join(".jet").join("build").join(if cfg!(windows) {
         format!("{stem}.exe")
     } else {
         stem.into()

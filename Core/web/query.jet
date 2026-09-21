@@ -1,0 +1,123 @@
+// core.web.query — client query cache and mutations.
+pub enum WebQueryStatus {
+    Pending
+    Fresh
+    Stale
+    Fetching
+    Error
+    Offline
+}
+
+pub enum WebMutationStatus {
+    Idle
+    Pending
+    Success
+    Error
+    Settled
+}
+
+pub enum WebQueryNetworkMode {
+    Online
+    Always
+    OfflineFirst
+}
+
+pub struct WebQuery {
+    pub key: String
+    pub data: String
+    pub status: WebQueryStatus
+    pub error: String
+    pub generation: Int
+    pub mode: WebQueryNetworkMode
+    pub online: Bool
+}
+
+pub struct WebMutationState {
+    pub status: WebMutationStatus
+    pub data: String
+    pub error: String
+}
+
+pub fn new(key: String, data: String) -> WebQuery {
+    {key: key, data: data, status: WebQueryStatus.Fresh, error: "", generation: 1, mode: WebQueryNetworkMode.Online, online: true}
+}
+
+pub fn get(q: WebQuery) -> String { q.data }
+
+pub fn live(key: String, data: String) -> WebQuery { new(key, data) }
+
+pub fn refresh(q: WebQuery) -> WebQuery {
+    {key: q.key, data: q.data, status: WebQueryStatus.Fetching, error: q.error, generation: q.generation + 1, mode: q.mode, online: q.online}
+}
+
+pub fn invalidate(q: WebQuery) -> WebQuery {
+    {key: q.key, data: q.data, status: WebQueryStatus.Stale, error: q.error, generation: q.generation + 1, mode: q.mode, online: q.online}
+}
+
+pub fn mutate(q: WebQuery, data: String) -> WebQuery {
+    {key: q.key, data: data, status: WebQueryStatus.Fresh, error: "", generation: q.generation + 1, mode: q.mode, online: q.online}
+}
+
+pub fn mutate_with_invalidations(q: WebQuery, data: String) -> WebQuery { mutate(q, data) }
+
+pub fn subscribe(q: WebQuery) -> WebQuery { q }
+
+pub fn state(q: WebQuery) -> String { status_name(q.status) }
+
+pub fn state_signal(q: WebQuery) -> String { "{q.key}:{status_name(q.status)}:{q.generation}" }
+
+pub fn mutation_state(q: WebQuery) -> WebMutationState {
+    st := WebMutationStatus.Idle
+    if q.status == WebQueryStatus.Fetching -> st = WebMutationStatus.Pending
+    if q.status == WebQueryStatus.Error -> st = WebMutationStatus.Error
+    if q.status == WebQueryStatus.Fresh -> st = WebMutationStatus.Success
+    {status: st, data: q.data, error: q.error}
+}
+
+pub fn mutation_signal(q: WebQuery) -> String { mutation_state(q).error }
+
+pub fn show(q: WebQuery) -> String { "{q.key}={q.data}" }
+
+pub fn cancel(q: WebQuery) -> WebQuery {
+    {key: q.key, data: q.data, status: WebQueryStatus.Stale, error: q.error, generation: q.generation, mode: q.mode, online: q.online}
+}
+
+pub fn retry(q: WebQuery) -> WebQuery {
+    if q.online {
+        return {key: q.key, data: q.data, status: WebQueryStatus.Fetching, error: "", generation: q.generation + 1, mode: q.mode, online: q.online}
+    }
+    {key: q.key, data: q.data, status: WebQueryStatus.Offline, error: q.error, generation: q.generation, mode: q.mode, online: q.online}
+}
+
+pub fn queue(q: WebQuery, data: String) -> WebQuery { mutate(q, data) }
+
+pub fn facts(q: WebQuery) -> String {
+    "{{\\\"key\\\":\\\"{q.key}\\\",\\\"status\\\":\\\"{status_name(q.status)}\\\",\\\"generation\\\":{q.generation},\\\"online\\\":{bool_json(q.online)}}}"
+}
+
+pub fn set_mode(q: WebQuery, mode: WebQueryNetworkMode) -> WebQuery {
+    {key: q.key, data: q.data, status: q.status, error: q.error, generation: q.generation, mode: mode, online: q.online}
+}
+
+pub fn set_online(q: WebQuery, online: Bool) -> WebQuery {
+    st := q.status
+    if !online -> st = WebQueryStatus.Offline
+    if online && q.status == WebQueryStatus.Offline -> st = WebQueryStatus.Stale
+    {key: q.key, data: q.data, status: st, error: q.error, generation: q.generation, mode: q.mode, online: online}
+}
+
+fn status_name(s: WebQueryStatus) -> String {
+    if s == {
+        WebQueryStatus.Pending -> "pending"
+        WebQueryStatus.Fresh -> "fresh"
+        WebQueryStatus.Stale -> "stale"
+        WebQueryStatus.Fetching -> "fetching"
+        WebQueryStatus.Error -> "error"
+        else -> "offline"
+    }
+}
+
+fn bool_json(b: Bool) -> String {
+    if b -> "true"
+    "false"
+}

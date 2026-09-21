@@ -857,7 +857,6 @@
         Handler(E),
         Panic(String),
     }
-
     pub trait JetIntoDispatchResult<E> {
         fn into_dispatch_result(self) -> Result<(), E>;
     }
@@ -866,6 +865,15 @@
     }
     impl<E> JetIntoDispatchResult<E> for Result<(), E> {
         fn into_dispatch_result(self) -> Result<(), E> { self }
+    }
+    // The public async event carrier may be a String even when a callback
+    // propagates Jet's default structured `Err`. Normalize that carrier at
+    // the host boundary instead of forcing every callback body to rewrite its
+    // checked failure type.
+    impl JetIntoDispatchResult<String> for Result<(), JetErr> {
+        fn into_dispatch_result(self) -> Result<(), String> {
+            self.map_err(|error| jet_err_message(&error))
+        }
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -949,6 +957,32 @@
         handler: std::sync::Arc<dyn Fn(T) -> Result<(), E> + Send + Sync>,
     }
 
+    trait JetAsyncHandler<T, R>: Send + Sync + 'static {
+        fn invoke(&self, payload: T) -> R;
+    }
+
+    impl<T, R, F> JetAsyncHandler<T, R> for F
+    where
+        F: Fn(T) -> R + Send + Sync + 'static,
+    {
+        fn invoke(&self, payload: T) -> R {
+            self(payload)
+        }
+    }
+
+    // A SendFn callback is lowered as an Arc carrier so the JIT can retain the
+    // function/environment pair across scheduler work. Arc<dyn Fn> is callable
+    // by dereference, but it does not itself satisfy a generic `F: Fn(...)`
+    // bound on all supported Rust toolchains. Keep the source-facing generic
+    // API while adapting that canonical carrier at the one async boundary.
+    impl<T: 'static, R: 'static> JetAsyncHandler<T, R>
+        for std::sync::Arc<dyn Fn(T) -> R + Send + Sync + 'static>
+    {
+        fn invoke(&self, payload: T) -> R {
+            self(payload)
+        }
+    }
+
     struct JetAsyncEntry<T, E: Clone + Send + 'static> {
         id: u64,
         event_id: u64,
@@ -1025,21 +1059,20 @@
                 owner_id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
             })
         }
-
         pub fn on<F, R>(&self, scope: &JetEventScope, handler: F) -> JetSubscription
-        where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
+        where F: JetAsyncHandler<T, R>, R: JetIntoDispatchResult<E> {
             self.add(scope, 0, false, handler)
         }
         pub fn once<F, R>(&self, scope: &JetEventScope, handler: F) -> JetSubscription
-        where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
+        where F: JetAsyncHandler<T, R>, R: JetIntoDispatchResult<E> {
             self.add(scope, 0, true, handler)
         }
         pub fn on_priority<F, R>(&self, scope: &JetEventScope, priority: i64, handler: F) -> JetSubscription
-        where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
+        where F: JetAsyncHandler<T, R>, R: JetIntoDispatchResult<E> {
             self.add(scope, priority, false, handler)
         }
         fn add<F, R>(&self, scope: &JetEventScope, priority: i64, once: bool, handler: F) -> JetSubscription
-        where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
+        where F: JetAsyncHandler<T, R>, R: JetIntoDispatchResult<E> {
             let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
             let sub = scope.track(JetSubscription::shared(active.clone()));
             if !sub.active() {
@@ -1047,7 +1080,7 @@
             }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.state.lock().unwrap().listeners.push(JetAsyncListener {
-                id, owner_id: scope.id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler(payload).into_dispatch_result()),
+                id, owner_id: scope.id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler.invoke(payload).into_dispatch_result()),
             });
             let cancel_state = std::sync::Arc::downgrade(&self.state);
             scope.track_hard_cancel(self.owner_id, move || {
@@ -1082,6 +1115,32 @@
         }
 
         pub fn emit_async(&self, payload: T) -> super::jet_std::JetTask<JetDispatchReport<E>> {
+            let (event, entry, control) = self.enqueue_async(payload);
+            super::jet_std::JetTask::spawn_typed_deadline(
+                move || event.run_entry(entry),
+                control,
+            )
+        }
+
+        pub fn emit_async_result(
+            &self,
+            payload: T,
+        ) -> super::jet_std::JetTask<Result<JetDispatchReport<E>, E>> {
+            let (event, entry, control) = self.enqueue_async(payload);
+            super::jet_std::JetTask::spawn_typed_deadline(
+                move || Ok(event.run_entry(entry)),
+                control,
+            )
+        }
+
+        fn enqueue_async(
+            &self,
+            payload: T,
+        ) -> (
+            JetAsyncEvent<T, E>,
+            std::sync::Arc<JetAsyncEntry<T, E>>,
+            std::sync::Arc<super::JetTaskControl>,
+        ) {
             let control = super::JetTaskControl::new();
             let entry = std::sync::Arc::new(JetAsyncEntry {
                 id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
@@ -1166,10 +1225,7 @@
                 owner: None,
                 owner_id: self.owner_id,
             };
-            super::jet_std::JetTask::spawn_typed_deadline(
-                move || event.run_entry(entry),
-                control,
-            )
+            (event, entry, control)
         }
 
         fn complete_entry(

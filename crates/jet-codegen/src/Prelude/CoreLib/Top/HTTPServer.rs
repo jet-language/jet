@@ -597,6 +597,12 @@ impl JetHTTPServerOptions {
     }
 }
 
+fn jet_http_server_safe_options() -> &'static JetHTTPServerOptions {
+    static OPTIONS: std::sync::LazyLock<JetHTTPServerOptions> =
+        std::sync::LazyLock::new(JetHTTPServerOptions::safe);
+    &OPTIONS
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct JetHTTPShutdownReport {
     user_accepted: i64,
@@ -1855,6 +1861,21 @@ fn jet_http_srv_response_header(
     }
     resp
 }
+
+fn jet_http_srv_response_header_owned(
+    mut resp: JetHTTPResponse,
+    name: String,
+    value: String,
+) -> JetHTTPResponse {
+    if !JetHTTPHeaders::valid_name(&name) || !JetHTTPHeaders::valid_value(&value) {
+        resp.status = 500;
+        resp.body = JetHTTPBody::from_text("500 Internal Server Error".to_string());
+        resp.headers = JetHTTPHeaders::new();
+    } else {
+        resp.headers.entries.push((name, value));
+    }
+    resp
+}
 fn jet_http_srv_response_status(resp: &JetHTTPResponse) -> i64 { resp.status }
 fn jet_http_srv_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
@@ -2198,6 +2219,18 @@ fn jet_http_server_run_listener_inner(
         }
         match listener.accept() {
             Ok((mut stream, peer)) => {
+                if let Err(error) = stream.set_nonblocking(false) {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    shutdown.store(true, Ordering::Release);
+                    force_cancel.store(true, Ordering::Release);
+                    if let Ok(active_streams) = active.lock() {
+                        for active_stream in active_streams.iter() {
+                            let _ = active_stream.shutdown(std::net::Shutdown::Both);
+                        }
+                    }
+                    accept_error = Some(format!("http accepted stream setup failed: {error}"));
+                    break;
+                }
                 let peer_ip = peer.ip();
                 let globally_full = connection_count.load(Ordering::Acquire) >= options.max_connections;
                 let ip_full = per_ip.lock().unwrap().get(&peer_ip).copied().unwrap_or(0) >= options.max_connections_per_ip;
@@ -4003,10 +4036,16 @@ fn jet_http_srv_read_streaming(
     let header_end = header_len - 4;
     let head = jet_http_validate_headers(&header[..header_end])?;
     let body_already_arrived = if head.expect_continue {
-        let _ = stream.set_nonblocking(true);
+        stream.set_nonblocking(true).map_err(|_| JetHTTPReadError {
+            status: 400,
+            message: "request read failed",
+        })?;
         let mut byte = [0u8; 1];
         let arrived = stream.peek(&mut byte).is_ok_and(|read| read > 0);
-        let _ = stream.set_nonblocking(false);
+        stream.set_nonblocking(false).map_err(|_| JetHTTPReadError {
+            status: 400,
+            message: "request read failed",
+        })?;
         let _ = stream.set_read_timeout(Some(options.read_body_timeout));
         arrived
     } else {
@@ -4125,10 +4164,11 @@ fn jet_http_mux_serve_once_listener_raw(
     if let Some(error) = route_cache.validation_error.clone() {
         return Err(error);
     }
-    let (mut stream, _peer) = jet_http_accept_once(listener, std::time::Duration::from_secs(5))?;
+    let (mut stream, _peer) =
+        jet_http_accept_once(listener, std::time::Duration::from_secs(5))?;
     let (req, version) = match jet_http_srv_read_streaming(
         &mut stream,
-        &JetHTTPServerOptions::safe(),
+        jet_http_server_safe_options(),
         false,
         None,
     ) {
@@ -4165,7 +4205,12 @@ fn jet_http_accept_once(
     let started = std::time::Instant::now();
     loop {
         match listener.inner.accept() {
-            Ok(connection) => return Ok(connection),
+            Ok((mut stream, peer)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("http accepted stream setup failed: {error}"))?;
+                return Ok((stream, peer));
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if started.elapsed() >= timeout {
                     return Err("HTTP serve_once accept timed out".to_string());
@@ -5907,15 +5952,21 @@ fn jet_http_srv_response_trailers(
     Ok(response)
 }
 
-fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHTTPResponse, String> {
+fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHTTPResponse, JetHTTPError> {
     let candidate = std::path::Path::new(path);
     let parent = candidate.parent().filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| std::path::Path::new("."));
-    let root = std::fs::canonicalize(parent).map_err(|error| format!("static file `{path}` failed: {error}"))?;
+    let root = std::fs::canonicalize(parent).map_err(|error| JetHTTPError::IO {
+        operation: format!("static file `{path}` failed: {error}"),
+    })?;
     let Some((file, metadata, _)) = jet_http_static_open(&root, candidate) else {
-        return Err(format!("static file `{path}` could not be opened with held identity"));
+        return Err(JetHTTPError::IO {
+            operation: format!("static file `{path}` could not be opened with held identity"),
+        });
     };
-    let length = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
+    let length = usize::try_from(metadata.len()).map_err(|_| JetHTTPError::IO {
+        operation: format!("static file `{path}` is too large"),
+    })?;
     let mut response = jet_http_srv_response(200, &String::new());
     response.body = JetHTTPBody::file(file, length);
     Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
@@ -6780,10 +6831,15 @@ pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
             let message = format!("web app server failed: {error}");
             jet_runtime_stop("E3001", "", 0, &message)
         });
+
 }
 
 fn jet_http_srv_json_text<S: JetHTTPStatusCode>(status: S, body: &String) -> JetHTTPResponse {
-    let mut response = jet_http_srv_response(status, body);
+    jet_http_srv_json_text_owned(status.jet_http_status_code(), body.clone())
+}
+
+fn jet_http_srv_json_text_owned(status: i64, body: String) -> JetHTTPResponse {
+    let mut response = jet_http_srv_response_owned(status, body);
     let _ = response
         .headers
         .set("content-type", "application/json; charset=utf-8");

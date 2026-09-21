@@ -1409,14 +1409,14 @@ impl<'a> Parser<'a> {
             let span = self.bump().span;
             return Ok(Some(span));
         }
-        // Migration arm for retired `TypeName.{`.
+        // Retired `TypeName.{`. Fmt rewrites; compile rejects.
         if self.peek_is_ident(expected)
             && matches!(self.peek2().kind, TokKind::Dot)
             && matches!(self.peek3().kind, TokKind::LBrace)
         {
             let span = self.bump().span;
             let dot = self.bump();
-            self.diags.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "E0320",
                 format!(
                     "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
@@ -1425,7 +1425,11 @@ impl<'a> Parser<'a> {
                 "literal heads place no dot before their brace (D-LIT-DOT1)".to_string(),
                 format!("write `{}{{…}}`", expected),
                 Some(dot.span),
-            ));
+            );
+            if !self.migration_mode {
+                return Err(diagnostic);
+            }
+            self.diags.push(diagnostic);
             return Ok(Some(span));
         }
         Ok(None)

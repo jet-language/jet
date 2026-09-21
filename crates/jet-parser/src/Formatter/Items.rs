@@ -122,34 +122,6 @@ impl ModuleBodyEntry<'_> {
     }
 }
 
-/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `->` one-line function
-/// body? The parser reads that body with `expr`, which accepts a headless
-/// record literal after `->` — a `Type{ … }` construction or a
-/// block lambda (`Parser/Items/functions_params.rs`,
-/// `Parser/Expressions/primary.rs`). Braces inside `(`/`[` reopen the ordinary
-/// expression grammar, and braces inside text are the lexer's business.
-fn reads_back_as_one_line_body(rendered: &str) -> bool {
-    let mut depth = 0usize;
-    let mut chars = rendered.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' | '\'' => {
-                while let Some(inner) = chars.next() {
-                    if inner == '\\' {
-                        chars.next();
-                    } else if inner == ch {
-                        break;
-                    }
-                }
-            }
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            '{' if depth == 0 => return false,
-            _ => {}
-        }
-    }
-    true
-}
 
 fn has_ambiguous_decode_union(items: &[Item], ty: &Type) -> bool {
     if let Type::Union(members) = ty {
@@ -941,18 +913,6 @@ impl<'a> Fmt<'a> {
                     f.source_list_span_after(m.name_span.end, super::SourceDelimiter::Paren),
                 );
                 f.write(")");
-                if let Some(ret) = &m.return_type {
-                    if Self::is_unit_fallible_type(ret) {
-                        f.fmt_unit_fallible_return(ret);
-                    } else {
-                        f.write(" ");
-                        f.fmt_return_type(ret);
-                    }
-                }
-                if let Some(map) = &m.declared_return_view_provenance {
-                    f.fmt_declared_return_view_from(map, &m.params);
-                }
-                // D-SIG-SHAPE1=B / D-EFF3: result first, effect ceiling second.
                 if let Some(effects) = &m.declared_effects {
                     let source = f.source_effect_row_span_after(m.name_span.end);
                     f.write(" ");
@@ -969,18 +929,23 @@ impl<'a> Fmt<'a> {
                     f.write(Syntax::EFFECT_ARROW_OPEN);
                     f.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
+                if let Some(ret) = &m.return_type {
+                    if Self::is_unit_fallible_type(ret) {
+                        f.fmt_unit_fallible_return(ret);
+                    } else if m.declared_effects.is_some() || m.is_pure {
+                        f.write(" ");
+                        f.fmt_return_type(ret);
+                    } else {
+                        f.write(" -> ");
+                        f.fmt_return_type(ret);
+                    }
+                }
+                if let Some(map) = &m.declared_return_view_provenance {
+                    f.fmt_declared_return_view_from(map, &m.params);
+                }
                 // D-LIB2: a trait method may carry a default body.
                 if let Some(body) = &m.default_body {
-                    if m.return_type
-                        .as_ref()
-                        .is_some_and(Self::return_type_has_value)
-                        && m.declared_effects.is_none()
-                        && !m.is_pure
-                    {
-                        f.write(" -> {");
-                    } else {
-                        f.write(" {");
-                    }
+                    f.write(" {");
                     f.newline();
                     f.with_indent(|f| f.fmt_block_stmts(body));
                     f.end_block();
@@ -1029,7 +994,7 @@ impl<'a> Fmt<'a> {
             if Self::is_unit_fallible_type(ret) {
                 self.fmt_unit_fallible_return(ret);
             } else {
-                self.write(" ");
+                self.write(" -> ");
                 self.fmt_return_type(ret);
             }
         }
@@ -1396,55 +1361,55 @@ impl<'a> Fmt<'a> {
             .return_type
             .as_ref()
             .is_some_and(|ty| Self::is_unit_fallible_type(ty));
-        if let Some(ret) = &f.return_type {
+        // D-SIG-AFTER1=A: the one arrow, then optional return facts.
+        let has_effect_row = f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure;
+        if has_effect_row {
+            if let Some(effects) = &f.declared_effects {
+                self.write(" ");
+                self.write(Syntax::EFFECT_ARROW_OPEN);
+                self.fmt_comma_items(
+                    effects,
+                    self.source_effect_row_span_after(f.name_span.end),
+                    |(_, span)| *span,
+                    |f, (name, _)| f.write(name),
+                );
+                self.write(Syntax::EFFECT_ARROW_CLOSE);
+            } else if f.is_pure {
+                self.write(" ");
+                self.write(Syntax::EFFECT_ARROW_OPEN);
+                self.write(Syntax::EFFECT_ARROW_CLOSE);
+            }
+            if let Some((param, _)) = &f.effect_via {
+                self.write(" ");
+                self.write(Syntax::EFFECT_ARROW_OPEN);
+                self.write(Syntax::KW_VIA);
+                self.write(" ");
+                self.write(param);
+                self.write(Syntax::EFFECT_ARROW_CLOSE);
+            }
+            if let Some(ret) = &f.return_type {
+                if unit_fallible {
+                    self.fmt_unit_fallible_return(ret);
+                } else {
+                    self.write(" ");
+                    self.fmt_type_at(ret, f.return_type_span);
+                }
+            }
+        } else if let Some(ret) = &f.return_type {
             if unit_fallible {
                 self.fmt_unit_fallible_return(ret);
             } else {
-                self.write(" ");
+                self.write(" -> ");
                 self.fmt_type_at(ret, f.return_type_span);
             }
         }
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);
         }
-        // D-SIG-SHAPE1=B / D-ARROW-CONTROL1: the result is bare, then the
-        // effect ceiling owns the body-arrow position.
-        if let Some(effects) = &f.declared_effects {
-            self.write(" ");
-            self.write(Syntax::EFFECT_ARROW_OPEN);
-            self.fmt_comma_items(
-                effects,
-                self.source_effect_row_span_after(f.name_span.end),
-                |(_, span)| *span,
-                |f, (name, _)| f.write(name),
-            );
-            self.write(Syntax::EFFECT_ARROW_CLOSE);
-        } else if f.is_pure {
-            self.write(" ");
-            self.write(Syntax::EFFECT_ARROW_OPEN);
-            self.write(Syntax::EFFECT_ARROW_CLOSE);
-        }
-        if let Some((param, _)) = &f.effect_via {
-            self.write(" ");
-            self.write(Syntax::EFFECT_ARROW_OPEN);
-            self.write(Syntax::KW_VIA);
-            self.write(" ");
-            self.write(param);
-            self.write(Syntax::EFFECT_ARROW_CLOSE);
-        }
-        let value_body_arrow = f
-            .return_type
-            .as_ref()
-            .is_some_and(Self::return_type_has_value)
-            && f.declared_effects.is_none()
-            && f.effect_via.is_none()
-            && !f.is_pure;
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
-        // D-SIG-SHAPE1=B: preserve the canonical concise callable body. The
-        // parser keeps its expression as `Stmt::Expr`; recover the authored
-        // marker from the preceding source token so braced bodies remain
-        // distinct. Retired `::`/`=`/arrow input stays readable for fmt.
+        // D-SIG-AFTER1=A: named bodies always use braces. A recovered
+        // one-expression `-> expr` reprints as `{ expr }`.
         let concise_body = if let [crate::AST::Stmt::Expr(expr)] = f.body.as_slice() {
             self.source_toks
                 .iter()
@@ -1472,68 +1437,18 @@ impl<'a> Fmt<'a> {
             None
         };
         if let Some(expr) = concise_body {
-            let effect_body = f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure;
-            if effect_body {
-                self.write(" ");
-            } else {
-                self.write(" -> ");
-            }
+            self.write(" { ");
             self.fmt_expr(expr, Prec::OrFallback);
+            self.write(" }");
             self.expected_return_type = saved_return_type;
             return;
-        }
-        // D-FMT-SIMPLIFY1=A / card #1514 criterion 3: a braced body with one
-        // return uses the canonical `->` one-line body when it fits. Keep
-        // comments and wide output in the explicit block form.
-        if self.simplify {
-            if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
-                // A word test, not a prefix test: the marker forms above have
-                // already returned, so the only construct D-FMT-SIMPLIFY1=A
-                // ratified here is a body whose single statement the author
-                // wrote as the `return` keyword.
-                let after_keyword = span.start.saturating_add("return".len());
-                let is_authored_return = self.src.get(span.start..after_keyword) == Some("return")
-                    && self
-                        .src
-                        .get(after_keyword..)
-                        .and_then(|rest| rest.chars().next())
-                        .map_or(true, |ch| !ch.is_alphanumeric() && ch != '_');
-                let comment_free = self
-                    .single_stmt_braces(&f.body[0])
-                    .is_some_and(|(open, close)| !self.span_has_comment(open, close));
-                if is_authored_return && comment_free {
-                    let saved_out = self.out.len();
-                    let saved_col = self.col;
-                    let saved_line_start = self.at_line_start;
-                    let saved_pending_blank = self.pending_blank;
-                    let saved_comment_i = self.comment_i;
-                    if f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure {
-                        self.write(" ");
-                    } else {
-                        self.write(" -> ");
-                    }
-                    self.fmt_expr(expr, Prec::OrFallback);
-                    if self.col <= MAX_WIDTH
-                        && !self.out[saved_out..].contains('\n')
-                        && reads_back_as_one_line_body(&self.out[saved_out..])
-                    {
-                        self.expected_return_type = saved_return_type;
-                        return;
-                    }
-                    self.out.truncate(saved_out);
-                    self.col = saved_col;
-                    self.at_line_start = saved_line_start;
-                    self.pending_blank = saved_pending_blank;
-                    self.comment_i = saved_comment_i;
-                }
-            }
         }
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
         // foreign-source string. Reconstruct the string expression and reuse the
         // ordinary string formatter so the triple-quoted shape round-trips
         // exactly (via `self.src` + span), then close the block on its own line.
         if let Some(inl) = &f.inline_foreign {
-            self.write(if value_body_arrow { " -> {" } else { " {" });
+            self.write(" {");
             self.indent += 1;
             self.newline();
             self.write("\"\"\"");
@@ -1545,7 +1460,7 @@ impl<'a> Fmt<'a> {
             self.expected_return_type = saved_return_type;
             return;
         }
-        self.write(if value_body_arrow { " -> {" } else { " {" });
+        self.write(" {");
         if f.body.is_empty()
             && self
                 .src

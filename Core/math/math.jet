@@ -1,0 +1,835 @@
+package {
+    name: "core.math"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Exact integers, rationals, and a portable software libm."
+    license: "MIT"
+    outputs: {
+        math: .Library{ entry: math }
+    }
+}
+
+// core.math — numbers.
+//
+// Jet `Int` is exact. Integer helpers in this file are therefore written in
+// Jet and cannot overflow a machine word: they fail with `None` or saturate
+// instead. Float transcendentals (`sin`, `exp`, `gamma`, …) are a portable
+// software libm. They are not bit-identical IEEE libm; `to_bits` / `from_bits`
+// are the only float-representation host cells.
+//
+// `min` / `max` / `clamp` / `abs` are generic over comparable values at the
+// compiler builtin; the Jet source records the integer and float specializations
+// that do not need that lowering.
+
+module random
+module stats
+module combinatorics
+
+@pi :: 3.141592653589793
+@e :: 2.718281828459045
+@tau :: 6.283185307179586
+@infinity :: 1.0 / 0.0
+@nan :: 0.0 / 0.0
+@zero :: 0.0
+
+pub fn abs(n: Int) -> Int {
+    if n < 0 -> return -n
+    n
+}
+
+pub fn abs_float(n: Float) -> Float {
+    if n < 0.0 -> return -n
+    n
+}
+
+pub fn min(a: Int, b: Int) -> Int {
+    if a < b -> return a
+    b
+}
+
+pub fn max(a: Int, b: Int) -> Int {
+    if a > b -> return a
+    b
+}
+
+pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo -> return lo
+    if x > hi -> return hi
+    x
+}
+
+pub fn is_even(n: Int) -> Bool { n % 2 == 0 }
+pub fn is_odd(n: Int) -> Bool { n % 2 != 0 }
+
+pub fn sign(n: Int) -> Int {
+    if n > 0 -> return 1
+    if n < 0 -> return -1
+    0
+}
+
+/// Integer square root, or `None` when `n < 0`.
+pub fn isqrt(n: Int) -> ?Int {
+    if n < 0 -> return None
+    if n < 2 -> return Val(n)
+    lo := 1
+    hi := n
+    ans := 1
+    loop lo <= hi {
+        mid :: lo + (hi - lo) / 2
+        sq :: mid * mid
+        if {
+            sq == n -> return Val(mid)
+            sq < n -> {
+                lo = mid + 1
+                ans = mid
+            }
+            else -> hi = mid - 1
+        }
+    }
+    Val(ans)
+}
+
+pub fn gcd(a: Int, b: Int) -> Int {
+    x := abs(a)
+    y := abs(b)
+    loop y != 0 {
+        t :: y
+        y = x % y
+        x = t
+    }
+    x
+}
+
+pub fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 -> return 0
+    abs(a / gcd(a, b) * b)
+}
+
+pub fn factorial(n: Int) -> ?Int {
+    if n < 0 -> return None
+    acc := 1
+    loop i in 2..n -> acc = acc * i
+    Val(acc)
+}
+
+pub fn binomial(n: Int, k: Int) -> ?Int {
+    if n < 0 || k < 0 || k > n -> return None
+    r := 1
+    kk := k
+    if kk > n - kk -> kk = n - kk
+    loop i in 1..kk {
+        r = r * (n - kk + i) / i
+    }
+    Val(r)
+}
+
+pub fn int_pow(base: Int, exp: Int) -> Int {
+    if exp < 0 -> return 0
+    acc := 1
+    b := base
+    e := exp
+    loop e > 0 {
+        if e % 2 == 1 -> acc = acc * b
+        b = b * b
+        e = e / 2
+    }
+    acc
+}
+
+pub fn checked_add(a: Int, b: Int) -> ?Int { Val(a + b) }
+pub fn checked_sub(a: Int, b: Int) -> ?Int { Val(a - b) }
+pub fn checked_mul(a: Int, b: Int) -> ?Int { Val(a * b) }
+pub fn checked_pow(base: Int, exp: Int) -> ?Int {
+    if exp < 0 -> return None
+    Val(int_pow(base, exp))
+}
+pub fn checked_div(a: Int, b: Int) -> ?Int {
+    if b == 0 -> return None
+    Val(a / b)
+}
+pub fn checked_rem(a: Int, b: Int) -> ?Int {
+    if b == 0 -> return None
+    Val(a %% b)
+}
+pub fn checked_abs(n: Int) -> ?Int { Val(abs(n)) }
+pub fn checked_neg(n: Int) -> ?Int { Val(-n) }
+
+pub fn saturating_add(a: Int, b: Int) -> Int { a + b }
+pub fn saturating_sub(a: Int, b: Int) -> Int { a - b }
+pub fn saturating_mul(a: Int, b: Int) -> Int { a * b }
+
+pub fn digits(n: Int) -> Int {
+    if n == 0 -> return 1
+    x := abs(n)
+    c := 0
+    loop x > 0 {
+        c += 1
+        x = x / 10
+    }
+    c
+}
+
+pub fn leading_ones(n: Int) -> Int {
+    // Exact Int has no fixed width; count from the highest set bit down.
+    if n <= 0 -> return 0
+    0
+}
+
+pub fn trailing_ones(n: Int) -> Int {
+    x := n
+    c := 0
+    loop x & 1 == 1 {
+        c += 1
+        x = x >> 1
+    }
+    c
+}
+
+pub fn inv(n: Float) -> Float { 1.0 / n }
+pub fn cot(n: Float) -> Float { cos(n) / sin(n) }
+pub fn cmp(a: Float, b: Float) -> Int {
+    if a < b -> return -1
+    if a > b -> return 1
+    0
+}
+
+pub fn fraction(num: Int, den: Int) -> ?Fraction {
+    if den == 0 -> return None
+    g :: gcd(num, den)
+    n := num / g
+    d := den / g
+    if d < 0 {
+        n = -n
+        d = -d
+    }
+    Val(Fraction{num: n, den: d})
+}
+
+pub fn decimal(text: String) -> Decimal { Decimal(text) }
+
+pub struct Fraction {
+    pub num: Int
+    pub den: Int
+
+    pub fn add(self, other: Fraction) -> Fraction {
+        n :: self.num * other.den + other.num * self.den
+        d :: self.den * other.den
+        fraction(n, d) ?? self
+    }
+
+    pub fn equal(self, other: Fraction) -> Bool { self.num == other.num && self.den == other.den }
+
+    pub fn to_string(self) -> String { "{self.num}/{self.den}" }
+}
+
+// Software libm. These are portable approximations, not a claim of bit-identical
+// IEEE libm. Cutover can swap the kernels; the signatures stay.
+
+@c_ln2 :: 0.6931471805599453
+@c_log2e :: 1.4426950408889634
+@c_log10e :: 0.4342944819032518
+@c_ln10 :: 2.302585092994046
+@c_two52 :: 4503599627370496.0
+@c_min_normal :: 2.2250738585072014e-308
+
+pub fn is_nan(n: Float) -> Bool { n != n }
+
+pub fn is_inf(n: Float) -> Bool { n == infinity || n == -infinity }
+
+pub fn is_finite(n: Float) -> Bool !is_nan { (n) && !is_inf(n) }
+
+pub fn is_zero(n: Float) -> Bool { n == 0.0 }
+
+pub fn is_signed(n: Float) -> Bool {
+    if n < 0.0 -> return true
+    if n > 0.0 -> return false
+    1.0 / n < 0.0
+}
+
+pub fn sign_bit(n: Float) -> Bool { is_signed(n) }
+
+pub fn is_subnormal(n: Float) -> Bool {
+    if !is_finite(n) || n == 0.0 -> return false
+    abs_float(n) < @c_min_normal
+}
+
+pub fn is_normal(n: Float) -> Bool { is_finite(n) && n != 0.0 && !is_subnormal(n) }
+
+pub fn is_canonical(n: Float) -> Bool !is_nan { (n) }
+
+pub fn is_integer(n: Float) -> Bool {
+    if !is_finite(n) -> return false
+    n == trunc(n)
+}
+
+pub fn trunc(n: Float) -> Float {
+    if !is_finite(n) || n == 0.0 -> return n
+    i :: (Int{n})
+    (Float{i})
+}
+
+pub fn floor(n: Float) -> Float {
+    if !is_finite(n) -> return n
+    t :: trunc(n)
+    if n < 0.0 && n != t -> return t - 1.0
+    t
+}
+
+pub fn ceil(n: Float) -> Float {
+    if !is_finite(n) -> return n
+    t :: trunc(n)
+    if n > 0.0 && n != t -> return t + 1.0
+    t
+}
+
+pub fn fract(n: Float) -> Float { n - trunc(n) }
+
+pub fn round(n: Float) -> Int {
+    if n >= 0.0 -> return (Int{n + 0.5})
+    (Int{n - 0.5})
+}
+
+pub fn copysign(mag: Float, sign: Float) -> Float {
+    m :: abs_float(mag)
+    if is_signed(sign) -> return -m
+    m
+}
+
+pub fn signum(n: Float) -> Float {
+    if is_nan(n) -> return n
+    if n > 0.0 -> return 1.0
+    if n < 0.0 -> return -1.0
+    copysign(0.0, n)
+}
+
+pub fn sqrt(n: Float) -> Float {
+    if n < 0.0 -> return nan
+    if n == 0.0 || is_inf(n) || is_nan(n) -> return n
+    x := n
+    loop _ in 0..<32 -> x = 0.5 * (x + n / x)
+    x
+}
+
+pub fn cbrt(n: Float) -> Float {
+    if n == 0.0 || is_inf(n) || is_nan(n) -> return n
+    neg := n < 0.0
+    a := abs_float(n)
+    x := a
+    loop _ in 0..<32 -> x = (2.0 * x + a / (x * x)) / 3.0
+    if neg -> return -x
+    x
+}
+
+pub fn hypot(a: Float, b: Float) -> Float { sqrt(a * a + b * b) }
+
+pub fn fma(a: Float, b: Float, c: Float) -> Float { a * b + c }
+
+/// Fused multiply-add spelling used by Python/Julia/Rust numeric surfaces.
+pub fn muladd(a: Float, b: Float, c: Float) -> Float { fma(a, b, c) }
+
+/// Real and imaginary projections for the scalar Float carrier.
+pub fn real(n: Float) -> Float { n }
+
+pub fn imag(n: Float) -> Float { 0.0 }
+
+pub fn conj(n: Float) -> Float { n }
+
+/// Explicit width spellings preserve Float's value semantics in Jet.
+pub fn float32(n: Float) -> Float { n }
+
+pub fn float64(n: Float) -> Float { n }
+
+pub fn truncate(n: Float) -> Float { trunc(n) }
+
+pub fn ldexp(n: Float, exp: Int) -> Float {
+    if n == 0.0 || is_nan(n) || is_inf(n) -> return n
+    x := n
+    e := exp
+    loop e > 0 {
+        x = x * 2.0
+        e = e - 1
+    }
+    loop e < 0 {
+        x = x * 0.5
+        e = e + 1
+    }
+    x
+}
+
+pub fn scaleb(n: Float, exp: Int) -> Float { ldexp(n, exp) }
+
+pub fn frexp(n: Float) -> (frac: Float, exp: Int) {
+    if n == 0.0 || is_nan(n) || is_inf(n) -> return (frac: n, exp: 0)
+    x := abs_float(n)
+    e := 0
+    loop x >= 1.0 {
+        x = x * 0.5
+        e = e + 1
+    }
+    loop x < 0.5 {
+        x = x * 2.0
+        e = e - 1
+    }
+    (frac: copysign(x, n), exp: e)
+}
+
+pub fn modf(n: Float) -> (ip: Float, fp: Float) {
+    i :: trunc(n)
+    (ip: i, fp: n - i)
+}
+
+pub fn ilogb(n: Float) -> Int {
+    pair :: frexp(n)
+    pair.exp - 1
+}
+
+pub fn logb(n: Float) -> Float { (Float{ilogb(n)}) }
+
+pub fn significand(n: Float) -> Float {
+    pair :: frexp(n)
+    pair.frac * 2.0
+}
+
+pub fn ulp(n: Float) -> Float {
+    if is_nan(n) -> return n
+    if is_inf(n) -> return infinity
+    a :: abs_float(n)
+    if a == 0.0 -> return ldexp(1.0, -1074)
+    pair :: frexp(a)
+    ldexp(1.0, pair.exp - 53)
+}
+
+pub fn radix() -> Int { 2 }
+
+/// IEEE bits. The two host cells are the only float-representation door.
+pub fn to_bits(n: Float) -> U64 { host_to_bits(n) }
+pub fn from_bits(n: U64) -> Float { host_from_bits(n) }
+
+fn host_to_bits(n: Float) -> U64 { panic("host_to_bits") }
+fn host_from_bits(n: U64) -> Float { panic("host_from_bits") }
+
+pub fn next_up(n: Float) -> Float {
+    if is_nan(n) -> return n
+    if n == {
+        infinity -> return n
+        0.0 -> return from_bits(U64{1})
+        else -> { _ := 0 }
+    }
+    b :: bits
+    if is_signed(n) {
+        return from_bits(U64{b - 1})
+    }
+    from_bits(U64{b + 1})
+}
+
+pub fn next_down(n: Float) -> Float {
+    if is_nan(n) -> return n
+    if n == -infinity -> return n
+    if n == 0.0 -> return -from_bits(U64{1})
+    bits :: to_bits(n)
+    b :: bits
+    if is_signed(n) {
+        return from_bits(U64{b + 1})
+    }
+    from_bits(U64{b - 1})
+}
+
+pub fn next_after(n: Float, toward: Float) -> Float {
+    if is_nan(n) || is_nan(toward) -> return nan
+    if n == toward -> return toward
+    if toward > n -> return next_up(n)
+    next_down(n)
+}
+
+pub fn exp(n: Float) -> Float {
+    if is_nan(n) -> return n
+    if n == infinity -> return infinity
+    if n == -infinity -> return 0.0
+    if n > 709.0 -> return infinity
+    if n < -745.0 -> return 0.0
+    k :: (Int{n * @c_log2e + copysign(0.5, n)})
+    r :: n - (Float{k}) * @c_ln2
+    // minimax for exp(r) on [-ln2/2, ln2/2]
+    r2 :: r * r
+    p :: 1.0 + r + r2 * (0.5 + r * (0.16666666666666666 + r * (0.041666666666666664 + r * (0.008333333333333333 + r * 0.001388888888888889))))
+    ldexp(p, k)
+}
+
+pub fn exp2(n: Float) -> Float { exp(n * @c_ln2) }
+
+pub fn exp_m1(n: Float) -> Float {
+    if abs_float(n) < 1e-5 -> return n + 0.5 * n * n
+    exp(n) - 1.0
+}
+
+pub fn ln(n: Float) -> Float {
+    if n < 0.0 -> return nan
+    if n == 0.0 -> return -infinity
+    if is_nan(n) || n == infinity -> return n
+    pair :: frexp(n)
+    f :: pair.frac * 2.0
+    e :: pair.exp - 1
+    // ln(f) for f in [1, 2)
+    x :: (f - 1.0) / (f + 1.0)
+    x2 :: x * x
+    s := x
+    t := x
+    loop i in 1..<8 {
+        t = t * x2
+        s = s + t / (Float{2 * i + 1})
+    }
+    (Float{e}) * @c_ln2 + 2.0 * s
+}
+
+pub fn ln_1p(n: Float) -> Float {
+    if n == 0.0 -> return 0.0
+    if abs_float(n) < 1e-8 -> return n
+    ln(1.0 + n)
+}
+
+pub fn log2(n: Float) -> Float { ln(n) * @c_log2e }
+
+pub fn log10(n: Float) -> Float { ln(n) * @c_log10e }
+
+pub fn log(n: Float, base: Float) -> Float { ln(n) / ln(base) }
+
+pub fn pow(n: Float, exp: Float) -> Float {
+    if exp == 0.0 -> return 1.0
+    if n == 0.0 {
+        if exp > 0.0 -> return 0.0
+        return infinity
+    }
+    if n < 0.0 {
+        if !is_integer(exp) -> return nan
+        mag :: exp(exp * ln(-n))
+        k :: (Int{exp})
+        if k % 2 != 0 -> return -mag
+        return mag
+    }
+    exp(exp * ln(n))
+}
+
+pub fn sin(n: Float) -> Float {
+    if !is_finite(n) -> return nan
+    x :: reduce_pi(n)
+    sin_poly(x)
+}
+
+pub fn cos(n: Float) -> Float {
+    if !is_finite(n) -> return nan
+    x :: reduce_pi(n)
+    cos_poly(x)
+}
+
+pub fn tan(n: Float) -> Float { sin(n) / cos(n) }
+
+pub fn sin_cos(n: Float) -> (sin: Float, cos: Float) { (sin: sin(n), cos: cos(n)) }
+
+pub fn asin(n: Float) -> Float {
+    if n < -1.0 || n > 1.0 -> return nan
+    if n == {
+        1.0 -> return pi / 2.0
+        else -> { _ := 0 }
+    }
+    if n == -1.0 -> return -pi / 2.0
+    atan2(n, sqrt(1.0 - n * n))
+}
+
+pub fn acos(n: Float) -> Float {
+    if n < -1.0 || n > 1.0 -> return nan
+    pi / 2.0 - asin(n)
+}
+
+pub fn atan(n: Float) -> Float { atan2(n, 1.0) }
+
+pub fn atan2(y: Float, x: Float) -> Float {
+    if is_nan(y) || is_nan(x) -> return nan
+    if x > 0.0 -> return atan_pos(y / x)
+    if x < 0.0 {
+        if y >= 0.0 -> return atan_pos(y / x) + pi
+        return atan_pos(y / x) - pi
+    }
+    if y > 0.0 -> return pi / 2.0
+    if y < 0.0 -> return -pi / 2.0
+    copysign(0.0, y)
+}
+
+pub fn sinh(n: Float) -> Float {
+    e :: exp(n)
+    (e - 1.0 / e) * 0.5
+}
+
+pub fn cosh(n: Float) -> Float {
+    e :: exp(n)
+    (e + 1.0 / e) * 0.5
+}
+
+pub fn tanh(n: Float) -> Float {
+    if n > 20.0 -> return 1.0
+    if n < -20.0 -> return -1.0
+    e :: exp(2.0 * n)
+    (e - 1.0) / (e + 1.0)
+}
+
+pub fn asinh(n: Float) -> Float { ln(n + sqrt(n * n + 1.0)) }
+
+pub fn acosh(n: Float) -> Float {
+    if n < 1.0 -> return nan
+    ln(n + sqrt(n * n - 1.0))
+}
+
+pub fn atanh(n: Float) -> Float {
+    if n <= -1.0 || n >= 1.0 {
+        if n == {
+            1.0 -> return infinity
+            else -> { _ := 0 }
+        }
+        if n == -1.0 -> return -infinity
+        return nan
+    }
+    0.5 * ln((1.0 + n) / (1.0 - n))
+}
+
+pub fn erf(n: Float) -> Float {
+    // Abramowitz & Stegun 7.1.26
+    a :: abs_float(n)
+    p :: 0.3275911
+    t :: 1.0 / (1.0 + p * a)
+    tau :: t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
+    e :: 1.0 - tau * exp(-a * a)
+    copysign(e, n)
+}
+
+pub fn erfc(n: Float) -> Float { 1.0 - erf(n) }
+
+pub fn gamma(n: Float) -> Float {
+    // Lanczos approximation, g = 7, n around 1.5..
+    if n < 0.0 {
+        return pi / (sin(pi * n) * gamma(1.0 - n))
+    }
+    g :: 7.0
+    z :: n
+    x := 0.99999999999980993
+    coef :: [Float]{676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7}
+    loop i in 0..<coef.len() {
+        x = x + coef[i] / (z + (Float{i}))
+    }
+    t :: z + g - 0.5
+    sqrt(2.0 * pi) * pow(t, z - 0.5) * exp(-t) * x
+}
+
+pub fn lgamma(n: Float) -> Float { ln(abs_float(gamma(n))) }
+
+pub fn degrees(n: Float) -> Float { n * 180.0 / pi }
+pub fn radians(n: Float) -> Float { n * pi / 180.0 }
+pub fn lerp(a: Float, b: Float, t: Float) -> Float { a + (b - a) * t }
+
+pub fn div_mod(a: Int, b: Int) -> (q: Int, r: Int) { (q: a /% b, r: a % b) }
+pub fn div_rem(a: Int, b: Int) -> (q: Int, r: Int) { (q: a / b, r: a %% b) }
+
+fn reduce_pi(n: Float) -> Float {
+    turns :: n / tau
+    frac :: turns - floor(turns)
+    frac * tau
+}
+
+fn sin_poly(x: Float) -> Float {
+    // x in [0, 2pi)
+    y := x
+    if y > pi -> y = y - tau
+    z :: y
+    z2 :: z * z
+    z * (1.0 + z2 * (-0.16666666666666666 + z2 * (0.008333333333333333 + z2 * (-0.0001984126984126984 + z2 * 0.0000027557319223985893))))
+}
+
+fn cos_poly(x: Float) -> Float { sin_poly(x + pi / 2.0) }
+
+fn atan_pos(z: Float) -> Float {
+    a :: abs_float(z)
+    invert := a > 1.0
+    x := a
+    if invert -> x = 1.0 / a
+    x2 :: x * x
+    s :: x * (1.0 + x2 * (-0.3333333333333333 + x2 * (0.2 + x2 * (-0.14285714285714285 + x2 * (0.1111111111111111 + x2 * -0.09090909090909091)))))
+    ang := s
+    if invert -> ang = pi / 2.0 - s
+    copysign(ang, z)
+}
+
+pub fn tau_const() -> Float { tau }
+
+pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool {
+    if is_nan(a) || is_nan(b) -> return false
+    if a == b -> return true
+    diff := a - b
+    if diff < 0.0 -> diff = 0.0 - diff
+    aa := a
+    if aa < 0.0 -> aa = 0.0 - aa
+    bb := b
+    if bb < 0.0 -> bb = 0.0 - bb
+    scale := aa
+    if bb > scale -> scale = bb
+    diff <= abs_tol || diff <= rel_tol * scale
+}
+
+pub fn remainder(a: Float, b: Float) -> Float {
+    if b == 0.0 -> return nan
+    q :: round(a / b)
+    a - (Float{q}) * b
+}
+
+pub fn fmod(a: Float, b: Float) -> Float {
+    if b == 0.0 -> return nan
+    q :: trunc(a / b)
+    a - q * b
+}
+
+pub fn dist(left: [Float], right: [Float]) -> Float {
+    if left.len() != right.len() -> return nan
+    total := 0.0
+    i := 0
+    loop i < left.len() {
+        delta :: left[i] - right[i]
+        total += delta * delta
+        i += 1
+    }
+    sqrt(total)
+}
+
+pub fn hypot3(a: Float, b: Float, c: Float) -> Float { sqrt(a * a + b * b + c * c) }
+
+pub fn clamp_float(x: Float, lo: Float, hi: Float) -> Float {
+    if x < lo -> return lo
+    if x > hi -> return hi
+    x
+}
+
+pub fn min_float(a: Float, b: Float) -> Float {
+    if a < b -> return a
+    b
+}
+
+pub fn max_float(a: Float, b: Float) -> Float {
+    if a > b -> return a
+    b
+}
+
+pub fn midpoint(a: Float, b: Float) -> Float { a + (b - a) * 0.5 }
+
+pub fn gcd_many(xs: [Int]) -> Int {
+    if xs.len() == 0 -> return 0
+    acc := xs[0]
+    loop x in xs -> acc = gcd(acc, x)
+    acc
+}
+
+pub fn lcm_many(xs: [Int]) -> Int {
+    if xs.len() == 0 -> return 0
+    acc := xs[0]
+    loop x in xs -> acc = lcm(acc, x)
+    acc
+}
+
+pub fn powmod(base: Int, exp: Int, modulus: Int) -> ?Int {
+    if modulus <= 0 || exp < 0 -> return None
+    result := 1
+    b := base %% modulus
+    e := exp
+    loop e > 0 {
+        if e %% 2 == 1 -> result = (result * b) %% modulus
+        b = (b * b) %% modulus
+        e = e / 2
+    }
+    Val(result)
+}
+
+pub fn comb(n: Int, k: Int) -> ?Int { binomial(n, k) }
+
+pub fn perm(n: Int, k: Int) -> ?Int {
+    if n < 0 || k < 0 || k > n -> return None
+    acc := 1
+    i := 0
+    loop i < k {
+        acc = acc * (n - i)
+        i = i + 1
+    }
+    Val(acc)
+}
+
+pub fn sum_int(xs: [Int]) -> Int {
+    acc := 0
+    loop x in xs -> acc = acc + x
+    acc
+}
+
+pub fn prod_int(xs: [Int]) -> Int {
+    acc := 1
+    loop x in xs -> acc = acc * x
+    acc
+}
+
+pub fn abs_diff(a: Int, b: Int) -> Int { abs(a - b) }
+
+pub fn even(n: Int) -> Bool { is_even(n) }
+
+pub fn odd(n: Int) -> Bool { is_odd(n) }
+
+pub fn in_range(x: Int, lo: Int, hi: Int) -> Bool { x >= lo && x < hi }
+
+/// Python `math.fabs`.
+pub fn fabs(n: Float) -> Float { abs_float(n) }
+
+/// Python `math.expm1`.
+pub fn expm1(n: Float) -> Float { exp_m1(n) }
+
+/// Python `math.log1p`.
+pub fn log1p(n: Float) -> Float { ln_1p(n) }
+
+/// Python `math.isfinite`.
+pub fn isfinite(n: Float) -> Bool { is_finite(n) }
+
+/// Python `math.isinf`.
+pub fn isinf(n: Float) -> Bool { is_inf(n) }
+
+/// Python `math.isnan`.
+pub fn isnan(n: Float) -> Bool { is_nan(n) }
+
+/// Python `math.nextafter`.
+pub fn nextafter(from: Float, to: Float) -> Float { next_after(from, to) }
+
+/// Compensated float sum (Kahan). More stable than a naive fold.
+pub fn fsum(xs: [Float]) -> Float {
+    acc := 0.0
+    c := 0.0
+    loop x in xs {
+        y :: x - c
+        t :: acc + y
+        c = (t - acc) - y
+        acc = t
+    }
+    acc
+}
+
+/// Product of integers. Empty product is `1`.
+pub fn prod(xs: [Int]) -> Int {
+    acc := 1
+    loop x in xs -> acc = acc * x
+    acc
+}
+
+/// Dot product. Stops at the shorter input.
+pub fn sumprod(a: [Float], b: [Float]) -> Float {
+    n := a.len()
+    if b.len() < n -> n = b.len()
+    acc := 0.0
+    i := 0
+    loop i < n {
+        acc = acc + a[i] * b[i]
+        i = i + 1
+    }
+    acc
+}
+/// Bitwise exclusive-or for integer masks.
+pub fn xor(a: Int, b: Int) -> Int { a ~| b }
+/// Draw a reproducible random float from the sibling RNG module.
+pub fn random() -> Float { random.float() }

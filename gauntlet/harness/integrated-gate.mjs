@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PAIR_ID, PLAIN_LABEL, PLAIN_PROGRAM, PLAIN_SOURCE, SURFACE_LABEL, SURFACE_PROGRAM, SURFACE_SOURCE, TARGET, METRIC, EXPECTED_OUTPUT, WARMUPS, TRIALS, validatePerformanceSurfaceReceipt } from "./performance-surface.mjs";
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../..");
@@ -12,7 +13,6 @@ const statusContract = "gauntlet-status-v1";
 const reportContract = "gauntlet-report-v1";
 const supportedTiers = Object.freeze(["aot", "run"]);
 const supportedBackends = Object.freeze(["aot_rust", "interpreter", "cranelift", "web"]);
-const resultStatuses = new Set(["ok", "measured", "pass"]);
 const knownFailureKinds = new Set([
   "missing-input", "malformed-input", "manifest", "missing-cell", "unexpected-cell",
   "cell-mismatch", "missing-entry", "entry-mismatch", "missing-peer", "unexpected-peer",
@@ -20,7 +20,9 @@ const knownFailureKinds = new Set([
   "wrong-verdict", "wrong-ratio", "loss", "unavailable", "inconclusive", "wrong-output",
   "missing-evidence", "missing-timestamp", "stale", "future-evidence", "identity-missing",
   "identity-mismatch", "policy-mismatch", "coverage", "publication", "tier-not-covered",
-  "tier-count", "baseline", "conformance", "summary-mismatch",
+  "tier-count", "baseline", "conformance", "summary-mismatch", "missing-confidence",
+  "overlapping-confidence", "unpaired-row", "missing-sample", "stale-identity",
+  "process-failure", "timeout", "signal", "nonzero", "contamination",
 ]);
 
 const HELP = `Usage: node gauntlet/harness/integrated-gate.mjs [options]
@@ -307,13 +309,19 @@ function validatePerformanceSurfacePairs(spec) {
   if (!isObject(evidence) || !nonEmpty(evidence.file) || !nonEmpty(evidence.path)) {
     issues.push("performance_surface_pairs.evidence.file and evidence.path are required");
   }
-  if (!nonEmpty(evidence?.tier) || !nonEmpty(evidence?.metric) || !nonEmpty(evidence?.output_oracle)) {
-    issues.push("performance_surface_pairs evidence tier, metric, and output_oracle are required");
+  if (!nonEmpty(evidence?.tier) || evidence.tier !== "interpreter"
+    || evidence.metric !== METRIC || evidence.target !== TARGET || evidence.output_oracle !== EXPECTED_OUTPUT) {
+    issues.push("performance_surface_pairs evidence must pin interpreter target, wall_time_ms metric, and exact output oracle");
   }
-  if (!nonEmpty(evidence?.target) || !nonEmpty(evidence?.input) || !nonEmpty(evidence?.setup)
-    || !Number.isInteger(evidence?.warmups) || evidence.warmups < 0
-    || !Number.isInteger(evidence?.trials) || evidence.trials <= 0) {
-    issues.push("performance_surface_pairs evidence must pin target, input, setup, warmups, and positive trials");
+  if (!nonEmpty(evidence?.input) || !nonEmpty(evidence?.setup)
+    || evidence.warmups !== WARMUPS || evidence.trials !== TRIALS) {
+    issues.push(`performance_surface_pairs evidence must pin ${WARMUPS} warmups and ${TRIALS} positive matched trials`);
+  }
+  const confidence = spec.comparator?.confidence;
+  if (!isObject(confidence) || confidence.method !== "paired_index_bootstrap"
+    || confidence.confidence !== 0.95 || confidence.resamples !== 10000 || confidence.seed !== 2977
+    || confidence.quantile !== "nearest_rank_one_based" || confidence.lower_rank !== 250 || confidence.upper_rank !== 9750) {
+    issues.push("performance_surface_pairs comparator must predeclare deterministic 95% paired bootstrap confidence");
   }
   const comparator = spec.comparator;
   if (!isObject(comparator)
@@ -330,6 +338,12 @@ function validatePerformanceSurfacePairs(spec) {
     if (!isObject(pair)) {
       issues.push("performance surface pair rows must be objects");
       continue;
+    }
+    if (pair.id === PAIR_ID && (pair.surface !== SURFACE_LABEL || pair.plain !== PLAIN_LABEL
+      || pair.surface_program !== SURFACE_PROGRAM || pair.plain_program !== PLAIN_PROGRAM
+      || pair.surface_source !== SURFACE_SOURCE || pair.plain_source !== PLAIN_SOURCE
+      || pair.input_range !== "0..<100000" || pair.expected_output !== EXPECTED_OUTPUT)) {
+      issues.push(`performance surface pair ${PAIR_ID} has stale source, range, program, or output identity`);
     }
     if (!nonEmpty(pair.id) || ids.has(pair.id)) issues.push(`performance surface pair id ${pair.id ?? "missing"} is missing or duplicated`);
     if (nonEmpty(pair.id)) ids.add(pair.id);
@@ -382,6 +396,10 @@ function evaluatePerformanceSurfacePairs(spec, evidence, options = {}) {
     if (!evidenceRow) {
       add("missing-evidence", pair, `performance surface pair ${pair.id} has no evidence row`);
       continue;
+    }
+    if (pair.id === PAIR_ID) {
+      const strict = validatePerformanceSurfaceReceipt(evidence, { pairSpec: pair });
+      for (const finding of strict.findings) add(finding.kind, pair, finding.cause);
     }
     if (nonEmpty(evidenceRow.canonical) && evidenceRow.canonical !== pair.surface) {
       add("identity-mismatch", pair, `performance surface pair ${pair.id} surface label differs from evidence`);

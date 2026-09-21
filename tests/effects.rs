@@ -283,6 +283,140 @@ fn run() {
     );
 }
 
+#[test]
+fn erased_scope_restores_refinement_and_effect_facts() {
+    let src = r#"
+use core.files as fs
+
+fn need(value: Int) {
+    print(value)
+}
+
+fn erased_refinement(value: ?Int) {
+    #Off {
+        if value == .None {
+            return
+        }
+        need(value)
+    }
+    need(value)
+}
+
+fn erased_effect() -[IO]> {
+    #Off {
+        #FX(authority: FS) {
+            _text :: fs.read("missing") ?? ""
+        }
+    }
+    print("erased")
+}
+
+fn active_effect() -[IO]> {
+    #FX(authority: FS) {
+        _text :: fs.read("missing") ?? ""
+    }
+    print("active")
+}
+
+fn run() {}
+"#;
+    let diagnostics = codes(src);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|code| *code == "E0310")
+            .count(),
+        1,
+        "the erased optional refinement must not escape: {diagnostics:?}"
+    );
+    assert_eq!(
+        diagnostics.iter().filter(|code| *code == "E0740").count(),
+        1,
+        "the erased effect grant must not reach the caller, while the active control remains: {diagnostics:?}"
+    );
+    assert_eq!(diagnostics.len(), 2, "unexpected diagnostics: {diagnostics:?}");
+}
+
+#[test]
+fn erased_authority_delegations_do_not_enter_effect_facts() {
+    let source = r#"
+use core.process as process
+
+fn delegation_witness() {
+    #FX(authority: Exec, IO, Time.Wait) {
+        #Off {
+            _erased :: process.run(["echo", "erased"], authority)
+        }
+        _active :: process.run(["echo", "active"], authority)
+    }
+}
+
+fn run() {
+    delegation_witness()
+}
+"#;
+    let root = common::unique_tmp("jet_erased_authority_delegations");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    fs::write(&entry, source).unwrap();
+    let (diagnostics, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        diagnostics.is_empty(),
+        "authority delegation witness must compile: {diagnostics:#?}"
+    );
+    let delegations = &facts.summaries["delegation_witness"].authority_delegations;
+    assert_eq!(
+        delegations.len(),
+        1,
+        "only the active process.run may publish an authority delegation: {delegations:#?}"
+    );
+    assert_eq!(delegations[0].operation, "run");
+}
+
+#[test]
+fn erased_panic_does_not_cross_into_active_tier_output() {
+    let source = r#"
+fn run() {
+    #Off {
+        panic("erased")
+    }
+    print("active")
+}
+"#;
+    tir_support::assert_tiers_agree("erased_panic_output", source, "active\n");
+}
+
+#[test]
+fn active_panic_remains_a_tier_stop() {
+    let source = r#"
+fn run() {
+    panic("active")
+}
+"#;
+    let mut tiers = vec![
+        ("jit", tir_support::jit_run("active_panic", source)),
+        (
+            "interpreter",
+            tir_support::interpreter_run("active_panic", source),
+        ),
+    ];
+    if tir_support::have_rustc() {
+        tiers.push((
+            "release",
+            tir_support::build_and_run_full("active_panic", "active_panic", source),
+        ));
+    }
+    for (tier, (code, stdout, stderr)) in tiers {
+        assert_eq!(code, 70, "{tier} active panic exit code");
+        assert!(stdout.is_empty(), "{tier} active panic stdout: {stdout:?}");
+        assert!(
+            stderr.contains("panic: active"),
+            "{tier} lost active panic diagnostic: {stderr:?}"
+        );
+    }
+}
+
 /// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
 /// compile-time proof only — they must leave NO trace in generated Rust.
 #[test]

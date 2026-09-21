@@ -1,0 +1,93 @@
+package {
+    name: "core.watcher"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Filesystem, process, and port watches."
+    license: "MIT"
+    outputs: {
+        watcher: .Library{ entry: watcher }
+    }
+}
+
+pub struct WatchHandle { pub kind: String, pub target: String }
+pub struct WatchSet { pub handles: [WatchHandle] }
+pub fn files(path: String) -[FS]> WatchHandle !IOError {
+    if path.len() == 0 -> return Err(IOError{operation: "watch", message: "empty path", path: path, os_code: None})
+    host_watch_path(path)
+    Ok(WatchHandle{kind: "fs", target: path})
+}
+
+pub fn process_pid(pid: Int) -> WatchHandle { WatchHandle{kind: "pid", target: "{pid}"} }
+
+pub fn port(host: String, port: Int) -[Net]> WatchHandle { WatchHandle{kind: "port", target: "{host}:{port}"} }
+
+pub fn set() -> WatchSet { WatchSet{handles: [WatchHandle]{}} }
+
+fn host_watch_path(path: String) !IOError { panic("host_watch_path") }
+
+
+pub fn add(set: WatchSet, handle: WatchHandle) -> WatchSet {
+    handles := set.handles
+    handles.push(handle)
+    WatchSet{handles: handles}
+}
+
+pub fn remove(set: WatchSet, target: String) -> WatchSet {
+    handles := [WatchHandle]{}
+    loop h in set.handles {
+        if h.target != target -> handles.push(h)
+    }
+    WatchSet{handles: handles}
+}
+
+pub fn contains(set: WatchSet, target: String) -> Bool {
+    loop h in set.handles {
+        if h.target == target -> return true
+    }
+    false
+}
+
+pub fn len(set: WatchSet) -> Int { set.handles.len() }
+
+pub fn kind(handle: WatchHandle) -> String { handle.kind }
+
+pub fn target(handle: WatchHandle) -> String { handle.target }
+
+
+pub enum WatchEventKind {
+    Create
+    Modify
+    Delete
+    Overflow
+}
+
+pub struct WatchEvent {
+    pub kind: WatchEventKind
+    pub path: String
+    pub is_dir: Bool
+}
+
+pub fn recursive(path: String) -[FS]> WatchHandle !IOError {
+    h :: files(path)
+    Ok(WatchHandle{kind: "fs-recursive", target: path})
+}
+
+pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle {
+    _ :: ms
+    handle
+}
+
+pub fn poll(handle: WatchHandle) -[FS]> [WatchEvent] {
+    host_watch_poll(handle.target)
+    [WatchEvent]{}
+}
+
+pub fn drain(set: WatchSet) -[FS]> [WatchEvent] {
+    out := [WatchEvent]{}
+    loop h in set.handles {
+        loop ev in poll(h) -> out.push(ev)
+    }
+    out
+}
+
+fn host_watch_poll(path: String) -[FS]> panic("host_watch_poll")

@@ -659,6 +659,7 @@ fn script_to_system_continuity_preserves_one_source() {
         "aot-build-lock",
     );
     let executable = scratch
+        .join(".jet")
         .join("build")
         .join(format!("run{}", std::env::consts::EXE_SUFFIX));
     assert!(executable.is_file(), "missing {}", executable.display());
@@ -808,7 +809,7 @@ fn script_to_system_continuity_preserves_one_source() {
             "pre_library_aot_sha256={pre_library_executable_sha256} after_library_sha256={executable_after_library_build_sha256} bytes_match=true hash_match=true"
         ),
     );
-    let target = scratch.join("target");
+    let target = scratch.join(".jet/build");
     for artifact in [
         target.join("libpulse.a"),
         target.join("pulse.h"),

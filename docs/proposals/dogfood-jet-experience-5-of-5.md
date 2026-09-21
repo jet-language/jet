@@ -261,29 +261,12 @@ unresolved testimony statement fails the campaign.
 
 ## Verification tooling
 
-`scripts/agent/dogfood-campaign.mjs` is a read-only verifier. It never starts
-agents, executes Jet or Rust programs, edits receipts, writes Tower state, or
-changes the ledger. It validates the sealed manifest and receipt digests,
-checks receipt identity and explicit incomplete states, checks blind mappings,
-computes the participant and campaign medians, checks this protocol and all
-finding rows, and requires dated rerun and hostile-closeout verdict artifacts.
-
-Run the human report:
-
-```text
-scripts/agent/jet-env node scripts/agent/dogfood-campaign.mjs check \
-  --manifest docs/audits/raw/2393-r1/manifest.json \
-  --protocol docs/proposals/dogfood-jet-experience-5-of-5.md \
-  --ledger docs/proposals/dogfood-jet-experience-5-of-5.md \
-  --rerun-report docs/audits/fresh-agent-5-of-5-rerun-2026-08-31.md \
-  --closeout-report <dated-2394-closeout-report>
-```
-
-Add `--json` for deterministic canonical JSON. `score` is an alias for
-`check`. Exit status is `0` only for a complete pass, `1` for valid evidence
-whose fixed gate is not met, and `2` for a usage or setup error. A closeout
-report is required for a pass; the tool does not infer hostile closure from a
-missing file.
+This protocol is the pass bar. Evidence is the sealed manifest and dated
+reports, not a live runner: `docs/audits/raw/2393-r1/manifest.json`,
+`docs/audits/fresh-agent-5-of-5-rerun-2026-08-31.md`, and the hostile-closeout
+report named by that run. Those artifacts record receipt digests, identity and
+incomplete states, blind mappings, participant and campaign medians, finding
+rows, and the closeout verdict. A missing closeout report is not closure.
 
 ## Current evidence
 

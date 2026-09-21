@@ -45,9 +45,9 @@ scripts/agent/closeout-gate.mjs open MILESTONE --by AGENT
 The gate must select the frozen source commit, a qualified candidate at that
 commit, and a review-ready milestone. Only that token authorizes **one composed
 targeted sweep** and **one fresh-context integrated-diff review**, covering
-every applicable I9 tier. Broad proof, an unfiltered conformance census,
-`proof-parallel.sh`, and `verify-full.sh` do not substitute for card evidence
-and refuse without the token. Do not reuse a token after the source changes.
+every applicable I9 tier. Broad proof, an unfiltered conformance census, and `verify-full.sh` do not
+substitute for card evidence and refuse without the token. Do not reuse a
+token after the source changes.
 
 The fresh reviewer receives the integrated milestone diff, acceptance criteria,
 relevant authority and invariants, and implementation evidence. The review

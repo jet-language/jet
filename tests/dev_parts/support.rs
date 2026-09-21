@@ -6,8 +6,8 @@
 // `dev_diff_lock`, so the binary needed longer than the 900s suite guard and
 // aborted with about 30 of its own declared tests never started — every pass/fail
 // number it ever printed was a partial measurement. The guard is right and the
-// budget is not raisable (`scripts/agent/time-suites.sh` refuses anything over
-// 900), so the cost is split across targets instead: one routine target plus one
+// budget is not raisable, so the cost is split across targets instead: one routine
+// target plus one
 // per whole-corpus battery. This file is the single copy of everything they
 // share, so the split cannot fork a helper into two versions (AGENTS.md I8).
 

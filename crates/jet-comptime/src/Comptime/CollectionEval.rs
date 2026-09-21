@@ -1941,3 +1941,600 @@ fn byte_buffer_mutating(
     *recv = byte_buffer_struct_at(bytes, pos);
     Ok(result)
 }
+
+fn collection_type_matches(actual: &str, expected: &str) -> bool {
+    actual == expected || actual == format!("Jet{expected}")
+}
+
+fn collection_struct_fields<'a>(
+    value: &'a CtValue,
+    expected: &str,
+    what: &str,
+    span: Span,
+) -> Result<&'a [(String, CtValue)], Diagnostic> {
+    match value {
+        CtValue::Struct { type_name, fields }
+            if collection_type_matches(type_name, expected) =>
+        {
+            Ok(fields)
+        }
+        _ => Err(unsupported(what, span)),
+    }
+}
+
+fn collection_field<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+    what: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    fields
+        .iter()
+        .find(|(field_name, _)| field_name == name)
+        .map(|(_, value)| value)
+        .ok_or_else(|| unsupported(what, span))
+}
+
+fn collection_string_list(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported(what, span));
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(unsupported(what, span)),
+        })
+        .collect()
+}
+
+fn collection_int_list(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<Vec<i64>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported(what, span));
+    };
+    values
+        .iter()
+        .map(|value| as_int(value, span))
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn collection_counter(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetCounter, Diagnostic> {
+    let fields = collection_struct_fields(value, "Counter", "Counter value", span)?;
+    let keys = collection_string_list(
+        collection_field(fields, "keys", "Counter keys", span)?,
+        "Counter keys",
+        span,
+    )?;
+    let counts = collection_int_list(
+        collection_field(fields, "counts", "Counter counts", span)?,
+        "Counter counts",
+        span,
+    )?;
+    if keys.len() != counts.len() {
+        return Err(unsupported("Counter keys/counts", span));
+    }
+    Ok(collection_semantics::JetCounter { keys, counts })
+}
+
+fn collection_counter_value(counter: &collection_semantics::JetCounter) -> CtValue {
+    CtValue::Struct {
+        type_name: "Counter".to_string(),
+        fields: vec![
+            (
+                "keys".to_string(),
+                CtValue::List(counter.keys.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "counts".to_string(),
+                CtValue::List(counter.counts.iter().copied().map(CtValue::Int).collect()),
+            ),
+        ],
+    }
+}
+
+fn collection_deque(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetDeque, Diagnostic> {
+    let fields = collection_struct_fields(value, "Deque", "Deque value", span)?;
+    let items = collection_string_list(
+        collection_field(fields, "items", "Deque items", span)?,
+        "Deque items",
+        span,
+    )?;
+    let head = as_int(collection_field(fields, "head", "Deque head", span)?, span)?;
+    Ok(collection_semantics::JetDeque { items, head })
+}
+
+fn collection_deque_value(deque: &collection_semantics::JetDeque) -> CtValue {
+    CtValue::Struct {
+        type_name: "Deque".to_string(),
+        fields: vec![
+            (
+                "items".to_string(),
+                CtValue::List(deque.items.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            ("head".to_string(), CtValue::Int(deque.head)),
+        ],
+    }
+}
+
+fn collection_optional_string(value: Option<String>) -> CtValue {
+    value
+        .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+        .unwrap_or_else(|| CtValue::absent(Type::String))
+}
+
+fn collection_deque_pair(
+    deque: &collection_semantics::JetDeque,
+    value: Option<String>,
+) -> CtValue {
+    CtValue::Struct {
+        type_name: String::new(),
+        fields: vec![
+            ("deque".to_string(), collection_deque_value(deque)),
+            ("value".to_string(), collection_optional_string(value)),
+        ],
+    }
+}
+
+fn collection_ordered_map(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetOrderedMap, Diagnostic> {
+    let fields = collection_struct_fields(value, "OrderedMap", "OrderedMap value", span)?;
+    let keys = collection_string_list(
+        collection_field(fields, "keys", "OrderedMap keys", span)?,
+        "OrderedMap keys",
+        span,
+    )?;
+    let values = collection_string_list(
+        collection_field(fields, "values", "OrderedMap values", span)?,
+        "OrderedMap values",
+        span,
+    )?;
+    if keys.len() != values.len() {
+        return Err(unsupported("OrderedMap keys/values", span));
+    }
+    Ok(collection_semantics::JetOrderedMap { keys, values })
+}
+
+fn collection_ordered_map_value(map: &collection_semantics::JetOrderedMap) -> CtValue {
+    CtValue::Struct {
+        type_name: "OrderedMap".to_string(),
+        fields: vec![
+            (
+                "keys".to_string(),
+                CtValue::List(map.keys.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "values".to_string(),
+                CtValue::List(map.values.iter().cloned().map(CtValue::Str).collect()),
+            ),
+        ],
+    }
+}
+
+fn collection_layer(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetLayer, Diagnostic> {
+    let fields = collection_struct_fields(value, "Layer", "Chain layer", span)?;
+    let keys = collection_string_list(
+        collection_field(fields, "keys", "Chain layer keys", span)?,
+        "Chain layer keys",
+        span,
+    )?;
+    let values = collection_string_list(
+        collection_field(fields, "values", "Chain layer values", span)?,
+        "Chain layer values",
+        span,
+    )?;
+    if keys.len() != values.len() {
+        return Err(unsupported("Chain layer keys/values", span));
+    }
+    Ok(collection_semantics::JetLayer { keys, values })
+}
+
+fn collection_layer_value(layer: &collection_semantics::JetLayer) -> CtValue {
+    CtValue::Struct {
+        type_name: "Layer".to_string(),
+        fields: vec![
+            (
+                "keys".to_string(),
+                CtValue::List(layer.keys.iter().cloned().map(CtValue::Str).collect()),
+            ),
+            (
+                "values".to_string(),
+                CtValue::List(layer.values.iter().cloned().map(CtValue::Str).collect()),
+            ),
+        ],
+    }
+}
+
+fn collection_chain(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetChain, Diagnostic> {
+    let fields = collection_struct_fields(value, "Chain", "Chain value", span)?;
+    let CtValue::List(layers) =
+        collection_field(fields, "layers", "Chain layers", span)?
+    else {
+        return Err(unsupported("Chain layers", span));
+    };
+    Ok(collection_semantics::JetChain {
+        layers: layers
+            .iter()
+            .map(|layer| collection_layer(layer, span))
+            .collect::<Result<Vec<_>, _>>()?,
+    })
+}
+
+fn collection_chain_value(chain: &collection_semantics::JetChain) -> CtValue {
+    CtValue::Struct {
+        type_name: "Chain".to_string(),
+        fields: vec![(
+            "layers".to_string(),
+            CtValue::List(chain.layers.iter().map(collection_layer_value).collect()),
+        )],
+    }
+}
+fn collection_string_set(
+    value: &CtValue,
+    span: Span,
+) -> Result<collection_semantics::JetStringSet, Diagnostic> {
+    let fields = collection_struct_fields(value, "StringSet", "StringSet value", span)?;
+    Ok(collection_semantics::JetStringSet {
+        items: collection_string_list(
+            collection_field(fields, "items", "StringSet items", span)?,
+            "StringSet items",
+            span,
+        )?,
+    })
+}
+
+fn collection_string_set_value(set: &collection_semantics::JetStringSet) -> CtValue {
+    CtValue::Struct {
+        type_name: "StringSet".to_string(),
+        fields: vec![(
+            "items".to_string(),
+            CtValue::List(set.items.iter().cloned().map(CtValue::Str).collect()),
+        )],
+    }
+}
+
+fn collection_optional_string_set(
+    value: Option<collection_semantics::JetStringSet>,
+) -> CtValue {
+    value
+        .map(|value| CtValue::Present(Box::new(collection_string_set_value(&value))))
+        .unwrap_or_else(|| CtValue::absent(Type::Named("StringSet".to_string())))
+}
+
+fn collection_arg<'a>(
+    args: &'a [CtValue],
+    index: usize,
+    method: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    args.get(index)
+        .ok_or_else(|| unsupported(&format!("core.collections.{method} argument"), span))
+}
+
+/// Evaluate the nominal string-container surface through the same kernel used
+/// by generated AOT code.  This is deliberately outside the generic list
+/// evaluator: the carrier fields are part of the public Core type contract.
+pub fn apply_core_collections(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    use collection_semantics as native;
+
+    match method {
+        "counter" => Ok(collection_counter_value(&native::jet_coll_counter())),
+        "counter_from" => {
+            let keys = collection_string_list(
+                collection_arg(args, 0, method, span)?,
+                "core.collections.counter_from keys",
+                span,
+            )?;
+            Ok(collection_counter_value(&native::jet_coll_counter_from(&keys)))
+        }
+        "add" if module == "core.collections" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            let amount = as_int(collection_arg(args, 2, method, span)?, span)?;
+            Ok(collection_counter_value(&native::jet_coll_counter_add(
+                &counter, &key, amount,
+            )))
+        }
+        "inc" | "dec" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            let value = if method == "inc" {
+                native::jet_coll_counter_inc(&counter, &key)
+            } else {
+                native::jet_coll_counter_dec(&counter, &key)
+            };
+            Ok(collection_counter_value(&value))
+        }
+        "get" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            Ok(CtValue::Int(native::jet_coll_counter_get(&counter, &key)))
+        }
+        "set_count" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            let count = as_int(collection_arg(args, 2, method, span)?, span)?;
+            Ok(collection_counter_value(&native::jet_coll_counter_set_count(
+                &counter, &key, count,
+            )))
+        }
+        "total" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            Ok(CtValue::Int(native::jet_coll_counter_total(&counter)))
+        }
+        "names" | "elements" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let values = if method == "names" {
+                native::jet_coll_counter_names(&counter)
+            } else {
+                native::jet_coll_counter_elements(&counter)
+            };
+            Ok(CtValue::List(values.into_iter().map(CtValue::Str).collect()))
+        }
+        "most_common" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let count = as_int(collection_arg(args, 1, method, span)?, span)?;
+            Ok(collection_counter_value(&native::jet_coll_counter_most_common(
+                &counter, count,
+            )))
+        }
+        "subtract" | "merge_add" => {
+            let left = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            let right = collection_counter(collection_arg(args, 1, method, span)?, span)?;
+            let value = if method == "subtract" {
+                native::jet_coll_counter_subtract(&left, &right)
+            } else {
+                native::jet_coll_counter_merge_add(&left, &right)
+            };
+            Ok(collection_counter_value(&value))
+        }
+        "clear_counter" => {
+            let counter = collection_counter(collection_arg(args, 0, method, span)?, span)?;
+            Ok(collection_counter_value(&native::jet_coll_counter_clear(
+                &counter,
+            )))
+        }
+        "deque" => Ok(collection_deque_value(&native::jet_coll_deque())),
+        "deque_from" => {
+            let items = collection_string_list(
+                collection_arg(args, 0, method, span)?,
+                "core.collections.deque_from items",
+                span,
+            )?;
+            Ok(collection_deque_value(&native::jet_coll_deque_from(&items)))
+        }
+        "deque_len" | "deque_is_empty" | "deque_items" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            match method {
+                "deque_len" => Ok(CtValue::Int(native::jet_coll_deque_len(&deque))),
+                "deque_is_empty" => Ok(CtValue::Bool(native::jet_coll_deque_is_empty(
+                    &deque,
+                ))),
+                _ => Ok(CtValue::List(
+                    native::jet_coll_deque_items(&deque)
+                        .into_iter()
+                        .map(CtValue::Str)
+                        .collect(),
+                )),
+            }
+        }
+        "append" | "appendleft" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            let value = as_string(collection_arg(args, 1, method, span)?, span)?;
+            let next = if method == "append" {
+                native::jet_coll_deque_append(&deque, &value)
+            } else {
+                native::jet_coll_deque_appendleft(&deque, &value)
+            };
+            Ok(collection_deque_value(&next))
+        }
+        "pop" | "popleft" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            let (next, value) = if method == "pop" {
+                native::jet_coll_deque_pop(&deque)
+            } else {
+                native::jet_coll_deque_popleft(&deque)
+            };
+            Ok(collection_deque_pair(&next, value.ok()))
+        }
+        "peek" | "peekleft" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            let value = if method == "peek" {
+                native::jet_coll_deque_peek(&deque)
+            } else {
+                native::jet_coll_deque_peekleft(&deque)
+            };
+            Ok(collection_optional_string(value))
+        }
+        "extend" | "extendleft" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            let values = collection_string_list(
+                collection_arg(args, 1, method, span)?,
+                "core.collections.extend values",
+                span,
+            )?;
+            let next = if method == "extend" {
+                native::jet_coll_deque_extend(&deque, &values)
+            } else {
+                native::jet_coll_deque_extendleft(&deque, &values)
+            };
+            Ok(collection_deque_value(&next))
+        }
+        "rotate" => {
+            let deque = collection_deque(collection_arg(args, 0, method, span)?, span)?;
+            let amount = as_int(collection_arg(args, 1, method, span)?, span)?;
+            Ok(collection_deque_value(&native::jet_coll_deque_rotate(
+                &deque, amount,
+            )))
+        }
+        "ordered_map" => Ok(collection_ordered_map_value(&native::jet_coll_ordered_map())),
+        "map_get" | "map_set" | "map_remove" | "map_contains" => {
+            let map = collection_ordered_map(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            match method {
+                "map_get" => Ok(collection_optional_string(
+                    native::jet_coll_map_get(&map, &key),
+                )),
+                "map_set" => {
+                    let value = as_string(collection_arg(args, 2, method, span)?, span)?;
+                    Ok(collection_ordered_map_value(&native::jet_coll_map_set(
+                        &map, &key, &value,
+                    )))
+                }
+                "map_remove" => Ok(collection_ordered_map_value(
+                    &native::jet_coll_map_remove(&map, &key),
+                )),
+                _ => Ok(CtValue::Bool(native::jet_coll_map_contains(&map, &key))),
+            }
+        }
+        "map_keys" | "map_values" | "map_len" => {
+            let map = collection_ordered_map(collection_arg(args, 0, method, span)?, span)?;
+            match method {
+                "map_keys" => Ok(CtValue::List(
+                    native::jet_coll_map_keys(&map)
+                        .into_iter()
+                        .map(CtValue::Str)
+                        .collect(),
+                )),
+                "map_values" => Ok(CtValue::List(
+                    native::jet_coll_map_values(&map)
+                        .into_iter()
+                        .map(CtValue::Str)
+                        .collect(),
+                )),
+                _ => Ok(CtValue::Int(native::jet_coll_map_len(&map))),
+            }
+        }
+        "chain" => Ok(collection_chain_value(&native::jet_coll_chain())),
+        "chain_push" => {
+            let chain = collection_chain(collection_arg(args, 0, method, span)?, span)?;
+            let keys = collection_string_list(
+                collection_arg(args, 1, method, span)?,
+                "core.collections.chain_push keys",
+                span,
+            )?;
+            let values = collection_string_list(
+                collection_arg(args, 2, method, span)?,
+                "core.collections.chain_push values",
+                span,
+            )?;
+            Ok(collection_chain_value(&native::jet_coll_chain_push(
+                &chain, &keys, &values,
+            )))
+        }
+        "chain_get" | "chain_contains" => {
+            let chain = collection_chain(collection_arg(args, 0, method, span)?, span)?;
+            let key = as_string(collection_arg(args, 1, method, span)?, span)?;
+            if method == "chain_get" {
+                Ok(collection_optional_string(
+                    native::jet_coll_chain_get(&chain, &key),
+                ))
+            } else {
+                Ok(CtValue::Bool(native::jet_coll_chain_contains(&chain, &key)))
+            }
+        }
+        "new" => Ok(collection_string_set_value(&native::jet_coll_set())),
+        "from_list" => {
+            let items = collection_string_list(
+                collection_arg(args, 0, method, span)?,
+                "core.collections.set.from_list items",
+                span,
+            )?;
+            Ok(collection_string_set_value(
+                &native::jet_coll_set_from_list(&items),
+            ))
+        }
+        "add" | "discard" => {
+            let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+            let next = if method == "add" {
+                native::jet_coll_set_add(&set, &item)
+            } else {
+                native::jet_coll_set_discard(&set, &item)
+            };
+            Ok(collection_string_set_value(&next))
+        }
+        "remove" => {
+            let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+            Ok(collection_optional_string_set(
+                native::jet_coll_set_remove(&set, &item),
+            ))
+        }
+        "contains" => {
+            let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            let item = as_string(collection_arg(args, 1, method, span)?, span)?;
+            Ok(CtValue::Bool(native::jet_coll_set_contains(&set, &item)))
+        }
+        "len" | "is_empty" | "to_list" | "clear" | "clone_set" => {
+            let set = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            match method {
+                "len" => Ok(CtValue::Int(native::jet_coll_set_len(&set))),
+                "is_empty" => Ok(CtValue::Bool(native::jet_coll_set_is_empty(&set))),
+                "to_list" => Ok(CtValue::List(
+                    native::jet_coll_set_items(&set)
+                        .into_iter()
+                        .map(CtValue::Str)
+                        .collect(),
+                )),
+                "clear" => Ok(collection_string_set_value(
+                    &native::jet_coll_set_clear(&set),
+                )),
+                _ => Ok(collection_string_set_value(
+                    &native::jet_coll_set_clone(&set),
+                )),
+            }
+        }
+        "union" | "intersection" | "difference" | "symmetric_difference" => {
+            let left = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            let right = collection_string_set(collection_arg(args, 1, method, span)?, span)?;
+            let next = match method {
+                "union" => native::jet_coll_set_union(&left, &right),
+                "intersection" => native::jet_coll_set_intersection(&left, &right),
+                "difference" => native::jet_coll_set_difference(&left, &right),
+                _ => native::jet_coll_set_symmetric_difference(&left, &right),
+            };
+            Ok(collection_string_set_value(&next))
+        }
+        "issubset" | "issuperset" | "isdisjoint" => {
+            let left = collection_string_set(collection_arg(args, 0, method, span)?, span)?;
+            let right = collection_string_set(collection_arg(args, 1, method, span)?, span)?;
+            let result = match method {
+                "issubset" => native::jet_coll_set_issubset(&left, &right),
+                "issuperset" => native::jet_coll_set_issuperset(&left, &right),
+                _ => native::jet_coll_set_isdisjoint(&left, &right),
+            };
+            Ok(CtValue::Bool(result))
+        }
+        _ => Err(unsupported(
+            &format!("core.collections.{method}()"),
+            span,
+        )),
+    }
+}

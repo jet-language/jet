@@ -6,7 +6,7 @@ fn run() {
     original :: [U8]{72, 101, 108, 108, 111}  // ASCII "Hello"
     // Zip round-trip: compress into a single-entry zip archive, then extract.
     zip_data :: ar.zip_compress("entry.txt", original)
-    print(zip_data.len() > 0)
+    print(zip_data.len() != 0)
     zip_restored :: ar.zip_decompress(zip_data)
     print(zip_restored == original)
     vector :: "123456789".bytes()
@@ -32,7 +32,7 @@ fn run() {
     tar1 :: ar.tar_add(empty, "hello.txt", original)
     tar2 :: ar.tar_add(tar1, "bye.txt", bye)
     // Archive is non-empty.
-    print(tar2.len() > 0)
+    print(tar2.len() != 0)
     // Exact content round-trip.
     hello_back :: ar.tar_get(tar2, "hello.txt")
     print(hello_back == original)

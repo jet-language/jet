@@ -9,13 +9,13 @@ pub enum Action {
 }
 
 pub struct Rule {
-    name: String,
-    fact: String,
-    condition: Condition,
-    action: Action,
+    name: String
+    fact: String
+    condition: Condition
+    action: Action
 }
 
-fn parse_rule(source: String) ?Rule -> {
+fn parse_rule(source: String) -> ?Rule {
     line :: source.trim()
     if line == "" -> return None
 
@@ -38,6 +38,7 @@ fn parse_rule(source: String) ?Rule -> {
         Condition.Equals(threshold)
     } else -> {
         return None
+
     }
 
     amount :: Int.parse(action_words[1].trim()) ?? return None
@@ -47,17 +48,20 @@ fn parse_rule(source: String) ?Rule -> {
         Action.Set(amount)
     } else -> {
         return None
+
     }
 
-    return Val(Rule{
+    return Val(
+    Rule{
         name: name,
         fact: fact,
         condition: condition,
         action: action,
-    })
+    },
+    )
 }
 
-pub fn parse(source: String) ?[Rule] -> {
+pub fn parse(source: String) -> ?[Rule] {
     rules := [Rule]{}
     loop item in source.split(";") {
         line :: item.trim()
@@ -70,7 +74,7 @@ pub fn parse(source: String) ?[Rule] -> {
     return Val(rules)
 }
 
-fn matches(condition: Condition, value: Int) Bool -> {
+fn matches(condition: Condition, value: Int) -> Bool {
     if condition == {
         .AtLeast(limit) -> return value >= limit
         .Equals(expected) -> return value == expected
@@ -78,7 +82,7 @@ fn matches(condition: Condition, value: Int) Bool -> {
     return false
 }
 
-fn apply(facts: &[String:Int], fact: String, action: Action) String -> {
+fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
     current :: facts.get(~fact) ?? 0
     if action == {
         .Add(delta) -> {
@@ -96,16 +100,14 @@ fn apply(facts: &[String:Int], fact: String, action: Action) String -> {
     return ""
 }
 
-pub fn fire(facts: &[String:Int], rules: [Rule]) [String] -> {
+pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value :: facts.get(~rule.fact) ?? 0
         if matches(~rule.condition, value) {
             event :: apply(&facts, ~rule.fact, ~rule.action)
             events.push("{rule.name}:{event}")
-        } else {
-            events.push("{rule.name}:skip")
-        }
+        } else { events.push("{rule.name}:skip") }
     }
     return events
 }

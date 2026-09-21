@@ -327,7 +327,7 @@ pub mod jet_xml_pull {
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.
 // D-JITDEP1 approved this as a scoped runtime-side exception.
 
-use std::cell::RefCell;
+use std::cell::{Cell as StdCell, RefCell};
 
 use runtime_host::ResidentModule;
 
@@ -336,6 +336,8 @@ thread_local! {
     static RESIDENT_MODULE: RefCell<Option<ResidentModule>> = const { RefCell::new(None) };
     /// Live heap preserved across type-stable hot_swap; reset on restart.
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
+    /// Count edits that reused the current resident artifact without lowering.
+    static RESIDENT_REUSE_COUNT: StdCell<u64> = const { StdCell::new(0) };
 }
 
 
@@ -365,6 +367,31 @@ pub fn reset_one_shot_core_state() {
     // One-shot runs must not retain `core.watcher` handles or event scopes from
     // a previous in-process invocation. Resident teardown owns its own reset.
     Watcher::clear_watcher_state();
+}
+
+/// Invoke the already-linked resident artifact without rebuilding it.
+///
+/// Dev reload uses this only after sema proves that the candidate has no
+/// changed functions, surface changes, or rechecked items. The resident
+/// runtime therefore remains the sole source of state and the candidate's
+/// unchanged artifact stays installed.
+pub fn run_resident_current() -> Result<jet_foundation::JitBackend::RunOutcome, String> {
+    let _guard = RESIDENT_JIT_RUN_LOCK
+        .lock()
+        .map_err(|_| "resident JIT run lock was poisoned".to_string())?;
+    let outcome = runtime_host::catch_jit_panic("resident invoke", resident::resident_invoke)?;
+    RESIDENT_REUSE_COUNT.with(|count| count.set(count.get().saturating_add(1)));
+    Ok(outcome)
+}
+
+#[doc(hidden)]
+pub fn resident_reuses_for_test() -> u64 {
+    RESIDENT_REUSE_COUNT.with(StdCell::get)
+}
+
+#[doc(hidden)]
+pub fn reset_resident_reuses_for_test() {
+    RESIDENT_REUSE_COUNT.with(|count| count.set(0));
 }
 
 
@@ -476,6 +503,19 @@ pub use api_debug::{
 };
 pub use backend::CraneliftBackend;
 pub use Ffi::set_bridge_cdylib;
+/// Bind the prepared native bridge before interpreter MIR execution.
+///
+/// The interpreter's canonical extern-call ambient uses the same bridge
+/// cdylib as the resident JIT; this only installs its checked descriptor table
+/// and does not provide an alternate foreign implementation.
+pub fn bind_interpreter_ffi(
+    program: &jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
+) -> Result<(), String> {
+    Ffi::bind_mir_ffi(program, artifact).map_err(|error| match error {
+        Ffi::BindError::Message(message) => message,
+    })
+}
 pub use resident::{
     apply_hot_swap, apply_hot_swap_with_program, discard_hot_swap_plan, resident_boot_console,
     ConsoleServiceBinding, ResidentConsoleLease,

@@ -782,10 +782,24 @@ pub(crate) fn lower_comptime_scalar(
 /// while the emitted callable always returns its effective failure carrier.
 /// Project that same carrier here so a call inside an inferred fallible
 /// callback has the ABI type that its generated Rust value already has.
+fn keeps_raw_stream_return(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if name == crate::Syntax::TYPE_STREAM && args.len() == 1
+    )
+}
+
 pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
     match cx.fn_types.get(name) {
         Some(Type::Fn { ret, .. }) => {
             let declared = ret.as_deref().map(|ty| cx.expand_type_aliases(ty));
+            // Generators return Stream<T> as the executable protocol, not the
+            // default Result carrier. Call sites must see that raw type so they
+            // do not ResultIsOk a stream handle (JIT hang / interpret E0956).
+            if declared.as_ref().is_some_and(keeps_raw_stream_return) {
+                return declared.expect("stream return checked above");
+            }
             jet_foundation::AST::FailureContract::from_return_type(declared.as_ref())
                 .effective_type()
         }
@@ -826,11 +840,7 @@ pub(crate) fn module_call_target_return(
     // `lower_func_with_web_boundary` keeps a source-declared Stream raw rather
     // than lifting it into the ordinary failure carrier. Mirror that existing
     // TFunc rule before expanding aliases.
-    if matches!(
-        &resolved_ret,
-        Type::Apply { name, args }
-            if name == crate::Syntax::TYPE_STREAM && args.len() == 1
-    ) {
+    if keeps_raw_stream_return(&resolved_ret) {
         return Ok(resolved_ret);
     }
     Ok(

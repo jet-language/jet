@@ -919,11 +919,11 @@ impl JetDateTime {
         if leap_second && offset != 0 {
             return Err(format!("time out of range: {}", time_part));
         }
-        Ok(Self::from_timestamp_ns_with_leap(
-            jet_time_utc_from_parts(&date, &time).saturating_sub(offset),
-            nanos,
-            leap_second,
-        ))
+        let utc = jet_time_utc_from_parts(&date, &time).saturating_sub(offset);
+        if leap_second && !jet_time_is_leap_second_epoch(utc.saturating_add(1)) {
+            return Err(format!("time out of range: {}", time_part));
+        }
+        Ok(Self::from_timestamp_ns_with_leap(utc, nanos, leap_second))
     }
     pub(crate) fn format_rfc3339(&self) -> String {
         let d = self.date();

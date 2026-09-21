@@ -3951,7 +3951,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
         .join(revision_prefix);
     fs::write(cache_dir.join("mylib.jet"), "pub fn compromised() {}\n").unwrap();
     fs::write(
-        tmp.join(".jet-build/deps/mylib/mylib.jet"),
+        tmp.join(".jet/build/deps/mylib/mylib.jet"),
         "pub fn compromised() {}\n",
     )
     .unwrap();
@@ -5555,7 +5555,7 @@ fn cli_build_sbom_writes_spdx() {
     );
 
     // The SBOM lands beside the produced binary as <bin>.spdx.
-    let spdx = tmp.join("build/hello.spdx");
+    let spdx = tmp.join(".jet/build/hello.spdx");
     assert!(spdx.is_file(), "expected SBOM at {}", spdx.display());
     let body = fs::read_to_string(&spdx).unwrap();
     assert!(
@@ -7756,7 +7756,7 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         );
         assert!(immature[0].what.contains("freshlib#1.2.0"));
         assert!(
-            !consumer.join(".jet-build/deps/freshlib").exists(),
+            !consumer.join(".jet/build/deps/freshlib").exists(),
             "freshness must fail before a registry artifact is usable"
         );
 

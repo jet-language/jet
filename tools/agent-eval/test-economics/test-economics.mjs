@@ -13,9 +13,6 @@ import { fileURLToPath } from "node:url";
 export const SCHEMA = "jet.test-economics.report.v1";
 export const SCHEMA_VERSION = 1;
 export const RUNNER_SOURCES = Object.freeze([
-  "scripts/agent/hardening-rig.mjs",
-  "scripts/agent/hardening-oracle-layer.mjs",
-  "scripts/agent/time-suites.sh",
   "gauntlet/harness/run.mjs",
 ]);
 export const HARDENING_REQUIREMENTS = Object.freeze({

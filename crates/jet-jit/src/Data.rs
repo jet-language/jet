@@ -311,9 +311,13 @@ fn jet_jit_data_error_show(handle: i64) -> i64 {
             .record_get_string(handle, 5)
             .and_then(|s| rt.heap.clone_string(s))
             .unwrap_or_default();
-        let idx = rt.heap.record_get_int(handle, 4).unwrap_or(0);
-        let text = if idx > 0 {
-            format!("{kind} {op}, index {}: {reason}", idx - 1)
+        let index = rt
+            .heap
+            .record_get_int(handle, 4)
+            .and_then(|raw| crate::runtime_host::jit_result_parts(rt, raw))
+            .and_then(|(ok, bits)| ok.then_some(bits as i64));
+        let text = if let Some(index) = index {
+            format!("{kind} {op}, index {index}: {reason}")
         } else {
             format!("{kind} {op}: {reason}")
         };
@@ -380,6 +384,14 @@ fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
 
 fn jet_jit_data_mean(values: i64) -> i64 {
     jet_jit_data_stat(values, 0)
+}
+
+fn jet_jit_data_variance(values: i64) -> i64 {
+    jet_jit_data_stat(values, 5)
+}
+
+fn jet_jit_data_sum(values: i64) -> i64 {
+    jet_jit_data_stat(values, 1)
 }
 
 fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
@@ -509,11 +521,15 @@ fn load_line_options(options: i64) -> DataLineOptions {
             .record_get_string(options, 7)
             .and_then(|sid| rt.heap.clone_string(sid))
             .unwrap_or_default();
-        let reference = jet_outcome_of(
-            rt.heap
-                .record_get_int(options, 4)
-                .and_then(|raw| (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))),
-        );
+        let reference = jet_outcome_of(rt.heap.record_get_int(options, 4).and_then(|raw| {
+            if raw == 0 {
+                return None;
+            }
+            if let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, raw) {
+                return ok.then(|| f64::from_bits(bits));
+            }
+            Some(f64::from_bits(raw.wrapping_sub(1) as u64))
+        }));
         let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
         DataLineOptions {
             title,
@@ -573,6 +589,18 @@ fn data_kernel_limits() -> data_kernel::JetDataKernelLimits {
         limits.max_join_rows,
         limits.max_output_rows,
     )
+}
+/// Build the resident carrier for the checked `DataLimits.safe()` Prelude call.
+fn jet_jit_data_limits_safe() -> i64 {
+    let encoding = crate::enc_stream::jet_jit_encoding_limits_safe();
+    Concurrency::with_runtime_mut(|rt| {
+        let handle = rt.heap.alloc_record(5);
+        let fields = [encoding, 100_000, 1_000_000, 1_000_000, 1_000_000];
+        for (index, value) in fields.into_iter().enumerate() {
+            let _ = rt.heap.record_set_int(handle, index as i64, value);
+        }
+        handle
+    })
 }
 
 fn data_row_words(rows: i64, operation: &str) -> Result<Vec<i64>, DataError> {
@@ -920,14 +948,20 @@ fn loader_limits(
             .record_get_int(encoding, index)
             .ok_or_else(|| data_decode_error(operation, "EncodingLimits has an invalid field"))
     };
-    let max_total_handle = rt
+    let max_total_packed = rt
         .heap
         .record_get_int(encoding, 3)
         .ok_or_else(|| data_decode_error(operation, "EncodingLimits max_total_bytes is invalid"))?;
-    let max_total_bytes = crate::runtime_host::jit_result_parts(rt, max_total_handle)
-        .ok_or_else(|| data_decode_error(operation, "EncodingLimits max_total_bytes is invalid"))?
-        .0
-        .then(|| crate::runtime_host::jit_result_i64(rt, max_total_handle).unwrap_or(0));
+    let max_total_bytes = match max_total_packed {
+        0 => None,
+        value if value > 0 => Some(value - 1),
+        _ => {
+            return Err(data_decode_error(
+                operation,
+                "EncodingLimits max_total_bytes is invalid",
+            ))
+        }
+    };
     let limits = jet_foundation::PreludeDataFlow::Limits {
         buffer_bytes: get(0)?,
         max_depth: get(1)?,
@@ -1143,21 +1177,17 @@ fn loader_slot_index(
 }
 
 fn loader_place_handle(
-    rt: &crate::JitRuntime,
+    _rt: &crate::JitRuntime,
     place: i64,
     operation: &str,
 ) -> Result<i64, DataError> {
     if place == 0 {
-        return Err(data_error(operation, "null mutable DataLoader place"));
+        return Err(data_error(operation, "null resident DataLoader handle"));
     }
-    // SAFETY: mutable Core arguments are addresses of resident JIT stack
-    // slots produced by `address_of`; the caller never supplies this ABI by
-    // hand and the load is used only for the duration of the host call.
-    let carrier = unsafe { (place as *const i64).read() };
-    if carrier == 0 {
-        return Err(data_error(operation, "mutable DataLoader place is empty"));
-    }
-    Ok(carrier)
+    // Core data hosts receive the resident carrier itself.  Mutable
+    // operations update runtime state keyed by that carrier; they never
+    // dereference an untrusted integer as a native pointer.
+    Ok(place)
 }
 
 fn loader_format(format: &str, operation: &str) -> Result<LoaderFormat, DataError> {
@@ -1794,8 +1824,18 @@ fn jet_data_loader_stream(place: i64, type_key: i64) -> i64 {
             let slot_index = loader_slot_index(rt, carrier, "data.stream")?;
             let slot = rt.data_loaders[slot_index].clone();
             let metadata = loader_type_key(rt, type_key, "data.stream")?;
-            if metadata != slot.type_key {
-                return Err(data_error("data.stream", "DataLoader type metadata does not match owner"));
+            let descriptor = loader_descriptor(rt, &slot.type_key).ok_or_else(|| {
+                data_error("data.stream", "unknown checked DataLoader type")
+            })?;
+            let stream_type_key = descriptor
+                .element
+                .map(|id| format!("id:{id}"))
+                .unwrap_or_else(|| slot.type_key.clone());
+            if metadata != stream_type_key {
+                return Err(data_error(
+                    "data.stream",
+                    "DataLoader stream type metadata does not match owner row type",
+                ));
             }
             if slot.state.cancelled {
                 return Err(err(
@@ -1804,10 +1844,10 @@ fn jet_data_loader_stream(place: i64, type_key: i64) -> i64 {
                     "loader was cancelled",
                 ));
             }
-            Ok((carrier, slot_index, slot))
+            Ok((carrier, slot_index, slot, stream_type_key))
         },
     );
-    let (carrier, slot_index, slot) = match extracted {
+    let (carrier, slot_index, slot, stream_type_key) = match extracted {
         Ok(value) => value,
         Err(error) => return result_data_err(error),
     };
@@ -1823,16 +1863,21 @@ fn jet_data_loader_stream(place: i64, type_key: i64) -> i64 {
         Ok(value) => value,
         Err(error) => return result_data_err(error),
     };
-    let rows = match loader_decode_rows(tree, &slot.type_key, "data.stream") {
+    let rows = match loader_decode_rows(tree, &stream_type_key, "data.stream") {
         Ok(value) => value,
         Err(error) => return result_data_err(error),
     };
     Concurrency::with_runtime_mut(|rt| {
-        let stream_type = slot.type_key.clone();
+        let stream_type = stream_type_key.clone();
         rt.data_streams.push(DataStreamSlot {
             rows,
             index: 0,
-            max_groups: slot.state.limits.max_output_rows,
+            limits: data_kernel::jet_std::DataLimits {
+                max_groups: slot.state.limits.max_groups,
+                max_sort_rows: slot.state.limits.max_sort_rows,
+                max_join_rows: slot.state.limits.max_join_rows,
+                max_output_rows: slot.state.limits.max_output_rows,
+            },
             type_key: stream_type,
             cancelled: false,
         });
@@ -1850,7 +1895,7 @@ fn jet_data_loader_stream(place: i64, type_key: i64) -> i64 {
 pub(crate) struct DataStreamSlot {
     rows: Vec<i64>,
     index: usize,
-    max_groups: i64,
+    limits: data_kernel::jet_std::DataLimits,
     type_key: String,
     cancelled: bool,
 }
@@ -1929,8 +1974,12 @@ fn jet_data_stream_next(place: i64, type_key: i64) -> i64 {
         },
     );
     match result {
-        Ok(value) => value,
-        Err(error) => result_data_err(error),
+        Ok(value) => {
+            value
+        }
+        Err(error) => {
+            result_data_err(error)
+        }
     }
 }
 fn jet_data_stream_collect(place: i64, type_key: i64) -> i64 {
@@ -1960,11 +2009,14 @@ fn jet_data_stream_collect(place: i64, type_key: i64) -> i64 {
                     ));
                 }
                 let remaining = stream.rows.len().saturating_sub(stream.index);
-                if remaining as i64 > stream.max_groups {
+                if remaining as i64 > stream.limits.max_output_rows {
                     return Err(err(
                         DataErrorKind::Limit,
                         "data.stream.collect",
-                        format!("max_output_rows {} exceeded", stream.max_groups),
+                        format!(
+                            "max_output_rows {} exceeded",
+                            stream.limits.max_output_rows
+                        ),
                     ));
                 }
                 let rows = stream.rows[stream.index..].to_vec();
@@ -2180,70 +2232,83 @@ fn jet_data_snapshot_reusable(previous: i64, current: i64) -> i64 {
     })
 }
 
-/// Decode CSV `service,latency_ms` rows into Event records.
-fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
-    let delimiter = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(","));
-    let csv = crate::enc_stream::jet_jit_csv_reader(file, encoding, delimiter, 1, 0);
-    let (ok, handle) = Concurrency::with_runtime_mut(|rt| {
-        let ok = crate::runtime_host::jit_result_is_ok(rt, csv).unwrap_or(false);
-        let h = crate::runtime_host::jit_result_i64(rt, csv).unwrap_or(0);
-        (ok, h)
-    });
-    if !ok {
-        return csv;
+/// Decode a file into a typed `DataStream<T>` using the canonical loader tree.
+fn jet_jit_data_typed_reader(file: i64, limits: i64, type_key: i64, format: LoaderFormat) -> i64 {
+    let mut reader = match crate::enc_stream::take_file_reader(file) {
+        Ok(reader) => {
+            reader
+        }
+        Err(error) => return result_data_err(err(DataErrorKind::IO, "data.reader", error)),
+    };
+    let mut payload = Vec::new();
+    if let Err(error) = std::io::Read::read_to_end(&mut reader.inner, &mut payload) {
+        return result_data_err(err(
+            DataErrorKind::IO,
+            "data.reader",
+            error.to_string(),
+        ));
     }
-    let mut decoded = Vec::new();
-    loop {
-        let next = crate::enc_stream::jet_jit_csv_reader_next(handle);
-        let (ok, bits, cells) = Concurrency::with_runtime_mut(|rt| {
-            let ok = crate::runtime_host::jit_result_is_ok(rt, next).unwrap_or(false);
-            if !ok {
-                return (false, 0_i64, Vec::new());
+    let limits = match Concurrency::with_runtime_result(
+        err(DataErrorKind::State, "data.reader", "no active resident runtime"),
+        |rt| {
+            if limits == 0 {
+                Ok(loader_safe_limits())
+            } else {
+                loader_limits(rt, limits, "data.reader")
             }
-            let bits = crate::runtime_host::jit_result_i64(rt, next).unwrap_or(0);
-            if bits == 0 {
-                return (true, 0, Vec::new());
-            }
-            let row = (bits as u64).wrapping_sub(1) as i64;
-            let list = rt.heap.record_get_record(row, 0).unwrap_or(0);
-            let n = rt.heap.list_len(list).unwrap_or(0);
-            let mut cells = Vec::with_capacity(n as usize);
-            for i in 0..n {
-                let sid = rt.heap.list_get_int(list, i).unwrap_or(0);
-                cells.push(rt.heap.clone_string(sid).unwrap_or_default());
-            }
-            (true, bits, cells)
-        });
-        if !ok {
-            return next;
+        },
+    ) {
+        Ok(limits) => limits,
+        Err(error) => {
+            return result_data_err(error);
         }
-        if bits == 0 {
-            break;
+    };
+    let type_key = match Concurrency::with_runtime_result(
+        err(DataErrorKind::State, "data.reader", "no active resident runtime"),
+        |rt| loader_type_key(rt, type_key, "data.reader"),
+    ) {
+        Ok(type_key) => type_key,
+        Err(error) => {
+            return result_data_err(error);
         }
-        if cells.len() < 2 {
-            continue;
+    };
+    let tree = match loader_tree(&payload, format, &limits) {
+        Ok(tree) => tree,
+        Err(error) => {
+            return result_data_err(error);
         }
-        let latency = cells[1].parse::<f64>().unwrap_or(0.0);
-        let row = Concurrency::with_runtime_mut(|rt| {
-            let h = rt.heap.alloc_record(2);
-            let svc = rt.heap.alloc_string(cells[0].clone());
-            let _ = rt.heap.record_set_string(h, 0, svc);
-            let _ = rt.heap.record_set_float(h, 1, latency);
-            h
-        });
-        decoded.push(row);
-    }
+    };
+    let rows = match loader_decode_rows(tree, &type_key, "data.reader") {
+        Ok(rows) => rows,
+        Err(error) => {
+            return result_data_err(error);
+        }
+    };
     Concurrency::with_runtime_mut(|rt| {
         rt.data_streams.push(DataStreamSlot {
-            rows: decoded,
+            rows,
             index: 0,
-            max_groups,
-            type_key: String::new(),
+            limits: data_kernel::jet_std::DataLimits {
+                max_groups: limits.max_groups,
+                max_sort_rows: limits.max_sort_rows,
+                max_join_rows: limits.max_join_rows,
+                max_output_rows: limits.max_output_rows,
+            },
+            type_key,
             cancelled: false,
         });
-        let h = rt.data_streams.len() as i64;
-        crate::runtime_host::alloc_jit_result(rt, true, h as u64)
+        let handle = rt.data_streams.len() as i64;
+        let result = crate::runtime_host::alloc_jit_result(rt, true, handle as u64);
+        result
     })
+}
+
+fn jet_jit_data_csv_reader(file: i64, limits: i64, type_key: i64) -> i64 {
+    jet_jit_data_typed_reader(file, limits, type_key, LoaderFormat::CSV)
+}
+
+fn jet_jit_data_json_reader(file: i64, limits: i64, type_key: i64) -> i64 {
+    jet_jit_data_typed_reader(file, limits, type_key, LoaderFormat::JSON)
 }
 
 fn jet_jit_data_stream_next(handle: i64) -> i64 {
@@ -4121,7 +4186,7 @@ fn query_stream_rows(
     rt: &mut crate::JitRuntime,
     stream: i64,
     operation: &str,
-) -> Result<Vec<QueryRow>, DataError> {
+) -> Result<(Vec<QueryRow>, data_kernel::jet_std::DataLimits), DataError> {
     let index = usize::try_from(stream)
         .ok()
         .and_then(|index| index.checked_sub(1))
@@ -4130,15 +4195,18 @@ fn query_stream_rows(
         .data_streams
         .get_mut(index)
         .ok_or_else(|| data_decode_error(operation, "query source is not a valid DataStream"))?;
+    let limits = stream.limits.clone();
     let rows = stream.rows[stream.index..].to_vec();
     stream.index = stream.rows.len();
-    Ok(rows
-        .into_iter()
-        .map(|word| QueryRow {
-            value: jet_rt::JetVal::Int(word),
-            word,
-        })
-        .collect())
+    Ok((
+        rows.into_iter()
+            .map(|word| QueryRow {
+                value: jet_rt::JetVal::Int(word),
+                word,
+            })
+            .collect(),
+        limits,
+    ))
 }
 
 fn alloc_query_rows(rt: &mut crate::JitRuntime, rows: Vec<QueryRow>) -> i64 {
@@ -4292,6 +4360,7 @@ fn query_store_field(
 fn query_apply_operations(
     mut rows: Vec<QueryRow>,
     operations: i64,
+    limits: &data_kernel::jet_std::DataLimits,
 ) -> Result<Vec<QueryRow>, DataError> {
     let operations = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(operations))
         .ok_or_else(|| data_decode_error("query.collect", "query operation list is invalid"))?;
@@ -4318,7 +4387,7 @@ fn query_apply_operations(
                 rows = filtered;
             }
             QUERY_OPERATION_SORT => {
-                let max_sort_rows = data_kernel::jet_std::DataLimits::safe().max_sort_rows;
+                let max_sort_rows = limits.max_sort_rows;
                 if rows.len() as i64 > max_sort_rows {
                     return Err(err(
                         DataErrorKind::Limit,
@@ -4342,7 +4411,7 @@ fn query_apply_operations(
             }
         }
     }
-    let max_output_rows = data_kernel::jet_std::DataLimits::safe().max_output_rows;
+    let max_output_rows = limits.max_output_rows;
     if rows.len() as i64 > max_output_rows {
         return Err(err(
             DataErrorKind::Limit,
@@ -4360,6 +4429,7 @@ fn query_group_rows(
     reducer: i64,
     value_callback: i64,
     value_descriptor: Option<&crate::runtime_host::RuntimeTypeDescriptor>,
+    limits: &data_kernel::jet_std::DataLimits,
 ) -> Result<Vec<QueryRow>, DataError> {
     let operation = match reducer {
         QUERY_REDUCER_COUNT => "query.group_by.count",
@@ -4369,7 +4439,6 @@ fn query_group_rows(
     };
     let value_kind = value_descriptor.map(|descriptor| descriptor.kind);
     let mut groups = Vec::new();
-    let limits = data_kernel::jet_std::DataLimits::safe();
     for row in rows {
         let key_word = query_callback(key_callback, row.word, operation)?;
         let key = query_key(key_word, key_descriptor, operation)?;
@@ -4525,7 +4594,9 @@ fn query_group_rows(
     result.ok_or_else(|| data_decode_error(operation, "runtime is unavailable"))?
 }
 
-fn query_collect_rows(query: i64) -> Result<Vec<QueryRow>, DataError> {
+fn query_collect_rows(
+    query: i64,
+) -> Result<(Vec<QueryRow>, data_kernel::jet_std::DataLimits), DataError> {
     let parts = Concurrency::with_runtime_mut(|rt| {
         Some(
             query_carrier(rt, query)
@@ -4533,9 +4604,10 @@ fn query_collect_rows(query: i64) -> Result<Vec<QueryRow>, DataError> {
         )
     })
     .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
-    let rows = if parts.kind == QUERY_KIND_ROWS {
-        Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, parts.source, "query.collect")))
-            .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??
+    let (rows, limits) = if parts.kind == QUERY_KIND_ROWS {
+        let rows = Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, parts.source, "query.collect")))
+            .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
+        (rows, data_kernel::jet_std::DataLimits::safe())
     } else if parts.kind == QUERY_KIND_STREAM {
         let already_collected = Concurrency::with_runtime_mut(|rt| {
             let already = rt.heap.record_get_bool(parts.state, 0).unwrap_or(true);
@@ -4568,7 +4640,7 @@ fn query_collect_rows(query: i64) -> Result<Vec<QueryRow>, DataError> {
                 "query has already been collected",
             ));
         }
-        let base_rows = query_collect_rows(parts.source)?;
+        let (base_rows, limits) = query_collect_rows(parts.source)?;
         let (_, key_callback, key_type) = Concurrency::with_runtime_mut(|rt| {
             Some(query_group_parts(rt, parts.group, "query.collect"))
         })
@@ -4587,21 +4659,31 @@ fn query_collect_rows(query: i64) -> Result<Vec<QueryRow>, DataError> {
             Some(descriptor_for_key(rt, key_type, "query.collect"))
         })
         .ok_or_else(|| data_decode_error("query.collect", "runtime is unavailable"))??;
-        query_group_rows(
+        let rows = query_group_rows(
             base_rows,
             key_callback,
             &key_descriptor,
             parts.reducer,
             parts.value_callback,
             value_descriptor.as_ref(),
-        )?
+            &limits,
+        )?;
+        (rows, limits)
     } else {
         return Err(data_decode_error("query.collect", "query carrier has unknown source kind"));
     };
-    query_apply_operations(rows, parts.operations)
+    Ok((query_apply_operations(rows, parts.operations, &limits)?, limits))
 }
 
-fn jet_jit_data_query(rows: i64) -> i64 {
+fn jet_jit_data_arrow_import(batch: i64) -> i64 {
+    batch
+}
+
+fn jet_jit_data_query_arrow(batch: i64) -> i64 {
+    let _ = batch;
+    0
+}
+pub(crate) fn jet_jit_data_query(rows: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let (kind, source) = if let Some(source) = rt.heap.clone_list(rows) {
             (QUERY_KIND_ROWS, source)
@@ -4638,33 +4720,30 @@ fn jet_jit_data_query(rows: i64) -> i64 {
 }
 
 fn jet_jit_data_query_sql(rows: i64, sql: i64, type_key: i64) -> i64 {
-    let source_rows = match Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, rows, "data.query"))) {
-        Some(Ok(rows)) => rows,
-        Some(Err(error)) => {
-            return crate::Encoding::result_err_fields(
-                crate::Encoding::json_rt::FieldError::one(error.reason),
-            )
-        }
-        None => {
-            return crate::Encoding::result_err_fields(
-                crate::Encoding::json_rt::FieldError::one("runtime is unavailable"),
-            )
-        }
-    };
-    let sql = match Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(sql)) {
-        Some(sql) => sql,
-        None => {
-            return crate::Encoding::result_err_fields(
-                crate::Encoding::json_rt::FieldError::one("query SQL is not a String"),
-            )
-        }
+    let source_rows =
+        match Concurrency::with_runtime_mut(|rt| Some(query_rows(rt, rows, "data.query"))) {
+            Some(Ok(rows)) => rows,
+            Some(Err(error)) => {
+                return crate::Encoding::result_err_fields(
+                    crate::Encoding::json_rt::FieldError::one(error.reason),
+                )
+            }
+            None => {
+                return crate::Encoding::result_err_fields(
+                    crate::Encoding::json_rt::FieldError::one("runtime is unavailable"),
+                )
+            }
+        };
+    let Some((sql, _params)) = crate::DB::clone_sql_value(sql) else {
+        return crate::Encoding::result_err_fields(
+            crate::Encoding::json_rt::FieldError::one("query SQL is not a SQL value"),
+        );
     };
     let descriptor = Concurrency::with_runtime_mut(|rt| {
         if type_key == 0 {
             None
         } else {
-            descriptor_for_key(rt, type_key, "data.query")
-                .ok()
+            descriptor_for_key(rt, type_key, "data.query").ok()
         }
     });
     let trees = if let Some(descriptor) = descriptor {
@@ -4704,7 +4783,9 @@ fn jet_jit_data_query_sql(rows: i64, sql: i64, type_key: i64) -> i64 {
     };
     let selected = match crate::Encoding::data_query_rt::jet_data_query_indices(&trees, &sql) {
         Ok(selected) => selected,
-        Err(errors) => return crate::Encoding::result_err_fields(errors),
+        Err(errors) => {
+            return crate::Encoding::result_err_fields(errors);
+        }
     };
     let selected_rows = selected
         .into_iter()
@@ -4819,7 +4900,7 @@ fn jet_jit_data_query_sort_by(query: i64, callback: i64) -> i64 {
 
 fn jet_jit_data_query_collect(query: i64) -> i64 {
     match query_collect_rows(query) {
-        Ok(rows) => Concurrency::with_runtime_mut(|rt| {
+        Ok((rows, _limits)) => Concurrency::with_runtime_mut(|rt| {
             let rows = alloc_query_rows(rt, rows);
             crate::runtime_host::alloc_jit_result(rt, true, rows as u64)
         }),
@@ -5016,8 +5097,12 @@ host_fns! {
     status: "jet_jit_data_status" => jet_jit_data_status: sig_void;
     require_bridge: "jet_jit_data_require_bridge" => jet_jit_data_require_bridge: sig_unary;
     stat: "jet_jit_data_stat" => jet_jit_data_stat: sig_binary;
+    data_limits_safe: "jet_jit_data_limits_safe" => jet_jit_data_limits_safe: sig_void;
+    data_limits_safe_prelude: "jet_std::DataLimits::safe" => jet_jit_data_limits_safe: sig_void;
     mean: "jet_jit_data_mean" => jet_jit_data_mean: sig_unary;
     mean_checked: "jet_data_mean_checked" => jet_jit_data_mean: sig_unary;
+    variance: "jet_jit_data_variance" => jet_jit_data_variance: sig_unary;
+    sum: "jet_jit_data_sum" => jet_jit_data_sum: sig_unary;
     quantile: "jet_jit_data_quantile" => jet_jit_data_quantile: sig_binary;
     describe: "jet_jit_data_describe" => jet_jit_data_describe: sig_unary;
     bar_text: "jet_jit_data_bar_text" => jet_jit_data_bar_text: sig_unary;
@@ -5053,8 +5138,11 @@ host_fns! {
     data_snapshot_reusable: "jet_data_snapshot_reusable" => jet_data_snapshot_reusable: sig_binary;
     data_stream_cancel: "jet_data_stream_cancel" => jet_data_stream_cancel: sig_unary;
     csv_reader: "jet_jit_data_csv_reader" => jet_jit_data_csv_reader: sig_ternary;
+    json_reader: "jet_jit_data_json_reader" => jet_jit_data_json_reader: sig_ternary;
     stream_next: "jet_jit_data_stream_next" => jet_jit_data_stream_next: sig_unary;
     data_count: "jet_jit_data_count" => jet_jit_data_count: sig_unary;
+    arrow_import: "jet_jit_data_arrow_import" => jet_jit_data_arrow_import: sig_unary;
+    query_arrow: "jet_jit_data_query_arrow" => jet_jit_data_query_arrow: sig_unary;
     query: "jet_jit_data_query" => jet_jit_data_query: sig_unary;
     query_sql: "jet_jit_data_query_sql" => jet_jit_data_query_sql: sig_ternary;
     query_filter: "jet_jit_data_query_filter" => jet_jit_data_query_filter: sig_binary;

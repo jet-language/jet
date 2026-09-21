@@ -110,16 +110,16 @@ fn foreign_callback_reenters_jet_and_completes_on_a_jet_task() {
 
     let source = r#"use c.callback as c
 
-fn increment(value: I32) I32 -[]> {
+fn increment(value: I32) -[]> I32 {
     return value + 1
 }
 
 #Import module c.callback {
-    fn foreign_callback(callback: fn(I32) I32 -[]>, value: I32) I32 = "foreign_callback"
-    fn foreign_async(value: I32) I32 = "foreign_async"
+    fn foreign_callback(callback: fn(I32) -[]> I32, value: I32) -> I32 = "foreign_callback"
+    fn foreign_async(value: I32) -> I32 = "foreign_async"
 }
 
-fn foreign_work() I32 -> {
+fn foreign_work() -> I32 {
     return c.foreign_async(41)
 }
 

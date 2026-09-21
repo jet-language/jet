@@ -5306,6 +5306,7 @@ fn compiler_package_specs(
 }
 
 fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
+
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
         entry.to_path_buf()

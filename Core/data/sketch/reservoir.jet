@@ -1,0 +1,41 @@
+// Reservoir sample (Algorithm R). Fixed k, uniform over the stream so far.
+pub struct Reservoir {
+    pub k: Int
+    pub seen: Int
+    pub items: [String]
+}
+
+pub fn new() -> Reservoir { {k: 32, seen: 0, items: [String]{}} }
+
+pub fn new_k(k: Int) -> Reservoir {
+    n := k
+    if n < 1 -> n = 1
+    {k: n, seen: 0, items: [String]{}}
+}
+
+pub fn add(res: Reservoir, item: String, rand: Int) -> Reservoir {
+    seen := res.seen + 1
+    items := [String]{}
+    loop x in res.items -> items.push(x)
+    if items.len() < res.k {
+        items.push(item)
+        return {k: res.k, seen: seen, items: items}
+    }
+    // replace j uniformly in 0..seen-1 if j < k
+    span := seen
+    if span < 1 -> span = 1
+    j :: (abs_pos(rand) % span)
+    if j < res.k -> items[j] = item
+    {k: res.k, seen: seen, items: items}
+}
+
+pub fn sample(res: Reservoir) -> [String] {
+    out := [String]{}
+    loop x in res.items -> out.push(x)
+    out
+}
+
+fn abs_pos(n: Int) -> Int {
+    if n < 0 -> return 0 - n
+    n
+}

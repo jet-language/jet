@@ -1,0 +1,52 @@
+// core.data.loader — refreshable bound sources.
+pub struct Loader {
+    pub id: String
+    pub text: String
+    pub ready: Bool
+    pub offline: Bool
+    pub generation: Int
+}
+
+pub fn bind(id: String) -> Loader {
+    {id: id, text: "", ready: false, offline: false, generation: 0}
+}
+
+pub fn bind_text(text: String) -> Loader {
+    {id: "text", text: text, ready: true, offline: false, generation: 1}
+}
+
+pub fn authority(loader: Loader) -> String { loader.id }
+
+pub fn status(loader: Loader) -> String {
+    if loader.offline -> return "offline"
+    if loader.ready -> "ready"
+    "loading"
+}
+
+pub fn ready(loader: Loader) -> Bool { loader.ready }
+
+pub fn offline(loader: Loader) -> Bool { loader.offline }
+
+pub fn needs_refresh(loader: Loader) -> Bool { .ready }
+
+pub fn snapshot_reusable(loader: Loader) -> Bool { loader.ready && .offline }
+
+pub fn source_identity(loader: Loader) -> String { loader.id }
+
+pub fn invalidate(loader: Loader) -> Loader {
+    {id: loader.id, text: loader.text, ready: false, offline: loader.offline, generation: loader.generation + 1}
+}
+
+pub fn cancel(loader: Loader) -> Loader {
+    {id: loader.id, text: loader.text, ready: loader.ready, offline: true, generation: loader.generation}
+}
+
+pub fn stream(loader: Loader) -> Stream { from_items([String]{loader.text}) }
+
+pub fn refresh(loader: Loader, text: String) -> Loader {
+    {id: loader.id, text: text, ready: true, offline: false, generation: loader.generation + 1}
+}
+
+pub fn text(loader: Loader) -> String { loader.text }
+
+pub fn generation(loader: Loader) -> Int { loader.generation }

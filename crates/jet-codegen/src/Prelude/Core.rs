@@ -48,6 +48,29 @@ impl<T> JetPersistCell<T> {
         *self.guard() = Some(value);
     }
 }
+impl JetShow for (String, jet_foundation::Numeric::JetInt) {
+    fn jet_show(&self) -> String {
+        jet_foundation::StructuralDebug::jet_debug_record(
+            "(key,value)",
+            [
+                ("key".to_string(), self.0.jet_show()),
+                ("value".to_string(), self.1.jet_show()),
+            ],
+        )
+    }
+}
+
+impl JetDisplay for (String, jet_foundation::Numeric::JetInt) {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for (String, jet_foundation::Numeric::JetInt) {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
 
 impl JetShow for JetDate {
     fn jet_show(&self) -> String {
@@ -331,7 +354,19 @@ where
     let worker_cap = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let indexed = jet_list_para_chunks_kernel(len, worker_limit, worker_cap, f);
+    let (indexed, _) = jet_list_para_chunks_measured(
+        len,
+        worker_limit,
+        worker_cap,
+        true,
+        true,
+        true,
+        JetAccelerationTransform::PooledParallelChunks,
+        false,
+        false,
+        None,
+        f,
+    );
     let mut results = Vec::with_capacity(indexed.len());
     let mut first_failure: Option<JetParaFailure> = None;
     for (_, outcome) in indexed {
@@ -2806,6 +2841,14 @@ where
     true
 }
 
+#[inline(always)]
+fn jet_map_setdefault<M, K: Ord, V: Clone>(m: &mut M, k: K, v: V) -> V
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
+    m.entry(k).or_insert(v).clone()
+}
+
 /// Update one map entry through the map's storage seam. The closure receives
 /// the existing value without cloning it, so a read/compute/insert update can
 /// perform one tree lookup and one key evaluation while retaining the same
@@ -3088,6 +3131,16 @@ fn jet_map_merge<K: Ord + Clone, V: Clone>(
         storage.insert(k.clone(), v.clone());
     }
     out
+}
+/// Mutate `left` with every entry from `other`; right wins on shared keys.
+fn jet_map_update_all<K: Ord + Clone, V: Clone>(
+    left: &mut JetMap<K, V>,
+    other: &JetMap<K, V>,
+) {
+    let storage = jet_map_make_mut(left);
+    for (key, value) in other {
+        storage.insert(key.clone(), value.clone());
+    }
 }
 
 /// D-MAP-MERGE1=E: merge with an explicit conflict callback `(key, left, right) -> V`.
@@ -3490,6 +3543,18 @@ fn jet_map_slice_keys<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>, keys: Vec<K>) 
     jet_map_slice_keys_kernel(m, keys)
 }
 fn jet_map_from_keys<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
+    jet_map_from_keys_kernel(keys, default)
+}
+fn jet_map_from_keys_int<V: Clone>(
+    keys: Vec<jet_foundation::Numeric::JetInt>,
+    default: V,
+) -> JetMap<jet_foundation::Numeric::JetInt, V> {
+    jet_map_from_keys_kernel(keys, default)
+}
+fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(
+    keys: Vec<K>,
+    default: V,
+) -> JetMap<K, V> {
     jet_map_from_keys_kernel(keys, default)
 }
 fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {

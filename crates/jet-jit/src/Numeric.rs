@@ -47,6 +47,7 @@ pub(crate) fn push_decimal(d: CtDecimal) -> i64 {
     })
 }
 
+#[inline(always)]
 fn with_decimal<R>(handle: i64, f: impl FnOnce(&CtDecimal) -> R) -> Option<R> {
     Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
@@ -58,10 +59,11 @@ fn push_decimal_in_runtime(rt: &mut JitRuntime, value: CtDecimal) -> i64 {
     rt.decimal_values.len() as i64
 }
 
+#[inline(always)]
 fn decimal_binary(
     left: i64,
     right: i64,
-    operation: fn(&CtDecimal, &CtDecimal) -> CtDecimal,
+    operation: impl FnOnce(&CtDecimal, &CtDecimal) -> CtDecimal,
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let left = rt
@@ -716,6 +718,26 @@ fn jet_jit_decimal_equal(a: i64, b: i64) -> i8 {
         }
     })
 }
+fn jet_jit_decimal_compare(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .decimal_values
+            .get(a.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        let right = rt
+            .decimal_values
+            .get(b.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        match (left, right) {
+            (Some(left), Some(right)) => match left.cmp(right) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+            _ => 0,
+        }
+    })
+}
 
 fn jet_jit_decimal_to_string(a: i64) -> i64 {
     let text = with_decimal(a, |d| d.to_string_rep()).unwrap_or_else(|| "0".to_string());
@@ -1307,6 +1329,7 @@ host_fns! {
     row_decimal_sub: "jet_decimal_sub" => jet_jit_decimal_sub: sig_binary;
     row_decimal_mul: "jet_decimal_mul" => jet_jit_decimal_mul: sig_binary;
     row_decimal_equal: "jet_decimal_equal" => jet_jit_decimal_equal: sig_compare;
+    row_decimal_compare: "jet_decimal_compare" => jet_jit_decimal_compare: sig_binary;
     row_decimal_to_string: "jet_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
     row_decimal_to_float: "jet_decimal_to_float" => jet_jit_decimal_to_float: sig_unary_f64;
     row_fraction_from_parts: "jet_fraction_from_parts" => jet_jit_fraction_from_parts: sig_binary;
@@ -1372,6 +1395,7 @@ host_fns! {
     decimal_sub: "jet_jit_decimal_sub" => jet_jit_decimal_sub: sig_binary;
     decimal_mul: "jet_jit_decimal_mul" => jet_jit_decimal_mul: sig_binary;
     decimal_equal: "jet_jit_decimal_equal" => jet_jit_decimal_equal: sig_compare;
+    decimal_compare: "jet_jit_decimal_compare" => jet_jit_decimal_compare: sig_binary;
     decimal_to_string: "jet_jit_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
     decimal_to_float: "jet_jit_decimal_to_float" => jet_jit_decimal_to_float: sig_unary_f64;
     fraction_new: "jet_jit_fraction_new" => jet_jit_fraction_new: sig_binary;

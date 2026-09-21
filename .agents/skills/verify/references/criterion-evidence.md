@@ -21,6 +21,6 @@ card, not this skill, supplies the command and acceptance boundary.
    for the orchestrator to record and close. A worker receipt does not close a
    card.
 
-Use `scripts/agent/tmp-guard.sh` and the shared resource rules before trusting a
-resource-related failure. Keep broad proof and milestone review behind the
-commit-bound token described by closeout.
+Use the shared resource rules before trusting a resource-related failure.
+Keep broad proof and milestone review behind the commit-bound token described
+by closeout.

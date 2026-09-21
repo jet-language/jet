@@ -12,9 +12,9 @@ pub struct Handle { value: Int }
 #Error
 pub enum DotNetError { Exception InvalidHandle ResourceLimit }
 
-fn error(code: Int) DotNetError !Never -[]> { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
+fn error(code: Int) -[]> DotNetError !Never { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
 
-pub fn new(arg0: Int) Handle !DotNetError -[FFI.DotNet]> {
+pub fn new(arg0: Int) -[FFI.DotNet]> Handle !DotNetError {
     value :: abi.new(arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
@@ -30,21 +30,21 @@ impl Handle.Close {
     }
 }
 
-pub fn add(handle: Handle, arg0: Int) Int !DotNetError -[FFI.DotNet]> {
+pub fn add(handle: Handle, arg0: Int) -[FFI.DotNet]> Int !DotNetError {
     value :: abi.add(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-pub fn explode(handle: Handle, arg0: Int) Int !DotNetError -[FFI.DotNet]> {
+pub fn explode(handle: Handle, arg0: Int) -[FFI.DotNet]> Int !DotNetError {
     value :: abi.explode(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-pub fn twice(arg0: Float) Float !DotNetError -[FFI.DotNet]> {
+pub fn twice(arg0: Float) -[FFI.DotNet]> Float !DotNetError {
     value :: abi.twice(arg0)
     code :: abi.take_error()
     if code != 0 { return Err(error(code)) }

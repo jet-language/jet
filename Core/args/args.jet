@@ -1,0 +1,410 @@
+package {
+    name: "core.args"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Command-line specs and configuration merge."
+    license: "MIT"
+    outputs: {
+        args: .Library{ entry: args }
+    }
+}
+
+// core.args — argv decoding against a declarative spec.
+//
+// `spec` is the empty builder. `decode` reads process argv. `merge` overlays
+// two configuration trees (later wins). Flags are `--key=value`, `--key value`
+// `--flag` (true), and `--no-flag` (false). A bare `--` ends options.
+// Positionals land in the `_` array.
+
+pub struct ArgsSpec {
+    pub flags: [String]
+}
+
+pub fn spec() -> ArgsSpec { ArgsSpec{flags: [String]{}} }
+
+/// Decode process argv into a `DataTree` object. `--help` / `-h` set `help`.
+pub fn decode() -[Env]> DataTree {
+    argv :: host_argv()
+    Ok(decode_argv(argv))
+}
+
+pub fn decode_argv(argv: [String]) -> DataTree {
+    entries := [String: DataTree]{}
+    positionals := [DataTree]{}
+    i := 0
+    // skip argv[0] (program name) when present
+    if argv.len() > 0 -> i = 1
+    loop {
+        if i >= argv.len() -> break
+        a :: argv[i]
+        if a == "--" {
+            i = i + 1
+            loop {
+                if i >= argv.len() -> break
+                positionals.push(DataTree.Text(argv[i]))
+                i = i + 1
+            }
+            break
+        }
+        if starts(a, "--") {
+            rest :: drop_prefix(a, 2)
+            eq :: index_of(rest, "=")
+            if eq >= 0 {
+                key :: slice_str(rest, 0, eq)
+                val :: slice_str(rest, eq + 1, rest.bytes().len())
+                entries = entries.add(key, parse_atom(val))
+                i = i + 1
+                next
+            }
+            if starts(rest, "no-") && rest.bytes().len() > 3 {
+                entries = entries.add(drop_prefix(rest, 3), DataTree.Bool(false))
+                i = i + 1
+                next
+            }
+            if i + 1 < argv.len() && !starts(argv[i + 1], "-") {
+                entries = entries.add(rest, parse_atom(argv[i + 1]))
+                i = i + 2
+                next
+            }
+            entries = entries.add(rest, DataTree.Bool(true))
+            i = i + 1
+            next
+        }
+        if a == "-h" {
+            entries = entries.add("help", DataTree.Bool(true))
+            i = i + 1
+            next
+        }
+        if starts(a, "-") && a.bytes().len() > 1 {
+            // clustered short flags: -abc
+            raw :: a.bytes()
+            loop k in 1..<raw.len() {
+                ch :: String.from_bytes([U8]{raw[k]}) ?? ""
+                entries = entries.add(ch, DataTree.Bool(true))
+            }
+            i = i + 1
+            next
+        }
+        positionals.push(DataTree.Text(a))
+        i = i + 1
+    }
+    if argv.len() > 0 -> entries = entries.add("0", DataTree.Text(argv[0]))
+    entries = entries.add("_", DataTree.Array(positionals))
+    DataTree.Object(entries)
+}
+
+/// Overlay `overlay` onto `base`. Object keys in overlay replace; arrays
+/// replace (they are not concatenated). Scalars replace.
+pub fn merge(base: DataTree, overlay: DataTree) -> DataTree {
+    if overlay == {
+        .Object(over) -> {
+            if base == {
+                .Object(under) -> {
+                    out := under
+                    loop key in over.keys() {
+                        ov :: over.get(key) ?? DataTree.Null
+                        un :: under.get(key)
+                        if un == None {
+                            out = out.add(key, ov)
+                        } else {
+                            out = out.add(key, merge(un ?? DataTree.Null, ov))
+                        }
+                    }
+                    return DataTree.Object(out)
+                }
+                else -> return overlay
+            }
+        }
+        else -> return overlay
+    }
+}
+
+fn parse_atom(text: String) -> DataTree {
+    if text == {
+        "true" -> return DataTree.Bool(true)
+        "false" -> return DataTree.Bool(false)
+        "null" -> return DataTree.Null
+        else -> { _ := 0 }
+    }
+    n := 0
+    sign := 1
+    i := 0
+    raw :: text.bytes()
+    if raw.len() > 0 && raw[0] == (U8{45}) {
+        sign = -1
+        i = 1
+    }
+    if i >= raw.len() -> DataTree.Text(text)
+    loop {
+        if i >= raw.len() -> return DataTree.Int(sign * n)
+        d :: raw[i]
+        if d < 48 || d > 57 -> return DataTree.Text(text)
+        n = n * 10 + (d - 48)
+        i = i + 1
+    }
+}
+
+fn starts(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn drop_prefix(text: String, n: Int) -> String {
+    raw :: text.bytes()
+    if n >= raw.len() -> return ""
+    slice_str(text, n, raw.len())
+}
+
+fn slice_str(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn index_of(text: String, needle: String) -> Int {
+    hay :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() == 0 -> return 0
+    if nd.len() > hay.len() -> return -1
+    loop i in 0..<(hay.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if hay[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return i
+    }
+    -1
+}
+
+fn host_argv() -[Env]> [String] { panic("host_argv") }
+
+
+pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec {
+    flags := spec.flags
+    flags.push(name)
+    ArgsSpec{flags: flags}
+}
+
+pub fn has(tree: DataTree, key: String) -> Bool {
+    if tree == {
+        .Object(entries) -> return entries.get(key) != None
+        else -> return false
+    }
+    false
+}
+
+pub fn get_text(tree: DataTree, key: String) -> String {
+    if tree == {
+        .Object(entries) -> {
+            v :: entries.get(key) ?? return ""
+            if v == {
+                .Text(s) -> return s
+                .Int(n) -> return "{n}"
+                .Bool(b) -> {
+                    if b -> return "true"
+                    return "false"
+                }
+                else -> return ""
+            }
+        }
+        else -> return ""
+    }
+    ""
+}
+
+pub fn get_bool(tree: DataTree, key: String) -> Bool {
+    if tree == {
+        .Object(entries) -> {
+            v :: entries.get(key) ?? return false
+            if v == {
+                .Bool(b) -> return b
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+    false
+}
+
+pub fn get_int(tree: DataTree, key: String) -> Int {
+    if tree == {
+        .Object(entries) -> {
+            v :: entries.get(key) ?? return 0
+            if v == {
+                .Int(n) -> return n
+                else -> return 0
+            }
+        }
+        else -> return 0
+    }
+    0
+}
+
+pub fn positionals(tree: DataTree) -> [String] {
+    out := [String]{}
+    if tree == {
+        .Object(entries) -> {
+            v :: entries.get("_") ?? return out
+            if v == {
+                .Array(items) -> {
+                    loop item in items {
+                        if item == {
+                            .Text(s) -> out.push(s)
+                            else -> { _ := 0 }
+                        }
+                    }
+                }
+                else -> { _ := 0 }
+            }
+        }
+        else -> { _ := 0 }
+    }
+    out
+}
+
+pub fn program(tree: DataTree) -> String { get_text(tree, "0") }
+
+pub fn help_text(name: String, summary: String) -> String { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
+
+pub struct ArgDef {
+    pub name: String
+    pub dest: String
+    pub help: String
+    pub flag: Bool
+    pub required: Bool
+    pub default_text: String
+}
+
+pub fn argument(spec: ArgsSpec, name: String) -> ArgsSpec { flag(spec, name) }
+
+pub fn define(name: String, help: String, flag: Bool) -> ArgDef {
+    ArgDef{
+    name: name,
+    dest: name,
+    help: help,
+    flag: flag,
+    required: false,
+    default_text: "",
+    }
+}
+
+pub fn dest(def: ArgDef, dest: String) -> ArgDef {
+    ArgDef{
+    name: def.name,
+    dest: dest,
+    help: def.help,
+    flag: def.flag,
+    required: def.required,
+    default_text: def.default_text,
+    }
+}
+
+pub fn required(def: ArgDef) -> ArgDef {
+    ArgDef{
+    name: def.name,
+    dest: def.dest,
+    help: def.help,
+    flag: def.flag,
+    required: true,
+    default_text: def.default_text,
+    }
+}
+
+pub fn default_value(def: ArgDef, value: String) -> ArgDef {
+    ArgDef{
+    name: def.name,
+    dest: def.dest,
+    help: def.help,
+    flag: def.flag,
+    required: def.required,
+    default_text: value,
+    }
+}
+
+pub fn get_or(tree: DataTree, key: String, fallback: String) -> String {
+    if has(tree, key) -> return get_text(tree, key)
+    fallback
+}
+
+pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> ?String {
+    v :: get_text(tree, key)
+    if v.bytes().len() == 0 -> return None
+    loop c in choices {
+        if c == v -> return Val(v)
+    }
+    None
+}
+
+pub fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] {
+    out := [String]{}
+    loop d in defs {
+        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> out.push(d.name)
+    }
+    out
+}
+
+pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree {
+    out := tree
+    loop d in defs {
+        if !has(out, d.dest) && d.default_text.bytes().len() > 0 {
+            if out == {
+                .Object(entries) -> {
+                    next_entries := entries.add(d.dest, parse_atom(d.default_text))
+                    out = DataTree.Object(next_entries)
+                }
+                else -> { _ := 0 }
+            }
+        }
+    }
+    out
+}
+
+pub fn usage(name: String, defs: [ArgDef]) -> String {
+    s := "usage: {name}"
+    loop d in defs {
+        token := "--{d.name}"
+        if !d.flag -> token = "{token} <{d.dest}>"
+        if d.required {
+            s = "{s} {token}"
+        } else {
+            s = "{s} [{token}]"
+        }
+    }
+    "{s} [args...]"
+}
+
+pub fn help_from(name: String, summary: String, defs: [ArgDef]) -> String {
+    s := "{usage(name, defs)}\n\n{summary}\n\nOptions:\n"
+    loop d in defs {
+        flag := "--{d.name}"
+        if !d.flag -> flag = "{flag} <{d.dest}>"
+        req := ""
+        if d.required -> req = " (required)"
+        def := ""
+        if d.default_text.bytes().len() > 0 -> def = " [default: {d.default_text}]"
+        s = "{s}  {flag}    {d.help}{req}{def}\n"
+    }
+    s = "{s}  -h, --help    Show this help\n"
+    s
+}
+
+pub fn remainder(tree: DataTree) -> [String] { positionals(tree) }
+
+pub fn count_flag(tree: DataTree, key: String) -> Int {
+    if get_bool(tree, key) -> return 1
+    n :: get_int(tree, key)
+    if n != 0 -> return n
+    0
+}
+
+pub fn wants_help(tree: DataTree) -> Bool { get_bool(tree, "help") || has(tree, "h") }

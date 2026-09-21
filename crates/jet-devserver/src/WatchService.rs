@@ -736,7 +736,7 @@ impl WatchGraph {
         if !visited.insert(path.clone()) {
             return;
         }
-        let exists = PathStamp::capture(&path).exists;
+        let exists = fs::metadata(&path).is_ok();
         let expected_dir = !exists
             && self
                 .nodes
@@ -803,7 +803,7 @@ impl WatchGraph {
             return;
         }
         let is_dir = path.is_dir();
-        let exists = PathStamp::capture(&path).exists;
+        let exists = fs::metadata(&path).is_ok();
         if let Some(node) = self.nodes.get_mut(&path) {
             if exists {
                 node.is_dir = is_dir;
@@ -1068,14 +1068,23 @@ impl WatchGraph {
         if !visited.insert(path.clone()) {
             return;
         }
-        let exists = PathStamp::capture(&path).exists;
+        let exists = fs::metadata(&path).is_ok();
         let is_dir = path.is_dir() || (dir_hint && !exists);
         let kind = if is_dir {
             RootKind::Asset
         } else {
             Self::classify(&path)
         };
-        self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists);
+        if let Some(node) = self.nodes.get_mut(&path) {
+            if exists {
+                node.is_dir = is_dir;
+                if is_dir {
+                    node.kind = RootKind::Asset;
+                }
+            }
+        } else {
+            self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists);
+        }
         if register_root && dir_hint {
             self.runtime_input_roots.insert(path.clone());
         }
@@ -1104,15 +1113,6 @@ impl WatchGraph {
         }
     }
 
-    fn scan_existing_html_references(&mut self) {
-        let roots: Vec<PathBuf> = self
-            .nodes
-            .values()
-            .filter(|node| node.kind == RootKind::HTML)
-            .map(|node| node.path.clone())
-            .collect();
-        self.scan_html_references(&roots);
-    }
 
     fn add_reference_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
         let path = canonicalize_loose(path);
@@ -1448,8 +1448,7 @@ pub struct WatchSession {
 
 impl WatchSession {
     pub fn open(entry: &Path) -> Result<Self, Diagnostic> {
-        let mut graph = WatchGraph::discover(entry)?;
-        graph.refresh_stamps();
+        let graph = WatchGraph::discover(entry)?;
         let events = EventWaiter::new(graph.watched_paths());
         Ok(Self {
             graph,
@@ -1477,8 +1476,7 @@ impl WatchSession {
     /// Interactive callers can replace a resident session without orphaning
     /// terminal-input wakeups.
     pub fn reopen(&mut self, entry: &Path) -> Result<(), Diagnostic> {
-        let mut graph = WatchGraph::discover(entry)?;
-        graph.refresh_stamps();
+        let graph = WatchGraph::discover(entry)?;
         self.events.refresh(graph.watched_paths());
         self.graph = graph;
         self.generation = 0;
@@ -1719,6 +1717,49 @@ impl WatchSession {
     /// Mark a receipt applied. Later polls with older generations are stale.
     /// Stamps refresh in place; newly discovered imports merge in without
     /// dropping previously tracked roots (assets, manual links, etc.).
+    /// A successful checked bundle already contains the loader's dependency
+    /// closure.  Reuse it for the common reload path instead of loading the
+    /// entry a second time just to rediscover unchanged imports.  If the
+    /// closure shape changed, fall back to `acknowledge`, which preserves the
+    /// loader-backed recovery path for new/removed imports.
+    pub fn acknowledge_with_dependencies(
+        &mut self,
+        receipt: &InvalidationReceipt,
+        dependencies: &[PathBuf],
+    ) -> Result<(), Diagnostic> {
+        let Some(entry) = self.graph.entry().map(|p| p.to_path_buf()) else {
+            return self.acknowledge(receipt);
+        };
+        let desired_imports = std::iter::once(entry.clone())
+            .chain(dependencies.iter().map(|path| canonicalize_loose(path)))
+            .filter(|path| WatchGraph::classify(path) == RootKind::Import)
+            .collect::<BTreeSet<_>>();
+        let current_imports = self
+            .graph
+            .nodes
+            .values()
+            .filter(|node| node.kind == RootKind::Import)
+            .map(|node| node.path.clone())
+            .collect::<BTreeSet<_>>();
+        let topology_changed = desired_imports.iter().any(|path| !current_imports.contains(path))
+            || current_imports.iter().any(|path| !desired_imports.contains(path));
+        if topology_changed {
+            return self.acknowledge(receipt);
+        }
+        if receipt.generation > self.applied_generation {
+            self.applied_generation = receipt.generation;
+        }
+        for dependency in dependencies {
+            let path = canonicalize_loose(dependency);
+            if !self.graph.nodes.contains_key(&path) {
+                self.graph.upsert(path.clone(), WatchGraph::classify(&path));
+            }
+            self.graph.link(entry.clone(), path);
+        }
+        self.events.refresh(self.graph.watched_paths());
+        Ok(())
+    }
+
     pub fn acknowledge(&mut self, receipt: &InvalidationReceipt) -> Result<(), Diagnostic> {
         if receipt.generation > self.applied_generation {
             self.applied_generation = receipt.generation;
@@ -1739,9 +1780,9 @@ impl WatchSession {
                 .runtime_input_roots
                 .extend(discovered.runtime_input_roots.iter().cloned());
         }
-        self.graph.refresh_stamps();
-        self.graph.scan_existing_html_references();
-        self.graph.scan_runtime_inputs();
+        // `poll` has already stamped the settled paths.  The discovered
+        // graph carries fresh stamps for newly-added nodes, so refreshing and
+        // rescanning the unchanged closure here only repeats file I/O.
         Ok(())
     }
 

@@ -254,7 +254,9 @@ fn parse_for_check_inner(
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
     } else if p.diags.iter().all(|d| {
-        d.severity == crate::Diagnostics::Severity::Lint || is_teaching_parse_diag(&d.code)
+        d.severity == crate::Diagnostics::Severity::Lint
+            || is_teaching_parse_diag(&d.code)
+            || d.code == "E0081"
     }) {
         Ok((prog, p.diags))
     } else {
@@ -1258,6 +1260,54 @@ mod s61_tests {
                 "expected E0386 in variant: {diagnostics:?}"
             );
         }
+    }
+
+    #[test]
+    fn missing_function_body_is_e0081_and_recovers_for_check() {
+        let source = "fn host_open(path: String) Int -[FS]>\nfn run() {}\n";
+        let (tokens, lex_diags) = lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        assert!(
+            parse(&tokens).is_err(),
+            "a function without a body must fail ordinary parse"
+        );
+        let (prog, diagnostics) =
+            parse_for_check(&tokens).expect("E0081 should recover an AST for check/LSP");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0081"),
+            "expected E0081, got {diagnostics:?}"
+        );
+        let names: Vec<&str> = prog
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::AST::Item::Func(func) => Some(func.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            names.contains(&"host_open") && names.contains(&"run"),
+            "later items must still parse: {names:?}"
+        );
+
+        let source = "fn foo() Int\nfn bar() {}\n";
+        let (tokens, lex_diags) = lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let (prog, diagnostics) =
+            parse_for_check(&tokens).expect("missing brace body should recover");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0081"),
+            "expected E0081 for a typed signature without a body, got {diagnostics:?}"
+        );
+        let names: Vec<&str> = prog
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::AST::Item::Func(func) => Some(func.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(names.contains(&"bar"), "fn bar must still parse: {names:?}");
     }
 
     /// S84 (regression): spaced `a - b` is still subtraction. The dashed-name
@@ -2556,6 +2606,18 @@ fn notify(ready: Bool) -[Net]> {
             .find(|diagnostic| diagnostic.code == "E0003")
             .expect("E0003");
         assert!(diagnostic.fix.contains("fn save(path: String) !IOError"));
+    }
+
+    #[test]
+    fn missing_function_body_is_e0081() {
+        let source = "fn greet(name: String) String\nfn run() {}\n";
+        let (tokens, lex_diagnostics) = lex(&source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("a signature without a body is incomplete");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0081"),
+            "expected E0081, got {diagnostics:?}"
+        );
     }
 
     /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.

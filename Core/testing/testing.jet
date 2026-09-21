@@ -1,0 +1,117 @@
+package {
+    name: "core.testing"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Assertions, fixtures, goldens, and fake clocks."
+    license: "MIT"
+    outputs: {
+        testing: .Library{ entry: testing }
+    }
+}
+// core.testing — deterministic tests.
+//
+// `
+pub struct TestSuite {
+    pub name: String
+    pub passed: Int
+    pub failed: Int
+}
+
+pub struct Fake {
+    pub seed: Int
+}
+
+pub struct Clock {
+    pub unix_ms: Int
+    pub fake: Bool
+}
+
+pub struct Rng {
+    pub state: Int
+}
+
+pub fn assert_equal(left: String, right: String) -> Bool { left == right }
+
+pub fn compare(left: String, right: String) -> TestComparison {
+    {
+        equal: left == right,
+        left: left,
+        right: right,
+    }
+}
+
+/// Snapshot under `testdata/{name}.snap`. Creates the file when missing.
+pub fn snap(name: String, value: String) -[FS]> Bool { golden_at("testdata/{name}.snap", value) }
+
+pub fn golden(name: String, value: String) -[FS]> Bool {
+    golden_at("testdata/golden/{name}", value)
+}
+
+fn golden_at(path: String, value: String) -[FS]> Bool {
+    existing := host_read_text(path)
+    if existing == .None {
+        host_write_text(path, value)
+        return true
+    }
+    (existing ?? "") == value
+}
+
+pub fn fixture(name: String) -[FS]> String { host_read_text("testdata/fixtures/{name}") ?? "" }
+
+pub fn temp_dir(prefix: String) -[FS]> String { host_temp_dir(prefix) }
+
+pub fn corpus(glob: String) -[FS]> [String] { host_glob(glob) }
+
+pub fn fake_clock(unix_ms: Int) -> Clock { {unix_ms: unix_ms, fake: true} }
+
+pub fn fake_rng(seed: Int) -> Rng {
+    s := seed
+    if s == 0 -> s = 0x9E3779B97F4A7C15
+    {state: s}
+}
+
+pub fn fake_data(seed: Int) -> Fake { {seed: seed} }
+
+pub fn test_suite() -> TestSuite { {name: "default", passed: 0, failed: 0} }
+
+pub fn world(body: Int) {}
+
+/// Exhaustive interleavings of `ops` labelled operations. The count is
+/// `ops!` for ops <= 8; larger requests cap at 40320 recorded histories
+/// (the 8! bound) so a test cannot explode memory.
+pub fn histories(ops: Int) -> [String] {
+    if ops <= 0 -> return [String]{}
+    labels := [String]{}
+    loop i in 0..<ops -> labels.push("{i}")
+    if ops == 1 -> return [String]{"0"}
+    n := ops
+    if n > 8 -> n = 8
+    permute_join(labels[0..n - 1])
+}
+
+pub fn status() -> String { "ok" }
+
+fn permute_join(items: [String]) -> [String] {
+    if items.len() == 0 -> return [String]{""}
+    if items.len() == 1 -> return [String]{items[0]}
+    out := [String]{}
+    loop i in 0..<items.len() {
+        rest := [String]{}
+        loop j in 0..<items.len() {
+            if j != i -> rest.push(items[j])
+        }
+        tails :: permute_join(rest)
+        loop t in tails {
+            if t.len() == 0 -> out.push(items[i]) else -> out.push("{items[i]} {t}")
+        }
+    }
+    out
+}
+
+fn host_read_text(path: String) -[FS]> ?String { panic("host_read_text") }
+
+fn host_write_text(path: String, value: String) -[FS]> { panic("host_write_text") }
+
+fn host_temp_dir(prefix: String) -[FS]> String { panic("host_temp_dir") }
+
+fn host_glob(pattern: String) -[FS]> [String] { panic("host_glob") }

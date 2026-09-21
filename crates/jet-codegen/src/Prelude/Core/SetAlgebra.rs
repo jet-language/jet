@@ -80,6 +80,47 @@ pub(crate) fn jet_set_is_disjoint_by<T, F: Fn(&T, &T) -> bool>(
         .all(|value| !right.iter().any(|candidate| equal(value, candidate)))
 }
 
+pub(crate) fn jet_set_insert<T: Eq + std::hash::Hash>(
+    set: &mut std::collections::HashSet<T>,
+    value: T,
+) {
+    set.insert(value);
+}
+
+pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
+    set: &mut std::collections::HashSet<T>,
+    value: T,
+) {
+    set.remove(&value);
+}
+pub(crate) fn jet_set_update<T: Eq + std::hash::Hash + Clone>(
+    left: &mut std::collections::HashSet<T>,
+    right: &std::collections::HashSet<T>,
+) {
+    left.extend(right.iter().cloned());
+}
+pub(crate) fn jet_set_difference_update<T: Eq + std::hash::Hash>(
+    left: &mut std::collections::HashSet<T>,
+    right: &std::collections::HashSet<T>,
+) {
+    left.retain(|value| !right.contains(value));
+}
+
+pub(crate) fn jet_set_intersection_update<T: Eq + std::hash::Hash>(
+    left: &mut std::collections::HashSet<T>,
+    right: &std::collections::HashSet<T>,
+) {
+    left.retain(|value| right.contains(value));
+}
+
+pub(crate) fn jet_set_symmetric_difference_update<T: Eq + std::hash::Hash + Clone>(
+    left: &mut std::collections::HashSet<T>,
+    right: &std::collections::HashSet<T>,
+) {
+    let next = left.symmetric_difference(right).cloned().collect();
+    *left = next;
+}
+
 pub(crate) fn jet_set_union<T: Eq + std::hash::Hash + Clone>(
     left: &std::collections::HashSet<T>,
     right: &std::collections::HashSet<T>,

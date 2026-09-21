@@ -436,6 +436,30 @@ impl<'a> Checker<'a> {
         self.diags.push(diagnostic);
     }
 
+    pub(crate) fn error_converts_into_current_return(&mut self, err: &Type) -> bool {
+        let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
+        let Type::Result { err: ret_err, .. } = ret else {
+            let err_name = err.name();
+            return !self.no_prelude && is_core_error_family_type(&err_name)
+                || matches!(err, Type::String);
+        };
+        if *ret_err == *err {
+            return true;
+        }
+        let err_name = err.name();
+        let ret_err_name = ret_err.name();
+        if self.trait_reg.has_error_conv(&err_name, &ret_err_name) {
+            return true;
+        }
+        if is_default_error(&ret_err) && matches!(err, Type::String) {
+            return true;
+        }
+        if is_default_error(&ret_err) && !self.no_prelude && is_core_error_family_type(&err_name) {
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn infer_try(
         &mut self,
         inner: &mut Box<Expr>,

@@ -42,8 +42,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "log2")
             | ("core.math", "log10")
             | ("core.math", "hypot")
-            | ("core.math", "trunc")
-            | ("core.math", "fract")
+            | ("core.math", "trunc" | "truncate" | "fract" | "real" | "imag" | "conj" | "float32" | "float64")
             | ("core.math", "sign")
             | ("core.math", "is_nan")
             | ("core.math", "is_inf")
@@ -73,7 +72,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "ln_1p")
             | ("core.math", "log")
             | ("core.math", "signum")
-            | ("core.math", "fma")
+            | ("core.math", "fma" | "muladd")
             | ("core.math", "is_even")
             | ("core.math", "is_odd")
             | ("core.math", "isqrt")
@@ -93,7 +92,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "trailing_ones")
             | ("core.math", "next_up")
             | ("core.math", "next_down")
-            | ("core.math", "next_after")
+            | ("core.math", "next_after" | "nextafter")
             | ("core.math", "sin_cos")
             | ("core.math", "binomial")
             | ("core.math", "cmp")
@@ -271,16 +270,41 @@ pub fn core_call_surface_signature(
         (
             "core.math",
             "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
-            | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "fract" | "sign"
-            | "degrees" | "radians",
+            | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "truncate" | "fract"
+            | "sign" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
+            | "fabs" | "expm1",
         ) => Some((vec![(read, float.clone())], Some(float))),
         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
         ("core.math", "int_pow" | "gcd" | "lcm") => {
             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
         }
         ("core.math", "pow" | "atan2" | "hypot") => Some((
-            vec![(read, float.clone()), (read, float)],
+            vec![(read, float.clone()), (read, float.clone())],
             Some(Type::Float),
+        )),
+        ("core.math", "fmod" | "remainder") => Some((
+            vec![(read, float.clone()), (read, float.clone())],
+            Some(Type::Float),
+        )),
+        ("core.math", "isclose") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.math", "dist") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Float))),
+                (read, Type::List(Box::new(Type::Float))),
+            ],
+            Some(Type::Float),
+        )),
+        ("core.math", "comb" | "perm") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Option(Box::new(Type::Int))),
         )),
         ("core.math", "min" | "max") => {
             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
@@ -289,30 +313,36 @@ pub fn core_call_surface_signature(
             vec![(read, int.clone()), (read, int.clone()), (read, int)],
             Some(Type::Int),
         )),
-        ("core.math", "lerp") => Some((
+        ("core.math", "lerp" | "muladd") => Some((
             vec![(read, float.clone()), (read, float.clone()), (read, float)],
             Some(Type::Float),
         )),
         ("core.math", "pi" | "e") => Some((vec![], Some(Type::Float))),
-        ("core.math", "is_nan" | "is_inf" | "is_finite" | "is_even" | "is_odd") => {
+        ("core.math", "is_nan" | "is_inf" | "is_finite" | "isnan" | "isinf" | "isfinite") => {
             Some((vec![(read, Type::Float)], Some(Type::Bool)))
         }
+        ("core.math", "is_even" | "is_odd") => {
+            Some((vec![(read, Type::Int)], Some(Type::Bool)))
+        }
+        ("core.math", "fsum") => Some((
+            vec![(read, Type::List(Box::new(Type::Float)))],
+            Some(Type::Float),
+        )),
+        ("core.math", "prod") => Some((
+            vec![(read, Type::List(Box::new(Type::Int)))],
+            Some(Type::Int),
+        )),
         (
             "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
             | "core.encoding.yaml",
-            "parse" | "decode",
+            "parse" | "decode" | "loads",
         ) => result(Type::String),
         (
             "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
-            "decode" | "decode_url",
+            "decode" | "decode_url" | "b64decode" | "standard_b64decode"
+            | "urlsafe_b64decode" | "b32decode" | "b16decode"
+            | "a85decode" | "b85decode" | "z85decode",
         ) => result(Type::String),
-        ("core.encoding.xml" | "core.encoding.cbor", "parse" | "decode" | "decode_bytes") => {
-            result(Type::String)
-        }
-        ("core.event", "policy_sync") => {
-            Some((vec![], Some(Type::Named("EventPolicy".to_string()))))
-        }
-        ("core.event", "scope") => Some((vec![], Some(Type::Named("EventScope".to_string())))),
         _ => None,
     }
 }
@@ -329,10 +359,12 @@ pub fn core_call_has_safe_defaults(module: &str, name: &str) -> bool {
     module == "core.math"
         || matches!(
             (module, name),
-            ("core.encoding.json", "parse" | "decode")
+            ("core.encoding.json", "parse" | "decode" | "loads")
                 | (
                     "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
-                    "decode" | "decode_url"
+                    "decode" | "decode_url" | "b64decode" | "standard_b64decode"
+                        | "urlsafe_b64decode" | "b16decode"
+                        | "a85decode" | "b85decode" | "z85decode",
                 )
         )
 }
@@ -1210,6 +1242,17 @@ fn core_fixed_sig_impl(
     let io = io_error_ty();
     let json = json_ty();
     let list_u8 = Type::List(Box::new(u8_ty()));
+    let list_float = Type::List(Box::new(Type::Float));
+    let list_int = Type::List(Box::new(Type::Int));
+    let list_bool = Type::List(Box::new(Type::Bool));
+    let list_list_int = Type::List(Box::new(list_int.clone()));
+    let list_string = Type::List(Box::new(Type::String));
+    let counter = Type::Named("Counter".to_string());
+    let deque = Type::Named("Deque".to_string());
+    let ordered_map = Type::Named("OrderedMap".to_string());
+    let chain = Type::Named("Chain".to_string());
+    let string_set = Type::Named("StringSet".to_string());
+
     let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
     let io_unit = result_ty(unit.clone(), io.clone());
     let ui_error = Type::Named("UiHostError".to_string());
@@ -1240,6 +1283,10 @@ fn core_fixed_sig_impl(
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
+        )),
+        ("core.files", "close") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(unit.clone(), io.clone())),
         )),
         ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io.clone())))),
         ("core.files", "read_bytes") => Some((
@@ -1272,9 +1319,25 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
-        ("core.files", "stat") => Some((
+        ("core.files", "stat" | "lstat") => Some((
             vec![(read, path)],
             Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
+        )),
+        ("core.files", "is_fifo" | "is_socket") => Some((
+            vec![(read, path.clone())],
+            Some(result_ty(Type::Bool, io_error_ty())),
+        )),
+        ("core.files", "chown") => Some((
+            vec![(read, path.clone()), (read, int.clone()), (read, int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "mkdtemp") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())),
+        )),
+        ("core.files", "mktemp") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
         )),
         ("core.files", "set_mode") => Some((
             vec![(read, path), (read, int)],
@@ -1841,34 +1904,611 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TestComparison".to_string()))],
             Some(Type::String),
         )),
-        ("core.math", "sqrt" | "floor" | "ceil") => {
+        ("core.math", "abs_float" | "log1p") => {
+            Some((vec![(read, float.clone())], Some(float)))
+        }
+        ("core.math", "min_float" | "max_float" | "midpoint") => Some((
+            vec![(read, float.clone()), (read, float.clone())],
+            Some(float),
+        )),
+        ("core.math", "clamp_float") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+            ],
+            Some(float),
+        )),
+        ("core.math", "hypot3") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+            ],
+            Some(float),
+        )),
+        ("core.math", "tau_const" | "random") => Some((vec![], Some(float.clone()))),
+        ("core.math", "gcd_many" | "lcm_many" | "sum_int" | "prod_int") => Some((
+            vec![(read, Type::List(Box::new(int.clone())))],
+            Some(int.clone()),
+        )),
+        ("core.math", "powmod") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(Type::Option(Box::new(int.clone()))),
+        )),
+        ("core.math", "abs_diff" | "xor") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(int.clone()),
+        )),
+        ("core.math", "even" | "odd") => {
+            Some((vec![(read, int.clone())], Some(Type::Bool)))
+        }
+        ("core.math", "in_range") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.math", "sqrt" | "floor" | "ceil" | "fabs" | "expm1") => {
             Some((vec![(read, float.clone())], Some(float)))
         }
         ("core.math", "pow") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
-        ("core.math", "round") => Some((vec![(read, Type::Float)], Some(Type::Int))),
-        ("core.math.random", "int") => {
+        ("core.math", "fmod" | "remainder") => Some((
+            vec![(read, float.clone()), (read, float.clone())],
+            Some(Type::Float),
+        )),
+        ("core.math", "isclose") => Some((
+            vec![
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.math", "dist") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Float))),
+                (read, Type::List(Box::new(Type::Float))),
+            ],
+            Some(Type::Float),
+        )),
+        (
+            "core.math.combinatorics",
+            "permutations"
+            | "combinations"
+            | "combinations_with_replacement"
+            | "product"
+            | "batched"
+            | "tee"
+            | "windows",
+        ) => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(list_list_int.clone()),
+        )),
+        ("core.math.combinatorics", "cartesian") => Some((
+            vec![(read, list_int.clone()), (read, list_int.clone())],
+            Some(list_list_int.clone()),
+        )),
+        (
+            "core.math.combinatorics",
+            "pairwise" | "groupby" | "powerset",
+        ) => Some((
+            vec![(read, list_int.clone())],
+            Some(list_list_int.clone()),
+        )),
+        ("core.math.combinatorics", "zip_longest") => Some((
+            vec![
+                (read, list_int.clone()),
+                (read, list_int.clone()),
+                (read, int.clone()),
+            ],
+            Some(list_list_int.clone()),
+        )),
+        ("core.math.combinatorics", "flatten" | "starmap") => Some((
+            vec![(read, list_list_int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "chain") => Some((
+            vec![(read, list_int.clone()), (read, list_int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "compress") => Some((
+            vec![(read, list_int.clone()), (read, list_bool.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "drop") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(list_int.clone()),
+        )),
+        (
+            "core.math.combinatorics",
+            "takewhile" | "dropwhile" | "filterfalse",
+        ) => Some((
+            vec![(read, list_int.clone()), (read, bool_.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "islice") => Some((
+            vec![
+                (read, list_int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "unique") => {
+            Some((vec![(read, list_int.clone())], Some(list_int.clone())))
+        }
+        ("core.math.combinatorics", "repeat") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "count_from" | "count") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "cycle") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.math.combinatorics", "accumulate" | "reverse") => {
+            Some((vec![(read, list_int.clone())], Some(list_int.clone())))
+        }
+        (
+            "core.math.combinatorics",
+            "factorial",
+        ) => Some((
+            vec![(read, int.clone())],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        (
+            "core.math.combinatorics",
+            "binomial"
+            | "permutations_count"
+            | "combinations_count"
+            | "npr"
+            | "ncr"
+            | "falling_factorial"
+            | "rising_factorial",
+        ) => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.math.combinatorics", "multinomial") => Some((
+            vec![(read, Type::List(Box::new(Type::Int)))],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.collections", "heapify") => Some((
+            vec![(read, list_int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.collections", "heappush") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.collections", "heappop") => Some((
+            vec![(read, list_int.clone())],
+            Some(Type::Tuple(vec![
+                ("heap".to_string(), Box::new(list_int.clone())),
+                (
+                    "value".to_string(),
+                    Box::new(Type::Option(Box::new(Type::Int))),
+                ),
+            ])),
+        )),
+        ("core.collections", "heappushpop") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(Type::Tuple(vec![
+                ("heap".to_string(), Box::new(list_int.clone())),
+                ("value".to_string(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.collections", "heapreplace") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(Type::Tuple(vec![
+                ("heap".to_string(), Box::new(list_int.clone())),
+                (
+                    "value".to_string(),
+                    Box::new(Type::Option(Box::new(Type::Int))),
+                ),
+            ])),
+        )),
+        ("core.collections", "bisect_left" | "bisect_right") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(Type::Int),
+        )),
+        ("core.collections", "insort_left" | "insort_right") => Some((
+            vec![(read, list_int.clone()), (read, int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.collections", "merge_sorted") => Some((
+            vec![(read, list_int.clone()), (read, list_int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.collections", "nsmallest" | "nlargest") => Some((
+            vec![(read, int.clone()), (read, list_int.clone())],
+            Some(list_int.clone()),
+        )),
+        ("core.collections", "counter") => Some((vec![], Some(counter.clone()))),
+        ("core.collections", "counter_from") => Some((
+            vec![(read, list_string.clone())],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "add" | "set_count") => Some((
+            vec![
+                (read, counter.clone()),
+                (read, Type::String),
+                (read, int.clone()),
+            ],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "inc" | "dec") => Some((
+            vec![(read, counter.clone()), (read, Type::String)],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "get") => Some((
+            vec![(read, counter.clone()), (read, Type::String)],
+            Some(int.clone()),
+        )),
+        ("core.collections", "total") => Some((
+            vec![(read, counter.clone())],
+            Some(int.clone()),
+        )),
+        ("core.collections", "names" | "elements") => Some((
+            vec![(read, counter.clone())],
+            Some(list_string.clone()),
+        )),
+        ("core.collections", "most_common") => Some((
+            vec![(read, counter.clone()), (read, int.clone())],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "subtract" | "merge_add") => Some((
+            vec![(read, counter.clone()), (read, counter.clone())],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "clear_counter") => Some((
+            vec![(read, counter.clone())],
+            Some(counter.clone()),
+        )),
+        ("core.collections", "deque") => Some((vec![], Some(deque.clone()))),
+        ("core.collections", "deque_from") => Some((
+            vec![(read, list_string.clone())],
+            Some(deque.clone()),
+        )),
+        ("core.collections", "deque_len") => Some((
+            vec![(read, deque.clone())],
+            Some(int.clone()),
+        )),
+        ("core.collections", "deque_is_empty") => Some((
+            vec![(read, deque.clone())],
+            Some(bool_.clone()),
+        )),
+        ("core.collections", "append" | "appendleft") => Some((
+            vec![(read, deque.clone()), (read, Type::String)],
+            Some(deque.clone()),
+        )),
+        ("core.collections", "pop" | "popleft") => Some((
+            vec![(read, deque.clone())],
+            Some(Type::Tuple(vec![
+                ("deque".to_string(), Box::new(deque.clone())),
+                (
+                    "value".to_string(),
+                    Box::new(Type::Option(Box::new(Type::String))),
+                ),
+            ])),
+        )),
+        ("core.collections", "peek" | "peekleft") => Some((
+            vec![(read, deque.clone())],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.collections", "extend" | "extendleft") => Some((
+            vec![(read, deque.clone()), (read, list_string.clone())],
+            Some(deque.clone()),
+        )),
+        ("core.collections", "rotate") => Some((
+            vec![(read, deque.clone()), (read, int.clone())],
+            Some(deque.clone()),
+        )),
+        ("core.collections", "deque_items") => Some((
+            vec![(read, deque.clone())],
+            Some(list_string.clone()),
+        )),
+        ("core.collections", "ordered_map") => {
+            Some((vec![], Some(ordered_map.clone())))
+        }
+        ("core.collections", "map_get") => Some((
+            vec![(read, ordered_map.clone()), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.collections", "map_set") => Some((
+            vec![
+                (read, ordered_map.clone()),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(ordered_map.clone()),
+        )),
+        ("core.collections", "map_remove") => Some((
+            vec![(read, ordered_map.clone()), (read, Type::String)],
+            Some(ordered_map.clone()),
+        )),
+        ("core.collections", "map_keys" | "map_values") => Some((
+            vec![(read, ordered_map.clone())],
+            Some(list_string.clone()),
+        )),
+        ("core.collections", "map_contains") => Some((
+            vec![(read, ordered_map.clone()), (read, Type::String)],
+            Some(bool_.clone()),
+        )),
+        ("core.collections", "map_len") => Some((
+            vec![(read, ordered_map.clone())],
+            Some(int.clone()),
+        )),
+        ("core.collections", "chain") => Some((vec![], Some(chain.clone()))),
+        ("core.collections", "chain_push") => Some((
+            vec![
+                (read, chain.clone()),
+                (read, list_string.clone()),
+                (read, list_string.clone()),
+            ],
+            Some(chain.clone()),
+        )),
+        ("core.collections", "chain_get") => Some((
+            vec![(read, chain.clone()), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.collections", "chain_contains") => Some((
+            vec![(read, chain.clone()), (read, Type::String)],
+            Some(bool_.clone()),
+        )),
+        ("core.collections.set", "new") => Some((vec![], Some(string_set.clone()))),
+        ("core.collections.set", "from_list") => Some((
+            vec![(read, list_string.clone())],
+            Some(string_set.clone()),
+        )),
+        ("core.collections.set", "add" | "discard") => Some((
+            vec![(read, string_set.clone()), (read, Type::String)],
+            Some(string_set.clone()),
+        )),
+        ("core.collections.set", "remove") => Some((
+            vec![(read, string_set.clone()), (read, Type::String)],
+            Some(Type::Option(Box::new(string_set.clone()))),
+        )),
+        ("core.collections.set", "contains") => Some((
+            vec![(read, string_set.clone()), (read, Type::String)],
+            Some(bool_.clone()),
+        )),
+        ("core.collections.set", "len" | "is_empty") => Some((
+            vec![(read, string_set.clone())],
+            Some(if name == "len" {
+                int.clone()
+            } else {
+                bool_.clone()
+            }),
+        )),
+        ("core.collections.set", "to_list") => Some((
+            vec![(read, string_set.clone())],
+            Some(list_string.clone()),
+        )),
+        ("core.collections.set", "clear" | "clone_set") => Some((
+            vec![(read, string_set.clone())],
+            Some(string_set.clone()),
+        )),
+        (
+            "core.collections.set",
+            "union" | "intersection" | "difference" | "symmetric_difference",
+        ) => Some((
+            vec![(read, string_set.clone()), (read, string_set.clone())],
+            Some(string_set.clone()),
+        )),
+        (
+            "core.collections.set",
+            "issubset" | "issuperset" | "isdisjoint",
+        ) => Some((
+            vec![(read, string_set.clone()), (read, string_set.clone())],
+            Some(bool_.clone()),
+        )),
+        ("core.math", "comb" | "perm") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.math", "isnan" | "isinf" | "isfinite") => {
+            Some((vec![(read, Type::Float)], Some(Type::Bool)))
+        }
+        ("core.math", "fsum") => Some((
+            vec![(read, Type::List(Box::new(Type::Float)))],
+            Some(Type::Float),
+        )),
+        ("core.math", "sumprod") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Float))),
+                (read, Type::List(Box::new(Type::Float))),
+            ],
+            Some(Type::Float),
+        )),
+        ("core.math", "prod") => Some((
+            vec![(read, Type::List(Box::new(Type::Int)))],
+            Some(Type::Int),
+        )),
+        ("core.math.stats", "sum" | "prod") => {
+            Some((vec![(read, list_float.clone())], Some(Type::Float)))
+        }
+        ("core.math.stats", "count") => {
+            Some((vec![(read, list_float.clone())], Some(Type::Int)))
+        }
+        (
+            "core.math.stats",
+            "cumsum" | "cumprod" | "diff" | "rank" | "zscore",
+        ) => Some((vec![(read, list_float.clone())], Some(list_float.clone()))),
+        ("core.math.stats", "moving_average") => Some((
+            vec![(read, list_float.clone()), (read, Type::Int)],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "ewma") => Some((
+            vec![(read, list_float.clone()), (read, Type::Float)],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "clip") => Some((
+            vec![
+                (read, list_float.clone()),
+                (read, Type::Float),
+                (read, Type::Float),
+            ],
+            Some(list_float.clone()),
+        )),
+        (
+            "core.math.stats",
+            "mean"
+            | "fmean"
+            | "geometric_mean"
+            | "harmonic_mean"
+            | "median"
+            | "median_low"
+            | "median_high"
+            | "mode"
+            | "pvariance"
+            | "pstdev"
+            | "variance"
+            | "stdev"
+            | "min"
+            | "max"
+            | "range"
+            | "iqr"
+            | "mad"
+            | "mean_abs_deviation"
+            | "skew"
+            | "kurtosis",
+        ) => Some((
+            vec![(read, list_float.clone())],
+            Some(Type::Option(Box::new(Type::Float))),
+        )),
+        (
+            "core.math.stats",
+            "median_grouped" | "quantile" | "percentile",
+        ) => Some((
+            vec![(read, list_float.clone()), (read, Type::Float)],
+            Some(Type::Option(Box::new(Type::Float))),
+        )),
+        (
+            "core.math.stats",
+            "covariance"
+            | "correlation"
+            | "sumprod"
+            | "weighted_mean"
+            | "spearman"
+            | "pearson"
+            | "covariance_population",
+        ) => Some((
+            vec![(read, list_float.clone()), (read, list_float.clone())],
+            Some(Type::Option(Box::new(Type::Float))),
+        )),
+        ("core.math.stats", "multimode") => {
+            Some((vec![(read, list_float.clone())], Some(list_float.clone())))
+        }
+        ("core.math.stats", "kde" | "winsorize") => Some((
+            vec![(read, list_float.clone()), (read, Type::Float)],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "kde_random") => Some((
+            vec![
+                (read, list_float.clone()),
+                (read, Type::Float),
+                (read, Type::Int),
+            ],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "quantiles") => Some((
+            vec![(read, list_float.clone()), (read, Type::Int)],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "residuals") => Some((
+            vec![(read, list_float.clone()), (read, list_float.clone())],
+            Some(list_float.clone()),
+        )),
+        ("core.math.stats", "histogram") => Some((
+            vec![(read, list_float.clone()), (read, Type::Int)],
+            Some(list_int.clone()),
+        )),
+        ("core.math.random", "int" | "randint") => {
             Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
         }
-        ("core.math.random", "float") => Some((vec![], Some(Type::Float))),
-        ("core.math.random", "float_range") => Some((
+        ("core.math.random", "float" | "random") => Some((vec![], Some(Type::Float))),
+        ("core.math.random", "float_range" | "uniform") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
-        ("core.math.random", "bool") => Some((vec![(read, Type::Float)], Some(Type::Bool))),
-        ("core.math.random", "normal") => Some((
+        ("core.math.random", "bool") => Some((vec![], Some(Type::Bool))),
+        ("core.math.random", "normal" | "normalvariate" | "gauss") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
-        ("core.math.random", "exponential") => Some((vec![(read, Type::Float)], Some(Type::Float))),
+        ("core.math.random", "exponential" | "expovariate") => {
+            Some((vec![(read, Type::Float)], Some(Type::Float)))
+        }
         ("core.math.random", "seed") => Some((vec![(read, Type::Int)], None)),
         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
-        ("core.math.random", "bytes") => {
+        ("core.math.random", "bytes" | "randbytes") => {
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }
+        ("core.math.random", "getrandbits") => {
+            Some((vec![(read, Type::Int)], Some(Type::Int)))
+        }
+        ("core.math.random", "randrange") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.math.random", "choice") => Some((
+            vec![(read, Type::List(Box::new(Type::Int)))],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.math.random", "choices") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Int))),
+                (read, Type::Int),
+            ],
+            Some(Type::List(Box::new(Type::Int))),
+        )),
+        ("core.math.random", "triangular") => Some((
+            vec![
+                (read, Type::Float),
+                (read, Type::Float),
+                (read, Type::Float),
+            ],
+            Some(Type::Float),
+        )),
+        (
+            "core.math.random",
+            "gammavariate"
+                | "betavariate"
+                | "lognormvariate"
+                | "weibullvariate"
+                | "vonmisesvariate",
+        ) => Some((
+            vec![(read, Type::Float), (read, Type::Float)],
+            Some(Type::Float),
+        )),
+        ("core.math.random", "paretovariate") => {
+            Some((vec![(read, Type::Float)], Some(Type::Float)))
+        }
+        ("core.math.random", "binomialvariate") => Some((
+            vec![(read, Type::Int), (read, Type::Float)],
+            Some(Type::Int),
+        )),
         // D-CRYPTO-RNG1=A: fail-closed bytes from the target's tier-1 OS CSPRNG.
         // Edition 2026 keeps the infallible source shape and takes E3001/exit 70
         // on invalid length or provider failure; no weak fallback exists.
@@ -2041,7 +2681,7 @@ fn core_fixed_sig_impl(
         )),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
-        ("core.encoding.json", "parse") => Some((
+        ("core.encoding.json", "parse" | "loads") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), encoding_error_ty())),
         )),
@@ -2049,7 +2689,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), encoding_error_ty())),
         )),
-        ("core.encoding.json", "to_string" | "to_string_pretty") => {
+        ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps") => {
             Some((vec![(read, json)], Some(Type::String)))
         }
         // D-JSONCANON1=A: edition 2026 keeps the infallible prototype; 2027 is
@@ -2099,6 +2739,31 @@ fn core_fixed_sig_impl(
         ("core.encoding.jsonl", "to_string") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
             Some(Type::String),
+        )),
+        ("core.encoding.jsonl", "loads") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(json.clone())),
+                encoding_error_ty(),
+            )),
+        )),
+        ("core.encoding.jsonl", "dumps") => Some((
+            vec![(read, Type::List(Box::new(json.clone())))],
+            Some(Type::String),
+        )),
+        ("core.encoding.jsonl", "count_rows") => {
+            Some((vec![(read, Type::String)], Some(Type::Int)))
+        }
+        ("core.encoding.jsonl", "append_line") => Some((
+            vec![(read, Type::String), (read, json.clone())],
+            Some(Type::String),
+        )),
+        ("core.encoding.jsonl", "first") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(json.clone())),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.jsonl", "reader") => Some((
             vec![
@@ -3027,7 +3692,7 @@ fn core_fixed_sig_impl(
         )),
         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
         // `parse` returns `TOML` (= `Data`); `to_string` takes any encodable value.
-        ("core.encoding.toml", "parse") => Some((
+        ("core.encoding.toml", "parse" | "load" | "loads") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), encoding_error_ty())),
         )),
@@ -3191,6 +3856,57 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(Type::String, Type::String)),
         )),
+        ("core.net.url", "geturl" | "unparse" | "urlunparse" | "urlunsplit") => Some((
+            vec![(read, Type::Named("Url".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net.url", "urljoin") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.net.url", "parse_qsl" | "parse_qs") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::List(Box::new(Type::String))))),
+        )),
+        ("core.net.url", "urlencode") => Some((
+            vec![(
+                read,
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+            )],
+            Some(Type::String),
+        )),
+        ("core.net.url", "split_fragment") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Tuple(vec![
+                ("fragment".to_string(), Box::new(Type::String)),
+                ("url".to_string(), Box::new(Type::String)),
+            ])),
+        )),
+        ("core.net.url", "quote" | "quote_plus") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.net.url", "quote_from_bytes") => {
+            Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::String)))
+        }
+        ("core.net.url", "unquote" | "unquote_plus") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.net.url", "unquote_to_bytes") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("core.net.url", "urlparse" | "urlsplit") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+        )),
+        ("core.net.url", "urldefrag") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Tuple(vec![
+                ("url".to_string(), Box::new(Type::String)),
+                ("fragment".to_string(), Box::new(Type::String)),
+            ])),
+        )),
         ("core.net.mime", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("Mime".to_string()), Type::String)),
@@ -3336,9 +4052,290 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Bool),
         )),
+        ("core.text.parse", "parse_kv") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("ok".to_string(), Box::new(Type::Bool)),
+                ("value".to_string(), Box::new(Type::String)),
+            ])),
+        )),
         ("core.text", "char_indices") => Some((
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.parse", "rsplit") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.parse", "split_once") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Tuple(vec![
+                ("found".to_string(), Box::new(Type::Bool)),
+                ("head".to_string(), Box::new(Type::String)),
+                ("tail".to_string(), Box::new(Type::String)),
+            ])),
+        )),
+        ("core.text.parse", "partition" | "rpartition") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(Type::Tuple(vec![
+                ("head".to_string(), Box::new(Type::String)),
+                ("sep".to_string(), Box::new(Type::String)),
+                ("tail".to_string(), Box::new(Type::String)),
+            ])),
+        )),
+        ("core.text.parse", "split_ws") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.parse", "parse_bool") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::Bool))),
+        )),
+        ("core.text.parse", "parse" | "parse_int") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.text.parse", "parse_int_base") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.text.parse", "parse_float") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::Float))),
+        )),
+        ("core.text.parse", "split") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.parse", "find" | "rfind" | "count" | "index") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Int),
+        )),
+        ("core.text.parse", "replace") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "join") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::String))),
+                (read, Type::String),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "splitlines") => Some((
+            vec![(read, Type::String), (read, Type::Bool)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.parse", "capwords" | "lstrip" | "rstrip" | "strip"
+        | "escape_c" | "unescape_c") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "find_from" | "rfind_from") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(Type::Int),
+        )),
+        ("core.text.parse", "contains") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Bool),
+        )),
+        ("core.text.parse", "capitalize" | "lower" | "swapcase" | "title" | "upper") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "startswith" | "endswith" | "starts_with" | "ends_with"
+        | "removeprefix" | "removesuffix" | "strip_prefix" | "strip_suffix" | "rindex") => {
+            let result = match name {
+                "rindex" => Type::Int,
+                "startswith" | "endswith" | "starts_with" | "ends_with" => Type::Bool,
+                _ => Type::String,
+            };
+            Some((vec![(read, Type::String), (read, Type::String)], Some(result)))
+        }
+        ("core.text.parse", "encode") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.text.parse", "isalpha" | "isdecimal" | "isnumeric" | "isalnum" | "isascii"
+        | "is_digit" | "isdigit" | "is_alnum" | "isidentifier" | "is_identifier"
+        | "islower" | "is_lower" | "isspace" | "is_space" | "istitle" | "is_title"
+        | "isprintable" | "isupper" | "is_upper" | "is_ascii") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.text.parse", "expandtabs") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "center" | "ljust" | "rjust") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.parse", "zfill") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "wrap") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text.wrap", "fill") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "shorten") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "indent") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "dedent") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text.wrap", "expand_tabs") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "html_escape") => Some((
+            vec![(read, Type::String), (read, Type::Bool)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "html_unescape") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text.wrap", "indent_with") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Bool),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "wrap_paragraphs") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.text.wrap", "hanging_indent") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.html", "escape" | "unescape" | "strip_tags"
+        | "unescape_and_strip" | "attr_escape" | "text_escape") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text.html", "escape_quote") => Some((
+            vec![(read, Type::String), (read, Type::Bool)],
+            Some(Type::String),
+        )),
+        ("core.time.calendar", "isleap") => {
+            Some((vec![(read, Type::Int)], Some(Type::Bool)))
+        }
+        ("core.time.calendar", "leapdays") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.time.calendar", "weekday") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.time.calendar", "monthrange") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Tuple(vec![
+                ("days".to_string(), Box::new(Type::Int)),
+                ("weekday".to_string(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.time.calendar", "monthcalendar") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
+        )),
+        ("core.time.calendar", "monthcalendar_start") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
+        )),
+        ("core.time.calendar", "yearcalendar") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::List(Box::new(Type::List(Box::new(
+                Type::List(Box::new(Type::Int)),
+            ))))),
+        )),
+        ("core.time.calendar", "weekheader") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.time.calendar", "formatmonth") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::String),
+        )),
+        ("core.time.calendar", "formatyear") => {
+            Some((vec![(read, Type::Int)], Some(Type::String)))
+        }
+        ("core.time.calendar", "day_name" | "day_abbr" | "month_name" | "month_abbr") => {
+            Some((vec![(read, Type::Int)], Some(Type::String)))
+        }
+        ("core.time.calendar", "timegm") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::Int),
+        )),
+        ("core.time.expiring", "expired") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Bool),
+        )),
+        ("core.time.expiring", "remaining_ms") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
         )),
         // core.log: structured logging, typed fields, spans, sinks.
         ("core.log", "info" | "warn" | "error" | "debug" | "critical" | "fatal") => {
@@ -3781,6 +4778,7 @@ fn core_fixed_sig_impl(
             )),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+        ("core.net", "gethostname") => Some((vec![], Some(Type::String))),
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
@@ -4443,6 +5441,18 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
+        ("core.http", "reason_phrase") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.http", "basic_auth") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.http", "bearer_auth") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
+        )),
         // E2-M10: core.http — HTTP client/server over blocking I/O.
         // GET / HEAD / DELETE requests (no body sent).
         ("core.http", "get") => Some((
@@ -4520,7 +5530,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Bool),
         )),
-        ("core.regex", "full_match") => Some((
+        ("core.regex", "full_match" | "fullmatch") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -4528,7 +5538,7 @@ fn core_fixed_sig_impl(
             Some(Type::Bool),
         )),
         // First match anywhere: `Match?` (none when nothing matches).
-        ("core.regex", "match") => Some((
+        ("core.regex", "match" | "search") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -4543,14 +5553,14 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        ("core.regex", "find_all" | "split") => Some((
+        ("core.regex", "find_all" | "findall" | "split") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.regex", "matches") => Some((
+        ("core.regex", "matches" | "finditer") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -4565,7 +5575,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.regex", "replace" | "replace_first") => Some((
+        ("core.regex", "replace" | "replace_first" | "sub") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -4834,33 +5844,126 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
         )),
+        ("core.encoding.binary", "pack_u8" | "pack_i8" | "pack_u16le" | "pack_u16be"
+            | "pack_u32le" | "pack_u32be" | "pack_u64le" | "pack_u64be") => Some((
+            vec![(read, Type::Int)],
+            Some(list_u8.clone()),
+        )),
+        ("core.encoding.binary", "unpack_u8" | "unpack_u16le" | "unpack_u16be"
+            | "unpack_u32le" | "unpack_u32be" | "unpack_u64le" | "unpack_u64be") => Some((
+            vec![(read, list_u8.clone()), (read, Type::Int)],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.encoding.binary", "sign_extend") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.encoding.binary", "pack_f64le" | "pack_f64be") => Some((
+            vec![(read, Type::Float)],
+            Some(list_u8.clone()),
+        )),
+        ("core.encoding.binary", "unpack_f64le" | "unpack_f64be") => Some((
+            vec![(read, list_u8.clone()), (read, Type::Int)],
+            Some(Type::Option(Box::new(Type::Float))),
+        )),
+        ("core.encoding.binary", "calcsize") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Int, Type::String)),
+        )),
+        ("core.encoding.binary", "pack") => Some((
+            vec![(read, Type::String), (read, Type::List(Box::new(Type::Int)))],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.binary", "unpack") => Some((
+            vec![(read, Type::String), (read, list_u8.clone())],
+            Some(result_ty(Type::List(Box::new(Type::Int)), Type::String)),
+        )),
+        ("core.encoding.binary", "iter_unpack") => Some((
+            vec![(read, Type::String), (read, list_u8.clone())],
+            Some(result_ty(
+                Type::List(Box::new(Type::List(Box::new(Type::Int)))),
+                Type::String,
+            )),
+        )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] !String` (invalid input → Err).
-        ("core.encoding.hex", "encode") => {
+        ("core.encoding.hex", "encode" | "hexlify" | "b2a_hex" | "encode_upper" | "encode_prefixed") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.hex", "decode") => Some((
+        ("core.encoding.hex", "is_hex") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.encoding.hex", "encode_sep") => Some((
+            vec![(read, list_u8.clone()), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.encoding.hex", "dump") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.hex", "decode" | "unhexlify" | "a2b_hex") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
-        ("core.encoding.base64", "encode") => {
+        ("core.encoding.hex", "crc_hqx") => Some((
+            vec![(read, list_u8.clone()), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.encoding.hex", "crc32") => Some((
+            vec![(read, list_u8.clone())],
+            Some(Type::Int),
+        )),
+        ("core.encoding.hex", "b2a_base64") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode") => Some((
+        ("core.encoding.hex", "a2b_base64") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
-        ("core.encoding.base64", "encode_url") => {
+        ("core.encoding.hex", "b2a_qp" | "b2a_uu") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode_url") => Some((
+        ("core.encoding.hex", "a2b_qp" | "a2b_uu") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
-        ("core.encoding.base32", "encode") => {
+        ("core.encoding.base64", "encode" | "b64encode" | "standard_b64encode" | "b32encode" | "b32hexencode" | "a85encode" | "b85encode" | "z85encode" | "encodebytes" | "b2a_base64") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base32", "decode") => Some((
+        ("core.encoding.base64", "b16encode") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.base64", "b16decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base64", "decode" | "b64decode" | "standard_b64decode" | "b32decode" | "b32hexdecode" | "a85decode" | "b85decode" | "z85decode" | "decodebytes" | "a2b_base64") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base64", "encode_url_padded") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.base64", "decode_padded") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base64", "pad" | "unpad") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.encoding.base64", "is_base64") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.encoding.base32", "is_base32") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.encoding.base64", "decode_url" | "urlsafe_b64decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base32", "encode" | "b32encode" | "b32hexencode") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.base32", "decode" | "b32decode" | "b32hexdecode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
@@ -5423,6 +6526,7 @@ pub struct CoreParam {
 pub enum CoreDefault {
     Bool(bool),
     Int(i64),
+    Float(f64),
     String(&'static str),
     EmptyList,
     /// An omitted optional Core handle. The binder inserts the slot; the
@@ -5446,6 +6550,7 @@ impl CoreDefault {
         match self {
             CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
             CoreDefault::Int(value) => crate::AST::Expr::Int(value, span, None, None),
+            CoreDefault::Float(value) => crate::AST::Expr::Float(value, span, false, None),
             CoreDefault::String(value) => {
                 crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
             }
@@ -5658,6 +6763,28 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 optional("limits", ENCODING_LIMITS_DEFAULT),
             ])
         }
+        ("core.encoding.xml", "reader") => Some(vec![
+            required("source"),
+            optional("limits", ENCODING_LIMITS_DEFAULT),
+            optional(
+                "options",
+                CoreDefault::StaticCall {
+                    type_name: "XMLParseOptions",
+                    method: "safe",
+                },
+            ),
+        ]),
+        ("core.encoding.xml", "writer") => Some(vec![
+            required("target"),
+            optional("limits", ENCODING_LIMITS_DEFAULT),
+            optional(
+                "options",
+                CoreDefault::StaticCall {
+                    type_name: "XMLRenderOptions",
+                    method: "safe",
+                },
+            ),
+        ]),
         ("core.encoding.json", "writer") => Some(vec![
             required("target"),
             optional("limits", ENCODING_LIMITS_DEFAULT),
@@ -5690,6 +6817,12 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 zone: crate::AST::ParamZone::LabelOnly,
                 default: None,
             },
+        ]),
+        ("core.math", "isclose") => Some(vec![
+            required_either("a"),
+            required_either("b"),
+            optional("rel_tol", CoreDefault::Float(1.0e-9)),
+            optional("abs_tol", CoreDefault::Float(0.0)),
         ]),
         _ => None,
     }

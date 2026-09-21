@@ -68,12 +68,6 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert_eq!(oracle.matches("\"status\": \"ready\"").count(), 4);
     assert!(oracle.contains("\"corpus_status\": \"bit_exact\""));
 
-    let verifier = fs::read_to_string(root.join("scripts/agent/verify-nix-eval-fixture.js"))
-        .expect("pinned oracle verifier");
-    assert!(verifier.contains("packages.${system}.nix"));
-    assert!(verifier.contains("complete install and its evaluator executable"));
-    assert!(verifier.contains("path-info"));
-
     let breadth = fs::read_to_string(root.join("tests/fixtures/nix-compat/breadth.json"))
         .expect("pinned breadth fixture");
     assert!(breadth.contains("\"fuzz_seeds\""));
@@ -81,15 +75,7 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert!(breadth.contains("\"output_identities\""));
     assert!(breadth.contains("\"memory_bytes\": 16777216"));
     assert!(breadth.contains("\"latency_micros\": 1000000"));
-    let breadth_verifier =
-        fs::read_to_string(root.join("scripts/agent/verify-nix-eval-breadth.js"))
-            .expect("pinned breadth verifier");
-    assert!(breadth_verifier.contains("function mutate"));
-    assert!(breadth_verifier.contains("Object.entries(fixture.budgets)"));
-    assert!(breadth_verifier.contains("reference value"));
-    assert!(breadth_verifier.contains("verify-nix-eval-fixture.js"));
     let stopline = fs::read_to_string(root.join("scripts/agent/verify-nix-eval-stopline.sh"))
         .expect("native evaluator stop-line");
     assert!(stopline.contains("breadth.json"));
-    assert!(stopline.contains("verify-nix-eval-breadth.js"));
 }

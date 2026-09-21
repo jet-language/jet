@@ -1072,9 +1072,10 @@ pub(crate) fn register_generated_declarations(
                         .is_none_or(|qualifier| generated_module_matches(declaration, qualifier))
             })
             .collect::<Vec<_>>();
-        let Some(declaration) = (matches.len() == 1).then_some(matches[0]) else {
+        if matches.len() != 1 {
             continue;
-        };
+        }
+        let declaration = matches[0];
         let anchor = jet_semindex::DefinitionAnchor {
             module_path: declaration.module_path.clone(),
             kind: "function".to_string(),
@@ -1093,14 +1094,18 @@ pub(crate) fn register_generated_declarations(
                     return (index, true, false);
                 };
                 let generated_target = declarations.iter().any(|candidate| {
-                    candidate.name == name.as_str()
-                        && candidate.module_path == target.module_path
-                        && candidate.span == target.def_span.into()
+                    // The artifact/span is the canonical origin. Rebind an
+                    // old or missing semantic key to the declaration key
+                    // selected from this BuildPlan, rather than retaining a
+                    // first-match leaf key.
+                    target.module_path == candidate.module_path
+                        && target.def_span == candidate.span.into()
                 });
-                let known_target = db.defs.iter().any(|definition| {
-                    definition.module_path == target.module_path
-                        && definition.def_span == target.def_span.into()
-                });
+                let known_target = !matches!(target.kind.as_str(), "module" | "import_alias")
+                    && db.defs.iter().any(|definition| {
+                        definition.module_path == target.module_path
+                            && definition.def_span == target.def_span.into()
+                    });
                 (index, generated_target, known_target)
             })
             .collect::<Vec<_>>();
@@ -1139,6 +1144,53 @@ pub(crate) fn generated_declaration_at<'a>(
         declaration.module_path == module_path && declaration.span == span
     })
 }
+/// Resolve a generated definition through the exact checked call-site anchor.
+///
+/// BuildPlan facts are authoritative for generated origins, while the
+/// reference still has to prove the cursor's source path, token span, spelling,
+/// and target artifact/span. No name-only recovery is allowed.
+pub(crate) fn generated_definition_for_reference(
+    db: &SymbolDB,
+    declarations: &[GeneratedDeclarationFact],
+    tokens: &[Token],
+    source_path: &str,
+    offset: usize,
+) -> Option<(String, Span)> {
+    let token = tokens.iter().find(|token| {
+        token.span.start <= offset && offset <= token.span.end
+    })?;
+    let TokKind::Ident(name) = &token.kind else {
+        return None;
+    };
+    let mut selected = None;
+    let mut saw_reference = false;
+    for reference in db.refs.iter().filter(|reference| {
+        reference.module_path == source_path
+            && reference.span == token.span
+            && reference.name == name.as_str()
+    }) {
+        saw_reference = true;
+        let target = reference.target.as_ref()?;
+        let declaration = declarations.iter().find(|declaration| {
+            declaration.name == name.as_str()
+                && declaration.module_path == target.module_path
+                && declaration.span == target.def_span.into()
+                && target
+                    .semantic_identity
+                    .as_deref()
+                    .is_none_or(|identity| identity == declaration.identity)
+        })?;
+        if selected.is_some_and(|existing: &GeneratedDeclarationFact| {
+            existing.identity != declaration.identity
+        }) {
+            return None;
+        }
+        selected = Some(declaration);
+    }
+    saw_reference.then(|| selected.map(|declaration| {
+        (declaration.module_path.clone(), declaration.span)
+    }))?
+}
 
 // ── Go-to-definition ──────────────────────────────────────────────────────────
 
@@ -1150,6 +1202,13 @@ pub(crate) fn compute_definition(
     offset: usize,
 ) -> Option<(String, Span)> {
     let identity = checked_semantic_identity_at(db, tokens, path, offset)?;
+    if let Ok(Some(reference)) = checked_reference_in_span(db, path, offset, offset) {
+        if let Some(target) = reference.target.as_ref() {
+            if checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()) {
+                return Some((target.module_path.clone(), target.def_span.into()));
+            }
+        }
+    }
     let mut definition = None;
     for candidate in db.defs.iter().filter(|candidate| candidate.identity == identity) {
         if definition.is_some_and(|existing: &jet_semindex::SymDef| {

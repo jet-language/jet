@@ -212,6 +212,56 @@ impl<'a> Checker<'a> {
     pub(crate) fn record_current_function_reference(&mut self, name: &str, span: Span) {
         self.record_function_reference(self.module_idx, name, span);
     }
+    /// Resolve a named callback through the same declaration maps sema uses for
+    /// direct and unqualified imported names. The returned key is the canonical
+    /// module-qualified identity consumed by TIR/MIR and artifact publication.
+    fn callback_function_target(&self, name: &str) -> Option<(usize, String)> {
+        if self.funcs.contains_key(name) {
+            return Some((self.module_idx, name.to_string()));
+        }
+        if let Some(scope) = self.inline_module.as_ref() {
+            if let Some(mangled) = self
+                .inline_unqualified
+                .get(&(scope.clone(), name.to_string()))
+            {
+                return Some((self.module_idx, mangled.clone()));
+            }
+            if let Some((function, module)) = self
+                .inline_unqualified_file
+                .get(&(scope.clone(), name.to_string()))
+            {
+                return Some((*module, function.clone()));
+            }
+        }
+        if let Some(mangled) = self.unqualified.get(name) {
+            return Some((self.module_idx, mangled.clone()));
+        }
+        self.unqualified_file
+            .get(name)
+            .map(|(function, module)| (*module, function.clone()))
+    }
+
+    pub(crate) fn callback_function_key(&self, name: &str) -> Option<String> {
+        let (module, function) = self.callback_function_target(name)?;
+        self.name_ledger.semantic_identity(module, &function)
+    }
+
+    pub(crate) fn callback_function_is_safe(&self, name: &str) -> bool {
+        let Some((module, function)) = self.callback_function_target(name) else {
+            return false;
+        };
+        let signature = if module == self.module_idx {
+            self.funcs.get(&function)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(module))
+                .and_then(|module| module.funcs.get(&function))
+        };
+        signature.is_some_and(|signature| {
+            !signature.is_extern && signature.is_foreign_thread_safe
+        })
+    }
+
 
     pub(crate) fn record_const_reference(&mut self, name: &str, span: Span) {
         let target = self

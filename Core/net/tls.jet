@@ -1,0 +1,115 @@
+// core.net.tls — client TLS over the host stack.
+//
+// Certificate stores, ALPN, and identity files are host policy. Read/write
+// loops and UTF-8 conversion are Jet.
+
+pub struct TLSStream { pub fd: Int, pub host: String, pub port: Int }
+pub struct ClientConfig { pub host: String, pub alpn: [String] }
+pub struct ClientIdentity { pub cert: String, pub key: String }
+pub struct RootCertificates { pub path: String }
+pub struct TLSCertificate { pub der: [U8] }
+pub struct TLSPeerIdentity { pub name: String }
+pub enum TLSVersion {
+    TLS12
+    TLS13
+}
+
+pub fn client(host: String, port: Int) -[Net]> TLSStream !IOError {
+    fd :: host_tls_client(host, port)
+    Ok(TLSStream{fd: fd, host: host, port: port})
+}
+
+pub fn read(stream: TLSStream, n: Int) -[Net]> [U8] !IOError { host_tls_read(stream.fd, n) }
+
+pub fn read_text(stream: TLSStream, n: Int) -[Net]> String !IOError {
+    bytes :: read(stream, n)
+    Ok(String.from_bytes(bytes) ?? return Err(IOError{operation: "read", message: "not UTF-8", address: stream.host, name: stream.host, os_code: None}))
+}
+
+pub fn write(stream: TLSStream, bytes: [U8]) -[Net]> Int !IOError { host_tls_write(stream.fd, bytes) }
+
+pub fn write_all(stream: TLSStream, bytes: [U8]) !IOError {
+    off := 0
+    loop off < bytes.len() {
+        chunk := [U8]{}
+        i := off
+        loop {
+            if i >= bytes.len() -> break
+            chunk.push(bytes[i])
+            i = i + 1
+        }
+        n :: write(stream, chunk)
+        if n <= 0 -> return Err(IOError{operation: "write", message: "short write", address: stream.host, name: stream.host, os_code: None})
+        off = off + n
+    }
+    Ok()
+}
+
+pub fn write_text(stream: TLSStream, text: String) !IOError { write_all(stream, text.bytes()) }
+
+pub fn close(stream: TLSStream) !IOError {
+    host_tls_close(stream.fd)
+    Ok()
+}
+
+fn host_tls_client(host: String, port: Int) -[Net]> Int !IOError { panic("host_tls_client") }
+fn host_tls_read(fd: Int, n: Int) -[Net]> [U8] !IOError { panic("host_tls_read") }
+fn host_tls_write(fd: Int, bytes: [U8]) -[Net]> Int !IOError { panic("host_tls_write") }
+fn host_tls_close(fd: Int) -[Net]> panic("host_tls_close")
+
+
+pub fn sni(stream: TLSStream) -> String { stream.host }
+
+pub fn peer_port(stream: TLSStream) -> Int { stream.port }
+
+pub fn unwrap(stream: TLSStream) -[Net]> TcpStream !IOError {
+    fd := stream.fd
+    host := stream.host
+    port := stream.port
+    host_tls_close(fd)
+    TcpStream{fd: fd, host: host, port: port}
+
+pub fn version_name(v: TLSVersion) -> String {
+    if v == TLSVersion.TLS12 -> "TLSv1.2"
+    "TLSv1.3"
+}
+
+pub fn parse_version(name: String) -> ?TLSVersion {
+    if name == {
+        "TLSv1.2" | "1.2" | "tls12" -> Val(TLSVersion.TLS12)
+        "TLSv1.3" | "1.3" | "tls13" -> Val(TLSVersion.TLS13)
+        else -> None
+    }
+}
+
+pub fn is_tls13(v: TLSVersion) -> Bool { v == TLSVersion.TLS13 }
+
+pub fn is_tls12(v: TLSVersion) -> Bool { v == TLSVersion.TLS12 }
+
+pub fn config(host: String) -> ClientConfig { ClientConfig{host: host, alpn: [String]{}} }
+
+pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig {
+    alpn := [String]{}
+    loop p in cfg.alpn -> alpn.push(p)
+    alpn.push(proto)
+    ClientConfig{host: cfg.host, alpn: alpn}
+}
+
+pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig { with_alpn(with_alpn(cfg, "h2"), "http/1.1") }
+
+pub fn identity(cert: String, key: String) -> ClientIdentity { ClientIdentity{cert: cert, key: key} }
+
+pub fn roots(path: String) -> RootCertificates { RootCertificates{path: path} }
+
+pub fn connect_host(cfg: ClientConfig, port: Int) -[Net]> TLSStream !IOError { client(cfg.host, port) }
+
+pub fn flags(cfg: ClientConfig) -> [String] {
+    cfg.alpn
+}
+
+pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool {
+    loop p in cfg.alpn {
+        if p == proto -> return true
+    }
+    false
+}

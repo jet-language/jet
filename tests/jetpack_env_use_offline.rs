@@ -1,4 +1,4 @@
-//! Card #2330: warm env-entry reuse is offline, deterministic, and near-instant.
+//! Cards #2330/#3024: warm env-entry reuse is offline, deterministic, and near-instant.
 
 use std::fs;
 use std::path::Path;
@@ -14,6 +14,8 @@ use jetpack::SHA256;
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
 use jetpack_fixtures::{jetpack, Scratch};
+#[cfg(target_os = "linux")]
+use jetpack_fixtures::jet;
 
 fn write_native_omp_fixture(fixtures: &Path) -> String {
     fs::create_dir_all(fixtures).unwrap();
@@ -28,6 +30,89 @@ fn write_native_omp_fixture(fixtures: &Path) -> String {
     )
     .unwrap();
     digest
+}
+#[cfg(target_os = "linux")]
+fn write_native_pid_fixture(fixtures: &Path) {
+    fs::create_dir_all(fixtures).unwrap();
+    let artifact = fixtures.join("omp-1.0.0");
+    fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' \"$$\"\n").unwrap();
+    let digest = SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+        ),
+    )
+    .unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn warm_jet_entry_execs_tool_without_wrapper_process() {
+    let project = Scratch::new("warm-jet-entry-project");
+    let root = Scratch::new("warm-jet-entry-root");
+    let fixtures = Scratch::new("warm-jet-entry-fixtures");
+    let home = Scratch::new("warm-jet-entry-home");
+    write_native_pid_fixture(&fixtures.path);
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev { packages: [\"omp@releases#1.0.0\"] }\n",
+    )
+    .unwrap();
+
+    let prep = jetpack()
+        .args([
+            "env",
+            "--prep",
+            "--yes",
+            "--trust",
+            "--offline",
+            "--no-color",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        prep.status.success(),
+        "env --prep failed: {}",
+        String::from_utf8_lossy(&prep.stderr)
+    );
+    fs::remove_file(fixtures.path.join("jetpackage-omp.json")).unwrap();
+    fs::remove_file(fixtures.path.join("omp-1.0.0")).unwrap();
+
+    let mut command = jet();
+    command
+        .args(["env", "--trust", "--offline", "--no-color", "--", "omp"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES");
+    let child = command.spawn().unwrap();
+    let pid = child.id();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "warm jet entry failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tool_pid = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .unwrap_or_else(|error| {
+            panic!(
+                "warm entry did not return the selected tool pid: {error}; stdout={:?}; stderr={:?}",
+                output.stdout, output.stderr
+            )
+        });
+    assert_eq!(
+        tool_pid, pid,
+        "warm entry retained a Jet/Jetpack wrapper process"
+    );
 }
 
 #[cfg(target_os = "linux")]

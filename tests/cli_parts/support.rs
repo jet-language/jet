@@ -144,12 +144,12 @@ pub fn scrub(s: &str, file: &Path) -> String {
 
 /// A private cwd for a `jet run`/`build`/`test` subprocess.
 ///
-/// `jet` writes compiled output to `build/<stem>.rs` + `build/<stem>` *relative
-/// to its own cwd* (Source/CmdCompile.rs `bin_path`/`stem`/`build`), keyed only
+/// `jet` writes compiled output to `.jet/build/<stem>.rs` + `.jet/build/<stem>` *relative
+/// to its own cwd* (Source/CmdCompile.rs `bin_path`/`stem`/`.jet/build`), keyed only
 /// by the source file's stem — not its full path. Two concurrent `jet`
 /// processes compiling different files that happen to share a stem (e.g. two
-/// `main.jet` fixtures) race on that shared `build/` path if both inherit the
-/// test harness's cwd (the repo root). Giving each such test its own cwd
+/// `main.jet` fixtures) race on that shared `.jet/build/` path if both inherit
+/// the test harness's cwd (the repo root). Giving each such test its own cwd
 /// removes the shared namespace entirely, regardless of stem.
 pub fn isolated_cwd(tag: &str) -> PathBuf {
     static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -604,7 +604,7 @@ pub fn expand_effects_layout_fixture() -> PathBuf {
 // member and running bare failed too.
 
 /// Recursively copy a directory tree — sandboxes the shipped monorepo
-/// fixture into an isolated cwd so `jet run`'s `build/` output never lands in
+/// fixture into an isolated cwd so `jet run`'s `.jet/build/` output never lands in
 /// the checked-in example and concurrent test runs never collide.
 pub fn copy_dir_all(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();

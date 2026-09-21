@@ -1,0 +1,96 @@
+// core.data.arrow — Apache Arrow batches. IPC is host; projection is Jet.
+pub struct DataArrowBatch {
+    pub columns: [String]
+    pub rows: [[String]]
+}
+
+pub fn import(path: String) -[FS]> DataArrowBatch !IOError {
+    bytes :: host_read_all(path)
+    // Arrow IPC magic "ARROW1" — if missing, treat as CSV-ish TSV.
+    if bytes.len() >= 6 && slice_ascii(bytes, 0, 6) == "ARROW1" -> return host_arrow_ipc(path)
+    text :: String.from_bytes(bytes) ?? return Err(IOError{operation: "arrow", message: "not utf-8", path: path, os_code: None})
+    Ok(parse_tsv(text))
+}
+
+pub fn query(batch: DataArrowBatch, sql: String) -> DataTree {
+    q :: ascii_lower(trim(sql))
+    if starts(q, "select count") -> return Ok(DataTree.Int(batch.rows.len()))
+    items := [DataTree]{}
+    loop r in batch.rows {
+        fields := [DataTree]{}
+        loop c in r -> fields.push(DataTree.Text(c))
+        items.push(DataTree.Array(fields))
+    }
+    Ok(DataTree.Array(items))
+}
+
+fn parse_tsv(text: String) -> DataArrowBatch {
+    lines := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{10}) {
+            lines.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+        } else {
+            if b != (U8{13}) -> cur.push(b)
+        }
+    }
+    if cur.len() > 0 -> lines.push(String.from_bytes(cur) ?? "")
+    cols := [String]{}
+    rows := [[String]]{}
+    if lines.len() == 0 -> return ({columns: cols, rows: rows})
+    cols = split_tab(lines[0])
+    loop i in 1..<lines.len() {
+        if lines[i].len() == 0 -> next
+        rows.push(split_tab(lines[i]))
+    }
+    {columns: cols, rows: rows}
+}
+
+fn split_tab(text: String) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{9}) || b == (U8{44}) {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+        } else { cur.push(b) }
+    }
+    out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn slice_ascii(bytes: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(bytes[i])
+        i = i + 1
+    }
+}
+
+fn trim(text: String) -> String { text }
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn starts(text: String, p: String) -> Bool {
+    a :: text.bytes()
+    b :: p.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn host_read_all(path: String) -[FS]> [U8] !IOError { panic("host_read_all") }
+
+fn host_arrow_ipc(path: String) -[FS]> DataArrowBatch !IOError { panic("host_arrow_ipc") }

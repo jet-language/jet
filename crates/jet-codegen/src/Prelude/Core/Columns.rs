@@ -15,17 +15,17 @@
 /// speed against a layout tuned per struct, and a tuned column can be added
 /// later behind this same read without moving the policy back into an engine.
 ///
-/// The reads take the columns BORROWED (`&[&[C]]`) rather than owned, because a
-/// tier whose values live in its own arena or value enum can hand over column
-/// slices without copying any rows. `JetColumns` below is the owning store for
-/// tiers that hold the columns directly; it delegates to the same free reads, so
-/// there is one gather, not one per owner.
+/// The borrowed helpers below keep the same read contract for tiers that own
+/// column slices elsewhere. `JetColumns` is the owning store for tiers that
+/// hold columns directly, and its methods index those slices in place rather
+/// than materializing a temporary `Vec<&[C]>` per read.
 /// One record's cells pulled out of a column store, in declaration order.
 pub type JetRowCells<C> = Vec<C>;
 
 /// Row count for a borrowed column set. Every column holds the same number of
 /// rows, so column 0 answers for all of them; a zero-field record has no column
 /// and therefore no rows.
+#[inline(always)]
 pub fn jet_columns_rows<C>(columns: &[&[C]]) -> usize {
     match columns.first() {
         Some(column) => column.len(),
@@ -39,19 +39,20 @@ pub fn jet_columns_rows<C>(columns: &[&[C]]) -> usize {
 /// order. Bounds selection and wording come from the shared fixed-list stop, so
 /// `xs[i]` reports identically whether `xs` is stored columnar or
 /// array-of-structs; each tier only maps the returned error onto its own stop.
+#[inline(always)]
 pub fn jet_columns_gather<C: Clone>(
     columns: &[&[C]],
     index: i64,
 ) -> Result<JetRowCells<C>, JetFixedListIndexError> {
-    jet_fixed_list_index(jet_columns_rows(columns), index, |row| {
-        columns.iter().map(|column| column[row].clone()).collect()
-    })
+    let row = jet_fixed_list_index(jet_columns_rows(columns), index, |row| row)?;
+    Ok(columns.iter().map(|column| column[row].clone()).collect())
 }
 
 /// The fused single-field read behind `xs[i].field`: one cell straight out of
 /// that field's column, with no whole-record gather. Same store, same bounds
 /// policy, same error as the whole-record read above — this is the
 /// cache-friendly access the layout exists for.
+#[inline(always)]
 pub fn jet_columns_gather_cell<C: Clone>(
     columns: &[&[C]],
     field: usize,
@@ -59,8 +60,8 @@ pub fn jet_columns_gather_cell<C: Clone>(
 ) -> Result<C, JetFixedListIndexError> {
     // Bounds are the row bounds of the whole store, not of one column, so a
     // fused read on a zero-width record still reports the record's row count.
-    let rows = jet_columns_rows(columns);
-    jet_fixed_list_index(rows, index, |row| columns[field][row].clone())
+    let row = jet_fixed_list_index(jet_columns_rows(columns), index, |row| row)?;
+    Ok(columns[field][row].clone())
 }
 
 /// The owning column store, for a tier that holds the columns itself.
@@ -85,20 +86,35 @@ impl<C> JetColumns<C> {
         self.cols.len()
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.cols.first().map_or(0, Vec::len)
     }
 
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Borrow the columns for the shared reads above.
-    pub fn views(&self) -> Vec<&[C]> {
-        self.cols.iter().map(Vec::as_slice).collect()
+    /// Project one stored cell column into its typed hot-loop representation.
+    ///
+    /// The cell enum is matched once per row here, before an eligible loop
+    /// starts; the loop itself receives the contiguous typed `Vec<T>`.  An
+    /// invalid canonical field index follows `column()`'s empty-column
+    /// fallback rather than introducing a second bounds policy.
+    #[inline]
+    pub fn project<T, F>(&self, field: usize, project: F) -> Vec<T>
+    where
+        F: FnMut(&C) -> T,
+    {
+        self.cols
+            .get(field)
+            .map(|column| column.iter().map(project).collect())
+            .unwrap_or_default()
     }
 
     /// One whole column, for a caller scanning a single field.
+    #[inline(always)]
     pub fn column(&self, field: usize) -> &[C] {
         match self.cols.get(field) {
             Some(column) => column.as_slice(),
@@ -122,22 +138,25 @@ impl<C> JetColumns<C> {
 
 impl<C: Clone> JetColumns<C> {
     /// THE read, for an owning store: one record's cells at `index`.
+    #[inline(always)]
     pub fn gather(&self, index: i64) -> Result<JetRowCells<C>, JetFixedListIndexError> {
-        jet_fixed_list_index(self.len(), index, |row| {
-            self.cols
-                .iter()
-                .map(|column| column[row].clone())
-                .collect()
-        })
+        let row = jet_fixed_list_index(self.len(), index, |row| row)?;
+        Ok(self
+            .cols
+            .iter()
+            .map(|column| column[row].clone())
+            .collect())
     }
 
     /// The fused single-field read, for an owning store.
+    #[inline(always)]
     pub fn gather_cell(
         &self,
         field: usize,
         index: i64,
     ) -> Result<C, JetFixedListIndexError> {
-        jet_fixed_list_index(self.len(), index, |row| self.cols[field][row].clone())
+        let row = jet_fixed_list_index(self.len(), index, |row| row)?;
+        Ok(self.cols[field][row].clone())
     }
 
     /// Every record in row order — the array-of-structs view of the store.
@@ -162,4 +181,47 @@ impl<C: Clone> JetColumns<C> {
         columns
     }
 }
+
+#[cfg(test)]
+mod column_store_tests {
+    use super::JetColumns;
+
+    #[test]
+    fn gather_and_cell_keep_row_order_and_shared_bounds() {
+        let columns = JetColumns::from_rows(
+            2,
+            vec![
+                vec!["x0".to_owned(), "y0".to_owned()],
+                vec!["x1".to_owned(), "y1".to_owned()],
+            ],
+        );
+
+        assert_eq!(
+            columns.column(0),
+            ["x0".to_owned(), "x1".to_owned()].as_slice()
+        );
+        assert_eq!(
+            columns.column(1),
+            ["y0".to_owned(), "y1".to_owned()].as_slice()
+        );
+        assert_eq!(
+            columns.gather(1).expect("row 1 is present"),
+            vec!["x1".to_owned(), "y1".to_owned()]
+        );
+        assert_eq!(
+            columns.gather_cell(1, 0).expect("row 0 is present"),
+            "y0"
+        );
+
+        for index in [-1, 2] {
+            let whole = columns.gather(index).expect_err("row must be rejected");
+            let cell = columns
+                .gather_cell(1, index)
+                .expect_err("cell row must use the same bounds");
+            assert_eq!((whole.index, whole.len), (index, 2));
+            assert_eq!((cell.index, cell.len), (index, 2));
+        }
+    }
+}
+
 

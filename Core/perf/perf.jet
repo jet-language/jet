@@ -1,0 +1,49 @@
+package {
+    name: "core.perf"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Runtime fidelity signal."
+    license: "MIT"
+    outputs: {
+        perf: .Library{ entry: perf }
+    }
+}
+// core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
+// Values outside the unit interval are rejected. The cell is host; clamp
+// and defaulting are Jet.
+pub struct Perf {
+    pub fidelity: Float
+}
+
+pub fn fidelity() -[Env]> Float { host_fidelity() }
+
+pub fn default_fidelity() -> Float { 1.0 }
+
+pub fn override_fidelity(value: Float) {
+    if value < 0.0 || value > 1.0 -> return Err("fidelity must be in 0.0..=1.0")
+    host_set_fidelity(value)
+    Ok()
+}
+
+pub fn reset_fidelity() -[Env]> { host_set_fidelity(1.0) }
+
+fn host_fidelity() -[Env]> Float { panic("host_fidelity") }
+
+fn host_set_fidelity(value: Float) -[Env]> { panic("host_set_fidelity") }
+
+pub fn of(fidelity: Float) -> Perf {
+    v := fidelity
+    if v < 0.0 -> v = 0.0
+    if v > 1.0 -> v = 1.0
+    {fidelity: v}
+}
+
+pub fn is_full(perf: Perf) -> Bool { perf.fidelity >= 1.0 }
+
+pub fn is_low(perf: Perf) -> Bool { perf.fidelity < 0.25 }
+
+pub fn scale(perf: Perf, work: Int) -> Int {
+    n :: Int{(Float{work}) * perf.fidelity}
+    if n < 0 -> return 0
+    n
+}

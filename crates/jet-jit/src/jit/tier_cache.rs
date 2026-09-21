@@ -41,7 +41,9 @@ use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 ///
 /// FORMAT 7 stores the checked MIR function id beside each roster name so a
 /// warm hit reports the same `function_id` rows as the cold run.
-const FORMAT: u32 = 7;
+///
+/// FORMAT 8 stores whether the entry's successful App value must be served.
+const FORMAT: u32 = 8;
 
 thread_local! {
     static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
@@ -104,6 +106,7 @@ enum StoredTarget {
 struct EntryRail {
     returns_result: bool,
     returns_app: bool,
+    serves_app: bool,
     returns_default_err: bool,
     error_is_packed: bool,
     error_name: Option<String>,
@@ -119,6 +122,7 @@ fn capture_rail() -> Option<EntryRail> {
         slot.borrow().as_ref().map(|resident| EntryRail {
             returns_result: resident.main_returns_result,
             returns_app: resident.main_returns_app,
+            serves_app: resident.main_serves_app,
             returns_default_err: resident.main_returns_default_err,
             error_is_packed: resident.main_error_is_packed,
             error_name: resident.main_error_type.clone(),
@@ -471,6 +475,7 @@ fn write_str(out: &mut Vec<u8>, s: &str) {
 fn write_rail(out: &mut Vec<u8>, rail: &EntryRail) {
     out.push(u8::from(rail.returns_result));
     out.push(u8::from(rail.returns_app));
+    out.push(u8::from(rail.serves_app));
     out.push(u8::from(rail.returns_default_err));
     out.push(u8::from(rail.error_is_packed));
     match &rail.error_name {
@@ -502,6 +507,7 @@ fn read_bool(data: &[u8], i: &mut usize) -> Option<bool> {
 fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
     let returns_result = read_bool(data, i)?;
     let returns_app = read_bool(data, i)?;
+    let serves_app = read_bool(data, i)?;
     let returns_default_err = read_bool(data, i)?;
     let error_is_packed = read_bool(data, i)?;
     let error_name = if read_bool(data, i)? {
@@ -512,6 +518,7 @@ fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
     Some(EntryRail {
         returns_result,
         returns_app,
+        serves_app,
         returns_default_err,
         error_is_packed,
         error_name,
@@ -762,6 +769,7 @@ pub fn run_cached_module(
             // The rail the cold run decided, read back rather than re-derived:
             // a warm run has no TIR program to ask.
             main_returns_result: rail.returns_result,
+            main_serves_app: rail.serves_app,
             main_returns_app: rail.returns_app,
             main_returns_default_err: rail.returns_default_err,
             main_error_type: rail.error_name,

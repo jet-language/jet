@@ -3,7 +3,6 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Browser, Exec, IO, Mem.Alloc] } }
 }
-
 // One flat typed Style feeds the canonical UiNode paint pipeline directly.
 // Lengths use Jet's existing unit-family mechanism; there is no parallel View.
 use core.ui as ui
@@ -16,7 +15,9 @@ struct Style {
     height: Px
 }
 
-fn styled_text(text: String, style: Style) UiNode -> ui.node_color(text, style.width.raw(), style.height.raw(), style.color)
+fn styled_text(text: String, style: Style) -> UiNode {
+    ui.node_color(text, style.width.raw(), style.height.raw(), style.color)
+}
 
 fn run() {
     red :: Style{color: "#dc143c", width: 10px, height: 4px}

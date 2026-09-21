@@ -215,3 +215,11 @@ fn run() {
         );
     }
 }
+
+/// Card #2872: the modulo/division-heavy ring recurrence keeps exact values
+/// across the AOT, resident, and interpreter tiers.
+#[test]
+fn integer_ring_modulo_and_division_preserve_tier_output() {
+    let source = include_str!("int_ring_witness.jet");
+    assert_tiers_agree("int_ring_mod_div", source, "613081333\n");
+}

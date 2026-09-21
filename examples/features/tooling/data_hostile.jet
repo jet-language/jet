@@ -1,3 +1,9 @@
+package {
+    name: "tooling_data_hostile"
+    version: "0.1.0"
+    authority: { holds: { allow: [FS, IO, Mem.Alloc, Panic] } }
+}
+
 // #709 / #237 C4 / #706: hostile typed-data corpus — typed DataError or safe behavior.
 use core.data as data
 use core.files as files
@@ -21,22 +27,19 @@ struct Event {
     latency_ms: Float
 }
 
-fn no_float() ?Float -> None
+fn no_float() -> ?Float { None }
 
 fn run() {
     // Empty analytics → typed Empty errors.
-    empty_mean :: data.mean([Float]{})
-    if empty_mean == {
+    if data.mean([Float]{}) == {
         .Ok(_) -> { print("empty_mean: ok") }
         .Err(error) -> { print("empty_mean: {error}") }
     }
-    empty_q :: data.quantile([Float]{}, 0.5)
-    if empty_q == {
+    if data.quantile([Float]{}, 0.5) == {
         .Ok(_) -> { print("empty_quantile: ok") }
         .Err(error) -> { print("empty_quantile: {error}") }
     }
-    empty_var :: data.variance([Float]{})
-    if empty_var == {
+    if data.variance([Float]{}) == {
         .Ok(_) -> { print("empty_variance: ok") }
         .Err(error) -> { print("empty_variance: {error}") }
     }
@@ -66,13 +69,11 @@ fn run() {
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
 
     // Extreme / non-finite numerics fail closed.
-    nan_mean :: data.mean([Float]{1.0, Float.NAN, 3.0})
-    if nan_mean == {
+    if data.mean([Float]{1.0, Float.NAN, 3.0}) == {
         .Ok(_) -> { print("nan_mean: ok") }
         .Err(error) -> { print("nan_mean: {error}") }
     }
-    inf_sum :: data.sum([Float]{1.0, Float.INFINITY})
-    if inf_sum == {
+    if data.sum([Float]{1.0, Float.INFINITY}) == {
         .Ok(_) -> { print("inf_sum: ok") }
         .Err(error) -> { print("inf_sum: {error}") }
     }
@@ -97,13 +98,11 @@ fn run() {
     print("one_variance: {one_var}")
 
     // Invalid quantile domain and rolling width.
-    bad_q :: data.quantile([Float]{1.0, 2.0, 3.0}, 1.5)
-    if bad_q == {
+    if data.quantile([Float]{1.0, 2.0, 3.0}, 1.5) == {
         .Ok(_) -> { print("bad_quantile: ok") }
         .Err(error) -> { print("bad_quantile: {error}") }
     }
-    bad_w :: data.rolling_mean([1.0, 2.0, 3.0], 0)
-    if bad_w == {
+    if data.rolling_mean([1.0, 2.0, 3.0], 0) == {
         .Ok(_) -> { print("bad_window: ok") }
         .Err(error) -> { print("bad_window: {error}") }
     }
@@ -128,12 +127,11 @@ fn run() {
     input :: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
-    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
-    groups :: data.query(reader)
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+    if data.query(reader)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)
-        .collect()
-    if groups == {
+        .collect() == {
         .Ok(_) -> print("large_limit: ok")
         .Err(error) -> print("large_limit: {error}")
     }

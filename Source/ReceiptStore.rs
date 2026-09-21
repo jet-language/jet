@@ -36,9 +36,39 @@ use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::LazyLock;
+
+const OPTIONAL_HISTORY_QUEUE_CAPACITY: usize = 8;
+const OPTIONAL_RECEIPT_HELPER_ARG: &str = "__jet_receipt_persist";
+const OPTIONAL_RECEIPT_JOB_MAGIC: &[u8] = b"jet-optional-receipt-job-v1\0";
+const OPTIONAL_RECEIPT_JOB_MAX_BYTES: u64 = MAX_RECEIPT_BYTES + 8 * 1024 * 1024;
+const OPTIONAL_RECEIPT_JOB_MAX_ARGS: u64 = 4096;
+const OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES: usize = 4096;
+const OPTIONAL_RECEIPT_JOB_DIR: &str = ".pending";
+type OptionalHistoryJob = (String, Box<dyn FnOnce() + Send + 'static>);
+static OPTIONAL_HISTORY_QUEUE: LazyLock<Option<SyncSender<OptionalHistoryJob>>> =
+    LazyLock::new(|| {
+        let (sender, receiver): (
+            SyncSender<OptionalHistoryJob>,
+            mpsc::Receiver<OptionalHistoryJob>,
+        ) = mpsc::sync_channel(OPTIONAL_HISTORY_QUEUE_CAPACITY);
+        let worker = std::thread::Builder::new()
+            .name("jet-optional-history".into())
+            .spawn(move || {
+                while let Ok((operation, job)) = receiver.recv() {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                        optional_history_notice(
+                            &operation,
+                            "optional history worker failed while persisting this result",
+                        );
+                    }
+                }
+            });
+        worker.ok().map(|_| sender)
+    });
 const RECEIPT_LINK_WIRE_MAGIC: &[u8] = b"jet-receipt-links-v1\0";
 const RECEIPT_LINK_VERSION: u64 = 1;
 const MAX_RECEIPT_LINKS: u64 = 100_000;
@@ -80,6 +110,20 @@ pub struct ReceiptClaim {
     pub key: String,
     pub inputs: Vec<ReceiptInput>,
 }
+
+#[derive(Clone, Debug)]
+struct OptionalReceiptJob {
+    project_root: PathBuf,
+    cwd: PathBuf,
+    context_key: String,
+    claim: ReceiptClaim,
+    argv: Vec<String>,
+    status: i32,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Receipt {
@@ -529,19 +573,16 @@ impl ReceiptStore {
         Ok(Some(receipt))
     }
 
-    /// Publish the latest claim for one invocation. This index is advisory:
-    /// a torn, stale, or forged pointer can only cause a cache miss.
-    fn remember_context(
+
+    fn remember_context_key(
         &self,
-        verb: &str,
-        argv: &[String],
+        context_key: &str,
         claim: &ReceiptClaim,
     ) -> Result<(), String> {
-        if claim.verb != verb || !is_digest(&claim.key) {
+        if !is_digest(context_key) || claim.verb.is_empty() || !is_digest(&claim.key) {
             return Err("receipt context claim is malformed".into());
         }
-        let context_key = self.context_key(verb, argv)?;
-        let path = self.context_path(&context_key);
+        let path = self.context_path(context_key);
         let parent = path
             .parent()
             .ok_or_else(|| "receipt context path has no parent".to_string())?;
@@ -1209,6 +1250,679 @@ pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> 
         .collect()
 }
 
+pub fn optional_history_notice(operation: &str, error: &str) {
+    let lower = error.to_ascii_lowercase();
+    let fix = if lower.contains("permission") || lower.contains("access denied") {
+        "check `.jet` history permissions"
+    } else if lower.contains("no space")
+        || lower.contains("disk full")
+        || lower.contains("quota")
+    {
+        "free `.jet` history storage or raise its quota"
+    } else if lower.contains("queue") || lower.contains("worker") {
+        "retry after optional history drains or repair `.jet` history storage"
+    } else if lower.contains("budget") || lower.contains("exceeds") {
+        "raise the history byte budget or remove disposable history"
+    } else {
+        "check `.jet` history storage and retry"
+    };
+    eprintln!("history: optional persistence failed while {operation}: {error}; fix: {fix}");
+}
+
+fn optional_receipt_project_root(store_root: &Path) -> Result<PathBuf, String> {
+    if !store_root.is_absolute() {
+        return Err("optional receipt store root must be absolute".into());
+    }
+    if store_root.file_name().and_then(|name| name.to_str()) != Some("receipts") {
+        return Err("optional receipt store is not the canonical `.jet/receipts` root".into());
+    }
+    let jet_root = store_root
+        .parent()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some(".jet"))
+        .ok_or_else(|| "optional receipt store is not under `.jet`".to_string())?;
+    let project_root = fs::canonicalize(
+        jet_root
+            .parent()
+            .ok_or_else(|| "optional receipt store has no project root".to_string())?,
+    )
+    .map_err(|error| format!("could not canonicalize optional receipt project root: {error}"))?;
+    let selected = crate::Loader::selected_project_root(&project_root)
+        .map_err(|diagnostic| format!("could not validate optional receipt project root: {diagnostic:?}"))?;
+    if selected != project_root {
+        return Err(format!(
+            "optional receipt root is not the selected project root: {}",
+            project_root.display()
+        ));
+    }
+    let jet_dir = project_root.join(".jet");
+    let expected = jet_dir.join("receipts");
+    let root_metadata = fs::symlink_metadata(&project_root)
+        .map_err(|error| format!("could not inspect optional receipt project root: {error}"))?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err("optional receipt project root is not a real directory".into());
+    }
+    match fs::symlink_metadata(&jet_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err("optional `.jet` directory is not a real directory".into());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("could not inspect optional `.jet` directory: {error}")),
+    }
+    if store_root != expected {
+        return Err(format!(
+            "optional receipt store must be `{}`",
+            expected.display()
+        ));
+    }
+    Ok(project_root)
+}
+
+fn optional_receipt_job_directory(store_root: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let project_root = optional_receipt_project_root(store_root)?;
+    let receipts = project_root.join(".jet").join("receipts");
+    secure_create_dir(&receipts)?;
+    let pending = receipts.join(OPTIONAL_RECEIPT_JOB_DIR);
+    secure_create_dir(&pending)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = fs::symlink_metadata(&pending)
+            .map_err(|error| format!("could not inspect optional receipt queue: {error}"))?;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            fs::set_permissions(&pending, fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("could not secure optional receipt queue: {error}"))?;
+        }
+    }
+    Ok((project_root, pending))
+}
+
+fn stage_optional_receipt_job(job: &OptionalReceiptJob) -> Result<PathBuf, String> {
+    let (project_root, pending) = optional_receipt_job_directory(
+        &job.project_root.join(".jet").join("receipts"),
+    )?;
+    if project_root != job.project_root {
+        return Err("optional receipt job project root changed before staging".into());
+    }
+    let bytes = encode_optional_receipt_job(job)?;
+    let path = pending.join(format!(
+        ".job-{}-{}",
+        std::process::id(),
+        NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| format!("could not stage optional receipt job: {error}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|error| format!("could not secure optional receipt job: {error}"))?;
+        }
+        // This is deliberately a disposable handoff: the trusted helper
+        // validates and consumes it after the parent exits, so no fsync or
+        // saved-record claim is taken on the optional path.
+        file.write_all(&bytes)
+            .map_err(|error| format!("could not write optional receipt job: {error}"))?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_file(&path);
+        return Err(error);
+    }
+    Ok(path)
+}
+fn spawn_optional_receipt_helper(job: &OptionalReceiptJob) -> Result<(), String> {
+    let path = stage_optional_receipt_job(job)?;
+    let result = (|| -> Result<(), String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("could not locate the Jet executable: {error}"))
+            .and_then(|path| {
+                fs::canonicalize(path)
+                    .map_err(|error| format!("could not canonicalize the Jet executable: {error}"))
+            })?;
+        let metadata = fs::symlink_metadata(&executable)
+            .map_err(|error| format!("could not inspect the Jet executable: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("the current Jet executable is not a regular file".into());
+        }
+        let path = path
+            .to_str()
+            .ok_or_else(|| "optional receipt job path is not UTF-8".to_string())?;
+        Command::new(executable)
+            .current_dir(&job.cwd)
+            .arg(OPTIONAL_RECEIPT_HELPER_ARG)
+            .arg(path)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("could not start optional receipt helper: {error}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result
+}
+
+fn read_optional_receipt_job(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect optional receipt job: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("optional receipt job is not a regular file".into());
+    }
+    if metadata.len() > limit {
+        return Err("optional receipt job exceeds its size limit".into());
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| format!("could not open optional receipt job: {error}"))?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read optional receipt job: {error}"))?;
+    if bytes.len() as u64 > limit {
+        return Err("optional receipt job exceeds its size limit".into());
+    }
+    Ok(bytes)
+}
+
+fn discard_optional_receipt_job(path: &Path) {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let Some(pending) = path.parent() else {
+        return;
+    };
+    let Some(receipts) = pending.parent() else {
+        return;
+    };
+    let Some(jet_root) = receipts.parent() else {
+        return;
+    };
+    if !path.is_absolute()
+        || !file_name.starts_with(".job-")
+        || pending.file_name().and_then(|name| name.to_str()) != Some(OPTIONAL_RECEIPT_JOB_DIR)
+        || receipts.file_name().and_then(|name| name.to_str()) != Some("receipts")
+        || jet_root.file_name().and_then(|name| name.to_str()) != Some(".jet")
+    {
+        return;
+    }
+    let Some(project_root) = jet_root.parent() else {
+        return;
+    };
+    for directory in [project_root, jet_root, receipts, pending] {
+        let Ok(metadata) = fs::symlink_metadata(directory) else {
+            return;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return;
+        }
+    }
+    if let Err(error) = fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            optional_history_notice("removing an invalid optional receipt job", &error.to_string());
+        }
+    }
+}
+
+fn validate_optional_receipt_job_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err("optional receipt job path must be absolute".into());
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "optional receipt job has no UTF-8 filename".to_string())?;
+    if !file_name.starts_with(".job-") {
+        return Err("optional receipt job filename is not in the disposable namespace".into());
+    }
+    let pending = path
+        .parent()
+        .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some(OPTIONAL_RECEIPT_JOB_DIR))
+        .ok_or_else(|| "optional receipt job is outside the disposable queue".to_string())?;
+    let receipts = pending
+        .parent()
+        .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some("receipts"))
+        .ok_or_else(|| "optional receipt job is outside `.jet/receipts`".to_string())?;
+    let jet_root = receipts
+        .parent()
+        .filter(|parent| parent.file_name().and_then(|name| name.to_str()) == Some(".jet"))
+        .ok_or_else(|| "optional receipt job is outside `.jet`".to_string())?;
+    let project_root = fs::canonicalize(
+        jet_root
+            .parent()
+            .ok_or_else(|| "optional receipt job has no project root".to_string())?,
+    )
+    .map_err(|error| format!("could not canonicalize optional receipt job root: {error}"))?;
+    let selected = crate::Loader::selected_project_root(&project_root)
+        .map_err(|diagnostic| format!("could not validate optional receipt job root: {diagnostic:?}"))?;
+    if selected != project_root {
+        return Err("optional receipt job root is not the selected project root".into());
+    }
+    let expected = project_root
+        .join(".jet")
+        .join("receipts")
+        .join(OPTIONAL_RECEIPT_JOB_DIR)
+        .join(file_name);
+    if path != expected {
+        return Err("optional receipt job path is not canonical".into());
+    }
+    let jet_dir = project_root.join(".jet");
+    let receipts_dir = jet_dir.join("receipts");
+    let pending_dir = receipts_dir.join(OPTIONAL_RECEIPT_JOB_DIR);
+    #[cfg(unix)]
+    let owner = {
+        use std::os::unix::fs::MetadataExt;
+        fs::symlink_metadata(&project_root)
+            .map_err(|error| format!("could not inspect optional receipt project root: {error}"))?
+            .uid()
+    };
+    for directory in [
+        project_root.as_path(),
+        jet_dir.as_path(),
+        receipts_dir.as_path(),
+        pending_dir.as_path(),
+    ] {
+        let metadata = fs::symlink_metadata(directory)
+            .map_err(|error| format!("could not inspect optional receipt job directory: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("optional receipt job directory is not a real directory".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            if metadata.uid() != owner {
+                return Err("optional receipt job directory ownership does not match its project".into());
+            }
+            if directory == pending_dir.as_path() && metadata.permissions().mode() & 0o077 != 0 {
+                return Err("optional receipt job queue permissions are too broad".into());
+            }
+        }
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect optional receipt job: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("optional receipt job is not a regular file".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.uid() != owner {
+            return Err("optional receipt job ownership does not match its project".into());
+        }
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err("optional receipt job permissions are too broad".into());
+        }
+    }
+    if metadata.len() > OPTIONAL_RECEIPT_JOB_MAX_BYTES {
+        return Err("optional receipt job exceeds its size limit".into());
+    }
+    Ok(project_root)
+}
+
+/// Consume one staged outer-receipt job. This is only reached through the
+/// private parent-spawned helper mode; malformed or hostile jobs are discarded
+/// without dispatching any user command.
+#[doc(hidden)]
+pub fn run_optional_receipt_helper(args: &[String]) -> i32 {
+    let Some(path) = args.first().map(PathBuf::from) else {
+        optional_history_notice("consuming an optional receipt job", "missing staged job path");
+        return 0;
+    };
+    if args.len() != 1 {
+        optional_history_notice("consuming an optional receipt job", "unexpected helper arguments");
+        discard_optional_receipt_job(&path);
+        return 0;
+    }
+    let project_root = match validate_optional_receipt_job_path(&path) {
+        Ok(root) => root,
+        Err(error) => {
+            optional_history_notice("consuming an optional receipt job", &error);
+            discard_optional_receipt_job(&path);
+            return 0;
+        }
+    };
+    let result = (|| -> Result<(), String> {
+        let bytes = read_optional_receipt_job(&path, OPTIONAL_RECEIPT_JOB_MAX_BYTES)?;
+        let job = decode_optional_receipt_job(&bytes, &project_root)?;
+        if job.project_root != project_root {
+            return Err("optional receipt job project root does not match its canonical path".into());
+        }
+        let cwd = fs::canonicalize(&job.cwd)
+            .map_err(|error| format!("could not canonicalize optional receipt working directory: {error}"))?;
+        if cwd != job.cwd || !cwd.starts_with(&project_root) || !cwd.is_dir() {
+            return Err("optional receipt working directory is not a canonical project directory".into());
+        }
+        let store = ReceiptStore::new(project_root.join(".jet").join("receipts"));
+        persist_published_receipt(
+            &store,
+            &job.claim,
+            &job.context_key,
+            &job.argv,
+            job.status,
+            &job.stdout,
+            &job.stderr,
+            &job.cwd,
+        )
+    })();
+    if let Err(error) = result {
+        optional_history_notice("consuming an optional receipt job", &error);
+    }
+    if let Err(error) = fs::remove_file(&path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            optional_history_notice("removing an optional receipt job", &error.to_string());
+        }
+    }
+    0
+}
+fn optional_job_frame(output: &mut Vec<u8>, value: &[u8]) -> Result<(), String> {
+    if value.len() as u64 > MAX_FIELD {
+        return Err("optional receipt job field exceeds the frame limit".into());
+    }
+    let added = 8usize
+        .checked_add(value.len())
+        .ok_or_else(|| "optional receipt job size overflows".to_string())?;
+    let next = output
+        .len()
+        .checked_add(added)
+        .ok_or_else(|| "optional receipt job size overflows".to_string())?;
+    if next as u64 > OPTIONAL_RECEIPT_JOB_MAX_BYTES {
+        return Err("optional receipt job exceeds its size limit".into());
+    }
+    frame(output, value);
+    Ok(())
+}
+
+fn optional_job_text(value: &[u8], field: &str, max_bytes: usize) -> Result<String, String> {
+    if value.is_empty()
+        || value.len() > max_bytes
+        || value.iter().any(|byte| *byte == 0 || byte.is_ascii_control())
+    {
+        return Err(format!("optional receipt job {field} is empty, too large, or unsafe"));
+    }
+    String::from_utf8(value.to_vec())
+        .map_err(|_| format!("optional receipt job {field} is not UTF-8"))
+}
+
+fn optional_job_u64(bytes: &[u8], cursor: &mut usize, field: &str) -> Result<u64, String> {
+    let value = take_frame(bytes, cursor)?;
+    if value.len() != 8 {
+        return Err(format!("optional receipt job {field} is malformed"));
+    }
+    Ok(u64::from_be_bytes(
+        value
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("optional receipt job {field} is malformed"))?,
+    ))
+}
+
+fn redacted_optional_receipt_argv(argv: &[String]) -> Vec<String> {
+    let mut redacted = Vec::with_capacity(argv.len());
+    let mut redact_next = false;
+    for argument in argv {
+        if redact_next {
+            redacted.push(String::from_utf8_lossy(REDACTION_MARKER).into_owned());
+            redact_next = false;
+            continue;
+        }
+        if let Some((name, _)) = argument.split_once('=') {
+            if is_secret_name(name) {
+                redacted.push(format!(
+                    "{name}={}",
+                    String::from_utf8_lossy(REDACTION_MARKER)
+                ));
+                continue;
+            }
+        }
+        redact_next = is_secret_name(argument);
+        redacted.push(argument.clone());
+    }
+    redacted
+}
+
+fn encode_optional_receipt_job(job: &OptionalReceiptJob) -> Result<Vec<u8>, String> {
+    let root = job
+        .project_root
+        .to_str()
+        .ok_or_else(|| "optional receipt job project root is not UTF-8".to_string())?;
+    let cwd = job
+        .cwd
+        .to_str()
+        .ok_or_else(|| "optional receipt job working directory is not UTF-8".to_string())?;
+    if !job.project_root.is_absolute() || !job.cwd.is_absolute() {
+        return Err("optional receipt job paths must be absolute".into());
+    }
+    if !job.cwd.starts_with(&job.project_root) {
+        return Err("optional receipt job working directory is outside its project root".into());
+    }
+    if !is_digest(&job.context_key) || !is_digest(&job.claim.key) || job.claim.verb.is_empty() {
+        return Err("optional receipt job claim is malformed".into());
+    }
+    if participating_verb(&job.argv) != Some(job.claim.verb.as_str())
+        || !cacheable_invocation(&job.claim.verb, &job.argv)
+    {
+        return Err("optional receipt job command is not a cacheable Jet act".into());
+    }
+    if job.claim.inputs.len() as u64 > 100_000 {
+        return Err("optional receipt job has too many inputs".into());
+    }
+    if job.argv.len() as u64 > OPTIONAL_RECEIPT_JOB_MAX_ARGS {
+        return Err("optional receipt job has too many arguments".into());
+    }
+    let mut output = OPTIONAL_RECEIPT_JOB_MAGIC.to_vec();
+    optional_job_frame(&mut output, root.as_bytes())?;
+    optional_job_frame(&mut output, cwd.as_bytes())?;
+    optional_job_frame(&mut output, job.context_key.as_bytes())?;
+    optional_job_frame(&mut output, job.claim.verb.as_bytes())?;
+    optional_job_frame(&mut output, job.claim.key.as_bytes())?;
+    optional_job_frame(&mut output, &job.status.to_be_bytes())?;
+    optional_job_frame(&mut output, &(job.claim.inputs.len() as u64).to_be_bytes())?;
+    for input in &job.claim.inputs {
+        let path = input
+            .path
+            .to_str()
+            .ok_or_else(|| "optional receipt job input path is not UTF-8".to_string())?;
+        if path.len() > OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES
+            || !input.path.is_absolute()
+            || !input.path.starts_with(&job.project_root)
+        {
+            return Err("optional receipt job input path is outside its project root".into());
+        }
+        optional_job_frame(&mut output, path.as_bytes())?;
+        if !is_digest(&input.digest) {
+            return Err("optional receipt job input digest is malformed".into());
+        }
+        optional_job_frame(&mut output, input.digest.as_bytes())?;
+    }
+    optional_job_frame(&mut output, &(job.argv.len() as u64).to_be_bytes())?;
+    for argument in &job.argv {
+        if argument.is_empty()
+            || argument.len() > OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES
+            || argument.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+        {
+            return Err("optional receipt job argument is empty, too large, or unsafe".into());
+        }
+        optional_job_frame(&mut output, argument.as_bytes())?;
+    }
+    optional_job_frame(&mut output, &job.stdout)?;
+    optional_job_frame(&mut output, &job.stderr)?;
+    Ok(output)
+}
+
+fn decode_optional_receipt_job(
+    bytes: &[u8],
+    project_root: &Path,
+) -> Result<OptionalReceiptJob, String> {
+    if bytes.len() as u64 > OPTIONAL_RECEIPT_JOB_MAX_BYTES
+        || !bytes.starts_with(OPTIONAL_RECEIPT_JOB_MAGIC)
+    {
+        return Err("optional receipt job schema or size is invalid".into());
+    }
+    let mut cursor = OPTIONAL_RECEIPT_JOB_MAGIC.len();
+    let root = optional_job_text(
+        &take_frame(bytes, &mut cursor)?,
+        "project root",
+        OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES,
+    )?;
+    let expected_root = project_root
+        .to_str()
+        .ok_or_else(|| "canonical optional receipt project root is not UTF-8".to_string())?;
+    if root != expected_root {
+        return Err("optional receipt job project root does not match its path".into());
+    }
+    let cwd = optional_job_text(
+        &take_frame(bytes, &mut cursor)?,
+        "working directory",
+        OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES,
+    )?;
+    let cwd = PathBuf::from(cwd);
+    if !cwd.is_absolute() || !cwd.starts_with(project_root) {
+        return Err("optional receipt job working directory is outside its project root".into());
+    }
+    let context_key = optional_job_text(
+        &take_frame(bytes, &mut cursor)?,
+        "context key",
+        DIGEST_LEN,
+    )?;
+    if !is_digest(&context_key) {
+        return Err("optional receipt job context key is malformed".into());
+    }
+    let verb = optional_job_text(
+        &take_frame(bytes, &mut cursor)?,
+        "verb",
+        OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES,
+    )?;
+    let key = optional_job_text(
+        &take_frame(bytes, &mut cursor)?,
+        "claim key",
+        DIGEST_LEN,
+    )?;
+    let status_bytes = take_frame(bytes, &mut cursor)?;
+    if status_bytes.len() != 4 {
+        return Err("optional receipt job status is malformed".into());
+    }
+    let status = i32::from_be_bytes(
+        status_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| "optional receipt job status is malformed".to_string())?,
+    );
+    let input_count = optional_job_u64(bytes, &mut cursor, "input count")?;
+    if input_count > 100_000 {
+        return Err("optional receipt job has too many inputs".into());
+    }
+    let mut inputs = Vec::with_capacity(input_count as usize);
+    for _ in 0..input_count {
+        let path = optional_job_text(
+            &take_frame(bytes, &mut cursor)?,
+            "input path",
+            OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES,
+        )?;
+        let path = PathBuf::from(path);
+        if !path.is_absolute() || !path.starts_with(project_root) {
+            return Err("optional receipt job input path is outside its project root".into());
+        }
+        let digest = optional_job_text(
+            &take_frame(bytes, &mut cursor)?,
+            "input digest",
+            DIGEST_LEN,
+        )?;
+        if !is_digest(&digest) {
+            return Err("optional receipt job input digest is malformed".into());
+        }
+        inputs.push(ReceiptInput { path, digest });
+    }
+    let argument_count = optional_job_u64(bytes, &mut cursor, "argument count")?;
+    if argument_count > OPTIONAL_RECEIPT_JOB_MAX_ARGS {
+        return Err("optional receipt job has too many arguments".into());
+    }
+    let mut argv = Vec::with_capacity(argument_count as usize);
+    for _ in 0..argument_count {
+        argv.push(optional_job_text(
+            &take_frame(bytes, &mut cursor)?,
+            "argument",
+            OPTIONAL_RECEIPT_JOB_MAX_PATH_BYTES,
+        )?);
+    }
+    let stdout = take_frame(bytes, &mut cursor)?;
+    let stderr = take_frame(bytes, &mut cursor)?;
+    if cursor != bytes.len() {
+        return Err("optional receipt job has trailing bytes".into());
+    }
+    let claim = ReceiptClaim {
+        verb,
+        key,
+        inputs,
+    };
+    if !is_digest(&claim.key)
+        || participating_verb(&argv) != Some(claim.verb.as_str())
+        || !cacheable_invocation(&claim.verb, &argv)
+    {
+        return Err("optional receipt job claim does not match its cacheable act".into());
+    }
+    Ok(OptionalReceiptJob {
+        project_root: project_root.to_path_buf(),
+        cwd,
+        context_key,
+        claim,
+        argv,
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn persist_published_receipt(
+    store: &ReceiptStore,
+    published_claim: &ReceiptClaim,
+    context_key: &str,
+    argv: &[String],
+    status: i32,
+    stdout: &[u8],
+    stderr: &[u8],
+    cwd: &Path,
+) -> Result<(), String> {
+    let published = store.write(published_claim, argv, status, stdout, stderr)?;
+    if !published {
+        return Ok(());
+    }
+    store.adopt_staged_sections(published_claim)?;
+    store.remember_context_key(context_key, published_claim)?;
+    if let Some(receipt) = store.lookup(published_claim)? {
+        index_published_receipt(store, &receipt, argv, cwd)?;
+    }
+    Ok(())
+}
+
+/// Queue one ordinary history write without delaying the command's result.
+/// The queue is intentionally small: a full or unavailable worker drops this
+/// optional job and reports the cause instead of creating an unbounded thread
+/// backlog.
+pub fn enqueue_optional_history(
+    operation: &str,
+    job: impl FnOnce() + Send + 'static,
+) {
+    let Some(sender) = OPTIONAL_HISTORY_QUEUE.as_ref() else {
+        optional_history_notice(operation, "optional history worker is unavailable");
+        return;
+    };
+    match sender.try_send((operation.to_string(), Box::new(job))) {
+        Ok(()) => {}
+        Err(TrySendError::Full((operation, _)))
+        | Err(TrySendError::Disconnected((operation, _))) => {
+            optional_history_notice(&operation, "optional history queue is full or unavailable");
+        }
+    }
+}
+
 /// Run a cacheable CLI act in a child process, then publish its observed
 /// output as one receipt. Returning `Some` means the caller must exit with the
 /// supplied status; `None` leaves the normal dispatcher untouched.
@@ -1223,21 +1937,39 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     if !cacheable_invocation(verb, argv) {
         return None;
     }
-    let cwd = std::env::current_dir().ok()?;
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(error) => {
+            optional_history_notice("resolving receipt working directory", &error.to_string());
+            return None;
+        }
+    };
     let root = receipt_root(verb, argv, &cwd);
     let store = ReceiptStore::new(root);
     match store.lookup_context(verb, argv, &cwd) {
         Ok(Some(receipt)) => {
-            if let Err(error) = index_published_receipt(&store, &receipt, argv, &cwd) {
-                eprintln!("receipt index: {error}");
-            }
+            let store_root = store.root.clone();
+            let receipt_for_index = receipt.clone();
+            let argv_for_index = argv.to_vec();
+            let cwd_for_index = cwd.clone();
+            enqueue_optional_history("indexing a cached receipt", move || {
+                let store = ReceiptStore::new(store_root);
+                if let Err(error) = index_published_receipt(
+                    &store,
+                    &receipt_for_index,
+                    &argv_for_index,
+                    &cwd_for_index,
+                ) {
+                    optional_history_notice("indexing a cached receipt", &error);
+                }
+            });
             let secret_values = receipt_secret_values(argv);
             replay_receipt(verb, &receipt, &secret_values);
             return Some(receipt.status);
         }
         Ok(None) => {}
         Err(error) => {
-            eprintln!("receipt: {error}");
+            optional_history_notice("reading a cached receipt", &error);
             return None;
         }
     }
@@ -1250,12 +1982,18 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     if input_paths.is_empty() && verb != "budget check" {
         return None;
     }
-    let mut claim = store.claim(verb, argv, &input_paths).ok()?;
+    let mut claim = match store.claim(verb, argv, &input_paths) {
+        Ok(claim) => claim,
+        Err(error) => {
+            optional_history_notice("claiming a receipt", &error);
+            return None;
+        }
+    };
     if verb == "prove" {
         let target_inputs_sha256 = match receipt_target_inputs_sha256(&claim, argv, &cwd) {
             Ok(identity) => identity,
             Err(error) => {
-                eprintln!("receipt: {error}");
+                optional_history_notice("resolving receipt identity", &error);
                 return None;
             }
         };
@@ -1281,18 +2019,28 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
                     .unwrap_or_default(),
                 NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
             );
-            claim = store
-                .claim_with_attempt(verb, argv, &filtered_paths, attempt.as_bytes())
-                .ok()?;
+            claim = match store.claim_with_attempt(verb, argv, &filtered_paths, attempt.as_bytes()) {
+                Ok(claim) => claim,
+                Err(error) => {
+                    optional_history_notice("claiming a generated replay receipt", &error);
+                    return None;
+                }
+            };
         } else if filtered_paths.len() != claim.inputs.len() {
-            claim = store.claim(verb, argv, &filtered_paths).ok()?;
+            claim = match store.claim(verb, argv, &filtered_paths) {
+                Ok(claim) => claim,
+                Err(error) => {
+                    optional_history_notice("claiming a filtered receipt", &error);
+                    return None;
+                }
+            };
         }
     }
     let proof_receipt_link = if verb == "prove" {
         match reserve_receipt_record(&store, &claim, argv, &cwd) {
             Ok(link) => link,
             Err(error) => {
-                eprintln!("receipt index: {error}");
+                optional_history_notice("reserving a receipt record", &error);
                 None
             }
         }
@@ -1300,7 +2048,13 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
         None
     };
 
-    let executable = std::env::current_exe().ok()?;
+    let executable = match std::env::current_exe() {
+        Ok(executable) => executable,
+        Err(error) => {
+            optional_history_notice("resolving the Jet executable for receipt capture", &error.to_string());
+            return None;
+        }
+    };
     let mut command = std::process::Command::new(executable);
     command
         .args(argv)
@@ -1316,23 +2070,43 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     } else {
         command.env_remove(JET_RECEIPT_RECORD_CLAIM_ENV);
     }
-    let mut child = command
+    let mut child = match command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .ok()?;
-    let stdout = child.stdout.take()?;
-    let stderr = child.stderr.take()?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            optional_history_notice("starting receipt capture", &error.to_string());
+            return None;
+        }
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        optional_history_notice("capturing receipt stdout", "receipt child did not expose stdout");
+        return None;
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        optional_history_notice("capturing receipt stderr", "receipt child did not expose stderr");
+        return None;
+    };
     let stdout_reader = std::thread::spawn(move || capture_stream(stdout, std::io::stdout()));
     let stderr_reader = std::thread::spawn(move || capture_stream(stderr, std::io::stderr()));
-    let status = child.wait().ok()?.code().unwrap_or(1);
+    let status = match child.wait() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(error) => {
+            optional_history_notice("waiting for receipt capture", &error.to_string());
+            return None;
+        }
+    };
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
     let published_claim = if verb == "prove" {
         let target_inputs_sha256 = match receipt_target_inputs_sha256(&claim, argv, &cwd) {
             Ok(identity) => identity,
             Err(error) => {
-                eprintln!("receipt: {error}");
+                optional_history_notice("resolving published receipt identity", &error);
                 return None;
             }
         };
@@ -1343,7 +2117,13 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
                     || generated_failure_matches_target(path, &target_inputs_sha256)
             })
             .collect::<Vec<_>>();
-        let current_claim = store.claim(verb, argv, &current_paths).ok()?;
+        let current_claim = match store.claim(verb, argv, &current_paths) {
+            Ok(claim) => claim,
+            Err(error) => {
+                optional_history_notice("claiming the published receipt", &error);
+                return None;
+            }
+        };
         ReceiptClaim {
             inputs: current_claim.inputs,
             ..claim.clone()
@@ -1351,18 +2131,68 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     } else {
         claim.clone()
     };
-    let receipt_stderr = canonicalize_receipt_stderr(verb, &stderr);
-    let published = store
-        .write(&published_claim, argv, status, &stdout, &receipt_stderr)
-        .is_ok();
-    if published {
-        let _ = store.adopt_staged_sections(&published_claim);
-        let _ = store.remember_context(verb, argv, &published_claim);
-    }
-    if let Ok(Some(receipt)) = store.lookup(&published_claim) {
-        if let Err(error) = index_published_receipt(&store, &receipt, argv, &cwd) {
-            eprintln!("receipt index: {error}");
+    let secret_values = receipt_secret_values(argv);
+    let stdout = match bounded_redact_bytes(&stdout, &secret_values) {
+        Ok(stdout) => stdout,
+        Err(error) => {
+            optional_history_notice("staging optional receipt job", &error);
+            return Some(status);
         }
+    };
+    let receipt_stderr = canonicalize_receipt_stderr(verb, &stderr);
+    let receipt_stderr = match bounded_redact_bytes(&receipt_stderr, &secret_values) {
+        Ok(stderr) => stderr,
+        Err(error) => {
+            optional_history_notice("staging optional receipt job", &error);
+            return Some(status);
+        }
+    };
+    let context_key = match store.context_key(verb, argv) {
+        Ok(context_key) => context_key,
+        Err(error) => {
+            optional_history_notice("staging optional receipt job", &error);
+            return Some(status);
+        }
+    };
+    let project_root = match receipt_project_root_for_store(&store, &cwd) {
+        Some(project_root) => project_root,
+        None => {
+            optional_history_notice(
+                "staging optional receipt job",
+                "receipt store is not rooted at the canonical `.jet/receipts` path",
+            );
+            return Some(status);
+        }
+    };
+    let helper_cwd = match fs::canonicalize(&cwd) {
+        Ok(helper_cwd) if helper_cwd.starts_with(&project_root) => helper_cwd,
+        Ok(_) => {
+            optional_history_notice(
+                "staging optional receipt job",
+                "receipt working directory is outside its canonical project root",
+            );
+            return Some(status);
+        }
+        Err(error) => {
+            optional_history_notice(
+                "staging optional receipt job",
+                &format!("could not canonicalize receipt working directory: {error}"),
+            );
+            return Some(status);
+        }
+    };
+    let job = OptionalReceiptJob {
+        project_root,
+        cwd: helper_cwd,
+        context_key,
+        claim: published_claim,
+        argv: redacted_optional_receipt_argv(argv),
+        status,
+        stdout,
+        stderr: receipt_stderr,
+    };
+    if let Err(error) = spawn_optional_receipt_helper(&job) {
+        optional_history_notice("staging optional receipt job", &error);
     }
     Some(status)
 }
@@ -1373,12 +2203,22 @@ fn receipt_record_path(store: &ReceiptStore, claim: &ReceiptClaim, cwd: &Path) -
     } else {
         cwd.join(object)
     };
+    let project_root = receipt_project_root_for_store(store, cwd)?;
     object
-        .strip_prefix(cwd)
+        .strip_prefix(&project_root)
         .ok()
         .map(Path::to_path_buf)
         .filter(|path| !path.as_os_str().is_empty())
         .filter(|path| path.starts_with(Path::new(".jet")))
+}
+
+fn receipt_project_root_for_store(store: &ReceiptStore, cwd: &Path) -> Option<PathBuf> {
+    let object_root = store.root.parent()?;
+    if object_root.file_name().and_then(|name| name.to_str()) != Some(".jet") {
+        return None;
+    }
+    let root = object_root.parent().unwrap_or(cwd);
+    fs::canonicalize(root).ok().or_else(|| Some(root.to_path_buf()))
 }
 
 /// The one target identity contract shared by proof artifacts, receipt index
@@ -1595,8 +2435,8 @@ fn canonical_identity_tree(
 }
 
 fn is_generated_failure_identity_path(path: &str) -> bool {
-    path.split('/').collect::<Vec<_>>().windows(3).any(|parts| {
-        parts[0] == ".jet" && parts[1] == "records" && parts[2] == "generated"
+    path.split('/').collect::<Vec<_>>().windows(2).any(|parts| {
+        parts[0] == ".jet" && parts[1] == "generated"
     })
 }
 
@@ -1647,7 +2487,9 @@ fn reserve_receipt_record(
     };
     let identity = receipt_record_identity(claim, argv, cwd)?;
     let link = receipt_record_link(claim)?;
-    let mut index = RecordIndex::load_for_project(cwd.to_path_buf())?;
+    let project_root = receipt_project_root_for_store(store, cwd)
+        .ok_or_else(|| "receipt store is not under the canonical project `.jet` root".to_string())?;
+    let mut index = RecordIndex::load_for_project(project_root)?;
     if let Some(existing) = index.find(RecordKind::Receipt, &claim.key, true) {
         if existing.identity != identity {
             return Err(format!(
@@ -1690,8 +2532,11 @@ fn index_published_receipt(
     let size = metadata.len();
     let identity = receipt_record_identity(&receipt.claim, argv, cwd)?;
     let comparisons = indexed_comparison_sections(receipt)?;
-    let mut index = RecordIndex::load_for_project(cwd.to_path_buf())?;
+    let project_root = receipt_project_root_for_store(store, cwd)
+        .ok_or_else(|| "receipt store is not under the canonical project `.jet` root".to_string())?;
+    let mut index = RecordIndex::load_for_project(project_root)?;
     let mut comparison_links = Vec::with_capacity(comparisons.len());
+    let mut entries = Vec::with_capacity(comparisons.len() + 1);
     for (artifact_id, consumed, comparison_size) in comparisons {
         let existing = index.find(RecordKind::Comparison, &artifact_id, true);
         let sequence = match existing.as_ref() {
@@ -1705,22 +2550,19 @@ fn index_published_receipt(
             identity.tool_version.clone(),
             "jet-comparison-v1",
         )?;
-        let entry = RecordIndexEntry::new(
-            comparison_identity,
-            RecordKind::Comparison,
-            artifact_id.clone(),
-            path.clone(),
-        )?
-        .with_links(consumed, Vec::new())?
-        .with_capture(RecordCapture::Safe)
-        .with_size(comparison_size)
-        .with_recorded_sequence(sequence)
-        .with_saved(existing.as_ref().is_some_and(|entry| entry.saved));
-        if existing.is_some() {
-            index.replace(entry)?;
-        } else {
-            index.update(entry)?;
-        }
+        entries.push(
+            RecordIndexEntry::new(
+                comparison_identity,
+                RecordKind::Comparison,
+                artifact_id.clone(),
+                path.clone(),
+            )?
+            .with_links(consumed, Vec::new())?
+            .with_capture(RecordCapture::Safe)
+            .with_size(comparison_size)
+            .with_recorded_sequence(sequence)
+            .with_saved(existing.as_ref().is_some_and(|entry| entry.saved)),
+        );
         comparison_links.push(RecordLink::new(RecordKind::Comparison, artifact_id)?);
     }
     let mut produced = receipt.produced.clone();
@@ -1737,23 +2579,20 @@ fn index_published_receipt(
             .map_err(|error| error.to_string())?,
     };
     let saved = existing.as_ref().is_some_and(|entry| entry.saved);
-    let entry = RecordIndexEntry::new(
-        identity,
-        RecordKind::Receipt,
-        receipt.claim.key.clone(),
-        path,
-    )?
-    .with_links(receipt.consumed.clone(), produced)?
-    .with_capture(RecordCapture::Safe)
-    .with_size(size)
-    .with_recorded_sequence(sequence)
-    .with_saved(saved);
-    if existing.is_some() {
-        index.replace(entry)?;
-    } else {
-        index.update(entry)?;
-    }
-    index.store()?;
+    entries.push(
+        RecordIndexEntry::new(
+            identity,
+            RecordKind::Receipt,
+            receipt.claim.key.clone(),
+            path,
+        )?
+        .with_links(receipt.consumed.clone(), produced)?
+        .with_capture(RecordCapture::Safe)
+        .with_size(size)
+        .with_recorded_sequence(sequence)
+        .with_saved(saved),
+    );
+    index.upsert_many_and_store(entries)?;
     Ok(())
 }
 
@@ -1836,20 +2675,14 @@ pub fn participating_verb(argv: &[String]) -> Option<&'static str> {
         Some("build") => Some("build"),
         Some("test") => Some("test"),
         Some("prove") => Some("prove"),
-        Some("budget") if argv.get(1).map(String::as_str) == Some("check") => Some("budget check"),
+        Some("budget") if argv.get(1).map(String::as_str) == Some("check") => {
+            Some("budget check")
+        }
         _ => None,
     }
 }
 
 fn cacheable_invocation(verb: &str, argv: &[String]) -> bool {
-    if argv.iter().any(|arg| arg == "--record")
-        || argv.iter().any(|arg| arg.starts_with("--record="))
-    {
-        return false;
-    }
-    if verb == "test" && argv.iter().any(|arg| arg == "--shuffle") {
-        return false;
-    }
     if verb == "prove"
         && argv.iter().any(|arg| {
             matches!(
@@ -1868,28 +2701,29 @@ fn cacheable_invocation(verb: &str, argv: &[String]) -> bool {
 }
 
 fn receipt_root(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
-    if let Ok(root) = std::env::var("JET_RECEIPT_DIR") {
-        return PathBuf::from(root);
-    }
     let target = target_path(verb, argv, cwd);
-    let base = target
-        .as_deref()
-        .and_then(|path| {
-            let start = if path.is_dir() {
-                path
-            } else {
-                path.parent().unwrap_or(cwd)
-            };
-            receipt_package_root(start).or_else(|| Some(start.to_path_buf()))
-        })
-        .unwrap_or_else(|| cwd.to_path_buf());
-    base.join(".jet").join("receipts")
+    let start = target.as_deref().unwrap_or(cwd);
+    let start = if start.is_absolute() {
+        start.to_path_buf()
+    } else {
+        cwd.join(start)
+    };
+    let start = if start.is_dir() {
+        start
+    } else {
+        start.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or(start)
+    };
+    receipt_project_root(&start).join(".jet").join("receipts")
 }
 
-fn receipt_package_root(start: &Path) -> Option<PathBuf> {
-    crate::Loader::find_package_root_checked(start)
-        .ok()
-        .flatten()
+fn receipt_project_root(start: &Path) -> PathBuf {
+    crate::Loader::selected_project_root(start).unwrap_or_else(|_| {
+        fs::canonicalize(start)
+            .ok()
+            .unwrap_or_else(|| start.to_path_buf())
+    })
 }
 
 fn receipt_authority_roots(start: &Path) -> BTreeSet<PathBuf> {
@@ -1897,9 +2731,7 @@ fn receipt_authority_roots(start: &Path) -> BTreeSet<PathBuf> {
     if let Ok(Some(root)) = crate::Loader::find_workspace_root_checked(start) {
         roots.insert(root);
     }
-    if let Some(root) = receipt_package_root(start) {
-        roots.insert(root);
-    }
+    roots.insert(receipt_project_root(start));
 
     // Checked discovery is authoritative when it succeeds.  Keep a lexical
     // filename fallback as an invalidation floor when an authority is newly
@@ -1979,7 +2811,7 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
         }
     }
     let Some(candidate) = positionals.first().map(|value| cwd.join(value.as_str())) else {
-        let root = receipt_package_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        let root = receipt_project_root(cwd);
         if matches!(verb, "test" | "budget check") {
             return Some(root);
         }
@@ -3054,7 +3886,8 @@ mod tests {
             .any(|path| path.ends_with("src/run.jet")));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(project.join("run.jet"), "fn run() {}\n").unwrap();
         assert!(project_check_input_paths(&project)
@@ -3099,7 +3932,8 @@ mod tests {
             .any(|path| path == &generated.join("inputs.jet")));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(generated.join("inputs.jet"), "generated-v2\n").unwrap();
         let current_inputs = input_paths_for("check", &argv, &project);
@@ -3135,7 +3969,8 @@ mod tests {
         assert!(!initial_inputs.iter().any(|path| path == &workspace));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(&workspace, "module workspace { members: [] }\n").unwrap();
         let current_inputs = input_paths_for("check", &argv, &project);
@@ -3172,7 +4007,8 @@ mod tests {
         assert!(!initial_inputs.iter().any(|path| path == &lock));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::create_dir_all(lock.parent().unwrap()).unwrap();
         fs::write(&lock, "lock-v1\n").unwrap();
@@ -3210,7 +4046,8 @@ mod tests {
         assert!(initial_inputs.iter().any(|path| path == &package));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(
             &package,
@@ -3251,7 +4088,8 @@ mod tests {
         let initial_inputs = input_paths_for("check", &argv, &project);
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
         assert!(store
             .lookup_context("check", &argv, &project)
             .unwrap()
@@ -3296,7 +4134,8 @@ mod tests {
         assert!(!initial_inputs.iter().any(|path| path == &retired));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(&retired, "name: \"retired\"\n").unwrap();
         let current_inputs = input_paths_for("check", &argv, &project);
@@ -3337,7 +4176,8 @@ mod tests {
         assert!(!initial_inputs.iter().any(|path| path == &workspace));
         let claim = store.claim("check", &argv, &initial_inputs).unwrap();
         store.write(&claim, &argv, 0, b"first", b"").unwrap();
-        store.remember_context("check", &argv, &claim).unwrap();
+        let context_key = store.context_key("check", &argv).unwrap();
+        store.remember_context_key(&context_key, &claim).unwrap();
 
         fs::write(&workspace, "module workspace {\n").unwrap();
         let current_inputs = input_paths_for("check", &argv, &project);
@@ -3610,5 +4450,135 @@ mod tests {
         assert!(store.lookup(&claim).unwrap().is_none());
         assert!(store.list().unwrap().is_empty());
         let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn optional_history_uses_canonical_jobs_and_fails_closed_for_blocked_destinations() {
+        let make_project = |label: &str| {
+            let project = std::env::temp_dir().join(format!(
+                "jet-receipt-optional-{label}-{}-{}",
+                std::process::id(),
+                NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = fs::remove_dir_all(&project);
+            fs::create_dir_all(&project).unwrap();
+            fs::write(
+                project.join("package.jet"),
+                "name: \"optional-history\"\nversion: \"0.1.0\"\n",
+            )
+            .unwrap();
+            fs::write(project.join("main.jet"), "fn run() {}\n").unwrap();
+            fs::canonicalize(project).unwrap()
+        };
+
+        let project = make_project("success");
+        let store = ReceiptStore::new(project.join(".jet").join("receipts"));
+        let source = project.join("main.jet");
+        let argv = vec!["check".to_string(), source.display().to_string()];
+        let claim = store.claim("check", &argv, std::slice::from_ref(&source)).unwrap();
+        let job = OptionalReceiptJob {
+            project_root: project.clone(),
+            cwd: project.clone(),
+            context_key: store.context_key("check", &argv).unwrap(),
+            claim: claim.clone(),
+            argv: argv.clone(),
+            status: 0,
+            stdout: b"optional-output".to_vec(),
+            stderr: Vec::new(),
+        };
+        let staged = stage_optional_receipt_job(&job).unwrap();
+        assert_eq!(
+            staged.parent().and_then(|path| path.file_name()).and_then(|name| name.to_str()),
+            Some(OPTIONAL_RECEIPT_JOB_DIR)
+        );
+        assert_eq!(
+            run_optional_receipt_helper(&[staged.display().to_string()]),
+            0
+        );
+        assert!(!staged.exists(), "the helper consumes its disposable job");
+        assert!(store.lookup(&claim).unwrap().is_some());
+        let indexed = RecordIndex::load_for_project(&project).unwrap();
+        assert!(indexed
+            .find(RecordKind::Receipt, &claim.key, true)
+            .is_some());
+
+        let required = make_project("required-blocked");
+        let required_root = required.join(".jet").join("receipts");
+        fs::create_dir_all(&required_root).unwrap();
+        let blocked_objects = required_root.join("objects");
+        fs::write(&blocked_objects, b"required-destination").unwrap();
+        let required_store = ReceiptStore::new(&required_root);
+        let required_source = required.join("main.jet");
+        let required_argv = vec![
+            "check".to_string(),
+            required_source.display().to_string(),
+        ];
+        let required_claim = required_store
+            .claim(
+                "check",
+                &required_argv,
+                std::slice::from_ref(&required_source),
+            )
+            .unwrap();
+        let error = required_store
+            .write(&required_claim, &required_argv, 0, b"output", b"")
+            .expect_err("a non-directory object destination must fail closed");
+        assert!(error.contains("unsafe"));
+        assert_eq!(fs::read(&blocked_objects).unwrap(), b"required-destination");
+
+        let optional = make_project("optional-blocked");
+        let optional_root = optional.join(".jet").join("receipts");
+        fs::create_dir_all(&optional_root).unwrap();
+        let blocked_pending = optional_root.join(OPTIONAL_RECEIPT_JOB_DIR);
+        fs::write(&blocked_pending, b"optional-destination").unwrap();
+        let optional_store = ReceiptStore::new(&optional_root);
+        let optional_source = optional.join("main.jet");
+        let optional_argv = vec!["check".to_string(), optional_source.display().to_string()];
+        let optional_claim = optional_store
+            .claim(
+                "check",
+                &optional_argv,
+                std::slice::from_ref(&optional_source),
+            )
+            .unwrap();
+        let optional_job = OptionalReceiptJob {
+            project_root: optional.clone(),
+            cwd: optional.clone(),
+            context_key: optional_store
+                .context_key("check", &optional_argv)
+                .unwrap(),
+            claim: optional_claim,
+            argv: optional_argv,
+            status: 0,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        assert!(stage_optional_receipt_job(&optional_job).is_err());
+        assert_eq!(fs::read(&blocked_pending).unwrap(), b"optional-destination");
+
+        let cleanup = make_project("cleanup");
+        let cleanup_pending = cleanup.join(".jet").join("receipts").join(OPTIONAL_RECEIPT_JOB_DIR);
+        fs::create_dir_all(&cleanup_pending).unwrap();
+        let invalid = cleanup_pending.join(".job-invalid");
+        fs::write(&invalid, b"not-a-job").unwrap();
+        assert_eq!(
+            run_optional_receipt_helper(&[invalid.display().to_string()]),
+            0
+        );
+        assert!(!invalid.exists(), "invalid jobs in the disposable namespace are removed");
+        let outside = cleanup.join(".job-invalid");
+        fs::write(&outside, b"not-a-job").unwrap();
+        assert_eq!(
+            run_optional_receipt_helper(&[outside.display().to_string()]),
+            0
+        );
+        assert!(
+            outside.exists(),
+            "cleanup never deletes a file outside the canonical disposable namespace"
+        );
+
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(required);
+        let _ = fs::remove_dir_all(optional);
+        let _ = fs::remove_dir_all(cleanup);
     }
 }

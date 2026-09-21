@@ -37,18 +37,19 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("compare_exchange", 2) | ("publish", 1) | ("observe", 0)
         |         ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only, except for Iter's positional terminal.
-        | ("push", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
-        | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("sort_desc", 0) | ("join", 1)
+        | ("push", 1) | ("append", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
+        | ("index_of" | "index", 1) | ("reverse", 0) | ("sort", 0) | ("sort_desc", 0) | ("join", 1)
         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
         | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1 | 2) | ("get", 1)
         // List + string: contains.
         | ("contains", 1)
         // Map-only.
-        | ("keys", 0) | ("values", 0) | ("has_key", 1) | ("merge", 1) | ("merge", 2)
-        // String-only.
-        | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
-        | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
-        | ("to_upper", 0) | ("to_lower", 0) | ("to_ascii_upper", 0) | ("to_ascii_lower", 0)
+        | ("keys", 0) | ("values", 0) | ("items", 0) | ("has_key", 1)
+        | ("setdefault", 2)
+        | ("update", 1) | ("merge", 1) | ("merge", 2)
+        | ("strip" | "lstrip" | "rstrip", 0)
+        | ("expandtabs", 1) | ("find", 1) | ("rfind", 1) | ("rindex", 1)
+        | ("partition", 1)
         | ("repeat", 1) | ("slice", 2)
         | ("trim_start", 0) | ("trim_end", 0)
         | ("pad_start", 2) | ("pad_end", 2)
@@ -64,10 +65,9 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
         | ("lines", 0)
-        // D-STR-DECLINE1=C: `to_int`/`to_float` — same `Int.parse`/`Float.parse`
-        // builtin, string is the receiver either way. `matches`/`match` — the
-        // one core.regex engine, composed for a String receiver.
-        | ("to_int", 0) | ("to_float", 0)
+        // D-STR-DECLINE1=C: `parse`/`to_int`/`to_float` — same numeric
+        // parse mechanisms, with String as the receiver.
+        | ("parse", 0) | ("to_int", 0) | ("to_float", 0)
         | ("matches", 1) | ("match", 1)
         // `to_string` (String/Bool/Char receiver — String may retain
         // `recv_type == Some("String")` through parentheses/fallibility; Bool/Char
@@ -85,10 +85,13 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
         | ("lazy", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
-        | ("add", 1) | ("union", 1) | ("to_list", 0)
+        | ("add", 1) | ("discard", 1) | ("union", 1) | ("to_list", 0)
         | ("intersection", 1) | ("difference", 1)
         | ("symmetric_difference", 1)
-        | ("is_subset", 1) | ("is_superset", 1) | ("is_disjoint", 1)
+        | ("difference_update" | "intersection_update" | "symmetric_difference_update", 1)
+        | ("is_subset" | "issubset", 1)
+        | ("is_superset" | "issuperset", 1)
+        | ("is_disjoint" | "isdisjoint", 1)
         | ("to_set", 0)
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
@@ -105,7 +108,6 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
         | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
         | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
-        | ("read_byte", 0) | ("next", 0) | ("parse", 0)
         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
@@ -728,7 +730,9 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Opt
         return Some(TNumericOp::Predicate(method.to_string()));
     }
     // Integer bit-population queries → `((recv).{method}() as i64)`.
-    if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
+    if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+    | "bit_count" | "bit_length" = method
+    {
         let width = match src_name {
             "I8" | "U8" => 8,
             "I16" | "U16" => 16,

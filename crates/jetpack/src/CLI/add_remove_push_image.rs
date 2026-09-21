@@ -609,11 +609,22 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         None => None,
     };
 
-    // D-JPK-IMAGE1: non-environment package images still read the compiler's
-    // project-local `build/<name>` output. Environment images below consume
-    // verified Hangar package outputs instead.
+    // D-JPK-IMAGE1: non-environment package images consume the canonical
+    // project-local `.jet/build/<name>` output. Environment images below
+    // consume verified Hangar package outputs instead.
+    let project_root = match jet_driver::Loader::selected_project_root(&dir) {
+        Ok(root) => root,
+        Err(error) => {
+            theme.error(
+                "couldn't resolve the image project root",
+                &format!("{}: {}", error.what, error.why),
+                "repair the package/workspace authority and retry the image build",
+            );
+            return 2;
+        }
+    };
     let roots = Store::resolve();
-    let out_dir = dir.join(".jet").join("images").join(name);
+    let out_dir = project_root.join(".jet").join("images").join(name);
     let mut projection = Image::ProjectionReport::default();
     if !image.from_environment && !image.services.is_empty() {
         projection.rejected.push("services".to_string());
@@ -710,8 +721,11 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut files = if image.from_environment {
         environment_image_files(theme, &roots, &plan, name, image_platform, &mut projection)
     } else {
-        let bin_path = dir.join("build").join(&image.from);
-        let bin_data = match read_project_image_file(&dir.join("build"), &image.from) {
+        let bin_path = project_root.join(".jet").join("build").join(&image.from);
+        let bin_data = match read_project_image_file(
+            &project_root.join(".jet").join("build"),
+            &image.from,
+        ) {
             Ok(data) => data,
             Err(_) => {
                 theme.error(

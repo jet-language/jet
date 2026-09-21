@@ -17,6 +17,22 @@ fn jet_std_b64_decode_opts(
     }
 }
 
+fn jet_std_b64_encodebytes(bytes: &Vec<u8>) -> String {
+    let encoded = jet_std_b64_encode(bytes);
+    let mut out = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
+    for chunk in encoded.as_bytes().chunks(76) {
+        for &byte in chunk {
+            out.push(byte as char);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn jet_std_b64_decodebytes(text: &String) -> Result<Vec<u8>, String> {
+    jet_std_b64_decode_opts(text, true, false)
+}
+
 fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
     jet_std_b64url_decode_opts(text, false, false)
 }
@@ -35,6 +51,20 @@ fn jet_std_b64url_decode_opts(
 
 fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
     jet_std_base32_decode_opts(text, false, false, false)
+}
+fn jet_std_base32hex_decode(text: &String) -> Result<Vec<u8>, String> {
+    const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut canonical = String::with_capacity(text.len());
+    for ch in text.chars() {
+        let mapped = match ch {
+            '0'..='9' => STANDARD[(ch as u8 - b'0') as usize],
+            'A'..='V' => STANDARD[(ch as u8 - b'A' + 10) as usize],
+            '=' => b'=',
+            _ => return Err("invalid Base32hex character".to_string()),
+        };
+        canonical.push(mapped as char);
+    }
+    jet_std_base32_decode(&canonical)
 }
 
 fn jet_std_base32_decode_opts(

@@ -6,27 +6,23 @@ struct Sample {
 }
 
 // AoS struct-field projection access.
-fn project_fields(points: [Sample#4]) [Float#4] -> {
+fn project_fields(points: [Sample#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
-    loop i in 0..<4 {
-        output[i] = points[i].value + points[i].bias
-    }
+    loop i in 0..<4 -> output[i] = points[i].value + points[i].bias
     return output
 }
 
 // Conditional Float accumulation. The reduction keeps source-order semantics.
-fn sum_positive(values: [Float#8]) Float -> {
+fn sum_positive(values: [Float#8]) -> Float {
     total := Float{0.0}
     loop i in 0..<8 {
-        if values[i] > 0.0 {
-            total += values[i]
-        }
+        if values[i] > 0.0 -> total += values[i]
     }
     return total
 }
 
 // Early-exit Int search. The first matching lane is the result.
-fn first_match(values: [Int#8], needle: Int) Int -> {
+fn first_match(values: [Int#8], needle: Int) -> Int {
     loop i in 0..<8 {
         if values[i] == needle -> return i
     }
@@ -38,7 +34,7 @@ fn run() {
         {value: 1.0, bias: 10.0},
         {value: 2.0, bias: 20.0},
         {value: 3.0, bias: 30.0},
-        {value: 4.0, bias: 40.0}
+        {value: 4.0, bias: 40.0},
     }
     print(project_fields(points))
     print(sum_positive([Float#8]{-2.0, 1.0, -3.0, 4.0, 0.0, 5.0, -1.0, 2.0}))

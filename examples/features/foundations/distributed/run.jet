@@ -5,11 +5,9 @@ use core.process as process
 use core.sys as os
 use core.time as time
 
-fn cpu_work(n: Int) Int -> {
+fn cpu_work(n: Int) -> Int {
     total := n
-    loop i in 1..12000 {
-        total = (total * 33 + i + n) % 1000003
-    }
+    loop i in 1..12000 -> total = (total * 33 + i + n) % 1000003
     return total
 }
 
@@ -28,9 +26,7 @@ fn run_bounded_pipeline() {
         worker_tx :: ~output_tx
 
         producer :: task {
-            loop n in 1..8 {
-                producer_tx.send(n)
-            }
+            loop n in 1..8 -> producer_tx.send(n)
             producer_tx.close()
         }
         worker :: task {
@@ -106,7 +102,7 @@ struct Event {
 // The late c=9 and d=15 records arrive after b=21 advances the watermark to
 // 16. They are new keys, so accepting them would create two extra windows;
 // the explicit Drop policy proves that the event-time operator rejects them.
-fn source() Stream<Event> -> {
+fn source() -> Stream<Event> {
     yield Event{key: "a", timestamp: 12, value: 3}
     yield Event{key: "b", timestamp: 8, value: 4}
     yield Event{key: "a", timestamp: 7, value: 2}
@@ -120,7 +116,7 @@ fn source() Stream<Event> -> {
 // A restart starts a fresh operator and replays the same in-memory source:
 // the first three records are the checkpoint prefix, followed by five records
 // from the suffix. No durable checkpoint or broker is implied by this example.
-fn replay_source() Stream<Event> -> {
+fn replay_source() -> Stream<Event> {
     yield Event{key: "a", timestamp: 12, value: 3}
     yield Event{key: "b", timestamp: 8, value: 4}
     yield Event{key: "a", timestamp: 7, value: 2}
@@ -131,7 +127,7 @@ fn replay_source() Stream<Event> -> {
     yield Event{key: "a", timestamp: 31, value: 7}
 }
 
-fn count_windows(stream: Stream<Event>) Int -> {
+fn count_windows(stream: Stream<Event>) -> Int {
     // These are the real Core event-time operators. The window stream owns
     // keyed state, watermark advancement, ordering, and late-event handling.
     windows :: stream

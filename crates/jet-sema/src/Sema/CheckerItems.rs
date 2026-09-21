@@ -8,6 +8,27 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// A flow-narrowed Optional still needs its stable carrier when a pattern
+/// explicitly tests `.Val(...)` or `.None`. Ordinary identifier reads use the
+/// narrow overlay; contextual pattern validation must not mistake the payload
+/// for the original Option constructor.
+fn pattern_needs_stable_optional_carrier(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Present { .. } | Pattern::Absent(_) => true,
+        Pattern::Variant { variant, .. } => matches!(
+            crate::Sema::CheckerCore::contextual_literal(variant),
+            Some(
+                crate::Sema::CheckerCore::ContextualLiteral::Value
+                    | crate::Sema::CheckerCore::ContextualLiteral::Null
+            )
+        ),
+        Pattern::Or(alternatives, _) => alternatives
+            .iter()
+            .any(pattern_needs_stable_optional_carrier),
+        _ => false,
+    }
+}
+
 /// D-BINPAT1: the unsigned integer type a fixed-width bit hole binds — the
 /// smallest standard width (`U8`/`U16`/`U32`/`U64`) that holds `width` bits.
 pub(crate) fn bin_bits_type(width: u8) -> Type {
@@ -3533,8 +3554,23 @@ impl<'a> Checker<'a> {
         if !preserve_result_carrier && matches!(saved_subject_expected, Some(Type::Result { .. })) {
             self.expected_type = None;
         }
+        let stable_optional_subject = if pattern_needs_stable_optional_carrier(pattern) {
+            match subject.as_ref() {
+                Expr::Ident(name, _) => self.flow.bindings.get(name).and_then(|info| {
+                    matches!(&info.ty, Type::Option(_)).then(|| info.ty.clone())
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let mut subj_ty = cached_subject_ty.clone().or_else(|| {
-            let inferred = if preserve_result_carrier {
+            let inferred = if let Some(stable) = stable_optional_subject.clone() {
+                // Preserve ordinary identifier-use/ownership bookkeeping; only
+                // replace the type returned to pattern validation.
+                let _ = self.infer(subject);
+                Some(stable)
+            } else if preserve_result_carrier {
                 self.infer_without_auto_propagation(subject)
             } else {
                 self.infer(subject)

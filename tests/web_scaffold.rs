@@ -7,7 +7,7 @@ use common::Scratch;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -62,6 +62,107 @@ fn wait_for_server(port: u16, timeout: Duration) {
             panic!("web scaffold server did not start on {port}");
         }
         std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+const WEB_DOM_HARNESS: &str = r#"
+class FakeElement {
+  constructor(tag) {
+    this.tagName = tag;
+    this.style = {};
+    this.dataset = {};
+    this.children = [];
+    this.textContent = "";
+    this.id = "";
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.parentNode = null;
+  }
+  appendChild(child) {
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+  }
+  addEventListener(name, handler) {
+    const handlers = this.listeners.get(name) ?? [];
+    handlers.push(handler);
+    this.listeners.set(name, handlers);
+  }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  removeAttribute(name) { this.attributes.delete(name); }
+  focus() {}
+}
+class FakeDocument {
+  constructor() {
+    this.body = new FakeElement("body");
+    this.body.ownerDocument = this;
+    this.activeElement = null;
+    this._byId = new Map();
+  }
+  createElement(tag) {
+    const element = new FakeElement(tag);
+    element.ownerDocument = this;
+    return element;
+  }
+  getElementById(id) { return this._byId.get(id) ?? null; }
+}
+const document = new FakeDocument();
+const appendBody = document.body.appendChild.bind(document.body);
+document.body.appendChild = (element) => {
+  if (element.id) document._byId.set(element.id, element);
+  return appendBody(element);
+};
+globalThis.document = document;
+
+const { jet_main } = await import("./app.js");
+await jet_main();
+const root = document.getElementById("jet-app");
+const text = root?.children.map((child) => child.textContent).join("") ?? "";
+if (!text.includes("hello, world")) {
+  throw new Error(`expected rendered greeting, got ${JSON.stringify(text)}`);
+}
+console.log(text);
+"#;
+
+fn assert_web_dom_output(project: &Path) {
+    let build = project.join(".jet/build");
+    let harness = build.join("web_dom_harness.mjs");
+    fs::write(&harness, WEB_DOM_HARNESS).expect("write Web DOM harness");
+    let output = Command::new("node")
+        .current_dir(&build)
+        .arg("web_dom_harness.mjs")
+        .output()
+        .expect("spawn Web DOM harness");
+    let _ = fs::remove_file(harness);
+    assert!(
+        output.status.success(),
+        "generated Web app did not render the greeting:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_no_scaffold_diagnostic("Web DOM harness", &output.stdout, &output.stderr);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("hello, world"),
+        "generated Web DOM omitted the greeting:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn assert_no_scaffold_diagnostic(label: &str, stdout: &[u8], stderr: &[u8]) {
+    let output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stdout),
+        String::from_utf8_lossy(stderr)
+    );
+    for code in ["E-WEB-TIR-UNSUPPORTED", "E2937", "ICE"] {
+        assert!(
+            !output.contains(code),
+            "{label} emitted scaffold drift diagnostic {code}:\n{output}"
+        );
     }
 }
 
@@ -124,7 +225,8 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
-    assert!(project.join("build/index.html").is_file());
+    assert_no_scaffold_diagnostic("web scaffold build", &build.stdout, &build.stderr);
+    assert!(project.join(".jet/build/index.html").is_file());
 
     let test = Command::new(jet_bin())
         .current_dir(&project)
@@ -137,6 +239,7 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
         String::from_utf8_lossy(&test.stdout),
         String::from_utf8_lossy(&test.stderr)
     );
+    assert_no_scaffold_diagnostic("web scaffold test", &test.stdout, &test.stderr);
 
     let port = unused_local_port();
     struct KillOnDrop(Child);
@@ -172,8 +275,8 @@ fn jet_new_web_scaffold_runs_from_new_to_browser() {
 
 #[test]
 fn jet_new_native_scaffold_builds_for_explicit_web_target() {
-    if !have_tool("rustc") {
-        eprintln!("note: skipping native scaffold Web build (need rustc)");
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping native scaffold Web DOM proof (need rustc + node)");
         return;
     }
 
@@ -192,9 +295,38 @@ fn jet_new_native_scaffold_builds_for_explicit_web_target() {
     );
 
     let project = project_root.join("demo");
-    let source = fs::read_to_string(project.join("run.jet")).expect("native scaffold source");
-    assert!(source.contains("#CLI"), "native scaffold lost its CLI schema:\n{source}");
-    assert!(source.contains("fn run(args: GreetingArgs)"), "{source}");
+    let manifest = fs::read_to_string(project.join("package.jet")).expect("native scaffold manifest");
+    let manifest_facts = jet::Package::PackageFacts::parse(&manifest, "package.jet")
+        .expect("native scaffold manifest must remain valid");
+    let allowed_effects = manifest_facts
+        .authority
+        .holds
+        .allow
+        .as_ref()
+        .expect("native scaffold authority must declare allowed effects");
+    for effect in ["Exec", "Browser"] {
+        assert!(
+            allowed_effects.iter().any(|declared| declared == effect),
+            "native scaffold authority must grant {effect}:\n{manifest}"
+        );
+    }
+    let native = Command::new(jet_bin())
+        .current_dir(&project)
+        .arg("run")
+        .output()
+        .expect("spawn native run for scaffold");
+    assert!(
+        native.status.success(),
+        "native scaffold run failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&native.stdout),
+        String::from_utf8_lossy(&native.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&native.stdout),
+        "hello, world\n",
+        "native scaffold output changed"
+    );
+    assert_no_scaffold_diagnostic("native scaffold run", &native.stdout, &native.stderr);
 
     let build = Command::new(jet_bin())
         .current_dir(&project)
@@ -207,7 +339,34 @@ fn jet_new_native_scaffold_builds_for_explicit_web_target() {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
-    for artifact in ["build/index.html", "build/app.js", "build/app.wasm"] {
-        assert!(project.join(artifact).is_file(), "missing Web scaffold artifact {artifact}");
+    assert_no_scaffold_diagnostic("native scaffold Web build", &build.stdout, &build.stderr);
+    for artifact in [".jet/build/index.html", ".jet/build/app.js", ".jet/build/app.wasm"] {
+        assert!(
+            project.join(artifact).is_file(),
+            "missing Web scaffold artifact {artifact}"
+        );
     }
+
+    let port = unused_local_port();
+    struct KillOnDrop(Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let _server = KillOnDrop(
+        Command::new(jet_bin())
+            .current_dir(&project)
+            .args(["dev", &format!("--port={port}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn jet dev for native scaffold"),
+    );
+    wait_for_server(port, Duration::from_secs(30));
+    let (status, _) = http_get(port, "/").expect("GET native scaffold page");
+    assert_eq!(status, 200, "native scaffold page was not served");
+
+    assert_web_dom_output(&project);
 }

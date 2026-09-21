@@ -2411,9 +2411,17 @@ fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i
     };
     Concurrency::with_runtime_mut(|rt| {
         let now = rt.clock_now(clock);
+        // `Duration` is nanoseconds; resident clocks report milliseconds.
+        // Preserve a positive sub-millisecond duration instead of silently
+        // turning it into an already-expired entry.
+        let duration_ms = duration
+            .max(0)
+            .saturating_add(999_999)
+            .checked_div(1_000_000)
+            .unwrap_or(i64::MAX);
         rt.expirings.push(ExpiringState {
             value,
-            expires_at: now.saturating_add(duration.max(0)),
+            expires_at: now.saturating_add(duration_ms),
             clock,
             secret: owned_secret,
         });
@@ -2422,34 +2430,82 @@ fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i
 }
 
 fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
-    let (status, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
+    let (value, expired, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
         let stored_clock = rt
             .expirings
             .get((handle as usize).wrapping_sub(1))
-            .map(|value| value.clock)
+            .map(|state| state.clock)
             .unwrap_or(0);
         let clock = if clock == 0 { stored_clock } else { clock };
         let now = rt.clock_now(clock);
-        let Some(value) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
-            return (0_i64, None);
+        let Some(state) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
+            return (0_i64, true, None);
         };
-        if now > value.expires_at {
-            let crypto_handle = value.value;
-            value.secret.take();
-            value.value = 0;
-            return (0, Some(crypto_handle));
+        if now > state.expires_at {
+            let crypto_handle = state.value;
+            state.secret.take();
+            state.value = 0;
+            return (0, true, (crypto_handle != 0).then_some(crypto_handle));
         }
-        (value.value + 1, None)
+        (state.value, false, None)
     });
     if let Some(crypto_handle) = drop_crypto {
         crate::Crypto::drop_crypto_handle(crypto_handle);
     }
-    status
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, !expired, value as u64)
+    })
 }
 
 fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
-    i8::from(jet_jit_expiring_get(handle, clock) != 0)
+    let result = jet_jit_expiring_get(handle, clock);
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(crate::runtime_host::jit_result_is_ok(rt, result).unwrap_or(false))
+    })
 }
+fn jet_jit_expiring_secret_with(handle: i64, callback: i64) -> i64 {
+    let (value, expired, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
+        let index = (handle as usize).wrapping_sub(1);
+        let stored_clock = rt.expirings.get(index).map(|state| state.clock).unwrap_or(0);
+        let now = rt.clock_now(stored_clock);
+        let Some(state) = rt.expirings.get_mut(index) else {
+            return (0, true, None);
+        };
+        if state.value == 0 || now > state.expires_at {
+            let drop = state.value;
+            state.secret.take();
+            state.value = 0;
+            return (0, true, (drop != 0).then_some(drop));
+        }
+        (state.value, false, None)
+    });
+    if let Some(crypto_handle) = drop_crypto {
+        crate::Crypto::drop_crypto_handle(crypto_handle);
+    }
+    if expired {
+        return Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
+    }
+    let Some(slot) = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::jit_callable_parts(rt, callback)
+    }) else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("ExpiringSecret.with callback is invalid");
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
+    };
+    let Some(result) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("ExpiringSecret.with callback has no unary thunk");
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, result as u64)
+    })
+}
+
 
 fn jet_jit_volatile_read(address: i64) -> i64 {
     let allowed = Concurrency::with_runtime_mut(|rt| {
@@ -2584,7 +2640,8 @@ host_fns! {
     gc_edit_additive: "jet_gc_edit_additive" => jet_jit_gc_edit_additive: ternary;
     gc_edit_plain: "jet_gc_edit_plain" => jet_jit_gc_edit_plain: binary;
     gc_edit_edge_slot: "jet_gc_edit_edge_slot" => jet_jit_gc_edit_edge_slot: quaternary;
-    pool_new: "jet_std::JetPool::new" => jet_jit_pool_new: noarg_i64;
+    expiring_secret_with: "jet_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
+    expiring_secret_with_jit: "jet_jit_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
     pool_add: "jet_std::JetPool::add" => jet_jit_pool_add: binary;
     pool_get: "jet_jit_pool_get" => jet_jit_pool_get: quaternary;
 
@@ -2640,8 +2697,12 @@ host_fns! {
     shared_txn_commit: "jet_jit_shared_txn_commit" => jet_jit_shared_txn_commit: Signature::new(cc);
     shared_txn_abort: "jet_jit_shared_txn_abort" => jet_jit_shared_txn_abort: Signature::new(cc);
     expiring_new: "jet_jit_expiring_new" => jet_jit_expiring_new: quaternary;
+    expiring_secret_new: "jet_jit_expiring_secret_new" => jet_jit_expiring_new: quaternary;
     expiring_get: "jet_jit_expiring_get" => jet_jit_expiring_get: binary;
     expiring_is_valid: "jet_jit_expiring_is_valid" => jet_jit_expiring_is_valid: binary_i8;
+    expiring_new_prelude: "jet_expiring_new" => jet_jit_expiring_new: quaternary;
+    expiring_secret_new_prelude: "jet_expiring_secret_new" => jet_jit_expiring_new: quaternary;
+    expiring_get_prelude: "jet_expiring_get" => jet_jit_expiring_get: binary;
     volatile_read: "std::ptr::read_volatile" => jet_jit_volatile_read: unary;
     volatile_write: "std::ptr::write_volatile" => jet_jit_volatile_write: binary_void;
 }

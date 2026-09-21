@@ -1,0 +1,28 @@
+// core.ui.host.ime — input-method editor events.
+pub enum UiImePhase {
+    Start
+    Update
+    Commit
+    Cancel
+}
+
+pub struct UiImeEvent {
+    pub phase: UiImePhase
+    pub text: String
+}
+
+/// Poll one pending IME event. `None` means the queue is empty.
+pub fn poll() -> ?UiImeEvent {
+    phase :: host_ime_phase()
+    if phase < 0 -> return None
+    text :: host_ime_text()
+    p := UiImePhase.Update
+    if phase == 0 -> p = UiImePhase.Start
+    if phase == 2 -> p = UiImePhase.Commit
+    if phase == 3 -> p = UiImePhase.Cancel
+    Val(UiImeEvent{phase: p, text: text})
+}
+
+fn host_ime_phase() -> Int { panic("host_ime_phase") }
+
+fn host_ime_text() -> String { panic("host_ime_text") }

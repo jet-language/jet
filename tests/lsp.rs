@@ -76,6 +76,26 @@ fn read_msg(stdout: &mut impl Read) -> String {
     String::from_utf8(body).unwrap()
 }
 
+fn request_lsp(
+    stdin: &mut impl Write,
+    stdout: &mut impl Read,
+    id: i64,
+    method: &str,
+    params: &str,
+) -> String {
+    send_msg(
+        stdin,
+        &format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{params}}}"#),
+    );
+    loop {
+        let body = read_msg(stdout);
+        let parsed = parse_json(&body).expect("valid LSP response");
+        if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
+            return body;
+        }
+    }
+}
+
 fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -3682,96 +3702,245 @@ fn run() {
 }
 
 #[test]
+fn lsp_definition_foreign_declaration_uses_checked_jet_boundary() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = r#"extern rust "std" {
+    fn rust_max(a: Int, b: Int) Int = "std::cmp::max"
+}
+fn run() {
+    rust_max(1, 2)
+}
+"#;
+    let uri = "file:///tmp/lsp_foreign_definition_test.jet";
+    let _guard = lock_lsp_process();
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp for foreign definition");
+    let mut stdin = child.stdin.take().expect("foreign definition stdin");
+    let mut stdout = child.stdout.take().expect("foreign definition stdout");
+
+    let initialize = request_lsp(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "initialize",
+        r#"{"capabilities":{}}"#,
+    );
+    assert!(initialize.contains("definitionProvider"), "{initialize}");
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            uri,
+            json_string(source)
+        ),
+    );
+    let diagnostics = read_msg(&mut stdout);
+    assert!(diagnostics.contains("publishDiagnostics"), "{diagnostics}");
+
+    let response = request_lsp(
+        &mut stdin,
+        &mut stdout,
+        2,
+        "textDocument/definition",
+        &format!(
+            r#"{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":7}}}}"#,
+            uri
+        ),
+    );
+    let parsed = parse_json(&response).expect("foreign definition JSON");
+    let result = json_object_field(&parsed, "result");
+    assert_eq!(json_str(json_object_field(result, "uri")), Some(uri));
+    let expected_range = parse_json(
+        r#"{"start":{"line":1,"character":7},"end":{"line":1,"character":15}}"#,
+    )
+    .unwrap();
+    assert_json_values_equal(
+        "foreign definition stays on Jet declaration",
+        json_object_field(result, "range"),
+        &expected_range,
+    );
+    assert!(
+        !response.contains("std::cmp::max"),
+        "foreign definition must not claim a Rust body: {response}"
+    );
+
+    request_lsp(
+        &mut stdin,
+        &mut stdout,
+        99,
+        "shutdown",
+        "{}",
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn lsp_definition_imported_identity_collisions_are_exact() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let root = common::Scratch::new("lsp-definition-identity-collisions");
+    fs::write(
+        root.join("package.jet"),
+        "name: \"definition-collisions\"\nversion: \"0.1.0\"\n",
+    )
+    .expect("write definition collision package manifest");
+    let main_source = "use scoring as grades\nuse \"util\"\nfn run() {\n    print(grades.letter(91))\n    print(util.letter(91))\n}\nfn local(letter: Int) {\n    print(letter)\n}\n";
+    let scoring_source = "pub fn letter(score: Int) -> String { \"A\" }\n";
+    let util_source = "pub fn letter(score: Int) -> String { \"unrelated\" }\n";
+    fs::write(root.join("run.jet"), main_source).expect("write definition collision root");
+    fs::write(root.join("scoring.jet"), scoring_source).expect("write scoring module");
+    fs::write(root.join("util.jet"), util_source).expect("write util module");
+    let uri = |name: &str| {
+        format!("file://{}", root.join(name).display())
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('(', "%28")
+            .replace(')', "%29")
+    };
+    let main_uri = uri("run.jet");
+    let scoring_uri = uri("scoring.jet");
+    let util_uri = uri("util.jet");
+    let _guard = lock_lsp_process();
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .current_dir(&root.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp for definition collisions");
+    let mut stdin = child.stdin.take().expect("definition collision stdin");
+    let mut stdout = child.stdout.take().expect("definition collision stdout");
+
+    let initialize = request_lsp(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "initialize",
+        r#"{"capabilities":{}}"#,
+    );
+    assert!(initialize.contains("definitionProvider"), "{initialize}");
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+    for (document_uri, source) in [
+        (&main_uri, main_source),
+        (&scoring_uri, scoring_source),
+        (&util_uri, util_source),
+    ] {
+        send_msg(
+            &mut stdin,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+                document_uri,
+                json_string(source)
+            ),
+        );
+        let diagnostics = read_msg(&mut stdout);
+        assert!(diagnostics.contains("publishDiagnostics"), "{diagnostics}");
+    }
+
+    let mut definition = |id: i64, line: u32, character: u32| {
+        request_lsp(
+            &mut stdin,
+            &mut stdout,
+            id,
+            "textDocument/definition",
+            &format!(
+                r#"{{"textDocument":{{"uri":"{}"}},"position":{{"line":{line},"character":{character}}}}}"#,
+                main_uri
+            ),
+        )
+    };
+    let scoring = parse_json(&definition(2, 3, 19)).expect("scoring definition JSON");
+    let scoring_result = json_object_field(&scoring, "result");
+    assert_eq!(
+        json_str(json_object_field(scoring_result, "uri")),
+        Some(scoring_uri.as_str())
+    );
+    let expected_scoring = parse_json(
+        r#"{"start":{"line":0,"character":7},"end":{"line":0,"character":13}}"#,
+    )
+    .unwrap();
+    assert_json_values_equal(
+        "qualified scoring definition",
+        json_object_field(scoring_result, "range"),
+        &expected_scoring,
+    );
+
+    let util = parse_json(&definition(3, 4, 17)).expect("util definition JSON");
+    let util_result = json_object_field(&util, "result");
+    assert_eq!(
+        json_str(json_object_field(util_result, "uri")),
+        Some(util_uri.as_str())
+    );
+    let expected_util = parse_json(
+        r#"{"start":{"line":0,"character":7},"end":{"line":0,"character":13}}"#,
+    )
+    .unwrap();
+    assert_json_values_equal(
+        "qualified util definition",
+        json_object_field(util_result, "range"),
+        &expected_util,
+    );
+
+    let local = parse_json(&definition(4, 7, 12)).expect("local definition JSON");
+    let local_result = json_object_field(&local, "result");
+    assert_eq!(
+        json_str(json_object_field(local_result, "uri")),
+        Some(main_uri.as_str())
+    );
+    let expected_local = parse_json(
+        r#"{"start":{"line":6,"character":9},"end":{"line":6,"character":15}}"#,
+    )
+    .unwrap();
+    assert_json_values_equal(
+        "local definition wins over imported leaves",
+        json_object_field(local_result, "range"),
+        &expected_local,
+    );
+
+    request_lsp(&mut stdin, &mut stdout, 99, "shutdown", "{}");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+
+#[test]
 fn lsp_definition_uses_build_graph_generated_source() {
     let jet = jet_bin();
     if !jet.exists() {
         return;
     }
-    let source = r#"fn build(b: BuildContext) BuildPlan {
+    let source = r#"fn build(b: BuildContext) -> BuildPlan {
     b.generate("made") {
-        fn generated_value() String -> "hi";
+        fn generated_value() -> String { "hi" }
     }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])
     return b.plan(app)
 }
 fn run() { print(generated_value()) }
 "#;
-    let uri = format!(
-        "file:///tmp/lsp_generated_def_{}/main.jet",
-        std::process::id()
-    );
-
-    run_transcript(
-        source,
-        &[
-            TranscriptStep::Send {
-                msg:
-                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                        .to_string(),
-                expect_contains: Some(vec!["definitionProvider".to_string()]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
-                expect_contains: None,
-            },
-            TranscriptStep::Open {
-                uri: uri.clone(),
-                expect_notification: true,
-            },
-            TranscriptStep::Send {
-                msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":20}}}}}}"#,
-                    uri
-                ),
-                expect_contains: Some(vec![
-                    ".jet/generated/main/made.jet".to_string(),
-                    "range".to_string(),
-                ]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
-                expect_contains: Some(vec!["result".to_string()]),
-            },
-        ],
-    );
-}
-#[test]
-fn lsp_generated_definition_uses_module_identity_and_preserves_ambiguity() {
-    let jet = jet_bin();
-    if !jet.exists() {
-        return;
-    }
-    // Keep the build query inside an isolated, declaration-backed authority.
-    // The generated artifact package is deliberately named `main` so its
-    // canonical BuildPlan paths remain `.jet/generated/main/...`.
-    let source = r#"fn build(b: BuildContext) BuildPlan -> {
-    b.generate("right") {
-        fn generated_value() String -> "right"
-    }
-    b.generate("left") {
-        fn generated_value() String -> "left"
-    }
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/right.jet", ".jet/generated/main/left.jet"], [])
-    return b.plan(app)
-}
-fn run() {
-    generated_value()
-    left.generated_value()
-    right.generated_value()
-}
-"#;
-    let root = common::Scratch::new("lsp-generated-definition-identity");
+    let root = common::Scratch::new("lsp-generated-def");
     fs::write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n")
-        .expect("write generated identity package manifest");
-    fs::write(
-        root.join("workspace.jet"),
-        "module workspace { members: [] }\n",
-    )
-    .expect("write generated identity workspace authority");
-    fs::write(root.join("main.jet"), source).expect("write generated identity source");
-    // Generate the right-hand module first on purpose. A name-only fallback
-    // would return `right` for both calls; the checked module qualifier must
-    // select the BuildPlan identity instead.
+        .expect("write generated definition package manifest");
+    fs::write(root.join("main.jet"), source).expect("write generated definition source");
     let uri = format!("file://{}", root.join("main.jet").display());
 
     run_transcript(
@@ -3793,45 +3962,12 @@ fn run() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":10}}}}}}"#,
-                    uri
-                ),
-                expect_contains: Some(vec!["\"result\":null".to_string()]),
-            },
-            TranscriptStep::Send {
-                msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":12,"character":12}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":7,"character":20}}}}}}"#,
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "\"identity\":\"fn:module:left::generated_value\"".to_string(),
-                    "\"generated\":true".to_string(),
-                    "\"artifact\":\".jet/generated/main/left.jet\"".to_string(),
-                    "\"status\":\"available\"".to_string(),
-                    "\"generator\":\"left\"".to_string(),
-                    "\"schema\":null".to_string(),
-                    "\"source\":\".jet/generated/main/left.jet\"".to_string(),
-                    "\"plugin\":null".to_string(),
-                    "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}"
-                        .to_string(),
-                ]),
-            },
-            TranscriptStep::Send {
-                msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":13,"character":13}}}}}}"#,
-                    uri
-                ),
-                expect_contains: Some(vec![
-                    "\"identity\":\"fn:module:right::generated_value\"".to_string(),
-                    "\"generated\":true".to_string(),
-                    "\"artifact\":\".jet/generated/main/right.jet\"".to_string(),
-                    "\"status\":\"available\"".to_string(),
-                    "\"generator\":\"right\"".to_string(),
-                    "\"schema\":null".to_string(),
-                    "\"source\":\".jet/generated/main/right.jet\"".to_string(),
-                    "\"plugin\":null".to_string(),
-                    "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}"
-                        .to_string(),
+                    ".jet/generated/main/made.jet".to_string(),
+                    "range".to_string(),
                 ]),
             },
             TranscriptStep::Send {
@@ -3840,6 +3976,93 @@ fn run() {
             },
         ],
     );
+}
+
+#[test]
+fn lsp_generated_definition_uses_selected_buildplan_identity() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let root = common::Scratch::new("lsp-generated-definition-identity");
+    fs::write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n")
+        .expect("write generated identity package manifest");
+    fs::write(
+        root.join("workspace.jet"),
+        "module workspace { members: [] }\n",
+    )
+    .expect("write generated identity workspace authority");
+
+    let source_for = |first: &str, second: &str, selected: &str| {
+        format!(
+            r#"fn build(b: BuildContext) -> BuildPlan {{
+    b.generate("{first}") {{
+        fn generated_value() -> String {{ "{first}" }}
+    }}
+    b.generate("{second}") {{
+        fn generated_value() -> String {{ "{second}" }}
+    }}
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/{selected}.jet"], [])
+    return b.plan(app)
+}}
+fn run() {{
+    generated_value()
+}}
+"#
+        )
+    };
+    let run_case = |source: String, selected: &str| {
+        fs::write(root.join("main.jet"), &source).expect("write selected generated source");
+        let uri = format!("file://{}", root.join("main.jet").display());
+        run_transcript(
+            &source,
+            &[
+                TranscriptStep::Send {
+                    msg:
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                            .to_string(),
+                    expect_contains: Some(vec!["definitionProvider".to_string()]),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                    expect_contains: None,
+                },
+                TranscriptStep::Open {
+                    uri: uri.clone(),
+                    expect_notification: true,
+                },
+                TranscriptStep::Send {
+                    msg: format!(
+                        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":10}}}}}}"#,
+                        uri
+                    ),
+                    expect_contains: Some(vec![
+                        format!(
+                            "\"identity\":\"fn:module:{selected}::generated_value\""
+                        ),
+                        "\"generated\":true".to_string(),
+                        format!("\"artifact\":\".jet/generated/main/{selected}.jet\""),
+                        "\"status\":\"available\"".to_string(),
+                        format!("\"generator\":\"{selected}\""),
+                        "\"schema\":null".to_string(),
+                        format!("\"source\":\".jet/generated/main/{selected}.jet\""),
+                        "\"plugin\":null".to_string(),
+                        "\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,\"character\":18}}"
+                            .to_string(),
+                    ]),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                    expect_contains: Some(vec!["result".to_string()]),
+                },
+            ],
+        );
+    };
+
+    // Each case registers both same-leaf modules but selects only one target
+    // source. The selected identity must not depend on registration order.
+    run_case(source_for("right", "left", "left"), "left");
+    run_case(source_for("left", "right", "right"), "right");
 }
 
 #[test]

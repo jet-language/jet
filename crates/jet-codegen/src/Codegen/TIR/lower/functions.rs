@@ -794,14 +794,15 @@ fn effective_generic_convention(
 
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.
 /// Explicit access conventions stay aligned with the emitted Rust signature.
+/// Callers have already applied `effective_generic_convention` to `p`; keep
+/// this projection borrowed so lowering does not clone the complete parameter
+/// metadata just to read its convention.
 pub(crate) fn param_place_generic(
     name: &str,
     p: &Param,
-    type_params: &[crate::AST::TypeParam],
+    _type_params: &[crate::AST::TypeParam],
 ) -> TLocal {
-    let mut p = p.clone();
-    p.convention = effective_generic_convention(&p, type_params);
-    param_place(name, &p)
+    param_place(name, p)
 }
 
 /// Project a method owner through the same canonical nominal identities used
@@ -1089,6 +1090,7 @@ fn lower_trait_method_inner(
                 | crate::Generics::EQUATABLE
                 | crate::Generics::COMPARABLE
                 | crate::Generics::CLOSE
+                | crate::Syntax::TRAIT_ROLLBACK
                 | crate::Generics::ADD
                 | crate::Generics::SUB
                 | crate::Generics::MUL
@@ -1100,7 +1102,11 @@ fn lower_trait_method_inner(
         .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     let return_type = if raw_protocol_return {
         debug_assert!(
-            f.return_type.is_some() || trait_name == crate::Generics::CLOSE,
+            f.return_type.is_some()
+                || matches!(
+                    trait_name,
+                    crate::Generics::CLOSE | crate::Syntax::TRAIT_ROLLBACK
+                ),
             "protocol methods must declare their raw return type"
         );
         resolve_self_ty(&declared_return_type, type_name)

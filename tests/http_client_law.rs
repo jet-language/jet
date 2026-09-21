@@ -462,10 +462,10 @@ fn main() {
     let response = bridge::jet_http_client_send_with_impl(
         root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"hello".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), Some(b"hello".to_vec()));
     std::net::TcpStream::connect(signal).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"world".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), Some(b"world".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 5).unwrap(), None);
     assert_eq!(bridge::jet_http_client_send_with_impl(
         root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap_err(), bridge::JetHTTPBridgeError::UnsupportedEncoding);
@@ -619,7 +619,7 @@ fn custom_client_clones_share_pool_cookie_jar_and_transport_facts() {
     fs::write(
         &harness,
         r#"
-fn send(client: i64, url: &String) -> (i64, i64, Option<i64>, Vec<String>) {
+fn send(client: i64, url: &String) -> bridge::JetHTTPResponseParts {
     bridge::jet_http_client_send_with_impl(
         client, "GET", url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
@@ -632,17 +632,15 @@ fn main() {
     let client = bridge::jet_http_client_cookies_impl(root, true).unwrap();
     bridge::jet_http_client_drop_impl(root);
     let first = send(client, &url);
-    assert_eq!(bridge::jet_http_client_body_read_impl(first.1, 64).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_body_read_impl(first.body_handle, 64).unwrap(), None);
     let second = send(client, &url);
-    assert_eq!(bridge::jet_http_client_body_read_impl(second.1, 64).unwrap(), Some(b"ok".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(second.1, 64).unwrap(), None);
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(second.1), "HTTP/1.1");
-    assert!(!bridge::jet_http_client_response_remote_address_impl(second.1).is_empty());
-    assert!(bridge::jet_http_client_response_redirect_history_impl(second.1).is_empty());
-    assert_eq!(bridge::jet_http_client_response_timings_impl(second.1).len(), 7);
-    assert!(bridge::jet_http_client_response_reused_impl(second.1));
-    bridge::jet_http_client_response_facts_drop_impl(first.1);
-    bridge::jet_http_client_response_facts_drop_impl(second.1);
+    assert_eq!(bridge::jet_http_client_body_read_impl(second.body_handle, 64).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(second.body_handle, 64).unwrap(), None);
+    assert_eq!(second.context.protocol, "HTTP/1.1");
+    assert!(!second.context.remote_address.is_empty());
+    assert!(second.context.redirect_history.is_empty());
+    assert_eq!(second.context.timings_ms.len(), 7);
+    assert!(second.context.reused_connection);
     bridge::jet_http_client_drop_impl(client);
 }
 "#,
@@ -1052,16 +1050,16 @@ fn main() {
     let warm = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), Some(b"w0".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.body_handle, 64).unwrap(), Some(b"w0".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.body_handle, 64).unwrap(), None);
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
     let send = |barrier: std::sync::Arc<std::sync::Barrier>, url: String| std::thread::spawn(move || {
         barrier.wait();
         let response = bridge::jet_http_client_send_with_impl(
             client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
         ).unwrap();
-        let body = bridge::jet_http_client_body_read_impl(response.1, 64).unwrap().unwrap();
-        assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), None);
+        let body = bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap().unwrap();
+        assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), None);
         (response, body)
     });
     let first = send(barrier.clone(), url.clone());
@@ -1075,16 +1073,16 @@ fn main() {
     let third = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), Some(b"c3".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), None);
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(warm.1), "HTTP/2");
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(first.0.1), "HTTP/2");
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(second.0.1), "HTTP/2");
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(third.1), "HTTP/2");
-    assert!(!bridge::jet_http_client_response_reused_impl(warm.1));
-    assert!(bridge::jet_http_client_response_reused_impl(first.0.1));
-    assert!(bridge::jet_http_client_response_reused_impl(second.0.1));
-    assert!(!bridge::jet_http_client_response_reused_impl(third.1));
+    assert_eq!(bridge::jet_http_client_body_read_impl(third.body_handle, 64).unwrap(), Some(b"c3".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(third.body_handle, 64).unwrap(), None);
+    assert_eq!(warm.context.protocol, "HTTP/2");
+    assert_eq!(first.0.context.protocol, "HTTP/2");
+    assert_eq!(second.0.context.protocol, "HTTP/2");
+    assert_eq!(third.context.protocol, "HTTP/2");
+    assert!(!warm.context.reused_connection);
+    assert!(first.0.context.reused_connection);
+    assert!(second.0.context.reused_connection);
+    assert!(!third.context.reused_connection);
 }
 
 "#,
@@ -1186,10 +1184,10 @@ fn main() {
     let response = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(response.0, 200);
+    assert_eq!(response.status, 200);
     let mut received = 0usize;
     loop {
-        match bridge::jet_http_client_body_read_impl(response.1, 64 * 1024) {
+        match bridge::jet_http_client_body_read_impl(response.body_handle, 64 * 1024) {
             Ok(Some(chunk)) => received += chunk.len(),
             Ok(None) => panic!("HTTP/2 body overrun was accepted"),
             Err(error) => {
@@ -1199,7 +1197,7 @@ fn main() {
         }
     }
     assert_eq!(received, 64 * 1024 * 1024);
-    bridge::jet_http_client_body_close_impl(response.1);
+    bridge::jet_http_client_body_close_impl(response.body_handle);
     bridge::jet_http_client_drop_impl(client);
 }
 "#,
@@ -1353,9 +1351,9 @@ fn main() {
     let response = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(response.1), "HTTP/2");
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), Some(b"ok".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), None);
+    assert_eq!(response.context.protocol, "HTTP/2");
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap(), None);
     server.join().unwrap();
 }
 "#,
@@ -1496,7 +1494,7 @@ fn main() {
     let response = bridge::jet_http_client_send_with_impl(
         client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    println!("{:?}", bridge::jet_http_client_body_read_impl(response.1, 64).unwrap_err());
+    println!("{:?}", bridge::jet_http_client_body_read_impl(response.body_handle, 64).unwrap_err());
 }
 "#,
     )
@@ -2018,12 +2016,12 @@ fn main() {{
         offset += filled;
         Ok(Some(chunk))
     }};
-    let response = bridge::jet_http_client_send_with_stream_impl(
+    let response = bridge::jet_http_client_send_with_stream_parts_impl(
         client, "POST", &url, &[], Some(total as i64), true, &mut body_read,
         None, None, None, None, None, None, None, None, Some(0), None, &[], &[], &[],
     ).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 8).unwrap(), Some(b"ok".to_vec()));
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(response.1), "HTTP/2");
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 8).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(response.context.protocol, "HTTP/2");
 }}
 "#,
         ),
@@ -2656,9 +2654,9 @@ fn main() {
         allowed, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     )
     .unwrap();
-    assert_eq!(response.0, 200);
+    assert_eq!(response.status, 200);
     assert_eq!(
-        bridge::jet_http_client_body_read_impl(response.1, 8).unwrap(),
+        bridge::jet_http_client_body_read_impl(response.body_handle, 8).unwrap(),
         Some(b"ok".to_vec())
     );
     https_server.join().unwrap();
@@ -2715,7 +2713,7 @@ fn main() {
             cookie_client, "GET", url, &[], None, None, None, None, None, None, None, None, None,
             None, None, &[], &[], &[],
         ).unwrap();
-        assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 1).unwrap(), None);
+        assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 1).unwrap(), None);
     }
     cookie_https_server.join().unwrap();
     cookie_http_server.join().unwrap();
@@ -3446,7 +3444,7 @@ fn send(
     method: &str,
     url: &String,
     body: Option<&[u8]>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHTTPBridgeError> {
+) -> Result<bridge::JetHTTPResponseParts, bridge::JetHTTPBridgeError> {
     bridge::jet_http_client_send_with_impl(
         client,
         method,
@@ -3474,7 +3472,6 @@ fn drain(handle: i64) -> Vec<u8> {
     while let Some(chunk) = bridge::jet_http_client_body_read_impl(handle, 64).unwrap() {
         out.extend_from_slice(&chunk);
     }
-    bridge::jet_http_client_response_facts_drop_impl(handle);
     out
 }
 
@@ -3541,31 +3538,31 @@ fn main() {
 
     let warm = format!("{base}warm");
     let first = send(safe, "GET", &warm, None).unwrap();
-    assert!(!bridge::jet_http_client_response_reused_impl(first.1));
-    assert_eq!(drain(first.1), b"w");
+    assert!(!first.context.reused_connection);
+    assert_eq!(drain(first.body_handle), b"w");
 
     // Same pool socket as /warm — proves reuse before the write-fail arm.
     let reuse = format!("{base}reuse");
     let pooled = send(safe, "GET", &reuse, None).unwrap();
     assert!(
-        bridge::jet_http_client_response_reused_impl(pooled.1),
+        pooled.context.reused_connection,
         "write-path retry proof requires a reused pooled connection first"
     );
-    assert_eq!(drain(pooled.1), b"r");
+    assert_eq!(drain(pooled.body_handle), b"r");
     wait_for_pooled_rst();
 
     let retry = format!("{base}retry");
     let second = send(safe, "GET", &retry, None).unwrap();
     assert!(
-        !bridge::jet_http_client_response_reused_impl(second.1),
+        !second.context.reused_connection,
         "write-before-bytes IO reconnect must dial fresh"
     );
-    assert_eq!(drain(second.1), b"ok");
+    assert_eq!(drain(second.body_handle), b"ok");
     wait_for_pooled_rst();
 
     let warm2 = format!("{base}warm2");
     let third = send(safe, "GET", &warm2, None).unwrap();
-    assert_eq!(drain(third.1), b"x");
+    assert_eq!(drain(third.body_handle), b"x");
     wait_for_pooled_rst();
     let post = format!("{base}unsafe");
     assert!(send(safe, "POST", &post, Some(b"nope")).is_err());
@@ -3580,7 +3577,7 @@ fn main() {
     .unwrap();
     let warm3 = format!("{base}warm3");
     let fourth = send(none, "GET", &warm3, None).unwrap();
-    assert_eq!(drain(fourth.1), b"y");
+    assert_eq!(drain(fourth.body_handle), b"y");
     wait_for_pooled_rst();
     let again = format!("{base}again");
     assert!(send(none, "GET", &again, None).is_err());
@@ -3588,7 +3585,7 @@ fn main() {
 
     let warm4 = format!("{base}warm4");
     let fifth = send(safe, "GET", &warm4, None).unwrap();
-    assert_eq!(drain(fifth.1), b"z");
+    assert_eq!(drain(fifth.body_handle), b"z");
     wait_for_pooled_rst();
     let denied = format!("{base}denied");
     assert!(send(safe, "PUT", &denied, None).is_err());
@@ -3604,11 +3601,11 @@ fn main() {
     .unwrap();
     let warm5 = format!("{base}warm5");
     let sixth = send(idem, "GET", &warm5, None).unwrap();
-    assert_eq!(drain(sixth.1), b"q");
+    assert_eq!(drain(sixth.body_handle), b"q");
     wait_for_pooled_rst();
     let allowed = format!("{base}allowed");
     let seventh = send(idem, "PUT", &allowed, None).unwrap();
-    assert_eq!(drain(seventh.1), b"ok");
+    assert_eq!(drain(seventh.body_handle), b"ok");
     bridge::jet_http_client_drop_impl(idem);
 }
 "#,
@@ -3780,10 +3777,10 @@ fn main() {
         &[],
     )
     .unwrap();
-    assert_eq!(response.0, 200);
-    let error = bridge::jet_http_client_body_read_impl(response.1, 64 * 1024).unwrap_err();
+    assert_eq!(response.status, 200);
+    let error = bridge::jet_http_client_body_read_impl(response.body_handle, 64 * 1024).unwrap_err();
     assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
-    bridge::jet_http_client_body_close_impl(response.1);
+    bridge::jet_http_client_body_close_impl(response.body_handle);
     bridge::jet_http_client_drop_impl(client);
     bridge::jet_http_client_drop_impl(root);
 }
@@ -3936,7 +3933,7 @@ fn h2_bounds_queued_frames_for_another_active_stream() {
 fn send(
     client: i64,
     url: &String,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHTTPBridgeError> {
+) -> Result<bridge::JetHTTPResponseParts, bridge::JetHTTPBridgeError> {
     bridge::jet_http_client_send_with_impl(
         client,
         "GET",
@@ -3964,16 +3961,16 @@ fn main() {
     let root = bridge::jet_http_client_new_impl();
     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
     let first = send(client, &url).unwrap();
-    assert_eq!(first.0, 200);
+    assert_eq!(first.status, 200);
     let second_url = url.clone();
     let second = std::thread::spawn(move || send(client, &second_url).unwrap())
         .join()
         .unwrap();
-    assert_eq!(second.0, 200);
-    let error = bridge::jet_http_client_body_read_impl(first.1, 64 * 1024).unwrap_err();
+    assert_eq!(second.status, 200);
+    let error = bridge::jet_http_client_body_read_impl(first.body_handle, 64 * 1024).unwrap_err();
     assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
-    bridge::jet_http_client_body_close_impl(first.1);
-    bridge::jet_http_client_body_close_impl(second.1);
+    bridge::jet_http_client_body_close_impl(first.body_handle);
+    bridge::jet_http_client_body_close_impl(second.body_handle);
     bridge::jet_http_client_drop_impl(client);
     bridge::jet_http_client_drop_impl(root);
 }

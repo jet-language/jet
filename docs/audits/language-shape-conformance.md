@@ -17,7 +17,7 @@ production workspace-driver and focused build-entry proof.
 
 | Surface | Proof path |
 |---------|------------|
-| Parser / AST | grammar regen via `jet devtools grammars`; fuzz corpus under `tests/fuzz/` |
+| Parser / AST | grammar regen via `jet self devtools grammars`; fuzz corpus under `tests/fuzz/` |
 | Sema | UI snapshots `tests/ui/*.stderr`; checker modules under `crates/jet-sema/` |
 | Formatter | fmt stability suites; STABILITY fixtures |
 | Diagnostics | registered codes + UI snapshots (I4) |

@@ -946,18 +946,33 @@ pub(crate) fn lambda_body_ty_expecting(
     env: &LowerEnv,
     expected_params: Option<&[Type]>,
 ) -> Type {
-    fn bind_params(lam: &Lambda, env: &LowerEnv, expected_params: Option<&[Type]>) -> LowerEnv {
+    lambda_body_ty_expecting_with_return(lam, cx, env, expected_params, None)
+}
+
+/// Probe a lambda body under the callback's checked return carrier rather than
+/// the enclosing callable's ambient carrier.  The body probe must see the same
+/// return context as executable lowering or a source `Ok(...)` gets typed as
+/// the enclosing function's result and is wrapped again by the lambda carrier.
+pub(crate) fn lambda_body_ty_expecting_with_return(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: Option<&[Type]>,
+    expected_return: Option<&Type>,
+) -> Type {
+    fn bind_params(
+        lam: &Lambda,
+        env: &LowerEnv,
+        expected_params: Option<&[Type]>,
+        expected_return: Option<&Type>,
+    ) -> LowerEnv {
         let mut lam_env = clone_env(env);
         lam_env.fallback_subject = false;
-        // A type probe must not inherit `fn run()`'s Result<Unit> carrier.
-        // Wrapping `inner(4)` as Ok during the probe makes an Int block look
-        // like a Unit-success Result and poisons the executable ABI.
-        if lam.result_type.is_none()
-            && lam.error_type.is_none()
-            && lam.meta.fallible_carrier.is_none()
-        {
-            lam_env.ret_ty = None;
-        }
+        let callback_return = expected_return
+            .cloned()
+            .or_else(|| crate::Codegen::TIR::lambda_explicit_failure_carrier(lam))
+            .or_else(|| lam.meta.fallible_carrier.clone());
+        lam_env.ret_ty = callback_return;
         for (i, p) in lam.params.iter().enumerate() {
             let ty =
                 p.ty.clone()
@@ -979,19 +994,20 @@ pub(crate) fn lambda_body_ty_expecting(
     let saved_spawn_sites = cx.jit_spawn_sites.borrow().clone();
     let body_ty = with_lambda_body_expr_cache(|| match &lam.body {
         LambdaBody::Expr(e) => {
-            let mut lam_env = bind_params(lam, env, expected_params);
+            let mut lam_env = bind_params(lam, env, expected_params, expected_return);
             lower_expr(e, cx, &mut lam_env).ty
         }
         LambdaBody::Block(stmts) => {
             // A tail such as `inner(4)` is only typed once the prefix has
-            // bound `inner`. Probing the tail in an empty env makes an Int
-            // block look like Unit, and the executable pass then compiles
-            // the lambda as a Unit-success Result.
-            let mut lam_env = bind_params(lam, env, expected_params);
+            // bound `inner`. Probing the tail in an env of its own keeps the
+            // callback's return carrier independent of its caller.
+            let mut lam_env = bind_params(lam, env, expected_params, expected_return);
             if let Some((prefix, tail)) = lambda_block_tail(stmts) {
                 let _ = lower_stmts(prefix, cx, &mut lam_env);
                 match tail {
-                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
+                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => {
+                        lower_expr(e, cx, &mut lam_env).ty
+                    }
                     _ => unit_type(),
                 }
             } else {
@@ -1077,10 +1093,13 @@ pub(crate) fn lower_call_arg_value(
         (Expr::Ident(name, _), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
+            let Some(callback_key) = a.flags.c_callback_function_key.as_ref() else {
+                return invariant_arg_value(a, "named C callback has no canonical function key");
+            };
             TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(
-                    crate::Codegen::TIR::c_callback_adapter_name(name),
+                    callback_key.clone(),
                 ))),
             }
         }
@@ -1455,6 +1474,16 @@ pub(crate) fn builtin_dispatch_ty(ty: Type) -> Type {
             Type::Tagged { marker, inner }
         }
         Type::Tagged { inner, .. } => builtin_dispatch_ty(*inner),
+        Type::Apply { name, mut args }
+            if name == crate::Syntax::TYPE_LIST && args.len() == 1 =>
+        {
+            // `List<T>` is the legacy generic spelling. Builtin routes own
+            // the canonical `Type::List` carrier, so normalize it at the
+            // shared dispatch seam rather than teaching every collection
+            // route a second receiver shape.
+            let element = args.pop().expect("checked one-element List");
+            Type::List(Box::new(builtin_dispatch_ty(element)))
+        }
         other => other,
     }
 }
@@ -1529,6 +1558,18 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                         ))))
                     }
                     _ => {}
+                }
+            }
+            if recv_type.as_deref() == Some("HTTPResponse") {
+                let ret = match method.as_str() {
+                    "cookies" | "redirect_history" => {
+                        Some(Type::List(Box::new(Type::String)))
+                    }
+                    "timings" => Some(Type::List(Box::new(Type::Int))),
+                    _ => None,
+                };
+                if let Some(ret) = ret {
+                    return Some(builtin_dispatch_ty(ret));
                 }
             }
             // `resolved_ret` exists only when sema persisted a result more exact

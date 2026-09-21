@@ -51,10 +51,18 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     // Strip every canonical vetted region (jet_mem, jet_term_unix/windows, and
     // the rest of the list) before checking for `unsafe` in user code.
     let user = common::strip_vetted_prelude_modules(&out.rust);
+    let leaked_unsafe = user
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            (!common::unsafe_keyword_columns(line).is_empty())
+                .then(|| format!("line {}: {}", index + 1, line.trim()))
+        })
+        .collect::<Vec<_>>();
     assert!(
-        user.lines()
-            .all(|line| common::unsafe_keyword_columns(line).is_empty()),
-        "`unsafe` leaked outside the vetted prelude helpers"
+        leaked_unsafe.is_empty(),
+        "`unsafe` leaked outside the vetted prelude helpers:\n{}",
+        leaked_unsafe.join("\n")
     );
 
     if !common::have_rustc() {
@@ -141,6 +149,49 @@ fn run() {
         assert_eq!(out, "42\n");
     }
     tir_support::assert_tiers_agree("arena_erased_close", src, "42\n");
+}
+ 
+#[test]
+fn erased_initialization_does_not_leak_past_scope() {
+    let src = r#"
+use core.mem
+
+fn erased_off() {
+    value := Int{ uninit }
+    #Off {
+        value = 7
+    }
+    print(value)
+}
+
+fn erased_debug() {
+    value := Int{ uninit }
+    #DebugOnly {
+        value = 8
+    }
+    print(value)
+}
+
+fn active_initialization() {
+    value := Int{ uninit }
+    value = 9
+    print(value)
+}
+
+
+fn run() {
+    erased_off()
+    erased_debug()
+    active_initialization()
+}
+"#;
+    let codes = error_codes(src);
+    assert_eq!(
+        codes.iter().filter(|code| *code == "E0420").count(),
+        2,
+        "removed initialization facts must not escape erased scopes: {codes:?}"
+    );
+    assert_eq!(codes.len(), 2, "unexpected diagnostics: {codes:?}");
 }
 
 #[test]

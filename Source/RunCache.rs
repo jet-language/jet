@@ -71,18 +71,23 @@ pub fn phases() -> RunPhases {
     }
 }
 
-/// Where warm artifacts live. `JET_RUN_CACHE_DIR` wins. The default is
-/// `~/.cache/jet/run`, outside the project tree.
-pub fn cache_root() -> PathBuf {
+/// Where warm artifacts live for a specific entry. `JET_RUN_CACHE_DIR` wins.
+/// The default is the canonical project-local `.jet/cache/run`; an authority
+/// failure returns `None` and never falls back to a user cache.
+pub fn cache_root_for_entry(entry: &Path) -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("JET_RUN_CACHE_DIR") {
-        return PathBuf::from(dir);
+        return Some(PathBuf::from(dir));
     }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache").join("jet").join("run")
+    let entry = entry.to_string_lossy();
+    crate::build_project_root(&entry)
+        .ok()
+        .map(|root| root.join(".jet").join("cache").join("run"))
 }
 
+
+fn entry_dir(cache_root: &Path, key: &str) -> PathBuf {
+    cache_root.join(key)
+}
 fn compiler_identity() -> String {
     use std::sync::OnceLock;
     static IDENTITY: OnceLock<String> = OnceLock::new();
@@ -179,18 +184,17 @@ pub fn run_cache_key(entry: &Path, program_args: &[&str]) -> String {
     sha256_hex(&flat)
 }
 
-fn entry_dir(key: &str) -> PathBuf {
-    cache_root().join(key)
-}
 pub fn try_warm_run(
     entry: &Path,
+    cache_root: Option<&Path>,
     program_args: &[&str],
     selected_entry: Option<&str>,
     requested_artifact: Option<MirArtifactId>,
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Option<jet_foundation::JitBackend::RunOutcome> {
+    let cache_root = cache_root?;
     let key = run_cache_key(entry, program_args);
-    let dir = entry_dir(&key);
+    let dir = entry_dir(cache_root, &key);
     let artifact_path = dir.join("module.bin");
     let bytes = fs::read(&artifact_path).ok()?;
     let artifact = requested_artifact.or_else(|| jet_jit::cached_artifact_id(&bytes))?;
@@ -229,7 +233,7 @@ pub fn try_warm_run(
 }
 
 /// Store the tier-1 artifact from the just-finished native compile, if any.
-pub fn store_after_miss(entry: &Path, program_args: &[&str]) {
+pub fn store_after_miss(entry: &Path, cache_root: Option<&Path>, program_args: &[&str]) {
     CACHE_MISS.fetch_add(1, Ordering::Relaxed);
     let Some(artifact) = jet_jit::take_last_tier_artifact() else {
         if std::env::var_os("JET_RUN_TRACE").is_some() {
@@ -237,8 +241,11 @@ pub fn store_after_miss(entry: &Path, program_args: &[&str]) {
         }
         return;
     };
+    let Some(cache_root) = cache_root else {
+        return;
+    };
     let key = run_cache_key(entry, program_args);
-    let dir = entry_dir(&key);
+    let dir = entry_dir(cache_root, &key);
     if fs::create_dir_all(&dir).is_err() {
         return;
     }

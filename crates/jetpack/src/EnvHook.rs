@@ -87,92 +87,165 @@ pub fn definition_fingerprint_with_selections(
     )
     .ok()?;
     let source = std::str::from_utf8(&source).ok()?;
-    let mut entries = Vec::<(String, Vec<u8>)>::new();
-    let mut budget = FingerprintBudget::default();
     if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env_with_selections(
         &source,
         root,
         requested_preset,
         requested_environment,
     ) {
-        for relative in &plan.source_files {
-            add_input(root, relative, "source", &mut budget, &mut entries);
-        }
-        for dotenv in &plan.lifecycle.dotenv {
-            add_input(root, &dotenv.file, "dotenv", &mut budget, &mut entries);
-        }
-        if let jet_env_model::ModuleEval::ReloadPolicy::Watch { paths, .. } = &plan.lifecycle.reload
-        {
-            for path in paths {
-                add_input(root, path, "reload-watch", &mut budget, &mut entries);
-            }
-        }
-        for file in &plan.files {
-            if let Some(relative) = &file.source {
-                add_input(root, relative, "managed", &mut budget, &mut entries);
-            }
-            budget.push(
-                &mut entries,
-                format!("managed-fact:{}", file.destination),
-                file.fingerprint().into_bytes(),
-            );
-        }
-        // `--env` selects an environment module, not a package generation.
-        // Shell activation always observes the canonical `profile.dev` root.
-        let profile_name = "dev";
-        if plan
-            .package_profiles
-            .iter()
-            .any(|profile| profile.name == profile_name)
-        {
-            add_input(
-                root,
-                &format!(
-                    "{}/profiles/{profile_name}/current",
-                    Syntax::SOURCE_ROOT_DIR
-                ),
-                "package-profile-current",
-                &mut budget,
-                &mut entries,
-            );
-        }
-        budget.push(
-            &mut entries,
-            "lifecycle".to_string(),
-            plan.lifecycle.fingerprint().into_bytes(),
+        return definition_fingerprint_from_inputs(
+            root,
+            requested_preset,
+            requested_environment,
+            &plan.source_files,
+            &plan.lifecycle,
+            &plan.files,
+            &plan.package_profiles,
+            &plan.presets,
+            &plan.languages,
         );
-        for preset in &plan.presets {
-            budget.push(
-                &mut entries,
-                format!("preset:{}", preset.name),
-                format!(
-                    "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
-                    preset.extends,
-                    preset.packages,
-                    preset.variables,
-                    preset.hostname,
-                    preset.user,
-                    requested_preset,
-                )
-                .into_bytes(),
-            );
-        }
-        budget.push(
-            &mut entries,
-            "languages".to_string(),
-            plan.languages
-                .iter()
-                .map(|language| language.fingerprint())
-                .collect::<Vec<_>>()
-                .join("\n")
-                .into_bytes(),
-        );
-    } else {
-        // Keep malformed/legacy files observable without allowing an
-        // unrelated `.jet` file to become part of a valid environment graph.
-        // The activation path still rejects the malformed plan below.
-        collect_definition_files(root, root, &mut budget, &mut entries, 0);
     }
+
+    // Keep malformed/legacy files observable without allowing an unrelated
+    // `.jet` file to become part of a valid environment graph. The activation
+    // path still rejects the malformed plan below.
+    let mut budget = FingerprintBudget::default();
+    let mut entries = Vec::new();
+    collect_definition_files(root, root, &mut budget, &mut entries, 0);
+    finish_definition_fingerprint(
+        root,
+        requested_preset,
+        requested_environment,
+        budget,
+        entries,
+    )
+}
+
+/// Hash a typed environment from the facts already loaded for activation.
+///
+/// The canonical env entry path has already evaluated `env.jet` into its
+/// `RunPlan`. Reusing that projection avoids a second source parse while
+/// preserving the exact source/input fingerprint used by the prompt hook.
+/// Legacy `pkg.*` plans have no typed source projection and must use the
+/// parser-backed function above instead.
+pub(crate) fn definition_fingerprint_from_facts(
+    root: &Path,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+    facts: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> Option<String> {
+    if facts.source_files.is_empty() {
+        return None;
+    }
+    definition_fingerprint_from_inputs(
+        root,
+        requested_preset,
+        requested_environment,
+        &facts.source_files,
+        &facts.lifecycle,
+        &facts.files,
+        &facts.package_profiles,
+        &facts.presets,
+        &facts.languages,
+    )
+}
+
+fn definition_fingerprint_from_inputs(
+    root: &Path,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+    source_files: &[String],
+    lifecycle: &jet_env_model::ModuleEval::EnvironmentLifecycle,
+    files: &[jet_env_model::ModuleEval::ManagedFile],
+    package_profiles: &[jet_env_model::ModuleEval::PackageProfileSpec],
+    presets: &[jet_env_model::ModuleEval::PresetSpec],
+    languages: &[jet_env_model::ModuleEval::LanguageSpec],
+) -> Option<String> {
+    let mut budget = FingerprintBudget::default();
+    let mut entries = Vec::<(String, Vec<u8>)>::new();
+    for relative in source_files {
+        add_input(root, relative, "source", &mut budget, &mut entries);
+    }
+    for dotenv in &lifecycle.dotenv {
+        add_input(root, &dotenv.file, "dotenv", &mut budget, &mut entries);
+    }
+    if let jet_env_model::ModuleEval::ReloadPolicy::Watch { paths, .. } = &lifecycle.reload {
+        for path in paths {
+            add_input(root, path, "reload-watch", &mut budget, &mut entries);
+        }
+    }
+    for file in files {
+        if let Some(relative) = &file.source {
+            add_input(root, relative, "managed", &mut budget, &mut entries);
+        }
+        budget.push(
+            &mut entries,
+            format!("managed-fact:{}", file.destination),
+            file.fingerprint().into_bytes(),
+        );
+    }
+    // `--env` selects an environment module, not a package generation.
+    // Shell activation always observes the canonical `profile.dev` root.
+    let profile_name = "dev";
+    if package_profiles
+        .iter()
+        .any(|profile| profile.name == profile_name)
+    {
+        add_input(
+            root,
+            &format!("{}/profiles/{profile_name}/current", Syntax::SOURCE_ROOT_DIR),
+            "package-profile-current",
+            &mut budget,
+            &mut entries,
+        );
+    }
+    budget.push(
+        &mut entries,
+        "lifecycle".to_string(),
+        lifecycle.fingerprint().into_bytes(),
+    );
+    for preset in presets {
+        budget.push(
+            &mut entries,
+            format!("preset:{}", preset.name),
+            format!(
+                "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+                preset.extends,
+                preset.packages,
+                preset.variables,
+                preset.hostname,
+                preset.user,
+                requested_preset,
+            )
+            .into_bytes(),
+        );
+    }
+    budget.push(
+        &mut entries,
+        "languages".to_string(),
+        languages
+            .iter()
+            .map(|language| language.fingerprint())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes(),
+    );
+    finish_definition_fingerprint(
+        root,
+        requested_preset,
+        requested_environment,
+        budget,
+        entries,
+    )
+}
+
+fn finish_definition_fingerprint(
+    root: &Path,
+    requested_preset: Option<&str>,
+    requested_environment: Option<&str>,
+    mut budget: FingerprintBudget,
+    mut entries: Vec<(String, Vec<u8>)>,
+) -> Option<String> {
     for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet"] {
         add_input(root, relative, "project", &mut budget, &mut entries);
     }

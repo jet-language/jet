@@ -217,9 +217,11 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // callable results and control arms/bodies in every position.
 // D-ARROW-RESPELL1=A (ratified 2026-08-21): `->` is canonical; `:>` and `=>`
 // are retired teaching spellings with no alias.
-// D-CALLABLE-ONE1=A (ratified 2026-08-21, card #2144): one callable interface
-// puts return facts before either the plain `->` body marker or the fused
-// effect form `-[Effects]>`.
+// D-SIG-AFTER1=A (ratified 2026-09-18, card #3503): return facts follow the
+// one arrow (`-> T`, `-[Effects]> T`). Named function and method bodies always
+// use braces. Bare type after the parameter list is a teaching diagnostic.
+// D-CALLABLE-ONE1=A is amended: the plain arrow is present when a non-unit
+// success result is declared; unit bodies keep bare braces.
 // D-EFFECT-ROW2=B (ratified 2026-08-21, card #2144): effect ceilings keep the
 // `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE1=A gives lambdas
 // the same interface suffixes.

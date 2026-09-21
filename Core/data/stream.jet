@@ -1,0 +1,47 @@
+// core.data.stream — pull from a loader stream.
+
+pub struct Stream {
+    pub items: [String]
+    pub index: Int
+    pub cancelled: Bool
+}
+
+pub fn from_items(items: [String]) -> Stream { Stream{items: items, index: 0, cancelled: false} }
+
+pub fn next(stream: Stream) -> (stream: Stream, value: ?String) {
+    if stream.cancelled || stream.index >= stream.items.len() -> return (stream: stream, value: None)
+    v :: stream.items[stream.index]
+    s :: Stream{items: stream.items, index: stream.index + 1, cancelled: false}
+    (stream: s, value: Val(v))
+}
+
+pub fn collect(stream: Stream) -> [String] {
+    out := [String]{}
+    i := stream.index
+    loop {
+        if stream.cancelled || i >= stream.items.len() -> return out
+        out.push(stream.items[i])
+        i = i + 1
+    }
+}
+
+pub fn cancel(stream: Stream) -> Stream { Stream{items: stream.items, index: stream.index, cancelled: true} }
+
+
+pub fn len(stream: Stream) -> Int {
+    if stream.cancelled -> return 0
+    n :: stream.items.len() - stream.index
+    if n < 0 -> return 0
+    n
+}
+
+pub fn is_empty(stream: Stream) -> Bool { len(stream) == 0 }
+
+
+pub fn skip(stream: Stream, n: Int) -> Stream {
+    i := stream.index + n
+    if i < stream.index -> i = stream.items.len()
+    if i > stream.items.len() -> i = stream.items.len()
+    Stream{items: stream.items, index: i, cancelled: stream.cancelled}
+}
+

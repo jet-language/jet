@@ -606,9 +606,9 @@ pub struct ProgramBundle {
     /// M10: Core helper names proven reachable by sema. Codegen emits only
     /// these helpers (SL9).
     pub used_core: std::collections::HashSet<String>,
-    /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
-    /// stable C callback symbol (`CallArgFlags::c_callback_symbol`) at some
-    /// `#Import` call site anywhere in the bundle. Codegen keeps each Jet
+    /// D-CABI-CALLBACK1: canonical function keys sema proved are passed as
+    /// stable C callback symbols (`CallArgFlags::c_callback_symbol`) at
+    /// `#Import` call sites anywhere in the bundle. Codegen keeps each Jet
     /// function's ordinary result carrier and emits a raw C trampoline beside it.
     pub ffi_callback_fns: std::collections::HashSet<String>,
     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading

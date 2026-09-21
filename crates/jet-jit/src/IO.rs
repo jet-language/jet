@@ -439,13 +439,18 @@ fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
 }
 
 fn jet_jit_io_progress(text: i64) -> i64 {
-    if !term_prelude::jet_term_progress_enabled() {
-        return result_ok_unit();
-    }
     let s = clone_string(text);
-    let frame =
-        term_prelude::jet_term_progress_frame(term_prelude::jet_term_stderr_is_terminal(), &s);
-    match runtime_host::write_jit_stderr(&frame, true) {
+    if term_prelude::jet_term_progress_enabled() {
+        let frame = term_prelude::jet_term_progress_frame(true, &s);
+        return match runtime_host::write_jit_stderr(&frame, true) {
+            Ok(()) => result_ok_unit(),
+            Err(error) => result_err(&error),
+        };
+    }
+    // Captured / non-tty runs still record the progress line so feature
+    // goldens and redirected logs see the status text.
+    let frame = term_prelude::jet_term_progress_frame(false, &s);
+    match runtime_host::write_jit_stdout(&frame, true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }

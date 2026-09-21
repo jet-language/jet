@@ -1,0 +1,90 @@
+// core.encoding.base32 — RFC 4648 §6 Base32 (A-Z2-7) with padding.
+//
+// Encode emits uppercase and `=` padding to a multiple of 8 characters.
+// Decode accepts that alphabet only; lowercase is rejected so a mistyped
+// Both RFC 4648 alphabets are available; the hex profile uses 0-9A-V.
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
+@c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+@c_hex_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+
+/// Encode `data` as padded Base32 text.
+pub fn encode(data: [U8]) -> String { encode_with_alphabet(data, @c_alphabet) }
+
+fn encode_with_alphabet(data: [U8], alphabet: String) -> String {
+    ab :: alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop i + 5 <= data.len() {
+        n :: (u8_int(data[i]) << 32) | (u8_int(data[i + 1]) << 24) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 8) | u8_int(data[i + 4])
+        out.push(ab[(n >> 35) & 31])
+        out.push(ab[(n >> 30) & 31])
+        out.push(ab[(n >> 25) & 31])
+        out.push(ab[(n >> 20) & 31])
+        out.push(ab[(n >> 15) & 31])
+        out.push(ab[(n >> 10) & 31])
+        out.push(ab[(n >> 5) & 31])
+        out.push(ab[n & 31])
+        i += 5
+    }
+    rest :: data.len() - i
+    if rest > 0 {
+        n := 0
+        loop k in 0..<rest -> n = n | (u8_int(data[i + k]) << ((4 - k) * 8))
+        bits :: rest * 8
+        chars :: (bits + 4) /% 5
+        shift := 35
+        loop _ in 0..<chars {
+            out.push(ab[(n >> shift) & 31])
+            shift -= 5
+        }
+        loop _ in 0..<(8 - chars) -> out.push(U8{61})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+/// Decode padded Base32 text into bytes.
+pub fn decode(text: String) -> [U8] { decode_with_alphabet(text, @c_alphabet) }
+
+fn decode_with_alphabet(text: String, alphabet: String) -> [U8] {
+    ab :: alphabet.bytes()
+    raw :: text.bytes()
+    table := [Int]{}
+    loop _ in 0..<256 -> table.push(-1)
+    loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
+    if end == 0 -> return Ok([U8]{})
+    out := [U8]{}
+    acc := 0
+    bits := 0
+    loop i in 0..<end {
+        v :: table[u8_int(raw[i])]
+        if v < 0 {
+            return Err("invalid Base32 character; expected the selected RFC 4648 alphabet and optional trailing '='")
+        }
+        acc = (acc << 5) | v
+        bits += 5
+        if bits >= 8 {
+            bits -= 8
+            b :: (acc >> bits) & 255
+            out.push(U8{b})
+        }
+    }
+    Ok(out)
+}
+
+pub fn is_base32(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n :: b
+        ok := (n >= 50 && n <= 55) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 61
+        if !ok -> return false
+    }
+    true
+}
+pub fn b32encode(data: [U8]) -> String { encode(data) }
+pub fn b32decode(text: String) -> [U8] { decode(text) }
+
+pub fn b32hexencode(data: [U8]) -> String { encode_with_alphabet(data, @c_hex_alphabet) }
+pub fn b32hexdecode(text: String) -> [U8] { decode_with_alphabet(text, @c_hex_alphabet) }

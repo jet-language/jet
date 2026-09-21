@@ -1,0 +1,143 @@
+// core.text.fmt — number and duration spellings for logs and UI.
+//
+// These are display helpers, not parsers. `hex` / `bin` / `oct` emit
+// lowercase digits with no radix prefix. `grouped` uses `,` thousands
+// separators. `bytes` uses 1024-based units (`KiB`, `MiB`, `GiB`).
+pub fn number(n: Int) -> String { "{n}" }
+
+pub fn bin(n: Int) -> String { radix(n, 2) }
+
+pub fn oct(n: Int) -> String { radix(n, 8) }
+
+/// `width` is the minimum digit count, zero-padded. Negative `n` keeps the sign.
+pub fn hex(n: Int, width: Int) -> String {
+    digits :: radix(abs_int(n), 16)
+    body :: pad_left(digits, width, "0")
+    if n < 0 -> return "-{body}"
+    body
+}
+
+pub fn ordinal(n: Int) -> String {
+    abs :: abs_int(n)
+    mod100 :: abs % 100
+    suffix := "th"
+    if mod100 < 11 || mod100 > 13 {
+        m :: abs % 10
+        if m == 1 -> suffix = "st"
+        if m == 2 -> suffix = "nd"
+        if m == 3 -> suffix = "rd"
+    }
+    if n < 0 -> "-{abs}{suffix}"
+    "{abs}{suffix}"
+}
+
+pub fn plural(n: Int, singular: String, many: String) -> String {
+    if n == 1 -> return singular
+    many
+}
+
+pub fn pad_left(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 0) }
+
+pub fn pad_right(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 1) }
+
+pub fn pad_center(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 2) }
+
+pub fn pad(text: String, width: Int, fill: String) -> String { pad_left(text, width, fill) }
+
+pub fn grouped(n: Float, _frac: Int) -> String { "{n}" }
+
+pub fn decimal(n: Float, _frac: Int) -> String { "{n}" }
+
+pub fn percent(n: Float, _frac: Int) -> String { "{n}%" }
+
+pub fn sci(n: Float, _frac: Int) -> String { "{n}" }
+
+pub fn pretty(value: String) -> String { value }
+
+pub fn bytes(n: Int) -> String {
+    if n < 1024 -> return "{n} B"
+    if n < 1048576 -> return "{n / 1024} KiB"
+    if n < 1073741824 -> "{n / 1048576} MiB"
+    "{n / 1073741824} GiB"
+}
+
+/// `n` is milliseconds.
+pub fn duration(n: Int) -> String {
+    if n < 1000 -> return "{n}ms"
+    if n < 60000 -> return "{n / 1000}s"
+    if n < 3600000 -> "{n / 60000}m"
+    "{n / 3600000}h"
+}
+
+fn abs_int(n: Int) -> Int {
+    if n < 0 -> return -n
+    n
+}
+
+fn grouped_int(n: Int) -> String {
+    sign := ""
+    rest := n
+    if n < 0 {
+        sign = "-"
+        rest = -n
+    }
+    digits :: radix(rest, 10)
+    raw :: digits.bytes()
+    out := [U8]{}
+    i := 0
+    loop {
+        if i >= raw.len() -> break
+        remaining :: raw.len() - i
+        if i != 0 && remaining % 3 == 0 -> out.push(U8{44})
+        out.push(raw[i])
+        i = i + 1
+    }
+    "{sign}{String.from_bytes(out) ?? digits}"
+}
+
+fn radix(n: Int, base: Int) -> String {
+    if n == 0 -> return "0"
+    digits := [U8]{}
+    x := n
+    loop {
+        if x <= 0 -> break
+        d :: x % base
+        if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
+        x = x / base
+    }
+    out := [U8]{}
+    i := digits.len() - 1
+    loop {
+        if i < 0 -> break
+        out.push(digits[i])
+        i = i - 1
+    }
+    String.from_bytes(out) ?? "0"
+}
+
+fn pad(text: String, width: Int, fill: String, mode: Int) -> String {
+    raw :: text.bytes()
+    extra :: width - raw.len()
+    if extra <= 0 || fill.bytes().len() == 0 -> text
+    if mode == {
+        0 -> "{fill_repeat(fill, extra)}{text}"
+        1 -> "{text}{fill_repeat(fill, extra)}"
+        else -> {
+            left :: extra / 2
+            "{fill_repeat(fill, left)}{text}{fill_repeat(fill, extra - left)}"
+        }
+    }
+}
+
+fn fill_repeat(fill: String, n: Int) -> String {
+    pad :: fill.bytes()
+    out := [U8]{}
+    loop {
+        if out.len() >= n -> break
+        loop b in pad {
+            if out.len() >= n -> break
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}

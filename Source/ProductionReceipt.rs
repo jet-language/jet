@@ -24,15 +24,21 @@ pub(crate) struct Context {
 
 pub(crate) fn prepare(file: &str, source: &str, program_args: &[&String]) -> Context {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let source_file = cwd.join(file);
-    let entry = project_relative_entry(&source_file, &cwd);
+    let source_file = if Path::new(file).is_absolute() {
+        PathBuf::from(file)
+    } else {
+        cwd.join(file)
+    };
+    let project_root = jet::build_project_root(&source_file.to_string_lossy())
+        .unwrap_or_else(|_| cwd.clone());
+    let entry = project_relative_entry(&source_file, &project_root);
     let source_digest = content_digest(source.as_bytes());
 
     let mut closure = b"jet-production-closure-v1\0".to_vec();
     frame(&mut closure, entry.as_bytes());
     frame(&mut closure, source_digest.as_bytes());
-    add_project_input(&mut closure, file, &cwd, "manifest");
-    add_project_input(&mut closure, file, &cwd, "lock");
+    add_project_input(&mut closure, file, &project_root, "manifest");
+    add_project_input(&mut closure, file, &project_root, "lock");
     let closure_digest = content_digest(&closure);
 
     let mut inputs = b"jet-production-inputs-v1\0".to_vec();
@@ -55,7 +61,7 @@ pub(crate) fn prepare(file: &str, source: &str, program_args: &[&String]) -> Con
         frame(&mut identity, value);
     }
     let receipt_id = content_digest(&identity);
-    let directory = cwd
+    let directory = project_root
         .join(".jet")
         .join("reports")
         .join(format!("production-{}", &receipt_id[7..23]));
@@ -119,9 +125,9 @@ impl Context {
 
 }
 
-fn project_relative_entry(file: &Path, cwd: &Path) -> String {
+fn project_relative_entry(file: &Path, project_root: &Path) -> String {
     file
-        .strip_prefix(cwd)
+        .strip_prefix(project_root)
         .ok()
         .map(|path| path.to_string_lossy().replace('\\', "/"))
         .filter(|path| !path.is_empty() && path != ".")
@@ -132,7 +138,7 @@ fn project_relative_entry(file: &Path, cwd: &Path) -> String {
         .unwrap_or_else(|| "<unknown>".into())
 }
 
-fn add_project_input(closure: &mut Vec<u8>, file: &str, cwd: &Path, kind: &str) {
+fn add_project_input(closure: &mut Vec<u8>, file: &str, project_root: &Path, kind: &str) {
     let source = Path::new(file);
     let start = source.parent().unwrap_or_else(|| Path::new("."));
     let Some(root) = jet::Loader::find_manifest_root(start) else {
@@ -151,7 +157,7 @@ fn add_project_input(closure: &mut Vec<u8>, file: &str, cwd: &Path, kind: &str) 
     };
     frame(closure, kind.as_bytes());
     let relative = path
-        .strip_prefix(cwd)
+        .strip_prefix(project_root)
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|_| kind.into());
     frame(closure, relative.as_bytes());

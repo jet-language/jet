@@ -5,20 +5,20 @@ use core.http.client as http
 use core.http.server as server
 use core.net as net
 
-fn handle(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn handle(req: HTTPRequest) -> HTTPResponse !HTTPError {
     greeting :: "hello from Jet! method={req.method()} path={req.path()}"
     return Ok(server.response(200, greeting))
 }
 
 fn run() !(HTTPError | NetError | TaskFailure) {
-    listener :: net.tcp_listen("127.0.0.1:0")
-    addr :: listener.local_addr()
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) -> handle(req))
     t :: task {
-        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux) ?? panic("serve")
     }
-    resp :: http.get("http://{addr}/")
-    print(resp.body().text(8388608))
-    t.join()
+    resp :: http.get("http://{addr}/") ?? panic("http get")
+    print(resp.body().text(8388608) ?? panic("body"))
+    t.join() ?? panic("server")
 }

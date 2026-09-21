@@ -7,7 +7,7 @@
 
 use super::Concurrency;
 use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::io::BufRead;
 
 mod set_semantics {
@@ -206,6 +206,32 @@ pub(crate) mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
+    // The shared acceleration plan carries the D-ACCEL1/D-PARA-GATE1
+    // constants and retained-first-chunk decision. These small host shims
+    // supply the AOT failure/receipt siblings that the flat Prelude expects.
+    #[allow(dead_code)]
+    mod jet_std {
+        pub(crate) use crate::Encoding::json_rt::{render_datatree_json, DataTree};
+    }
+    #[allow(dead_code)]
+    struct JetParaFailure {
+        index: usize,
+        payload: Box<dyn std::any::Any + Send + 'static>,
+    }
+    #[allow(dead_code)]
+    fn jet_para_call<R, F>(index: usize, f: F) -> Result<R, JetParaFailure>
+    where
+        F: FnOnce() -> R,
+    {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            .map_err(|payload| JetParaFailure { index, payload })
+    }
+    #[allow(dead_code)]
+    fn jet_para_raise_failure(failure: JetParaFailure) -> ! {
+        std::panic::resume_unwind(failure.payload)
+    }
+    use crate::Receipt::kernel::jet_receipt_attach_encoded;
+    include!("../../jet-codegen/src/Prelude/Core/ParallelPlan.rs");
     include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
@@ -313,13 +339,26 @@ pub(crate) mod collection_semantics {
         F: Fn(&i64) -> T + Sync,
     {
         let worker_limit = usize::try_from(limit).unwrap_or(usize::MAX).max(1);
-        jet_list_para_chunks_kernel(xs.len(), worker_limit, 1, |range| {
-            Ok::<Vec<T>, ()>(range.map(|index| f(&xs[index])).collect())
-        })
-        .into_iter()
-        .filter_map(|(_, result)| result.ok())
-        .flatten()
-        .collect()
+        let (indexed, _) = jet_list_para_chunks_measured(
+            xs.len(),
+            worker_limit,
+            1,
+            true,
+            true,
+            true,
+            JetAccelerationTransform::PooledParallelChunks,
+            false,
+            false,
+            None,
+            |range| {
+                Ok::<Vec<T>, ()>(range.map(|index| f(&xs[index])).collect())
+            },
+        );
+        indexed
+            .into_iter()
+            .filter_map(|(_, result)| result.ok())
+            .flatten()
+            .collect()
     }
 
     pub(super) fn list_closure_map_mut<F>(xs: Vec<i64>, f: F) -> Vec<i64>
@@ -393,6 +432,20 @@ pub(crate) mod collection_semantics {
     }
 
     pub(super) fn list_fold_add_fixed_f64(xs: Vec<f64>, init: f64) -> f64 {
+        jet_list_fold_add_fixed_f64(xs, init)
+    }
+
+    pub(super) fn list_fold_add_fixed_f32_iter<I>(xs: I, init: f32) -> f32
+    where
+        I: IntoIterator<Item = f32>,
+    {
+        jet_list_fold_add_fixed_f32(xs, init)
+    }
+
+    pub(super) fn list_fold_add_fixed_f64_iter<I>(xs: I, init: f64) -> f64
+    where
+        I: IntoIterator<Item = f64>,
+    {
         jet_list_fold_add_fixed_f64(xs, init)
     }
 
@@ -922,6 +975,13 @@ pub(crate) mod collection_semantics {
         jet_set_pop_kernel(values, value).ok()
     }
 
+    pub(super) fn set_replace_i64(
+        values: &mut std::collections::HashSet<i64>,
+        value: i64,
+    ) -> Option<i64> {
+        jet_set_replace_kernel(values, value).ok()
+    }
+
     pub(super) fn deque_pop_front<T>(values: &mut std::collections::VecDeque<T>) -> Option<T> {
         jet_deque_pop_front_kernel(values).ok()
     }
@@ -1103,6 +1163,12 @@ pub(crate) enum JetLoopCursorState {
     Range {
         cursor: collection_semantics::JetLoopRangeCursor,
     },
+    ResidentList {
+        collection: i64,
+        index: usize,
+        len: usize,
+        step: usize,
+    },
     Values {
         items: Vec<JetLoopItem>,
         index: usize,
@@ -1180,6 +1246,7 @@ fn loop_range_cursor_from_value(
     rt: &crate::JitRuntime,
     collection: i64,
     step_value: i64,
+
     has_step: bool,
 ) -> Option<collection_semantics::JetLoopRangeCursor> {
     let start = rt.heap.record_get_int(collection, 0)?;
@@ -1192,6 +1259,20 @@ fn loop_range_cursor_from_value(
     collection_semantics::jet_loop_range_init_checked(start, end, step_value, has_step, exclusive)
         .ok()
 }
+fn resident_int_list_len(rt: &crate::JitRuntime, collection: i64) -> Option<usize> {
+    match rt.heap.list_value(collection)? {
+        jet_rt::JetVal::IntList(values) => Some(values.len()),
+        jet_rt::JetVal::List(values)
+            if values
+                .iter()
+                .all(|value| matches!(value, jet_rt::JetVal::Int(_))) =>
+        {
+            Some(values.len())
+        }
+        _ => None,
+    }
+}
+
 
 fn loop_items_from_list(
     rt: &mut crate::JitRuntime,
@@ -1384,6 +1465,7 @@ fn loop_cursor_item(state: &JetLoopCursorState) -> Option<i64> {
                 None
             }
         }
+        JetLoopCursorState::ResidentList { .. } => None,
         JetLoopCursorState::Values { items, index, .. } => {
             items.get(*index).map(|item| match item {
                 JetLoopItem::Int(value) | JetLoopItem::FloatBits(value) => *value,
@@ -1421,93 +1503,64 @@ pub(crate) fn jet_jit_loop_range_init(
     loop_cursor_alloc(JetLoopCursorState::Range { cursor })
 }
 
+fn with_live_range_cursor<T>(
+    handle: i64,
+    f: impl FnOnce(&mut collection_semantics::JetLoopRangeCursor) -> T,
+) -> Result<T, String> {
+    let index = loop_handle_index(handle)?;
+    Concurrency::with_runtime_string(|rt| {
+        let state = rt
+            .loop_cursors
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| "loop cursor is not live".to_string())?;
+        match state {
+            JetLoopCursorState::Range { cursor } => Ok(f(cursor)),
+            _ => Err("range operation received a non-range cursor".to_string()),
+        }
+    })
+}
+
 pub(crate) fn jet_jit_loop_range_has_next(handle: i64) -> i8 {
-    let state = match loop_cursor_take(handle) {
-        Ok(state) => state,
+    match with_live_range_cursor(handle, |cursor| {
+        i8::from(collection_semantics::jet_loop_range_has_next(cursor))
+    }) {
+        Ok(result) => result,
         Err(error) => {
             loop_host_fault(error);
-            return 0;
+            0
         }
-    };
-    let result = match &state {
-        JetLoopCursorState::Range { cursor } => {
-            i8::from(collection_semantics::jet_loop_range_has_next(cursor))
-        }
-        JetLoopCursorState::Values { .. }
-        | JetLoopCursorState::Lines { .. }
-        | JetLoopCursorState::Channel { .. }
-        | JetLoopCursorState::Encoding { .. }
-        | JetLoopCursorState::Iterable { .. } => {
-            loop_host_fault("range operation received a non-range cursor".to_string());
-            return 0;
-        }
-    };
-    if let Err(error) = loop_cursor_put(handle, state) {
-        loop_host_fault(error);
-        return 0;
     }
-    result
 }
 
 pub(crate) fn jet_jit_loop_range_value(handle: i64) -> i64 {
-    let state = match loop_cursor_take(handle) {
-        Ok(state) => state,
+    match with_live_range_cursor(handle, |cursor| {
+        if collection_semantics::jet_loop_range_has_next(cursor) {
+            Some(collection_semantics::jet_loop_range_value(cursor))
+        } else {
+            None
+        }
+    }) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            loop_host_fault("range loop value requested after exhaustion".to_string());
+            0
+        }
         Err(error) => {
             loop_host_fault(error);
-            return 0;
+            0
         }
-    };
-    let result = match &state {
-        JetLoopCursorState::Range { cursor }
-            if collection_semantics::jet_loop_range_has_next(cursor) =>
-        {
-            collection_semantics::jet_loop_range_value(cursor)
-        }
-        JetLoopCursorState::Range { .. } => {
-            loop_host_fault("range loop value requested after exhaustion".to_string());
-            return 0;
-        }
-        JetLoopCursorState::Values { .. }
-        | JetLoopCursorState::Lines { .. }
-        | JetLoopCursorState::Channel { .. }
-        | JetLoopCursorState::Encoding { .. }
-        | JetLoopCursorState::Iterable { .. } => {
-            loop_host_fault("range operation received a non-range cursor".to_string());
-            return 0;
-        }
-    };
-    if let Err(error) = loop_cursor_put(handle, state) {
-        loop_host_fault(error);
-        return 0;
     }
-    result
 }
 
 pub(crate) fn jet_jit_loop_range_advance(handle: i64) {
-    let mut state = match loop_cursor_take(handle) {
-        Ok(state) => state,
-        Err(error) => {
-            loop_host_fault(error);
-            return;
-        }
-    };
-    match &mut state {
-        JetLoopCursorState::Range { cursor } => {
-            collection_semantics::jet_loop_range_advance(cursor);
-        }
-        JetLoopCursorState::Values { .. }
-        | JetLoopCursorState::Lines { .. }
-        | JetLoopCursorState::Channel { .. }
-        | JetLoopCursorState::Encoding { .. }
-        | JetLoopCursorState::Iterable { .. } => {
-            loop_host_fault("range operation received a non-range cursor".to_string());
-            return;
-        }
-    };
-    if let Err(error) = loop_cursor_put(handle, state) {
+    if let Err(error) = with_live_range_cursor(handle, |cursor| {
+        collection_semantics::jet_loop_range_advance(cursor);
+    }) {
         loop_host_fault(error);
     }
 }
+
 
 pub(crate) fn jet_jit_loop_map_init(
     collection: i64,
@@ -1601,6 +1654,39 @@ pub(crate) fn jet_jit_loop_iter_init(
                 loop_range_cursor_from_value(rt, collection, step_value, has_step != 0)
             }) {
                 return loop_cursor_alloc(JetLoopCursorState::Range { cursor });
+            }
+            // AOT Plain iterates Stream<T> via JetStream::into_iter. JIT must
+            // pull the same consumer: lowering never marks Stream as
+            // ChannelReceiver (that wire is illegal on native JetStream).
+            if let Some(stream) =
+                Concurrency::with_runtime_mut(|rt| rt.stream_consumers.remove(&collection))
+            {
+                let mut channel = None;
+                let mut stream = Some(stream);
+                let current = loop_pull(&mut channel, &mut stream);
+                return loop_cursor_alloc(JetLoopCursorState::Channel {
+                    channel,
+                    stream,
+                    current,
+                    step,
+                });
+            }
+            if by_value == 0
+                && matches!(
+                    source_kind,
+                    jet_foundation::MIR::MirLoopSourceKind::Plain
+                )
+            {
+                if let Some(len) =
+                    Concurrency::with_runtime_mut(|rt| resident_int_list_len(rt, collection))
+                {
+                    return loop_cursor_alloc(JetLoopCursorState::ResidentList {
+                        collection,
+                        index: 0,
+                        len,
+                        step,
+                    });
+                }
             }
             let items =
                 match Concurrency::with_runtime_string(|rt| loop_items_from_list(rt, collection)) {
@@ -1774,6 +1860,7 @@ pub(crate) fn jet_jit_loop_iter_has_next(handle: i64) -> i8 {
         }
     };
     let result = match &mut state {
+        JetLoopCursorState::ResidentList { index, len, .. } => i8::from(*index < *len),
         JetLoopCursorState::Values { items, index, .. } => i8::from(*index < items.len()),
         JetLoopCursorState::Lines {
             reader,
@@ -1857,7 +1944,15 @@ pub(crate) fn jet_jit_loop_iter_value(handle: i64) -> i64 {
             return 0;
         }
     };
-    let Some(value) = loop_cursor_item(&state) else {
+    let value = match &state {
+        JetLoopCursorState::ResidentList {
+            collection, index, ..
+        } => Concurrency::with_runtime_mut(|rt| {
+            rt.heap.list_get_int(*collection, *index as i64)
+        }),
+        _ => loop_cursor_item(&state),
+    };
+    let Some(value) = value else {
         loop_host_fault("iterator loop value requested after exhaustion".to_string());
         return 0;
     };
@@ -1866,6 +1961,36 @@ pub(crate) fn jet_jit_loop_iter_value(handle: i64) -> i64 {
         return 0;
     }
     value
+}
+
+pub(crate) fn jet_jit_loop_iter_drop(handle: i64) {
+    let Ok(index) = loop_handle_index(handle) else {
+        return;
+    };
+    let state = Concurrency::with_runtime_mut(|rt| {
+        rt.loop_cursors.get_mut(index).and_then(Option::take)
+    });
+    let Some(state) = state else {
+        return;
+    };
+    if matches!(state, JetLoopCursorState::Channel { .. }) {
+        Concurrency::contain_seam_unwind(move || drop(state));
+    }
+}
+
+pub(crate) fn drop_loop_stream_resources(rt: &mut crate::JitRuntime) {
+    let cursors = std::mem::take(&mut rt.loop_cursors);
+    let consumers = std::mem::take(&mut rt.stream_consumers);
+    let producers = std::mem::take(&mut rt.stream_producers);
+    let senders = std::mem::take(&mut rt.stream_senders);
+    rt.next_stream_channel = -1;
+    rt.next_stream_sender = -1;
+    Concurrency::contain_seam_unwind(move || {
+        drop(cursors);
+        drop(consumers);
+        drop(producers);
+        drop(senders);
+    });
 }
 
 pub(crate) fn jet_jit_loop_iter_advance(handle: i64) {
@@ -1877,6 +2002,10 @@ pub(crate) fn jet_jit_loop_iter_advance(handle: i64) {
         }
     };
     let _keep = match &mut state {
+        JetLoopCursorState::ResidentList { index, len, step, .. } => {
+            *index = index.saturating_add(*step);
+            *index < *len
+        }
         JetLoopCursorState::Values { items, index, step } => {
             *index = index.saturating_add(*step);
             *index < items.len()
@@ -2186,7 +2315,7 @@ fn jet_jit_list_push(list: i64, v: i64) {
         if !list_push_int_resident(rt, list, v) {
             jet_foundation::ice!(None, "jit list push: bad handle");
         }
-    });
+    })
 }
 
 fn jet_jit_list_push_f64(list: i64, v: f64) {
@@ -2737,11 +2866,9 @@ fn jet_jit_view_fold(
 }
 fn jet_jit_list_clear(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let values = rt
-            .heap
-            .list_values_mut(list)
+        rt.heap
+            .list_clear(list)
             .expect("jit list clear: bad handle");
-        collection_semantics::list_clear(values);
     });
 }
 
@@ -2817,6 +2944,28 @@ fn invoke_closure_f64(slot: JitCallableSlot, value: i64) -> f64 {
 fn invoke_closure_unit(slot: JitCallableSlot, value: i64) {
     let _ = invoke_closure_i64(slot, value);
 }
+fn hot_sequence_len(list: i64) -> usize {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::sequence_len(rt, list))
+        .unwrap_or_else(|| jet_foundation::ice!(None, "jit sequence adapter: bad sequence handle"))
+}
+
+#[inline(always)]
+fn hot_sequence_raw(list: i64, index: usize) -> i64 {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::sequence_get_raw(rt, list, index))
+        .unwrap_or_else(|| {
+            jet_foundation::ice!(
+                None,
+                "jit sequence adapter: sequence element has no universal ABI"
+            )
+        })
+}
+
+#[inline(always)]
+fn hot_sequence_float(list: i64, index: usize) -> f64 {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::sequence_get_float(rt, list, index))
+        .unwrap_or_else(|| jet_foundation::ice!(None, "jit float sequence element is not present"))
+}
+
 fn jet_jit_list_fold(list: i64, init: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
@@ -2834,63 +2983,139 @@ fn jet_jit_list_fold(list: i64, init: i64, callback: i64) -> i64 {
         }
         return folded;
     }
-    let values = clone_list_ints(list);
-    let folded = collection_semantics::list_fold(values, init, |acc, value| {
+
+    // Keep the resident list in its typed arena carrier. The old eager route
+    // cloned every slot into a temporary Vec before invoking the callback,
+    // which boxed/copies the whole input before the first fold step.
+    let mut folded = init;
+    for index in 0..hot_sequence_len(list) {
+        let value = hot_sequence_raw(list, index);
         if closure_trapped() {
-            0
-        } else {
-            invoke_closure_i64_pair(slot, *acc, *value)
+            return 0;
         }
-    });
-    if closure_trapped() {
-        0
-    } else {
-        folded
+        folded = invoke_closure_i64_pair(slot, folded, value);
+        if closure_trapped() {
+            return 0;
+        }
     }
+    folded
 }
+
+fn hot_list_sum_fixed_f32(list: i64, seed: f32) -> f32 {
+    if is_lazy_sequence(list) {
+        return collection_semantics::list_fold_add_fixed_f32(clone_list_floats(list), seed as f64)
+            as f32;
+    }
+    let values = (0..hot_sequence_len(list)).map(|index| hot_sequence_float(list, index) as f32);
+    collection_semantics::list_fold_add_fixed_f32_iter(values, seed)
+}
+
+fn hot_list_sum_fixed_f64(list: i64, seed: f64) -> f64 {
+    if is_lazy_sequence(list) {
+        return collection_semantics::list_fold_add_fixed_f64(clone_list_floats(list), seed);
+    }
+    let values = (0..hot_sequence_len(list)).map(|index| hot_sequence_float(list, index));
+    collection_semantics::list_fold_add_fixed_f64_iter(values, seed)
+}
+
 fn jet_jit_list_sum_fixed_f32(list: i64) -> f32 {
-    collection_semantics::list_sum_fixed_f32(clone_list_floats(list)) as f32
+    hot_list_sum_fixed_f32(list, 0.0)
 }
 
 fn jet_jit_list_sum_fixed_f64(list: i64) -> f64 {
-    collection_semantics::list_sum_fixed_f64(clone_list_floats(list))
+    hot_list_sum_fixed_f64(list, 0.0)
+}
+
+fn jet_jit_list_sumprod_f64(left: i64, right: i64) -> f64 {
+    if is_lazy_sequence(left) || is_lazy_sequence(right) {
+        let left = clone_list_floats(left);
+        let right = clone_list_floats(right);
+        return left
+            .into_iter()
+            .zip(right)
+            .map(|(a, b)| a * b)
+            .sum();
+    }
+    let length = hot_sequence_len(left).min(hot_sequence_len(right));
+    let mut result = 0.0;
+    for index in 0..length {
+        result += hot_sequence_float(left, index) * hot_sequence_float(right, index);
+    }
+    result
 }
 
 fn jet_jit_list_fold_add_fixed_f32(list: i64, init: f32) -> f32 {
-    collection_semantics::list_fold_add_fixed_f32(clone_list_floats(list), init as f64) as f32
+    hot_list_sum_fixed_f32(list, init)
 }
 
 fn jet_jit_list_fold_add_fixed_f64(list: i64, init: f64) -> f64 {
-    collection_semantics::list_fold_add_fixed_f64(clone_list_floats(list), init)
+    hot_list_sum_fixed_f64(list, init)
 }
 
 fn jet_jit_list_para_fold_add_fixed_f32(list: i64, seed: f32) -> f32 {
-    collection_semantics::list_para_fold_add_fixed_f32(clone_list_floats(list), seed as f64) as f32
+    hot_list_sum_fixed_f32(list, seed)
 }
 
 fn jet_jit_list_para_fold_add_fixed_f64(list: i64, seed: f64) -> f64 {
-    collection_semantics::list_para_fold_add_fixed_f64(clone_list_floats(list), seed)
+    hot_list_sum_fixed_f64(list, seed)
 }
 
 fn jet_jit_list_group_by(list: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
-    let values = clone_list_ints(list);
-    let groups = collection_semantics::list_group_by(values, |value| {
+    if is_lazy_sequence(list) {
+        let values = clone_list_ints(list);
+        let groups = collection_semantics::list_group_by(values, |value| {
+            if closure_trapped() {
+                return String::new();
+            }
+            let key = invoke_closure_i64(slot, *value);
+            if closure_trapped() {
+                return String::new();
+            }
+            Concurrency::with_runtime_mut(|rt| {
+                rt.heap
+                    .clone_string(key)
+                    .expect("jit list group_by: callback key")
+            })
+        });
         if closure_trapped() {
-            return String::new();
+            return 0;
         }
-        let key = invoke_closure_i64(slot, *value);
+        return Concurrency::with_runtime_mut(|rt| {
+            let map = rt.heap.alloc_empty_map();
+            for (key, values) in groups {
+                let key_id = rt.heap.alloc_string(key);
+                let value_id = rt.heap.alloc_int_list(values);
+                rt.heap
+                    .map_insert(map, key_id, value_id)
+                    .expect("jit list group_by: map insert");
+            }
+            map
+        });
+    }
+
+    // Group directly from the resident scalar carrier. Keys and output groups
+    // still own the same values as the Prelude route; only the input snapshot
+    // is removed.
+    let mut groups = BTreeMap::<String, Vec<i64>>::new();
+    for index in 0..hot_sequence_len(list) {
+        let value = hot_sequence_raw(list, index);
         if closure_trapped() {
-            return String::new();
+            return 0;
         }
-        Concurrency::with_runtime_mut(|rt| {
+        let key_id = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        let key = Concurrency::with_runtime_mut(|rt| {
             rt.heap
-                .clone_string(key)
+                .clone_string(key_id)
                 .expect("jit list group_by: callback key")
-        })
-    });
+        });
+        groups.entry(key).or_default().push(value);
+    }
     if closure_trapped() {
         return 0;
     }
@@ -2911,17 +3136,45 @@ fn jet_jit_list_group_by_int(list: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
-    let values = clone_list_ints(list);
-    let groups = collection_semantics::list_group_by_int(values, |value| {
+    if is_lazy_sequence(list) {
+        let values = clone_list_ints(list);
+        let groups = collection_semantics::list_group_by_int(values, |value| {
+            if closure_trapped() {
+                return 0;
+            }
+            let key = invoke_closure_i64(slot, *value);
+            if closure_trapped() {
+                return 0;
+            }
+            key
+        });
         if closure_trapped() {
             return 0;
         }
-        let key = invoke_closure_i64(slot, *value);
+        return Concurrency::with_runtime_mut(|rt| {
+            let map = rt.heap.alloc_empty_map();
+            for (key, values) in groups {
+                let value_id = rt.heap.alloc_int_list(values);
+                rt.heap
+                    .map_insert_int(map, key, value_id)
+                    .expect("jit list group_by_int: map insert");
+            }
+            map
+        });
+    }
+
+    let mut groups = BTreeMap::<i64, Vec<i64>>::new();
+    for index in 0..hot_sequence_len(list) {
+        let value = hot_sequence_raw(list, index);
         if closure_trapped() {
             return 0;
         }
-        key
-    });
+        let key = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        groups.entry(key).or_default().push(value);
+    }
     if closure_trapped() {
         return 0;
     }
@@ -4247,6 +4500,36 @@ fn jet_jit_list_contains(list: i64, needle: i64) -> i8 {
         .collect::<Vec<_>>();
     collection_semantics::list_contains(&values, &needle) as i8
 }
+fn jet_jit_list_index_of(list: i64, needle: i64) -> i64 {
+    let needle = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(needle) };
+    let value = clone_list_ints(list)
+        .into_iter()
+        .map(|value| unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) })
+        .position(|item| item == needle)
+        .map(|index| index as i64);
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+fn jet_jit_list_index_of_f64(list: i64, needle: f64) -> i64 {
+    let value = clone_list_floats(list)
+        .into_iter()
+        .position(|item| item == needle)
+        .map(|index| index as i64);
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+fn jet_jit_list_index_of_str(list: i64, needle: i64) -> i64 {
+    let needle = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_string(needle)
+            .unwrap_or_default()
+    });
+    let value = clone_list_strings(list)
+        .into_iter()
+        .position(|item| item == needle)
+        .map(|index| index as i64);
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
 
 fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
     let needle = Concurrency::with_runtime_mut(|rt| {
@@ -4570,6 +4853,30 @@ fn jet_jit_columnar_gather(list: i64, idx: i64, line: u32) -> i64 {
     })
 }
 
+/// Direct typed columnar field read for the resident numeric loop. The arena
+/// keeps the logical list rows, but `JetArena` reaches the selected `Float`
+/// field without cloning every row or allocating a record handle.
+fn jet_jit_columnar_get_f64(list: i64, field: i64, idx: i64, line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list).and_then(|len| usize::try_from(len).ok()) else {
+            jet_foundation::ice!(None, "jit columnar float read: bad handle");
+        };
+        match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |row| {
+            rt.heap.list_record_get_float(list, row as i64, field)
+        }) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                rt.set_host_fault("jit columnar float read: field representation mismatch");
+                0.0
+            }
+            Err(error) => {
+                rt.set_runtime_stop("E3010", line, &error.message());
+                0.0
+            }
+        }
+    })
+}
+
 fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(len) = rt.heap.list_len(list) else {
@@ -4709,6 +5016,21 @@ fn jet_jit_list_last_opt(list: i64) -> i64 {
 
 fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
     Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            let ok = usize::try_from(idx)
+                .ok()
+                .and_then(|index| crate::runtime_host::sequence_set_int(rt, list, index, v))
+                .is_some();
+            if !ok {
+                trap_index(
+                    i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+                        .unwrap_or(i64::MAX),
+                    idx,
+                    line,
+                );
+            }
+            return;
+        }
         if rt.heap.list_len(list).is_none() {
             jet_foundation::ice!(None, "jit list set: bad handle");
         }
@@ -4721,6 +5043,21 @@ fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
 fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         if crate::Compute::try_set_list_f64(rt, list, idx, v) {
+            return;
+        }
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            let ok = usize::try_from(idx)
+                .ok()
+                .and_then(|index| crate::runtime_host::sequence_set_float(rt, list, index, v))
+                .is_some();
+            if !ok {
+                trap_index(
+                    i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+                        .unwrap_or(i64::MAX),
+                    idx,
+                    line,
+                );
+            }
             return;
         }
         if rt.heap.list_len(list).is_none() {
@@ -4739,6 +5076,28 @@ fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, line: u32) {
 fn jet_jit_index_vec_set(list: i64, idx: i64, value: i64, _file: i64, line: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let line = line.max(0) as u32;
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            if let Some(index) = usize::try_from(idx).ok() {
+                if crate::runtime_host::sequence_set_float(
+                    rt,
+                    list,
+                    index,
+                    f64::from_bits(value as u64),
+                )
+                .is_some()
+                    || crate::runtime_host::sequence_set_int(rt, list, index, value).is_some()
+                {
+                    return;
+                }
+            }
+            trap_index(
+                i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+                    .unwrap_or(i64::MAX),
+                idx,
+                line,
+            );
+            return;
+        }
         if rt.heap.list_len(list).is_none() {
             jet_foundation::ice!(None, "jit index vec set: bad handle");
         }
@@ -4757,6 +5116,7 @@ fn jet_jit_index_vec_set(list: i64, idx: i64, value: i64, _file: i64, line: i64)
         }
     });
 }
+
 
 fn jet_jit_list_sort(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
@@ -5403,6 +5763,32 @@ fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
     let pairs = collection_semantics::map_from_keys_i64(keys, default);
     alloc_map_pairs(&pairs)
 }
+fn jet_jit_map_from_keys_int(keys: i64, default: i64) -> i64 {
+    let keys = clone_list_ints(keys);
+    Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        for key in keys {
+            rt.heap
+                .map_insert_int(map, key, default)
+                .expect("jit Int map from_keys: insert");
+        }
+        map
+    })
+}
+
+fn jet_jit_map_from_keys_composite(keys: i64, default: i64) -> i64 {
+    let keys = clone_list_ints(keys);
+    Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        for key in keys {
+            rt.heap
+                .map_insert_composite(map, key, default)
+                .expect("jit composite map from_keys: insert");
+        }
+        map
+    })
+}
+
 
 fn jet_jit_map_contains_value(map: i64, needle: i64) -> i8 {
     i8::from(collection_semantics::map_contains_i64(
@@ -5643,6 +6029,71 @@ fn jet_jit_map_merge_int(left: i64, right: i64) -> i64 {
         out
     })
 }
+fn jet_jit_map_update(left: i64, right: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .map_len(right)
+            .expect("jit map update: bad right handle");
+        for index in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(right, index)
+                .expect("jit map update: right key");
+            let value = rt
+                .heap
+                .map_value_at(right, index)
+                .expect("jit map update: right value");
+            rt.heap
+                .map_insert(left, key, value)
+                .expect("jit map update: bad left handle");
+        }
+    });
+}
+
+fn jet_jit_map_update_int(left: i64, right: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .map_len(right)
+            .expect("jit Int map update: bad right handle");
+        for index in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(right, index)
+                .expect("jit Int map update: right key");
+            let value = rt
+                .heap
+                .map_value_at(right, index)
+                .expect("jit Int map update: right value");
+            rt.heap
+                .map_insert_int(left, key, value)
+                .expect("jit Int map update: bad left handle");
+        }
+    });
+}
+
+fn jet_jit_map_update_composite(left: i64, right: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .map_len(right)
+            .expect("jit composite map update: bad right handle");
+        for index in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(right, index)
+                .expect("jit composite map update: right key");
+            let value = rt
+                .heap
+                .map_value_at(right, index)
+                .expect("jit composite map update: right value");
+            rt.heap
+                .map_insert_composite(left, key, value)
+                .expect("jit composite map update: bad left handle");
+        }
+    });
+}
 
 fn jet_jit_ordering_then(first: i64, second: i64) -> i64 {
     let equal = crate::types_meta::prelude_enum_variant_index(
@@ -5690,6 +6141,42 @@ fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) -> i64 {
             .map_insert_int(map, key, value)
             .expect("jit Int map insert: bad handle");
         option_i64(rt, previous)
+    })
+}
+
+fn jet_jit_map_setdefault(map: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(existing) = rt.heap.map_get(map, key) {
+            return existing;
+        }
+        rt.heap
+            .map_insert(map, key, value)
+            .expect("jit map setdefault: bad handle");
+        value
+    })
+}
+
+fn jet_jit_map_setdefault_composite(map: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(existing) = rt.heap.map_get_composite(map, key) {
+            return existing;
+        }
+        rt.heap
+            .map_insert_composite(map, key, value)
+            .expect("jit composite map setdefault: bad handle or key");
+        value
+    })
+}
+
+fn jet_jit_map_setdefault_int(map: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(existing) = rt.heap.map_get_int(map, key) {
+            return existing;
+        }
+        rt.heap
+            .map_insert_int(map, key, value)
+            .expect("jit Int map setdefault: bad handle");
+        value
     })
 }
 fn jet_jit_map_add_new(map: i64, key: i64, value: i64) -> i8 {
@@ -8136,6 +8623,80 @@ fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
         }
     })
 }
+fn jet_jit_set_update(set: i64, other: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let other_idx = (other as usize).wrapping_sub(1);
+        let Some(values) = rt.sets.get(other_idx).cloned() else {
+            return;
+        };
+        if idx >= rt.sets.len() {
+            return;
+        }
+        let string_kind = set_is_string(rt, set);
+        for value in values {
+            if string_kind {
+                let needle = rt.heap.clone_string(value).unwrap_or_default();
+                let duplicate = rt.sets[idx]
+                    .iter()
+                    .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()));
+                if duplicate {
+                    continue;
+                }
+            }
+            rt.sets[idx].insert(value);
+        }
+    });
+}
+fn jet_jit_set_relation_update(set: i64, other: i64, mode: u8) {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let other_idx = (other as usize).wrapping_sub(1);
+        let Some(left) = rt.sets.get(idx).cloned() else {
+            return;
+        };
+        let Some(right) = rt.sets.get(other_idx).cloned() else {
+            return;
+        };
+        let string_kind = set_is_string(rt, set) || set_is_string(rt, other);
+        let next = if string_kind {
+            let ids = string_ids(rt, &left)
+                .into_iter()
+                .chain(string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let left_values = set_string_values(rt, &left);
+            let right_values = set_string_values(rt, &right);
+            let values = match mode {
+                0 => set_semantics::jet_set_difference(&left_values, &right_values),
+                1 => set_semantics::jet_set_intersection(&left_values, &right_values),
+                _ => set_semantics::jet_set_symmetric_difference(&left_values, &right_values),
+            };
+            values
+                .into_iter()
+                .filter_map(|value| ids.get(&value).copied())
+                .collect()
+        } else {
+            match mode {
+                0 => set_semantics::jet_set_difference(&left, &right),
+                1 => set_semantics::jet_set_intersection(&left, &right),
+                _ => set_semantics::jet_set_symmetric_difference(&left, &right),
+            }
+        };
+        rt.sets[idx] = next;
+    });
+}
+
+fn jet_jit_set_difference_update(set: i64, other: i64) {
+    jet_jit_set_relation_update(set, other, 0);
+}
+
+fn jet_jit_set_intersection_update(set: i64, other: i64) {
+    jet_jit_set_relation_update(set, other, 1);
+}
+
+fn jet_jit_set_symmetric_difference_update(set: i64, other: i64) {
+    jet_jit_set_relation_update(set, other, 2);
+}
 
 fn jet_jit_set_remove(set: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
@@ -8177,6 +8738,30 @@ fn jet_jit_set_pop(set: i64, v: i64) -> i64 {
         option_packed(
             found.and_then(|id| collection_semantics::set_pop_i64(&mut rt.sets[idx], &id)),
         )
+    })
+}
+
+fn jet_jit_set_replace(set: i64, v: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let Some(existing) = rt.sets.get(idx).cloned() else {
+            return option_packed(None);
+        };
+        let string_kind = set_is_string(rt, set);
+        let found = if string_kind {
+            let needle = rt.heap.clone_string(v).unwrap_or_default();
+            existing
+                .iter()
+                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+                .copied()
+        } else {
+            existing.contains(&v).then_some(v)
+        };
+        if let Some(old) = found {
+            rt.sets[idx].remove(&old);
+        }
+        rt.sets[idx].insert(v);
+        option_packed(found)
     })
 }
 
@@ -9879,6 +10464,31 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
                     None => 0,
                 }
             }
+            55 => {
+                let separator = rt
+                    .byte_buffers
+                    .get((arg0 as usize).wrapping_sub(1))
+                    .cloned();
+                let Some(separator) = separator else {
+                    return crate::runtime_host::alloc_jit_result(rt, false, 0);
+                };
+                match rt.byte_buffers.get(idx).map(|b| b.partition(&separator)) {
+                    Some(Ok(parts)) => {
+                        let mut handles = Vec::with_capacity(parts.len());
+                        for part in parts {
+                            rt.byte_buffers.push(part);
+                            handles.push(rt.byte_buffers.len() as i64);
+                        }
+                        let list = copy_list(rt, handles);
+                        crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+                    }
+                    Some(Err(message)) => {
+                        rt.set_trap_message(message);
+                        crate::runtime_host::alloc_jit_result(rt, false, 0)
+                    }
+                    None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+                }
+            }
             51 | 52 => {
                 let other_idx = (arg0 as usize).wrapping_sub(1);
                 let other = rt.byte_buffers.get(other_idx).cloned();
@@ -10085,6 +10695,10 @@ fn jet_jit_byte_buffer_last_index_of(handle: i64, needle: i64) -> i64 {
 fn jet_jit_byte_buffer_split(handle: i64, separator: i64) -> i64 {
     jet_jit_byte_buffer_method(handle, 49, separator, 0)
 }
+fn jet_jit_byte_buffer_partition(handle: i64, separator: i64) -> i64 {
+    jet_jit_byte_buffer_method(handle, 55, separator, 0)
+}
+
 
 fn jet_jit_byte_buffer_join(handle: i64, parts: i64) -> i64 {
     jet_jit_byte_buffer_method(handle, 50, parts, 0)
@@ -10359,6 +10973,12 @@ host_fns! {
         let mut sig_get_f64 = sig_get.clone();
         sig_get_f64.returns.clear();
         sig_get_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_columnar_get_f64 = Signature::new(cc);
+        sig_columnar_get_f64
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_columnar_get_f64.params.push(AbiParam::new(types::I32));
+        sig_columnar_get_f64.returns.push(AbiParam::new(types::F64));
         let sig_get_range_scalar = sig_get.clone();
         let mut sig_get_range_exclusive = sig_get.clone();
         sig_get_range_exclusive.returns.clear();
@@ -10383,12 +11003,18 @@ host_fns! {
             .params
             .extend([AbiParam::new(types::I64); 2]);
         sig_scalar_debug.returns.push(AbiParam::new(types::I64));
+        let mut sig_error_show = Signature::new(cc);
+        sig_error_show.params.push(AbiParam::new(types::I64));
+        sig_error_show.returns.push(AbiParam::new(types::I64));
         let mut sig_set_from = sig_len.clone();
         sig_set_from.params.push(AbiParam::new(types::I64));
         let mut sig_list_eq = Signature::new(cc);
         sig_list_eq.params.push(AbiParam::new(types::I64));
         sig_list_eq.params.push(AbiParam::new(types::I64));
         sig_list_eq.returns.push(AbiParam::new(types::I8));
+        let mut sig_list_sumprod_f64 = sig_list_eq.clone();
+        sig_list_sumprod_f64.returns.clear();
+        sig_list_sumprod_f64.returns.push(AbiParam::new(types::F64));
         // list_set(list, idx, val, line)
         let mut sig_set = Signature::new(cc);
         sig_set.params.push(AbiParam::new(types::I64));
@@ -10578,6 +11204,7 @@ host_fns! {
         sig_loop_cursor_value.returns.push(AbiParam::new(types::I64));
         let mut sig_loop_cursor_advance = Signature::new(cc);
         sig_loop_cursor_advance.params.push(AbiParam::new(types::I64));
+        let sig_loop_cursor_drop = sig_loop_cursor_advance.clone();
     }
     loop_range_init: "jet_loop_range_init" => jet_jit_loop_range_init: sig_loop_range_init;
     loop_range_has_next: "jet_loop_range_has_next" => jet_jit_loop_range_has_next: sig_loop_cursor_has_next;
@@ -10587,6 +11214,7 @@ host_fns! {
     loop_iter_has_next: "jet_loop_iter_has_next" => jet_jit_loop_iter_has_next: sig_loop_cursor_has_next;
     loop_iter_value: "jet_loop_iter_value" => jet_jit_loop_iter_value: sig_loop_cursor_value;
     loop_iter_advance: "jet_loop_iter_advance" => jet_jit_loop_iter_advance: sig_loop_cursor_advance;
+    loop_iter_drop: "jet_loop_iter_drop" => jet_jit_loop_iter_drop: sig_loop_cursor_drop;
     io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
     io_process_args: "jet_jit_io_process_args" => jet_jit_io_process_args: sig_new;
     list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
@@ -10624,8 +11252,9 @@ host_fns! {
     list_push: "jet_jit_list_push" => jet_jit_list_push: sig_push;
     list_push_f64: "jet_jit_list_push_f64" => jet_jit_list_push_f64: sig_push_f64;
     list_extend: "jet_jit_list_extend" => jet_jit_list_extend: sig_push;
-    list_reverse: "jet_jit_list_reverse" => jet_jit_list_reverse: sig_sort;
-    list_concat: "jet_jit_list_concat" => jet_jit_list_concat: sig_get_opt;
+    list_sum_fixed_f64: "jet_list_sum_fixed_f64" => jet_jit_list_sum_fixed_f64: sig_fixed_float_sum_f64;
+    list_sum_fixed_f64_jit: "jet_jit_list_sum_fixed_f64" => jet_jit_list_sum_fixed_f64: sig_fixed_float_sum_f64;
+    list_sumprod_f64: "jet_jit_list_sumprod_f64" => jet_jit_list_sumprod_f64: sig_list_sumprod_f64;
     list_try_push: "jet_jit_list_try_push" => jet_jit_list_try_push: sig_try_push;
     view_new: "jet_jit_view_new" => jet_jit_view_new: sig_view_new;
     checked_view_new: "jet_view_new" => jet_jit_view_new: sig_view_new;
@@ -10636,12 +11265,12 @@ host_fns! {
     view_map: "jet_jit_view_map" => jet_jit_view_map: sig_view_map;
     list_try_push_f64: "jet_jit_list_try_push_f64" => jet_jit_list_try_push_f64: sig_try_push_f64;
     list_sum_fixed_f32: "jet_list_sum_fixed_f32" => jet_jit_list_sum_fixed_f32: sig_fixed_float_sum_f32;
-    list_sum_fixed_f64: "jet_list_sum_fixed_f64" => jet_jit_list_sum_fixed_f64: sig_fixed_float_sum_f64;
     list_try_reserve: "jet_jit_list_try_reserve" => jet_jit_list_try_reserve: sig_try_reserve;
     list_try_reserve_f64: "jet_jit_list_try_reserve_f64" => jet_jit_list_try_reserve_f64: sig_try_reserve_f64;
     string_try_push: "jet_jit_string_try_push" => jet_jit_string_try_push: sig_try_string_push;
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
+    columnar_get_f64: "jet_jit_columnar_get_f64" => jet_jit_columnar_get_f64: sig_columnar_get_f64;
     index_to_i64: "jet_jit_index_to_i64" => jet_jit_index_to_i64: sig_len;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
     fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;
@@ -10710,6 +11339,9 @@ host_fns! {
     checked_list_flat_map: "jet_list_flat_map" => checked_list_flat_map: sig_closure_value;
     checked_iter_flat_map: "jet_iter_flat_map" => checked_list_flat_map: sig_closure_value;
     checked_list_take: "jet_list_take_while" => checked_list_take: sig_closure_value;
+    list_index_of: "jet_list_index_of" => jet_jit_list_index_of: sig_get_opt;
+    list_index_of_f64: "jet_jit_list_index_of_f64" => jet_jit_list_index_of_f64: sig_get_opt;
+    list_index_of_str: "jet_jit_list_index_of_str" => jet_jit_list_index_of_str: sig_get_opt;
     checked_list_skip: "jet_list_skip_while" => checked_list_skip: sig_closure_value;
     checked_iter_take: "jet_iter_take_while" => checked_list_take: sig_closure_value;
     checked_iter_skip: "jet_iter_skip_while" => checked_list_skip: sig_closure_value;
@@ -10805,6 +11437,9 @@ host_fns! {
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
     map_merge_int: "jet_jit_map_merge_int" => jet_jit_map_merge_int: sig_get_opt;
+    map_update: "jet_jit_map_update" => jet_jit_map_update: sig_push;
+    map_update_int: "jet_jit_map_update_int" => jet_jit_map_update_int: sig_push;
+    map_update_composite: "jet_jit_map_update_composite" => jet_jit_map_update_composite: sig_push;
     map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
     checked_map_merge_with: "jet_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
 
@@ -10813,6 +11448,9 @@ host_fns! {
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_three_ret;
     map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_three_ret;
     map_insert_int: "jet_jit_map_insert_int" => jet_jit_map_insert_int: sig_three_ret;
+    map_setdefault: "jet_jit_map_setdefault" => jet_jit_map_setdefault: sig_three_ret;
+    map_setdefault_composite: "jet_jit_map_setdefault_composite" => jet_jit_map_setdefault_composite: sig_three_ret;
+    map_setdefault_int: "jet_jit_map_setdefault_int" => jet_jit_map_setdefault_int: sig_three_ret;
     map_add_new: "jet_jit_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
     map_add_new_composite: "jet_jit_map_add_new_composite" => jet_jit_map_add_new_composite: sig_map_add_new;
     map_add_new_int: "jet_jit_map_add_new_int" => jet_jit_map_add_new_int: sig_map_add_new;
@@ -10882,7 +11520,9 @@ host_fns! {
     checked_map_intersection: "jet_map_intersection" => jet_jit_map_intersection: sig_get_opt;
     map_slice: "jet_jit_map_slice" => jet_jit_map_slice: sig_get_opt;
     checked_map_slice: "jet_map_slice" => jet_jit_map_slice: sig_get_opt;
-    map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
+    map_from_keys_kernel: "jet_map_from_keys_kernel" => jet_jit_map_from_keys: sig_get_opt;
+    map_from_keys_int: "jet_map_from_keys_int" => jet_jit_map_from_keys_int: sig_get_opt;
+    map_from_keys_composite: "jet_map_from_keys_composite" => jet_jit_map_from_keys_composite: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     checked_map_contains_value: "jet_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     map_has_key: "jet_jit_map_has_key" => jet_jit_map_has_key: sig_list_eq;
@@ -10946,12 +11586,12 @@ host_fns! {
     list_sort_by_date_keys: "jet_jit_list_sort_by_date_keys" => jet_jit_list_sort_by_date_keys: sig_sort_by_keys;
     list_sort_by_date_keys_desc: "jet_jit_list_sort_by_date_keys_desc" => jet_jit_list_sort_by_date_keys_desc: sig_sort_by_keys;
     list_sort_by_compare: "jet_list_sort_by_compare" => jet_jit_list_sort_by_compare: sig_sort_by_compare;
-    io_error_show: "jet_jit_io_error_show" => jet_jit_io_error_show: sig_len;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
     list_display: "jet_jit_list_display" => jet_jit_list_display: sig_get_opt;
     string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
     scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
+    io_error_show: "jet_jit_io_error_show" => jet_jit_io_error_show: sig_error_show;
     enum_show: "jet_jit_enum_show" => jet_jit_enum_show: sig_enum_show;
     str_push_debug_map: "jet_jit_str_push_debug_map" => jet_jit_str_push_debug_map: sig_push;
     str_push_debug_optional: "jet_jit_str_push_debug_optional" => jet_jit_str_push_debug_optional: sig_debug_optional;
@@ -10966,6 +11606,10 @@ host_fns! {
     set_new: "jet_jit_set_new" => jet_jit_set_new: sig_sorted_set_new;
     checked_set_new: "std::collections::HashSet::new" => jet_jit_set_new: sig_sorted_set_new;
     set_insert: "jet_jit_set_insert" => jet_jit_set_insert: sig_list_eq;
+    set_update: "jet_jit_set_update" => jet_jit_set_update: sig_push;
+    set_difference_update: "jet_jit_set_difference_update" => jet_jit_set_difference_update: sig_push;
+    set_intersection_update: "jet_jit_set_intersection_update" => jet_jit_set_intersection_update: sig_push;
+    set_symmetric_difference_update: "jet_jit_set_symmetric_difference_update" => jet_jit_set_symmetric_difference_update: sig_push;
     set_remove: "jet_jit_set_remove" => jet_jit_set_remove: sig_push;
     set_has: "jet_jit_set_has" => jet_jit_set_has: sig_list_eq;
     set_len: "jet_jit_set_len" => jet_jit_set_len: sig_len;
@@ -10978,6 +11622,7 @@ host_fns! {
     set_max: "jet_jit_set_max" => jet_jit_set_max: sig_len;
     set_sort: "jet_jit_set_sort" => jet_jit_set_sort: sig_len;
     set_pop: "jet_jit_set_pop" => jet_jit_set_pop: sig_get_opt;
+    set_replace: "jet_jit_set_replace" => jet_jit_set_replace: sig_get_opt;
     set_union: "jet_jit_set_union" => jet_jit_set_union: sig_get_opt;
     set_intersection: "jet_jit_set_intersection" => jet_jit_set_intersection: sig_get_opt;
     set_difference: "jet_jit_set_difference" => jet_jit_set_difference: sig_get_opt;
@@ -11140,6 +11785,7 @@ host_fns! {
     checked_byte_buffer_index_of: "JetByteBuffer::index_of" => jet_jit_byte_buffer_index_of: sig_get_opt;
     checked_byte_buffer_last_index_of: "JetByteBuffer::last_index_of" => jet_jit_byte_buffer_last_index_of: sig_get_opt;
     checked_byte_buffer_split: "JetByteBuffer::split" => jet_jit_byte_buffer_split: sig_get_opt;
+    checked_byte_buffer_partition: "JetByteBuffer::partition" => jet_jit_byte_buffer_partition: sig_get_opt;
     checked_byte_buffer_join: "JetByteBuffer::join" => jet_jit_byte_buffer_join: sig_get_opt;
     checked_byte_buffer_equal: "JetByteBuffer::equal" => jet_jit_byte_buffer_equal: sig_list_eq;
     checked_byte_buffer_compare: "JetByteBuffer::compare" => jet_jit_byte_buffer_compare: sig_get_opt;
@@ -11174,8 +11820,8 @@ host_fns! {
     canonical_map_try_insert: "jet_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
     canonical_list_pop_kernel: "jet_list_pop_kernel" => jet_jit_list_pop: sig_len;
     canonical_priority_queue_pop_kernel: "jet_priority_queue_pop_kernel" => jet_jit_priority_queue_pop: sig_len;
+    canonical_map_update: "jet_map_update_all" => jet_jit_map_update: sig_push;
     canonical_map_merge: "jet_map_merge" => jet_jit_map_merge: sig_get_opt;
-    canonical_map_from_keys_kernel: "jet_map_from_keys_kernel" => jet_jit_map_from_keys: sig_get_opt;
     canonical_list_replace: "jet_list_replace" => jet_jit_list_replace: sig_three_ret;
     canonical_list_equal: "jet_list_equal" => jet_jit_list_equal: sig_list_eq;
     canonical_byte_buffer_with_capacity: "JetByteBuffer::with_capacity" => jet_jit_byte_buffer_with_capacity: sig_len;
@@ -11185,15 +11831,16 @@ host_fns! {
     canonical_list_remove_slot: "jet_list_remove_slot" => jet_jit_list_remove_slot_generic: sig_get_opt;
     canonical_list_push: "jet_list_push" => jet_jit_list_push: sig_push;
     canonical_map_insert: "jet_map_insert" => jet_jit_map_insert: sig_three_ret;
+    canonical_map_setdefault: "jet_map_setdefault" => jet_jit_map_setdefault: sig_three_ret;
     canonical_map_add_new: "jet_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
     canonical_list_extend: "jet_list_extend" => jet_jit_list_extend: sig_push;
-    canonical_list_reverse: "jet_list_reverse" => jet_jit_list_reverse: sig_sort;
+    list_reverse: "jet_list_reverse" => jet_jit_list_reverse: sig_sort;
     canonical_list_sort: "jet_list_sort" => jet_jit_list_sort: sig_sort;
     canonical_list_clear: "jet_list_clear" => jet_jit_list_clear: sig_sort;
     canonical_map_pop_first: "jet_map_pop_first" => jet_jit_map_pop_first: sig_len;
     canonical_list_count: "jet_list_count" => jet_jit_list_count: sig_get_opt;
     canonical_list_counts: "jet_list_counts" => jet_jit_list_counts: sig_len;
-    canonical_list_concat: "jet_list_concat" => jet_jit_list_concat: sig_get_opt;
+    list_concat: "jet_list_concat" => jet_jit_list_concat: sig_get_opt;
     canonical_list_sort_desc: "jet_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
     canonical_map_keys: "jet_map_keys" => jet_jit_map_keys: sig_len;
     canonical_map_values: "jet_map_values" => jet_jit_map_values: sig_len;
@@ -11205,7 +11852,12 @@ host_fns! {
     canonical_set_is_superset: "jet_set_is_superset" => jet_jit_set_is_superset: sig_list_eq;
     canonical_set_is_disjoint: "jet_set_is_disjoint" => jet_jit_set_is_disjoint: sig_list_eq;
     canonical_set_pop_kernel: "jet_set_pop_kernel" => jet_jit_set_pop: sig_get_opt;
+    canonical_set_replace: "jet_set_replace_kernel" => jet_jit_set_replace: sig_get_opt;
     canonical_set_insert: "jet_set_insert" => jet_jit_set_insert: sig_list_eq;
+    canonical_set_update: "jet_set_update" => jet_jit_set_update: sig_push;
+    canonical_set_difference_update: "jet_set_difference_update" => jet_jit_set_difference_update: sig_push;
+    canonical_set_intersection_update: "jet_set_intersection_update" => jet_jit_set_intersection_update: sig_push;
+    canonical_set_symmetric_difference_update: "jet_set_symmetric_difference_update" => jet_jit_set_symmetric_difference_update: sig_push;
     canonical_set_remove: "jet_set_remove" => jet_jit_set_remove: sig_push;
     canonical_sorted_set_insert: "jet_sorted_set_insert" => jet_jit_sorted_set_insert: sig_list_eq;
     canonical_sorted_set_remove: "jet_sorted_set_remove" => jet_jit_sorted_set_remove: sig_push;

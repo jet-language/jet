@@ -657,7 +657,7 @@ fn push_numeric_runtime(out: &mut String) {
         "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_numeric\n\
          // AUDIT: D-INTBIG1/D-DECIMAL1 keep the hazard-pointer exact numeric\n\
          // carrier and its raw i64 ownership adapters in this Foundation module.\n\
-         #[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_foundation_numeric {\nuse crate::jet_json_number::{json_decimal_lexeme, json_exact_integer_text};\nuse crate::{AllocError, jet_alloc_error};\nuse std::alloc::{alloc, dealloc, Layout};\nuse std::cell::Cell;\nuse std::fmt;\nuse std::ptr::{self, NonNull};\nuse std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\nmod Syntax {\n    pub const TYPE_DECIMAL: &'static str = \"Decimal\";\n    pub const TYPE_FRACTION: &'static str = \"Fraction\";\n}\n#[derive(Clone, Debug)]\nenum CtValue {\n    Int(i64),\n    Bool(bool),\n    Str(String),\n    BigInt(CtBigInt),\n    Struct { type_name: String, fields: Vec<(String, CtValue)> },\n}\n",
+         #[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_foundation_numeric {\nuse crate::jet_json_number::{json_decimal_lexeme, json_decimal_small, json_exact_integer_text};\nuse crate::{AllocError, jet_alloc_error};\nuse std::alloc::{alloc, dealloc, Layout};\nuse std::cell::Cell;\nuse std::fmt;\nuse std::ptr::{self, NonNull};\nuse std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\nmod Syntax {\n    pub const TYPE_DECIMAL: &'static str = \"Decimal\";\n    pub const TYPE_FRACTION: &'static str = \"Fraction\";\n}\n#[derive(Clone, Debug)]\nenum CtValue {\n    Int(i64),\n    Bool(bool),\n    Str(String),\n    BigInt(CtBigInt),\n    Struct { type_name: String, fields: Vec<(String, CtValue)> },\n}\n",
     );
     let body = NUMERIC_FOUNDATION_SOURCE[start..]
         .replace("crate::AST::CtValue", "CtValue")
@@ -3105,9 +3105,11 @@ fn push_typed_core_optional_parts(
     if runtime_parts.contains(&MirRuntimePartId::Process)
         || runtime_parts.contains(&MirRuntimePartId::FsRuntime)
     {
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_pty\n");
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_process_pty\n");
         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_sandbox\n");
         out.push_str("\nmod jet_process_sandbox {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
@@ -3704,7 +3706,9 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!(
         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
     ));
+    out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_crypto_entropy\n");
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
+    out.push_str("// JET_VETTED_UNSAFE_END: jet_crypto_entropy\n");
     out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
     out.push_str(include_str!("../Prelude/Deadline.rs"));
@@ -3767,9 +3771,11 @@ fn push_corelib_prelude_body(
         // Process.rs and FSIoEnvOsTesting share the one dispatcher support
         // source. Emit it before either adapter for process-only closures too.
         out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_pty\n");
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_process_pty\n");
         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_sandbox\n");
         out.push_str("\nmod jet_process_sandbox {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));

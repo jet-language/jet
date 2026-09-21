@@ -122,22 +122,30 @@ directory path. If you don't want install.sh:
 ```bash
 cd editors/vscode
 npm install
-npx --yes @vscode/vsce package -o jet.vsix   # bundles vscode-languageclient
-cursor --install-extension "$(pwd)/jet.vsix"
+npx --yes @vscode/vsce package --allow-missing-repository -o jet.vsix
+cursor --install-extension "$(pwd)/jet.vsix" --force
 ```
+
+Cursor refuses a live reinstall of Jet (`Please restart VS Code before
+reinstalling Jet`). Nix-bundled Jet is also a read-only store path. `install.sh`
+unpacks `jet-lang.jet-<version>` into `~/.cursor/extensions` and
+`~/.vscode-oss/extensions` so **Developer: Reload Window** picks up this
+checkout. Fully quit the editor only if the colors stay stale after reload.
 
 ## Highlighting
 
 Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
 
 ```bash
-nix develop -c cargo run --bin jet -- devtools grammars
+nix develop -c cargo run --bin jet -- self devtools grammars
 nix develop -c cargo test --test grammar
 ```
 
-The LSP semantic overlay refines live editor coloring for ownership (`~`, `^`,
-`&`), rules (`#Test`, `#Unsafe`), and effect rows (`-[]>`, `-[IO]>`).
-Retired or foreign spellings are not colored as live syntax.
+String interpolations stay string-colored (`"{escape(level)}"` is one string,
+not re-lexed Jet). Escapes (`\"`, `\\`, `{{`, `}}`, `\u{..}`) use the same
+string scope. The LSP semantic overlay refines live editor coloring for
+ownership (`~`, `^`, `&`), rules (`#Test`, `#Unsafe`), and effect rows (`-[]>`,
+`-[IO]>`). Retired or foreign spellings are not colored as live syntax.
 
 Code lenses use **Jet: Run File** and **Jet: Test File**, which open a terminal
 running the same `jet` binary the language server uses.

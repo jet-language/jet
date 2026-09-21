@@ -2,10 +2,10 @@ use core.email as email
 use core.crypto as crypto
 
 fn run() !EmailError {
-    from :: email.address("Mara ☕ <mara@example.com>")
-    to :: email.address("Ada <ada@example.net>")
-    attachment :: email.attachment("hello.txt", "text/plain", [104, 105])
-    message :: email.message(from, [to], [Address]{}, "Welcome ☕", "Hello", HTML{"<b>Hello</b>"}, [attachment])
+    from :: email.address("Mara ☕ <mara@example.com>") ?? panic("from")
+    to :: email.address("Ada <ada@example.net>") ?? panic("to")
+    attachment :: email.attachment("hello.txt", "text/plain", [104, 105]) ?? panic("attachment")
+    message :: email.message(from, [to], [Address]{}, "Welcome ☕", "Hello", HTML{"<b>Hello</b>"}, [attachment]) ?? panic("message")
     password :: crypto.Secret.from_text("example-only")
     config :: email.SMTPConfig{
         host: "localhost",
@@ -17,7 +17,7 @@ fn run() !EmailError {
         limits: email.Limits.safe(),
         dkim: None
     }
-    mailer :: email.smtp(config)
-    bytes :: email.serialize(message)
+    _mailer :: email.smtp(config) ?? panic("smtp")
+    bytes :: email.serialize(message) ?? panic("serialize")
     print(bytes.len() > 0)
 }

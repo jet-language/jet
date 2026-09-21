@@ -758,7 +758,7 @@ pub fn mir_to_ast_type(ty: &MirType) -> Type {
                 .as_ref()
                 .map(mir_to_ast_view_provenance),
         },
-        MirTypeKind::SendFn { params, ret } => Type::Fn {
+        MirTypeKind::SendFn { params, ret, .. } => Type::Fn {
             params: params.iter().map(mir_to_ast_type).collect(),
             ret: ret.as_deref().map(mir_to_ast_type).map(Box::new),
             effect_bound: None,

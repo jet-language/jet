@@ -321,6 +321,38 @@ test("compile-only metrics are explicitly not applicable on interpreted tiers", 
   assert.equal(result.rust.tiers.run.metrics.loc.peer, 2);
 });
 
+test("web comparisons require artifact bytes and bind them to the AOT tier", () => {
+  const entry = { name: "web-fixture", mode: "web", languages: ["jet", "rust"] };
+  const metrics = Object.fromEntries([
+    ["runtime_first_stdout_seconds", 1],
+    ["runtime_wall_seconds", 1],
+    ["runtime_peak_rss_kb", 1],
+    ["cold_build_seconds", 1],
+    ["warm_build_seconds", 1],
+    ["binary_bytes", 1],
+    ["artifact_bytes", 1],
+    ["loc", 1],
+    ["source_bytes", 1],
+    ["tokens", 1],
+    ["source_tokens", 1],
+  ]);
+  const rows = {
+    jet: { status: "ok", metrics },
+    rust: { status: "ok", metrics: Object.fromEntries(Object.entries(metrics).map(([metric, value]) => [metric, value * 2])) },
+  };
+  const tiers = {
+    aot: { status: "ok", metrics },
+    run: { status: "ok", metrics: { ...metrics, artifact_bytes: null } },
+    dev: { status: "unavailable", metrics: {} },
+  };
+  const result = comparisons(entry, Object.keys(rows), rows, tiers);
+  assert.equal(result.rust.tiers.aot.metrics.artifact_bytes.status, "measured");
+  assert.equal(result.rust.tiers.run.metrics.artifact_bytes.status, "not_applicable");
+  const missing = { ...rows.rust, metrics: { ...rows.rust.metrics, artifact_bytes: null } };
+  const missingResult = comparisons(entry, ["jet", "rust"], { ...rows, rust: missing }, tiers);
+  assert.equal(missingResult.rust.tiers.aot.metrics.artifact_bytes.status, "unmeasured");
+});
+
 test("candidate peer loss is retained in the aggregate cell verdict", () => {
   const metrics = [
     "runtime_wall_seconds",
@@ -384,6 +416,7 @@ function scoreboardFixture({ lossMetrics = [], missingMetrics = [], includeNode 
     "cold_build_seconds",
     "warm_build_seconds",
     "binary_bytes",
+    "artifact_bytes",
     "loc",
     "source_bytes",
     "tokens",
@@ -638,7 +671,18 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     not_applicable: "explicit_structural_reason",
     missing: "unmeasured_and_publication_blocked",
   });
-  assert.deepEqual(manifest.report_contract.aot_only_metrics, ["cold_build_seconds", "warm_build_seconds", "binary_bytes"]);
+  assert.deepEqual(manifest.report_contract.aot_only_metrics, ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes"]);
+  assert.ok(manifest.integrated_gate.required_metrics_by_mode.web.includes("artifact_bytes"));
+  assert.ok(manifest.integrated_gate.required_metrics_by_mode["web-app"].includes("artifact_bytes"));
+  assert.deepEqual(manifest.performance_surface_pairs.pair_measurement, {
+    inputs: { iterations: 100000, range: "0..<100000", expected_sum: 4999950000 },
+    tier: "interpreter",
+    target: "jet run --interpret",
+    artifact_binding: "one_artifact_sha256",
+    environment_binding: "one_host_toolchain_affinity_identity",
+    sampling: "balanced_seeded_fisher_yates; fresh process and fresh main.jet per arm",
+    output_validation: "exact_utf8_stdout_bytes",
+  });
   assert.deepEqual(manifest.report_contract.tier_policy_by_mode, {
     batch: ["aot", "run", "dev"],
     "batch-steps": ["aot", "run", "dev"],

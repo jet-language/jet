@@ -258,6 +258,21 @@ fn jet_jit_http_openapi(router: i64) -> i64 {
     let router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
     alloc_string(crate::Web::web_rt::jet_web_openapi(&router))
 }
+fn jet_jit_http_reason_phrase(code: i64) -> i64 {
+    alloc_string(jet_http_reason_phrase(code))
+}
+
+fn jet_jit_http_basic_auth(user: i64, password: i64) -> i64 {
+    let user = clone_string(user);
+    let password = clone_string(password);
+    alloc_string(jet_http_basic_auth(&user, &password))
+}
+
+fn jet_jit_http_bearer_auth(token: i64) -> i64 {
+    let token = clone_string(token);
+    alloc_string(jet_http_bearer_auth(&token))
+}
+
 
 fn http_server(handle: i64) -> Option<Arc<JetHTTPServer>> {
     with_handle(handle, |h| match h {
@@ -543,12 +558,23 @@ fn decode_http_handler_result(res_h: i64) -> Result<JetHTTPResponse, JetHTTPErro
             }
         }
         Some((false, bits)) => {
-            let msg = Concurrency::with_runtime_mut(|rt| {
-                rt.heap
-                    .clone_string(bits as i64)
-                    .unwrap_or_else(|| "handler error".into())
+            let packed = bits as i64;
+            let ordinal = packed & 0xff;
+            let payload = packed >> 8;
+            let text = (9..=19).contains(&ordinal).then(|| {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.heap
+                        .clone_string(payload)
+                        .unwrap_or_else(|| "handler error".into())
+                })
             });
-            Err(JetHTTPError::IO { operation: msg })
+            Err(
+                jet_http_error_from_surface_parts(ordinal, payload, text).unwrap_or_else(|| {
+                    JetHTTPError::IO {
+                        operation: "handler error".into(),
+                    }
+                }),
+            )
         }
         None => Err(JetHTTPError::IO {
             operation: "handler result".into(),
@@ -2209,8 +2235,8 @@ fn jet_jit_http_mux_add_zero(mux: i64, method: i64, pattern: i64, callable: i64)
 
 fn jet_jit_http_response(status: i64, body: i64) -> i64 {
     let body = clone_string(body);
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
-        status, &body,
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response_owned(
+        status, body,
     )))
 }
 
@@ -2223,9 +2249,9 @@ fn jet_jit_http_server_response_header(response: i64, name: i64, value: i64) -> 
     let NetHttpHandle::HTTPResponse(response) = response else {
         return 0;
     };
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response_header(
-        response, &name, &value,
-    )))
+    push_handle(NetHttpHandle::HTTPResponse(
+        jet_http_srv_response_header_owned(response, name, value),
+    ))
 }
 
 fn jet_jit_http_req_body(req: i64) -> i64 {
@@ -2262,10 +2288,10 @@ fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(
         with_handle(req, |h| match h {
-            NetHttpHandle::HTTPRequest(r) => Some(jet_http_request_param(r, &name)),
+            NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_param(r, &name)),
             _ => None,
         })
-        .and_then(|value| value),
+        .and_then(|value| value.ok()),
     )
 }
 
@@ -2734,11 +2760,13 @@ fn jet_jit_net_error_show(bits: i64) -> i64 {
     )
 }
 
-/// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
+/// D-HTTP-JSON1=A: `server.json(status, body)` — body is a canonical DataTree.
 fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
-    let body = clone_string(body);
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text(
-        status, &body,
+    let body = crate::Encoding::read_datatree(body)
+        .map(|tree| crate::Encoding::json_rt::render_datatree_json(&tree, false, 0))
+        .unwrap_or_else(|| "null".to_string());
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text_owned(
+        status, body,
     )))
 }
 
@@ -2871,10 +2899,20 @@ fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, JetHTTPE
     if raw == 0 {
         return Ok(None);
     }
-    let record = raw.checked_sub(1).ok_or_else(|| JetHTTPError::IO {
+    let Some((present, bits)) =
+        Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, raw))
+    else {
+        return Err(JetHTTPError::IO {
+            operation: "invalid HTTPServerTls option".to_string(),
+        });
+    };
+    if !present {
+        return Ok(None);
+    }
+    let record = i64::try_from(bits).map_err(|_| JetHTTPError::IO {
         operation: "invalid HTTPServerTls option".to_string(),
     })?;
-    let fields = Concurrency::with_runtime_mut(|rt| {
+    let (cert, key) = Concurrency::with_runtime_mut(|rt| {
         Some((
             rt.heap
                 .record_get_string(record, 0)
@@ -2887,13 +2925,16 @@ fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, JetHTTPE
     .ok_or_else(|| JetHTTPError::IO {
         operation: "invalid HTTPServerTls option".to_string(),
     })?;
-    Ok(Some(jet_http_srv_tls(&fields.0, &fields.1)))
+    Ok(Some(jet_http_srv_tls(&cert, &key)))
 }
 
 fn decode_http_server_deadline(raw: i64) -> Option<jet_std::Duration> {
-    (raw != 0).then_some(jet_std::Duration {
-        ns: raw.wrapping_sub(1),
-    })
+    if raw == 0 {
+        return None;
+    }
+    let (present, bits) =
+        Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, raw))?;
+    present.then_some(jet_std::Duration { ns: bits as i64 })
 }
 
 fn jet_jit_http_server_default(mux: i64, deadline_ns: i64) -> i64 {
@@ -3000,7 +3041,7 @@ jet_http_client_bridge!(native_http);
 
 fn jet_jit_http_client_get(url: i64) -> i64 {
     let url = clone_string(url);
-    match native_http_response(native_http::jet_http_client_get_impl(&url)) {
+    match native_http_response(native_http::jet_http_client_get_parts_impl(&url)) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
         Err(e) => http_err(e),
     }
@@ -3009,7 +3050,7 @@ fn jet_jit_http_client_get(url: i64) -> i64 {
 fn jet_jit_http_client_post(url: i64, body: i64) -> i64 {
     let url = clone_string(url);
     let body = clone_string(body);
-    match native_http_response(native_http::jet_http_client_post_impl(&url, &body)) {
+    match native_http_response(native_http::jet_http_client_post_parts_impl(&url, &body)) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
         Err(e) => http_err(e),
     }
@@ -3457,15 +3498,15 @@ fn jet_jit_http_static_file(path: i64, mime: i64) -> i64 {
     let mime = clone_string(mime);
     match jet_http_srv_static_file(&path, &mime) {
         Ok(response) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(response))),
-        Err(error) => result_err(error),
+        Err(error) => http_err(error),
     }
 }
 
 fn jet_jit_http_client_request_new(method: i64, url: i64) -> i64 {
     let method = clone_string(method);
     let url = clone_string(url);
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
-        &method, &url,
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new_owned(
+        method, url,
     )))
 }
 
@@ -3484,18 +3525,20 @@ fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_body(
-        req, &body,
-    )))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_body_owned(req, body),
+    ))
 }
 
 fn jet_jit_http_client_request_json(req: i64, body: i64) -> i64 {
-    let body = clone_string(body);
+    let body = crate::Encoding::read_datatree(body)
+        .map(|tree| crate::Encoding::json_rt::render_datatree_json(&tree, false, 0))
+        .unwrap_or_else(|| "null".to_string());
     let Some(req) = take_http_request(req) else {
         return 0;
     };
     push_handle(NetHttpHandle::HTTPRequest(
-        jet_http_client_request_json_text(req, &body),
+        jet_http_client_request_json_text_owned(req, body),
     ))
 }
 
@@ -3505,9 +3548,9 @@ fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_form(
-        req, &name, &value,
-    )))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_form_owned(req, name, value),
+    ))
 }
 
 fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64) -> i64 {
@@ -3516,10 +3559,11 @@ fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_cookie(
-        req, &name, &value,
-    )))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_cookie_owned(req, name, value),
+    ))
 }
+
 
 fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
@@ -3527,9 +3571,9 @@ fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_header(
-        req, &name, &value,
-    )))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_header_owned(req, name, value),
+    ))
 }
 
 fn jet_jit_http_client_request_redirects(req: i64, limit: i64) -> i64 {
@@ -3747,6 +3791,9 @@ host_fns! {
     udp_ready: "jet_jit_udp_socket_ready" => jet_jit_udp_socket_ready: sig3;
     udp_close: "jet_jit_udp_socket_close" => jet_jit_udp_socket_close: sig1;
     http_openapi: "jet_web_openapi" => jet_jit_http_openapi: sig1;
+    http_reason_phrase: "jet_jit_http_reason_phrase" => jet_jit_http_reason_phrase: sig1;
+    http_basic_auth: "jet_jit_http_basic_auth" => jet_jit_http_basic_auth: sig2;
+    http_bearer_auth: "jet_jit_http_bearer_auth" => jet_jit_http_bearer_auth: sig1;
     ready_readable: "jet_jit_net_ready_readable" => jet_jit_net_ready_readable: sig1;
     ready_writable: "jet_jit_net_ready_writable" => jet_jit_net_ready_writable: sig1;
     http_mux_new: "jet_jit_http_mux_new" => jet_jit_http_mux_new: sig0;
@@ -3760,6 +3807,7 @@ host_fns! {
     http_response_prelude: "jet_http_srv_response" => jet_jit_http_response: sig2;
     http_server_response_header_prelude: "jet_http_srv_response_header" => jet_jit_http_server_response_header: sig3;
     http_server_response_header: "jet_jit_http_server_response_header" => jet_jit_http_server_response_header: sig3;
+    http_req_param_prelude: "jet_http_srv_req_param" => jet_jit_http_req_param: sig2;
     http_server_access_log: "jet_jit_http_server_access_log" => jet_jit_http_server_access_log: sig2;
     http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
     http_req_body_prelude: "jet_http_srv_req_body" => jet_jit_http_req_body: sig1;
@@ -3774,9 +3822,6 @@ host_fns! {
     http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_req_text_prelude: "jet_http_request_text" => jet_jit_http_req_text: sig1;
     http_req_text_with_limit_prelude: "jet_http_request_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
-    http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
-    http_body_text_prelude: "jet_http_body_text" => jet_jit_http_body_text: sig2;
-    http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
     http_body_chunks: "jet_jit_http_body_chunks" => jet_jit_http_body_chunks: sig2;
     http_body_chunks_next: "jet_jit_http_body_chunks_next" => jet_jit_http_body_chunks_next: sig1;
     http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;
@@ -3833,10 +3878,14 @@ host_fns! {
     http_resp_trailers_prelude: "jet_http_srv_response_trailers" => jet_jit_http_resp_trailers: sig2;
     http_req_body_len: "jet_jit_http_req_body_len" => jet_jit_http_req_body_len: sig1;
     http_req_under_limit: "jet_jit_http_req_under_limit" => jet_jit_http_req_under_limit: sig2;
+    http_req_body_len_prelude: "jet_http_srv_req_body_len" => jet_jit_http_req_body_len: sig1;
+    http_req_under_limit_prelude: "jet_http_srv_req_under_limit" => jet_jit_http_req_under_limit: sig2;
     http_sse: "jet_jit_http_sse" => jet_jit_http_sse: sig1;
+    http_sse_prelude: "jet_http_srv_sse" => jet_jit_http_sse: sig1;
     http_static_file: "jet_jit_http_static_file" => jet_jit_http_static_file: sig2;
     http_static_file_prelude: "jet_http_srv_static_file" => jet_jit_http_static_file: sig2;
     http_static_file_range: "jet_jit_http_static_file_range" => jet_jit_http_static_file_range: sig3;
+    http_static_file_range_prelude: "jet_http_srv_static_file_range" => jet_jit_http_static_file_range: sig3;
     http_client_request_new: "jet_jit_http_client_request_new" => jet_jit_http_client_request_new: sig2;
     http_client_request_body: "jet_jit_http_client_request_body" => jet_jit_http_client_request_body: sig2;
     http_client_request_json: "jet_jit_http_client_request_json" => jet_jit_http_client_request_json: sig2;
@@ -3849,6 +3898,7 @@ host_fns! {
     http_client_request_send: "jet_jit_http_client_request_send" => jet_jit_http_client_request_send: sig1;
     http_resp_header: "jet_jit_http_resp_header" => jet_jit_http_resp_header: sig2;
     http_resp_cookies: "jet_jit_http_resp_cookies" => jet_jit_http_resp_cookies: sig1;
+    http_resp_cookies_prelude: "jet_http_response_cookies" => jet_jit_http_resp_cookies: sig1;
     ws_upgrade: "jet_jit_ws_upgrade" => jet_jit_ws_upgrade: sig1;
     ws_connect: "jet_jit_ws_connect" => jet_jit_ws_connect: sig1;
     ws_send_text: "jet_jit_ws_send_text" => jet_jit_ws_send_text: sig2;

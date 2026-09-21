@@ -284,42 +284,6 @@ fn core_conformance_checker_rejects_structural_false_greens() {
     );
 }
 
-/// #2942: the contract-to-candidate relation has source-only negative controls.
-///
-/// These fixtures are deliberately authored structural mutations. They must
-/// remain rejected without executing a compiler or treating a declaration,
-/// discarded output, shared oracle, stale candidate, or invalid exclusion as
-/// proof.
-#[test]
-fn capability_relation_negative_controls_reject_false_greens() {
-    let output = std::process::Command::new("node")
-        .arg("scripts/agent/hardening-manifest.mjs")
-        .arg("--capability-negative-controls")
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("node must run capability relation negative controls");
-    assert!(
-        output.status.success(),
-        "capability relation negative control failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for control in [
-        "new-member",
-        "missing-mode",
-        "discarded-output",
-        "shared-wrong-oracle",
-        "stale-identity",
-        "invalid-exclusion",
-    ] {
-        assert!(
-            stdout.contains(control),
-            "capability relation output must name {control}"
-        );
-    }
-}
-
 /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case

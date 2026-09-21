@@ -1,3 +1,9 @@
+package {
+    name: "ui_ui_native_linux"
+    version: "0.1.0"
+    authority: { holds: { allow: [Browser, Exec, FFI, IO, Mem.Alloc] } }
+}
+
 // D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): the native Linux UI
 // backend — a real, working GTK4 app. `core.ui.gtk_backend()` is a `JetBackend`
 // over libgtk-4: canonical `UiNode` trees reconcile into real widgets.
@@ -29,17 +35,26 @@ fn run() {
             clicks :: reactive.signal(0)
             app :: ui.gtk_backend()
             render_app :: ~app
-            ui.reactive_render(() -> {
-                tree :: ui.box([
+            ui.reactive_render(
+            () -> {
+                tree :: ui.box(
+                [
                     ui.text("Jet — native GTK4 counter"),
-                    ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"),
-                    ui.button("Increment", on_click: () -> {
+                    ui.node_color(
+                    "count: {clicks.get()}",
+                    220.0,
+                    40.0,
+                    "#3366ff",
+                    ),
+                    ui.button("Increment") {
                         clicks.set(clicks.get() + 1)
-                    })
-                ])
+                    },
+                ],
+                )
                 // D-UI-MOUNT1=A: Gtk default viewport is 320×240.
                 ui.mount(render_app, tree)
-            })
+            },
+            )
             print("native backend: gtk4")
             app.present("Jet — GTK4")
         }

@@ -688,6 +688,25 @@ impl JetArena {
             _ => None,
         }
     }
+    /// Clear a list without changing its carrier or giving up its allocation.
+    ///
+    /// Dense integer lists must stay dense: converting them through
+    /// `list_values_mut` would allocate one `JetVal` per element and erase the
+    /// resident loop's typed storage.
+    pub fn list_clear(&mut self, list: i64) -> Option<()> {
+        match self.values.get_mut(list as usize)? {
+            JetVal::IntList(values) => {
+                values.clear();
+                Some(())
+            }
+            JetVal::List(values) => {
+                values.clear();
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
 
     pub fn replace_float_list(&mut self, list: i64, values: Vec<f64>) -> Option<()> {
         match self.values.get_mut(list as usize) {
@@ -890,6 +909,42 @@ impl JetArena {
                     _ => None,
                 }
             }
+            _ => None,
+        }
+    }
+    /// Read one `Float` field from a record element in a resident columnar
+    /// list without materializing rows or a transient cell store.
+    pub fn list_record_get_float(
+        &self,
+        list: i64,
+        row: i64,
+        field: i64,
+    ) -> Option<f64> {
+        let row = usize::try_from(row).ok()?;
+        let field = usize::try_from(field).ok()?;
+        let row = match self.values.get(list as usize)? {
+            JetVal::List(values) => values.get(row)?,
+            JetVal::UninitList {
+                values,
+                initialized,
+            } => {
+                let row = uninit_semantics::jet_uninit_read(initialized, row).ok()?;
+                values.get(row)?
+            }
+            _ => return None,
+        };
+        let fields = match row {
+            JetVal::Record(fields) => fields,
+            JetVal::Int(handle) | JetVal::RecordRef(handle) => {
+                let JetVal::Record(fields) = self.values.get(*handle as usize)? else {
+                    return None;
+                };
+                fields
+            }
+            _ => return None,
+        };
+        match fields.get(field)? {
+            JetVal::Float(value) => Some(*value),
             _ => None,
         }
     }
@@ -1417,6 +1472,14 @@ impl JetArena {
     }
 
     pub fn int_bit_count(&self, value: i64, width: u32, method: &str) -> Option<i64> {
+        if Self::int_is_small(value) && matches!(method, "bit_count" | "bit_length") {
+            let magnitude = value.unsigned_abs();
+            return Some(match method {
+                "bit_count" => i64::from(magnitude.count_ones()),
+                "bit_length" => i64::from(64 - magnitude.leading_zeros()),
+                _ => unreachable!(),
+            });
+        }
         self.int_value(value).bit_count(width, method)
     }
 

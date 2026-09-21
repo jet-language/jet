@@ -1,25 +1,31 @@
+package {
+    name: "serde_encoding_jsonl_stream"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+}
+
 // D-ENCSTREAM-SURFACE1=A: bounded JSONL reader/writer lifecycle.
 use core.encoding as encoding
 use core.encoding.jsonl as jsonl
 use core.files as files
 
-fn write_catalog(path: Path) Bool !(EncodingError | IOError) -> {
-    output :: files.create(path)
-    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe())
-    writer.write(DataTree.Object(["ok": DataTree.Bool(true)]))
-    writer.flush()
-    writer.finish()
+fn write_catalog(path: Path) -> Bool !(EncodingError | IOError) {
+    output :: files.create(path) ?? return Err(err)
+    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    writer.write(DataTree.Object(["ok": DataTree.Bool(true)])) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-jsonl")
+    scratch :: files.temp_dir("jet-encoding-jsonl") ?? return
     path :: Path.from(scratch.path).join("catalog.jsonl")
-    write_catalog(path)
-    input :: files.open(path)
-    reader :: jsonl.reader(^input)
+    write_catalog(path) ?? return
+    input :: files.open(path) ?? return
+    reader :: jsonl.reader(^input) ?? return
     loop record in reader -> print("record")
     print("eof")
 }

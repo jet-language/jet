@@ -105,21 +105,21 @@ pub fn jet_unicode_trim(s: &str) -> String {
     jet_unicode_trim_view(s).to_string()
 }
 
-pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
+pub fn jet_unicode_index_of(s: &str, needle: &str) -> Option<i64> {
     s.find(needle)
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
-pub fn jet_unicode_last_index_of(s: &String, needle: &String) -> Option<i64> {
+pub fn jet_unicode_last_index_of(s: &str, needle: &str) -> Option<i64> {
     s.rfind(needle)
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
-pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
+pub fn jet_unicode_count(s: &str, needle: &str) -> i64 {
     if needle.is_empty() {
         return 0;
     }
-    let mut rest = s.as_str();
+    let mut rest = s;
     let mut count = 0i64;
     while let Some(at) = rest.find(needle) {
         count += 1;
@@ -129,8 +129,8 @@ pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
 }
 
 pub fn jet_unicode_split_once(
-    s: &String,
-    sep: &String,
+    s: &str,
+    sep: &str,
 ) -> jet_foundation::Outcome::JetOutcome<
     (String, String),
     jet_foundation::Outcome::JetAbsent,
@@ -142,8 +142,8 @@ pub fn jet_unicode_split_once(
 }
 
 pub fn jet_unicode_cut_last(
-    s: &String,
-    sep: &String,
+    s: &str,
+    sep: &str,
 ) -> jet_foundation::Outcome::JetOutcome<
     (String, String),
     jet_foundation::Outcome::JetAbsent,

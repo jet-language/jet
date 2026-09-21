@@ -6,6 +6,8 @@
     { "include": "#doc-comments" },
     { "include": "#strings" },
     { "include": "#chars" },
+    { "include": "#effect-arrows" },
+    { "include": "#brackets" },
     { "include": "#contextual-keywords" },
     { "include": "#keywords" },
     { "include": "#types" },
@@ -15,6 +17,42 @@
     { "include": "#operators" }
   ],
   "repository": {
+    "effect-arrows": {
+      "comment": "D-EFF2: `-[Net]>` is one token, not minus plus a list.",
+      "patterns": [
+        {
+          "name": "meta.effect-arrow.jet",
+          "begin": "-\\[",
+          "end": "\\]>",
+          "beginCaptures": { "0": { "name": "keyword.operator.jet" } },
+          "endCaptures": { "0": { "name": "keyword.operator.jet" } },
+          "patterns": [
+            { "match": "\\bvia\\b", "name": "keyword.declaration.jet" },
+            { "match": "[A-Za-z_][A-Za-z0-9_.]*", "name": "entity.name.type.jet" }
+          ]
+        }
+      ]
+    },
+    "brackets": {
+      "comment": "Balanced `[...]` so nested list types and indexes keep scopes.",
+      "patterns": [
+        {
+          "name": "meta.brackets.jet",
+          "begin": "\\[",
+          "end": "\\]",
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#comments" },
+            { "include": "#effect-arrows" },
+            { "include": "#brackets" },
+            { "include": "#keywords" },
+            { "include": "#types" },
+            { "include": "#numbers" },
+            { "include": "#functions" }
+          ]
+        }
+      ]
+    },
     "contextual-keywords": {
       "patterns": [
         {
@@ -45,24 +83,37 @@
       ]
     },
     "strings": {
+      "comment": "Quoted text is one color. Escapes and {interpolation} stay in this scope; never include $self, #functions, or #keywords.",
       "patterns": [
         {
           "name": "string.quoted.double.jet",
           "begin": "\"",
           "end": "\"",
+          "applyEndPatternLast": true,
           "patterns": [
-            {
-              "name": "constant.character.escape.jet",
-              "match": "\\\\[\"\\\\nrt0]|\\\\u\\{[0-9a-fA-F]+\\}|\\{\\{|\\}\\}"
-            },
-            {
-              "name": "meta.interpolation.jet",
-              "begin": "\\{",
-              "end": "\\}",
-              "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.jet" } },
-              "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.jet" } },
-              "patterns": [{ "include": "$self" }]
-            }
+            { "include": "#string-escapes" },
+            { "include": "#string-interpolation" }
+          ]
+        }
+      ]
+    },
+    "string-escapes": {
+      "name": "string.quoted.double.jet",
+      "match": "\\\\[\"\\\\nrt0]|\\\\u\\{[0-9a-fA-F]+\\}|\\{\\{|\\}\\}"
+    },
+    "string-interpolation": {
+      "name": "string.quoted.double.jet",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        { "include": "#string-interpolation" },
+        {
+          "name": "string.quoted.double.jet",
+          "begin": "\"",
+          "end": "\"",
+          "applyEndPatternLast": true,
+          "patterns": [
+            { "include": "#string-escapes" }
           ]
         }
       ]
@@ -81,7 +132,11 @@
       "patterns": [
         {
           "name": "keyword.control.jet",
-          "match": "\\b(after|break|defer|else|if|in|loop|return|task)\\b"
+          "match": "(?<![.A-Za-z0-9_])(break|else|if|in|loop|return)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.control.jet",
+          "match": "(?<![.A-Za-z0-9_])(after|defer|task)(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"
         },
         {
           "name": "keyword.control.jet",
@@ -89,15 +144,27 @@
         },
         {
           "name": "keyword.declaration.jet",
-          "match": "\\b(Context|Impure|Reactive|Scrub|State|Test|Todo|Transact|Transition|Unsafe|add|alias|as|change|client|derive|distinct|effect|enum|extern|fn|impl|marker|migration|module|policy|priv|protocol|pub|remove|rename|rust|server|state|struct|tag|trait|use|validate|via|wrap)\\b"
+          "match": "(?<![.A-Za-z0-9_])(derive|effect|enum|extern|fn|impl|module|priv|pub|struct|tag|trait|use)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.declaration.jet",
+          "match": "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"
+        },
+        {
+          "name": "keyword.declaration.jet",
+          "match": "(?<![.A-Za-z0-9_])(Context|Impure|Reactive|Scrub|State|Test|Todo|Transact|Transition|Unsafe|add|alias|change|client|distinct|marker|migration|policy|protocol|remove|rename|rust|server|state|validate|via|wrap)(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"
         },
         {
           "name": "keyword.other.ownership.jet",
-          "match": "\\b(uninit)\\b"
+          "match": "(?<![.A-Za-z0-9_])(uninit)(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"
         },
         {
           "name": "keyword.other.jet",
-          "match": "\\b(it|self|shared)\\b"
+          "match": "(?<![.A-Za-z0-9_])(it|self)(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "keyword.other.jet",
+          "match": "(?<![.A-Za-z0-9_])(shared)(?=\\s*(?:\\{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"
         },
         {
           "name": "constant.language.jet",
@@ -113,11 +180,11 @@
         },
         {
           "name": "support.function.builtin.jet",
-          "match": "\\b(assert|assert_eq|channel|check|freeze|input|join|print)\\b"
+          "match": "(?<![.A-Za-z0-9_])(assert|assert_eq|channel|check|freeze|input|join|print)(?=\\s*\\()"
         },
         {
           "name": "entity.name.tag.rule.jet",
-          "match": "\\b(ABI|Arithmetic|Bindgen|CLI|Close|Codable|CodableAsBase|Commutative|Comparable|Context|Debug|DebugOnly|Decode|DenyUnknownFields|Deprecated|DevPanel|Discriminant|Doc|Encode|Env|Equatable|Error|Every|Extern|FFI|FX|Flag|Flatten|HTML|Impure|Inline|Interrupt|Job|Kernel|Layout|Live|Local|Memo|Meta|MustUse|NoPrelude|Nondeterministic|Numeric|Off|Patchable|Persist|Policy|Post|Pre|Printable|PubFile|PublishedSchema|Reactive|Receipt|Redact|Region|Rename|RenameAll|Replayable|Root|SQL|Scalar|Scrub|Shared|Shield|Short|SingleUse|Skip|State|Static|Target|Test|Todo|Track|Transact|Transition|Undo|UnitFamily|Unsafe|Untagged|WasmExport|allow|wire)\\b"
+          "match": "#\\[?(ABI|Arithmetic|Bindgen|CLI|Close|Codable|CodableAsBase|Commutative|Comparable|Context|Debug|DebugOnly|Decode|DenyUnknownFields|Deprecated|DevPanel|Discriminant|Doc|Encode|Env|Equatable|Error|Every|Extern|FFI|FX|Flag|Flatten|HTML|Impure|Inline|Interrupt|Job|Kernel|Layout|Live|Local|Memo|Meta|MustUse|NoPrelude|Nondeterministic|Numeric|Off|Patchable|Persist|Policy|Post|Pre|Printable|PubFile|PublishedSchema|Reactive|Receipt|Redact|Region|Rename|RenameAll|Replayable|Root|SQL|Scalar|Scrub|Shared|Shield|Short|SingleUse|Skip|State|Static|Target|Test|Todo|Track|Transact|Transition|Undo|UnitFamily|Unsafe|Untagged|WasmExport|allow|wire)\\b"
         },
         {
           "name": "keyword.operator.sigil.jet",
@@ -125,7 +192,7 @@
         },
         {
           "name": "keyword.operator.jet",
-          "match": "(!|!=|%|%%|%%=|%=|&&|&=|\\*|\\*=|\\+|\\+\\+|\\+=|\\-|\\-\\-|\\-=|\\->|\\.\\.|\\.\\.<|\\.\\[|\\/|\\/%|\\/%=|\\/=|<|<<|<<=|<=|<=>|==|>|>=|>>|>>=|\\?|\\?\\.|\\?\\?|\\^=|\\{|\\||\\|=|\\|\\||~\\||~\\|=)"
+          "match": "(!|!=|%|%%|%%=|%=|&&|&=|\\*|\\*=|\\+|\\+\\+|\\+=|\\-|\\-\\-|\\-=|\\->|\\.\\.|\\.\\.<|\\.\\[|\\/|\\/%|\\/%=|\\/=|<|<<|<<=|<=|<=>|==|>|>=|>>|>>=|\\?|\\?\\.|\\?\\?|\\^=|\\||\\|=|\\|\\||~\\||~\\|=)"
         }
       ],
       "endComment": "END GENERATED JET SYNTAX HIGHLIGHTS"

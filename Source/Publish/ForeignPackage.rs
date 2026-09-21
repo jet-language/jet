@@ -94,7 +94,7 @@ struct ArchiveEntry {
     bytes: Vec<u8>,
 }
 
-/// Build a foreign archive in target/foreign without uploading it.
+/// Build a foreign archive in .jet/build/foreign without uploading it.
 pub fn build_foreign_package(
     root: &Path,
     registry: ForeignRegistry,
@@ -191,7 +191,7 @@ fn prepare_library(
     run_library_build(root, output_key, &entry)?;
 
     let stem = library_stem(&library_name);
-    let target_dir = root.join("target");
+    let target_dir = root.join(".jet").join("build");
     let runtime_name = format!("lib{stem}.{}", shared_extension());
     let runtime_path = target_dir.join(&runtime_name);
     let header_path = target_dir.join(format!("{stem}.h"));
@@ -1336,11 +1336,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn foreign_output_dir(root: &Path) -> Result<PathBuf, String> {
-    let target = root.join("target");
+    let target = root.join(".jet").join("build");
     if let Ok(metadata) = fs::symlink_metadata(&target) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(format!(
-                "foreign artifact directory '{}' is not a real target directory",
+                "foreign artifact directory '{}' is not a real build directory",
                 target.display()
             ));
         }

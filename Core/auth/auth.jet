@@ -1,0 +1,326 @@
+package {
+    name: "core.auth"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Sessions, passwords, magic links, OAuth, JWT, PASETO."
+    license: "MIT"
+    outputs: {
+        auth: .Library{ entry: auth }
+    }
+}
+// core.auth — closed token verification and session cookies.
+//
+// JWT verify is Jet (HS256 HMAC-SHA256, `exp`/`nbf`/`iss`/`aud`). Password
+// hashing uses PBKDF2 from `core.crypto`. OAuth HTTP exchange is host.
+// PASETO v2.local uses XChaCha20-Poly1305 with a 24-byte nonce prefix.
+#Error
+pub enum AuthError {
+    Rejected
+    Expired
+    Malformed
+    Unavailable
+}
+
+pub struct Claims {
+    pub issuer: String
+    pub audience: String
+    pub subject: String
+    pub expires_at: Int
+    pub json: String
+}
+
+pub struct Session {
+    pub id: String
+    pub user: String
+    pub cookie: String
+    pub expires_at: Int
+}
+
+pub struct Auth {
+    pub issuer: String
+}
+
+pub fn verify_jwt(token: String, key: [U8], issuer: String, audience: String, leeway: Duration) -> Claims !AuthError {
+    parts :: split_dot(token)
+    if parts.len() != 3 -> return Err(AuthError.Malformed)
+    header_b :: b64url(parts[0]) ?? return Err(AuthError.Malformed)
+    payload_b :: b64url(parts[1]) ?? return Err(AuthError.Malformed)
+    sig_b :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
+    header :: String.from_bytes(header_b) ?? return Err(AuthError.Malformed)
+    payload :: String.from_bytes(payload_b) ?? return Err(AuthError.Malformed)
+    if !contains(header, "HS256") -> return Err(AuthError.Unavailable)
+    mac_src :: "{parts[0]}.{parts[1]}"
+    expect :: hmac_sha256(key, mac_src.bytes())
+    if !constant_time_equal_bytes(expect, sig_b) -> return Err(AuthError.Rejected)
+    iss :: json_field(payload, "iss") ?? ""
+    aud :: json_field(payload, "aud") ?? ""
+    sub :: json_field(payload, "sub") ?? ""
+    exp :: parse_int(json_field(payload, "exp") ?? "0") ?? 0
+    nbf :: parse_int(json_field(payload, "nbf") ?? "0") ?? 0
+    now :: host_unix_s()
+    slack :: leeway.ns / 1000000000
+    if exp > 0 && now > exp + slack -> return Err(AuthError.Expired)
+    if nbf > 0 && now + slack < nbf -> return Err(AuthError.Rejected)
+    if issuer.len() > 0 && iss != issuer -> return Err(AuthError.Rejected)
+    if audience.len() > 0 && aud != audience -> return Err(AuthError.Rejected)
+    Ok(Claims{issuer: iss, audience: aud, subject: sub, expires_at: exp, json: payload})
+}
+
+pub fn verify_paseto(token: String, key: [U8], purpose: String) -> Claims !AuthError {
+    if key.len() != 32 -> return Err(AuthError.Rejected)
+    if !starts(token, "v2.local.") && !starts(token, "v4.local.") {
+        return Err(AuthError.Unavailable)
+    }
+    body :: drop_prefix(token, prefix_len(token))
+    raw :: b64url(body) ?? return Err(AuthError.Malformed)
+    if raw.len() < 24 + 16 -> return Err(AuthError.Malformed)
+    nonce :: slice_u8(raw, 0, 24)
+    rest :: slice_u8(raw, 24, raw.len())
+    plain :: xchacha_open(key, nonce, purpose.bytes(), rest)
+    if plain == .None -> return Err(AuthError.Rejected)
+    payload :: String.from_bytes(plain ?? [U8]{}) ?? return Err(AuthError.Malformed)
+    Ok(Claims{issuer: json_field(payload, "iss") ?? "", audience: json_field(payload, "aud") ?? "", subject: json_field(payload, "sub") ?? "", expires_at: parse_int(json_field(payload, "exp") ?? "0") ?? 0, json: payload})
+}
+
+pub fn register_user(name: String, password: String) -> Session {
+    if name.len() == 0 || password.bytes().len() < 8 -> return Err("invalid credentials")
+    h :: password_hash(Secret{bytes: password.bytes()}) ?? return Err("hash failed")
+    host_user_put(name, h.text)
+    Ok(make_session(name, 86400))
+}
+
+pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -> Session {
+    stored :: host_user_get(name) ?? return Err("unknown user")
+    ok :: password_verify(Secret{bytes: password.bytes()}, PasswordHash{text: stored}) ?? false
+    if !ok -> return Err("rejected")
+    ttl := ttl_s
+    if ttl < 1 -> ttl = 3600
+    Ok(make_session(name, ttl))
+}
+
+pub fn oauth_begin(provider: String) -[Net]> String {
+    if provider.len() == 0 -> return Err("provider")
+    state :: hex_encode(random.bytes(16) ?? [U8]{})
+    url :: host_oauth_authorize(provider, state)
+    Ok(url)
+}
+
+pub fn oauth_finish(provider: String, code: String, ttl_s: Int, flags: Int) -[Net]> Session {
+    if code.len() == 0 -> return Err("code")
+    user :: host_oauth_exchange(provider, code) ?? return Err("oauth")
+    ttl := ttl_s
+    if ttl < 1 -> ttl = 3600
+    Ok(make_session(user, ttl))
+}
+
+pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -> String {
+    if !contains(email, "@") -> return Err("address")
+    token_bytes :: random.bytes(32) ?? return Err("rng")
+    token :: hex_encode(token_bytes)
+    host_magic_put(token, email, host_unix_s() + ttl_s)
+    Ok(token)
+}
+
+pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -> Session {
+    email :: host_magic_take(token) ?? return Err("unknown token")
+    Ok(make_session(email, ttl_s))
+}
+
+pub fn session_validate(cookie: String, ttl_s: Int) -> Session {
+    parts :: split_dot(cookie)
+    if parts.len() != 3 -> return Err("malformed")
+    user :: parts[0]
+    exp :: parse_int(parts[1]) ?? 0
+    sig :: parts[2]
+    if host_unix_s() > exp -> return Err("expired")
+    expect :: hex_encode(hmac_sha256(host_session_key(), "{user}.{exp}".bytes()))
+    if expect != sig -> return Err("rejected")
+    Ok({id: sig, user: user, cookie: cookie, expires_at: exp})
+}
+
+pub fn session_show(session: Session) -> String { session.user }
+
+pub fn session_user(session: Session) -> String { session.user }
+
+pub fn session_cookie(session: Session) -> String { session.cookie }
+
+pub fn session_id(session: Session) -> String { session.id }
+
+fn make_session(user: String, ttl_s: Int) -> Session {
+    exp :: host_unix_s() + ttl_s
+    sig :: hex_encode(hmac_sha256(host_session_key(), "{user}.{exp}".bytes()))
+    cookie := "{user}.{exp}.{sig}"
+    {id: sig, user: user, cookie: cookie, expires_at: exp}
+}
+
+fn prefix_len(token: String) -> Int {
+    if starts(token, "v2.local.") -> return 9
+    if starts(token, "v4.local.") -> return 9
+    0
+}
+
+fn b64url(text: String) -> ?[U8] {
+    // pad to multiple of 4
+    raw := text
+    loop {
+        if raw.bytes().len() % 4 == 0 -> break
+        raw = "{raw}="
+    }
+    out :: decode_url_local(raw)
+    out
+}
+
+fn decode_url_local(text: String) -> ?[U8] {
+    // thin local decoder so auth does not import encoding at cutover
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    ab :: alphabet.bytes()
+    val := [Int]{}
+    loop i in 0..<256 -> val.push(-1)
+    loop i in 0..<ab.len() -> val[ab[i]] = i
+    out := [U8]{}
+    acc := 0
+    bits := 0
+    loop b in text.bytes() {
+        n :: b
+        if n == 61 -> break
+        v :: val[n]
+        if v < 0 -> return None
+        acc = (acc << 6) | v
+        bits = bits + 6
+        if bits >= 8 {
+            bits = bits - 8
+            out.push(U8{(acc >> bits) & 255})
+        }
+    }
+    Val(out)
+}
+
+fn json_field(json: String, key: String) -> ?String {
+    needle :: "\"{key}\""
+    at :: index_of(json, needle)
+    if at < 0 -> return None
+    i := at + needle.bytes().len()
+    raw :: json.bytes()
+    loop {
+        if i >= raw.len() -> return None
+        if raw[i] == (U8{58}) {
+            i = i + 1
+            break
+        }
+        i = i + 1
+    }
+    loop {
+        if i >= raw.len() -> return None
+        n :: raw[i]
+        if n != 32 && n != 9 -> break
+        i = i + 1
+    }
+    if i >= raw.len() -> return None
+    if raw[i] == (U8{34}) {
+        i = i + 1
+        start :: i
+        loop {
+            if i >= raw.len() -> return None
+            if raw[i] == (U8{34}) -> return Val(slice_bytes(raw, start, i))
+            i = i + 1
+        }
+    }
+    start :: i
+    loop {
+        if i >= raw.len() -> return Val(slice_bytes(raw, start, i))
+        n :: raw[i]
+        if n == 44 || n == 125 || n == 32 -> return Val(slice_bytes(raw, start, i))
+        i = i + 1
+    }
+}
+
+fn split_dot(text: String) -> [String] {
+    out := [String]{}
+    cur := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{46}) {
+            out.push(String.from_bytes(cur) ?? "")
+            cur = [U8]{}
+        } else { cur.push(b) }
+    }
+    out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn contains(text: String, needle: String) -> Bool { index_of(text, needle) >= 0 }
+
+fn index_of(text: String, needle: String) -> Int {
+    hay :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() == 0 -> return 0
+    if nd.len() > hay.len() -> return -1
+    loop i in 0..<(hay.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if hay[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return i
+    }
+    -1
+}
+
+fn starts(text: String, prefix: String) -> Bool { index_of(text, prefix) == 0 }
+
+fn drop_prefix(text: String, n: Int) -> String {
+    raw :: text.bytes()
+    if n >= raw.len() -> return ""
+    slice_bytes(raw, n, raw.len())
+}
+
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= bytes.len() -> return out
+        out.push(bytes[i])
+        i = i + 1
+    }
+}
+
+fn parse_int(text: String) -> ?Int {
+    n := 0
+    any := false
+    loop b in text.bytes() {
+        d :: b
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        any = true
+    }
+    if !any -> return None
+    Val(n)
+}
+
+fn host_unix_s() -[Time]> Int { panic("host_unix_s") }
+
+fn host_user_put(name: String, hash: String) { panic("host_user_put") }
+
+fn host_user_get(name: String) -> ?String { panic("host_user_get") }
+
+fn host_oauth_authorize(provider: String, state: String) -[Net]> String {
+    panic("host_oauth_authorize")
+}
+
+fn host_oauth_exchange(provider: String, code: String) -[Net]> ?String {
+    panic("host_oauth_exchange")
+}
+
+fn host_magic_put(token: String, email: String, exp: Int) { panic("host_magic_put") }
+
+fn host_magic_take(token: String) -> ?String { panic("host_magic_take") }
+
+fn host_session_key() -> [U8] { panic("host_session_key") }

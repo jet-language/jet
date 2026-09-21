@@ -607,6 +607,8 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         }
     };
     let exceeded = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    let child_pid = child.id();
     let reader_failed = Arc::new(AtomicBool::new(false));
     let stdout_exceeded = Arc::clone(&exceeded);
     let stdout_reader_failed = Arc::clone(&reader_failed);
@@ -620,6 +622,10 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         if result.is_err() {
             stdout_reader_failed.store(true, Ordering::Release);
         }
+        #[cfg(unix)]
+        if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) || result.is_err() {
+            let _ = terminate_process_group(child_pid);
+        }
         result
     });
     let stderr_thread = thread::spawn(move || {
@@ -630,37 +636,58 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         if result.is_err() {
             stderr_reader_failed.store(true, Ordering::Release);
         }
+        #[cfg(unix)]
+        if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) || result.is_err() {
+            let _ = terminate_process_group(child_pid);
+        }
         result
     });
 
+    // Unix sandbox commands are placed in their own process group. Reader
+    // workers kill that group on cap/read failure, so ordinary no-timeout
+    // collection can block in the native wait without a polling tax.
+    #[cfg(unix)]
+    let direct_wait = timeout.is_none();
+    #[cfg(not(unix))]
+    let direct_wait = false;
     let deadline = timeout.map(|limit| Instant::now() + limit);
     let mut timed_out = false;
     let mut child_reaped = false;
     let mut wait_error = None;
     let mut status = None;
     let mut known_descendants = Vec::new();
-    loop {
-        #[cfg(target_os = "linux")]
-        known_descendants.extend(collect_descendant_pids(child.id()));
-        match child.try_wait() {
-            Ok(Some(child_status)) => {
+    if direct_wait {
+        match child.wait() {
+            Ok(child_status) => {
                 child_reaped = true;
                 status = Some(child_status);
-                break;
             }
-            Ok(None) => {
-                if exceeded.load(Ordering::Acquire) || reader_failed.load(Ordering::Acquire) {
+            Err(error) => wait_error = Some(error),
+        }
+    } else {
+        loop {
+            #[cfg(target_os = "linux")]
+            known_descendants.extend(collect_descendant_pids(child.id()));
+            match child.try_wait() {
+                Ok(Some(child_status)) => {
+                    child_reaped = true;
+                    status = Some(child_status);
                     break;
                 }
-                if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                    timed_out = true;
+                Ok(None) => {
+                    if exceeded.load(Ordering::Acquire) || reader_failed.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                        timed_out = true;
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => {
+                    wait_error = Some(error);
                     break;
                 }
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => {
-                wait_error = Some(error);
-                break;
             }
         }
     }

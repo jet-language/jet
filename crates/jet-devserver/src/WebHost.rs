@@ -1080,6 +1080,8 @@ struct DevStatus {
     /// The file `jet dev` is watching — used in the `building` parity line
     /// and the `save <file> → …` verbose log lines.
     watched_file: String,
+    /// Selected project build root used for browser manifests and traces.
+    web_root: PathBuf,
     /// Port shown in status surfaces: application preview for hybrid web
     /// sessions, or Canvas control for Canvas-only sessions.
     port: AtomicU64,
@@ -1131,6 +1133,12 @@ impl DevStatus {
         DevStatus::new_with_terminal(file, verbose, is_tty, color)
     }
 
+    fn new_with_root(file: &str, verbose: bool, web_root: &Path) -> DevStatus {
+        let mut status = Self::new(file, verbose);
+        status.web_root = web_root.to_path_buf();
+        status
+    }
+
     fn new_with_terminal(file: &str, verbose: bool, is_tty: bool, color: bool) -> DevStatus {
         DevStatus {
             version: AtomicU64::new(1),
@@ -1145,6 +1153,7 @@ impl DevStatus {
             browser_trace_enabled: AtomicBool::new(false),
             command_receipt: Mutex::new(None),
             watched_file: file.to_string(),
+            web_root: PathBuf::from("build"),
             port: AtomicU64::new(0),
             canvas_port: AtomicU64::new(0),
             canvas_enabled: AtomicBool::new(true),
@@ -1433,7 +1442,7 @@ impl DevStatus {
         let mut browser_relay = self.browser_relay.lock().unwrap();
         if self.browser_trace_enabled.load(Ordering::SeqCst) {
             browser_relay.take();
-            *browser_relay = read_web_manifest()
+            *browser_relay = read_web_manifest(&self.web_root)
                 .and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
         }
         drop(browser_relay);
@@ -1580,7 +1589,7 @@ impl DevStatus {
         if !matches!(crate::BrowserTrace::take_request(), Ok(true)) {
             return;
         }
-        if let Some(manifest) = read_web_manifest() {
+        if let Some(manifest) = read_web_manifest(&self.web_root) {
             let _ = self.activate_browser_trace(&manifest);
         }
     }
@@ -1639,8 +1648,12 @@ pub struct WebHost {
 
 impl WebHost {
     /// Bind an application preview with a folded release-devtools policy.
+    ///
+    /// `static_root` is selected by the owning CLI from the entry's project
+    /// root, so nested invocations never fall back to cwd-relative `build/`.
     pub fn bind_with_policy(
         file: &str,
+        static_root: &Path,
         verbose: bool,
         port: Option<u16>,
         release_policy: ReleaseDevtoolsPolicy,
@@ -1649,7 +1662,7 @@ impl WebHost {
             file,
             verbose,
             port,
-            PathBuf::from("build"),
+            static_root.to_path_buf(),
             release_policy,
             true,
         )
@@ -1740,7 +1753,7 @@ impl WebHost {
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
-        let status = Arc::new(DevStatus::new(file, verbose));
+        let status = Arc::new(DevStatus::new_with_root(file, verbose, &static_root));
         status.set_port(application_port);
         status.set_canvas_port(0);
         status.set_canvas_enabled(false);
@@ -1771,6 +1784,7 @@ impl WebHost {
 
     pub fn bind_web_with_canvas_options_and_policy(
         file: &str,
+        static_root: &Path,
         verbose: bool,
         fallback_port: Option<u16>,
         options: &CanvasHostOptions,
@@ -1794,7 +1808,11 @@ impl WebHost {
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
-        let status = Arc::new(DevStatus::new(file, verbose || options.audit));
+        let status = Arc::new(DevStatus::new_with_root(
+            file,
+            verbose || options.audit,
+            static_root,
+        ));
         status.set_port(application_port);
         status.set_canvas_port(canvas_port);
         let session_secret = mint_session_secret()?;
@@ -1821,7 +1839,7 @@ impl WebHost {
             bind_host: host,
             session_secret,
             release_policy,
-            static_root: PathBuf::from("build"),
+            static_root: static_root.to_path_buf(),
             browser_state: Arc::new(Mutex::new(None)),
             web_swap_enabled: true,
             hot_swap_decision: Mutex::new(None),
@@ -1832,6 +1850,7 @@ impl WebHost {
 
     pub fn bind_canvas_with_options_and_policy(
         file: &str,
+        static_root: &Path,
         verbose: bool,
         options: &CanvasHostOptions,
         release_policy: ReleaseDevtoolsPolicy,
@@ -1842,7 +1861,11 @@ impl WebHost {
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
-        let status = Arc::new(DevStatus::new(file, verbose || options.audit));
+        let status = Arc::new(DevStatus::new_with_root(
+            file,
+            verbose || options.audit,
+            static_root,
+        ));
         status.set_port(bound_port);
         status.set_canvas_port(bound_port);
         let session_secret = mint_session_secret()?;
@@ -1864,7 +1887,7 @@ impl WebHost {
             bind_host: host,
             session_secret,
             release_policy,
-            static_root: PathBuf::from("build"),
+            static_root: static_root.to_path_buf(),
             browser_state: Arc::new(Mutex::new(None)),
             web_swap_enabled: false,
             hot_swap_decision: Mutex::new(None),
@@ -6101,24 +6124,13 @@ fn serve_static_from_root(
     write_response(stream, "200 OK", content_type, &bytes)?;
     Ok(200)
 }
-
 fn read_source_without_symlinks(path: &Path) -> std::io::Result<String> {
-    #[cfg(windows)]
-    {
-        let bytes = crate::read_file_without_symlinks_bounded(path, MAX_STATIC_RESPONSE_BYTES)?;
-        return String::from_utf8(bytes).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "source is not UTF-8")
-        });
-    }
-    #[cfg(not(windows))]
-    {
-        crate::Canvas::read_source_without_symlinks(path)
-    }
+    crate::Canvas::read_source_without_symlinks(path)
 }
 
-fn read_web_manifest() -> Option<String> {
+fn read_web_manifest(root: &Path) -> Option<String> {
     let bytes = read_static_file_bounded(
-        Path::new("build"),
+        root,
         Path::new("web.manifest.json"),
         MAX_STATIC_RESPONSE_BYTES,
     )
@@ -6523,6 +6535,7 @@ mod tests {
         options.port = port;
         WebHost::bind_canvas_with_options_and_policy(
             file,
+            std::path::Path::new("build"),
             verbose,
             &options,
             ReleaseDevtoolsPolicy::development(),
@@ -6537,6 +6550,7 @@ mod tests {
     ) -> Result<WebHost, String> {
         WebHost::bind_canvas_with_options_and_policy(
             file,
+            std::path::Path::new("build"),
             verbose,
             options,
             ReleaseDevtoolsPolicy::development(),
@@ -6551,6 +6565,7 @@ mod tests {
     ) -> Result<WebHost, String> {
         WebHost::bind_web_with_canvas_options_and_policy(
             file,
+            std::path::Path::new("build"),
             verbose,
             fallback_port,
             options,
@@ -7445,6 +7460,7 @@ mod tests {
     fn app_only_bind_has_no_canvas_listener_or_session_alias() {
         let host = WebHost::bind_with_policy(
             "app.jet",
+            std::path::Path::new("build"),
             false,
             Some(0),
             ReleaseDevtoolsPolicy::development(),

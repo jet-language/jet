@@ -1057,6 +1057,97 @@
         k + (((36 - 1 + 1) * delta) / (delta + 38))
     }
 
+    pub fn jet_url_join_text(base: &str, rel: &str) -> String {
+        if rel.is_empty() {
+            return base.to_string();
+        }
+        if let Some(colon) = rel.find(':') {
+            let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
+            if before_slash && jet_url_valid_scheme(&rel[..colon]) {
+                return rel.to_string();
+            }
+        }
+        let Ok(parsed) = JetURL::parse(&base.to_string()) else {
+            return rel.to_string();
+        };
+        if rel.starts_with("//") {
+            return JetURL::parse(&format!("{}:{}", parsed.scheme, rel))
+                .map(|url| url.to_string_value())
+                .unwrap_or_else(|_| rel.to_string());
+        }
+        parsed
+            .join(&rel.to_string())
+            .map(|url| url.to_string_value())
+            .unwrap_or_else(|_| rel.to_string())
+    }
+
+    pub fn jet_url_parse_qsl_rows(query: &str) -> Vec<Vec<String>> {
+        let query = query.strip_prefix('?').unwrap_or(query);
+        if query.is_empty() {
+            return Vec::new();
+        }
+        query
+            .split('&')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let (raw_key, raw_value) = part.split_once('=').unwrap_or((part, ""));
+                let key = jet_url_percent_decode_str(raw_key)
+                    .unwrap_or_else(|_| raw_key.to_string());
+                let value = jet_url_percent_decode_str(raw_value)
+                    .unwrap_or_else(|_| raw_value.to_string());
+                vec![key, value]
+            })
+            .collect()
+    }
+
+    pub fn jet_url_query_rows(rows: &[Vec<String>]) -> String {
+        rows.iter()
+            .filter(|row| !row.is_empty())
+            .map(|row| {
+                let key = row.first().cloned().unwrap_or_default();
+                let value = row.get(1).cloned().unwrap_or_default();
+                format!(
+                    "{}={}",
+                    jet_url_percent_encode(&key, false),
+                    jet_url_percent_encode(&value, false)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("&")
+    }
+
+    pub fn jet_url_quote(text: &str) -> String {
+        jet_url_percent_encode(text, true)
+    }
+
+    pub fn jet_url_quote_from_bytes(data: &[u8]) -> String {
+        String::from_utf8(data.to_vec())
+            .map(|text| jet_url_quote(&text))
+            .unwrap_or_default()
+    }
+
+    pub fn jet_url_quote_plus(text: &str) -> String {
+        jet_url_percent_encode(text, false).replace("%20", "+")
+    }
+
+    pub fn jet_url_unquote(text: &str) -> Result<String, String> {
+        jet_url_percent_decode_str(text)
+    }
+
+    pub fn jet_url_unquote_to_bytes(text: &str) -> Result<Vec<u8>, String> {
+        jet_url_percent_decode_str(text).map(|decoded| decoded.into_bytes())
+    }
+
+    pub fn jet_url_unquote_plus(text: &str) -> Result<String, String> {
+        jet_url_percent_decode_str(&text.replace('+', " "))
+    }
+
+    pub fn jet_url_split_fragment(text: &str) -> (String, String) {
+        text.find('#')
+            .map(|index| (text[..index].to_string(), text[index + 1..].to_string()))
+            .unwrap_or_else(|| (text.to_string(), String::new()))
+    }
+
     fn jet_url_parse_query(q: &str) -> Result<Vec<(String, String)>, String> {
         if q.is_empty() {
             return Ok(Vec::new());

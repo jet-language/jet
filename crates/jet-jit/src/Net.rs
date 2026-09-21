@@ -8,7 +8,7 @@
 
 use super::Concurrency;
 use crate::JetShow;
-use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+use crate::Marshal::{alloc_byte_list, alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 #[allow(unused_imports)]
@@ -146,6 +146,33 @@ pub(crate) mod runtime {
     }
     pub fn url_percent_decode(s: &String) -> Result<String, String> {
         jet_std::jet_url_percent_decode_str(s)
+    }
+    pub fn url_join(base: &String, rel: &String) -> String {
+        jet_std::jet_url_join_text(base, rel)
+    }
+    pub fn url_parse_qsl(query: &String) -> Vec<Vec<String>> {
+        jet_std::jet_url_parse_qsl_rows(query)
+    }
+    pub fn url_quote(text: &String) -> String {
+        jet_std::jet_url_quote(text)
+    }
+    pub fn url_quote_from_bytes(data: &[u8]) -> String {
+        jet_std::jet_url_quote_from_bytes(data)
+    }
+    pub fn url_quote_plus(text: &String) -> String {
+        jet_std::jet_url_quote_plus(text)
+    }
+    pub fn url_unquote(text: &String) -> Result<String, String> {
+        jet_std::jet_url_unquote(text)
+    }
+    pub fn url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
+        jet_std::jet_url_unquote_to_bytes(text)
+    }
+    pub fn url_unquote_plus(text: &String) -> Result<String, String> {
+        jet_std::jet_url_unquote_plus(text)
+    }
+    pub fn url_split_fragment(text: &String) -> (String, String) {
+        jet_std::jet_url_split_fragment(text)
     }
     pub fn mime_parse(s: &String) -> Result<JetMIME, String> {
         JetMIME::parse(s)
@@ -371,6 +398,85 @@ fn list_of_string_pairs(rows: Vec<Vec<String>>) -> i64 {
         outer
     })
 }
+fn list_of_bytes(bytes: &[u8]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &byte in bytes {
+            let _ = rt.heap.list_push_int(list, i64::from(byte));
+        }
+        list
+    })
+}
+
+fn string_pair(first: String, second: String) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let first = rt.heap.alloc_string(first);
+        let second = rt.heap.alloc_string(second);
+        let _ = rt.heap.record_set_string(record, 0, first);
+        let _ = rt.heap.record_set_string(record, 1, second);
+        record
+    })
+}
+
+fn jet_jit_url_join_text(base: i64, rel: i64) -> i64 {
+    alloc_string(runtime::url_join(&clone_string(base), &clone_string(rel)))
+}
+
+fn jet_jit_url_parse_qsl(query: i64) -> i64 {
+    list_of_string_pairs(runtime::url_parse_qsl(&clone_string(query)))
+}
+
+fn jet_jit_url_urlencode(pairs: i64) -> i64 {
+    alloc_string(runtime::url_query(&read_string_pair_list(pairs)))
+}
+
+fn jet_jit_url_split_fragment(text: i64) -> i64 {
+    let (url, fragment) = runtime::url_split_fragment(&clone_string(text));
+    string_pair(fragment, url)
+}
+
+fn jet_jit_url_quote(text: i64) -> i64 {
+    alloc_string(runtime::url_quote(&clone_string(text)))
+}
+
+fn jet_jit_url_quote_from_bytes(data: i64) -> i64 {
+    let Some(data) = list_bytes(data) else {
+        return 0;
+    };
+    alloc_string(runtime::url_quote_from_bytes(&data))
+}
+
+fn jet_jit_url_quote_plus(text: i64) -> i64 {
+    alloc_string(runtime::url_quote_plus(&clone_string(text)))
+}
+
+fn jet_jit_url_unquote(text: i64) -> i64 {
+    match runtime::url_unquote(&clone_string(text)) {
+        Ok(text) => result_ok(alloc_string(text) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_url_unquote_to_bytes(text: i64) -> i64 {
+    match runtime::url_unquote_to_bytes(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_url_unquote_plus(text: i64) -> i64 {
+    match runtime::url_unquote_plus(&clone_string(text)) {
+        Ok(text) => result_ok(alloc_string(text) as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_url_urldefrag(text: i64) -> i64 {
+    let (url, fragment) = runtime::url_split_fragment(&clone_string(text));
+    string_pair(url, fragment)
+}
+
 
 fn read_string_pair_list(list: i64) -> Vec<Vec<String>> {
     Concurrency::with_runtime_mut(|rt| {
@@ -1618,6 +1724,17 @@ host_fns! {
     url_query_value: "jet_jit_url_query_value" => jet_jit_url_query_value: sig1;
     url_percent_encode: "jet_jit_url_percent_encode" => jet_jit_url_percent_encode: sig1;
     url_percent_decode: "jet_jit_url_percent_decode" => jet_jit_url_percent_decode: sig1;
+    url_join_text: "jet_jit_url_join_text" => jet_jit_url_join_text: sig2;
+    url_parse_qsl: "jet_jit_url_parse_qsl" => jet_jit_url_parse_qsl: sig1;
+    url_urlencode: "jet_jit_url_urlencode" => jet_jit_url_urlencode: sig1;
+    url_split_fragment: "jet_jit_url_split_fragment" => jet_jit_url_split_fragment: sig1;
+    url_quote: "jet_jit_url_quote" => jet_jit_url_quote: sig1;
+    url_quote_from_bytes: "jet_jit_url_quote_from_bytes" => jet_jit_url_quote_from_bytes: sig1;
+    url_quote_plus: "jet_jit_url_quote_plus" => jet_jit_url_quote_plus: sig1;
+    url_unquote: "jet_jit_url_unquote" => jet_jit_url_unquote: sig1;
+    url_unquote_to_bytes: "jet_jit_url_unquote_to_bytes" => jet_jit_url_unquote_to_bytes: sig1;
+    url_unquote_plus: "jet_jit_url_unquote_plus" => jet_jit_url_unquote_plus: sig1;
+    url_urldefrag: "jet_jit_url_urldefrag" => jet_jit_url_urldefrag: sig1;
     mime_parse: "jet_jit_mime_parse" => jet_jit_mime_parse: sig1;
     mime_from_extension: "jet_jit_mime_from_extension" => jet_jit_mime_from_extension: sig1;
     mime_extension: "jet_jit_mime_extension" => jet_jit_mime_extension: sig1;

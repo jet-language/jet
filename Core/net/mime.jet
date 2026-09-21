@@ -1,0 +1,145 @@
+// core.net.mime — `type/subtype` values and a small extension table.
+//
+// `parse` accepts `type/subtype` plus `; name=value` parameters. Type
+// subtype, and parameter names are folded to lowercase. The extension
+// table is the same one CoreLib uses for static HTTP files; unknown
+// extensions are absent, never `application/octet-stream`.
+pub struct Mime {
+    pub top: String
+    pub sub: String
+}
+
+pub fn parse(text: String) -> Mime {
+    raw :: trim_ascii(text)
+    slash := -1
+    i := 0
+    bytes :: raw.bytes()
+    loop {
+        if i >= bytes.len() -> break
+        if bytes[i] == (U8{47}) {
+            slash = i
+            break
+        }
+        i = i + 1
+    }
+    if slash <= 0 -> return Err("Mime type needs `type/subtype`")
+    semi := bytes.len()
+    j := slash + 1
+    loop {
+        if j >= bytes.len() -> break
+        if bytes[j] == (U8{59}) {
+            semi = j
+            break
+        }
+        j = j + 1
+    }
+    top :: ascii_lower(slice(bytes, 0, slash))
+    sub :: ascii_lower(trim_ascii(slice(bytes, slash + 1, semi)))
+    if top.bytes().len() == 0 || sub.bytes().len() == 0 -> return Err("invalid Mime type")
+    Ok({top: top, sub: sub})
+}
+
+pub fn from_extension(ext: String) -> ?String {
+    key :: ascii_lower(trim_dot(ext))
+    if key == {
+        "html" | "htm" -> Val("text/html")
+        "css" -> Val("text/css")
+        "csv" -> Val("text/csv")
+        "txt" | "text" -> Val("text/plain")
+        "md" -> Val("text/markdown")
+        "json" -> Val("application/json")
+        "js" | "mjs" -> Val("text/javascript")
+        "wasm" -> Val("application/wasm")
+        "pdf" -> Val("application/pdf")
+        "png" -> Val("image/png")
+        "jpg" | "jpeg" -> Val("image/jpeg")
+        "gif" -> Val("image/gif")
+        "svg" -> Val("image/svg+xml")
+        "webp" -> Val("image/webp")
+        "ico" -> Val("image/x-icon")
+        "mp3" -> Val("audio/mpeg")
+        "mp4" -> Val("video/mp4")
+        "xml" -> Val("application/xml")
+        "zip" -> Val("application/zip")
+        "gz" -> Val("application/gzip")
+        "tar" -> Val("application/x-tar")
+        else -> None
+    }
+}
+
+pub fn extension(mime: String) -> ?String {
+    essence :: ascii_lower(trim_params(mime))
+    if essence == {
+        "text/html" -> Val("html")
+        "text/css" -> Val("css")
+        "text/csv" -> Val("csv")
+        "text/plain" -> Val("txt")
+        "text/markdown" -> Val("md")
+        "text/javascript" | "application/javascript" -> Val("js")
+        "application/wasm" -> Val("wasm")
+        "application/pdf" -> Val("pdf")
+        "image/png" -> Val("png")
+        "image/jpeg" -> Val("jpg")
+        "image/gif" -> Val("gif")
+        "image/svg+xml" -> Val("svg")
+        "image/webp" -> Val("webp")
+        "image/x-icon" -> Val("ico")
+        "audio/mpeg" -> Val("mp3")
+        "video/mp4" -> Val("mp4")
+        "application/xml" | "text/xml" -> Val("xml")
+        "application/zip" -> Val("zip")
+        "application/gzip" -> Val("gz")
+        "application/x-tar" -> Val("tar")
+        else -> None
+    }
+}
+
+fn trim_dot(ext: String) -> String {
+    raw :: ext.bytes()
+    if raw.len() > 0 && raw[0] == (U8{46}) -> return slice(raw, 1, raw.len())
+    ext
+}
+
+fn trim_params(mime: String) -> String {
+    raw :: mime.bytes()
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
+    }
+    trim_ascii(mime)
+}
+
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop {
+        if start >= end -> return ""
+        n :: raw[start]
+        if n == 32 || n == 9 -> start = start + 1 else -> break
+    }
+    loop {
+        if end <= start -> return ""
+        n :: raw[end - 1]
+        if n == 32 || n == 9 -> end = end - 1 else { break }
+    }
+    slice(raw, start, end)
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn slice(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}

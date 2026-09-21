@@ -1,0 +1,19 @@
+package {
+    name: "core.devtools"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Devtools publish channel."
+    license: "MIT"
+    outputs: {
+        devtools: .Library{ entry: devtools }
+    }
+}
+// core.devtools — a one-way event bus for the inspector.
+//
+// `publish` forwards a JSON-ish line to the host relay. Missing relay is
+// not an error; the host no-ops.
+/// Publish one inspector event. The host may drop it when no session is
+/// attached.
+pub fn publish(event: String) { host_devtools_publish(event) }
+
+fn host_devtools_publish(event: String) { panic("host_devtools_publish") }

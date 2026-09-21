@@ -7,12 +7,12 @@ use super::tir_to_mir_expr::lower_expr;
 use super::mir::{LowerCtx, LowerError};
 use crate::AST::{BinOp, Type};
 use crate::Codegen::TIR::{
-    ScopeMemberKind, TCoreClosureKind, TExpr, TExprKind, TForInMethod, TIfCond, TIndexFieldAssign, TLocal, TMatchArm,
-    TCallArg, TMethodRef, TNumericOp, TPattern, TPlace, TStaticOwner, TStmt, TLetTy, TBuiltinOp,
-    TFailureCarrier, TPreludeRoute,
+    ScopeMemberKind, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFailureCarrier, TForInMethod,
+    TIfCond, TIndexFieldAssign, TLetTy, TLocal, TMatchArm, TMethodRef, TNumericOp, TPattern,
+    TPlace, TPreludeRoute, TStaticOwner, TStmt, TTryConvert, TBuiltinOp,
 };
 use jet_foundation::MIR::{
-    MirAccess, MirBinaryDispatch, MirBlockId, MirConstant, MirIndexKind,
+    MirAccess, MirBinaryDispatch, MirBlockId, MirConstant, MirDropKind, MirIndexKind,
     MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirCallSignature,
     MirScopeId, MirScopeKind, MirSymbol, MirSemanticOp, MirTerminator, MirValueId,
     MirTestScopeMember,
@@ -185,8 +185,19 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             single,
             write,
             elem_ty,
-            line: _,
-        } => lower_split_view(ctx, owner.as_ref(), root, name, *start, *end, *single, *write, elem_ty.as_ref()),
+            line,
+        } => lower_split_view(
+            ctx,
+            owner.as_ref(),
+            root,
+            name,
+            *start,
+            *end,
+            *single,
+            *write,
+            *line,
+            elem_ty.as_ref(),
+        ),
 
         TStmt::TupleDestructure {
             tmp,
@@ -462,6 +473,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 None,
                 MirOperation::WritePlace { place, value },
             )?;
+            ctx.drop_temporary_shared_guard(place)?;
             Ok(())
         }
 
@@ -792,6 +804,7 @@ fn lower_split_view(
     end: i64,
     single: bool,
     write: bool,
+    line: usize,
     elem_ty: Option<&Type>,
 ) -> Result<(), LowerError> {
     let element = elem_ty
@@ -824,7 +837,14 @@ fn lower_split_view(
     let ty = if single {
         element.clone()
     } else {
-        Type::List(Box::new(element.clone()))
+        Type::Apply {
+            name: if write {
+                "ViewMut".to_string()
+            } else {
+                "View".to_string()
+            },
+            args: vec![element.clone()],
+        }
     };
     let value = if single {
         ctx.lower_index_value(
@@ -835,7 +855,38 @@ fn lower_split_view(
             MirAccess::Read,
         )?
     } else {
-        ctx.lower_slice_value(base_expr, &start_expr, &end_expr, None, &ty)?
+        let range_expr = TExpr {
+            ty: Type::Named("Range".to_string()),
+            kind: TExprKind::StructLit {
+                fields: vec![
+                    ("start".to_string(), start_expr.clone(), false),
+                    ("end".to_string(), end_expr.clone(), false),
+                    (
+                        "exclusive".to_string(),
+                        TExpr {
+                            ty: Type::Bool,
+                            kind: TExprKind::BoolLit(false),
+                        },
+                        false,
+                    ),
+                ],
+                extra: None,
+                as_trait: None,
+            },
+        };
+        let view = TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::BuiltinMethod {
+                recv: Box::new(base_expr.clone()),
+                op: if write {
+                    TBuiltinOp::ViewMutNew { line }
+                } else {
+                    TBuiltinOp::ViewNew { line }
+                },
+                args: vec![range_expr],
+            },
+        };
+        lower_expr(ctx, &view)?
     };
     let local = if write {
         TLocal::user(name).as_mutable()
@@ -1115,6 +1166,7 @@ fn lower_assign(
             value: assigned,
         },
     )?;
+    ctx.drop_temporary_shared_guard(place_id)?;
     Ok(())
 }
 
@@ -1163,6 +1215,7 @@ fn lower_index_field_assign(ctx: &mut LowerCtx, assign: &TIndexFieldAssign) -> R
         None,
         MirOperation::WritePlace { place, value: assigned },
     )?;
+    ctx.drop_temporary_shared_guard(place)?;
     Ok(())
 }
 fn lower_swizzle_assign(
@@ -1173,12 +1226,61 @@ fn lower_swizzle_assign(
     clone_value: bool,
 ) -> Result<(), LowerError> {
     let rhs = lower_expr(ctx, value)?;
+    let (rhs_values, rhs_ty) = if lanes.len() > 1 {
+        let rhs_type_name = match value.ty.without_user_tags() {
+            Type::Named(name) => name.clone(),
+            _ => {
+                return Err(ctx.error(
+                    ctx.span(),
+                    "checked multi-lane swizzle assignment has no vector RHS",
+                ))
+            }
+        };
+        let scalar_ty = crate::Sema::math_scalar_ty(&rhs_type_name);
+        let lane_carrier = TFailureCarrier::from_checked_type(&scalar_ty);
+        let line = ctx.source_line();
+        let mut values = Vec::with_capacity(lanes.len());
+        for ordinal in 0..lanes.len() {
+            let index = ctx.emit(
+                &format!("math-swizzle-rhs-index-{ordinal}"),
+                Some(Type::Int),
+                MirOperation::Constant(MirConstant::Int {
+                    value: ordinal as i64,
+                    width: None,
+                    spelling: None,
+                }),
+            )?;
+            let call = ctx.intern_prelude_route(super::lane_index_route(
+                &rhs_type_name,
+                &scalar_ty,
+                &lane_carrier,
+            )?)?;
+            let location = ctx.panic_location_at(line);
+            let context = ctx.panic_context_at(line, None);
+            values.push(ctx.emit(
+                "math-swizzle-rhs-lane",
+                Some(scalar_ty.clone()),
+                MirOperation::Index {
+                    call,
+                    base: rhs,
+                    index,
+                    kind: MirIndexKind::Lane,
+                    access: MirAccess::Read,
+                    location,
+                    context,
+                },
+            )?);
+        }
+        (values, scalar_ty)
+    } else {
+        (vec![rhs], value.ty.clone())
+    };
     let places = ctx.lower_swizzle_place(base, lanes, MirAccess::Write)?;
     for (index, place) in places.into_iter().enumerate() {
         let value = maybe_copy(
             ctx,
-            rhs,
-            &value.ty,
+            rhs_values[index],
+            &rhs_ty,
             clone_value || index + 1 < lanes.len(),
         )?;
         ctx.emit(
@@ -1425,7 +1527,24 @@ fn lower_counted_loop(
     }
     ctx.switch_to(exit);
     if let Some(facts) = auto_vectorization {
-        ctx.record_checked_vector_fact(header, facts, loop_span)?;
+        let cursor_place = ctx.loop_cursor_place(cond);
+        let body_blocks =
+            ctx.loop_body_blocks(header, body_block, Some(exit), Some(step_block));
+        let cursor = ctx.checked_loop_cursor(
+            &body_blocks,
+            Some(step_block),
+            cursor_place,
+            None,
+        );
+        ctx.record_checked_vector_fact(
+            header,
+            cursor,
+            body_blocks,
+            Some(step_block),
+            cursor_place,
+            facts,
+            loop_span,
+        )?;
     }
     Ok(())
 }
@@ -1567,8 +1686,27 @@ fn lower_range_loop(
     }
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(exit);
+    if iterator {
+        ctx.emit(
+            "range.iter-drop",
+            None,
+            MirOperation::Drop {
+                value: cursor,
+                kind: MirDropKind::Value,
+            },
+        )?;
+    }
     if let Some(facts) = auto_vectorization {
-        ctx.record_checked_vector_fact(header, facts, loop_span)?;
+        let body_blocks = ctx.loop_body_blocks(header, body_block, Some(exit), Some(advance));
+        ctx.record_checked_vector_fact(
+            header,
+            Some(cursor),
+            body_blocks,
+            Some(advance),
+            None,
+            facts,
+            loop_span,
+        )?;
     }
     Ok(())
 }
@@ -1661,7 +1799,24 @@ fn lower_for_in(
         _ => lower_expr(ctx, source)?,
     };
     let step_value = step.map(|step| lower_expr(ctx, step)).transpose()?;
-    let cursor_ty = Type::Named("IterCursor".to_string());
+    let byte_slice_cursor = matches!(source_kind, MirLoopSourceKind::Plain)
+        && !effective_by_value
+        && matches!(
+            loop_collection.ty.without_user_tags(),
+            Type::List(elem) | Type::FixedList { elem, .. }
+                if matches!(
+                    elem.without_user_tags(),
+                    Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    }
+                )
+        );
+    let cursor_ty = Type::Named(if byte_slice_cursor {
+        "ByteIterCursor".to_string()
+    } else {
+        "IterCursor".to_string()
+    });
     let cursor = ctx.emit(
         "for-in.iter-init",
         Some(cursor_ty),
@@ -1761,6 +1916,14 @@ fn lower_for_in(
     )?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(exit);
+    ctx.emit(
+        "for-in.iter-drop",
+        None,
+        MirOperation::Drop {
+            value: cursor,
+            kind: MirDropKind::Value,
+        },
+    )?;
     Ok(())
 }
 
@@ -2158,7 +2321,7 @@ fn lower_scope_member(
             ctx.push_lexical_frame();
             lower_stmts(ctx, body)?;
             ctx.pop_lexical_frame()?;
-            emit_scope_exits_on_early_paths(ctx, scope, body_block, body_block_start)?;
+            emit_scope_exits_on_early_paths(ctx, scope, body_block, body_block_start, &[])?;
             if !ctx.is_terminated() {
                 ctx.terminate(MirTerminator::Jump { target: exit });
             }
@@ -2202,11 +2365,72 @@ fn attach_scope_member(
     }
 }
 
+#[derive(Clone)]
+struct TransactionCustomRestore {
+    index: usize,
+    receiver: TLocal,
+    receiver_ty: Type,
+    saved: TLocal,
+}
+
+fn rollback_method_lookup(owner: &Type, method: &str) -> String {
+    let owner = match owner.without_user_tags() {
+        Type::Named(name) => name.clone(),
+        Type::Apply { name, .. } => name.clone(),
+        _ => return format!("{}::{method}", crate::Syntax::TRAIT_ROLLBACK),
+    };
+    let key = format!("{}::{method}", crate::Syntax::TRAIT_ROLLBACK);
+    if key == owner || key.starts_with(&format!("{owner}::")) {
+        key
+    } else {
+        format!("{owner}::{key}")
+    }
+}
+
+fn rollback_method_call(
+    receiver: TLocal,
+    receiver_ty: Type,
+    method: &str,
+    return_ty: Type,
+    args: Vec<TCallArg>,
+) -> TExpr {
+    TExpr {
+        ty: return_ty,
+        kind: TExprKind::MethodCall {
+            recv: Box::new(TExpr {
+                ty: receiver_ty,
+                kind: TExprKind::Local(receiver),
+            }),
+            method: TMethodRef::trait_method(crate::Syntax::TRAIT_ROLLBACK, method),
+            type_args: Vec::new(),
+            args,
+            source_first_string_literal: None,
+            operator_line: None,
+        },
+    }
+}
+
+fn transaction_restore_call_arg(value: TExpr) -> TCallArg {
+    TCallArg {
+        value,
+        template_items: None,
+        borrow: false,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }
+}
+
 fn emit_scope_exits_on_early_paths(
     ctx: &mut LowerCtx,
     scope: MirScopeId,
     body_entry: MirBlockId,
     body_block_start: usize,
+    custom_restores: &[TransactionCustomRestore],
 ) -> Result<(), LowerError> {
     let body_blocks = ctx.blocks[body_block_start..]
         .iter()
@@ -2236,10 +2460,44 @@ fn emit_scope_exits_on_early_paths(
                 })
         })
         .collect::<Vec<_>>();
+    let restores = ctx
+        .transaction_restores
+        .iter()
+        .rev()
+        .find(|(candidate, _)| *candidate == scope)
+        .map(|(_, snaps)| snaps.clone())
+        .unwrap_or_default();
     let current = ctx.current_block();
     for block in early_exits {
         ctx.switch_to(block);
         ctx.emit_scope_cleanups(scope)?;
+        for index in (0..restores.len()).rev() {
+            let (place, saved, ty) = &restores[index];
+            if let Some(custom) = custom_restores.iter().find(|row| row.index == index) {
+                let restore = rollback_method_call(
+                    custom.receiver.clone(),
+                    custom.receiver_ty.clone(),
+                    "restore",
+                    Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                    vec![transaction_restore_call_arg(TExpr {
+                        ty: ty.clone(),
+                        kind: TExprKind::Local(custom.saved.clone()),
+                    })],
+                );
+                lower_expr(ctx, &restore)?;
+            } else {
+                let value = ctx.emit(
+                    &format!("transaction.snapshot.{index}.restore.read"),
+                    Some(ty.clone()),
+                    MirOperation::ReadPlace(*saved),
+                )?;
+                ctx.emit(
+                    &format!("transaction.snapshot.{index}.restore.write"),
+                    None,
+                    MirOperation::WritePlace { place: *place, value },
+                )?;
+            }
+        }
         ctx.emit(
             &format!("scope-member.exit.early.{}", block.0),
             None,
@@ -2258,7 +2516,7 @@ fn lower_scope_member_body(
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
-    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
+    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start, &[])?;
     if ctx.is_terminated() {
         ctx.exit_scope(scope)?;
         return Ok(());
@@ -2315,27 +2573,109 @@ fn lower_transaction(
             MirOperation::WritePlace { place, value },
         )?;
     }
-    for (index, (local, ty)) in snapshots.iter().enumerate() {
+    let mut restores = Vec::new();
+    let mut custom_restores = Vec::new();
+    for (index, (local, rollback_ty)) in snapshots.iter().enumerate() {
         let place = ctx.lower_place(
             &crate::Codegen::TIR::TPlace::Local(local.clone()),
-            MirAccess::Read,
+            MirAccess::Write,
         )?;
-        let snapshot_ty = ty.clone().unwrap_or(Type::Named("Snapshot".to_string()));
-        let value = ctx.emit(
-            &format!("transaction.snapshot.{index}.read"),
-            Some(snapshot_ty.clone()),
-            MirOperation::ReadPlace(place),
+        let (value, snapshot_ty) = if let Some(owner_ty) = rollback_ty {
+            let snapshot_method = rollback_method_lookup(owner_ty, "snapshot");
+            let snapshot_function = ctx.function_id_for(&snapshot_method)?;
+            let callable_ty = match ctx.function_registry.return_type_for(snapshot_function) {
+                Some(snapshot_ty) => snapshot_ty,
+                None => {
+                    return Err(ctx.error(
+                        ctx.span(),
+                        format!(
+                            "Rollback::snapshot for `{}` has no checked return type",
+                            owner_ty.name()
+                        ),
+                    ));
+                }
+            };
+            let call = rollback_method_call(
+                local.clone(),
+                owner_ty.clone(),
+                "snapshot",
+                callable_ty.clone(),
+                Vec::new(),
+            );
+            let (snapshot, snapshot_ty) = match &callable_ty {
+                Type::Result { ok, .. } => {
+                    let snapshot_ty = (**ok).clone();
+                    (
+                        TExpr {
+                            ty: snapshot_ty.clone(),
+                            kind: TExprKind::Try {
+                                inner: Box::new(call),
+                                note: None,
+                                convert: TTryConvert::None,
+                                file: ctx.function.source_file.clone(),
+                                line: ctx.source_line() as usize,
+                                fn_name: ctx.function.name.clone(),
+                            },
+                        },
+                        snapshot_ty,
+                    )
+                }
+                _ => (call, callable_ty),
+            };
+            (lower_expr(ctx, &snapshot)?, snapshot_ty)
+        } else {
+            let snapshot_ty = ctx
+                .local_types
+                .get(&local.name)
+                .cloned()
+                .or_else(|| rollback_ty.clone())
+                .unwrap_or_else(|| Type::Named("Snapshot".to_string()));
+            let value = ctx.emit(
+                &format!("transaction.snapshot.{index}.read"),
+                Some(snapshot_ty.clone()),
+                MirOperation::ReadPlace(place),
+            )?;
+            let copied = ctx.emit(
+                &format!("transaction.snapshot.{index}.copy"),
+                Some(snapshot_ty.clone()),
+                MirOperation::Copy { value },
+            )?;
+            (copied, snapshot_ty)
+        };
+        let saved_local = TLocal::generated(format!(
+            "txn_snap_{}_{}",
+            ctx.transaction_restores.len(),
+            index
+        ))
+        .as_mutable();
+        let saved_place = ctx.bind_local(&saved_local, snapshot_ty.clone(), true, false, false)?;
+        ctx.emit(
+            &format!("transaction.snapshot.{index}.save"),
+            None,
+            MirOperation::WritePlace {
+                place: saved_place,
+                value,
+            },
         )?;
-        let _ = ctx.emit(
-            &format!("transaction.snapshot.{index}.copy"),
-            Some(snapshot_ty),
-            MirOperation::Copy { value },
-        )?;
+        if rollback_ty.is_some() {
+            custom_restores.push(TransactionCustomRestore {
+                index,
+                receiver: local.clone(),
+                receiver_ty: rollback_ty.clone().expect("checked rollback owner"),
+                saved: saved_local.clone(),
+            });
+        }
+        restores.push((place, saved_place, snapshot_ty));
     }
+    ctx.transaction_restores.push((scope, restores));
+    let body_entry = ctx.current_block();
+    let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
+    emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start, &custom_restores)?;
     if let Some(handle) = handle {
         if ctx.is_terminated() {
             ctx.exit_scope(scope)?;
+            ctx.transaction_restores.pop();
             return Ok(());
         }
         let handle_ty = Type::Named("Transaction".to_string());
@@ -2375,6 +2715,7 @@ fn lower_transaction(
         )?;
     }
     ctx.exit_scope(scope)?;
+    ctx.transaction_restores.pop();
     Ok(())
 }
 

@@ -17,9 +17,9 @@ struct ScanResult {
     millis: Int
 }
 
-fn pair_key(left: String, right: String) String -> "{left}|{right}"
+fn pair_key(left: String, right: String) -> String { "{left}|{right}" }
 
-fn merge_sequence(sequence: [String], key: String) [String] -> {
+fn merge_sequence(sequence: [String], key: String) -> [String] {
     pieces :: key.split("|").to_list()
     left :: pieces.get(0) ?? ""
     right :: pieces.get(1) ?? ""
@@ -45,12 +45,10 @@ fn merge_sequence(sequence: [String], key: String) [String] -> {
     return result
 }
 
-fn train_bpe(corpus: String) BpeModel -> {
+fn train_bpe(corpus: String) -> BpeModel {
     words :: text.words(corpus)
     sequences := [[String]]{}
-    loop word in words {
-        sequences.push(text.graphemes(word))
-    }
+    loop word in words -> sequences.push(text.graphemes(word))
     merges := [String]{}
     loop _round in 0..<12 {
         counts := [String:Int]{}
@@ -75,33 +73,25 @@ fn train_bpe(corpus: String) BpeModel -> {
         if best_count == 0 -> break
         merges.push(best)
         next_sequences := [[String]]{}
-        loop sequence in sequences {
-            next_sequences.push(merge_sequence(sequence, best))
-        }
+        loop sequence in sequences -> next_sequences.push(merge_sequence(sequence, best))
         sequences = next_sequences
     }
     token_count := 0
-    loop sequence in sequences {
-        token_count += sequence.len()
-    }
+    loop sequence in sequences -> token_count += sequence.len()
     return BpeModel{merges: merges, words: words.len(), tokens: token_count}
 }
 
-fn encode_text(source: String, model: BpeModel) [String] -> {
+fn encode_text(source: String, model: BpeModel) -> [String] {
     encoded := [String]{}
     loop word in text.words(source) {
         sequence := text.graphemes(word)
-        loop merge in model.merges {
-            sequence = merge_sequence(sequence, merge)
-        }
-        loop token in sequence {
-            encoded.push(token)
-        }
+        loop merge in model.merges -> sequence = merge_sequence(sequence, merge)
+        loop token in sequence -> encoded.push(token)
     }
     return encoded
 }
 
-fn corpus_fixture() String -> {
+fn corpus_fixture() -> String {
     target :: 1_048_576
     seed :: "Hello café नमस्ते سلام — Jet text views\n"
     seed_bytes :: text.byte_count(seed)
@@ -111,7 +101,7 @@ fn corpus_fixture() String -> {
     return body + "x".repeat(remaining)
 }
 
-fn write_log_fixture(path: Path) Int -> {
+fn write_log_fixture(path: Path) -> Int {
     base :: "INFO request user_id=1\nWARN request user_id=2\nERROR request user_id=42\n"
     base_bytes :: text.byte_count(base)
     block_size :: 1000
@@ -124,7 +114,7 @@ fn write_log_fixture(path: Path) Int -> {
     return blocks
 }
 
-fn scan_logs(path: Path) ScanResult -> {
+fn scan_logs(path: Path) -> ScanResult {
     mapped :: files.map(path) ?? panic("map log fixture")
     pattern :: re.compile("ERROR .* user_id=\\d+") ?? panic("compile log pattern")
     started :: time.instant()
@@ -139,13 +129,13 @@ fn scan_logs(path: Path) ScanResult -> {
         bytes: mapped.len(),
         lines: line_count,
         matches: match_count,
-        millis: started.elapsed_millis()
+        millis: started.elapsed_millis(),
     }
 }
 
 // The typed HarfBuzz handle remains gated by D-FOUND-HANDLE1. This example
 // still performs real shaping through the audited `hb-shape` process boundary.
-fn discover_font(language: String) ?String -> {
+fn discover_font(language: String) -> ?String {
     result :: process.cmd(["fc-match", "-f", "%{{file}}", "sans:lang={language}"])
         .stdout(.Capture)
         .stderr(.Capture)
@@ -156,7 +146,7 @@ fn discover_font(language: String) ?String -> {
     return Val(font)
 }
 
-fn shape_with_harfbuzz(font: String, sample: String) String -> {
+fn shape_with_harfbuzz(font: String, sample: String) -> String {
     result :: process.cmd(["hb-shape", "--output-format=json", font, sample])
         .stdout(.Capture)
         .stderr(.Capture)
@@ -183,7 +173,9 @@ fn run() {
     sentences :: text.sentences(segmented).len()
     normalized :: text.nfc("Café")
     caseless :: text.caseless_eq("Straße", "STRASSE")
-    if graphemes == 0 || words == 0 || sentences == 0 -> panic("text segmentation returned no units")
+    if graphemes == 0 || words == 0 || sentences == 0 {
+        panic("text segmentation returned no units")
+    }
     if normalized != "Café" -> panic("NFC normalization")
     if !caseless -> panic("Unicode caseless comparison")
     print("segments bytes={text.byte_count(segmented)} scalars={text.scalar_count(segmented)} graphemes={graphemes} words={words} sentences={sentences}")

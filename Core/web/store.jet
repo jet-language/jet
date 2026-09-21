@@ -1,0 +1,257 @@
+// core.web.store — client store with history and patches.
+//
+// State is a string (JSON at the call site). History is a bounded ring
+// (default 1000). `scrub` / `history_at` read a snapshot without moving
+// the live cursor. `back` / `forward` / `jump` move it.
+
+@c_history_limit :: 1000
+
+pub struct WebStore {
+    pub name: String
+    pub value: String
+    pub history: [String]
+    pub cursor: Int
+    pub generation: Int
+    pub history_enabled: Bool
+    pub history_limit: Int
+    pub patch_active: Bool
+    pub patch_backup: String
+    pub subs: Int
+}
+
+pub struct WebStoreEvent {
+    pub kind: String
+    pub cursor: Int
+    pub generation: Int
+    pub diff: String
+}
+
+pub struct WebStorePatch {
+    pub generation: Int
+    pub active: Bool
+}
+
+pub struct WebStoreTransaction {
+    pub label: String
+}
+
+pub struct WebStoreSubscription {
+    pub id: Int
+    pub active: Bool
+    pub selector: String
+}
+
+pub struct WebStoreInspection {
+    pub name: String
+    pub cursor: Int
+    pub generation: Int
+    pub history_len: Int
+}
+
+pub fn new(name: String, value: String) -> WebStore {
+    h := [String]{}
+    h.push(value)
+    WebStore{name: name, value: value, history: h, cursor: 0, generation: 1, history_enabled: true, history_limit: @c_history_limit, patch_active: false, patch_backup: "", subs: 0}
+}
+
+pub fn with_history(name: String, value: String, limit: Int) -> WebStore {
+    s :: new(name, value)
+    lim := limit
+    if lim < 1 -> lim = 1
+    if lim > @c_history_limit -> lim = @c_history_limit
+    WebStore{name: s.name, value: s.value, history: s.history, cursor: s.cursor, generation: s.generation, history_enabled: true, history_limit: lim, patch_active: false, patch_backup: "", subs: 0}
+}
+
+pub fn value(s: WebStore) -> String { s.value }
+pub fn get(s: WebStore) -> String { s.value }
+pub fn state_signal(s: WebStore) -> String { "{s.name}:{s.generation}" }
+pub fn signal(s: WebStore) -> String { state_signal(s) }
+
+pub fn set(s: WebStore, value: String) -> WebStore { commit(s, value, "set") }
+pub fn set_state(s: WebStore, value: String) -> WebStore { set(s, value) }
+pub fn update(s: WebStore, value: String) -> WebStore { set(s, value) }
+pub fn batch(s: WebStore, value: String) -> WebStore { set(s, value) }
+pub fn transaction(s: WebStore, label: String, value: String) -> WebStore {
+    _ :: label
+    set(s, value)
+}
+
+pub fn optimistic(s: WebStore, value: String) -> WebStore {
+    t :: patch_transaction(s)
+    set(t, value)
+}
+
+pub fn patch(s: WebStore, value: String) -> WebStore { set(s, value) }
+
+pub fn patch_generation(s: WebStore) -> Int { s.generation }
+pub fn patch_transaction(s: WebStore) -> WebStore {
+    WebStore{name: s.name, value: s.value, history: s.history, cursor: s.cursor, generation: s.generation, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: true, patch_backup: s.value, subs: s.subs}
+}
+pub fn patch_active(s: WebStore) -> Bool { s.patch_active }
+pub fn patch_commit(s: WebStore) -> WebStore {
+    WebStore{name: s.name, value: s.value, history: s.history, cursor: s.cursor, generation: s.generation, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: false, patch_backup: "", subs: s.subs}
+}
+pub fn patch_rollback(s: WebStore) -> WebStore {
+    if !s.patch_active -> s
+    WebStore{name: s.name, value: s.patch_backup, history: s.history, cursor: s.cursor, generation: s.generation, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: false, patch_backup: "", subs: s.subs}
+}
+
+pub fn back(s: WebStore) -> WebStore { jump(s, s.cursor - 1) }
+pub fn forward(s: WebStore) -> WebStore { jump(s, s.cursor + 1) }
+
+pub fn jump(s: WebStore, index: Int) -> WebStore {
+    i := index
+    if i < 0 -> i = 0
+    if i >= s.history.len() -> i = s.history.len() - 1
+    if i < 0 -> s
+    WebStore{name: s.name, value: s.history[i], history: s.history, cursor: i, generation: s.generation + 1, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: false, patch_backup: "", subs: s.subs}
+}
+
+pub fn scrub(s: WebStore, index: Int) -> String { history_at(s, index) }
+
+pub fn restore(s: WebStore, index: Int) -> WebStore { jump(s, index) }
+
+pub fn history(s: WebStore) -> [String] { s.history }
+
+pub fn history_at(s: WebStore, index: Int) -> String {
+    if index < 0 || index >= s.history.len() -> return ""
+    s.history[index]
+}
+
+pub fn events(s: WebStore) -> [WebStoreEvent] {
+    out := [WebStoreEvent]{}
+    loop i in 0..<s.history.len() {
+        out.push(WebStoreEvent{kind: "commit", cursor: i, generation: i + 1, diff: s.history[i]})
+    }
+    out
+}
+
+pub fn events_since(s: WebStore, cursor: Int) -> [WebStoreEvent] {
+    out := [WebStoreEvent]{}
+    loop e in events(s) {
+        if e.cursor >= cursor -> out.push(e)
+    }
+    out
+}
+
+pub fn clear_history(s: WebStore) -> WebStore {
+    h := [String]{}
+    h.push(s.value)
+    WebStore{name: s.name, value: s.value, history: h, cursor: 0, generation: s.generation + 1, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: false, patch_backup: "", subs: s.subs}
+}
+
+pub fn history_enabled(s: WebStore) -> Bool { s.history_enabled }
+pub fn history_limit(s: WebStore) -> Int { s.history_limit }
+
+pub fn set_history_limit(s: WebStore, limit: Int) -> WebStore {
+    lim := limit
+    if lim < 1 -> lim = 1
+    if lim > @c_history_limit -> lim = @c_history_limit
+    h := trim_hist(s.history, lim)
+    c := s.cursor
+    if c >= h.len() -> c = h.len() - 1
+    if c < 0 -> c = 0
+    WebStore{name: s.name, value: s.value, history: h, cursor: c, generation: s.generation, history_enabled: s.history_enabled, history_limit: lim, patch_active: s.patch_active, patch_backup: s.patch_backup, subs: s.subs}
+}
+
+pub fn cursor(s: WebStore) -> Int { s.cursor }
+pub fn current_generation(s: WebStore) -> Int { s.generation }
+
+pub fn subscribe_selector(s: WebStore, selector: String) -> (store: WebStore, subscription: WebStoreSubscription) {
+    id := s.subs + 1
+    ns := WebStore{name: s.name, value: s.value, history: s.history, cursor: s.cursor, generation: s.generation, history_enabled: s.history_enabled, history_limit: s.history_limit, patch_active: s.patch_active, patch_backup: s.patch_backup, subs: id}
+    (store: ns, subscription: WebStoreSubscription{id: id, active: true, selector: selector})
+}
+
+pub fn subscribe(s: WebStore, selector: String) -> (store: WebStore, subscription: WebStoreSubscription) {
+    subscribe_selector(s, selector)
+}
+
+pub fn subscription_unsubscribe(sub: WebStoreSubscription) -> WebStoreSubscription {
+    WebStoreSubscription{id: sub.id, active: false, selector: sub.selector}
+}
+
+pub fn subscription_active(sub: WebStoreSubscription) -> Bool { sub.active }
+
+pub fn derived(s: WebStore, selector: String) -> String { selector_apply(s.value, selector) }
+pub fn selector(s: WebStore, selector: String) -> String { derived(s, selector) }
+
+pub fn inspect(s: WebStore) -> WebStoreInspection {
+    WebStoreInspection{name: s.name, cursor: s.cursor, generation: s.generation, history_len: s.history.len()}
+}
+
+pub fn facts_json(s: WebStore) -> String {
+    "{{\"name\":\"{s.name}\",\"cursor\":{s.cursor},\"generation\":{s.generation},\"history\":{s.history.len()}}}"
+}
+
+pub fn event_json(e: WebStoreEvent) -> String {
+    "{{\"kind\":\"{e.kind}\",\"cursor\":{e.cursor},\"generation\":{e.generation}}}"
+}
+
+fn commit(s: WebStore, value: String, kind: String) -> WebStore {
+    _ :: kind
+    if !s.history_enabled {
+        return WebStore{name: s.name, value: value, history: s.history, cursor: s.cursor, generation: s.generation + 1, history_enabled: false, history_limit: s.history_limit, patch_active: s.patch_active, patch_backup: s.patch_backup, subs: s.subs}
+    }
+    prefix := [String]{}
+    loop i in 0..<(s.cursor + 1) {
+        if i < s.history.len() -> prefix.push(s.history[i])
+    }
+    prefix.push(value)
+    h := trim_hist(prefix, s.history_limit)
+    c := h.len() - 1
+    if c < 0 -> c = 0
+    WebStore{name: s.name, value: value, history: h, cursor: c, generation: s.generation + 1, history_enabled: true, history_limit: s.history_limit, patch_active: s.patch_active, patch_backup: s.patch_backup, subs: s.subs}
+}
+
+fn trim_hist(h: [String], limit: Int) -> [String] {
+    if h.len() <= limit -> return h
+    drop := h.len() - limit
+    out := [String]{}
+    loop i in drop..<h.len() -> out.push(h[i])
+    out
+}
+
+fn selector_apply(value: String, selector: String) -> String {
+    if selector.len() == 0 -> value
+    needle :: "\"{selector}\":"
+    raw :: value.bytes()
+    n :: needle.bytes()
+    loop i in 0..<raw.len() {
+        if starts_at(raw, n, i) {
+            j := i + n.len()
+            return slice_json_value(raw, j)
+        }
+    }
+    ""
+}
+
+fn starts_at(raw: [U8], n: [U8], i: Int) -> Bool {
+    if i + n.len() > raw.len() -> return false
+    loop k in 0..<n.len() {
+        if raw[i + k] != n[k] -> return false
+    }
+    true
+}
+
+fn slice_json_value(raw: [U8], j: Int) -> String {
+    loop j < raw.len() {
+        if raw[j] == (U8{32}) || raw[j] == (U8{9}) -> j = j + 1
+        else -> break
+    }
+    if j >= raw.len() -> return ""
+    if raw[j] == (U8{34}) {
+        k := j + 1
+        loop k < raw.len() {
+            if raw[k] == (U8{34}) -> return String.from_bytes(raw[j + 1..k - 1]) ?? ""
+            k = k + 1
+        }
+    }
+    k := j
+    loop k < raw.len() {
+        b :: raw[k]
+        if b == (U8{44}) || b == (U8{125}) || b == (U8{93}) -> break
+        k = k + 1
+    }
+    String.from_bytes(raw[j..k - 1]) ?? ""
+}

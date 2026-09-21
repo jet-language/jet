@@ -664,9 +664,7 @@ impl<'a> Checker<'a> {
                         .is_some_and(|transport| transport != "none");
                     let safe = match &arg.expr {
                         Expr::Ident(callback, _) => {
-                            self.funcs
-                                .get(callback)
-                                .is_some_and(|f| !f.is_extern && f.is_foreign_thread_safe)
+                            self.callback_function_is_safe(callback)
                                 || aty.as_ref().is_some_and(|ty| {
                                     crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                                 })
@@ -686,6 +684,11 @@ impl<'a> Checker<'a> {
                             && sig.foreign_effect_root.as_deref() == Some("FFI.C"));
                     if safe && metadata_complete {
                         arg.flags.c_callback_symbol = true;
+                        arg.flags.c_callback_function_key = match &arg.expr {
+                            Expr::Ident(callback, _) => self.callback_function_key(callback),
+                            Expr::Lambda(..) => None,
+                            _ => None,
+                        };
                         arg.flags.c_callback_managed = managed;
                         arg.flags.c_callback_plan_digest = sig.callback_plan_digest.clone();
                         arg.flags.c_callback_identity = sig.callback_identity.clone();

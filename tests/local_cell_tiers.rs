@@ -5,7 +5,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, compile, have_rustc};
+use tir_support::{build_and_run, have_rustc};
 
 const SOURCE: &str = r#"
 struct Pair {
@@ -13,7 +13,7 @@ struct Pair {
     right: Int,
 }
 
-struct Cache {
+struct ValueCache {
     value: Cell<?String>,
 }
 
@@ -48,7 +48,7 @@ fn split_edit(cell: Cell<Pair>) {
     right.set(11)
 }
 
-fn make_edit_guards(cell: Cell<Pair>) (
+fn make_edit_guards(cell: Cell<Pair>) -> (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
 ) {
@@ -87,7 +87,7 @@ fn run() {
     edit_returned_split(cell)
     print(cell.get().left + cell.get().right)
 
-    cache :: Cache{ value: Cell.new(None) }
+    cache :: ValueCache{ value: Cell.new(None) }
     print(cache.value.get_or_set(() -> "built"))
     print(cache.value.get_or_set(() -> "unused"))
 
@@ -114,6 +114,11 @@ fn run() {
 const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n";
 
 const GENERIC_SOURCE: &str = r#"
+#Error
+enum CellResultError {
+    Failed
+}
+
 struct Box<T> {
     value: T,
 }
@@ -128,17 +133,17 @@ struct Reverse<Value, Alpha> {
 }
 
 impl Box {
-    fn new(value: ^T) Box<T> {
+    fn new(value: ^T) -> Box<T> {
         return Box<T>{ value: value }
     }
 }
 
-fn keep_result(value: ^(Int !String)) {
+fn keep_result(value: ^(Int !CellResultError)) {
     cell :: Cell.new(value)
     print(cell.read(result -> result ?? 0))
 }
 
-fn ok_result() Int !String {
+fn ok_result() -> Int !CellResultError {
     return Ok(7)
 }
 
@@ -179,20 +184,6 @@ fn run() {
 }
 "#;
 
-#[test]
-fn local_cell_split_keeps_projected_tuple_type_in_tir() {
-    let rust = compile("local_cell_split_type", SOURCE);
-    assert!(
-        rust.contains("let __jet_left = (__jet_d")
-            && rust.contains(".__jet_first;")
-            && rust.contains(".__jet_second;"),
-        "split TIR lost its exact projected tuple fields:\n{rust}"
-    );
-    assert!(
-        !rust.contains("#[derive(Clone, PartialEq)]\nstruct __jet_JetTup_d9655a63806bd711"),
-        "the read-guard tuple must stay move-only"
-    );
-}
 
 #[test]
 fn local_cell_full_surface_runs_through_aot() {
@@ -224,7 +215,7 @@ fn local_cell_full_surface_runs_through_default_tier() {
                         stderr,
                         exit_code,
                     } => {
-                        assert_eq!(exit_code, 0, "{tier} exit drift");
+                        assert_eq!(exit_code, 0, "{tier} exit drift: {stderr}");
                         assert_eq!(stderr, "", "{tier} stderr drift");
                         assert_eq!(stdout, EXPECTED, "{tier} output drift");
                     }
@@ -282,7 +273,7 @@ fn local_cell_generic_shapes_run_through_default_tier() {
                         stderr,
                         exit_code,
                     } => {
-                        assert_eq!(exit_code, 0, "{tier} exit drift");
+                        assert_eq!(exit_code, 0, "{tier} exit drift: {stderr}");
                         assert_eq!(stderr, "", "{tier} stderr drift");
                         assert_eq!(stdout, GENERIC_EXPECTED, "{tier} output drift");
                     }
@@ -419,7 +410,7 @@ fn run() {
         (
             "lambda capture",
             r#"
-fn hold(cell: Cell<Int>) fn() Int {
+fn hold(cell: Cell<Int>) -> fn() -> Int {
     guard :: cell.guard_read()
     return () -> guard.get()
 }

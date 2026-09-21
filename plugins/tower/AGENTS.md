@@ -282,7 +282,7 @@ owner-only with no `--quote` escape — it IS the owner speaking.
 
 Ratifying a `group: "syntax"` decision auto-appends the standard
 post-ratification chores to the card's `criteria[]`: Syntax.rs entry
-updated, syntax-decisions.md log entry, `jet devtools grammars`
+updated, syntax-decisions.md log entry, `jet self devtools grammars`
 regenerated, snapshots re-blessed.
 
 `blockedBy` accepts a card ref or a decision id; an unratified decision id

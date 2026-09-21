@@ -17,7 +17,7 @@ contract. Do not run a suite merely because this skill was loaded.
 | Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `crates/jet-codegen/src/Prelude/Diagnostics.jet`, matching `tests/ui/` or `tests/ui_lint/`, `docs/spec/diagnostics.md`, and `examples/features/expected/` |
 | Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `crates/jet-foundation/src/Syntax.rs`, `docs/spec/syntax-decisions.md`, `docs/spec/contributing/examples.md`, and `examples/README.md` |
 | Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `scripts/agent/closeout-gate.mjs` |
-| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md), `scripts/agent/tmp-guard.sh`, and `scripts/agent/jet-env` |
+| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `scripts/agent/jet-env` |
 
 ## Non-negotiable truth
 
@@ -33,7 +33,7 @@ contract. Do not run a suite merely because this skill was loaded.
   commit-bound token, one composed targeted sweep, and one fresh-context review,
   is defined only in `../orchestration/references/closeout.md`. Do not invent a
   second cadence here.
-- `proof-parallel.sh`, an unfiltered conformance census, `verify-full.sh`, and
+- An unfiltered conformance census, `verify-full.sh`, and
   `tower milestone verify` are tokened milestone operations, not card proof.
   No blanket suite substitutes for the named criterion command.
 - Technical acceptance belongs to the agents and the orchestrator. Owner

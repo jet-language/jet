@@ -51,11 +51,11 @@ use core.reactive as reactive
 // by ui_showcase.html.
 #[Target(Web), HTML("ui_showcase.html")]
 
-fn stat_line(label: String, value: String) UiNode -> {
+fn stat_line(label: String, value: String) -> UiNode {
     return ui.text("{label}: {value}")
 }
 
-fn dashboard_view(cards: [UiNode]) UiNode -> {
+fn dashboard_view(cards: [UiNode]) -> UiNode {
     return ui.box(cards)
 }
 
@@ -74,7 +74,7 @@ struct StatCard {
 }
 
 #Target(JS)
-fn hex_digit(n: Int) String -> {
+fn hex_digit(n: Int) -> String {
     if n == 0 { return "0" }
     if n == 1 { return "1" }
     if n == 2 { return "2" }
@@ -94,7 +94,7 @@ fn hex_digit(n: Int) String -> {
 }
 
 #Target(JS)
-fn hi_nibble(n: Int) Int -> {
+fn hi_nibble(n: Int) -> Int {
     if n < 16 { return 0 }
     if n < 32 { return 1 }
     if n < 48 { return 2 }
@@ -114,31 +114,31 @@ fn hi_nibble(n: Int) Int -> {
 }
 
 #Target(JS)
-fn hex_byte(n: Int) String -> {
+fn hex_byte(n: Int) -> String {
     hi := hi_nibble(n)
     lo := n - (hi * 16)
     return "{hex_digit(hi)}{hex_digit(lo)}"
 }
 
 #Target(JS)
-fn to_hex(c: Color) String -> {
+fn to_hex(c: Color) -> String {
     return "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}"
 }
 
 #Target(JS)
-fn altitude_color() Color -> { return Color{r: 51, g: 102, b: 255} }
+fn altitude_color() -> Color { return Color{r: 51, g: 102, b: 255} }
 
 #Target(JS)
-fn airspeed_color() Color -> { return Color{r: 18, g: 184, b: 134} }
+fn airspeed_color() -> Color { return Color{r: 18, g: 184, b: 134} }
 
 #Target(JS)
-fn fuel_color() Color -> { return Color{r: 232, g: 121, b: 12} }
+fn fuel_color() -> Color { return Color{r: 232, g: 121, b: 12} }
 
 #Target(JS)
-fn boost_color() Color -> { return Color{r: 136, g: 85, b: 238} }
+fn boost_color() -> Color { return Color{r: 136, g: 85, b: 238} }
 
 #Target(JS)
-fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) StatCard -> {
+fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) -> StatCard {
     return StatCard{label: ~label, value: ~value, color: ~color, x: x, y: y}
 }
 
@@ -154,7 +154,7 @@ fn paint_stat_card(card: StatCard) {
 }
 
 #Target(JS)
-fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) Float -> {
+fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
     if elapsed_ms <= 0 {
         return from
     }
@@ -166,7 +166,7 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) Float -> {
     return from + (to - from) * eased
 }
 
-fn init_app() Signal<Int> -> {
+fn init_app() -> Signal<Int> {
     boosts :: reactive.signal(0)
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
@@ -183,7 +183,7 @@ fn init_app() Signal<Int> -> {
     return boosts
 }
 
-fn init_fuel() Signal<Int> -> {
+fn init_fuel() -> Signal<Int> {
     elapsed :: reactive.signal(0)
     backend :: ui.null_backend()
     ui.reactive_render(() -> {

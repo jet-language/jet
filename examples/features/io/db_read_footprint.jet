@@ -11,7 +11,7 @@ use core.db as db
 // so it adds no effect — the query's implicit error propagation and the
 // row-field `??` fallbacks are the whole set. A `conn.execute` hiding in here would need `DB.Write`
 // and be rejected by E0740, which is the point.
-fn person_count(conn: DBScope) Int -[DB.Read]> {
+fn person_count(conn: DBScope) -[DB.Read]> Int {
     row_opt :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
     if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")

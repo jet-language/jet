@@ -1,0 +1,55 @@
+// core.compute.solve — linear solvers on a tensor backend.
+pub struct Solver {
+    pub kind: String
+}
+
+/// Gaussian elimination with partial pivoting. `a` is n×n, `b` is n.
+/// Returns x such that A x ≈ b. Singular matrices yield Err.
+pub fn dense(a: Tensor, b: Tensor) -> Tensor {
+    if a.shape.len() != 2 || a.shape[0] != a.shape[1] -> return Err("A must be square")
+    n :: a.shape[0]
+    if b.data.len() != n -> return Err("b length")
+    // augment
+    m := [Float]{}
+    loop i in 0..<n {
+        loop j in 0..<n -> m.push(a.data[i * n + j])
+        m.push(b.data[i])
+    }
+    w :: n + 1
+    loop k in 0..<n {
+        pivot := k
+        best := absf(m[k * w + k])
+        loop i in (k + 1)..<n {
+            v :: absf(m[i * w + k])
+            if v > best {
+                best = v
+                pivot = i
+            }
+        }
+        if best == 0.0 -> return Err("singular")
+        if pivot != k {
+            loop j in 0..<w {
+                tmp :: m[k * w + j]
+                m[k * w + j] = m[pivot * w + j]
+                m[pivot * w + j] = tmp
+            }
+        }
+        diag :: m[k * w + k]
+        loop j in k..<w -> m[k * w + j] = m[k * w + j] / diag
+        loop i in 0..<n {
+            if i == k -> next
+            f :: m[i * w + k]
+            loop j in k..<w -> m[i * w + j] = m[i * w + j] - f * m[k * w + j]
+        }
+    }
+    x := [Float]{}
+    loop i in 0..<n -> x.push(m[i * w + n])
+    Ok({shape: [Int]{n}, data: x, device: "cpu"})
+}
+
+pub fn lu(a: Tensor) -> Solver { {kind: "lu"} }
+
+fn absf(x: Float) -> Float {
+    if x < 0.0 -> return 0.0 - x
+    x
+}

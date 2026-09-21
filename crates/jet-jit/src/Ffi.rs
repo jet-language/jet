@@ -2484,7 +2484,7 @@ fn validate_mir_bridge(
     }
     if !matches!(
         foreign.foreign_language,
-        MirForeignLanguage::C | MirForeignLanguage::Cpp
+        MirForeignLanguage::C | MirForeignLanguage::Cpp | MirForeignLanguage::Assembly
     ) || !matches!(
         foreign.foreign_abi,
         MirForeignAbi::C | MirForeignAbi::CUnwind

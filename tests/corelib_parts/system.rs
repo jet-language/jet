@@ -470,7 +470,7 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_size_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    fs::create_dir_all(dir.join("build")).unwrap();
+    fs::create_dir_all(dir.join(".jet/build")).unwrap();
 
     fs::write(
         dir.join("hello.jet"),
@@ -509,8 +509,8 @@ fn run() {
         .unwrap();
     assert!(imports.status.success(), "import-only build failed");
 
-    let hello_size = fs::metadata(dir.join("build/hello")).unwrap().len();
-    let import_size = fs::metadata(dir.join("build/core_import_only"))
+    let hello_size = fs::metadata(dir.join(".jet/build/hello")).unwrap().len();
+    let import_size = fs::metadata(dir.join(".jet/build/core_import_only"))
         .unwrap()
         .len();
     assert!(

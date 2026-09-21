@@ -3,7 +3,6 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Panic, Time.Wait] } }
 }
-
 // D-CONC-STM1=A (ratified 2026-08-06, card #1561; amends D-STM1=A): the Shared
 // plane of `#Transact`. Several statements that touch `Shared` values commit
 // together — either every value's change lands or none does, and no concurrent
@@ -39,7 +38,14 @@ fn run() {
     // every transfer is atomic, so the final balances are deterministic and the
     // grand total is conserved exactly.
     @[ t1..t8 ]@ :: task transfer(from, to, 100)
-    @[ t1..t8 ]@.join() ?? panic("transfer failed")
+    t1.join() ?? panic("transfer failed")
+    t2.join() ?? panic("transfer failed")
+    t3.join() ?? panic("transfer failed")
+    t4.join() ?? panic("transfer failed")
+    t5.join() ?? panic("transfer failed")
+    t6.join() ?? panic("transfer failed")
+    t7.join() ?? panic("transfer failed")
+    t8.join() ?? panic("transfer failed")
     from_bal :: from.balance
     to_bal :: to.balance
 

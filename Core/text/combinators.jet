@@ -1,0 +1,111 @@
+// Parser combinators over UTF-8 text. The cursor is a byte offset; failures
+// return `None` and never panic. Combinators are pure: they do not mutate
+// the input string.
+pub struct Input {
+    pub text: String
+    pub pos: Int
+}
+
+pub struct Took {
+    pub next: Input
+    pub chunk: String
+}
+
+pub struct Digit {
+    pub next: Input
+    pub n: Int
+}
+
+pub fn input(text: String) -> Input { {text: text, pos: 0} }
+
+pub fn remaining(src: Input) -> String {
+    raw :: src.text.bytes()
+    if src.pos < 0 || src.pos >= raw.len() -> return ""
+    String.from_bytes(slice_rest(raw, src.pos)) ?? ""
+}
+
+pub fn eof(src: Input) -> Bool { src.pos >= src.text.bytes().len() }
+
+pub fn peek(src: Input) -> ?U8 {
+    raw :: src.text.bytes()
+    if src.pos < 0 || src.pos >= raw.len() -> return None
+    Val(raw[src.pos])
+}
+
+pub fn take_n(src: Input, n: Int) -> ?Took {
+    raw :: src.text.bytes()
+    if n < 0 -> return None
+    if src.pos + n > raw.len() -> return None
+    chunk :: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? ""
+    Val(Took{next: Input{text: src.text, pos: src.pos + n}, chunk: chunk})
+}
+
+pub fn tag(src: Input, lit: String) -> ?Took {
+    got :: take_n(src, lit.bytes().len()) ?? return None
+    if got.chunk != lit -> return None
+    Val(got)
+}
+
+pub fn take_while(src: Input, ascii_pred: String) -> Took {
+    raw :: src.text.bytes()
+    i := src.pos
+    loop i < raw.len() {
+        ch :: raw[i]
+        if !pred_byte(ascii_pred, ch) -> break
+        i = i + 1
+    }
+    chunk :: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
+    {next: Input{text: src.text, pos: i}, chunk: chunk}
+}
+
+pub fn skip_ws(src: Input) -> Input { take_while(src, "space").next }
+
+pub fn digit(src: Input) -> ?Digit {
+    b :: peek(src) ?? return None
+    if b < 48 || b > 57 -> return None
+    nxt :: take_n(src, 1) ?? return None
+    Val(Digit{next: nxt.next, n: b - 48})
+}
+
+pub fn int_dec(src: Input) -> ?Digit {
+    cur := skip_ws(src)
+    sign := 1
+    b :: peek(cur) ?? return None
+    if b == 45 {
+        sign = -1
+        taken :: take_n(cur, 1) ?? return None
+        cur = taken.next
+    }
+    acc := 0
+    saw := false
+    loop {
+        d :: digit(cur) ?? break
+        saw = true
+        acc = acc * 10 + d.n
+        cur = d.next
+    }
+    if !saw -> return None
+    Val(Digit{next: cur, n: acc * sign})
+}
+
+fn pred_byte(kind: String, b: U8) -> Bool {
+    if kind == {
+        "space" -> b == 32 || b == 9 || b == 10 || b == 13
+        "digit" -> b >= 48 && b <= 57
+        "alpha" -> (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
+        "alnum" -> pred_byte("digit", b) || pred_byte("alpha", b)
+        else -> false
+    }
+}
+
+fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return out
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn slice_rest(raw: [U8], start: Int) -> [U8] { slice_range(raw, start, raw.len()) }

@@ -1,17 +1,15 @@
-fn build(b: BuildContext) BuildPlan -[IO]> {
+fn build(b: BuildContext) -[IO]> BuildPlan {
     #Impure("build action writes declared output") {
         action :: b.action(
-            "stamp",
-            ["graph.jet"],
-            ["stamp.txt"],
-            ["/bin/sh", "-c", "printf graph2 > stamp.txt"],
-            ["IO"]
+        "stamp",
+        ["graph.jet"],
+        ["stamp.txt"],
+        ["/bin/sh", "-c", "printf graph2 > stamp.txt"],
+        ["IO"],
         )
         app :: b.add_executable("graph_probe", ["graph.jet"], [action])
         return b.plan(app)
     }
 }
 
-fn run() {
-    print("graph probe")
-}
+fn run() { print("graph probe") }

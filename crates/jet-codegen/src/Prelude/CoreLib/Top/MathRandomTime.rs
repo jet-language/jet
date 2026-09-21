@@ -394,6 +394,411 @@ fn jet_time_days_in_month(year: i64, month: i64) -> i64 {
 fn jet_time_is_leap_year(year: i64) -> bool {
     JetDate::is_leap(jet_time_unix_input(year))
 }
+fn jet_calendar_isleap(year: i64) -> bool {
+    jet_time_is_leap_year(year)
+}
+fn jet_calendar_leapdays(
+    first: i64,
+    second: i64,
+) -> jet_foundation::Numeric::JetInt {
+    let (start, end) = if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    jet_std::jet_int_owned_from_i64(
+        (start..end)
+            .filter(|year| JetDate::is_leap(*year))
+            .count() as i64,
+    )
+}
+fn jet_calendar_weekday_i64(year: i64, month: i64, day: i64) -> i64 {
+    let adjusted_year = if month < 3 { year - 1 } else { year };
+    let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let month_index = month.saturating_sub(1).clamp(0, 11) as usize;
+    let sunday_zero = (adjusted_year
+        + adjusted_year.div_euclid(4)
+        - adjusted_year.div_euclid(100)
+        + adjusted_year.div_euclid(400)
+        + offsets[month_index]
+        + day)
+        .rem_euclid(7);
+    (sunday_zero + 6).rem_euclid(7)
+}
+fn jet_coll_owned_values(
+    values: Vec<i64>,
+) -> Vec<jet_foundation::Numeric::JetInt> {
+    values
+        .into_iter()
+        .map(jet_std::jet_int_owned_from_i64)
+        .collect()
+}
+
+fn jet_coll_sift_down_aot(values: &mut [i64], mut index: usize) {
+    loop {
+        let left = index.saturating_mul(2).saturating_add(1);
+        if left >= values.len() {
+            break;
+        }
+        let right = left + 1;
+        let child = if right < values.len() && values[right] < values[left] {
+            right
+        } else {
+            left
+        };
+        if values[index] <= values[child] {
+            break;
+        }
+        values.swap(index, child);
+        index = child;
+    }
+}
+
+fn jet_coll_heappop_aot(values: &[i64]) -> (Vec<i64>, Option<i64>) {
+    if values.is_empty() {
+        return (Vec::new(), None);
+    }
+    if values.len() == 1 {
+        return (Vec::new(), Some(values[0]));
+    }
+    let mut heap = Vec::with_capacity(values.len() - 1);
+    heap.push(values[values.len() - 1]);
+    heap.extend_from_slice(&values[1..values.len() - 1]);
+    let value = values[0];
+    jet_coll_sift_down_aot(&mut heap, 0);
+    (heap, Some(value))
+}
+
+fn jet_coll_heappushpop_aot(values: &[i64], value: i64) -> (Vec<i64>, i64) {
+    if values.is_empty() || value <= values[0] {
+        return (values.to_vec(), value);
+    }
+    let popped = values[0];
+    let mut heap = Vec::with_capacity(values.len());
+    heap.push(value);
+    heap.extend_from_slice(&values[1..]);
+    jet_coll_sift_down_aot(&mut heap, 0);
+    (heap, popped)
+}
+
+fn jet_coll_heapreplace_aot(values: &[i64], value: i64) -> (Vec<i64>, Option<i64>) {
+    if values.is_empty() {
+        return (vec![value], None);
+    }
+    let popped = values[0];
+    let mut heap = Vec::with_capacity(values.len());
+    heap.push(value);
+    heap.extend_from_slice(&values[1..]);
+    jet_coll_sift_down_aot(&mut heap, 0);
+    (heap, Some(popped))
+}
+
+fn jet_coll_heappop(
+    values: &[i64],
+) -> (
+    Vec<jet_foundation::Numeric::JetInt>,
+    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+) {
+    let (heap, value) = jet_coll_heappop_aot(values);
+    (
+        jet_coll_owned_values(heap),
+        value
+            .map(jet_std::jet_int_owned_from_i64)
+            .ok_or(JetAbsent),
+    )
+}
+
+fn jet_coll_heappushpop(
+    values: &[i64],
+    value: i64,
+) -> (
+    Vec<jet_foundation::Numeric::JetInt>,
+    jet_foundation::Numeric::JetInt,
+) {
+    let (heap, popped) = jet_coll_heappushpop_aot(values, value);
+    (
+        jet_coll_owned_values(heap),
+        jet_std::jet_int_owned_from_i64(popped),
+    )
+}
+
+fn jet_coll_heapreplace(
+    values: &[i64],
+    value: i64,
+) -> (
+    Vec<jet_foundation::Numeric::JetInt>,
+    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+) {
+    let (heap, popped) = jet_coll_heapreplace_aot(values, value);
+    (
+        jet_coll_owned_values(heap),
+        popped
+            .map(jet_std::jet_int_owned_from_i64)
+            .ok_or(JetAbsent),
+    )
+}
+impl JetShow for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+) {
+    fn jet_show(&self) -> String {
+        format!(
+            "(heap,value) {{ heap: {}, value: {} }}",
+            self.0.jet_show(),
+            self.1.jet_show(),
+        )
+    }
+}
+
+impl JetDisplay for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+) {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+) {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetShow for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    jet_foundation::Numeric::JetInt,
+) {
+    fn jet_show(&self) -> String {
+        format!(
+            "(heap,value) {{ heap: {}, value: {} }}",
+            self.0.jet_show(),
+            self.1.jet_show(),
+        )
+    }
+}
+
+impl JetDisplay for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    jet_foundation::Numeric::JetInt,
+) {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for (
+    Vec<jet_foundation::Numeric::JetInt>,
+    jet_foundation::Numeric::JetInt,
+) {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetShow for (String, String) {
+    fn jet_show(&self) -> String {
+        format!("({}, {})", self.0.jet_show(), self.1.jet_show())
+    }
+}
+
+impl JetDisplay for (String, String) {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for (String, String) {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+
+fn jet_calendar_weekday(
+    year: i64,
+    month: i64,
+    day: i64,
+) -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, day))
+}
+fn jet_calendar_monthrange(
+    year: i64,
+    month: i64,
+) -> (
+    jet_foundation::Numeric::JetInt,
+    jet_foundation::Numeric::JetInt,
+) {
+    (
+        jet_std::jet_int_owned_from_i64(jet_time_days_in_month(year, month)),
+        jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, 1)),
+    )
+}
+fn jet_calendar_monthcalendar(
+    year: i64,
+    month: i64,
+) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
+    jet_calendar_monthcalendar_start(year, month, 0)
+}
+fn jet_calendar_monthcalendar_start(
+    year: i64,
+    month: i64,
+    firstweekday: i64,
+) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
+    let days = jet_time_days_in_month(year, month);
+    let start = (jet_calendar_weekday_i64(year, month, 1) - firstweekday).rem_euclid(7);
+    let mut weeks = Vec::new();
+    let mut week = Vec::new();
+    for _ in 0..start {
+        week.push(jet_std::jet_int_owned_from_i64(0));
+    }
+    for day in 1..=days {
+        week.push(jet_std::jet_int_owned_from_i64(day));
+        if week.len() == 7 {
+            weeks.push(week);
+            week = Vec::new();
+        }
+    }
+    if !week.is_empty() {
+        while week.len() < 7 {
+            week.push(jet_std::jet_int_owned_from_i64(0));
+        }
+        weeks.push(week);
+    }
+    weeks
+}
+fn jet_calendar_yearcalendar(
+    year: i64,
+) -> Vec<Vec<Vec<jet_foundation::Numeric::JetInt>>> {
+    (1..=12)
+        .map(|month| jet_calendar_monthcalendar(year, month))
+        .collect()
+}
+fn jet_calendar_weekheader(width: i64, firstweekday: i64) -> Vec<String> {
+    let width = width.max(1) as usize;
+    (0..7)
+        .map(|index| {
+            let text = jet_calendar_day_abbr((index + firstweekday).rem_euclid(7));
+            let bytes = text.as_bytes();
+            if bytes.len() >= width {
+                String::from_utf8_lossy(&bytes[..width]).into_owned()
+            } else {
+                format!("{text}{}", " ".repeat(width - bytes.len()))
+            }
+        })
+        .collect()
+}
+fn jet_calendar_formatmonth(year: i64, month: i64, width: i64) -> String {
+    let width = width.max(2) as usize;
+    let title = format!("{} {year}", jet_calendar_month_name(month));
+    let title_width = width.saturating_mul(7).saturating_add(6);
+    let title_bytes = title.as_bytes();
+    let title = if title_bytes.len() >= title_width {
+        String::from_utf8_lossy(&title_bytes[..title_width]).into_owned()
+    } else {
+        let left = (title_width - title_bytes.len()) / 2;
+        let right = title_width - title_bytes.len() - left;
+        format!("{}{}{}", " ".repeat(left), title, " ".repeat(right))
+    };
+    let cells = jet_calendar_weekheader(width as i64, 0);
+    let mut out = format!("{title}\n{}\n", cells.join(" "));
+    for week in jet_calendar_monthcalendar(year, month) {
+        let row = week
+            .into_iter()
+            .map(|day| {
+                let day = day.to_raw().to_string();
+                let cell = if day == "0" { String::new() } else { day };
+                if cell.len() >= width {
+                    cell[..width].to_string()
+                } else {
+                    format!("{}{}", " ".repeat(width - cell.len()), cell)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+fn jet_calendar_formatyear(year: i64) -> String {
+    let mut out = String::new();
+    for month in 1..=12 {
+        out.push_str(&jet_calendar_formatmonth(year, month, 3));
+        out.push('\n');
+    }
+    out
+}
+fn jet_calendar_day_name(weekday: i64) -> String {
+    [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+    .get(weekday.clamp(0, 6) as usize)
+    .unwrap_or(&"Sunday")
+    .to_string()
+}
+fn jet_calendar_day_abbr(weekday: i64) -> String {
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        .get(weekday.clamp(0, 6) as usize)
+        .unwrap_or(&"Sun")
+        .to_string()
+}
+fn jet_calendar_month_name(month: i64) -> String {
+    [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
+    .get(month.saturating_sub(1).clamp(0, 11) as usize)
+    .unwrap_or(&"December")
+    .to_string()
+}
+fn jet_calendar_month_abbr(month: i64) -> String {
+    [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+        "Dec",
+    ]
+    .get(month.saturating_sub(1).clamp(0, 11) as usize)
+    .unwrap_or(&"Dec")
+    .to_string()
+}
+fn jet_calendar_timegm(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+) -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i64(
+        JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds(),
+    )
+}
+fn jet_time_expired(expires_at_ms: i64, now_ms: i64) -> bool {
+    now_ms >= expires_at_ms
+}
+fn jet_time_remaining_ms(
+    expires_at_ms: i64,
+    now_ms: i64,
+) -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i64(expires_at_ms.saturating_sub(now_ms))
+}
 fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
     JetPeriod::new(
         jet_time_unix_input(years),
@@ -891,6 +1296,44 @@ fn jet_url_percent_encode_component(s: &String) -> String {
 fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
     crate::jet_std::jet_url_percent_decode_str(s)
 }
+fn jet_url_join(base: &String, rel: &String) -> String {
+    crate::jet_std::jet_url_join_text(base, rel)
+}
+fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
+    crate::jet_std::jet_url_parse_qsl_rows(query)
+}
+fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
+    crate::jet_std::jet_url_query_rows(pairs)
+}
+fn jet_url_split_fragment(text: &String) -> (String, String) {
+    let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
+    (fragment, url)
+}
+fn jet_url_quote(text: &String) -> String {
+    crate::jet_std::jet_url_quote(text)
+}
+fn jet_url_quote_from_bytes(data: &Vec<u8>) -> String {
+    crate::jet_std::jet_url_quote_from_bytes(data)
+}
+fn jet_url_quote_plus(text: &String) -> String {
+    crate::jet_std::jet_url_quote_plus(text)
+}
+fn jet_url_unquote(text: &String) -> Result<String, String> {
+    crate::jet_std::jet_url_unquote(text)
+}
+fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
+    crate::jet_std::jet_url_unquote_to_bytes(text)
+}
+fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
+    crate::jet_std::jet_url_unquote_plus(text)
+}
+fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
+    url.to_string_value()
+}
+fn jet_url_urldefrag(text: &String) -> (String, String) {
+    crate::jet_std::jet_url_split_fragment(text)
+}
+
 fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
     crate::jet_std::JetMIME::parse(s)
 }
@@ -902,9 +1345,17 @@ fn jet_mime_extension(mime: &String) -> Option<String> {
 }
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
+#[inline(always)]
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
     jet_std::JetDecimal::from_str(s)
         .unwrap_or_else(|_| jet_panic("", 0, "invalid Decimal string"))
+}
+
+impl __jet_Comparable for jet_std::JetDecimal {
+    #[inline(always)]
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
 }
 // D-NUMTYPE1=A: exact ratios. Every answer is optional, because a zero bottom
 // has no value and a product can leave the range.
@@ -993,9 +1444,11 @@ fn jet_decimal_to_int(a: &jet_std::JetDecimal) -> i64 {
 fn jet_decimal_to_fraction(a: &jet_std::JetDecimal) -> jet_std::JetFraction {
     a.to_fraction().expect("Decimal does not fit Fraction")
 }
+#[inline(always)]
 fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
     a.add(b)
 }
+#[inline(always)]
 fn jet_decimal_sub(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
     a.sub(b)
 }
@@ -1005,6 +1458,14 @@ fn jet_decimal_mul(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std:
 fn jet_decimal_equal(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> bool {
     a == b
 }
+#[inline(always)]
+fn jet_decimal_compare(
+    a: &jet_std::JetDecimal,
+    b: &jet_std::JetDecimal,
+) -> __jet_Ordering {
+    <jet_std::JetDecimal as __jet_Comparable>::compare(a, b)
+}
+#[inline(always)]
 fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
     a.to_string_rep()
 }
@@ -1012,6 +1473,7 @@ fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
 // checker admits an exact Decimal at the irrational-result math functions
 // exactly as it admits a Fraction, so every tier needs this conversion, not
 // only the evaluator.
+#[inline(always)]
 fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
     a.to_float()
 }
@@ -1127,6 +1589,41 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
         out.push('\n');
     }
     out
+}
+fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i64(
+        text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
+    )
+}
+fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
+    let rendered = jet_std_json_render_canonical(value);
+    if text.is_empty() {
+        return format!("{rendered}\n");
+    }
+    if text.ends_with('\n') {
+        format!("{text}{rendered}\n")
+    } else {
+        format!("{text}\n{rendered}\n")
+    }
+}
+fn jet_std_jsonl_first(
+    text: &String,
+) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match jet_std_json_parse(&trimmed.to_string()) {
+            Ok(value) => return Ok(Some(value)),
+            Err(mut error) => {
+                error.format = jet_std::EncodingFormat::JSONL;
+                error.line = error.line.map(|line| idx as i64 + line);
+                return Err(error);
+            }
+        }
+    }
+    Ok(None)
 }
 
 // D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The

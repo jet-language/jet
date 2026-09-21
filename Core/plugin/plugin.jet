@@ -1,0 +1,59 @@
+package {
+    name: "core.plugin"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Load a native plugin from disk."
+    license: "MIT"
+    outputs: {
+        plugin: .Library{ entry: plugin }
+    }
+}
+
+// core.plugin — a sandboxed native/WASM handle.
+//
+// `load` opens `path` on the host and returns a move-only handle. Jet never
+// dlopens itself; the host cell owns wasmtime / dylib state.
+
+pub struct Plugin {
+    pub path: String
+    pub handle: Int
+}
+
+/// Load `path`. Fails when the file is missing or the host rejects it.
+pub fn load(path: String) -[FS]> Plugin !IOError {
+    h :: host_plugin_load(path)
+    if h <= 0 {
+        return Err(IOError{operation: "plugin.load", message: "load failed", path: path, os_code: None})
+    }
+    Ok(Plugin{path: path, handle: h})
+}
+
+pub fn call(plugin: Plugin, name: String, args: String) -[FS]> String !IOError {
+    out :: host_plugin_call(plugin.handle, name, args)
+    if starts_err(out) {
+        return Err(IOError{operation: "plugin.call", message: out, path: plugin.path, os_code: None})
+    }
+    Ok(out)
+}
+
+fn starts_err(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() < 2 -> return false
+    raw[0] == (U8{69}) && raw[1] == (U8{58})
+}
+
+fn host_plugin_load(path: String) -[FS]> Int { panic("host_plugin_load") }
+fn host_plugin_call(handle: Int, name: String, args: String) -[FS]> String { panic("host_plugin_call") }
+
+
+pub fn unload(plugin: Plugin) -[FS]> Plugin {
+    host_plugin_unload(plugin.handle)
+    Plugin{path: plugin.path, handle: 0}
+}
+
+pub fn is_loaded(plugin: Plugin) -> Bool { plugin.handle > 0 }
+
+pub fn path(plugin: Plugin) -> String { plugin.path }
+
+fn host_plugin_unload(handle: Int) -[FS]> panic("host_plugin_unload")
+

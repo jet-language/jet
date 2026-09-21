@@ -1,0 +1,837 @@
+package {
+    name: "core.archive"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Zip/tar containers and checksums. Stream codecs are nested."
+    license: "MIT"
+    outputs: {
+        archive: .Library{ entry: archive }
+    }
+}
+// core.archive — zip and tar containers (D-CORE-COMPRESS1=A).
+//
+// This package owns archive *containers*. Byte-stream codecs live in
+// `core.archive.gzip` and `core.archive.zstd`. CRC-32 (ISO 3309 / ITU-T V.42)
+// and Adler-32 (RFC 1950) are written in Jet. Deflate writes RFC 1951 fixed
+// Huffman (literals + EOB; no LZ77). Inflate reads stored, fixed Huffman
+// and dynamic Huffman. Zip/tar containers are Jet; file bytes stay host cells.
+//
+// Checksums return the 32-bit value as a non-negative `Int` in `0..=2^32-1`.
+// Zip helpers that cannot decode return empty bytes rather than panicking.
+module gzip
+
+module zstd
+
+@c_mask32 :: 4294967295
+
+@c_crc_poly :: 3988292384
+
+@c_adler_mod :: 65521
+
+@c_len_base :: [Int]{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
+
+@c_len_extra :: [Int]{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
+
+@c_dist_base :: [Int]{1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577}
+
+@c_dist_extra :: [Int]{0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13}
+
+@c_cl_order :: [Int]{16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
+
+/// ISO 3309 CRC-32, reflected polynomial `0xEDB88320`.
+pub fn crc32(data: [U8]) -> Int {
+    crc := @c_mask32
+    loop b in data {
+        crc = (crc ~| u8_int(b)) & @c_mask32
+        loop _ in 0..<8 {
+            if (crc & 1) != 0 -> crc = ((crc >> 1) ~| @c_crc_poly) & @c_mask32 else {
+                crc = (crc >> 1) & @c_mask32
+            }
+        }
+    }
+    (crc ~| @c_mask32) & @c_mask32
+}
+
+/// Adler-32 (RFC 1950). Empty input is 1.
+pub fn adler32(data: [U8]) -> Int {
+    a := 1
+    b := 0
+    loop byte in data {
+        n :: u8_int(byte)
+        a = (a + n) % @c_adler_mod
+        b = (b + a) % @c_adler_mod
+    }
+    b * 65536 + a
+}
+
+/// RFC 1951 deflate. One final fixed-Huffman block of literals.
+pub fn deflate(data: [U8]) -> [U8] {
+    w := BitWriter{out: [U8]{}, acc: 0, bit: 0}
+    put_bits(&w, 1, 1)
+    put_bits(&w, 1, 2)
+    loop b in data {
+        n :: u8_int(b)
+        if n <= 143 -> put_huff(&w, n + 48, 8) else -> put_huff(&w, n + 256, 9)
+    }
+    put_huff(&w, 0, 7)
+    if w.bit != 0 -> w.out.push(to_u8(w.acc))
+    ~w.out
+}
+
+/// RFC 1951 inflate. Stored, fixed Huffman, and dynamic Huffman.
+pub fn inflate(data: [U8]) -> [U8] {
+    r := BitReader{data: data, i: 0, bit: 0}
+    out := [U8]{}
+    loop {
+        if r.i >= r.data.len() -> break
+        bfinal :: get_bits_lsb(&r, 1)
+        btype :: get_bits_lsb(&r, 2)
+        if {
+            btype == 0 -> {
+                align_byte(&r)
+                lo :: take_u8(&r)
+                hi :: take_u8(&r)
+                ln :: u8_int(lo) | (u8_int(hi) << 8)
+                nlo :: take_u8(&r)
+                nhi :: take_u8(&r)
+                _nlen :: u8_int(nlo) | (u8_int(nhi) << 8)
+                k := 0
+                loop k < ln {
+                    out.push(take_u8(&r))
+                    k = k + 1
+                }
+            }
+            btype == 1 -> { inflate_fixed(&r, &out) }
+            btype == 2 -> { inflate_dynamic(&r, &out) }
+            else -> { return ~out }
+        }
+        if bfinal != 0 -> break
+    }
+    ~out
+}
+
+/// Python `zlib.compress` / `zlib.decompress` compatible wrappers.
+pub fn compress(data: [U8]) -> [U8] {
+    payload :: deflate(data)
+    checksum :: adler32(data)
+    out := [U8]{(U8{120}), (U8{156})}
+    loop byte in payload -> out.push(byte)
+    out.push(U8{(checksum >> 24) & 255})
+    out.push(U8{(checksum >> 16) & 255})
+    out.push(U8{(checksum >> 8) & 255})
+    out.push(U8{checksum & 255})
+    ~out
+}
+
+pub fn decompress(data: [U8]) -> [U8] {
+    if data.len() < 6 -> return [U8]{}
+    if data[0] != (U8{120}) -> return [U8]{}
+    payload :: slice_u8(data, 2, data.len() - 4)
+    inflate(payload)
+}
+
+fn slice_u8(data: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop i < end {
+        out.push(data[i])
+        i = i + 1
+    }
+    ~out
+}
+
+pub fn zip_decompress(data: [U8]) -> [U8] {
+    names :: zip_list(data)
+    if names.len() == 0 -> return [U8]{}
+    zip_extract(data, names[0])
+}
+
+pub fn zip_names_json(archive: [U8]) -> String {
+    names :: zip_list(archive)
+    out := "["
+    first := true
+    loop n in names {
+        if first -> first = false else -> out = "{out},"
+        out = "{out}\"{n}\""
+    }
+    "{out}]"
+}
+/// Return the names stored in a ZIP archive.
+pub fn list(archive: [U8]) -> [String] { zip_list(archive) }
+
+
+pub fn zip_open(archive: [U8]) -> [U8] { archive }
+
+pub fn zip_next(reader: [U8], index: Int) -> String {
+    names :: zip_list(reader)
+    if index < 0 || index >= names.len() -> return ""
+    names[index]
+}
+
+pub fn zip_read(reader: [U8], name: String) -> [U8] { zip_extract(reader, name) }
+
+pub fn zip_write(writer: [U8], name: String, data: [U8]) -> [U8] {
+    files :: zip_parse_writer(writer)
+    files.push(ZipFile{name: name, data: data})
+    zip_from_files(files)
+}
+
+pub fn zip_close(writer: [U8]) -> [U8] { writer }
+
+pub fn zip_extract(archive: [U8], name: String) -> [U8] {
+    loop f in zip_files(archive) {
+        if f.name == name -> return f.data
+    }
+    [U8]{}
+}
+
+pub fn unzip(archive: [U8], name: String) -> [U8] { zip_extract(archive, name) }
+
+pub fn tar_add(archive: [U8], name: String, data: [U8]) -> [U8] {
+    out := [U8]{}
+    loop b in archive -> out.push(b)
+    hdr :: tar_header(name, data.len())
+    loop b in hdr -> out.push(b)
+    loop b in data -> out.push(b)
+    pad := 512 - (data.len() % 512)
+    if pad == 512 && data.len() != 0 -> pad = 0
+    if data.len() == 0 -> pad = 0
+    if data.len() % 512 != 0 {
+        loop _ in 0..<(512 - (data.len() % 512)) -> out.push(U8{0})
+    }
+    out
+}
+
+pub fn tar_get(archive: [U8], name: String) -> [U8] {
+    i := 0
+    loop i + 512 <= archive.len() {
+        hdr := [U8]{}
+        loop k in 0..<512 -> hdr.push(archive[i + k])
+        if tar_empty(hdr) -> break
+        nm :: tar_name(hdr)
+        sz :: tar_size(hdr)
+        i = i + 512
+        body := [U8]{}
+        loop k in 0..<sz {
+            if i + k >= archive.len() -> break
+            body.push(archive[i + k])
+        }
+        if nm == name -> return body
+        i = i + sz
+        if sz % 512 != 0 -> i = i + (512 - (sz % 512))
+    }
+    [U8]{}
+}
+
+pub fn tar_names_json(archive: [U8]) -> String {
+    names := [String]{}
+    i := 0
+    loop i + 512 <= archive.len() {
+        hdr := [U8]{}
+        loop k in 0..<512 -> hdr.push(archive[i + k])
+        if tar_empty(hdr) -> break
+        names.push(tar_name(hdr))
+        sz :: tar_size(hdr)
+        i = i + 512 + sz
+        if sz % 512 != 0 -> i = i + (512 - (sz % 512))
+    }
+    out := "["
+    first := true
+    loop n in names {
+        if first -> first = false else -> out = "{out},"
+        out = "{out}\"{n}\""
+    }
+    "{out}]"
+}
+
+struct ZipFile {
+    name: String
+    data: [U8]
+}
+
+struct ZipWriter {
+    files: [ZipFile]
+}
+
+fn zip_one(name: String, data: [U8]) -> [U8] {
+    zip_from_files([ZipFile]{ZipFile{name: name, data: data}})
+}
+
+fn zip_from_files(files: [ZipFile]) -> [U8] {
+    out := [U8]{}
+    offsets := [Int]{}
+    loop f in files {
+        offsets.push(out.len())
+        crc :: crc32(f.data)
+        nb :: f.name.bytes()
+        // local header
+        put32(out, 0x04034b50)
+        put16(out, 20)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, crc)
+        put32(out, f.data.len())
+        put32(out, f.data.len())
+        put16(out, nb.len())
+        put16(out, 0)
+        loop b in nb -> out.push(b)
+        loop b in f.data -> out.push(b)
+    }
+    cd :: out.len()
+    loop i in 0..<files.len() {
+        f :: files[i]
+        nb :: f.name.bytes()
+        crc :: crc32(f.data)
+        put32(out, 0x02014b50)
+        put16(out, 20)
+        put16(out, 20)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, crc)
+        put32(out, f.data.len())
+        put32(out, f.data.len())
+        put16(out, nb.len())
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, 0)
+        put32(out, offsets[i])
+        loop b in nb -> out.push(b)
+    }
+    cdlen :: out.len() - cd
+    put32(out, 0x06054b50)
+    put16(out, 0)
+    put16(out, 0)
+    put16(out, files.len())
+    put16(out, files.len())
+    put32(out, cdlen)
+    put32(out, cd)
+    put16(out, 0)
+    out
+}
+
+fn zip_files(archive: [U8]) -> [ZipFile] {
+    files := [ZipFile]{}
+    i := 0
+    loop i + 30 <= archive.len() {
+        sig :: u32(archive, i)
+        if sig != 0x04034b50 -> break
+        method :: u16(archive, i + 8)
+        crc :: u32(archive, i + 14)
+        csz :: u32(archive, i + 18)
+        usz :: u32(archive, i + 22)
+        nlen :: u16(archive, i + 26)
+        elen :: u16(archive, i + 28)
+        i = i + 30
+        if i + nlen > archive.len() -> break
+        name :: String.from_bytes(cut(archive, i, i + nlen)) ?? ""
+        i = i + nlen + elen
+        if i + csz > archive.len() -> break
+        payload :: cut(archive, i, i + csz)
+        i = i + csz
+        data := payload
+        if method == 8 -> data = inflate(payload)
+        files.push(ZipFile{name: name, data: data})
+    }
+    files
+}
+
+fn zip_list(archive: [U8]) -> [String] {
+    names := [String]{}
+    loop f in zip_files(archive) -> names.push(f.name)
+    names
+}
+
+fn zip_parse_writer(writer: [U8]) -> [ZipFile] { zip_files(writer) }
+
+fn put16(out: &[U8], n: Int) {
+    out.push(to_u8(n))
+    out.push(to_u8(n >> 8))
+}
+
+fn put32(out: &[U8], n: Int) {
+    out.push(to_u8(n))
+    out.push(to_u8(n >> 8))
+    out.push(to_u8(n >> 16))
+    out.push(to_u8(n >> 24))
+}
+
+fn u16(data: [U8], i: Int) -> Int { u8_int(data[i]) | (u8_int(data[i + 1]) << 8) }
+
+fn u32(data: [U8], i: Int) -> Int {
+    u8_int(data[i]) | (u8_int(data[i + 1]) << 8) | (u8_int(data[i + 2]) << 16) | (u8_int(data[i + 3]) << 24)
+}
+
+fn cut(data: [U8], a: Int, b: Int) -> [U8] {
+    out := [U8]{}
+    i := a
+    loop {
+        if i >= b || i >= data.len() -> return out
+        out.push(data[i])
+        i = i + 1
+    }
+}
+
+fn tar_header(name: String, size: Int) -> [U8] {
+    hdr := [U8]{}
+    loop _ in 0..<512 -> hdr.push(U8{0})
+    nb :: name.bytes()
+    loop i in 0..<nb.len() {
+        if i >= 100 -> break
+        hdr[i] = nb[i]
+    }
+    write_octal(hdr, 100, 8, 420)
+    write_octal(hdr, 108, 8, 0)
+    write_octal(hdr, 116, 8, 0)
+    write_octal(hdr, 124, 12, size)
+    write_octal(hdr, 136, 12, 0)
+    hdr[156] = (U8{48})
+    loop i in 148..<156 -> hdr[i] = (U8{32})
+    sum := 0
+    loop b in hdr -> sum = sum + u8_int(b)
+    write_octal(hdr, 148, 7, sum)
+    hdr[155] = (U8{32})
+    ustar :: "ustar"
+    loop i in 0..<5 -> hdr[257 + i] = ustar.bytes()[i]
+    hdr[262] = (U8{0})
+    hdr[263] = (U8{48})
+    hdr[264] = (U8{48})
+    hdr
+}
+
+fn write_octal(hdr: &[U8], off: Int, width: Int, value: Int) {
+    n := value
+    i := off + width - 2
+    hdr[off + width - 1] = (U8{0})
+    loop i >= off {
+        hdr[i] = to_u8(48 + (n & 7))
+        n = n >> 3
+        i = i - 1
+    }
+}
+
+fn tar_name(hdr: [U8]) -> String {
+    end := 0
+    loop end < 100 {
+        if hdr[end] == (U8{0}) -> break
+        end = end + 1
+    }
+    String.from_bytes(cut(hdr, 0, end)) ?? ""
+}
+
+fn tar_size(hdr: [U8]) -> Int { parse_octal(hdr, 124, 12) }
+
+fn parse_octal(hdr: [U8], off: Int, width: Int) -> Int {
+    n := 0
+    loop i in 0..<width {
+        d :: u8_int(hdr[off + i])
+        if d >= 48 && d <= 55 -> n = n * 8 + (d - 48)
+    }
+    n
+}
+
+fn tar_empty(hdr: [U8]) -> Bool {
+    loop b in hdr {
+        if b != (U8{0}) -> return false
+    }
+    true
+}
+
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
+fn to_u8(n: Int) -> U8 {
+    v :: n & 255
+    (U8{v})
+}
+
+struct BitReader {
+    data: [U8]
+    i: Int
+    bit: Int
+}
+
+struct BitWriter {
+    out: [U8]
+    acc: Int
+    bit: Int
+}
+
+fn put_bits(w: &BitWriter, val: Int, n: Int) {
+    k := 0
+    loop k < n {
+        w.acc = w.acc | (((val >> k) & 1) << w.bit)
+        w.bit = w.bit + 1
+        if w.bit == 8 {
+            w.out.push(to_u8(w.acc))
+            w.acc = 0
+            w.bit = 0
+        }
+        k = k + 1
+    }
+}
+
+fn put_huff(w: &BitWriter, code: Int, n: Int) {
+    k := n - 1
+    loop k >= 0 {
+        w.acc = w.acc | (((code >> k) & 1) << w.bit)
+        w.bit = w.bit + 1
+        if w.bit == 8 {
+            w.out.push(to_u8(w.acc))
+            w.acc = 0
+            w.bit = 0
+        }
+        k = k - 1
+    }
+}
+
+fn get_bits_lsb(r: &BitReader, n: Int) -> Int {
+    v := 0
+    k := 0
+    loop k < n {
+        bit := 0
+        if r.i < r.data.len() {
+            bit = (u8_int(r.data[r.i]) >> r.bit) & 1
+            r.bit = r.bit + 1
+            if r.bit == 8 {
+                r.bit = 0
+                r.i = r.i + 1
+            }
+        }
+        v = v | (bit << k)
+        k = k + 1
+    }
+    v
+}
+
+fn align_byte(r: &BitReader) {
+    if r.bit != 0 {
+        r.bit = 0
+        r.i = r.i + 1
+    }
+}
+
+fn take_u8(r: &BitReader) -> U8 {
+    if r.i >= r.data.len() -> return (U8{0})
+    b :: r.data[r.i]
+    r.i = r.i + 1
+    b
+}
+
+fn inflate_fixed(r: &BitReader, out: &[U8]) {
+    loop {
+        code := 0
+        n := 0
+        loop n < 7 {
+            bit := 0
+            if r.i < r.data.len() {
+                bit = (u8_int(r.data[r.i]) >> r.bit) & 1
+                r.bit = r.bit + 1
+                if r.bit == 8 {
+                    r.bit = 0
+                    r.i = r.i + 1
+                }
+            }
+            code = (code << 1) | bit
+            n = n + 1
+        }
+        extra := 0
+        extra2 := 0
+        sym := 0
+        if code <= 23 -> sym = 256 + code else {
+            if r.i < r.data.len() {
+                extra = (u8_int(r.data[r.i]) >> r.bit) & 1
+                r.bit = r.bit + 1
+                if r.bit == 8 {
+                    r.bit = 0
+                    r.i = r.i + 1
+                }
+            }
+            code = (code << 1) | extra
+            if {
+                code >= 48 && code <= 191 -> { sym = code - 48 }
+                code >= 192 && code <= 199 -> { sym = 280 + (code - 192) }
+                else -> {
+                    if r.i < r.data.len() {
+                        extra2 = (u8_int(r.data[r.i]) >> r.bit) & 1
+                        r.bit = r.bit + 1
+                        if r.bit == 8 {
+                            r.bit = 0
+                            r.i = r.i + 1
+                        }
+                    }
+                    code = (code << 1) | extra2
+                    if code >= 400 && code <= 511 -> sym = 144 + (code - 400) else {
+                        return
+                    }
+                }
+            }
+        }
+        if {
+            sym < 256 -> { out.push(to_u8(sym)) }
+            sym == 256 -> {
+                return
+            }
+            sym <= 285 -> {
+                idx :: sym - 257
+                if idx < 0 || idx >= @c_len_base.len() {
+                    return
+                }
+                extra_n :: @c_len_extra[idx]
+                add := 0
+                k := 0
+                loop k < extra_n {
+                    bit := 0
+                    if r.i < r.data.len() {
+                        bit = (u8_int(r.data[r.i]) >> r.bit) & 1
+                        r.bit = r.bit + 1
+                        if r.bit == 8 {
+                            r.bit = 0
+                            r.i = r.i + 1
+                        }
+                    }
+                    add = add | (bit << k)
+                    k = k + 1
+                }
+                length :: @c_len_base[idx] + add
+                dcode := 0
+                n2 := 0
+                loop n2 < 5 {
+                    bit := 0
+                    if r.i < r.data.len() {
+                        bit = (u8_int(r.data[r.i]) >> r.bit) & 1
+                        r.bit = r.bit + 1
+                        if r.bit == 8 {
+                            r.bit = 0
+                            r.i = r.i + 1
+                        }
+                    }
+                    dcode = (dcode << 1) | bit
+                    n2 = n2 + 1
+                }
+                if dcode < 0 || dcode >= @c_dist_base.len() {
+                    return
+                }
+                dadd := 0
+                k2 := 0
+                d_extra :: @c_dist_extra[dcode]
+                loop k2 < d_extra {
+                    bit := 0
+                    if r.i < r.data.len() {
+                        bit = (u8_int(r.data[r.i]) >> r.bit) & 1
+                        r.bit = r.bit + 1
+                        if r.bit == 8 {
+                            r.bit = 0
+                            r.i = r.i + 1
+                        }
+                    }
+                    dadd = dadd | (bit << k2)
+                    k2 = k2 + 1
+                }
+                dist :: @c_dist_base[dcode] + dadd
+                if dist <= 0 || dist > out.len() {
+                    return
+                }
+                loop _ in 0..<length -> out.push(out[out.len() - dist])
+            }
+            else -> {
+                return
+            }
+        }
+    }
+}
+
+fn huff_codes(lengths: [Int]) -> [Int] {
+    bl := [Int]{}
+    loop _ in 0..<16 -> bl.push(0)
+    i := 0
+    loop i < lengths.len() {
+        len :: lengths[i]
+        if len > 0 && len < 16 -> bl[len] = bl[len] + 1
+        i = i + 1
+    }
+    next := [Int]{}
+    loop _ in 0..<16 -> next.push(0)
+    code := 0
+    bits := 1
+    loop bits < 16 {
+        code = (code + bl[bits - 1]) << 1
+        next[bits] = code
+        bits = bits + 1
+    }
+    codes := [Int]{}
+    i = 0
+    loop i < lengths.len() {
+        codes.push(-1)
+        i = i + 1
+    }
+    i = 0
+    loop i < lengths.len() {
+        len :: lengths[i]
+        if len > 0 && len < 16 {
+            codes[i] = next[len]
+            next[len] = next[len] + 1
+        }
+        i = i + 1
+    }
+    codes
+}
+
+fn huff_sym(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int {
+    i := 0
+    loop i < lengths.len() {
+        if lengths[i] == len && codes[i] == acc -> return i
+        i = i + 1
+    }
+    -1
+}
+
+fn inflate_dynamic(r: &BitReader, out: &[U8]) {
+    tmp := BitReader{data: r.data, i: r.i, bit: r.bit}
+    hlit :: get_bits_lsb(&tmp, 5) + 257
+    hdist :: get_bits_lsb(&tmp, 5) + 1
+    hclen :: get_bits_lsb(&tmp, 4) + 4
+    if hlit < 257 || hlit > 286 || hdist < 1 || hdist > 32 || hclen < 4 || hclen > 19 {
+        r.i = tmp.i
+        r.bit = tmp.bit
+        return
+    }
+    cl_len := [Int]{}
+    loop _ in 0..<19 -> cl_len.push(0)
+    i := 0
+    loop i < hclen {
+        cl_len[@c_cl_order[i]] = get_bits_lsb(&tmp, 3)
+        i = i + 1
+    }
+    cl_codes :: huff_codes(~cl_len)
+    all_len := [Int]{}
+    need :: hlit + hdist
+    prev := 0
+    loop all_len.len() < need {
+        acc := 0
+        len := 0
+        sym := -1
+        loop len < 7 {
+            bit :: get_bits_lsb(&tmp, 1)
+            acc = (acc << 1) | bit
+            len = len + 1
+            sym = huff_sym(~cl_len, ~cl_codes, acc, len)
+            if sym >= 0 -> break
+        }
+        if sym < 0 -> break
+        if {
+            sym <= 15 -> {
+                all_len.push(sym)
+                prev = sym
+            }
+            sym == 16 -> {
+                extra :: get_bits_lsb(&tmp, 2) + 3
+                if all_len.len() == 0 || all_len.len() + extra > need -> break
+                loop _ in 0..<extra -> all_len.push(prev)
+            }
+            sym == 17 -> {
+                extra :: get_bits_lsb(&tmp, 3) + 3
+                if all_len.len() + extra > need -> break
+                loop _ in 0..<extra -> all_len.push(0)
+                prev = 0
+            }
+            sym == 18 -> {
+                extra :: get_bits_lsb(&tmp, 7) + 11
+                if all_len.len() + extra > need -> break
+                loop _ in 0..<extra -> all_len.push(0)
+                prev = 0
+            }
+            else -> { break }
+        }
+    }
+    if all_len.len() != need {
+        r.i = tmp.i
+        r.bit = tmp.bit
+        return
+    }
+    lit_len := [Int]{}
+    dist_len := [Int]{}
+    i = 0
+    loop i < hlit {
+        lit_len.push(all_len[i])
+        i = i + 1
+    }
+    loop i < need {
+        dist_len.push(all_len[i])
+        i = i + 1
+    }
+    lit_codes :: huff_codes(~lit_len)
+    dist_codes :: huff_codes(~dist_len)
+    loop {
+        acc := 0
+        len := 0
+        sym := -1
+        loop len < 15 {
+            bit :: get_bits_lsb(&tmp, 1)
+            acc = (acc << 1) | bit
+            len = len + 1
+            sym = huff_sym(~lit_len, ~lit_codes, acc, len)
+            if sym >= 0 -> break
+        }
+        if sym < 0 {
+            r.i = tmp.i
+            r.bit = tmp.bit
+            return
+        }
+        if {
+            sym < 256 -> { out.push(to_u8(sym)) }
+            sym == 256 -> {
+                r.i = tmp.i
+                r.bit = tmp.bit
+                return
+            }
+            sym <= 285 -> {
+                idx :: sym - 257
+                if idx < 0 || idx >= @c_len_base.len() {
+                    r.i = tmp.i
+                    r.bit = tmp.bit
+                    return
+                }
+                add :: get_bits_lsb(&tmp, @c_len_extra[idx])
+                length :: @c_len_base[idx] + add
+                dacc := 0
+                dlen := 0
+                dcode := -1
+                loop dlen < 15 {
+                    bit :: get_bits_lsb(&tmp, 1)
+                    dacc = (dacc << 1) | bit
+                    dlen = dlen + 1
+                    dcode = huff_sym(~dist_len, ~dist_codes, dacc, dlen)
+                    if dcode >= 0 -> break
+                }
+                if dcode < 0 || dcode >= @c_dist_base.len() {
+                    r.i = tmp.i
+                    r.bit = tmp.bit
+                    return
+                }
+                dadd :: get_bits_lsb(&tmp, @c_dist_extra[dcode])
+                dist :: @c_dist_base[dcode] + dadd
+                if dist <= 0 || dist > out.len() {
+                    r.i = tmp.i
+                    r.bit = tmp.bit
+                    return
+                }
+                loop _ in 0..<length -> out.push(out[out.len() - dist])
+            }
+            else -> {
+                r.i = tmp.i
+                r.bit = tmp.bit
+                return
+            }
+        }
+    }
+}
+/// Create a one-entry ZIP archive.
+pub fn create(name: String, data: [U8]) -> [U8] { zip_compress(name, data) }
+
+/// Decode a gzip member through the nested stream codec.
+pub fn gunzip(data: [U8]) -> [U8] { gzip.decompress(data) }

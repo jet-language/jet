@@ -1160,7 +1160,7 @@ fn verify_type_kind(
             }
             Ok(())
         }
-        MirTypeKind::SendFn { params, ret } => {
+        MirTypeKind::SendFn { params, ret, .. } => {
             for param in params {
                 verify_type(param, span, function)?;
             }
@@ -1654,13 +1654,7 @@ fn verify_place(
                         MirIndexKind::List | MirIndexKind::FixedListProof => 5,
                         MirIndexKind::Map => 3,
                         MirIndexKind::Pool => 7,
-                        MirIndexKind::Lane => {
-                            return Err(MirLegalityError::InvalidReference {
-                                function: function.id,
-                                subject: "lane index place has no checked setter route".to_string(),
-                                span: *span,
-                            });
-                        }
+                        MirIndexKind::Lane => 5,
                     };
                     if write_route.signature.arity != setter_arity
                         || write_route.signature.max_arity != setter_arity
@@ -1937,14 +1931,23 @@ fn verify_move_place_projection(
 
 fn send_fn_signature_matches(source: &MirType, target: &MirType) -> bool {
     let target = match &target.kind {
-        MirTypeKind::SendFn { params, ret } => (params, ret),
+        MirTypeKind::SendFn {
+            params,
+            ret,
+            conventions,
+        } => (params, ret, conventions),
         _ => return false,
     };
-    let (params, ret) = match &source.kind {
-        MirTypeKind::SendFn { params, ret } => (params, ret),
+    let (params, ret, conventions) = match &source.kind {
+        MirTypeKind::SendFn {
+            params,
+            ret,
+            conventions,
+        } => (params, ret, conventions),
         _ => return false,
     };
-    params.len() == target.0.len()
+    conventions == target.2
+        && params.len() == target.0.len()
         && params
             .iter()
             .zip(target.0)
@@ -6611,8 +6614,11 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
                 .map(|ty| Box::new(inline_type(ty, substitutions)));
             MirTypeKind::Fn(signature)
         }
-        MirTypeKind::SendFn { params, ret } => MirTypeKind::SendFn {
-
+        MirTypeKind::SendFn {
+            params,
+            ret,
+            conventions,
+        } => MirTypeKind::SendFn {
             params: params
                 .iter()
                 .map(|ty| inline_type(ty, substitutions))
@@ -6620,6 +6626,7 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
             ret: ret
                 .as_ref()
                 .map(|ty| Box::new(inline_type(ty, substitutions))),
+            conventions: conventions.clone(),
         },
         MirTypeKind::Apply { name, args } => MirTypeKind::Apply {
             name: name.clone(),
@@ -8291,6 +8298,103 @@ fn fusion_facts_for_rows(rows: &[MirLoopFact], vectors: &[MirVectorFact]) -> Vec
     facts
 }
 
+/// Reconcile the structural loop analysis with the checked TIR proof carried
+/// on the MIR function.  Structural analysis is intentionally target-neutral,
+/// but it must not turn a missing or rejected semantic proof into an eligible
+/// vector loop after a recomputation pass.
+fn reconcile_checked_vector_fact(
+    derived: &mut MirVectorFact,
+    checked: &[MirVectorFact],
+    explicit_scalar: bool,
+) {
+    let proofs = checked
+        .iter()
+        .filter(|proof| proof.loop_header == derived.loop_header)
+        .collect::<Vec<_>>();
+
+    let reject = |derived: &mut MirVectorFact, reason: MirOptimizationRejection| {
+        derived.packed = false;
+        if derived.decision.is_eligible() {
+            derived.decision = MirOptimizationDecision::Rejected(reason);
+        }
+    };
+
+    if explicit_scalar {
+        reject(derived, MirOptimizationRejection::ScalarBoundary);
+        return;
+    }
+
+    // A loop that was not admitted by sema has no checked proof to carry.
+    // Keep the structural row for diagnostics, but never let it select a
+    // backend vector representation.  More than one row for a header is
+    // equally conservative: duplicate evidence is a conflicting proof, not
+    // permission to merge by header.
+    let Some(proof) = (proofs.len() == 1).then(|| proofs[0]) else {
+        reject(derived, MirOptimizationRejection::UnsupportedOperation);
+        return;
+    };
+
+    // Merge the checked semantic guards before scope rejection so a
+    // conflicting proof remains observable in the canonical row.
+    derived.no_aliasing &= proof.no_aliasing;
+    derived.no_early_exit &= proof.no_early_exit;
+    derived.effect_free_body &= proof.effect_free_body;
+    derived.no_cross_iteration_dependencies &= proof.no_cross_iteration_dependencies;
+
+    // Source span is the proof origin; the identity carrier is its complete
+    // validity window.  A matching header alone is insufficient after CFG or
+    // access rewriting.
+    if !proof.same_checked_scope(derived)
+        || proof.layout != derived.layout
+        || proof.packed != derived.packed
+        || proof.lane_width != derived.lane_width
+    {
+        let reason = if !derived.effect_free_body {
+            MirOptimizationRejection::HasEffects
+        } else if !derived.no_aliasing {
+            MirOptimizationRejection::MayAlias
+        } else if !derived.no_early_exit {
+            MirOptimizationRejection::HasEarlyExit
+        } else if !derived.no_cross_iteration_dependencies {
+            MirOptimizationRejection::CrossIterationDependency
+        } else {
+            MirOptimizationRejection::ScalarBoundary
+        };
+        reject(derived, reason);
+        return;
+    }
+
+    // The checked element type is semantic evidence, not a replacement for
+    // the type recovered from the exact MIR accesses.  A disagreement keeps
+    // the conservative scalar boundary rather than allowing a stale proof to
+    // widen the representation.
+    if let (Some(derived_ty), Some(checked_ty)) =
+        (derived.element_type.as_ref(), proof.element_type.as_ref())
+    {
+        if !derived_ty.same_checked_type(checked_ty) {
+            reject(derived, MirOptimizationRejection::UnsupportedOperation);
+            return;
+        }
+    }
+
+    if derived.decision.is_eligible() {
+        let rejection = if !proof.no_aliasing {
+            Some(MirOptimizationRejection::MayAlias)
+        } else if !proof.no_early_exit {
+            Some(MirOptimizationRejection::HasEarlyExit)
+        } else if !proof.effect_free_body {
+            Some(MirOptimizationRejection::HasEffects)
+        } else if !proof.no_cross_iteration_dependencies {
+            Some(MirOptimizationRejection::CrossIterationDependency)
+        } else {
+            None
+        };
+        if let Some(rejection) = rejection {
+            reject(derived, rejection);
+        }
+    }
+}
+
 fn derive_loop_and_vector_facts(program: &mut MirProgram) {
     let prelude_calls: HashMap<_, _> = program
         .prelude_calls
@@ -8369,6 +8473,11 @@ fn derive_loop_and_vector_facts(program: &mut MirProgram) {
                 vector_fact(function, row, shape, &prelude_calls, type_defs);
             function.optimization.loop_facts.push(row.clone());
             function.optimization.vector_facts.push(vector);
+        }
+        let checked = function.optimization.checked_vector_facts.clone();
+        let explicit_scalar = function.is_scalar;
+        for vector in &mut function.optimization.vector_facts {
+            reconcile_checked_vector_fact(vector, &checked, explicit_scalar);
         }
         let rows = function.optimization.loop_facts.clone();
         let vectors = function.optimization.vector_facts.clone();
@@ -11364,7 +11473,11 @@ impl CanonicalWriter {
                 self.debug(&signature.call_metadata);
                 self.debug(&signature.return_view_provenance);
             }
-            MirTypeKind::SendFn { params, ret } => {
+            MirTypeKind::SendFn {
+                params,
+                ret,
+                conventions,
+            } => {
                 self.tag("send-fn");
                 self.len(params.len());
                 for param in params {
@@ -11377,6 +11490,7 @@ impl CanonicalWriter {
                     }
                     None => self.tag("unit-ret"),
                 }
+                self.debug(conventions);
             }
             MirTypeKind::Apply { name, args } => {
                 self.tag("apply");

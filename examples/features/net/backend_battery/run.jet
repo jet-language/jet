@@ -15,12 +15,12 @@ struct Metrics {
     errors: Int
 }
 
-fn health(req: HTTPRequest, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+fn health(req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
     metrics.guard_edit().value.requests += 1
     return backend.health_response(req)
 }
 
-fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) -> HTTPResponse !HTTPError {
     metrics.guard_edit().value.requests += 1
     request_id :: backend.request_id(req.header("x-request-id") ?? "")
     if !backend.role_allowed(req, session_id, "writer", time.now()) {

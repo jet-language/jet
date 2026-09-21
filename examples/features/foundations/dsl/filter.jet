@@ -5,7 +5,7 @@ pub enum Step {
     AtLeast(field: String, limit: Int)
 }
 
-fn parse_stage(source: String) ?[Step] -> {
+fn parse_stage(source: String) -> ?[Step] {
     stage :: source.trim()
     if stage == "." -> return Val([Step]{Step.Identity})
 
@@ -34,7 +34,7 @@ fn parse_stage(source: String) ?[Step] -> {
     return None
 }
 
-pub fn parse(source: String) ?[Step] -> {
+pub fn parse(source: String) -> ?[Step] {
     steps := [Step]{}
     stages :: source.split("|").to_list()
     if stages.len() == 0 -> return None
@@ -46,18 +46,18 @@ pub fn parse(source: String) ?[Step] -> {
     return Val(steps)
 }
 
-fn field(value: DataTree, name: String) ?DataTree -> {
+fn field(value: DataTree, name: String) -> ?DataTree {
     if value == .Object(entries) {
         if entries.get(~name) == .Val(found) -> return Val(found)
     }
     return None
 }
 
-fn apply_step(values: [DataTree], step: Step) [DataTree] -> {
+fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
     output := [DataTree]{}
     loop value in values {
         if step == {
-            .Identity -> output.push(value)
+            .Identity -> { output.push(value) }
             .Field(name) -> {
                 if field(~value, ~name) == .Val(found) -> output.push(found)
             }
@@ -77,11 +77,9 @@ fn apply_step(values: [DataTree], step: Step) [DataTree] -> {
     return output
 }
 
-pub fn run(data: DataTree, query: String) ?[DataTree] -> {
+pub fn run(data: DataTree, query: String) -> ?[DataTree] {
     steps :: parse(query) ?? return None
     values := [DataTree]{data}
-    loop step in steps {
-        values = apply_step(values, step)
-    }
+    loop step in steps -> values = apply_step(values, step)
     return Val(values)
 }

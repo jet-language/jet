@@ -932,7 +932,12 @@ fn event_route(
             &[true, true, false, false][..],
         ),
         ("AsyncEvent", "emit_async") => {
-            ("jet_std::JetAsyncEvent::emit_async", 2, 2, &[true, false][..])
+            let symbol = if matches!(carrier, TFailureCarrier::Result { .. }) {
+                "jet_std::JetAsyncEvent::emit_async_result"
+            } else {
+                "jet_std::JetAsyncEvent::emit_async"
+            };
+            (symbol, 2, 2, &[true, false][..])
         }
         ("AsyncEvent", "close") => ("jet_std::JetAsyncEvent::close", 1, 1, &[true][..]),
         ("AsyncEvent", "listener_count") => {
@@ -1420,7 +1425,7 @@ impl THandleOp {
             TLSClientConfigWithIdentity => h("tls.config_with_identity", "jet_tls_client_config_with_client_identity", 2, 2, &[false, true], Some(Effect::Net), carrier),
             HTTPClientNew => h("http.client_new", "jet_http_client_new_impl", 0, 0, &[], Some(Effect::Net), carrier),
             TLSClientConfigWithVersionBounds => h("tls.config_with_version_bounds", "jet_tls_client_config_with_version_bounds", 3, 3, &[false, false, false], Some(Effect::Net), carrier),
-            HTTPReqParam => h("http.request_param", "jet_http_request_param", 2, 2, &[true, true], Some(Effect::Net), carrier),
+            HTTPReqParam => h("http.request_param", "jet_http_srv_req_param", 2, 2, &[true, true], Some(Effect::Net), carrier),
             HTTPReqHeader => h("http.request_header", "jet_http_srv_req_header", 2, 2, &[true, true], None, carrier),
             HTTPReqTrailers => h("http.request_trailers", "jet_http_srv_req_trailers", 1, 1, &[true], Some(Effect::Net), carrier),
             ArgsSpecFlag => h("args.flag", "jet_args_flag", 3, 3, &[false, true, true], Some(Effect::Env), carrier),
@@ -1455,6 +1460,29 @@ impl THandleOp {
                 "get" => h("expiring.get", "jet_expiring_get", 2, 2, &[true, true], Some(Effect::Time), carrier),
                 "is_valid" => primitive(),
                 _ => return Err(route_error(format!("unknown checked ExpiringValue method `{method}`"))),
+            },
+            HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
+                "send_text" => h("ws.send_text", "jet_ws_send_text", 2, 2, &[true, true], Some(Effect::Net), carrier),
+                "recv" => h("ws.recv", "jet_ws_recv", 1, 1, &[true], Some(Effect::Net), carrier),
+                "close" => h("ws.close", "jet_ws_close", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
+                _ => primitive(),
+            },
+            HTTPServerMethod { kind, method } if kind == "WsMessage" => match method.as_str() {
+                "is_text" => h("ws.message_is_text", "jet_ws_message_is_text", 1, 1, &[true], None, carrier),
+                "text" => h("ws.message_text", "jet_ws_message_text", 1, 1, &[true], None, carrier),
+                _ => primitive(),
+            },
+            HTTPServerMethod { kind, method } if kind == "HTTPMux" => match method.as_str() {
+                "middleware" => h(
+                    "http_mux.middleware",
+                    "jet_http_mux_middleware",
+                    2,
+                    2,
+                    &[true, false],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                _ => primitive(),
             },
             HTTPServerMethod { kind, method } if kind == "HTTPServer" => match method.as_str() {
                 "local_addr" => h("http_server.local_addr", "jet_http_server_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
@@ -1818,7 +1846,7 @@ impl THandleOp {
             WatchMethod { method, .. } => watch_route(receiver, method, carrier)?,
             PreciseMethod { type_name, method } => {
                 let arity = match method.as_str() {
-                    "add" | "sub" | "mul" | "div" | "equal" => 2,
+                    "add" | "sub" | "mul" | "div" | "equal" | "compare" => 2,
                     "to_string" | "numerator" | "denominator" | "to_float" | "is_zero" => 1,
                     _ => return Err(route_error(format!("unregistered precise method `{type_name}.{method}`"))),
                 };
@@ -2210,8 +2238,8 @@ fn devserver_route(method: &str, carrier: &TFailureCarrier) -> TRoutePlan {
 }
 
 fn app_route(method: &str, args_len: usize, carrier: &TFailureCarrier) -> TRoutePlan {
-    // Route and loader registrations carry the checked input binding as one
-    // trailing String argument appended by TIR lowering.
+    // Route, loader, and form registrations carry the checked input binding
+    // as one trailing String argument appended by TIR lowering.
     let (symbol, arity, borrow_mask, effect) = match (method, args_len) {
         ("route", 2) => ("jet_app_route", 4, vec![true, false, false, false], None),
         ("page", 2) => ("jet_app_page", 4, vec![true, false, false, false], None),
@@ -2227,7 +2255,7 @@ fn app_route(method: &str, args_len: usize, carrier: &TFailureCarrier) -> TRoute
         ("not_found", 1) => ("jet_app_not_found", 2, vec![true, false], None),
         ("error", 1) => ("jet_app_error", 2, vec![true, false], None),
         ("action", 2) => ("jet_app_action", 3, vec![true, false, false], None),
-        ("form", 2) => ("jet_app_form", 3, vec![true, false, false], None),
+        ("form", 2) => ("jet_app_form", 4, vec![true, false, false, false], None),
         ("data", 2) => ("jet_app_data", 3, vec![true, false, false], None),
         ("mount", 2) => ("jet_app_mount", 3, vec![true, false, false], None),
         ("mount", 3) => (
@@ -2564,6 +2592,7 @@ fn ui_backend_method_route(
         "focused_label" => ("focused_label", &[true]),
         "commands" if name == "NullBackend" => ("paint_commands", &[true]),
         "frame_lines" | "render_count" if name == "TuiBackend" => (method, &[true]),
+        "present" if name == "GtkBackend" => ("present", &[true, false]),
         _ => return Err(route_error(format!("checked UI backend method `{name}.{method}` has no Prelude route"))),
     };
     prelude_route_row(
@@ -2902,6 +2931,20 @@ fn iterator_builtin_route(
     Some(plan)
 }
 
+fn map_from_keys_symbol(receiver: &Type) -> &'static str {
+    let key = match receiver.without_user_tags() {
+        Type::List(inner) => inner.without_user_tags(),
+        Type::FixedList { elem, .. } => elem.without_user_tags(),
+        other => other,
+    };
+    match key {
+        Type::String => "jet_map_from_keys_kernel",
+        Type::Int | Type::IntN { .. } => "jet_map_from_keys_int",
+        Type::Named(name) if name == "Int" => "jet_map_from_keys_int",
+        _ => "jet_map_from_keys_composite",
+    }
+}
+
 impl TBuiltinOp {
     pub(super) fn route_plan(
         &self,
@@ -2920,6 +2963,7 @@ impl TBuiltinOp {
             TryStringPush => b("string_try_push", "jet_string_try_push", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             Pop => b("list_pop", "jet_list_pop_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
             PriorityQueuePop => b("priority_queue_pop", "jet_priority_queue_pop_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
+            MapUpdate => b("map_update", "jet_map_update_all", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             MapMerge => b("map_merge", "jet_map_merge", 2, 2, &[true, true], None, carrier),
             MapFromKeys => b("map_from_keys", "jet_map_from_keys_kernel", 2, 2, &[false, false], None, carrier),
             ListReplace => b("list_replace", "jet_list_replace", 3, 3, &[true, false, false], None, carrier),
@@ -2946,8 +2990,10 @@ impl TBuiltinOp {
                 ListRemoveMode::Dynamic => primitive(),
             },
             Push => b("list_push", "jet_list_push", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+            IndexOf => b("list_index_of", "jet_list_index_of", 2, 2, &[true, true], None, carrier),
             InsertMap => b("map_insert", "jet_map_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             AddNewMap => b("map_add_new", "jet_map_add_new", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
+            MapSetDefault => b("map_setdefault", "jet_map_setdefault", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
             ExtendList => b("list_extend", "jet_list_extend", 2, 2, &[true, false], Some(Effect::Mem), carrier),
             Reverse => b("list_reverse", "jet_list_reverse", 1, 1, &[true], Some(Effect::Mem), carrier),
             Sort => b("list_sort", "jet_list_sort", 1, 1, &[true], Some(Effect::Mem), carrier),
@@ -3006,7 +3052,12 @@ impl TBuiltinOp {
             SetIsDisjoint => b("set_is_disjoint", "jet_set_is_disjoint", 2, 2, &[true, true], None, carrier),
             SetValues => b("set_values", "jet_set_values", 1, 1, &[true], None, carrier),
             SetPop => b("set_pop", "jet_set_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            SetReplace => b("set_replace", "jet_set_replace_kernel", 2, 2, &[true, false], Some(Effect::Mem), carrier),
             SetInsert => b("set_insert", "jet_set_insert", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+            SetUpdate => b("set_update", "jet_set_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            SetDifferenceUpdate => b("set_difference_update", "jet_set_difference_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            SetIntersectionUpdate => b("set_intersection_update", "jet_set_intersection_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            SetSymmetricDifferenceUpdate => b("set_symmetric_difference_update", "jet_set_symmetric_difference_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
             SetRemove => b("set_remove", "jet_set_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
             SortedSetInsert => b("sorted_set_insert", "jet_sorted_set_insert", 2, 2, &[true, false], Some(Effect::Mem), carrier),
             SortedSetRemove => b("sorted_set_remove", "jet_sorted_set_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
@@ -3151,7 +3202,7 @@ impl TBuiltinOp {
             BitSetToList => b("bit_set_to_list", "jet_bit_set_to_list", 1, 1, &[true], None, carrier),
             BitSetCount => b("bit_set_count", "jet_bit_set_count", 1, 1, &[true], None, carrier),
             LenList | IsEmpty | GetMap | GetList | First | Last | Contains
-            | IndexOf | JoinSep | Product { .. }
+            | JoinSep | Product { .. }
             | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
             | ToString | Take | Skip | IterToList | IterCollect
             | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
@@ -3248,6 +3299,15 @@ impl TBuiltinOp {
                 | TBuiltinOp::ListIntersection
                 | TBuiltinOp::ListDifference
                 | TBuiltinOp::ListRandom => builtin_collection_route(self, receiver, carrier)?,
+                TBuiltinOp::MapFromKeys => b(
+                    "map_from_keys",
+                    map_from_keys_symbol(receiver),
+                    2,
+                    2,
+                    &[false, false],
+                    None,
+                    carrier,
+                ),
                 _ => self.route_plan(result, carrier)?,
             }
         };
@@ -3372,6 +3432,7 @@ fn byte_buffer_method_route(
         | "index_of"
         | "last_index_of"
         | "split"
+        | "partition"
         | "join"
         | "equal"
         | "compare"
@@ -3429,7 +3490,26 @@ pub(super) fn string_method_route(
             MirPreludeAbi::Value,
         ));
     }
+    if method == "expandtabs" {
+        return Ok(b(
+            "expandtabs",
+            "jet_text_expandtabs",
+            2,
+            2,
+            &[true, false],
+            None,
+            carrier,
+        ));
+    }
     let (member, symbol, arity) = match method {
+        "expandtabs" => ("expandtabs", "jet_text_expandtabs", 2),
+        "find" => ("find", "jet_text_parse_find", 2),
+        "rfind" => ("rfind", "jet_text_parse_rfind", 2),
+        "partition" => ("partition", "jet_text_parse_partition", 2),
+        "rpartition" => ("rpartition", "jet_text_parse_rpartition", 2),
+        "strip" => ("strip", "jet_text_parse_strip", 1),
+        "lstrip" => ("lstrip", "jet_text_parse_lstrip", 1),
+        "rstrip" => ("rstrip", "jet_text_parse_rstrip", 1),
         "copy" => ("copy", "jet_string_copy", 1),
         "replace" => ("replace", "jet_string_replace", 3),
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
@@ -3438,14 +3518,34 @@ pub(super) fn string_method_route(
         "is_upper" => ("is_upper", "jet_text_is_upper", 1),
         "capitalize" => ("capitalize", "jet_text_capitalize", 1),
         "swapcase" => ("swapcase", "jet_text_swapcase", 1),
-        "remove_prefix" => ("remove_prefix", "jet_text_remove_prefix", 2),
-        "remove_suffix" => ("remove_suffix", "jet_text_remove_suffix", 2),
+        "remove_prefix" | "removeprefix" => ("remove_prefix", "jet_text_remove_prefix", 2),
+        "remove_suffix" | "removesuffix" => ("remove_suffix", "jet_text_remove_suffix", 2),
         "compare" => ("compare", "jet_text_compare", 2),
         "reverse" => ("reverse", "jet_text_reverse", 1),
         "normalize" => ("normalize", "jet_text_normalize_nfc", 1),
         "rsplit" => ("rsplit", "jet_iter_string_rsplit", 2),
         "matches" => ("matches", "jet_std::jet_string_matches", 2),
         "match" => ("match", "jet_std::jet_string_match", 2),
+        "isalnum" => ("isalnum", "jet_text_isalnum", 1),
+        "isalpha" => ("isalpha", "jet_text_is_alphabetic", 1),
+        "isascii" => ("isascii", "jet_text_unicode_is_ascii", 1),
+        "isdecimal" => ("isdecimal", "jet_text_isdecimal", 1),
+        "isdigit" => ("isdigit", "jet_text_isdigit", 1),
+        "isidentifier" => ("isidentifier", "jet_text_isidentifier", 1),
+        "isnumeric" => ("isnumeric", "jet_text_isnumeric", 1),
+        "isprintable" => ("isprintable", "jet_text_isprintable", 1),
+        "isspace" => ("isspace", "jet_text_is_whitespace", 1),
+        "istitle" => ("istitle", "jet_text_istitle", 1),
+        "islower" => ("islower", "jet_text_is_lower", 1),
+        "isupper" => ("isupper", "jet_text_is_upper", 1),
+        "lower" => ("lower", "jet_unicode_lower", 1),
+        "upper" => ("upper", "jet_unicode_upper", 1),
+        "title" => ("title", "jet_text_title", 1),
+        "casefold" => ("casefold", "jet_text_casefold", 1),
+        "center" => ("center", "jet_text_center_ref", 3),
+        "ljust" => ("ljust", "jet_text_pad_end_ref", 3),
+        "rjust" => ("rjust", "jet_text_pad_start_ref", 3),
+        "zfill" => ("zfill", "jet_text_zfill_ref", 2),
         _ => return Err(route_error(format!("unknown checked String method `{method}`"))),
     };
     let _ = result;
@@ -3516,6 +3616,14 @@ fn numeric_binary(op: BinOp) -> bool {
             | BinOp::BitOr
             | BinOp::BitXor
     )
+}
+
+fn exact_int_type(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Int => true,
+        Type::InlineRange { base, .. } => exact_int_type(base),
+        _ => false,
+    }
 }
 
 fn exact_int_binary_route(
@@ -3710,8 +3818,8 @@ pub(super) fn binary_route(
     if let Some(route) = math_binary_route(op, input, rhs, result, carrier)? {
         return Ok(route);
     }
-    if input == &Type::Int {
-        if numeric_binary(op) && result != &Type::Int {
+    if exact_int_type(input) {
+        if numeric_binary(op) && !exact_int_type(result) {
             return Err(route_error(
                 "exact Int arithmetic has a non-Int resolved result type",
             ));
@@ -4377,16 +4485,27 @@ pub(super) fn index_route(
 /// sema-resolved and therefore never crosses the ABI as a runtime descriptor.
 pub(super) fn index_write_route(
     kind: MirIndexKind,
+    base: &Type,
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
+    let string_map_key = matches!(
+        base.without_user_tags(),
+        Type::Map { key, .. } if matches!(key.without_user_tags(), Type::String)
+    );
     let (member, symbol, arity, borrow_mask) = match kind {
         MirIndexKind::List | MirIndexKind::FixedListProof => (
             "index_list_set",
             "jet_index_vec_set",
             5,
             vec![true, false, false, true, false],
+        ),
+        MirIndexKind::Map if string_map_key => (
+            "index_map_set",
+            "jet_map_update_string",
+            3,
+            vec![true, true, false],
         ),
         MirIndexKind::Map => (
             "index_map_set",
@@ -4853,6 +4972,27 @@ pub(super) fn lane_index_route(
         carrier,
         MirPreludeAbi::Value,
         "lane index",
+    )
+}
+pub(super) fn lane_index_write_route(
+    lane_ty: &str,
+    result: &Type,
+    carrier: &TFailureCarrier,
+) -> Result<TPreludeRoute, LowerError> {
+    let _ = result;
+    let symbol = format!("jet_math_{lane_ty}_lane_set");
+    prelude_route_row(
+        MirPreludeFamily::MathBuiltin,
+        "core.math",
+        "lane_set",
+        &symbol,
+        5,
+        5,
+        &[true, false, false, true, false],
+        None,
+        carrier,
+        MirPreludeAbi::Value,
+        "lane assignment",
     )
 }
 
@@ -5575,6 +5715,22 @@ pub(super) fn try_conversion_route(
             "bare try propagation has no conversion Prelude route",
         )),
     }
+}
+
+pub(super) fn apply_conversion_route() -> Result<TPreludeRoute, LowerError> {
+    prelude_route_row(
+        MirPreludeFamily::StaticPrelude,
+        "core.errors",
+        "apply_conversion",
+        "jet_err_apply_conversion",
+        3,
+        3,
+        &[false, true, true],
+        None,
+        &TFailureCarrier::Infallible,
+        MirPreludeAbi::Value,
+        "declared error conversion history",
+    )
 }
 
 pub(super) fn journey_reset_route() -> Result<TPreludeRoute, LowerError> {

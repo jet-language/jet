@@ -4,7 +4,6 @@ package {
     edition: "2026"
     description: "A Jet-authored devtools panel dogfood package"
 }
-
 // #2497: a Jet-authored panel using the public devtools and UI surfaces.
 // The package has no external frontend runtime: `jet dev` discovers `panel`
 // through #DevPanel and hosts the returned core.ui tree.
@@ -15,27 +14,22 @@ package {
 use core.ui as ui
 use core.devtools as devtools
 
-
-
 struct State {
     selected: String{"none"}
     event_count: Int{0}
 }
 
-fn state_summary(state: State) String -> "{state.selected}/{state.event_count}"
+fn state_summary(state: State) -> String { "{state.selected}/{state.event_count}" }
 
-fn panel_lines(state: State) [UiNode] -> {
+fn panel_lines(state: State) -> [UiNode] {
     return [UiNode]{
         ui.text("Jet Devtools"),
         ui.text("Selected: {state.selected}"),
-        ui.text("Events: {state.event_count}")
+        ui.text("Events: {state.event_count}"),
     }
 }
 
-#DevPanel
-pub fn panel(state: State) UiNode -> {
-    return ui.box(panel_lines(state))
-}
+#DevPanel pub fn panel(state: State) -> UiNode { return ui.box(panel_lines(state)) }
 
 fn publish_selection(selected_value: String) {
     devtools.publish(field: .selected, value: selected_value)

@@ -95,10 +95,11 @@ pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 /// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
 /// value (`Type{ … }`) or live on signatures and fields.
-/// D-BODY-LAST1=B and D-SIG-SHAPE1=B retire `::` as a function-body marker:
-/// `->` introduces a one-expression body, while braces hold statements and a
-/// trailing value; `::` keeps its binding meaning and `=` remains for
-/// slot-filling declarations such as extern bindings.
+/// D-BODY-LAST1=B, D-SIG-SHAPE1=B, and D-SIG-AFTER1=A: `::` is not a
+/// function-body marker. Named function bodies use braces. `->` introduces
+/// the return type on signatures and still opens control, arm, and lambda
+/// bodies. `::` keeps its binding meaning and `=` remains for slot-filling
+/// declarations such as extern bindings.
 pub const SIGIL_BIND_IMMUT: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`

@@ -194,7 +194,7 @@ fn shared_runner_publishes_only_after_a_successful_jet_export() {
     let fake_jet = scratch.path.join("fake-jet");
     fs::write(
         &fake_jet,
-        "#!/bin/sh\nif [ \"$1\" = project ] && [ \"$2\" = parts ]; then printf 'automatic __project.library library.jet\\n'; exit 0; fi\nif [ \"$1\" = build ] && [ \"${FAKE_JET_FAIL:-0}\" = 1 ]; then exit 17; fi\nif [ \"$1\" = build ]; then mkdir -p target; printf '%s\\n' \"$@\" > target/args; printf archive > target/libloadable.a; printf header > target/loadable.h; printf 'jet-jetlib-v3\\0' > target/loadable.jetlib; a=$(sha256sum target/libloadable.a | cut -d' ' -f1); h=$(sha256sum target/loadable.h | cut -d' ' -f1); j=$(sha256sum target/loadable.jetlib | cut -d' ' -f1); printf 'jet-library-set-v1\\nlibloadable.a\\tsha256-%s\\nloadable.h\\tsha256-%s\\nloadable.jetlib\\tsha256-%s\\n' \"$a\" \"$h\" \"$j\" > target/.loadable.jet-library.complete; fi\n",
+        "#!/bin/sh\nif [ \"$1\" = project ] && [ \"$2\" = parts ]; then printf 'automatic __project.library library.jet\\n'; exit 0; fi\nif [ \"$1\" = build ] && [ \"${FAKE_JET_FAIL:-0}\" = 1 ]; then exit 17; fi\nif [ \"$1\" = build ]; then mkdir -p .jet/build; printf '%s\\n' \"$@\" > .jet/build/args; printf archive > .jet/build/libloadable.a; printf header > .jet/build/loadable.h; printf 'jet-jetlib-v3\\0' > .jet/build/loadable.jetlib; a=$(sha256sum .jet/build/libloadable.a | cut -d' ' -f1); h=$(sha256sum .jet/build/loadable.h | cut -d' ' -f1); j=$(sha256sum .jet/build/loadable.jetlib | cut -d' ' -f1); printf 'jet-library-set-v1\\nlibloadable.a\\tsha256-%s\\nloadable.h\\tsha256-%s\\nloadable.jetlib\\tsha256-%s\\n' \"$a\" \"$h\" \"$j\" > .jet/build/.loadable.jet-library.complete; fi\n",
     )
     .unwrap();
     fs::set_permissions(&fake_jet, fs::Permissions::from_mode(0o755)).unwrap();
@@ -232,8 +232,8 @@ fn shared_runner_publishes_only_after_a_successful_jet_export() {
     assert!(receipt.contains("\"output\":\"core\""));
     assert!(receipt.contains("\"lock\":{\"path\":\".jet/lock\",\"digest\":\"sha256-"));
     assert!(receipt.contains("\"command\":[\"build\",\"--lib\",\"--locked\",\"--output\",\"core\",\"--profile=dev\",\"library.jet\"]"));
-    assert!(scratch.path.join("target/.loadable.jet-library.complete").is_file());
-    let invoked = read(&scratch.path.join("target/args"));
+    assert!(scratch.path.join(".jet/build/.loadable.jet-library.complete").is_file());
+    let invoked = read(&scratch.path.join(".jet/build/args"));
     assert!(invoked.lines().any(|line| line == "--lib"));
     assert!(invoked.lines().any(|line| line == "--locked"));
     assert!(invoked.lines().any(|line| line == "--output"));

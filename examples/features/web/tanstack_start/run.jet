@@ -41,29 +41,29 @@ struct Cart {
     ids: [Int]
 }
 
-fn order_for(id: Int) Order -> {
+fn order_for(id: Int) -> Order {
     return Order{id: id, customer: "Customer {id}", total: 100 + (id % 500), shipped: id % 2 == 0}
 }
 
-fn order_rows() [Order] -> {
+fn order_rows() -> [Order] {
     rows := [Order]{}
     loop id in 0..<100000 -> rows.push(order_for(id + 1))
     return rows
 }
 
-fn order_id(order: Order) String -> "{order.id}"
-fn order_customer(order: Order) String -> order.customer
-fn order_shipped(order: Order) String -> "{order.shipped}"
-fn pending_order(order: Order) Bool -> !order.shipped
-fn render_order_row(order: Order) String -> "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>"
-fn render_order_rows(orders: [Order]) String -> orders.map(render_order_row).join("")
-fn render_keyed_order_row(row: WebTableRow<Order>) String -> render_order_row(row.value)
-fn render_keyed_order_rows(rows: [WebTableRow<Order>]) String -> rows.map(render_keyed_order_row).join("")
+fn order_id(order: Order) -> String { "{order.id}" }
+fn order_customer(order: Order) -> String { order.customer }
+fn order_shipped(order: Order) -> String { "{order.shipped}" }
+fn pending_order(order: Order) -> Bool { !order.shipped }
+fn render_order_row(order: Order) -> String { "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>" }
+fn render_order_rows(orders: [Order]) -> String { orders.map(render_order_row).join("") }
+fn render_keyed_order_row(row: WebTableRow<Order>) -> String { render_order_row(row.value) }
+fn render_keyed_order_rows(rows: [WebTableRow<Order>]) -> String { rows.map(render_keyed_order_row).join("") }
 
 // The server loader receives the same typed table state as local pagination.
 // This fixture applies its known sort/filter policy before honoring the
 // requested page, so route/query state and loader state stay one contract.
-fn load_order_page(state: WebTableState) WebTablePage<Order> !String -> {
+fn load_order_page(state: WebTableState) -> WebTablePage<Order> !String {
     source :: order_rows()
     pending :: table.filter(source, pending_order)
     ordered :: table.sort(pending, true, order_id)
@@ -73,19 +73,19 @@ fn load_order_page(state: WebTableState) WebTablePage<Order> !String -> {
 // The route loader takes the route's typed search input and returns the
 // Codable route data; the App graph runs it through the router (preload,
 // cache, abort) and hands the decoded value to `orders_page` as `data`.
-fn load_orders(search: OrderSearch) [Order] !String -> {
+fn load_orders(search: OrderSearch) -> [Order] !String {
     source :: order_rows()
     if search.q == "all" -> return Ok(table.page(source, search.page, 24).rows)
     if search.q != "pending" -> return Err("unknown order filter `{search.q}`")
     return Ok(table.page(table.filter(source, pending_order), search.page, 24).rows)
 }
 
-fn pending_page() WebPage -> web.page(
+fn pending_page() -> WebPage { web.page( }
     "Orders pending",
     "<main data-state=\"pending\"><h1>Orders</h1><p>Loading orders…</p></main>"
 )
 
-fn error_page() WebPage -> web.page(
+fn error_page() -> WebPage { web.page( }
     "Orders error",
     "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>"
 )
@@ -94,7 +94,7 @@ fn add_order_to_cart(cart: Cart) {
     cart.ids.push(41)
 }
 
-fn cart_seed(search: OrderSearch) Cart -> {
+fn cart_seed(search: OrderSearch) -> Cart {
     ids := [Int]{}
     if search.cart > 0 -> ids.push(41)
     return Cart{ids: ids}
@@ -109,7 +109,7 @@ fn cart_seed(search: OrderSearch) Cart -> {
     assert_eq(sample.shipped, false)
 }
 
-fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) String -> {
+fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> String {
     // App.route is the sole registration graph and the App router is the
     // single navigation state; `loaded` is that router's decoded route data.
     loaded_markup :: render_order_rows(loaded)
@@ -201,23 +201,23 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) String -
     return "<main data-jet-edit-loop=\"state-preserved\">" + nav + "<h1>Orders</h1><p data-state=\"edit-loop\">edit-loop: state-preserved</p>" + interactions + "<p data-state=\"loaded\">loaded: {loaded.len()}</p><p data-state=\"error\">error: route/query/form boundaries</p><p data-route=\"/orders/:id\">route search={search.q}</p><pre data-panel=\"router\">{route_text}</pre>" + loader_html + "<pre data-panel=\"query\" data-query-refresh=\"{search.refresh}\">{query_text} invalidation={stale_generation}</pre><section data-panel=\"forms\">{form_html}<pre>{form_text} body={submission} no-script={no_script_body}</pre></section>" + table_html + virtual_html + "<pre data-panel=\"store\" data-cart-count=\"{search.cart}\">{store_text} transaction={transaction.generation}</pre></main>"
 }
 
-fn home() WebPage -> web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{}))
+fn home() -> WebPage { web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{})) }
 // `/orders` binds its typed search record and the loader's decoded data.
-fn orders_page(search: OrderSearch, data: [Order]) WebPage -> web.page("Orders", render_snapshot(41, search, data))
-fn order_detail(id: Int, search: OrderSearch) WebPage -> web.page("Order", render_snapshot(id, search, [Order]{}))
-fn settings_page() WebPage -> web.page("Settings", "<main><h1>Settings</h1><p>Preferences</p></main>")
+fn orders_page(search: OrderSearch, data: [Order]) -> WebPage { web.page("Orders", render_snapshot(41, search, data)) }
+fn order_detail(id: Int, search: OrderSearch) -> WebPage { web.page("Order", render_snapshot(id, search, [Order]{})) }
+fn settings_page() -> WebPage { web.page("Settings", "<main><h1>Settings</h1><p>Preferences</p></main>") }
 
 // App.action and App.form are the one checked server boundary. ShipForm is
 // Codable so the same input/output contract is available to scripted and
 // progressive requests without a second RPC declaration.
-fn submit_ship_order(input: ShipForm) String -> "ship-order submitted for {input.id} via {input.carrier}"
+fn submit_ship_order(input: ShipForm) -> String { "ship-order submitted for {input.id} via {input.carrier}" }
 
-fn check_carrier(value: String) Unit !Err -> {
+fn check_carrier(value: String) -> Unit !String {
     if value == "" -> return Err("carrier required")
     return Ok()
 }
 
-fn run() App -> {
+fn run() -> App {
     // Existing web.app is the shipped derived render surface.  The suite state
     // above remains headless, so browser, native, and devtools hosts consume
     // one projection rather than a JavaScript runtime or fallback renderer.

@@ -21,8 +21,7 @@
 //! Every one of them is a `tests/*.rs` file, so cargo builds a binary for each;
 //! `tests/suites.txt` then puts each one in a named verification set and
 //! `tests/suite_membership.rs` fails if any declared target is in none (#2025).
-//! `scripts/agent/time-suites.sh --set <name>` runs a set against this same
-//! guard, and `tools/ci/test-shards.sh` shards the whole inventory (D-CI1=A).
+//! `tools/ci/test-shards.sh` shards the whole inventory (D-CI1=A).
 //! `every_dev_slice_is_wired_into_a_test_target` pins that nothing was dropped.
 #![allow(dead_code, unused_imports)]
 

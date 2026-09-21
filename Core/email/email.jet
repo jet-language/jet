@@ -1,0 +1,276 @@
+package {
+    name: "core.email"
+    version: "0.1.0"
+    edition: "2026"
+    description: "MIME messages and SMTP."
+    license: "MIT"
+    outputs: {
+        email: .Library{ entry: email }
+    }
+}
+#Error
+pub enum EmailError {
+    Address
+    Transport
+    Limit
+}
+
+pub struct Address {
+    pub raw: String
+    pub local: String
+    pub domain: String
+}
+
+pub struct Attachment {
+    pub name: String
+    pub mime: String
+    pub bytes: [U8]
+}
+
+pub struct Message {
+    pub from: Address
+    pub to: [Address]
+    pub cc: [Address]
+    pub subject: String
+    pub text: String
+    pub html: String
+    pub files: [Attachment]
+}
+
+pub struct Envelope {
+    pub from: String
+    pub to: [String]
+}
+
+pub struct Mailer {
+    pub host: String
+    pub port: Int
+    pub user: String
+}
+
+pub struct SMTPConfig {
+    pub host: String
+    pub port: Int
+    pub user: String
+    pub password: String
+}
+
+pub struct HTML {
+    pub source: String
+}
+
+pub enum SMTPSecurity {
+    Disabled
+    StartTls
+    Tls
+}
+
+pub enum RecipientPolicy {
+    Strict
+    Relaxed
+}
+
+pub enum TLSTrust {
+    System
+    Insecure
+}
+
+pub struct Limits {
+    pub max_bytes: Int
+    pub max_recipients: Int
+}
+
+pub struct SMTPAuth {
+    pub user: String
+    pub password: String
+}
+
+pub struct DkimConfig {
+    pub domain: String
+    pub selector: String
+    pub key: [U8]
+}
+
+pub struct RecipientReport {
+    pub accepted: [String]
+    pub rejected: [String]
+}
+
+pub struct SendReport {
+    pub ok: Bool
+    pub message_id: String
+    pub recipients: RecipientReport
+}
+
+pub fn limits() -> Limits { {max_bytes: 26214400, max_recipients: 100} }
+
+pub fn smtp_auth(user: String, password: String) -> SMTPAuth { {user: user, password: password} }
+
+pub fn dkim(domain: String, selector: String, key: [U8]) -> DkimConfig {
+    {domain: domain, selector: selector, key: key}
+}
+
+pub fn send_report(ok: Bool, message_id: String, accepted: [String], rejected: [String]) -> SendReport {
+    {ok: ok, message_id: message_id, recipients: RecipientReport{accepted: accepted, rejected: rejected}}
+}
+
+pub fn address(text: String) -> Address !EmailError {
+    t :: trim(text)
+    // "Name <user@dom>" or user@dom
+    raw := t
+    inner := t
+    lt :: index_of(t, "<")
+    gt :: index_of(t, ">")
+    if lt >= 0 && gt > lt -> inner = slice_str(t, lt + 1, gt)
+    at :: index_of(inner, "@")
+    if at <= 0 || at == inner.bytes().len() - 1 -> return Err(EmailError.Address)
+    local :: slice_str(inner, 0, at)
+    domain :: slice_str(inner, at + 1, inner.bytes().len())
+    if local.len() == 0 || domain.len() == 0 || !contains(domain, ".") {
+        return Err(EmailError.Address)
+    }
+    Ok(Address{raw: raw, local: local, domain: domain})
+}
+
+pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment !EmailError {
+    if name.len() == 0 -> return Err(EmailError.Limit)
+    m := mime
+    if m.len() == 0 -> m = "application/octet-stream"
+    if bytes.len() > 26214400 -> return Err(EmailError.Limit)
+    Ok(Attachment{name: name, mime: m, bytes: bytes})
+}
+
+pub fn message(from: Address, to: [Address], cc: [Address], subject: String, text: String, html: HTML, files: [Attachment]) -> Message !EmailError {
+    if to.len() == 0 -> return Err(EmailError.Address)
+    Ok(Message{from: from, to: to, cc: cc, subject: subject, text: text, html: html.source, files: files})
+}
+
+pub fn envelope() -> Envelope { {from: "", to: [String]{}} }
+
+pub fn serialize(message: Message) -> [U8] {
+    bound := "----=_JetBound7"
+    crlf :: String.from_bytes([U8]{13, 10}) ?? "\n"
+    out := "From: {message.from.raw}{crlf}"
+    out = "{out}To: {join_addr(message.to)}{crlf}"
+    if message.cc.len() > 0 -> out = "{out}Cc: {join_addr(message.cc)}{crlf}"
+    out = "{out}Subject: {message.subject}{crlf}"
+    out = "{out}MIME-Version: 1.0{crlf}"
+    out = "{out}Content-Type: multipart/mixed; boundary=\"{bound}\"{crlf}{crlf}"
+    out = "{out}--{bound}{crlf}Content-Type: text/plain; charset=utf-8{crlf}{crlf}{message.text}{crlf}"
+    if message.html.len() > 0 {
+        out = "{out}--{bound}{crlf}Content-Type: text/html; charset=utf-8{crlf}{crlf}{message.html}{crlf}"
+    }
+    loop f in message.files {
+        b64 :: b64_std(f.bytes)
+        out = "{out}--{bound}{crlf}Content-Type: {f.mime}{crlf}Content-Disposition: attachment; filename=\"{f.name}\"{crlf}Content-Transfer-Encoding: base64{crlf}{crlf}{b64}{crlf}"
+    }
+    out = "{out}--{bound}--{crlf}"
+    out.bytes()
+}
+
+pub fn smtp(config: SMTPConfig) -[Net]> Mailer !EmailError {
+    if config.host.len() == 0 -> return Err(EmailError.Transport)
+    port := config.port
+    if port == 0 -> port = 587
+    host_smtp_connect(config.host, port, config.user, config.password)
+    Ok(Mailer{host: config.host, port: port, user: config.user})
+}
+
+pub fn smtp_from_env() -[Net]> Mailer !EmailError {
+    host :: host_env("SMTP_HOST") ?? return Err(EmailError.Transport)
+    user :: host_env("SMTP_USER") ?? ""
+    pass :: host_env("SMTP_PASS") ?? ""
+    port :: parse_int(host_env("SMTP_PORT") ?? "587") ?? 587
+    smtp(SMTPConfig{host: host, port: port, user: user, password: pass})
+}
+
+fn join_addr(xs: [Address]) -> String {
+    out := ""
+    loop i in 0..<xs.len() {
+        if i > 0 -> out = "{out}, "
+        out = "{out}{xs[i].raw}"
+    }
+    out
+}
+
+fn b64_std(data: [U8]) -> String {
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    ab :: alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop {
+        if i >= data.len() -> break
+        n := (data[i] & 255) << 16
+        if i + 1 < data.len() -> n = n | ((data[i + 1] & 255) << 8)
+        if i + 2 < data.len() -> n = n | (data[i + 2] & 255)
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        if i + 1 < data.len() -> out.push(ab[(n >> 6) & 63]) else -> out.push(U8{61})
+        if i + 2 < data.len() -> out.push(ab[n & 63]) else -> out.push(U8{61})
+        i = i + 3
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn trim(text: String) -> String {
+    raw :: text.bytes()
+    a := 0
+    b := raw.len()
+    loop {
+        if a >= b -> return ""
+        if raw[a] != (U8{32}) -> break
+        a = a + 1
+    }
+    loop {
+        if b <= a -> return ""
+        if raw[b - 1] != (U8{32}) -> break
+        b = b - 1
+    }
+    slice_str(text, a, b)
+}
+
+fn slice_str(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn index_of(text: String, needle: String) -> Int {
+    hay :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() > hay.len() -> return -1
+    loop i in 0..<(hay.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if hay[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return i
+    }
+    -1
+}
+
+fn contains(text: String, needle: String) -> Bool { index_of(text, needle) >= 0 }
+
+fn parse_int(text: String) -> ?Int {
+    n := 0
+    any := false
+    loop b in text.bytes() {
+        d :: b
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+        any = true
+    }
+    if !any -> return None
+    Val(n)
+}
+
+fn host_smtp_connect(host: String, port: Int, user: String, password: String) !EmailError {
+    panic("host_smtp_connect")
+}
+
+fn host_env(name: String) -[Net]> ?String { panic("host_env") }

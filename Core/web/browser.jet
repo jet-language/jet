@@ -1,0 +1,304 @@
+// core.web.browser — headed/headless browser control for tests.
+//
+// Connect talks to a host CDP/WebDriver cell. Reports, fixtures, and
+// generated source are Jet: they never need a real browser. Headless CI
+// uses `connect` which may return `BrowserError.Headless`.
+
+#Error
+pub enum BrowserError {
+    Connect
+    Headless
+    Timeout
+    Protocol
+    Closed
+}
+
+pub enum BrowserPrivacy {
+    Default
+    Isolated
+}
+
+pub enum BrowserProtocol {
+    Cdp
+    WebDriver
+}
+
+pub struct BrowserTimeout {
+    pub ms: Int
+}
+
+pub struct BrowserProfile {
+    pub name: String
+    pub privacy: BrowserPrivacy
+    pub headless: Bool
+}
+
+pub struct BrowserAbilities {
+    pub javascript: Bool
+    pub screenshots: Bool
+}
+
+pub struct Browser {
+    pub id: Int
+    pub profile: BrowserProfile
+    pub url: String
+    pub closed: Bool
+}
+
+pub struct BrowserContext {
+    pub id: Int
+    pub browser: Int
+}
+
+pub struct BrowserPage {
+    pub id: Int
+    pub url: String
+    pub title: String
+}
+
+pub struct BrowserFrame {
+    pub id: Int
+    pub url: String
+}
+
+pub struct BrowserLocator {
+    pub selector: String
+}
+
+pub struct BrowserLocked {
+    pub reason: String
+}
+
+pub struct BrowserIntercept {
+    pub url: String
+    pub status: Int
+}
+
+pub struct BrowserEvent {
+    pub kind: String
+    pub target: String
+}
+
+pub struct BrowserReceipt {
+    pub ok: Bool
+    pub detail: String
+}
+
+pub struct BrowserTrace {
+    pub events: [String]
+}
+
+pub struct BrowserTestConfig {
+    pub headless: Bool
+    pub timeout_ms: Int
+    pub base_url: String
+}
+
+pub struct BrowserTestCase {
+    pub name: String
+    pub ok: Bool
+    pub detail: String
+}
+
+pub struct BrowserReport {
+    pub title: String
+    pub cases: [BrowserTestCase]
+}
+
+pub struct BrowserServer {
+    pub url: String
+    pub running: Bool
+    pub logs: String
+}
+
+pub fn config() -> BrowserTestConfig {
+    BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: "http://127.0.0.1:0"}
+}
+
+pub fn config_from_env() -[Env]> BrowserTestConfig {
+    c :: config()
+    base :: host_env("JET_BROWSER_BASE_URL")
+    if base.len() > 0 {
+        return BrowserTestConfig{headless: c.headless, timeout_ms: c.timeout_ms, base_url: base}
+    }
+    c
+}
+
+pub fn profile(name: String) -> BrowserProfile {
+    BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
+}
+
+pub fn timeout(ms: Int) -> BrowserTimeout {
+    n := ms
+    if n < 0 -> n = 0
+    BrowserTimeout{ms: n}
+}
+
+pub fn locked(reason: String) -> BrowserLocked { BrowserLocked{reason: reason} }
+
+pub fn connect() -[Net]> Browser !BrowserError { connect_profile(profile("default"), timeout(5000)) }
+
+pub fn connect_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser !BrowserError {
+    id :: host_browser_connect(p.name, p.headless, t.ms)
+    if id < 0 -> return Err(BrowserError.Headless)
+    if id == 0 -> return Err(BrowserError.Connect)
+    Ok(Browser{id: id, profile: p, url: "about:blank", closed: false})
+}
+
+pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator {
+    _ :: page
+    BrowserLocator{selector: selector}
+}
+
+pub fn begin_named(report: BrowserReport, name: String) -> BrowserReport {
+    cases := [BrowserTestCase]{}
+    loop c in report.cases -> cases.push(c)
+    cases.push(BrowserTestCase{name: name, ok: true, detail: ""})
+    BrowserReport{title: report.title, cases: cases}
+}
+
+pub fn fixture_context(browser: Browser) -> BrowserContext { BrowserContext{id: 1, browser: browser.id} }
+
+pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage {
+    _ :: ctx
+    BrowserPage{id: 1, url: url, title: ""}
+}
+
+pub fn fixture_source(name: String, body: String) -> String { generate_source(name, body, "") }
+
+pub fn generate_source(name: String, body: String, base_url: String) -> String {
+    url := base_url
+    if url.len() == 0 -> url = "/"
+    "\") {{\n    // generated browser test\n    _ :: \"{url}\"\n    {body}\n}}\n"
+}
+
+pub fn report_new(title: String) -> BrowserReport { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
+
+pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport {
+    cases := [BrowserTestCase]{}
+    loop c in report.cases -> cases.push(c)
+    cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
+    BrowserReport{title: report.title, cases: cases}
+}
+
+pub fn report_html(report: BrowserReport) -> String {
+    out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
+    loop c in report.cases {
+        cls := "pass"
+        if !c.ok -> cls = "fail"
+        out = "{out}<li class=\"{cls}\">{esc(c.name)}</li>"
+    }
+    out = "{out}</ol></body></html>"
+    out
+}
+
+pub fn report_json(report: BrowserReport) -> String {
+    out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
+    loop i in 0..<report.cases.len() {
+        c :: report.cases[i]
+        if i > 0 -> out = "{out},"
+        ok := "true"
+        if !c.ok -> ok = "false"
+        out = "{out}{{\"name\":\"{esc_json(c.name)}\",\"ok\":{ok}}}"
+    }
+    "{out}]}}"
+}
+
+pub fn report_text(report: BrowserReport) -> String {
+    out := "{report.title}\n"
+    loop c in report.cases {
+        mark := "ok"
+        if !c.ok -> mark = "FAIL"
+        out = "{out}[{mark}] {c.name}\n"
+    }
+    out = "{out}{passed(report)} passed, {failed(report)} failed\n"
+    out
+}
+
+pub fn report_exit_code(report: BrowserReport) -> Int {
+    if failed(report) > 0 -> return 1
+    0
+}
+
+pub fn write_report(report: BrowserReport, path: String) !IOError {
+    text :: report_text(report)
+    host_write_text(path, text)
+    Ok()
+}
+
+pub fn server_start(root: String) -[Net]> BrowserServer {
+    url :: host_browser_server_start(root)
+    if url.len() == 0 {
+        return BrowserServer{url: "http://127.0.0.1:0", running: false, logs: ""}
+    }
+    BrowserServer{url: url, running: true, logs: ""}
+}
+
+pub fn server_stop(server: BrowserServer) -> BrowserServer {
+    host_browser_server_stop(server.url)
+    BrowserServer{url: server.url, running: false, logs: server.logs}
+}
+
+pub fn server_url(server: BrowserServer) -> String { server.url }
+
+pub fn server_logs(server: BrowserServer) -> String { server.logs }
+
+pub fn watch_changed(path: String) -[FS]> Bool { host_watch_changed(path) }
+
+fn passed(report: BrowserReport) -> Int {
+    n := 0
+    loop c in report.cases {
+        if c.ok -> n = n + 1
+    }
+    n
+}
+
+fn failed(report: BrowserReport) -> Int { report.cases.len() - passed(report) }
+
+fn esc(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        if n == 38 {
+            push_str(&out, "&amp;")
+        } else {
+            if n == 60 {
+                push_str(&out, "&lt;")
+            } else {
+                if n == 62 {
+                    push_str(&out, "&gt;")
+                } else {
+                    out.push(b)
+                }
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn esc_json(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        if n == 34 || n == 92 {
+            out.push(U8{92})
+            out.push(b)
+        } else {
+            out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn push_str(out: [U8], s: String) {
+    loop b in s.bytes() -> out.push(b)
+}
+
+fn host_browser_connect(name: String, headless: Bool, timeout_ms: Int) -[Net]> Int { panic("host_browser_connect") }
+fn host_env(name: String) -[Env]> String { panic("host_env") }
+fn host_write_text(path: String, text: String) -[FS]> panic("host_write_text")
+fn host_browser_server_start(root: String) -[Net]> String { panic("host_browser_server_start") }
+fn host_browser_server_stop(url: String) { panic("host_browser_server_stop") }
+fn host_watch_changed(path: String) -[FS]> Bool { panic("host_watch_changed") }

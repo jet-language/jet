@@ -616,6 +616,41 @@ fn run() {
 }
 
 #[test]
+fn card_2872_exact_int_division_family_uses_hot_kernels() {
+    let src = r#"
+fn probe(value: Int) Int -> {
+    return (value /% 3) + (value % 3) + (value %% 3) + (value << 1) + (value >> 1)
+}
+fn run() {
+    total := 0
+    loop i in 0..<10 {
+        total = total + (i /% 3)
+        total = total + (i % 3)
+        total = total + (i %% 3)
+        total = total + (i << 1)
+        total = total + (i >> 1)
+    }
+    print(total)
+    print(probe(9223372036854775808))
+}
+"#;
+    let rust = compile("card_2872_exact_int_division_family", src);
+    assert!(
+        rust.contains("jet_std::jet_int_floor_div_hot!")
+            && rust.contains("jet_std::jet_int_mod_hot!")
+            && rust.contains("jet_std::jet_int_rem_hot!")
+            && rust.contains("jet_std::jet_int_shl_hot!")
+            && rust.contains("jet_std::jet_int_shr_hot!"),
+        "exact-Int division-family operations must use shared hot kernels:\n{rust}"
+    );
+    assert_tiers_agree(
+        "card_2872_exact_int_division_family",
+        src,
+        "140\n26132887437755198128\n",
+    );
+}
+
+#[test]
 fn card_2254_integer_paths_reject_uncertain_negative_and_overflow() {
     let uncertain = r#"
 fn body(limit: Int) {

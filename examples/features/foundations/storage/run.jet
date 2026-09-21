@@ -2,11 +2,11 @@ use core.files as fs
 use core.process as process
 use core.sys as sys
 use core.time as time
-use "cache" as cache
-use "kv" as kv
-use "log" as log
-use "pool" as pool
-use "queue" as queue
+use "cache"
+use "kv"
+use "log"
+use "pool"
+use "queue"
 
 fn require(ok: Bool, message: String) {
     if !ok -> panic(message)
@@ -21,7 +21,7 @@ fn crash_writer(path: Path) {
     log.append_record(path, "event|3|late")
 }
 
-fn recover_after_sigkill(path: Path) log.Recovery -> {
+fn recover_after_sigkill(path: Path) -> log.Recovery {
     child :: process.cmd([sys.executable(), "--storage-crash-writer", path.to_string()])
         .stdout(.Stream)
         .stderr(.Capture)

@@ -1742,8 +1742,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
                         bracket_depth = bracket_depth.saturating_sub(1);
                         i += 1;
                     }
-                    b'm' if brace_depth == 0
-                        && paren_depth == 0
+                    b'm' if paren_depth == 0
                         && bracket_depth == 0
                         && bytes.get(i + 1..i + 3) == Some(b"od")
                         && (i == 0 || !ident_continue(bytes[i - 1]))
@@ -1836,7 +1835,14 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     }
 
     fn strip_mod(src: &str, name: &str) -> String {
-        strip_named_mod(src, |candidate| candidate == name)
+        let mut stripped = strip_named_mod(src, |candidate| candidate == name);
+        loop {
+            let next = strip_named_mod(&stripped, |candidate| candidate == name);
+            if next == stripped {
+                return stripped;
+            }
+            stripped = next;
+        }
     }
 
     fn strip_mod_prefix(src: &str, prefix: &str) -> String {
@@ -1851,6 +1857,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_vetted_module(&s, "jet_fixed_kernel");
     let s = strip_vetted_module(&s, "jet_arrow_data");
     let s = strip_vetted_module(&s, "jet_foundation_sha256");
+    let s = strip_vetted_module(&s, "jet_arrow_file_reader");
     let s = strip_vetted_module(&s, "jet_foundation_numeric");
     let s = strip_vetted_module(&s, "jet_term_kernel");
     let s = strip_vetted_module(&s, "jet_atomic_carrier");
@@ -1862,21 +1869,14 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
-    let mut s = strip_mod(&s, "jet_term_mode");
-    loop {
-        let next = strip_mod(&s, "jet_term_mode");
-        if next == s {
-            break;
-        }
-        s = next;
-    }
-    let s = strip_mod(&s, "jet_process_pty");
+    let s = strip_mod(&s, "jet_term_mode");
+    let s = strip_vetted_module(&s, "jet_process_pty");
     let s = strip_vetted_module(&s, "jet_process_sandbox");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
     let s = strip_mod(&s, "jet_gtk");
-    let s = strip_mod(&s, "jet_crypto_entropy");
-    let mut s = strip_scheduler_native(&s);
+    let mut s = strip_vetted_module(&s, "jet_crypto_entropy");
+    s = strip_scheduler_native(&s);
     s = strip_shared_guard_internals(&s);
     s = strip_vetted_module(&s, "jet_os_extra");
     s = strip_vetted_module(&s, "jet_conpty_control");
@@ -1889,6 +1889,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     // D-TASKBORROW1=A: canonical task-group lifetime erasure (mirrors golden.rs).
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_std_common_types");
+    s = strip_vetted_module(&s, "jet_fs_chown");
     s = strip_vetted_module(&s, "jet_std_math_task_mem");
     s = strip_vetted_module(&s, "jet_std_reactive_event_watch");
     s = strip_vetted_module(&s, "jet_std_ffi_callbacks");

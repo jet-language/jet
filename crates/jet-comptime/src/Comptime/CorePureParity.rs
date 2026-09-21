@@ -848,9 +848,16 @@ pub(super) fn evaluate_method(
         ("Decimal", "to_string", 0) => {
             decimal_from_value(recv, span).map(|decimal| CtValue::Str(decimal.to_string_rep()))
         }
+        ("Decimal", "to_float", 0) => decimal_from_value(recv, span).map(|decimal| {
+            CtValue::Float(crate::AST::CtFloat::F64(decimal.to_f64()))
+        }),
         ("Decimal", "equal", 1) => decimal_from_value(recv, span).and_then(|left| {
             let right = decimal_from_value(&args[0], span)?;
             Ok(CtValue::Bool(left == right))
+        }),
+        ("Decimal", "compare", 1) => decimal_from_value(recv, span).and_then(|left| {
+            let right = decimal_from_value(&args[0], span)?;
+            Ok(ordering_value(left.cmp(&right)))
         }),
         ("Decimal", "add" | "sub" | "mul", 1) => decimal_from_value(recv, span).and_then(|left| {
             let right = decimal_from_value(&args[0], span)?;

@@ -2099,9 +2099,12 @@ impl<'a> Checker<'a> {
                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
                     // parameter's carrier or width and be checked at the literal.
                     self.expected_type = Some(param_ty.clone());
-                } else if matches!(param_ty, Type::Named(_) | Type::Option(_)) {
-                    // D-ENUMDOT2=A: propagate named/optional type so `.Variant` can
-                    // resolve to the correct enum from context.
+                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. }) {
+                    // D-ENUMDOT2=A: named/optional type so `.Variant` can
+                    // resolve from context. D-FAIL-CARRIER1=A: a `T !E`
+                    // parameter is the carrier itself; without this slot
+                    // fact, a fallible argument auto-propagates into the
+                    // caller's default `Err` and the callee never sees it.
                     self.expected_type = Some(param_ty.clone());
                 } else if crate::Sema::CheckerCore::is_core_view_generic(param_ty) {
                     // D-MEM-COPYSEM1=A: a `View`/`ViewMut`/`Pin` parameter is a
@@ -2205,9 +2208,7 @@ impl<'a> Checker<'a> {
                     .is_some_and(|transport| transport != "none");
                 let safe = match &arg.expr {
                     Expr::Ident(callback, _) => {
-                        self.funcs
-                            .get(callback)
-                            .is_some_and(|f| !f.is_extern && f.is_foreign_thread_safe)
+                        self.callback_function_is_safe(callback)
                             || arg_ty.as_ref().is_some_and(|ty| {
                                 crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                             })
@@ -2227,6 +2228,11 @@ impl<'a> Checker<'a> {
                         && sig.foreign_effect_root.as_deref() == Some("FFI.C"));
                 if safe && metadata_complete {
                     arg.flags.c_callback_symbol = true;
+                    arg.flags.c_callback_function_key = match &arg.expr {
+                        Expr::Ident(callback, _) => self.callback_function_key(callback),
+                        Expr::Lambda(..) => None,
+                        _ => None,
+                    };
                     arg.flags.c_callback_managed = managed;
                     arg.flags.c_callback_plan_digest = sig.callback_plan_digest.clone();
                     arg.flags.c_callback_identity = sig.callback_identity.clone();

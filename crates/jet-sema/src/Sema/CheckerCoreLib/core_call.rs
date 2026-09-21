@@ -39,21 +39,11 @@ fn core_effect_leaf_for_call(module: &str, name: &str) -> Option<&'static str> {
 }
 
 fn core_call_is_known(module: &str, name: &str) -> bool {
-    matches!(
-        (module, name),
-            ("core.service", "tree")
-            | (
-                "core.data.loader",
-                "authority" | "bind" | "bind_text" | "cancel" | "invalidate" | "needs_refresh"
-                    | "offline" | "ready" | "source_identity" | "status" | "stream",
-            )
-            | ("core.build", "graph" | "receipt_diff")
-            | ("core.auth", "verify_jwt" | "verify_paseto")
-            | ("core.net.tls", "client")
-            | ("core.net", "unix_connect")
-            | ("core.process", "run")
-            | ("core.plugin", "load")
-    ) || core_effect_for_call(module, name).is_some()
+    jet_foundation::CoreModuleExports::core_modules()
+        .iter()
+        .find(|declaration| declaration.module == module)
+        .is_some_and(|declaration| declaration.members.iter().any(|member| *member == name))
+        || core_effect_for_call(module, name).is_some()
         || Syntax::core_call(module, name).is_some()
         || super::is_polymorphic_core_special(module, name)
         || core_fixed_sig(module, name).is_some()
@@ -4301,7 +4291,7 @@ impl<'a> Checker<'a> {
                     }
                     self.infer(&mut arg.expr)
                 });
-                let _row = match loader_ty {
+                let row = match loader_ty {
                     Some(Type::Apply { name, args }) if name == "DataLoader" && args.len() == 1 => {
                         args.into_iter().next()
                     }
@@ -4346,10 +4336,24 @@ impl<'a> Checker<'a> {
                     "status" => Type::Named("DataLoaderStatus".to_string()),
                     "source_identity" => Type::Named("DataSourceIdentity".to_string()),
                     "authority" => Type::Named("DataAuthority".to_string()),
-                    "stream" => result_ty(
-                        Type::Named("DataStream".to_string()),
-                        Type::Named("DataError".to_string()),
-                    ),
+                    "stream" => {
+                        // A loader stores its complete payload shape (`DataLoader<[T]>`)
+                        // for snapshots, while streams pull one row at a time.
+                        // Preserve that distinction at the checked boundary.
+                        let stream_row = row.map(|row| match row {
+                            Type::List(inner) | Type::FixedList { elem: inner, .. } => *inner,
+                            other => other,
+                        });
+                        result_ty(
+                            stream_row
+                                .map(|row| Type::Apply {
+                                    name: "DataStream".to_string(),
+                                    args: vec![row],
+                                })
+                                .unwrap_or_else(|| Type::Named("DataStream".to_string())),
+                            Type::Named("DataError".to_string()),
+                        )
+                    }
                     _ => unreachable!(),
                 };
                 return Some(result);
@@ -4390,11 +4394,30 @@ impl<'a> Checker<'a> {
                             2 => Type::String,
                             _ => Type::Named("DataLimits".to_string()),
                         }),
-                        "value" => Some(t.clone()),
+                        "value" => Some(if index == 0 {
+                            t.clone()
+                        } else {
+                            Type::Named("DataLimits".to_string())
+                        }),
                         "snapshot" => Some(Type::Apply { name: "DataLoader".to_string(), args: vec![t.clone()] }),
                         _ => None,
                     };
                     if let Some(ty) = ty {
+                        if name == "snapshot"
+                            && index == 0
+                            && arg.convention != AccessConvention::Write
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0202",
+                                "`snapshot` requires the write-access marker `&`".to_string(),
+                                "taking a snapshot refreshes loader state in place".to_string(),
+                                format!(
+                                    "write the write-access marker `&`: `{}loader`",
+                                    Syntax::SIGIL_WRITE
+                                ),
+                                Some(arg.span),
+                            ));
+                        }
                         self.expect_core_arg(name, index, &ty, arg);
                     } else {
                         self.infer(&mut arg.expr);
@@ -4485,7 +4508,15 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("FileReader".to_string()), arg);
+                    let file_reader = Type::Named("FileReader".to_string());
+                    self.expect_core_arg_moving(name, 0, &file_reader, arg);
+                    self.finish_core_call_ownership(
+                        name,
+                        0,
+                        arg,
+                        AccessConvention::Move,
+                        &file_reader,
+                    );
                 }
                 if let Some(arg) = args.get_mut(1) {
                     self.expect_core_arg(name, 1, &Type::Named("DataLimits".to_string()), arg);
@@ -4991,8 +5022,8 @@ impl<'a> Checker<'a> {
                 "core.math",
                 "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
                 | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh"
-                | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "signum" | "trunc" | "fract"
-                | "degrees" | "radians",
+                | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "signum" | "trunc" | "truncate"
+                | "fract" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians",
             ) => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -5034,8 +5065,8 @@ impl<'a> Checker<'a> {
                 }
                 return Some(ty);
             }
-            ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma") => {
-                let wanted = if name == "lerp" || name == "fma" {
+            ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd") => {
+                let wanted = if name == "lerp" || name == "fma" || name == "muladd" {
                     3
                 } else {
                     2
@@ -5291,13 +5322,13 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Float);
             }
-            ("core.math", "cmp" | "next_after" | "ldexp" | "scaleb") => {
+            ("core.math", "cmp" | "next_after" | "nextafter" | "ldexp" | "scaleb") => {
                 let wanted = 2;
                 if args.len() != wanted {
                     self.diags
                         .push(wrong_core_arity(name, wanted, args.len(), span));
                 }
-                if name == "cmp" || name == "next_after" {
+                if name == "cmp" || name == "next_after" || name == "nextafter" {
                     let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);

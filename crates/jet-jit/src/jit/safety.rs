@@ -1,20 +1,89 @@
 use jet_foundation::MIR::{
-    MirAbi, MirAccess, MirCallee, MirFunction, MirFunctionId, MirOperation, MirProgram, MirSemanticOp,
-    MirTypeDefKind,
+    MirAbi, MirAccess, MirCallee, MirFunction, MirFunctionId, MirOperation, MirPreludeFamily,
+    MirPreludeTypeArg, MirProgram, MirSemanticOp, MirType, MirTypeKind, MirTypeDefKind,
 };
 
-/// Check the canonical facts required by this adapter.  Legality and target
-/// applicability are decided upstream; this function only consumes those
-/// verdicts and verifies that every operation has an emitter arm.
+/// Check the canonical facts required by this adapter. Legality is decided
+/// upstream; this function consumes those verdicts, verifies every operation
+/// has an emitter arm, and rejects target-specific shapes the resident ABI
+/// cannot represent.
 pub(crate) fn resident_safe_mir_program(program: &MirProgram) -> Result<(), String> {
     program
         .validate()
         .map_err(|error| format!("invalid MIR: {error}"))?;
     for function in &program.functions {
         resident_safe_mir_function(function)?;
+        resident_safe_cell_shapes(program, function)?;
     }
     Ok(())
 }
+
+/// Cell's resident ABI stores ordinary maps as opaque handles.  The native
+/// path only has a checked representation for string-key maps; other key
+/// shapes stay valid MIR and therefore remain available to the interpreter.
+fn resident_safe_cell_shapes(
+    program: &MirProgram,
+    function: &MirFunction,
+) -> Result<(), String> {
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                call,
+                owner_type_args,
+                ..
+            }) = &instruction.operation
+            else {
+                continue;
+            };
+            let Some(route) = program
+                .prelude_calls
+                .iter()
+                .find(|candidate| candidate.id == *call)
+            else {
+                continue;
+            };
+            if route.family != MirPreludeFamily::StaticPrelude
+                || route.module != "::jet_std::JetCell"
+                || route.member != "new"
+            {
+                continue;
+            }
+            let Some(MirPreludeTypeArg::Type(element_ty)) = owner_type_args.first() else {
+                continue;
+            };
+            let Some(map_key) = cell_map_key(element_ty) else {
+                continue;
+            };
+            if !is_string_key(map_key) {
+                return Err(format!(
+                    "MIR function `{}` has a Cell map with non-string key `{}`; \
+                     resident Cranelift supports only string-key Cell maps",
+                    function.key,
+                    map_key.display_name()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cell_map_key(ty: &MirType) -> Option<&MirType> {
+    match ty.kind() {
+        MirTypeKind::Map { key, .. } => Some(key),
+        MirTypeKind::Tagged { inner, .. } => cell_map_key(inner),
+        _ => None,
+    }
+}
+
+fn is_string_key(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::String => true,
+        MirTypeKind::Tagged { inner, .. } => is_string_key(inner),
+        MirTypeKind::Apply { name, args } => args.is_empty() && name.name == "String",
+        _ => false,
+    }
+}
+
 
 pub(crate) fn resident_safe_mir_function(function: &MirFunction) -> Result<(), String> {
     if !function.target_applicability.cranelift {

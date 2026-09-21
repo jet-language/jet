@@ -357,6 +357,24 @@ fn clone_spec(handle: i64) -> Option<JitProcessSpec> {
     let idx = (handle as usize).saturating_sub(1);
     Concurrency::with_runtime_mut(|rt| rt.process_specs.get(idx).cloned())
 }
+
+fn clone_specs_from_list(spec_list: i64) -> Option<Vec<JitProcessSpec>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(spec_list).unwrap_or(0);
+        let mut specs = Vec::with_capacity(len as usize);
+        for index in 0..len {
+            let handle = rt.heap.list_get_int(spec_list, index).unwrap_or(0);
+            if handle <= 0 {
+                return None;
+            }
+            let spec_index = (handle as usize).saturating_sub(1);
+            let spec = rt.process_specs.get(spec_index)?.clone();
+            specs.push(spec);
+        }
+        Some(specs)
+    })
+}
+
 #[derive(Default)]
 struct InterpreterProcessState {
     specs: Vec<JitProcessSpec>,
@@ -407,13 +425,16 @@ fn local_process_index(handle: i64) -> Option<usize> {
 }
 
 fn push_ambient_spec(spec: JitProcessSpec) -> i64 {
+    let mut spec = Some(spec);
     let resident = Concurrency::with_runtime_mut(|rt| {
-        rt.process_specs.push(spec.clone());
+        let spec = spec.take()?;
+        rt.process_specs.push(spec);
         Some(rt.process_specs.len() as i64)
     });
     if let Some(handle) = resident {
         return handle;
     }
+    let spec = spec.expect("ambient process spec was neither resident nor local");
     INTERPRETER_PROCESS_STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         state.specs.push(spec);
@@ -429,7 +450,8 @@ fn update_ambient_spec(
         return INTERPRETER_PROCESS_STATE.with(|slot| {
             let mut state = slot.borrow_mut();
             let spec = state.specs.get_mut(index)?;
-            *spec = f(spec.clone());
+            let current = std::mem::replace(spec, process_prelude::spec_new(Vec::new()));
+            *spec = f(current);
             Some(handle)
         });
     }
@@ -439,7 +461,8 @@ fn update_ambient_spec(
     let index = usize::try_from(handle).ok()?.checked_sub(1)?;
     Concurrency::with_runtime_mut(|rt| {
         let spec = rt.process_specs.get_mut(index)?;
-        *spec = f(spec.clone());
+        let current = std::mem::replace(spec, process_prelude::spec_new(Vec::new()));
+        *spec = f(current);
         Some(handle)
     })
 }
@@ -461,13 +484,16 @@ fn with_ambient_spec<R>(
 }
 
 fn push_ambient_child(child: JitProcessChild) -> i64 {
+    let mut child = Some(child);
     let resident = Concurrency::with_runtime_mut(|rt| {
-        rt.process_children.push(child.clone());
+        let child = child.take()?;
+        rt.process_children.push(child);
         Some(rt.process_children.len() as i64)
     });
     if let Some(handle) = resident {
         return handle;
     }
+    let child = child.expect("ambient process child was neither resident nor local");
     INTERPRETER_PROCESS_STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         state.children.push(child);
@@ -1832,21 +1858,9 @@ fn jet_jit_process_run_with_authority(cmd_list: i64, _authority: i64) -> i64 {
 }
 
 fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
-    let handles = Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(spec_list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(spec_list, i).unwrap_or(0));
-        }
-        out
-    });
-    let mut specs = Vec::with_capacity(handles.len());
-    for handle in handles {
-        let Some(spec) = clone_spec(handle) else {
-            return invalid_process_spec();
-        };
-        specs.push(spec);
-    }
+    let Some(specs) = clone_specs_from_list(spec_list) else {
+        return invalid_process_spec();
+    };
     match process_prelude::spec_pipeline(&specs) {
         Ok(result) => outcome_to_result(result),
         Err(error) => process_io_error_result(error),

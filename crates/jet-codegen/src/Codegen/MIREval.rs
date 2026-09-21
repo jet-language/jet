@@ -506,6 +506,8 @@ thread_local! {
     static MIR_NEXT_DETERMINISTIC_WORLD_ID: Cell<i64> = const { Cell::new(1) };
     static MIR_HTTP_HANDLERS: RefCell<BTreeMap<i64, RuntimeValue>> =
         const { RefCell::new(BTreeMap::new()) };
+    static MIR_HTTP_STANDALONE_HANDLERS: RefCell<BTreeMap<i64, CtValue>> =
+        const { RefCell::new(BTreeMap::new()) };
     static MIR_NEXT_HTTP_HANDLER: Cell<i64> = const { Cell::new(1) };
     static MIR_HTTP_LISTENERS: RefCell<BTreeMap<i64, ()>> =
         const { RefCell::new(BTreeMap::new()) };
@@ -1277,6 +1279,51 @@ fn mir_http_handler_value(value: &MirEvalValue) -> Option<RuntimeValue> {
             })
     })?;
     MIR_HTTP_HANDLERS.with(|handlers| handlers.borrow().get(&raw).cloned())
+}
+
+#[allow(dead_code)]
+fn mir_http_standalone_handler_value(value: &MirEvalValue) -> Option<CtValue> {
+    let MirEvalValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != MIR_HTTP_HANDLER_TOKEN_TYPE {
+        return None;
+    }
+    let raw = fields.iter().find_map(|(name, value)| {
+        (name == "id")
+            .then_some(value)
+            .and_then(|value| match value {
+                MirEvalValue::Int(raw) => Some(*raw),
+                _ => None,
+            })
+    })?;
+    MIR_HTTP_STANDALONE_HANDLERS.with(|handlers| handlers.borrow().get(&raw).cloned())
+}
+
+fn with_mir_http_standalone_handlers<T>(
+    handlers: BTreeMap<i64, CtValue>,
+    callback: impl FnOnce() -> T,
+) -> T {
+    if handlers.is_empty() {
+        return callback();
+    }
+    MIR_HTTP_STANDALONE_HANDLERS.with(|active| {
+        let previous = std::mem::replace(&mut *active.borrow_mut(), handlers);
+        struct Restore<'a> {
+            active: &'a RefCell<BTreeMap<i64, CtValue>>,
+            previous: Option<BTreeMap<i64, CtValue>>,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                *self.active.borrow_mut() = self.previous.take().unwrap_or_default();
+            }
+        }
+        let _restore = Restore {
+            active,
+            previous: Some(previous),
+        };
+        callback()
+    })
 }
 
 /// Byte order used by the explicit target layout supplied to an adapter.
@@ -2400,10 +2447,25 @@ struct MirClosureHost {
     function: MirFunctionId,
     captures: Vec<CtValue>,
     config: MirEvalConfig,
+    ambient: crate::Comptime::AmbientRuntimeSnapshot,
+    http_handlers: BTreeMap<i64, CtValue>,
 }
 
 impl MirClosureHost {
     fn run(
+        &self,
+        args: Vec<CtValue>,
+        capture_parameters: bool,
+        span: Span,
+    ) -> Result<(CtValue, Vec<CtValue>), Diagnostic> {
+        with_mir_http_standalone_handlers(self.http_handlers.clone(), || {
+            crate::Comptime::with_ambient_runtime_snapshot(self.ambient.clone(), || {
+                self.run_scoped(args, capture_parameters, span)
+            })
+        })
+    }
+
+    fn run_scoped(
         &self,
         args: Vec<CtValue>,
         capture_parameters: bool,
@@ -2646,33 +2708,18 @@ fn eval_core_call_binding(
     } else {
         (module, member)
     };
-    // Route state-only trace context through the shared log dispatcher before
-    // service/data state handling can claim the call.
+    // `set_trace_id` is state-only Prelude meaning, not a service/data
+    // operation. Keep this canonical evaluator route on the shared log
+    // carrier used by the other tiers.
     if module == "core.log" && member == "set_trace_id" {
-        if runtime {
-            return crate::Comptime::apply_impure_core_call_with_type_args(
-                module,
-                member,
-                values,
+        let [CtValue::Str(id)] = values.as_slice() else {
+            return Err(mir_error_at(
+                "core.log.set_trace_id expects one String",
                 span,
-                base_dir,
-                sink,
-                repl_mode,
-                None,
-                None,
-                type_args,
-                resolved_ret,
-            );
-        }
-        return crate::Comptime::apply_core_call_without_ambient_with_type_args(
-            module,
-            member,
-            values,
-            span,
-            repl_mode,
-            type_args,
-            resolved_ret,
-        );
+            ));
+        };
+        crate::Comptime::set_trace_id(id);
+        return Ok(CtValue::Unit);
     }
     if let Some(result) = eval_fixed_float_reduction(module, member, &values, span) {
         return result;
@@ -3857,6 +3904,7 @@ struct Machine<'a, 'state, 'debug> {
     dma_transfers: Rc<RefCell<HashMap<u64, PinnedDmaTransfer>>>,
     next_dma_transfer_id: Rc<RefCell<u64>>,
     completed_parameters: Option<Vec<RuntimeValue>>,
+    completed_callback_parameters: Option<Vec<RuntimeValue>>,
     last_runtime_stop: Option<String>,
     atexit_handlers: Vec<RuntimeValue>,
     deadline_guards: Vec<(usize, MirScopeId, crate::scheduler::JetDeadlineGuard)>,
@@ -3984,6 +4032,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             dma_transfers,
             next_dma_transfer_id,
             completed_parameters: None,
+            completed_callback_parameters: None,
             last_runtime_stop: None,
             atexit_handlers: Vec::new(),
             deadline_guards: Vec::new(),
@@ -4570,6 +4619,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 Action::Return(value) => {
                     self.debug_finish_statement(index)?;
                     let continuation = self.continuations.pop().flatten();
+                    let stopped_at_depth =
+                        stop_depth.is_some_and(|depth| self.frames.len().saturating_sub(1) == depth);
+                    let completed_callback_parameters = stopped_at_depth
+                        .then(|| self.completed_parameter_values(index, Span::new(0, 0)))
+                        .transpose()?;
                     let completed_parameters = if continuation.is_none() {
                         Some(self.completed_parameter_values(index, Span::new(0, 0))?)
                     } else {
@@ -4580,7 +4634,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.cleanup_deadline_frame(index);
                     self.frames.pop();
                     self.debug_statements.pop();
-                    if stop_depth.is_some_and(|depth| self.frames.len() == depth) {
+                    if stopped_at_depth {
+                        self.completed_callback_parameters = completed_callback_parameters;
                         return Ok((value, MirExecutionStatus::Completed, None));
                     }
                     if let Some(continuation) = continuation {
@@ -5135,7 +5190,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.runtime_to_ct(result, span)
             },
         ) {
-            let payload = runtime_from_ct(result?, span)?;
+            let result = result?;
+            let result = if !flatten_result {
+                match result {
+                    CtValue::Present(value) => *value,
+                    result => result,
+                }
+            } else {
+                result
+            };
+            let payload = runtime_from_ct(result, span)?;
             return Self::eval_task_payload(payload, flatten_result, span);
         }
         Self::eval_task_join_legacy(receiver, flatten_result, span)
@@ -5650,12 +5714,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 route,
                 args,
                 type_args,
-                fallibility: _,
+                fallibility,
                 data_plan,
                 ..
             } => {
+                let route_is_fallible = !matches!(
+                    self.prelude_row(*route, span)?.fallibility,
+                    jet_foundation::MIR::MirCallFallibility::Infallible
+                );
                 let values = self.call_args(frame_index, args, span)?;
-                self.eval_core_call(
+                let value = self.eval_core_call(
                     *call,
                     *route,
                     values,
@@ -5663,7 +5731,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     instruction.ty.as_ref(),
                     data_plan.as_ref(),
                     span,
-                )?
+                )?;
+                if (!route_is_fallible
+                    && matches!(
+                        fallibility,
+                        jet_foundation::MIR::MirCallFallibility::Infallible
+                    ))
+                    || matches!(
+                    value,
+                    RuntimeValue::Result { .. }
+                        | RuntimeValue::Data(MirEvalValue::Present(_))
+                        | RuntimeValue::Data(MirEvalValue::FailedTold(_))
+                        | RuntimeValue::Ambient(CtValue::Present(_))
+                        | RuntimeValue::Ambient(CtValue::Failed(_))
+                ) {
+                    value
+                } else {
+                    RuntimeValue::Result {
+                        ok: true,
+                        value: Box::new(value),
+                    }
+                }
             }
             MirOperation::IndirectCall { callee, args, .. } => {
                 let closure = self.value(frame_index, *callee, span)?;
@@ -5787,9 +5875,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MirPlaceBase::Temporary(source) | MirPlaceBase::Parameter(source) => {
                 if let Some(mut alias) = self.frames[frame_index].value_aliases.get(source).cloned()
                 {
-                    alias.steps.extend(self.move_steps_for_frame(
+                    alias.steps.extend(self.move_steps_for_place(
                         frame_index,
-                        &place.projections,
+                        place.id,
                         span,
                     )?);
                     Ok(Some(alias))
@@ -6052,7 +6140,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
             MirOperation::Copy { value } => {
+                let source_ty = self.value_type(frame_index, *value, span)?;
                 let mut value = self.value(frame_index, *value, span)?;
+                if is_materializable_view_type(&source_ty) {
+                    let address = match &value {
+                        RuntimeValue::Address(address) => Some(address.clone()),
+                        _ => None,
+                    };
+                    if let Some(address) = address {
+                        require_address_access(&address, MirAccess::Read, span)?;
+                        value = self.read_place(address.frame, address.place, span)?;
+                    }
+                }
                 fork_runtime_value_owners(&mut value);
                 Ok(value)
             }
@@ -6235,7 +6334,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }))
             }
             MirOperation::Field { base, field } => {
-                self.project_field_id(self.value(frame_index, *base, span)?, *field, span)
+                let value = self.value(frame_index, *base, span)?;
+                self.project_field_id(value, *field, span)
             }
             MirOperation::Struct { type_id, fields } => {
                 let type_name = type_instance_name(self.program, *type_id, span)?;
@@ -6656,12 +6756,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             span,
                         )?))
                     }
-                    RuntimeValue::CellGuard(guard) => Ok(RuntimeValue::Data(cell_payload_read(
+                    RuntimeValue::CellGuard(guard) => cell_payload_read(
                         self.program,
                         &guard.payload,
                         &guard.path,
                         span,
-                    )?)),
+                    ),
+
                     RuntimeValue::Address(address) => {
                         require_address_access(&address, MirAccess::Read, span)?;
                         self.read_place(address.frame, address.place, span)
@@ -6684,6 +6785,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     | RuntimeValue::SharedSnapshot(_)
                     | RuntimeValue::Transaction(_)
                     | RuntimeValue::SharedTransaction(_)
+                    | RuntimeValue::Cell(_)
+
                     | RuntimeValue::GcRoot(_) => Err(mir_error_at(
                         "MIR dereference requires an address or guard",
                         span,
@@ -6903,7 +7006,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let is_stream = matches!(
                     collection_type.nominal_name(),
                     Some(crate::Syntax::TYPE_STREAM | crate::Syntax::TYPE_ITER | crate::Syntax::TYPE_VIEW_ITER)
-                );
+                ) || matches!(collection_value, RuntimeValue::Stream(_));
                 let is_stdin = collection_type.nominal_name() == Some("StdinHandle");
                 let step_value = step
                     .map(|step| self.value(frame_index, step, span))
@@ -7755,6 +7858,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     )
                 }),
+                RuntimeValue::Data(MirEvalValue::Int(raw)) => Ok(raw),
                 _ => Err(mir_error_at(
                     "MIR HTTP operation received a non-handle receiver",
                     span,
@@ -7781,6 +7885,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             })??;
         let constructor = operation.ends_with(".new");
         match result {
+            crate::Comptime::AmbientMirHandleResult::Handle(raw)
+                if operation == "http_mux.new" =>
+            {
+                Ok(RuntimeValue::Data(MirEvalValue::Int(raw)))
+            }
             crate::Comptime::AmbientMirHandleResult::Handle(raw) if constructor => {
                 let handle = result_ty
                     .and_then(|ty| self.handle_id_for_type(ty))
@@ -8892,27 +9001,29 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 base,
                 index,
                 column,
-                column_index,
+                column_index: _,
                 accessor,
             } => {
                 let row = self.prelude_row(*accessor, span)?;
-                if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
+                if row.family != jet_foundation::MIR::MirPreludeFamily::ColumnarAccess
+                    || row.module != "core.columnar"
+                    || row.symbol.name() != "jet_columns_gather_cell"
+                    || row.signature.arity != 3
+                    || row.signature.max_arity != 3
+                    || row.signature.borrow_mask.as_slice() != [true, false, false]
+                {
                     return Err(mir_error_at(
-                        "MIR columnar accessor has unsupported Prelude ABI",
+                        "MIR columnar accessor has non-canonical Prelude route",
                         span,
                     ));
                 }
-                let _ = field_name(self.program, *column)
-                    .ok_or_else(|| mir_error_at("MIR columnar field ID is missing", span))?;
-                let column_index = i64::try_from(*column_index)
-                    .map_err(|_| mir_error_at("MIR columnar index does not fit Int", span))?;
-                let values = vec![
-                    runtime_to_data(self.value(frame_index, *base, span)?, span)?,
-                    MirEvalValue::Int(column_index),
-                    runtime_to_data(self.value(frame_index, *index, span)?, span)?,
-                ];
-                self.eval_prelude(*accessor, values, result_ty, span)
-                    .map(RuntimeValue::Data)
+                Ok(RuntimeValue::Data(self.eval_columnar_read(
+                    frame_index,
+                    *base,
+                    *index,
+                    *column,
+                    span,
+                )?))
             }
             MirSemanticOp::StaticPreludeCall {
                 call,
@@ -9147,6 +9258,50 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     );
                 }
+                if route.family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                    && route.module == "::jet_std::JetCell"
+                    && route.member == "new"
+                {
+                    if route.symbol.name() != "jet_std::JetCell::new" {
+                        return Err(mir_error_at(
+                            "MIR Cell constructor has a non-canonical symbol",
+                            span,
+                        ));
+                    }
+                    if route.abi != jet_foundation::MIR::MirPreludeAbi::Value
+                        || !matches!(
+                            &route.fallibility,
+                            jet_foundation::MIR::MirCallFallibility::Infallible
+                        )
+                        || args.len() != 1
+                        || type_args.len() != 0
+                        || owner_type_args.len() != 1
+                    {
+                        return Err(mir_error_at(
+                            "MIR Cell.new expects one value argument and one owner type argument",
+                            span,
+                        ));
+                    }
+                    if !matches!(
+                        owner_type_args.as_slice(),
+                        [jet_foundation::MIR::MirPreludeTypeArg::Type(_)]
+                    ) {
+                        return Err(mir_error_at(
+                            "MIR Cell.new owner argument must be an element type",
+                            span,
+                        ));
+                    }
+                    let value = self
+                        .call_args(frame_index, args, span)?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            mir_error_at("MIR Cell.new requires one value argument", span)
+                        })?;
+                    return Ok(RuntimeValue::Cell(Rc::new(RefCell::new(value))));
+
+                }
+
                 if route.module == "core.http" && route.member == "router" {
                     if !args.is_empty() {
                         return Err(mir_error_at(
@@ -9211,9 +9366,31 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 {
                     return self.eval_shared_host(frame_index, &member, values, span);
                 }
+                if module == "core.host"
+                    && matches!(
+                        member.as_str(),
+                        "Cell.get"
+                            | "Cell.set"
+                            | "Cell.replace"
+                            | "Cell.read"
+                            | "Cell.edit"
+                            | "Cell.guard_read"
+                            | "Cell.guard_edit"
+                            | "Cell.get_or_set"
+                            | "CellReadGuard.get"
+                            | "CellReadGuard.read"
+                            | "CellEditGuard.get"
+                            | "CellEditGuard.set"
+                            | "CellEditGuard.read"
+                            | "CellEditGuard.edit"
+                    )
+                {
+                    return self.eval_cell_host(&member, values, result_ty, span);
+                }
+
                 if module == "core.host" {
                     if let Some(value) =
-                        self.eval_comptime_host_method(&member, values.clone(), span)?
+                        self.eval_comptime_host_method(frame_index, &member, values.clone(), span)?
                     {
                         return Ok(value);
                     }
@@ -9741,7 +9918,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     })??;
                     return match result {
                         crate::Comptime::AmbientMirHandleResult::Value(value) => {
-                            Ok(RuntimeValue::Data(value))
+                            let value = RuntimeValue::Data(value);
+                            if matches!(
+                                route.fallibility,
+                                jet_foundation::MIR::MirCallFallibility::Infallible
+                            ) {
+                                Ok(value)
+                            } else {
+                                Ok(RuntimeValue::Result {
+                                    ok: true,
+                                    value: Box::new(value),
+                                })
+                            }
                         }
                         _ => Err(mir_error_at(
                             "MIR TCP listener address host returned a handle",
@@ -9862,6 +10050,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             .collect::<Result<Vec<_>, Diagnostic>>()?,
                     );
                     return self.eval_allocator_runtime(&route.member, values, result_ty, span);
+                }
+                if route.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+                    && route.module == "core.handle"
+                    && route.member.starts_with("reader.")
+                    && route.member != "reader.over"
+                {
+                    let mut values = Vec::with_capacity(args.len() + 1);
+                    values.push(receiver_value.clone());
+                    values.extend(
+                        args.iter()
+                            .map(|value| self.value(frame_index, *value, span))
+                            .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    );
+                    return self.eval_prelude_runtime_values(
+                        *call,
+                        values,
+                        result_ty,
+                        span,
+                    );
                 }
                 if let RuntimeValue::Ambient(value) = &receiver_value {
                     let values = args
@@ -10793,14 +11000,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     callback_span,
                 ) {
                     Some(Ok(value)) => value,
-                    Some(Err(error)) => jet_foundation::AST::CtValue::Failed(
-                        jet_foundation::AST::CtReport::Told(Box::new(
-                            jet_foundation::AST::CtValue::Str(format!(
-                                "{}: {}",
-                                error.code, error.what
+                    Some(Err(error)) => {
+                        jet_foundation::AST::CtValue::Failed(
+                            jet_foundation::AST::CtReport::Told(Box::new(
+                                jet_foundation::AST::CtValue::Str(format!(
+                                    "{}: {}",
+                                    error.code, error.what
+                                )),
                             )),
-                        )),
-                    ),
+                        )
+                    }
                     None => panic!("MIR task callback has no standalone host"),
                 }
             },
@@ -11731,6 +11940,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let result = self.invoke_callback(callback, cell, span)?;
         if editable {
             storage.commit_scalar_shadow(span)?;
+            let value = storage
+                .payload
+                .try_borrow()
+                .map_err(|_| mir_error_at("MIR Shared payload is already mutably borrowed", span))?
+                .clone();
+            storage.sync_transfer(&value);
         }
         Ok(result)
     }
@@ -11780,6 +11995,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
 
     fn eval_comptime_host_method(
         &mut self,
+        frame_index: usize,
         member: &str,
         args: Vec<RuntimeValue>,
         span: Span,
@@ -11846,6 +12062,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         } else {
             argv
         };
+        let in_impure_gate = {
+            let frame = self.frames.get(frame_index).ok_or_else(|| {
+                mir_error_at("MIR comptime host call frame is unavailable", span)
+            })?;
+            let function = program_function(self.program, frame.function)?;
+            frame.scopes.iter().any(|scope_id| {
+                function
+                    .scopes
+                    .iter()
+                    .any(|scope| scope.id == *scope_id && scope.kind == MirScopeKind::Impure)
+            })
+        };
         let result = if type_name == crate::Syntax::TYPE_BUILD_CONTEXT {
             match crate::Comptime::Build::eval_program_build_method(
                 &receiver,
@@ -11853,7 +12081,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 argv.clone(),
                 generated_source.as_deref(),
                 span,
-                false,
+                in_impure_gate,
             ) {
                 Some(result) => result?,
                 None => crate::Comptime::Builtins::apply_method(&receiver, method, argv, span)?,
@@ -12018,6 +12246,287 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             Some(span),
         )
     }
+    fn cell_callback_value(
+        &self,
+        guard: Rc<MirCellGuard>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        cell_payload_read(self.program, &guard.payload, &guard.path, span)
+    }
+
+    fn materialize_cell_result(
+        &self,
+        value: RuntimeValue,
+        result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        fn is_shared_type(ty: &MirType) -> bool {
+            match ty.kind() {
+                MirTypeKind::Tagged { inner, .. } => is_shared_type(inner),
+                MirTypeKind::Shared(_) => true,
+                _ => false,
+            }
+        }
+
+        if result_ty.is_some_and(is_shared_type) {
+            return Ok(value);
+        }
+        let RuntimeValue::SharedCell(cell) = value else {
+            return Ok(value);
+        };
+        if let Some(storage) = &cell.guard.storage {
+            storage.refresh_scalar_shadow(span)?;
+        }
+        Ok(RuntimeValue::Data(shared_payload_read(
+            &cell.guard.payload,
+            &cell.path,
+            span,
+        )?))
+    }
+
+    fn eval_cell_host(
+        &mut self,
+        member: &str,
+        args: Vec<RuntimeValue>,
+        result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+
+        let mut args = args.into_iter();
+        let receiver = args
+            .next()
+            .ok_or_else(|| mir_error_at("MIR Cell host route has no receiver", span))?;
+        match member {
+            "Cell.get" => {
+                if args.next().is_some() {
+                    return Err(mir_error_at("MIR Cell.get received extra arguments", span));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell.get requires an opaque Cell",
+                        span,
+                    ));
+                };
+                let value = cell
+                    .try_borrow()
+                    .map_err(|_| mir_error_at("MIR Cell payload is already borrowed", span))?
+                    .clone();
+                self.materialize_cell_result(value, result_ty, span)
+
+            }
+            "Cell.set" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| mir_error_at("MIR Cell.set is missing its value", span))?;
+
+                if args.next().is_some() {
+                    return Err(mir_error_at("MIR Cell.set received extra arguments", span));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell.set requires an opaque Cell",
+                        span,
+                    ));
+                };
+                *cell
+                    .try_borrow_mut()
+                    .map_err(|_| mir_error_at("MIR Cell payload is already borrowed", span))? =
+                    value;
+                Ok(RuntimeValue::Data(MirEvalValue::Unit))
+            }
+            "Cell.replace" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| {
+                        mir_error_at("MIR Cell.replace is missing its value", span)
+                    })?;
+
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell.replace received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell.replace requires an opaque Cell",
+                        span,
+                    ));
+                };
+                let previous = {
+                    let mut slot = cell.try_borrow_mut().map_err(|_| {
+                        mir_error_at("MIR Cell payload is already borrowed", span)
+                    })?;
+                    std::mem::replace(&mut *slot, value)
+                };
+                self.materialize_cell_result(previous, result_ty, span)
+
+            }
+            "Cell.guard_read" | "Cell.guard_edit" => {
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell guard received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell guard requires an opaque Cell",
+                        span,
+                    ));
+                };
+                Ok(RuntimeValue::CellGuard(Rc::new(MirCellGuard {
+                    payload: cell,
+                    path: Vec::new(),
+                    lease: Rc::new(MirCellLease {
+                        editable: member == "Cell.guard_edit",
+                    }),
+                })))
+            }
+            "Cell.read" | "Cell.edit" => {
+                let callback = args
+                    .next()
+                    .ok_or_else(|| mir_error_at("MIR Cell callback is missing", span))?;
+                if args.next().is_some() {
+                    return Err(mir_error_at("MIR Cell callback received extra arguments", span));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell callback requires an opaque Cell",
+                        span,
+                    ));
+                };
+                let guard = Rc::new(MirCellGuard {
+                    payload: cell,
+                    path: Vec::new(),
+                    lease: Rc::new(MirCellLease {
+                        editable: member == "Cell.edit",
+                    }),
+                });
+                let value = self.cell_callback_value(guard.clone(), span)?;
+                if member == "Cell.edit" {
+                    let (result, value) = self.invoke_edit_callback(callback, value, span)?;
+                    write_cell_guard(self.program, &guard, value, span)?;
+                    self.materialize_cell_result(result, result_ty, span)
+                } else {
+                    let result = self.invoke_callback(callback, value, span)?;
+                    self.materialize_cell_result(result, result_ty, span)
+                }
+            }
+            "Cell.get_or_set" => {
+                let callback = args
+                    .next()
+                    .ok_or_else(|| mir_error_at("MIR Cell initializer is missing", span))?;
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell.get_or_set received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::Cell(cell) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell.get_or_set requires an opaque Cell",
+                        span,
+                    ));
+                };
+                let current = cell
+                    .try_borrow()
+                    .map_err(|_| mir_error_at("MIR Cell payload is already borrowed", span))?
+                    .clone();
+                if let RuntimeValue::Data(MirEvalValue::Present(value)) = current {
+                    return Ok(RuntimeValue::Data(*value));
+                }
+
+                let value = self.invoke_callback_args(callback, Vec::new(), span)?;
+                let stored = MirEvalValue::Present(Box::new(runtime_to_data(
+                    value.clone(),
+                    span,
+                )?));
+                *cell
+                    .try_borrow_mut()
+                    .map_err(|_| mir_error_at("MIR Cell payload is already borrowed", span))? =
+                    RuntimeValue::Data(stored);
+                Ok(value)
+
+            }
+            "CellReadGuard.get" | "CellEditGuard.get" => {
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell guard get received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::CellGuard(guard) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell guard get requires an opaque Cell guard",
+                        span,
+                    ));
+                };
+                self.materialize_cell_result(
+                    cell_payload_read(self.program, &guard.payload, &guard.path, span)?,
+                    result_ty,
+                    span,
+                )
+
+            }
+            "CellEditGuard.set" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| mir_error_at("MIR Cell guard set is missing its value", span))?;
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell guard set received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::CellGuard(guard) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell guard set requires an opaque Cell guard",
+                        span,
+                    ));
+                };
+                write_cell_guard(self.program, &guard, value, span)?;
+                Ok(RuntimeValue::Data(MirEvalValue::Unit))
+            }
+            "CellReadGuard.read" | "CellEditGuard.read" | "CellEditGuard.edit" => {
+                let callback = args
+                    .next()
+                    .ok_or_else(|| mir_error_at("MIR Cell guard callback is missing", span))?;
+                if args.next().is_some() {
+                    return Err(mir_error_at(
+                        "MIR Cell guard callback received extra arguments",
+                        span,
+                    ));
+                }
+                let RuntimeValue::CellGuard(guard) = receiver else {
+                    return Err(mir_error_at(
+                        "MIR Cell guard callback requires an opaque Cell guard",
+                        span,
+                    ));
+                };
+                if member == "CellEditGuard.edit" && !guard.lease.editable {
+                    return Err(mir_error_at(
+                        "MIR editable Cell guard callback lacks an editable lease",
+                        span,
+                    ));
+                }
+                let value = self.cell_callback_value(guard.clone(), span)?;
+                if member == "CellEditGuard.edit" {
+                    let (result, value) = self.invoke_edit_callback(callback, value, span)?;
+                    write_cell_guard(self.program, &guard, value, span)?;
+                    self.materialize_cell_result(result, result_ty, span)
+                } else {
+                    let result = self.invoke_callback(callback, value, span)?;
+                    self.materialize_cell_result(result, result_ty, span)
+                }
+            }
+            _ => Err(mir_error_at(
+                "MIR Cell host route has no interpreter implementation",
+                span,
+            )),
+        }
+    }
+
 
     fn eval_shared_host(
         &mut self,
@@ -12941,6 +13450,44 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             )),
         }
     }
+    fn eval_columnar_read(
+        &mut self,
+        frame_index: usize,
+        base: MirValueId,
+        index: MirValueId,
+        column: MirFieldId,
+        span: Span,
+    ) -> Result<MirEvalValue, Diagnostic> {
+        let base = runtime_to_data(self.materialize_runtime(self.value(frame_index, base, span)?, span)?, span)?;
+        let MirEvalValue::List(rows) = base else {
+            return Err(mir_error_at(
+                "MIR columnar read receiver is not a List",
+                span,
+            ));
+        };
+        let index = int_value(
+            runtime_to_data(self.materialize_runtime(self.value(frame_index, index, span)?, span)?, span)?,
+            span,
+        )?;
+        let field = field_name(self.program, column)
+            .ok_or_else(|| mir_error_at("MIR columnar field ID is missing", span))?;
+        let value = crate::fixed_list::jet_fixed_list_index(rows.len(), index, |row| {
+            match &rows[row] {
+                MirEvalValue::Struct { fields, .. } => fields
+                    .iter()
+                    .find_map(|(name, value)| (name == &field).then_some(value.clone())),
+                _ => None,
+            }
+        })
+        .map_err(|error| mir_error_at(&error.message(), span))?;
+        value.ok_or_else(|| {
+            mir_error_at(
+                "MIR columnar row does not contain its checked field",
+                span,
+            )
+        })
+    }
+
 
     fn index_prelude_args(
         &self,
@@ -13398,6 +13945,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     1 => "count_zeros",
                     2 => "leading_zeros",
                     3 => "trailing_zeros",
+                    4 => "bit_count",
+                    5 => "bit_length",
                     _ => panic!("checked integer population operation"),
                 };
                 Ok(MirEvalValue::Int(
@@ -14138,7 +14687,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
         let row = self.prelude_row(call, span)?;
-        if args.len() < row.signature.arity || args.len() > row.signature.max_arity {
+        let view_range = row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            && row.module == "core.builtin"
+            && matches!(row.member.as_str(), "view_new" | "view_mut_new");
+        if !view_range && (args.len() < row.signature.arity || args.len() > row.signature.max_arity) {
             return Err(mir_error_at(
                 &format!(
                     "MIR PreludeCallId {call:?} received {} arguments; expected {}..={}",
@@ -14163,6 +14715,135 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let member_name = row.member.clone();
         let symbol = row.symbol.name().to_string();
         let family = row.family;
+        // `core.prelude.keep` is the identity/anti-optimization barrier used by
+        // measured loops.  The interpreter has no optimizer to fence, so move
+        // the original runtime value through unchanged rather than round-tripping
+        // it through CtValue (which could allocate or alter an opaque carrier).
+        if family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+            && module == "core.prelude"
+            && member_name == "keep"
+            && symbol == "jet_keep"
+        {
+            let mut values = args.into_iter();
+            let value = values
+                .next()
+                .ok_or_else(|| mir_error_at("MIR Prelude keep route requires one value", span))?;
+            if values.next().is_some() {
+                return Err(mir_error_at(
+                    "MIR Prelude keep route received extra values",
+                    span,
+                ));
+            }
+            return Ok(value);
+        }
+        if view_range {
+            let Some((receiver, view_args)) = args.split_first() else {
+                return Err(mir_error_at(
+                    "MIR view route has no receiver",
+                    span,
+                ));
+            };
+            let receiver = runtime_to_data(receiver.clone(), span)?;
+            let (start, end, exclusive) = match view_args {
+                [range] => {
+                    let range = runtime_to_data(range.clone(), span)?;
+                    let MirEvalValue::Struct { type_name, fields } = range else {
+                        return Err(mir_error_at(
+                            "MIR view route range is not a Range",
+                            span,
+                        ));
+                    };
+                    if type_name != crate::Syntax::TYPE_RANGE {
+                        return Err(mir_error_at(
+                            "MIR view route range has the wrong type",
+                            span,
+                        ));
+                    }
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find_map(|(field, value)| (field == name).then_some(value.clone()))
+                    };
+                    Ok((
+                        int_value(
+                            field("start")
+                                .ok_or_else(|| mir_error_at("MIR view range has no start", span))?,
+                            span,
+                        )?,
+                        int_value(
+                            field("end")
+                                .ok_or_else(|| mir_error_at("MIR view range has no end", span))?,
+                            span,
+                        )?,
+                        match field("exclusive") {
+                            Some(value) => match value {
+                                MirEvalValue::Bool(value) => value,
+                                _ => {
+                                    return Err(mir_error_at(
+                                        "MIR view range exclusive flag is not Bool",
+                                        span,
+                                    ))
+                                }
+                            },
+                            None => {
+                                return Err(mir_error_at(
+                                    "MIR view range has no exclusive flag",
+                                    span,
+                                ))
+                            }
+                        },
+                    ))
+                }
+                [start, end] => Ok((
+                    int_value(runtime_to_data(start.clone(), span)?, span)?,
+                    int_value(runtime_to_data(end.clone(), span)?, span)?,
+                    false,
+                )),
+                _ => {
+                    return Err(mir_error_at(
+                        "MIR view route expects a Range or start/end",
+                        span,
+                    ))
+                }
+            }?;
+            let len = match &receiver {
+                MirEvalValue::List(values) => values.len(),
+                MirEvalValue::Bytes(bytes) => bytes.len(),
+                _ => {
+                    return Err(mir_error_at(
+                        "MIR view receiver is not a List",
+                        span,
+                    ))
+                }
+            };
+            let len = i64::try_from(len)
+                .map_err(|_| mir_error_at("MIR view receiver is too large", span))?;
+            let end_exclusive = if exclusive {
+                end
+            } else {
+                end.checked_add(1)
+                    .ok_or_else(|| mir_error_at("MIR view range endpoint overflows Int", span))?
+            };
+            if start < 0 || end < 0 || start > end || end_exclusive > len {
+                return Err(mir_error_at(
+                    &format!(
+                        "can't view {len} items from {start} to {end} ({})",
+                        if exclusive { "exclusive" } else { "inclusive" }
+                    ),
+                    span,
+                ));
+            }
+            let start = usize::try_from(start)
+                .map_err(|_| mir_error_at("MIR view range start is not addressable", span))?;
+            let end = usize::try_from(end_exclusive)
+                .map_err(|_| mir_error_at("MIR view range end is not addressable", span))?;
+            let result = match receiver {
+                MirEvalValue::List(values) => MirEvalValue::List(values[start..end].to_vec()),
+                MirEvalValue::Bytes(bytes) => MirEvalValue::Bytes(bytes[start..end].to_vec()),
+                _ => unreachable!("view receiver shape was checked above"),
+            };
+            return Ok(RuntimeValue::Data(result));
+        }
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && module == "core.builtin"
             && matches!(
@@ -14203,8 +14884,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ));
             };
             let value = runtime_to_data(value.clone(), span)?;
-            let MirEvalValue::Bytes(bytes) = value else {
-                return Err(mir_error_at("MIR Reader.over value is not Bytes", span));
+            let bytes = match value {
+                MirEvalValue::Bytes(bytes) => bytes,
+                MirEvalValue::List(values) => values
+                    .into_iter()
+                    .map(|value| {
+                        let value = int_value(value, span)?;
+                        u8::try_from(value).map_err(|_| {
+                            mir_error_at(
+                                "MIR Reader.over byte list contains a value outside U8",
+                                span,
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+                _ => {
+                    return Err(mir_error_at("MIR Reader.over value is not Bytes", span));
+                }
             };
             let reader = if symbol == "jet_reader_over_owned" {
                 jet_foundation::StreamCursor::jet_reader_over_owned(bytes)
@@ -14219,6 +14915,209 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
                 Arc::new(Mutex::new(reader)),
             )));
+        }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && module == "core.handle"
+            && member_name.starts_with("reader.")
+            && member_name != "reader.over"
+        {
+            let Some((receiver, method_args)) = args.split_first() else {
+                return Err(mir_error_at(
+                    "MIR Reader method route has no receiver",
+                    span,
+                ));
+            };
+            let reader = mir_reader_handle(receiver, span)?;
+            match member_name.as_str() {
+                "reader.remaining" => {
+                    if !method_args.is_empty() {
+                        return Err(mir_error_at(
+                            "MIR Reader.remaining route has invalid checked arity",
+                            span,
+                        ));
+                    }
+                    let reader = reader
+                        .lock()
+                        .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                    return Ok(RuntimeValue::Data(MirEvalValue::Int(
+                        jet_foundation::StreamCursor::jet_reader_remaining(&reader),
+                    )));
+                }
+                "reader.at_end" => {
+                    if !method_args.is_empty() {
+                        return Err(mir_error_at(
+                            "MIR Reader.at_end route has invalid checked arity",
+                            span,
+                        ));
+                    }
+                    let reader = reader
+                        .lock()
+                        .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                    return Ok(RuntimeValue::Data(MirEvalValue::Bool(
+                        jet_foundation::StreamCursor::jet_reader_at_end(&reader),
+                    )));
+                }
+                "reader.seek" => {
+                    let [position] = method_args else {
+                        return Err(mir_error_at(
+                            "MIR Reader.seek route has invalid checked arity",
+                            span,
+                        ));
+                    };
+                    let position = int_value(runtime_to_data(position.clone(), span)?, span)?;
+                    let result = {
+                        let mut reader = reader
+                            .lock()
+                            .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                        jet_foundation::StreamCursor::jet_reader_seek(&mut reader, position)
+                            .map(|_| MirEvalValue::Unit)
+                    };
+                    return Ok(mir_pattern_result(result));
+                }
+                "reader.skip" => {
+                    let [count] = method_args else {
+                        return Err(mir_error_at(
+                            "MIR Reader.skip route has invalid checked arity",
+                            span,
+                        ));
+                    };
+                    let count = int_value(runtime_to_data(count.clone(), span)?, span)?;
+                    let result = {
+                        let mut reader = reader
+                            .lock()
+                            .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                        jet_foundation::StreamCursor::jet_reader_skip(&mut reader, count)
+                            .map(|_| MirEvalValue::Unit)
+                    };
+                    return Ok(mir_pattern_result(result));
+                }
+                "reader.take" => {
+                    let [count] = method_args else {
+                        return Err(mir_error_at(
+                            "MIR Reader.take route has invalid checked arity",
+                            span,
+                        ));
+                    };
+                    let count = int_value(runtime_to_data(count.clone(), span)?, span)?;
+                    let result = {
+                        let mut reader = reader
+                            .lock()
+                            .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                        jet_foundation::StreamCursor::jet_reader_take(&mut reader, count).map(
+                            |bytes| {
+                                MirEvalValue::List(
+                                    bytes
+                                        .into_iter()
+                                        .map(|value| MirEvalValue::Int(i64::from(value)))
+                                        .collect(),
+                                )
+                            },
+                        )
+                    };
+                    return Ok(mir_pattern_result(result));
+                }
+                _ => {}
+            }
+            let result = {
+                let mut reader = reader
+                    .lock()
+                    .map_err(|_| mir_error_at("MIR Reader is already borrowed", span))?;
+                match (member_name.as_str(), method_args) {
+                    ("reader.read_u8", []) => jet_foundation::StreamCursor::jet_reader_read_u8(
+                        &mut reader,
+                    )
+                    .map(|value| MirEvalValue::Int(i64::from(value))),
+                    ("reader.read_i8", []) => jet_foundation::StreamCursor::jet_reader_read_i8(
+                        &mut reader,
+                    )
+                    .map(|value| MirEvalValue::Int(i64::from(value))),
+                    ("reader.read_u16_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u16_le(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_u16_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u16_be(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_i16_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i16_le(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_i16_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i16_be(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_u32_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u32_le(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_u32_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u32_be(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_i32_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i32_le(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_i32_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i32_be(&mut reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    ("reader.read_u64_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u64_le(&mut reader)
+                            .map(mir_unsigned_integer)
+                    }
+                    ("reader.read_u64_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_u64_be(&mut reader)
+                            .map(mir_unsigned_integer)
+                    }
+                    ("reader.read_i64_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i64_le(&mut reader)
+                            .map(MirEvalValue::Int)
+                    }
+                    ("reader.read_i64_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_i64_be(&mut reader)
+                            .map(MirEvalValue::Int)
+                    }
+                    ("reader.read_f32_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_f32_le(&mut reader).map(
+                            |value| MirEvalValue::Float {
+                                value: f64::from(value),
+                                f32: true,
+                            },
+                        )
+                    }
+                    ("reader.read_f32_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_f32_be(&mut reader).map(
+                            |value| MirEvalValue::Float {
+                                value: f64::from(value),
+                                f32: true,
+                            },
+                        )
+                    }
+                    ("reader.read_f64_le", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_f64_le(&mut reader).map(
+                            |value| MirEvalValue::Float { value, f32: false },
+                        )
+                    }
+                    ("reader.read_f64_be", []) => {
+                        jet_foundation::StreamCursor::jet_reader_read_f64_be(&mut reader).map(
+                            |value| MirEvalValue::Float { value, f32: false },
+                        )
+                    }
+                    ("reader.peek", []) => {
+                        jet_foundation::StreamCursor::jet_reader_peek(&reader)
+                            .map(|value| MirEvalValue::Int(i64::from(value)))
+                    }
+                    _ => {
+                        return Err(mir_error_at(
+                            "MIR Reader method route has invalid checked arity",
+                            span,
+                        ))
+                    }
+                }
+            };
+            return Ok(mir_pattern_result(result));
         }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
             && module == "core.handle"
@@ -14329,7 +15228,152 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return self.eval_allocator_runtime(&member_name, args, result_ty, span);
         }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
-            && module == "core.http"
+            && module == "core.handle"
+            && member_name == "http.request_header"
+        {
+            let [request, name, rest @ ..] = args.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR HTTP request header expects request and name",
+                    span,
+                ));
+            };
+            if rest.len() > 1 {
+                return Err(mir_error_at(
+                    "MIR HTTP request header received extra arguments",
+                    span,
+                ));
+            }
+            let request =
+                runtime_to_data(self.materialize_runtime(request.clone(), span)?, span)?;
+            let name = match runtime_to_data(self.materialize_runtime(name.clone(), span)?, span)? {
+                MirEvalValue::String(name) => name,
+                _ => return Err(mir_error_at("MIR HTTP header name is not a String", span)),
+            };
+            let MirEvalValue::Struct { mut fields, .. } = request else {
+                return Err(mir_error_at("MIR HTTP request is not a request carrier", span));
+            };
+            let headers = fields
+                .iter_mut()
+                .find_map(|(field, value)| (field == "headers").then_some(value))
+                .ok_or_else(|| mir_error_at("MIR HTTP request has no headers", span))?;
+            let MirEvalValue::Map(headers) = headers else {
+                return Err(mir_error_at("MIR HTTP request headers are not a map", span));
+            };
+            if let Some(value) = rest.first() {
+                let value = match runtime_to_data(
+                    self.materialize_runtime(value.clone(), span)?,
+                    span,
+                )? {
+                    MirEvalValue::String(value) => value,
+                    _ => {
+                        return Err(mir_error_at(
+                            "MIR HTTP header value is not a String",
+                            span,
+                        ))
+                    }
+                };
+                if let Some((_, existing)) = headers.iter_mut().find(|(key, _)| {
+                    matches!(key, MirConstKey::String(candidate) if candidate.eq_ignore_ascii_case(&name))
+                }) {
+                    *existing = MirEvalValue::String(value);
+                } else {
+                    headers.push((MirConstKey::String(name), MirEvalValue::String(value)));
+                }
+                return Ok(RuntimeValue::Data(MirEvalValue::Struct {
+                    type_name: "HTTPRequest".to_string(),
+                    fields,
+                }));
+            }
+            let value = headers.iter().find_map(|(key, value)| match (key, value) {
+                (MirConstKey::String(candidate), MirEvalValue::String(value))
+                    if candidate.eq_ignore_ascii_case(&name) =>
+                {
+                    Some(value.clone())
+                }
+                _ => None,
+            });
+            return Ok(RuntimeValue::Data(match value {
+                Some(value) => MirEvalValue::Present(Box::new(MirEvalValue::String(value))),
+                None => MirEvalValue::Absent {
+                    element: MirType::from_kind(MirTypeKind::String),
+                },
+            }));
+        }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && module == "core.handle"
+            && member_name == "http.request_param"
+        {
+            let [request, name] = args.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR HTTP request parameter expects request and name",
+                    span,
+                ));
+            };
+            let request =
+                runtime_to_data(self.materialize_runtime(request.clone(), span)?, span)?;
+            let name = match runtime_to_data(self.materialize_runtime(name.clone(), span)?, span)? {
+                MirEvalValue::String(name) => name,
+                _ => {
+                    return Err(mir_error_at(
+                        "MIR HTTP request parameter name is not a String",
+                        span,
+                    ))
+                }
+            };
+            let MirEvalValue::Struct { fields, .. } = request else {
+                return Err(mir_error_at("MIR HTTP request is not a request carrier", span));
+            };
+            let params = fields
+                .into_iter()
+                .find_map(|(field, value)| (field == "params").then_some(value));
+            let value = match params {
+                Some(MirEvalValue::Map(params)) => {
+                    params.into_iter().find_map(|(key, value)| match (key, value) {
+                        (MirConstKey::String(candidate), MirEvalValue::String(value))
+                            if candidate == name =>
+                        {
+                            Some(value)
+                        }
+                        _ => None,
+                    })
+                }
+                None => None,
+                Some(_) => {
+                    return Err(mir_error_at(
+                        "MIR HTTP request parameters are not a map",
+                        span,
+                    ))
+                }
+            };
+            return Ok(RuntimeValue::Data(match value {
+                Some(value) => MirEvalValue::Present(Box::new(MirEvalValue::String(value))),
+                None => MirEvalValue::Absent {
+                    element: MirType::from_kind(MirTypeKind::String),
+                },
+            }));
+        }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && module == "core.handle"
+            && member_name == "http.request_send"
+        {
+            let [request] = args.as_slice() else {
+                return Err(mir_error_at("MIR HTTP send expects one request", span));
+            };
+            let request = runtime_to_data(request.clone(), span)?;
+            let result = crate::Comptime::try_ambient_mir_handle(
+                "http_client.send",
+                None,
+                vec![request],
+                span,
+            )
+            .ok_or_else(|| mir_error_at("MIR HTTP client host is unavailable", span))??;
+            let crate::Comptime::AmbientMirHandleResult::Value(response) = result else {
+                return Err(mir_error_at("MIR HTTP client returned an invalid handle", span));
+            };
+            return Ok(RuntimeValue::Data(MirEvalValue::Present(Box::new(response))));
+        }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && matches!(module.as_str(), "core.http" | "core.handle")
             && matches!(
                 member_name.as_str(),
                 "request_text"
@@ -14342,7 +15386,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return self.eval_http_text_runtime(&member_name, args, span);
         }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
-            && module == "core.http"
+            && matches!(module.as_str(), "core.http" | "core.handle")
             && matches!(
                 member_name.as_str(),
                 "request_method"
@@ -14356,7 +15400,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
 
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
-            && module == "core.http"
+            && matches!(module.as_str(), "core.http" | "core.handle")
             && member_name == "response_header"
         {
             return self.eval_http_response_header_runtime(args, span);
@@ -14416,6 +15460,53 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
             return self
                 .eval_exact_int_prelude(&member_name, values, span)
+                .map(RuntimeValue::Data);
+        }
+        // Fixed-width overflow rows carry their native word as a MIR integer
+        // carrier.  Keep the evaluator on the shared fixed-arithmetic kernel;
+        // converting through `CtBigInt::wrapping_u64` preserves U64 values
+        // whose native carrier uses the negative half of the i64 word.
+        if family == jet_foundation::MIR::MirPreludeFamily::Overflow
+            && module == "core.numeric"
+            && member_name == "u64.wrapping.add"
+            && symbol == "jet_u64_wrapping_add"
+        {
+            let (signed, bits) = result_ty
+                .and_then(MirType::fixed_int)
+                .ok_or_else(|| mir_error_at("MIR fixed overflow route has no integer result type", span))?;
+            let values = args
+                .into_iter()
+                .map(|value| {
+                    let value = self.materialize_runtime(value, span)?;
+                    runtime_to_data(value, span)
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            let [left, right] = values.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR U64 wrapping-add route requires two operands",
+                    span,
+                ));
+            };
+            let carrier = |value: &MirEvalValue| {
+                mir_exact_big(value)
+                    .map(|value| value.wrapping_u64() as i64)
+                    .ok_or_else(|| {
+                        mir_error_at(
+                            "MIR fixed overflow operand requires an integer carrier",
+                            span,
+                        )
+                    })
+            };
+            let result = crate::Comptime::MathLayout::overflow_opt(
+                crate::Syntax::BUILTIN_WRAPPING,
+                jet_foundation::AST::BinOp::Add,
+                carrier(left)?,
+                carrier(right)?,
+                signed,
+                bits,
+                span,
+            )?;
+            return crate::Comptime::MirBridge::ct_to_mir_value(result, span)
                 .map(RuntimeValue::Data);
         }
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
@@ -14738,6 +15829,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "string_trim" => Some("trim"),
                 "string_upper" => Some("to_upper"),
                 "string_replace" | "replace" => Some("replace"),
+                "string_repeat" => Some("repeat"),
                 "string_lower" => Some("to_lower"),
                 "iter_compare" => Some("compare"),
                 "iter_split" => Some("split"),
@@ -14943,6 +16035,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             ("jet_err_from_message", [CtValue::Str(message)]) => Ok(CtValue::from_jet_err(
                 &jet_foundation::Outcome::jet_err_from_message(message.clone()),
             )),
+            (
+                "jet_err_apply_conversion",
+                [error, CtValue::Str(source), CtValue::Str(target)],
+            ) => Ok({
+                let mut error = error.to_jet_err().ok_or_else(|| {
+                    mir_error_at(
+                        "checked conversion history requires the default Err carrier",
+                        span,
+                    )
+                })?;
+                jet_foundation::Outcome::jet_err_apply_conversion(
+                    &mut error,
+                    source.clone(),
+                    target.clone(),
+                );
+                CtValue::from_jet_err(&error)
+            }),
             (
                 "jet_err_with_context_frame",
                 [error, CtValue::Str(file), CtValue::Int(line), CtValue::Str(function), CtValue::Str(note)],
@@ -16845,6 +17954,15 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let value = self.read_place(address.frame, address.place, span)?;
                 self.runtime_to_ct(value, span)
             }
+            RuntimeValue::SharedCell(cell) => {
+                let storage = cell.guard.storage.as_ref().ok_or_else(|| {
+                    mir_error_at("MIR Shared value has no transferable storage", span)
+                })?;
+                Ok(mir_runtime_owner_value(MirSharedTransfer {
+                    payload: storage.transfer.clone(),
+                    path: cell.path.clone(),
+                }))
+            }
             value => {
                 crate::Comptime::MirBridge::mir_to_ct_value(runtime_to_data(value, span)?, span)
             }
@@ -16854,6 +17972,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     fn standalone_closure_value(
         &mut self,
         value: RuntimeValue,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let handlers = MIR_HTTP_HANDLERS.with(|active| active.borrow().clone());
+        let http_handlers = handlers
+            .into_iter()
+            .map(|(raw, handler)| {
+                self.standalone_closure_value_with_http_handlers(
+                    handler,
+                    BTreeMap::new(),
+                    span,
+                )
+                .map(|handler| (raw, handler))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        self.standalone_closure_value_with_http_handlers(value, http_handlers, span)
+    }
+
+    fn standalone_closure_value_with_http_handlers(
+        &mut self,
+        value: RuntimeValue,
+        http_handlers: BTreeMap<i64, CtValue>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         if let RuntimeValue::Ambient(value) = value {
@@ -16891,6 +18030,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             function: closure.function,
             captures,
             config: self.config.clone(),
+            ambient: crate::Comptime::ambient_runtime_snapshot(),
+            http_handlers,
         };
         Ok(CtValue::Closure(Arc::new(ClosureData {
             lambda: Lambda {
@@ -16964,6 +18105,31 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.invoke_function_with_capture_cells(function, args, captures, capture_cells, span)
     }
 
+    fn invoke_edit_callback(
+        &mut self,
+        callback: RuntimeValue,
+        value: RuntimeValue,
+        span: Span,
+    ) -> Result<(RuntimeValue, RuntimeValue), Diagnostic> {
+        if let RuntimeValue::Ambient(callback) = callback {
+            let result = self.invoke_ambient_callback(callback, vec![value.clone()], span)?;
+            return Ok((result, value));
+        }
+        let (function, captures, capture_cells) = self.closure_parts(callback, span)?;
+        let (result, mut parameters) = self.invoke_function_with_capture_cells_and_parameters(
+            function,
+            vec![value],
+            captures,
+            capture_cells,
+            span,
+        )?;
+        let value = parameters
+            .drain(..)
+            .next()
+            .ok_or_else(|| mir_error_at("MIR Cell callback returned no payload parameter", span))?;
+        Ok((result, value))
+    }
+
     fn invoke_callback(
         &mut self,
         callback: RuntimeValue,
@@ -16991,6 +18157,25 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
+        self.invoke_function_with_capture_cells_and_parameters(
+            function,
+            args,
+            captures,
+            capture_cells,
+            span,
+        )
+        .map(|(value, _)| value)
+    }
+
+    fn invoke_function_with_capture_cells_and_parameters(
+        &mut self,
+        function: MirFunctionId,
+        args: Vec<RuntimeValue>,
+        captures: Vec<RuntimeValue>,
+        capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
+        span: Span,
+    ) -> Result<(RuntimeValue, Vec<RuntimeValue>), Diagnostic> {
+        self.completed_callback_parameters = None;
         let parent_depth = self.frames.len();
         let frame = Frame::with_capture_cells(
             program_function(self.program, function)?,
@@ -17003,12 +18188,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.continuations.push(Some(Continuation { result: None }));
         let (value, status, _) = self.run_runtime_until(Some(parent_depth))?;
         if status != MirExecutionStatus::Completed {
+            self.completed_callback_parameters = None;
             return Err(mir_error_at(
                 "MIR callback suspended before returning",
                 span,
             ));
         }
-        Ok(value)
+        let parameters = self
+            .completed_callback_parameters
+            .take()
+            .ok_or_else(|| mir_error_at("MIR callback parameter state is unavailable", span))?;
+        Ok((value, parameters))
     }
     fn eval_foreign_call(
         &mut self,
@@ -18120,6 +19310,33 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
     }
 
+    fn invoke_http_handler(
+        &mut self,
+        handler: MirEvalValue,
+        args: Vec<MirEvalValue>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        if let Some(handler) = mir_http_handler_value(&handler) {
+            let (function, captures, capture_cells) = self.closure_parts(handler, span)?;
+            return self.invoke_function_with_capture_cells(
+                function,
+                args.into_iter().map(RuntimeValue::Data).collect(),
+                captures,
+                capture_cells,
+                span,
+            );
+        }
+        let callback = mir_http_standalone_handler_value(&handler)
+            .ok_or_else(|| mir_error_at("MIR HTTP handler token has no callable owner", span))?;
+        let args = args
+            .into_iter()
+            .map(|value| crate::Comptime::MirBridge::mir_to_ct_value(value, span))
+            .collect::<Result<Vec<_>, _>>()?;
+        let value = crate::Comptime::try_ambient_standalone_closure(&callback, args, span)
+            .ok_or_else(|| mir_error_at("MIR HTTP handler has no standalone host", span))??;
+        runtime_from_ct(value, span)
+    }
+
     fn eval_http_router_dispatch(
         &mut self,
         receiver: RuntimeValue,
@@ -18177,15 +19394,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             ));
         };
-        let handler = mir_http_handler_value(&handler).unwrap_or(RuntimeValue::Data(handler));
-        let (function, captures, capture_cells) = self.closure_parts(handler, span)?;
-        self.invoke_function_with_capture_cells(
-            function,
-            args.into_iter().map(RuntimeValue::Data).collect(),
-            captures,
-            capture_cells,
-            span,
-        )
+        self.invoke_http_handler(handler, args, span)
     }
 
     fn eval_clock_handle(
@@ -18586,6 +19795,37 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ));
             }
         }
+        // `keep` is a plain CoreCall (not a direct PreludeCall), so handle the
+        // canonical row before the generic CtValue dispatcher.  Moving the
+        // runtime carrier preserves native U64 and opaque values without an
+        // allocation; `jet_keep`'s only observable contract is identity.
+        if row.module == "core.prelude"
+            && row.member == "keep"
+            && row.symbol.name() == "jet_keep"
+        {
+            let route_row = self.prelude_row(route, span)?;
+            if route_row.family != jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+                || route_row.module != "core.prelude"
+                || route_row.member != "keep"
+                || route_row.symbol.name() != "jet_keep"
+            {
+                return Err(mir_error_at(
+                    "MIR core.prelude.keep route has a non-canonical Prelude row",
+                    span,
+                ));
+            }
+            let mut values = args.into_iter();
+            let value = values
+                .next()
+                .ok_or_else(|| mir_error_at("MIR core.prelude.keep expects one value", span))?;
+            if values.next().is_some() {
+                return Err(mir_error_at(
+                    "MIR core.prelude.keep received extra values",
+                    span,
+                ));
+            }
+            return Ok(value);
+        }
         if row.module == "core.sys" && row.member == "atexit" {
             let [handler] = args.as_slice() else {
                 return Err(mir_error_at(
@@ -18785,6 +20025,53 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.ensure_core_route(id, route, span)?;
             return self.eval_game_run(args, span);
         }
+        if row.module == "core.http.client" && row.member == "request" {
+            self.ensure_core_route(id, route, span)?;
+            let [method, url] = args.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR HTTP client request expects method and URL",
+                    span,
+                ));
+            };
+            let method = match self.materialize_runtime(method.clone(), span)? {
+                RuntimeValue::Data(MirEvalValue::String(method)) => method,
+                _ => return Err(mir_error_at("MIR HTTP method is not a String", span)),
+            };
+            let url = match self.materialize_runtime(url.clone(), span)? {
+                RuntimeValue::Data(MirEvalValue::String(url)) => url,
+                _ => return Err(mir_error_at("MIR HTTP URL is not a String", span)),
+            };
+            return Ok(RuntimeValue::Data(MirEvalValue::Struct {
+                type_name: "HTTPRequest".to_string(),
+                fields: vec![
+                    ("method".to_string(), MirEvalValue::String(method)),
+                    ("url".to_string(), MirEvalValue::String(url)),
+                    ("headers".to_string(), MirEvalValue::Map(Vec::new())),
+                    ("body".to_string(), MirEvalValue::Bytes(Vec::new())),
+                ],
+            }));
+        }
+        if row.module == "core.http.server" && row.member == "static_file" {
+            self.ensure_core_route(id, route, span)?;
+            let [path, mime] = args.as_slice() else {
+                return Err(mir_error_at(
+                    "MIR HTTP static_file expects path and mime",
+                    span,
+                ));
+            };
+            let path = match self.materialize_runtime(path.clone(), span)? {
+                RuntimeValue::Data(MirEvalValue::String(path)) => path,
+                _ => return Err(mir_error_at("MIR HTTP static_file path is not a String", span)),
+            };
+            let mime = match self.materialize_runtime(mime.clone(), span)? {
+                RuntimeValue::Data(MirEvalValue::String(mime)) => mime,
+                _ => return Err(mir_error_at("MIR HTTP static_file mime is not a String", span)),
+            };
+            return runtime_from_ct(
+                crate::Comptime::AppLite::http_static_file(path, mime),
+                span,
+            );
+        }
         if row.module == "core.http.server" && row.member == "response" {
             self.ensure_core_route(id, route, span)?;
             let [status, body] = args.as_slice() else {
@@ -18960,6 +20247,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 RuntimeValue::ForeignHandle { token } => token
                     .raw()
                     .ok_or_else(|| mir_error_at("MIR HTTP mux handle was moved", span))?,
+                RuntimeValue::Data(MirEvalValue::Int(raw)) => *raw,
                 _ => return Err(mir_error_at("MIR HTTP serve mux is not a mux handle", span)),
             };
             let invocation = crate::Comptime::try_ambient_mir_handle(
@@ -19000,17 +20288,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     _ => None,
                 })
                 .ok_or_else(|| mir_error_at("MIR HTTP invocation has no stream", span))?;
-            let handler = mir_http_handler_value(&handler).unwrap_or(RuntimeValue::Data(handler));
-            let (function, captures, capture_cells) = self.closure_parts(handler, span)?;
-            let result = self.invoke_function_with_capture_cells(
-                function,
-                call_args.into_iter().map(RuntimeValue::Data).collect(),
-                captures,
-                capture_cells,
-                span,
-            )?;
+            let result = self.invoke_http_handler(handler, call_args, span)?;
             let response = match result {
                 RuntimeValue::Data(MirEvalValue::Present(value)) => *value,
+                RuntimeValue::Data(MirEvalValue::FailedTold(error)) => {
+                    let error =
+                        crate::Comptime::MirBridge::mir_to_ct_value(*error, span)?;
+                    let response = crate::Comptime::AppLite::http_error_response(error)
+                        .map_err(|message| mir_error_at(&message, span))?;
+                    runtime_to_data(runtime_from_ct(response, span)?, span)?
+                }
                 RuntimeValue::Data(value) => value,
                 _ => MirEvalValue::Struct {
                     type_name: "HTTPResponse".to_string(),
@@ -19761,7 +21048,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         ) {
             return Ok(false);
         }
-        let steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+        let steps = self.move_steps_for_place(frame_index, place.id, span)?;
         let replacement = runtime_to_data(value.clone(), span)?;
         self.invalidate_base_overrides(frame_index, &place.base)?;
         let mut data = match self.take_base_value(frame_index, &place.base, span)? {
@@ -19991,8 +21278,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 require_address_access(&address, MirAccess::Move, span)?;
                 let _ = self.take_base_value(frame_index, &place.base, span)?;
                 self.store_base_value(frame_index, &place.base, RuntimeValue::Moved, span)?;
-                let mut steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+                let mut steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
                 steps.extend_from_slice(extra_steps);
+                let steps = self.canonicalize_move_steps_for_place(
+                    address.frame,
+                    address.place,
+                    &steps,
+                    span,
+                )?;
                 return if steps.is_empty() {
                     self.move_place(address.frame, address.place, span)
                 } else {
@@ -20004,7 +21297,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if matches!(base, RuntimeValue::Moved) {
             return Err(mir_error_at("MIR place value was moved", span));
         }
-        let mut steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+        let mut steps = self.move_steps_for_place(frame_index, place.id, span)?;
         steps.extend_from_slice(extra_steps);
         let (updated, moved) = self.take_runtime_steps(base, &steps, span)?;
         self.store_base_value(frame_index, &place.base, updated, span)?;
@@ -20037,10 +21330,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 require_address_access(&address, MirAccess::Move, span)?;
                 let _ = self.take_base_value(frame_index, &place.base, span)?;
                 self.store_base_value(frame_index, &place.base, RuntimeValue::Moved, span)?;
-                let steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+                let steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
                 self.frames[frame_index]
                     .place_overrides
                     .insert(place_id, RuntimeValue::Moved);
+                let steps = self.canonicalize_move_steps_for_place(
+                    address.frame,
+                    address.place,
+                    &steps,
+                    span,
+                )?;
                 return if steps.is_empty() {
                     self.move_place(address.frame, address.place, span)
                 } else {
@@ -20062,7 +21361,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 .insert(place_id, RuntimeValue::Moved);
             return Ok(override_value.unwrap_or(base));
         }
-        let steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+        let steps = self.move_steps_for_place(frame_index, place.id, span)?;
         let (updated, moved) = self.take_runtime_steps(base, &steps, span)?;
         self.store_base_value(frame_index, &place.base, updated, span)?;
         self.frames[frame_index]
@@ -20071,30 +21370,90 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(override_value.unwrap_or(moved))
     }
 
-    fn move_steps_for_frame(
+    fn raw_move_steps_for_place(
         &self,
         frame_index: usize,
-        projections: &[MirProjection],
+        place_id: MirPlaceId,
         span: Span,
     ) -> Result<Vec<MoveStep>, Diagnostic> {
-        projections
+        let function = program_function(self.program, self.frames[frame_index].function)?;
+        let place = function
+            .places
             .iter()
-            .map(|projection| match projection {
-                MirProjection::Field { field, .. } => {
-                    let name = field_name(self.program, *field)
-                        .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
-                    Ok(MoveStep::Field {
+            .find(|place| place.id == place_id)
+            .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
+        let mut steps = Vec::with_capacity(place.projections.len());
+        for projection in &place.projections {
+            match projection {
+                MirProjection::Field { field, .. } => steps.push(MoveStep::Field {
+                    field: *field,
+                    name: String::new(),
+                }),
+                MirProjection::Index { index, kind, .. } => {
+                    let index = runtime_to_data(self.value(frame_index, *index, span)?, span)?;
+                    steps.push(MoveStep::Index {
+                        value: index,
+                        kind: *kind,
+                    });
+                }
+                MirProjection::Deref { .. } => steps.push(MoveStep::Deref),
+            }
+        }
+        Ok(steps)
+    }
+
+    fn move_steps_for_place(
+        &self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        span: Span,
+    ) -> Result<Vec<MoveStep>, Diagnostic> {
+        let steps = self.raw_move_steps_for_place(frame_index, place_id, span)?;
+        self.canonicalize_move_steps_for_place(frame_index, place_id, &steps, span)
+    }
+
+    fn canonicalize_move_steps_for_place(
+        &self,
+        frame_index: usize,
+        place_id: MirPlaceId,
+        steps: &[MoveStep],
+        span: Span,
+    ) -> Result<Vec<MoveStep>, Diagnostic> {
+        let function = program_function(self.program, self.frames[frame_index].function)?;
+        let place = function
+            .places
+            .iter()
+            .find(|place| place.id == place_id)
+            .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
+        let mut current_ty = function
+            .places
+            .iter()
+            .find(|root| root.base == place.base && root.projections.is_empty())
+            .map(|root| root.ty.clone())
+            .ok_or_else(|| mir_error_at("MIR place has no checked root type", span))?;
+        let mut canonical = Vec::with_capacity(steps.len());
+        for step in steps {
+            match step {
+                MoveStep::Field { field, .. } => {
+                    let (name, field_ty) =
+                        checked_field_for_type(self.program, &current_ty, *field, span)?;
+                    canonical.push(MoveStep::Field {
                         field: *field,
                         name,
-                    })
+                    });
+                    current_ty = field_ty;
                 }
-                MirProjection::Index { index, kind, .. } => Ok(MoveStep::Index {
-                    value: runtime_to_data(self.value(frame_index, *index, span)?, span)?,
-                    kind: *kind,
-                }),
-                MirProjection::Deref { .. } => Ok(MoveStep::Deref),
-            })
-            .collect()
+                MoveStep::Index { value, kind } => {
+                    canonical.push(MoveStep::Index {
+                        value: value.clone(),
+                        kind: *kind,
+                    });
+                    current_ty = indexed_value_type(&current_ty, *kind);
+                }
+                MoveStep::Deref => canonical.push(MoveStep::Deref),
+            }
+        }
+        Ok(canonical)
     }
 
     fn take_runtime_steps(
@@ -20158,6 +21517,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::SharedSnapshot(_)
                 | RuntimeValue::Transaction(_)
                 | RuntimeValue::SharedTransaction(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::CellGuard(_)
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
@@ -20189,6 +21550,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::SharedSnapshot(_)
                 | RuntimeValue::Transaction(_)
                 | RuntimeValue::SharedTransaction(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::CellGuard(_)
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
@@ -20226,12 +21589,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     Ok((RuntimeValue::Moved, value))
                 }
                 RuntimeValue::CellGuard(guard) if rest.is_empty() => {
-                    let value = RuntimeValue::Data(cell_payload_read(
+                    let value = cell_payload_read(
                         self.program,
                         &guard.payload,
                         &guard.path,
                         span,
-                    )?);
+                    )?;
                     Ok((RuntimeValue::Moved, value))
                 }
                 RuntimeValue::SharedGuard(_)
@@ -20240,6 +21603,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::SharedSnapshot(_)
                 | RuntimeValue::Transaction(_)
                 | RuntimeValue::SharedTransaction(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::CellGuard(_)
                 | RuntimeValue::Data(_)
                 | RuntimeValue::Atomic(_)
@@ -20396,6 +21761,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     | Some(RuntimeValue::Game(_))
                     | Some(RuntimeValue::Address(_))
                     | Some(RuntimeValue::Aggregate(_))
+                    | Some(RuntimeValue::Cell(_))
+
                     | Some(RuntimeValue::CellGuard(_))
                     | Some(RuntimeValue::GcRoot(_)) => {
                         self.frames[frame_index].values.insert(*source, value);
@@ -20447,6 +21814,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     | RuntimeValue::Atomic(_)
                     | RuntimeValue::Game(_)
                     | RuntimeValue::Aggregate(_)
+                    | RuntimeValue::Cell(_)
+
                     | RuntimeValue::CellGuard(_)
                     | RuntimeValue::GcRoot(_) => {
                         self.frames[frame_index].values.insert(*source, value);
@@ -20466,7 +21835,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
         match projection {
-            MirProjection::Field { field, .. } => self.project_field_id(value, *field, span),
+            MirProjection::Field { field, .. } => {
+                self.project_field_id(value, *field, span)
+            }
             MirProjection::Index {
                 index,
                 call,
@@ -20503,12 +21874,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     )?))
                 }
-                RuntimeValue::CellGuard(guard) => Ok(RuntimeValue::Data(cell_payload_read(
+                RuntimeValue::CellGuard(guard) => cell_payload_read(
                     self.program,
                     &guard.payload,
                     &guard.path,
                     span,
-                )?)),
+                ),
                 RuntimeValue::Moved
                 | RuntimeValue::Stream(_)
                 | RuntimeValue::StreamCursor(_)
@@ -20526,6 +21897,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::SharedSnapshot(_)
                 | RuntimeValue::Transaction(_)
                 | RuntimeValue::SharedTransaction(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
                     "MIR place dereference requires an address or guard",
@@ -20559,7 +21932,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         value: RuntimeValue,
         span: Span,
     ) -> Result<(), Diagnostic> {
-        let steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+        let steps = self.move_steps_for_place(frame_index, place.id, span)?;
         let base = self.read_base_for_write(frame_index, &place.base, span)?;
         let updated = self.replace_runtime_steps(base, &steps, value.clone(), span)?;
         self.write_base(frame_index, &place.base, updated, span)?;
@@ -20613,33 +21986,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Err(self.pool_index_stop(*location, context.as_ref(), span));
         };
 
-        let mut steps =
-            Vec::with_capacity(place.projections.len().saturating_sub(1) + extra_steps.len());
-        for projection in place.projections.iter().skip(1) {
-            match projection {
-                MirProjection::Field { field, .. } => {
-                    let name = field_name(self.program, *field)
-                        .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
-                    steps.push(MoveStep::Field {
-                        field: *field,
-                        name,
-                    });
-                }
-                MirProjection::Index { index, kind, .. } => {
-                    let index = runtime_to_data(self.value(frame_index, *index, span)?, span)?;
-                    steps.push(MoveStep::Index {
-                        value: index,
-                        kind: *kind,
-                    });
-                }
-                MirProjection::Deref { .. } => {
-                    return Err(mir_error_at(
-                        "MIR Pool place cannot project through a dereference",
-                        span,
-                    ));
-                }
-            }
+        let mut steps = self.move_steps_for_place(frame_index, place.id, span)?;
+        if steps.is_empty() {
+            return Err(mir_error_at("MIR Pool place has no checked index", span));
         }
+        steps.remove(0);
         steps.extend_from_slice(extra_steps);
 
         let current = {
@@ -20689,21 +22040,32 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         {
             return Err(mir_error_at("MIR place value was moved", span));
         }
-        if let &(MirPlaceBase::Capture(source) | MirPlaceBase::Parameter(source)) = &place.base {
-            if let Some(RuntimeValue::Address(address)) =
-                self.frames[frame_index].values.get(&source).cloned()
-            {
-                require_address_access(&address, MirAccess::Write, span)?;
-                let mut steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
-                steps.extend_from_slice(extra_steps);
-                if extra_steps.is_empty() && !place.projections.is_empty() {
-                    self.publish_live_value_update(&place, &value, span);
-                }
-                if steps.is_empty() {
-                    return self.write_place(address.frame, address.place, value, span);
-                }
-                return self.write_place_path(address.frame, address.place, &steps, value, span);
+        let address = match &place.base {
+            MirPlaceBase::Capture(source)
+            | MirPlaceBase::Parameter(source)
+            | MirPlaceBase::Temporary(source) => {
+                self.frames[frame_index].values.get(source).cloned()
             }
+            MirPlaceBase::Local(local) => self.frames[frame_index].locals.get(local).cloned(),
+            MirPlaceBase::Static(_) => None,
+        };
+        if let Some(RuntimeValue::Address(address)) = address {
+            require_address_access(&address, MirAccess::Write, span)?;
+            let mut steps = self.raw_move_steps_for_place(frame_index, place.id, span)?;
+            steps.extend_from_slice(extra_steps);
+            let steps = self.canonicalize_move_steps_for_place(
+                address.frame,
+                address.place,
+                &steps,
+                span,
+            )?;
+            if extra_steps.is_empty() && !place.projections.is_empty() {
+                self.publish_live_value_update(&place, &value, span);
+            }
+            if steps.is_empty() {
+                return self.write_place(address.frame, address.place, value, span);
+            }
+            return self.write_place_path(address.frame, address.place, &steps, value, span);
         }
         if place.projections.iter().any(|projection| {
             matches!(
@@ -20729,8 +22091,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if matches!(base, RuntimeValue::Moved) {
             return Err(mir_error_at("MIR place value was moved", span));
         }
-        let mut steps = self.move_steps_for_frame(frame_index, &place.projections, span)?;
+        let mut steps = self.move_steps_for_place(frame_index, place.id, span)?;
         steps.extend_from_slice(extra_steps);
+        let steps =
+            self.canonicalize_move_steps_for_place(frame_index, place.id, &steps, span)?;
         let updated = self.replace_runtime_steps(base, &steps, value.clone(), span)?;
         self.store_base_value(frame_index, &place.base, updated, span)?;
         if extra_steps.is_empty() {
@@ -20789,10 +22153,46 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     replace_data_steps(&mut data, steps, replacement, span)?;
                     Ok(RuntimeValue::Data(data))
                 }
+                RuntimeValue::Address(address) => {
+                    require_address_access(&address, MirAccess::Write, span)?;
+                    let mut address_steps = Vec::with_capacity(steps.len());
+                    address_steps.push(MoveStep::Field {
+                        field: *field,
+                        name: name.clone(),
+                    });
+                    address_steps.extend_from_slice(rest);
+                    self.write_place_path(
+                        address.frame,
+                        address.place,
+                        &address_steps,
+                        replacement,
+                        span,
+                    )?;
+                    Ok(RuntimeValue::Address(address))
+                }
+                RuntimeValue::SharedCell(cell) => {
+                    if let Some(storage) = &cell.guard.storage {
+                        storage.refresh_scalar_shadow(span)?;
+                    }
+                    let mut nested = cell.as_ref().clone();
+                    nested.path.push(name.clone());
+                    for step in rest {
+                        match step {
+                            MoveStep::Field { name, .. } => nested.path.push(name.clone()),
+                            MoveStep::Index { .. } | MoveStep::Deref => {
+                                return Err(mir_error_at(
+                                    "MIR projected Shared write requires field-only projection",
+                                    span,
+                                ));
+                            }
+                        }
+                    }
+                    write_shared_cell(&nested, replacement, span)?;
+                    Ok(RuntimeValue::SharedCell(cell))
+                }
                 RuntimeValue::Moved => Err(mir_error_at("MIR write parent is moved", span)),
                 RuntimeValue::Stream(_)
                 | RuntimeValue::StreamCursor(_)
-                | RuntimeValue::Address(_)
                 | RuntimeValue::Absent { .. }
                 | RuntimeValue::Closure(_)
                 | RuntimeValue::App(_)
@@ -20806,7 +22206,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::ProcessSpec { .. }
                 | RuntimeValue::DmaTransfer { .. }
                 | RuntimeValue::SharedGuard(_)
-                | RuntimeValue::SharedCell(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::CellGuard(_)
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
@@ -20839,6 +22240,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::DmaTransfer { .. }
                 | RuntimeValue::SharedGuard(_)
                 | RuntimeValue::SharedCell(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::CellGuard(_)
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
@@ -20883,6 +22286,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     write_shared_cell(&cell, replacement, span)?;
                     Ok(RuntimeValue::SharedGuard(guard))
                 }
+                RuntimeValue::CellGuard(guard) => {
+                    let mut mapped = guard.as_ref().clone();
+                    for step in rest {
+                        match step {
+                            MoveStep::Field { field, .. } => mapped.path.push(*field),
+                            MoveStep::Index { .. } | MoveStep::Deref => {
+                                return Err(mir_error_at(
+                                    "MIR projected CellGuard write requires field-only projection",
+                                    span,
+                                ));
+                            }
+                        }
+                    }
+                    write_cell_guard(self.program, &mapped, replacement, span)?;
+                    Ok(RuntimeValue::CellGuard(guard))
+                }
+
                 RuntimeValue::Moved => Err(mir_error_at("MIR place value was moved", span)),
                 RuntimeValue::Stream(_)
                 | RuntimeValue::StreamCursor(_)
@@ -20901,7 +22321,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 | RuntimeValue::DmaTransfer { .. }
                 | RuntimeValue::Aggregate(_)
                 | RuntimeValue::SharedCell(_)
-                | RuntimeValue::CellGuard(_)
+                | RuntimeValue::Cell(_)
+
                 | RuntimeValue::GcRoot(_)
                 | RuntimeValue::Game(_) => Err(mir_error_at(
                     "MIR projected dereference write requires an address",
@@ -20920,7 +22341,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<(), Diagnostic> {
         let mut steps = alias.steps;
-        steps.extend(self.move_steps_for_frame(frame_index, &place.projections, span)?);
+        steps.extend(self.move_steps_for_place(frame_index, place.id, span)?);
         self.write_place_path(alias.frame, alias.place, &steps, value, span)
     }
 
@@ -20953,11 +22374,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(());
         }
         let capture_address = match &place.base {
-            &MirPlaceBase::Capture(source) | &MirPlaceBase::Parameter(source) => matches!(
-                self.frames[frame_index].values.get(&source),
+            MirPlaceBase::Capture(source)
+            | MirPlaceBase::Parameter(source)
+            | MirPlaceBase::Temporary(source) => matches!(
+                self.frames[frame_index].values.get(source),
                 Some(RuntimeValue::Address(_))
             ),
-            MirPlaceBase::Local(_) | MirPlaceBase::Temporary(_) | MirPlaceBase::Static(_) => false,
+            MirPlaceBase::Local(local) => matches!(
+                self.frames[frame_index].locals.get(local),
+                Some(RuntimeValue::Address(_))
+            ),
+            MirPlaceBase::Static(_) => false,
         };
         let has_deref = place
             .projections
@@ -20999,15 +22426,26 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
             return Ok(());
         }
+        let canonical_steps = self.move_steps_for_place(frame_index, place.id, span)?;
         let mut updates = Vec::with_capacity(place.projections.len());
         for (projection_index, projection) in place.projections.iter().enumerate() {
             match projection {
                 MirProjection::Field { field, .. } => {
+                    let name = match canonical_steps.get(projection_index) {
+                        Some(MoveStep::Field { name, .. }) => name,
+                        _ => {
+                            return Err(mir_error_at(
+                                "MIR canonical field projection is missing",
+                                span,
+                            ))
+                        }
+                    };
                     let parent = current.clone();
-                    current = self.project_field_id(current, *field, span)?;
+                    current = self.project_field_name(current, *field, name, span)?;
                     updates.push(PlaceUpdate::Field {
                         parent,
                         field: *field,
+                        name: name.clone(),
                     });
                 }
                 MirProjection::Index {
@@ -21045,8 +22483,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let mut updated = value.clone();
         for update in updates.into_iter().rev() {
             match update {
-                PlaceUpdate::Field { parent, field } => {
-                    updated = replace_runtime_field(self.program, parent, field, updated, span)?;
+                PlaceUpdate::Field {
+                    parent,
+                    field,
+                    name,
+                } => {
+                    updated =
+                        replace_runtime_field(self.program, parent, field, &name, updated, span)?;
                 }
                 PlaceUpdate::Index {
                     mut parent,
@@ -21095,7 +22538,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
         }
-        self.write_base(frame_index, &place.base, updated, span)?;
+        if matches!(updated, RuntimeValue::SharedCell(_)) {
+            self.store_base_value(frame_index, &place.base, updated, span)?;
+        } else {
+            self.write_base(frame_index, &place.base, updated, span)?;
+        }
         if let Some(alias) = temporary_alias {
             self.write_value_alias(frame_index, alias, &place, value.clone(), span)?;
         }
@@ -21264,6 +22711,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
     ) -> Result<RuntimeValue, Diagnostic> {
         let name = field_name(self.program, field)
             .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
+        self.project_field_name(value, field, &name, span)
+    }
+
+    fn project_field_name(
+        &mut self,
+        value: RuntimeValue,
+        field: MirFieldId,
+        name: &str,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let value = match value {
+            RuntimeValue::Address(address) => {
+                require_address_access(&address, MirAccess::Read, span)?;
+                self.read_place(address.frame, address.place, span)?
+            }
+            value => value,
+        };
         if name == "terminal" {
             if let RuntimeValue::ForeignHandle { token } = &value {
                 let process_child = self.program.handles.iter().find(|handle| {
@@ -21286,7 +22750,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
         }
-        project_field_id(self.program, value, field, span)
+        project_field_id_named(self.program, value, field, name, span)
     }
     fn run_drops(
         &mut self,
@@ -21635,6 +23099,28 @@ fn direct_mutating_collection(
                 _ => Err(mir_error_at("MIR map add_new receiver is not a Map", span)),
             }
         }
+        "map_setdefault" => {
+            let key = args
+                .next()
+                .ok_or_else(|| mir_error_at("MIR map setdefault is missing its key", span))
+                .and_then(|value| mir_const_key(value, span))?;
+            let default = args
+                .next()
+                .ok_or_else(|| mir_error_at("MIR map setdefault is missing its default", span))?;
+            match receiver {
+                MirEvalValue::Map(entries) => {
+                    if let Some((_, existing)) =
+                        entries.iter().find(|(candidate, _)| *candidate == key)
+                    {
+                        Ok(Some(existing.clone()))
+                    } else {
+                        entries.push((key, default.clone()));
+                        Ok(Some(default))
+                    }
+                }
+                _ => Err(mir_error_at("MIR map setdefault receiver is not a Map", span)),
+            }
+        }
         "map_try_insert" => {
             let key = args
                 .next()
@@ -21924,6 +23410,8 @@ fn validate_captures(function: &MirFunction, captures: &[RuntimeValue]) -> Resul
             | (MirAccess::Move, RuntimeValue::SharedSnapshot(_))
             | (MirAccess::Move, RuntimeValue::Transaction(_))
             | (MirAccess::Move, RuntimeValue::SharedTransaction(_))
+            | (MirAccess::Move, RuntimeValue::Cell(_))
+
             | (MirAccess::Move, RuntimeValue::CellGuard(_))
             | (MirAccess::Move, RuntimeValue::GcRoot(_))
             | (MirAccess::Move, RuntimeValue::Atomic(_))
@@ -21933,6 +23421,8 @@ fn validate_captures(function: &MirFunction, captures: &[RuntimeValue]) -> Resul
             | (MirAccess::Read, RuntimeValue::SharedSnapshot(_))
             | (MirAccess::Read, RuntimeValue::Transaction(_))
             | (MirAccess::Read, RuntimeValue::SharedTransaction(_))
+            | (MirAccess::Read, RuntimeValue::Cell(_))
+
             | (MirAccess::Read, RuntimeValue::CellGuard(_))
             | (MirAccess::Read, RuntimeValue::GcRoot(_))
             | (MirAccess::Read, RuntimeValue::Atomic(_))
@@ -21972,6 +23462,8 @@ fn validate_captures(function: &MirFunction, captures: &[RuntimeValue]) -> Resul
             | (MirAccess::Write, RuntimeValue::SharedSnapshot(_))
             | (MirAccess::Write, RuntimeValue::Transaction(_))
             | (MirAccess::Write, RuntimeValue::SharedTransaction(_))
+            | (MirAccess::Write, RuntimeValue::Cell(_))
+
             | (MirAccess::Write, RuntimeValue::CellGuard(_))
             | (MirAccess::Write, RuntimeValue::Atomic(_))
             | (MirAccess::Write, RuntimeValue::GcRoot(_)) => false,
@@ -22057,6 +23549,9 @@ fn aggregate_field_ids(
 ) -> Result<Vec<MirFieldId>, Diagnostic> {
     let result_ty =
         result_ty.ok_or_else(|| mir_error_at("MIR aggregate result has no type fact", span))?;
+    if result_ty.tuple_fields().is_some() {
+        return tuple_field_ids(program, Some(result_ty), expected, span);
+    }
     let type_id = result_ty
         .identity
         .ok_or_else(|| mir_error_at("MIR aggregate result has no canonical type ID", span))?;
@@ -22096,6 +23591,7 @@ enum PlaceUpdate {
     Field {
         parent: RuntimeValue,
         field: MirFieldId,
+        name: String,
     },
     Index {
         parent: MirEvalValue,
@@ -22133,11 +23629,19 @@ struct ValueAlias {
     steps: Vec<MoveStep>,
 }
 #[derive(Clone)]
+#[allow(dead_code)]
+struct MirSharedTransfer {
+    payload: Arc<Mutex<MirEvalValue>>,
+    path: Vec<String>,
+}
+
+#[derive(Clone)]
 struct MirSharedStorage {
     protocol: Arc<shared_protocol::JetSharedProtocol>,
     scalar: Option<Arc<shared_protocol::JetSharedAtomic>>,
     revision: Arc<AtomicU64>,
     payload: Rc<RefCell<MirEvalValue>>,
+    transfer: Arc<Mutex<MirEvalValue>>,
 }
 
 impl std::fmt::Debug for MirSharedStorage {
@@ -22357,7 +23861,8 @@ impl MirSharedStorage {
             protocol: shared_protocol::JetSharedProtocol::new(),
             scalar,
             revision: Arc::new(AtomicU64::new(0)),
-            payload: Rc::new(RefCell::new(value)),
+            payload: Rc::new(RefCell::new(value.clone())),
+            transfer: Arc::new(Mutex::new(value)),
         })
     }
 
@@ -22365,12 +23870,36 @@ impl MirSharedStorage {
     // as its ownership/commit protocol. This adapter only gives a closure the
     // same SharedCell view without publishing the staged value.
     fn from_payload(payload: Rc<RefCell<MirEvalValue>>) -> Rc<Self> {
+        let value = payload.borrow().clone();
         Rc::new(Self {
             protocol: shared_protocol::JetSharedProtocol::new(),
             scalar: None,
             revision: Arc::new(AtomicU64::new(0)),
             payload,
+            transfer: Arc::new(Mutex::new(value)),
         })
+    }
+
+    #[allow(dead_code)]
+    fn from_transfer(transfer: Arc<Mutex<MirEvalValue>>) -> Rc<Self> {
+        let value = transfer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        Rc::new(Self {
+            protocol: shared_protocol::JetSharedProtocol::new(),
+            scalar: None,
+            revision: Arc::new(AtomicU64::new(0)),
+            payload: Rc::new(RefCell::new(value)),
+            transfer,
+        })
+    }
+
+    fn sync_transfer(&self, value: &MirEvalValue) {
+        *self
+            .transfer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = value.clone();
     }
 
     fn next_revision(&self, span: Span) -> Result<u64, Diagnostic> {
@@ -22394,8 +23923,10 @@ impl MirSharedStorage {
             *self
                 .payload
                 .try_borrow_mut()
-                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? = value;
+                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? =
+                value.clone();
         }
+        self.sync_transfer(&value);
         self.revision.store(next, Ordering::Release);
         Ok(())
     }
@@ -22423,8 +23954,10 @@ impl MirSharedStorage {
             *self
                 .payload
                 .try_borrow_mut()
-                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? = value;
+                .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))? =
+                value.clone();
         }
+        self.sync_transfer(&value);
         self.revision.store(next, Ordering::Release);
         Ok(())
     }
@@ -22436,6 +23969,7 @@ impl MirSharedStorage {
         if let Some(scalar) = &self.scalar {
             let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
             let previous = mir_shared_scalar_value(scalar.kind(), scalar.swap(bits), span)?;
+            self.sync_transfer(&value);
             self.revision.store(next, Ordering::Release);
             return Ok(previous);
         }
@@ -22443,7 +23977,10 @@ impl MirSharedStorage {
             .payload
             .try_borrow_mut()
             .map_err(|_| mir_error_at("MIR Shared payload is already borrowed", span))?;
+        let next_value = value.clone();
         let previous = std::mem::replace(&mut *payload, value);
+        drop(payload);
+        self.sync_transfer(&next_value);
         self.revision.store(next, Ordering::Release);
         Ok(previous)
     }
@@ -22496,6 +24033,7 @@ impl MirSharedStorage {
             .map_err(|_| mir_error_at("MIR Shared payload is already mutably borrowed", span))?;
         let bits = mir_shared_scalar_bits(&value, scalar.kind(), span)?;
         scalar.store(bits);
+        self.sync_transfer(&value);
         self.revision.store(next, Ordering::Release);
         Ok(())
     }
@@ -22544,10 +24082,11 @@ struct MirCellLease {
 
 #[derive(Debug, Clone)]
 struct MirCellGuard {
-    payload: Rc<RefCell<MirEvalValue>>,
+    payload: Rc<RefCell<RuntimeValue>>,
     path: Vec<MirFieldId>,
     lease: Rc<MirCellLease>,
 }
+
 #[derive(Debug, Clone)]
 struct MirGcRoot {
     value: MirEvalValue,
@@ -23229,6 +24768,7 @@ enum RuntimeValue {
     /// Native Prelude owners and their containing records never become serialized MIR data.
     Ambient(CtValue),
     Atomic(Arc<MirAtomicCell>),
+    Cell(Rc<RefCell<RuntimeValue>>),
     /// A private interpreter carrier for an opaque native pointer. Clones
     /// share one close-once token rather than copying ownership metadata.
     ForeignHandle {
@@ -23259,6 +24799,18 @@ enum RuntimeValue {
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
 type MirPool = std::sync::Mutex<crate::Comptime::PoolRuntime::jet_std::JetPool<CtValue>>;
 type MirPoolId = crate::Comptime::PoolRuntime::jet_std::JetId<CtValue>;
+
+fn is_materializable_view_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args }
+            if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            true
+        }
+        MirTypeKind::Tagged { inner, .. } => is_materializable_view_type(inner),
+        _ => false,
+    }
+}
 
 fn fork_runtime_value_owners(value: &mut RuntimeValue) {
     match value {
@@ -23374,6 +24926,12 @@ fn mir_pattern_result(result: Result<MirEvalValue, String>) -> RuntimeValue {
             value: Box::new(RuntimeValue::Data(MirEvalValue::String(error))),
         },
     }
+}
+
+fn mir_unsigned_integer(value: u64) -> MirEvalValue {
+    i64::try_from(value)
+        .map(MirEvalValue::Int)
+        .unwrap_or_else(|_| MirEvalValue::BigInt(value.to_string()))
 }
 
 fn mir_pattern_capture_result(
@@ -23831,6 +25389,8 @@ fn runtime_contains_moved(value: &RuntimeValue) -> bool {
         | RuntimeValue::SharedSnapshot(_)
         | RuntimeValue::Transaction(_)
         | RuntimeValue::SharedTransaction(_)
+        | RuntimeValue::Cell(_)
+
         | RuntimeValue::CellGuard(_)
         | RuntimeValue::GcRoot(_)
         | RuntimeValue::App(_) => false,
@@ -24280,6 +25840,8 @@ fn runtime_address(value: &RuntimeValue, _span: Span) -> Result<Option<Address>,
         | RuntimeValue::SharedSnapshot(_)
         | RuntimeValue::Transaction(_)
         | RuntimeValue::SharedTransaction(_)
+        | RuntimeValue::Cell(_)
+
         | RuntimeValue::CellGuard(_)
         | RuntimeValue::GcRoot(_) => Ok(None),
     }
@@ -24339,10 +25901,10 @@ fn shared_payload_read(
 }
 fn cell_payload_read(
     program: &jet_foundation::MIR::MirProgram,
-    payload: &Rc<RefCell<MirEvalValue>>,
+    payload: &Rc<RefCell<RuntimeValue>>,
     path: &[MirFieldId],
     span: Span,
-) -> Result<MirEvalValue, Diagnostic> {
+) -> Result<RuntimeValue, Diagnostic> {
     let names = path
         .iter()
         .map(|field| {
@@ -24350,8 +25912,53 @@ fn cell_payload_read(
                 .ok_or_else(|| mir_error_at("MIR CellGuard field ID is missing", span))
         })
         .collect::<Result<Vec<_>, Diagnostic>>()?;
-    shared_payload_read(payload, &names, span)
+    let value = payload
+        .try_borrow()
+        .map_err(|_| mir_error_at("MIR CellGuard payload is already borrowed", span))?
+        .clone();
+    if names.is_empty() {
+        return Ok(value);
+    }
+    let data = runtime_to_data(value, span)?;
+    let data = shared_payload_read(&Rc::new(RefCell::new(data)), &names, span)?;
+    Ok(RuntimeValue::Data(data))
 }
+fn write_cell_guard(
+    program: &jet_foundation::MIR::MirProgram,
+    guard: &MirCellGuard,
+    value: RuntimeValue,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if !guard.lease.editable {
+        return Err(mir_error_at(
+            "MIR CellReadGuard cannot be written",
+            span,
+        ));
+    }
+    let names = guard
+        .path
+        .iter()
+        .map(|field| {
+            field_name(program, *field)
+                .ok_or_else(|| mir_error_at("MIR CellGuard field ID is missing", span))
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let path = names.into_iter().map(PathStep::Field).collect::<Vec<_>>();
+    let mut root = guard
+        .payload
+        .try_borrow_mut()
+        .map_err(|_| mir_error_at("MIR CellGuard payload is already borrowed", span))?;
+    if path.is_empty() {
+        *root = value;
+        return Ok(());
+    }
+    let replacement = runtime_to_data(value, span)?;
+    let mut data = runtime_to_data((&*root).clone(), span)?;
+    replace_path(&mut data, &path, replacement, span)?;
+    *root = RuntimeValue::Data(data);
+    Ok(())
+}
+
 
 fn write_shared_cell(
     cell: &MirSharedCell,
@@ -25296,6 +26903,17 @@ fn ct_contains_runtime_owner(value: &CtValue) -> bool {
 }
 
 fn runtime_from_ct(value: CtValue, span: Span) -> Result<RuntimeValue, Diagnostic> {
+    if let Some(transfer) = mir_runtime_owner::<MirSharedTransfer>(&value).cloned() {
+        let storage = MirSharedStorage::from_transfer(transfer.payload);
+        return Ok(RuntimeValue::SharedCell(Rc::new(MirSharedCell {
+            guard: Rc::new(MirSharedGuard {
+                state: None,
+                payload: storage.payload.clone(),
+                storage: Some(storage),
+            }),
+            path: transfer.path,
+        })));
+    }
     if ct_contains_runtime_owner(&value) {
         Ok(RuntimeValue::Ambient(value))
     } else {
@@ -25367,6 +26985,7 @@ fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diag
         | RuntimeValue::SharedSnapshot(_)
         | RuntimeValue::SharedTransaction(_)
         | RuntimeValue::Transaction(_)
+        | RuntimeValue::Cell(_)
         | RuntimeValue::CellGuard(_)
         | RuntimeValue::Aggregate(_)
         | RuntimeValue::Address(_)
@@ -25637,10 +27256,12 @@ fn project_field(value: RuntimeValue, name: &str, span: Span) -> Result<RuntimeV
     }
     if let RuntimeValue::Ambient(value) = value {
         let projected = match value {
-            CtValue::Struct { fields, .. } => fields
-                .into_iter()
-                .find(|(field, _)| field == name)
-                .map(|(_, value)| value),
+            CtValue::Struct { fields, .. } => {
+                fields
+                    .into_iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            }
             CtValue::Enum { args, .. } => name
                 .parse::<usize>()
                 .ok()
@@ -25658,7 +27279,10 @@ fn project_field(value: RuntimeValue, name: &str, span: Span) -> Result<RuntimeV
             });
         }
     }
-    let value = runtime_to_data(value, span)?;
+    let value = match runtime_to_data(value, span)? {
+        MirEvalValue::Present(value) => *value,
+        value => value,
+    };
     let projected = match value {
         MirEvalValue::Struct { fields, .. } => fields
             .into_iter()
@@ -25675,12 +27299,37 @@ fn project_field(value: RuntimeValue, name: &str, span: Span) -> Result<RuntimeV
         .ok_or_else(|| mir_error_at(&format!("MIR field `{name}` is not present"), span))
 }
 
+#[allow(dead_code)]
 fn project_field_id(
     program: &jet_foundation::MIR::MirProgram,
     value: RuntimeValue,
     field: MirFieldId,
     span: Span,
 ) -> Result<RuntimeValue, Diagnostic> {
+    let name =
+        field_name(program, field).ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
+    project_field_id_named(program, value, field, &name, span)
+}
+
+fn project_field_id_named(
+    _program: &jet_foundation::MIR::MirProgram,
+    value: RuntimeValue,
+    field: MirFieldId,
+    name: &str,
+    span: Span,
+) -> Result<RuntimeValue, Diagnostic> {
+    if let RuntimeValue::SharedCell(cell) = value {
+        if let Some(storage) = &cell.guard.storage {
+            storage.refresh_scalar_shadow(span)?;
+        }
+        let mut path = cell.path.clone();
+        path.push(name.to_string());
+        return Ok(RuntimeValue::Data(shared_payload_read(
+            &cell.guard.payload,
+            &path,
+            span,
+        )?));
+    }
     if let RuntimeValue::Aggregate(fields) = value {
         return fields
             .into_iter()
@@ -25688,18 +27337,18 @@ fn project_field_id(
             .map(|(_, value)| value)
             .ok_or_else(|| mir_error_at("MIR aggregate field ID is not present", span));
     }
-    let name =
-        field_name(program, field).ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
-    project_field(value, &name, span)
+    project_field(value, name, span)
 }
 
 fn replace_runtime_field(
-    program: &jet_foundation::MIR::MirProgram,
+    _program: &jet_foundation::MIR::MirProgram,
     parent: RuntimeValue,
     field: MirFieldId,
+    name: &str,
     replacement: RuntimeValue,
     span: Span,
 ) -> Result<RuntimeValue, Diagnostic> {
+
     match parent {
         RuntimeValue::Aggregate(mut fields) => {
             let Some((_, value)) = fields.iter_mut().find(|(candidate, _)| *candidate == field)
@@ -25710,17 +27359,18 @@ fn replace_runtime_field(
             Ok(RuntimeValue::Aggregate(fields))
         }
         RuntimeValue::Data(mut data) => {
-            let name = field_name(program, field)
-                .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
             let replacement = runtime_to_data(replacement, span)?;
-            replace_path(&mut data, &[PathStep::Field(name)], replacement, span)?;
+            replace_path(
+                &mut data,
+                &[PathStep::Field(name.to_string())],
+                replacement,
+                span,
+            )?;
             Ok(RuntimeValue::Data(data))
         }
         RuntimeValue::SharedCell(cell) => {
-            let name = field_name(program, field)
-                .ok_or_else(|| mir_error_at("MIR field ID is missing", span))?;
             let mut nested = cell.as_ref().clone();
-            nested.path.push(name);
+            nested.path.push(name.to_string());
             write_shared_cell(&nested, replacement, span)?;
             Ok(RuntimeValue::SharedCell(cell))
         }
@@ -25775,6 +27425,11 @@ fn replace_runtime_field(
             "MIR field write cannot project a transaction handle",
             span,
         )),
+        RuntimeValue::Cell(_) => Err(mir_error_at(
+            "MIR field write cannot project a Cell handle",
+            span,
+        )),
+
         RuntimeValue::CellGuard(_) => Err(mir_error_at(
             "MIR field write requires dereferencing the CellGuard value",
             span,
@@ -25805,10 +27460,12 @@ fn replace_path(
             let MirEvalValue::Struct { fields, .. } = root else {
                 return Err(mir_error_at("MIR field write base is not a struct", span));
             };
-            let (_, value) = fields
-                .iter_mut()
-                .find(|(field, _)| field == name)
-                .ok_or_else(|| mir_error_at(&format!("MIR field `{name}` is not present"), span))?;
+            let Some((_, value)) = fields.iter_mut().find(|(field, _)| field == name) else {
+                return Err(mir_error_at(
+                    &format!("MIR field `{name}` is not present"),
+                    span,
+                ));
+            };
             replace_path(value, &path[1..], replacement, span)
         }
         PathStep::Index { value, kind } => match (kind, root) {
@@ -25935,6 +27592,97 @@ fn mir_values_equal(left: &MirEvalValue, right: &MirEvalValue) -> bool {
     }
 }
 
+fn mir_field_owner_type(ty: &MirType) -> &MirType {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } => mir_field_owner_type(inner),
+        MirTypeKind::Apply { name, args }
+            if matches!(
+                name.name.as_str(),
+                crate::Syntax::TYPE_SHARED_GUARD
+                    | "CellReadGuard"
+                    | "CellEditGuard"
+                    | crate::Syntax::TYPE_PIN
+            ) && args.len() == 1 =>
+        {
+            mir_field_owner_type(&args[0])
+        }
+        _ => ty,
+    }
+}
+
+fn checked_field_for_type(
+    program: &jet_foundation::MIR::MirProgram,
+    ty: &MirType,
+    field: MirFieldId,
+    span: Span,
+) -> Result<(String, MirType), Diagnostic> {
+    let owner_ty = mir_field_owner_type(ty);
+    if owner_ty.tuple_fields().is_some() {
+        let owner = owner_ty
+            .identity
+            .ok_or_else(|| mir_error_at("MIR tuple field owner has no type ID", span))?;
+        let row = program
+            .fields
+            .iter()
+            .find(|row| row.owner == owner && row.id == field)
+            .ok_or_else(|| {
+                mir_error_at("MIR tuple field ID is not present on the checked type", span)
+            })?;
+        return Ok((row.field.name.clone(), row.field.ty.clone()));
+    }
+    let owner = match owner_ty.kind() {
+        MirTypeKind::Apply { name, .. } => name.id,
+        _ => owner_ty
+            .nominal_id()
+            .ok_or_else(|| mir_error_at("MIR field owner has no canonical type ID", span))?,
+    };
+    let definition = program
+        .types
+        .iter()
+        .find(|definition| definition.id == owner)
+        .ok_or_else(|| mir_error_at("MIR field owner type row is missing", span))?;
+    let checked = match &definition.kind {
+        MirTypeDefKind::Struct { fields, .. } => fields.iter().find(|candidate| candidate.id == field),
+        MirTypeDefKind::Enum { variants, .. } => variants.iter().find_map(|variant| {
+            match &variant.payload {
+                jet_foundation::MIR::MirVariantPayload::Named(fields) => {
+                    fields.iter().find(|candidate| candidate.id == field)
+                }
+                _ => None,
+            }
+        }),
+        MirTypeDefKind::Distinct { .. }
+        | MirTypeDefKind::Alias { .. }
+        | MirTypeDefKind::UnitFamily { .. } => None,
+    };
+    checked
+        .map(|field| (field.name.clone(), field.ty.clone()))
+        .ok_or_else(|| {
+            mir_error_at(
+                "MIR field ID is not present on the checked root type",
+                span,
+            )
+        })
+}
+
+fn indexed_value_type(ty: &MirType, kind: MirIndexKind) -> MirType {
+    match kind {
+        MirIndexKind::List | MirIndexKind::FixedListProof => {
+            ty.list_element().cloned().unwrap_or_else(|| ty.clone())
+        }
+        MirIndexKind::Map => ty
+            .map_parts()
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| ty.clone()),
+        MirIndexKind::Pool => ty
+            .apply_args()
+            .and_then(|args| args.first())
+            .cloned()
+            .unwrap_or_else(|| ty.clone()),
+        MirIndexKind::Lane => ty.clone(),
+    }
+}
+
 fn field_name(program: &jet_foundation::MIR::MirProgram, id: MirFieldId) -> Option<String> {
     // Checked type definitions are the source-of-truth projection rows. The
     // flat field table is only a compatibility fallback for older MIR.
@@ -26009,11 +27757,18 @@ fn validate_enum_args(
     args: &[MirEnumArg],
     span: Span,
 ) -> Result<(), Diagnostic> {
-    let type_def = program
-        .types
-        .iter()
-        .find(|type_def| type_def.id == type_id)
-        .ok_or_else(|| mir_error_at("MIR enum type ID has no type row", span))?;
+    let Some(type_def) = program.types.iter().find(|type_def| type_def.id == type_id) else {
+        let type_name = type_instance_name(program, type_id, span)?;
+        let variants = jet_foundation::CoreModuleExports::core_enum_variants(&type_name)
+            .ok_or_else(|| mir_error_at("MIR enum type ID has no type row", span))?;
+        if !variants.contains(&variant) {
+            return Err(mir_error_at(
+                "MIR enum variant has no canonical Core row",
+                span,
+            ));
+        }
+        return Ok(());
+    };
     let payload = match &type_def.kind {
         MirTypeDefKind::Enum { variants, .. } => variants
             .iter()

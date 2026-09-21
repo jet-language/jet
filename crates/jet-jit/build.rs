@@ -9,6 +9,7 @@ fn main() {
     write_data_schema_std(&manifest);
     write_regex_rt(&manifest);
     write_math_rt(&manifest);
+    write_collection_rt(&manifest);
     write_prelude_enum_meta(&manifest);
 }
 
@@ -245,6 +246,11 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "JetAuthError",
         ),
         (
+            "HTTPError",
+            "../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs",
+            "JetHTTPError",
+        ),
+        (
             "HookOutcome",
             "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
             "JetHookOutcome",
@@ -389,6 +395,17 @@ fn write_math_rt(manifest: &PathBuf) {
         .replace("\nfn jet_std_math_", "\npub(crate) fn jet_std_math_");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("math_rt.rs");
     std::fs::write(&out, body).expect("write math_rt.rs");
+}
+ 
+fn write_collection_rt(manifest: &PathBuf) {
+    let src = manifest.join("../jet-codegen/src/Prelude/Core/Collections.rs");
+    println!("cargo:rerun-if-changed={}", src.display());
+    let raw = std::fs::read_to_string(&src).expect("read Core/Collections.rs");
+    let marker = "// D-CORE-COLLECTIONS1=A:";
+    let start = raw.find(marker).expect("nominal collection marker");
+    let body = &raw[start..];
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("collection_rt.rs");
+    std::fs::write(&out, format!("{body}\n")).expect("write collection_rt.rs");
 }
 
 fn write_reactive_rt(manifest: &PathBuf) {

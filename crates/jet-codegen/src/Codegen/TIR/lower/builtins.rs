@@ -303,8 +303,9 @@ fn builtin_recv_ty(
 /// `s.after(sep)` / `s.before(sep)`) to the borrowed `&str`-returning
 /// `TBuiltinOp::{TrimView,AfterView,BeforeView}` — the zero-copy sibling of
 /// whatever `resolve_builtin_op` would pick for the same call written
-/// somewhere the result isn't scope-tracked. The return type comes from the
-/// canonical String method table; no shape or type is guessed here.
+/// somewhere the result isn't scope-tracked. The source return type is still
+/// the canonical String method result; the TIR value carries the existing
+/// borrowed `View<str>` carrier so MIR preserves the Rust lifetime/ABI shape.
 pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let Expr::MethodCall {
         receiver,
@@ -329,10 +330,14 @@ pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -
     else {
         return invariant_expr(*method_span, "string-view signature");
     };
-    let ty = match resolved_ret {
-        Some(ret) if ret == &table_ret => ret.clone(),
-        Some(_) => return invariant_expr(*method_span, "string-view return type"),
-        None => table_ret,
+    if let Some(ret) = resolved_ret {
+        if ret != &table_ret {
+            return invariant_expr(*method_span, "string-view return type");
+        }
+    }
+    let ty = Type::Apply {
+        name: "View".to_string(),
+        args: vec![Type::Named("str".to_string())],
     };
     let recv = lower_expr(receiver, cx, env);
     if !matches!(recv.ty, Type::String) {
@@ -424,7 +429,7 @@ pub(crate) fn resolve_builtin_op(
             )
             | (
                 "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
-                | "ends_with" | "index_of" | "last_index_of" | "split" | "join" | "equal"
+                | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal"
                 | "compare" | "copy_to" | "write_to",
                 1,
             )
@@ -478,10 +483,10 @@ pub(crate) fn resolve_builtin_op(
     {
         return None;
     }
-    if crate::Collections::is_closure_method(method) {
+    let is_string = matches!(rty, Some(Type::String));
+    if crate::Collections::is_closure_method(method) && !is_string {
         return None;
     }
-    let is_string = matches!(rty, Some(Type::String));
     let is_list = rty.as_ref().is_some_and(list_receiver);
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
@@ -557,19 +562,22 @@ pub(crate) fn resolve_builtin_op(
         ("try_push", 1) if is_list => TBuiltinOp::TryPush,
         ("try_reserve", 1) if is_list => TBuiltinOp::TryReserve,
         ("try_insert", 2) if is_map => TBuiltinOp::TryInsertMap,
-        ("push", 1) => TBuiltinOp::Push,
+        ("push" | "append", 1) => TBuiltinOp::Push,
         ("pop", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePop,
         ("pop", 0) => TBuiltinOp::Pop,
         ("insert", 2) => TBuiltinOp::InsertList,
         ("add", 2) if is_map => TBuiltinOp::InsertMap,
         ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
+        ("setdefault", 2) if is_map => TBuiltinOp::MapSetDefault,
+        ("update", 1) if is_map => TBuiltinOp::MapUpdate,
         ("merge", 1) if is_map => TBuiltinOp::MapMerge,
         ("merge", 2) if is_map => TBuiltinOp::MapMergeWith,
+        ("take", 1) if is_set => TBuiltinOp::SetPop,
         ("pop", 1) if is_set => TBuiltinOp::SetPop,
         ("pop", 1) if is_map || is_lru => TBuiltinOp::RemoveMap,
         ("pop_first", 0) if is_map => TBuiltinOp::MapPopFirst,
         ("contains_value", 1) if is_map => TBuiltinOp::MapContainsValue,
-        ("remove", 1 | 2) => {
+        ("remove" | "discard", 1 | 2) => {
             if is_set {
                 TBuiltinOp::SetRemove
             } else if is_sorted_set {
@@ -622,8 +630,8 @@ pub(crate) fn resolve_builtin_op(
         ("contains", 1) if is_deque => TBuiltinOp::DequeContains,
         ("contains", 1) => TBuiltinOp::Contains,
         ("has", 1) if is_set || is_sorted_set || is_bit_set => TBuiltinOp::Contains,
-        ("index_of", 1) if is_string => TBuiltinOp::StringIndexOf,
-        ("index_of", 1) => TBuiltinOp::IndexOf,
+        ("index_of" | "index", 1) if is_string => TBuiltinOp::StringIndexOf,
+        ("index_of" | "index", 1) => TBuiltinOp::IndexOf,
         ("reverse", 0) if is_deque => TBuiltinOp::DequeReverse,
         ("reverse", 0) if is_string => TBuiltinOp::StringMethod {
             method: "reverse".to_string(),
@@ -662,8 +670,9 @@ pub(crate) fn resolve_builtin_op(
         // D-SET-DECLINE1=C: guard ahead of the unconditional Iter `shuffle`
         // arm below — Set.shuffle() returns a fresh List, same as Set.sort().
         ("shuffle", 0) if is_set => TBuiltinOp::SetShuffle,
-        ("shuffle", 0) => TBuiltinOp::IterShuffle,
-        ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
+        ("rindex", 1) if is_string => TBuiltinOp::StringMethod {
+            method: "last_index_of".to_string(),
+        },
         ("last_index_of", 1) if is_string => TBuiltinOp::StringMethod {
             method: "last_index_of".to_string(),
         },
@@ -697,17 +706,36 @@ pub(crate) fn resolve_builtin_op(
         ("intersperse", 1) => TBuiltinOp::Intersperse,
         ("clear", 0) => TBuiltinOp::Clear,
         ("chars", 0) => TBuiltinOp::Chars,
-        ("bytes", 0) => TBuiltinOp::Bytes { owned: false },
+        ("bytes" | "encode", 0) if is_string => TBuiltinOp::Bytes { owned: false },
+        ("strip" | "lstrip" | "rstrip", 0) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
         ("trim", 0) => TBuiltinOp::Trim,
         ("trim_start", 0) => TBuiltinOp::TrimStart,
         ("trim_end", 0) => TBuiltinOp::TrimEnd,
         // c97/D-STRPARSE1: String-only `lines`; parsing stays `Type.parse`.
-        ("lines", 0) => TBuiltinOp::Lines,
-        ("starts_with", 1) => TBuiltinOp::StartsWith,
-        ("ends_with", 1) => TBuiltinOp::EndsWith,
+        ("lines" | "splitlines", 0) => TBuiltinOp::Lines,
+        ("starts_with" | "startswith", 1) => TBuiltinOp::StartsWith,
+        ("ends_with" | "endswith", 1) => TBuiltinOp::EndsWith,
+        ("expandtabs", 1) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
+        ("find" | "rfind" | "partition" | "rpartition", 1) if is_string => {
+            TBuiltinOp::StringMethod {
+                method: method.to_string(),
+            }
+        }
+        ("center" | "ljust" | "rjust", 2) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
+        ("zfill", 1) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
         ("replace", 2) if is_string => TBuiltinOp::StringMethod {
             method: "replace".to_string(),
         },
+        ("replace", 1) if is_set => TBuiltinOp::SetReplace,
+        ("replace", 2) if is_map => TBuiltinOp::InsertMap,
         ("replace", 2) if is_list || rty.is_none() => TBuiltinOp::ListReplace,
         ("replace", 2) => TBuiltinOp::Replace,
         ("pad_start", 2) => TBuiltinOp::PadStart,
@@ -729,8 +757,29 @@ pub(crate) fn resolve_builtin_op(
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
         (
-            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
-            | "normalize",
+            "count_bytes"
+                | "is_lower"
+                | "is_upper"
+                | "capitalize"
+                | "swapcase"
+                | "copy"
+                | "normalize"
+                | "isalnum"
+                | "isalpha"
+                | "isascii"
+                | "isdecimal"
+                | "isdigit"
+                | "isidentifier"
+                | "isnumeric"
+                | "isprintable"
+                | "isspace"
+                | "istitle"
+                | "islower"
+                | "isupper"
+                | "lower"
+                | "upper"
+                | "title"
+                | "casefold",
             0,
         ) if is_string =>
         {
@@ -738,17 +787,25 @@ pub(crate) fn resolve_builtin_op(
                 method: method.to_string(),
             }
         }
-        ("remove_prefix" | "remove_suffix" | "equal" | "rsplit" | "matches" | "match", 1)
-            if is_string =>
+        (
+            "remove_prefix"
+                | "remove_suffix"
+                | "removeprefix"
+                | "removesuffix"
+                | "equal"
+                | "rsplit"
+                | "matches"
+                | "match",
+            1,
+        ) if is_string =>
         {
             TBuiltinOp::StringMethod {
                 method: method.to_string(),
             }
         }
-        // D-STR-DECLINE1=C: `s.to_int()`/`s.to_float()` are the same builtin
-        // `Int.parse(s)`/`Float.parse(s)` already lower to (D-STRPARSE1) — the
-        // string is the receiver either way, so the op is reused verbatim.
-        ("to_int", 0) if is_string => TBuiltinOp::ParseInt,
+        // D-STR-DECLINE1=C: `s.parse()`/`s.to_int()` share the canonical
+        // integer parser; `to_float()` keeps the corresponding float route.
+        ("parse" | "to_int", 0) if is_string => TBuiltinOp::ParseInt,
         ("to_float", 0) if is_string => TBuiltinOp::ParseFloat,
         ("split_once", 1) if is_string => {
             let fields = if let Some(ret) = resolved_ret {
@@ -828,7 +885,7 @@ pub(crate) fn resolve_builtin_op(
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
-        ("to_list", 0) if is_map => {
+        ("to_list" | "items", 0) if is_map => {
             let fields = match resolved_ret {
                 Some(ret) => tuple_list_elem_fields(Some(ret))?,
                 None => {
@@ -975,6 +1032,10 @@ pub(crate) fn resolve_builtin_op(
         ("try_collect", 0) => TBuiltinOp::TryCollect,
         // D-COLLBREADTH1=A: Set<T> instance methods.
         ("add", 1) if is_set => TBuiltinOp::SetInsert,
+        ("update", 1) if is_set => TBuiltinOp::SetUpdate,
+        ("difference_update", 1) if is_set => TBuiltinOp::SetDifferenceUpdate,
+        ("intersection_update", 1) if is_set => TBuiltinOp::SetIntersectionUpdate,
+        ("symmetric_difference_update", 1) if is_set => TBuiltinOp::SetSymmetricDifferenceUpdate,
         ("add", 1) if is_sorted_set => TBuiltinOp::SortedSetInsert,
         ("add", 1) if is_bit_set => TBuiltinOp::BitSetAdd,
         ("add", 1) if is_bag => TBuiltinOp::BagAdd,
@@ -996,9 +1057,9 @@ pub(crate) fn resolve_builtin_op(
         ("is_disjoint", 1) if is_sorted_set => TBuiltinOp::SortedSetIsDisjoint,
         // removed duplicate #1477
         ("symmetric_difference", 1) if is_set => TBuiltinOp::SetSymmetricDifference,
-        ("is_subset", 1) if is_set => TBuiltinOp::SetIsSubset,
-        ("is_superset", 1) if is_set => TBuiltinOp::SetIsSuperset,
-        ("is_disjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
+        ("is_subset" | "issubset", 1) if is_set => TBuiltinOp::SetIsSubset,
+        ("is_superset" | "issuperset", 1) if is_set => TBuiltinOp::SetIsSuperset,
+        ("is_disjoint" | "isdisjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
         // removed duplicate #1477
         ("capacity", 0) if is_set => TBuiltinOp::SetCapacity,
         // D-ONCE-VERB1=A: Set has one remove-and-return spelling.
@@ -1045,7 +1106,8 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::Pop
             | TBuiltinOp::InsertMap
             | TBuiltinOp::AddNewMap
-            | TBuiltinOp::InsertList
+            | TBuiltinOp::MapSetDefault
+            | TBuiltinOp::MapUpdate
             | TBuiltinOp::RemoveMap
             | TBuiltinOp::MapPopFirst
             | TBuiltinOp::ExtendList
@@ -1053,8 +1115,12 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::Sort
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert
-            | TBuiltinOp::SetRemove
+            | TBuiltinOp::SetUpdate
+            | TBuiltinOp::SetDifferenceUpdate
+            | TBuiltinOp::SetIntersectionUpdate
+            | TBuiltinOp::SetSymmetricDifferenceUpdate
             | TBuiltinOp::SetPop
+            | TBuiltinOp::SetReplace
             | TBuiltinOp::PriorityQueuePop
             | TBuiltinOp::SortedSetInsert
             | TBuiltinOp::SortedSetRemove

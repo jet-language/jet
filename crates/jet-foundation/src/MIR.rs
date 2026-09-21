@@ -564,41 +564,6 @@ impl MirFunctionSignature {
         })
     }
 
-    fn same_identity(&self, other: &Self) -> bool {
-        self.params.len() == other.params.len()
-            && self
-                .params
-                .iter()
-                .zip(&other.params)
-                .all(|(left, right)| left.same_checked_type(right))
-            && match (&self.ret, &other.ret) {
-                (None, None) => true,
-                (Some(left), Some(right)) => left.same_checked_type(right),
-                _ => false,
-            }
-            && self.param_contract == other.param_contract
-            && self
-                .effective_conventions()
-                .eq(other.effective_conventions())
-            && self
-                .call_metadata
-                .as_ref()
-                .map(|metadata| metadata.is_variadic())
-                == other
-                    .call_metadata
-                    .as_ref()
-                    .map(|metadata| metadata.is_variadic())
-            && self
-                .call_metadata
-                .as_ref()
-                .filter(|metadata| metadata.is_variadic())
-                .map(|metadata| &metadata.variadic)
-                == other
-                    .call_metadata
-                    .as_ref()
-                    .filter(|metadata| metadata.is_variadic())
-                    .map(|metadata| &metadata.variadic)
-    }
 }
 
 
@@ -660,11 +625,13 @@ pub enum MirTypeKind {
         err: Box<MirType>,
     },
     Fn(MirFunctionSignature),
-    /// Thread-safe callable carrier. Unlike `Fn`, its identity is only the
-    /// checked parameter and return representation.
+    /// Thread-safe callable carrier. The checked access convention is retained
+    /// so an owned send callback remains `Fn(T)`, rather than silently
+    /// changing to the ordinary borrowed `Fn(&T)` ABI.
     SendFn {
         params: Vec<MirType>,
         ret: Option<Box<MirType>>,
+        conventions: Vec<MirAccess>,
     },
     Apply {
         name: MirNominalRef,
@@ -778,7 +745,11 @@ impl MirTypeKind {
                     "Fn({params})->{ret};contract={contract};conventions={conventions};variadic={variadic}"
                 )
             }
-            Self::SendFn { params, ret } => {
+            Self::SendFn {
+                params,
+                ret,
+                conventions,
+            } => {
                 let params = params
                     .iter()
                     .map(MirType::canonical_key)
@@ -788,7 +759,15 @@ impl MirTypeKind {
                     .as_deref()
                     .map(MirType::canonical_key)
                     .unwrap_or_else(|| "Unit".to_string());
-                format!("SendFn({params})->{ret}")
+                let conventions = conventions
+                    .iter()
+                    .map(|convention| match convention {
+                        MirAccess::Read => 'R',
+                        MirAccess::Write => 'W',
+                        MirAccess::Move => 'M',
+                    })
+                    .collect::<String>();
+                format!("SendFn({params})->{ret};conventions={conventions}")
             }
             Self::Apply { name, args } if args.is_empty() => name.name.clone(),
             Self::Apply { name, args } => format!(
@@ -859,7 +838,7 @@ impl MirTypeKind {
             Self::Option(inner) => format!("?{}", inner.display_name()),
             Self::Result { ok, err } => mir_result_name(ok, err),
             Self::Fn(signature) => signature.display_name(),
-            Self::SendFn { params, ret } => {
+            Self::SendFn { params, ret, .. } => {
                 let params = params
                     .iter()
                     .map(MirType::display_name)
@@ -957,7 +936,6 @@ impl MirType {
     pub fn kind(&self) -> &MirTypeKind {
         &self.kind
     }
-
     pub fn same_checked_type(&self, other: &Self) -> bool {
         match (self.identity, other.identity) {
             (Some(left), Some(right)) => left == right,
@@ -975,10 +953,16 @@ impl MirType {
             .unwrap_or_else(|| self.canonical_key())
     }
 
-
     pub fn send_fn_signature(&self) -> Option<(&[MirType], Option<&MirType>)> {
         match &self.kind {
-            MirTypeKind::SendFn { params, ret } => Some((params, ret.as_deref())),
+            MirTypeKind::SendFn { params, ret, .. } => Some((params, ret.as_deref())),
+            _ => None,
+        }
+    }
+
+    pub fn send_fn_conventions(&self) -> Option<&[MirAccess]> {
+        match &self.kind {
+            MirTypeKind::SendFn { conventions, .. } => Some(conventions),
             _ => None,
         }
     }
@@ -1279,27 +1263,19 @@ fn same_kind_identity(left: &MirTypeKind, right: &MirTypeKind) -> bool {
             },
         ) => left_key.same_checked_type(right_key) && left_value.same_checked_type(right_value),
         (
-            MirTypeKind::Result {
-                ok: left_ok,
-                err: left_err,
-            },
-            MirTypeKind::Result {
-                ok: right_ok,
-                err: right_err,
-            },
-        ) => left_ok.same_checked_type(right_ok) && left_err.same_checked_type(right_err),
-        (MirTypeKind::Fn(left), MirTypeKind::Fn(right)) => left.same_identity(right),
-        (
             MirTypeKind::SendFn {
                 params: left_params,
                 ret: left_ret,
+                conventions: left_conventions,
             },
             MirTypeKind::SendFn {
                 params: right_params,
                 ret: right_ret,
+                conventions: right_conventions,
             },
         ) => {
-            left_params.len() == right_params.len()
+            left_conventions == right_conventions
+                && left_params.len() == right_params.len()
                 && left_params
                     .iter()
                     .zip(right_params)
@@ -3306,10 +3282,15 @@ pub struct MirFixedReductionFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirVectorFact {
     pub loop_header: MirBlockId,
+    /// The exact checked iterator/counting value.  This is deliberately an
+    /// identity, not a source variable name, so a proof cannot be rebound to
+    /// another loop after CFG rewriting.
     pub cursor: Option<MirValueId>,
+    /// Canonical loop body scope, excluding `advance_block`.
     pub body_blocks: Vec<MirBlockId>,
     pub advance_block: Option<MirBlockId>,
     pub rule: MirVectorRule,
+    /// Exact place/value roots and projections observed by the checked loop.
     pub accesses: Vec<MirVectorAccess>,
     pub layout: MirVectorLayout,
     pub element_type: Option<MirType>,
@@ -3320,8 +3301,28 @@ pub struct MirVectorFact {
     pub effect_free_body: bool,
     pub no_cross_iteration_dependencies: bool,
     pub fixed_reduction: Option<MirFixedReductionFact>,
+    /// Checked source origin.  The scope IDs above are the validity window:
+    /// after a CFG/access rewrite this span alone is never sufficient to
+    /// preserve the proof.
     pub span: Span,
     pub decision: MirOptimizationDecision,
+}
+
+impl MirVectorFact {
+    /// Return whether two rows describe the same checked loop scope.
+    ///
+    /// This intentionally compares only the existing MIR identity carrier and
+    /// source span.  It is used to reconcile checked TIR evidence with facts
+    /// recomputed from the post-optimization CFG; no second provenance schema
+    /// is introduced.
+    pub fn same_checked_scope(&self, other: &Self) -> bool {
+        self.loop_header == other.loop_header
+            && self.cursor == other.cursor
+            && self.body_blocks == other.body_blocks
+            && self.advance_block == other.advance_block
+            && self.accesses == other.accesses
+            && self.span == other.span
+    }
 }
 
 
@@ -6702,6 +6703,9 @@ pub struct MirProgram {
     pub core_calls: Vec<MirCoreCall>,
     pub prelude_calls: Vec<MirPreludeCall>,
     pub type_instances: Vec<MirType>,
+    /// Published-schema migration plans consumed by typed runtime decoders.
+    pub codec_migrations:
+        std::collections::HashMap<String, crate::SchemaMigration::SchemaMigrationPlan>,
     pub unreachable: Vec<MirUnreachable>,
 }
 

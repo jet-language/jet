@@ -356,7 +356,7 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
         "{}",
         String::from_utf8_lossy(&release.stdout)
     );
-    let shipped = Command::new(project.join("build/run"))
+    let shipped = Command::new(project.join(".jet/build/run"))
         .arg("greet")
         .current_dir(&project)
         .output()
@@ -367,7 +367,7 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
         String::from_utf8_lossy(&shipped.stderr)
     );
     assert!(String::from_utf8_lossy(&shipped.stdout).contains("hello from job"));
-    let stripped = Command::new(project.join("build/run"))
+    let stripped = Command::new(project.join(".jet/build/run"))
         .arg("seed_data")
         .current_dir(&project)
         .output()
@@ -898,7 +898,7 @@ fn budget_build_artifact_measures_real_selected_binary() {
     let CanonicalJson::String(digest) = &artifact["sha256"] else {
         panic!("artifact digest")
     };
-    let artifact_path = dir.join("build/run");
+    let artifact_path = dir.join(".jet/build/run");
     let metadata = fs::metadata(&artifact_path).unwrap();
     assert_eq!(bytes, &metadata.len().to_string());
     assert_eq!(
@@ -1001,7 +1001,7 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
     };
     assert_eq!(
         bytes,
-        &fs::metadata(dir.join("build/run"))
+        &fs::metadata(dir.join(".jet/build/run"))
             .unwrap()
             .len()
             .to_string()

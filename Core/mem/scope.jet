@@ -1,0 +1,15 @@
+// core.mem.scope — drop-scope guard for pinned allocations.
+pub struct Guard {
+    pub pin: Pin
+    pub live: Bool
+}
+
+pub fn guard(pin: Pin) -> Guard { {pin: pin, live: true} }
+
+pub fn drop(g: Guard) -> Guard { {pin: g.pin, live: false} }
+
+pub fn is_live(g: Guard) -> Bool { g.live }
+
+pub fn pin_of(g: Guard) -> Pin { g.pin }
+
+pub fn release(g: Guard) -> Guard { drop(g) }

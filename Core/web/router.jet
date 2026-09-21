@@ -1,0 +1,200 @@
+// core.web.router — path matching, preload, and navigation status.
+
+pub enum WebRouterValueType {
+    String
+    Int
+    Bool
+    Float
+    JSON
+}
+
+pub enum WebRouterSearchCodec {
+    Query
+    JSON
+}
+
+pub enum WebRouterCacheStatus {
+    Fresh
+    Stale
+    Invalidated
+    Collected
+}
+
+pub enum WebNavigationStatus {
+    Idle
+    Preloading
+    Pending
+    Ready
+    Error
+    Aborted
+}
+
+pub struct WebRoute {
+    pub pattern: String
+    pub name: String
+}
+
+pub struct WebMatch {
+    pub name: String
+    pub pattern: String
+    pub params: [String]
+    pub path: String
+}
+
+pub struct WebRouter {
+    pub routes: [WebRoute]
+    pub current: String
+    pub status: WebNavigationStatus
+    pub cache: [String]
+}
+
+pub fn new() -> WebRouter {
+    WebRouter{routes: [WebRoute]{}, current: "/", status: WebNavigationStatus.Idle, cache: [String]{}}
+}
+
+pub fn route(router: WebRouter, pattern: String, name: String) -> WebRouter {
+    routes := [WebRoute]{}
+    loop r in router.routes -> routes.push(r)
+    if routes.len() < 1024 -> routes.push(WebRoute{pattern: pattern, name: name})
+    WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache}
+}
+
+pub fn route_with_search_codec(router: WebRouter, pattern: String, name: String, codec: WebRouterSearchCodec) -> WebRouter {
+    _ :: codec
+    route(router, pattern, name)
+}
+
+pub fn navigate(router: WebRouter, path: String) -> WebRouter {
+    m :: match_path(router, path)
+    status := WebNavigationStatus.Ready
+    if m.name.len() == 0 -> status = WebNavigationStatus.Error
+    cache := [String]{}
+    loop c in router.cache -> cache.push(c)
+    if m.name.len() > 0 && !contains(cache, path) && cache.len() < 256 -> cache.push(path)
+    WebRouter{routes: router.routes, current: path, status: status, cache: cache}
+}
+
+pub fn link(router: WebRouter, name: String, param: String) -> String {
+    loop r in router.routes {
+        if r.name == name -> return fill_pattern(r.pattern, param)
+    }
+    "/"
+}
+
+pub fn current(router: WebRouter) -> String { router.current }
+
+pub fn preload(router: WebRouter, path: String) -> WebRouter {
+    cache := [String]{}
+    loop c in router.cache -> cache.push(c)
+    if !contains(cache, path) && cache.len() < 256 -> cache.push(path)
+    WebRouter{routes: router.routes, current: router.current, status: WebNavigationStatus.Preloading, cache: cache}
+}
+
+pub fn invalidate(router: WebRouter, path: String) -> WebRouter {
+    cache := [String]{}
+    loop c in router.cache {
+        if c != path -> cache.push(c)
+    }
+    WebRouter{routes: router.routes, current: router.current, status: router.status, cache: cache}
+}
+
+pub fn abort(router: WebRouter) -> WebRouter {
+    WebRouter{routes: router.routes, current: router.current, status: WebNavigationStatus.Aborted, cache: router.cache}
+}
+
+pub fn not_found() -> WebRoute { WebRoute{pattern: "*", name: "not_found"} }
+
+pub fn show(router: WebRouter) -> String { "{router.current}:{router.routes.len()}" }
+
+pub fn stale(router: WebRouter) -> Bool { router.status == WebNavigationStatus.Preloading }
+
+pub fn collect(router: WebRouter) -> WebRouter {
+    WebRouter{routes: router.routes, current: router.current, status: router.status, cache: [String]{}}
+}
+
+pub fn cache_show(router: WebRouter) -> String {
+    out := ""
+    loop i in 0..<router.cache.len() {
+        if i > 0 -> out = "{out},"
+        out = "{out}{router.cache[i]}"
+    }
+    out
+}
+
+pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus {
+    if contains(router.cache, path) -> return WebRouterCacheStatus.Fresh
+    WebRouterCacheStatus.Collected
+}
+
+fn match_path(router: WebRouter, path: String) -> WebMatch {
+    loop r in router.routes {
+        params :: match_pattern(r.pattern, path)
+        if params != None {
+            ps :: params ?? [String]{}
+            return WebMatch{name: r.name, pattern: r.pattern, params: ps, path: path}
+        }
+    }
+    WebMatch{name: "", pattern: "", params: [String]{}, path: path}
+}
+
+fn match_pattern(pattern: String, path: String) -> ?[String] {
+    if pattern == "*" -> return Val([String]{})
+    segs_p :: split_slash(pattern)
+    segs_u :: split_slash(path)
+    if segs_p.len() != segs_u.len() -> return None
+    params := [String]{}
+    loop i in 0..<segs_p.len() {
+        p :: segs_p[i]
+        u :: segs_u[i]
+        raw :: p.bytes()
+        if raw.len() > 0 && raw[0] == (U8{58}) {
+            params.push(u)
+        } else {
+            if p != u -> return None
+        }
+    }
+    Val(params)
+}
+
+fn fill_pattern(pattern: String, param: String) -> String {
+    segs :: split_slash(pattern)
+    out := ""
+    used := false
+    loop s in segs {
+        out = "{out}/"
+        raw :: s.bytes()
+        if raw.len() > 0 && raw[0] == (U8{58}) && !used {
+            out = "{out}{param}"
+            used = true
+        } else {
+            out = "{out}{s}"
+        }
+    }
+    if out.len() == 0 -> return "/"
+    out
+}
+
+fn split_slash(text: String) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    cur := [U8]{}
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{47}) {
+            if cur.len() > 0 {
+                out.push(String.from_bytes(cur) ?? "")
+                cur = [U8]{}
+            }
+        } else {
+            cur.push(raw[i])
+        }
+    }
+    if cur.len() > 0 -> out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn contains(xs: [String], v: String) -> Bool {
+    loop x in xs {
+        if x == v -> return true
+    }
+    false
+}

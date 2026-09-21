@@ -20,10 +20,10 @@ use std::time::{Duration, Instant};
 
 const NEST_P001_FORM: &str = include_str!("fixtures/nest_p001_form.jet");
 const NEST_P001_INPUT_SHA256: &str =
-    "72facb9077dbb3168de2278f426ef4ae4df4b48dd19ee03931b829463984772e";
+    "e5c1707a9ab751897c662ece76a9047622a999c58eb56b4d03c853101f74deca";
 
 fn assert_nest_p001_form_stages() {
-    assert_eq!(NEST_P001_FORM.len(), 294);
+    assert_eq!(NEST_P001_FORM.len(), 298);
     assert_eq!(
         jet::SHA256::sha256_hex(NEST_P001_FORM.as_bytes()),
         NEST_P001_INPUT_SHA256
@@ -81,6 +81,77 @@ fn assert_nest_p001_form_stages() {
             "NEST-P001 {stage} stage regressed to the old source-less lowering ICE:\n{combined}"
         );
     }
+}
+
+#[test]
+fn forms_table_browser_submit_reaches_typed_action() {
+    assert_nest_p001_form_stages();
+    let Some((chromium, node)) = web_tools() else {
+        eprintln!("note: skipping forms table browser fixture (need chromium + node)");
+        return;
+    };
+    let port = unused_local_port();
+    let _server = NativeAppServer::start(port);
+    let mut script = String::from(
+        r#"
+const { CdpDriver } = await import(`file://${process.cwd()}/scripts/canvas-test/driver.mjs`);
+
+const driver = await new CdpDriver().launch();
+try {
+  await driver.navigate("#,
+    );
+    script.push_str(&format!("\"http://127.0.0.1:{port}/\""));
+    script.push_str(
+        r#");
+  const markup = await driver.evaluate(
+    "document.querySelector('form')?.outerHTML || ''",
+  );
+  const expectedMarkup = [
+    'method="post" action="/actions/save"',
+    '<input name="name" id="Person-name" type="text" aria-label="name" aria-invalid="false" required value="Ada">',
+    '<button type="submit">Submit</button>',
+  ];
+  for (const fragment of expectedMarkup) {
+    if (!markup.includes(fragment)) {
+      throw new Error(`typed form lost generated ${fragment}: ${markup}`);
+    }
+  }
+  await driver.evaluate(`(() => {
+    const form = document.querySelector("form");
+    form.elements.namedItem("id").value = "7";
+    form.elements.namedItem("name").value = "Ada";
+    form.elements.namedItem("active").checked = true;
+    form.requestSubmit();
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  let body = "";
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    body = await driver.evaluate("document.body?.textContent || ''");
+    if (body.includes("saved Ada")) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!body.includes("saved Ada")) {
+    throw new Error(`typed form action did not return the observable result: ${body}`);
+  }
+  console.log("PASS forms table typed action browser fixture");
+} finally {
+  await driver.close();
+}
+"#,
+    );
+    let output = Command::new(&node)
+        .current_dir(repo_root())
+        .env("CHROMIUM", &chromium)
+        .args(["--input-type=module", "-e"])
+        .arg(script)
+        .output()
+        .expect("run forms table browser fixture");
+    assert!(
+        output.status.success(),
+        "forms table browser fixture failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn have_tool(name: &str) -> bool {
@@ -192,6 +263,60 @@ impl Drop for StaticServer {
     }
 }
 
+struct NativeAppServer {
+    child: Child,
+}
+
+impl NativeAppServer {
+    fn start(port: u16) -> Self {
+        let mut child = Command::new(jet_bin())
+            .current_dir(repo_root())
+            .args(["run", "examples/features/web/forms_table.jet"])
+            .env("JET_APP_PORT", port.to_string())
+            .env("NO_COLOR", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start forms table app");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+                let request =
+                    "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+                if stream.write_all(request.as_bytes()).is_ok() {
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                    let mut response = String::new();
+                    if stream.read_to_string(&mut response).is_ok()
+                        && response.starts_with("HTTP/1.1 200")
+                    {
+                        return Self { child };
+                    }
+                }
+            }
+            if let Ok(Some(status)) = child.try_wait() {
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stderr.take() {
+                    let _ = pipe.read_to_string(&mut stderr);
+                }
+                panic!("forms table app exited before listening ({status}): {stderr}");
+            }
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for forms table app on port {port}");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for NativeAppServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+
 fn jet_build_web(cwd: &Path, entry: &str) {
     let out = Command::new(jet_bin())
         .current_dir(cwd)
@@ -208,7 +333,7 @@ fn jet_build_web(cwd: &Path, entry: &str) {
 }
 
 fn publish_build(case_dir: &Path, serve_name: &str, serve_root: &Path) {
-    let build = case_dir.join("build");
+    let build = case_dir.join(".jet/build");
     let dest = serve_root.join(serve_name);
     let _ = fs::remove_dir_all(&dest);
     fs::create_dir_all(&dest).expect("create serve dir");

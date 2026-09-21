@@ -1,0 +1,160 @@
+package {
+    name: "core.text.html"
+    version: "0.1.0"
+    edition: "2026"
+    description: "HTML escaping, entity decoding, and tag stripping."
+    license: "MIT"
+    outputs: {
+        html: .Library{ entry: html }
+    }
+}
+// core.text.html — Python `html` plus the tag strip people actually write.
+//
+// `escape` is XML-safe (`&` `<` `>` `"` `'`). `unescape` understands named
+// entities `amp` `lt` `gt` `quot` `apos` `nbsp` and numeric `&#N;` / `&#xH;`.
+// Unknown entities are left intact. `strip_tags` removes `<...>` spans; it is
+// not a parser and will not execute scripts.
+pub fn escape(text: String) -> String { escape_quote(text, true) }
+
+pub fn escape_quote(text: String, quote: Bool) -> String {
+    out := ""
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 38 -> { out = "{out}&amp;" }
+            n == 60 -> { out = "{out}&lt;" }
+            n == 62 -> { out = "{out}&gt;" }
+            quote && n == 34 -> { out = "{out}&quot;" }
+            quote && n == 39 -> { out = "{out}&#x27;" }
+            else -> { out = "{out}{String.from_bytes([U8]{b}) ?? ""}" }
+        }
+    }
+    out
+}
+
+pub fn unescape(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{38}) {
+            semi := i + 1
+            loop semi < raw.len() && semi - i < 32 {
+                if raw[semi] == (U8{59}) -> break
+                semi = semi + 1
+            }
+            if semi < raw.len() && raw[semi] == (U8{59}) {
+                name :: String.from_bytes(slice_b(raw, i + 1, semi)) ?? ""
+                decoded :: entity(name)
+                if decoded.bytes().len() > 0 {
+                    loop b in decoded.bytes() -> out.push(b)
+                    i = semi + 1
+                    next
+                }
+            }
+        }
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn strip_tags(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{60}) {
+            loop i < raw.len() {
+                if raw[i] == (U8{62}) {
+                    i = i + 1
+                    break
+                }
+                i = i + 1
+            }
+            next
+        }
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn unescape_and_strip(text: String) -> String { unescape(strip_tags(text)) }
+
+pub fn attr_escape(text: String) -> String { escape_quote(text, true) }
+
+pub fn text_escape(text: String) -> String { escape_quote(text, false) }
+
+fn entity(name: String) -> String {
+    if name == {
+        "amp" -> return "&"
+        "lt" -> return "<"
+        "gt" -> return ">"
+        "quot" -> return "\""
+        "apos" -> return "'"
+        "nbsp" -> return " "
+        "copy" -> return "(c)"
+        "reg" -> return "(R)"
+        "trade" -> return "(TM)"
+        "mdash" -> return "-"
+        "ndash" -> return "-"
+        "hellip" -> return "..."
+        else -> { _ := 0 }
+    }
+    raw :: name.bytes()
+    if raw.len() >= 2 && raw[0] == (U8{35}) {
+        if raw[1] == (U8{120}) || raw[1] == (U8{88}) {
+            n := 0
+            i := 2
+            loop i < raw.len() {
+                d :: hex_val(raw[i]) ?? return ""
+                n = n * 16 + d
+                i = i + 1
+            }
+            return scalar(n)
+        }
+        n := 0
+        i := 1
+        loop i < raw.len() {
+            d :: raw[i]
+            if d < 48 || d > 57 -> return ""
+            n = n * 10 + (d - 48)
+            i = i + 1
+        }
+        return scalar(n)
+    }
+    ""
+}
+
+fn scalar(n: Int) -> String {
+    if n == {
+        34 -> return "\""
+        39 -> return "'"
+        38 -> return "&"
+        60 -> return "<"
+        62 -> return ">"
+        160 -> return " "
+        else -> { _ := 0 }
+    }
+    if n >= 32 && n <= 126 -> return String.from_bytes([U8]{(U8{n})}) ?? ""
+    ""
+}
+
+fn hex_val(b: U8) -> ?Int {
+    n :: b
+    if n >= 48 && n <= 57 -> return Val(n - 48)
+    if n >= 65 && n <= 70 -> return Val(n - 55)
+    if n >= 97 && n <= 102 -> return Val(n - 87)
+    None
+}
+
+fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return out
+        out.push(raw[i])
+        i = i + 1
+    }
+}

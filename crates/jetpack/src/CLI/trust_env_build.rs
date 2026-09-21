@@ -33,7 +33,7 @@ pub(super) struct EnvReadyStats {
 }
 
 impl EnvReadyStats {
-    fn record(&mut self, entry: &Store::StoreEntry, state: Provider::SourceState, _version: &str) {
+    fn record(&mut self, entry: &Store::StoreEntry, state: Provider::SourceState) {
         self.total += 1;
         // A local reuse and a verified binary-cache substitution both avoid
         // fresh work for the user entering the environment.
@@ -48,14 +48,34 @@ impl EnvReadyStats {
     }
 
     fn canonicalize(&mut self, roots: &Store::Roots) {
+        if self.realized.is_empty() {
+            return;
+        }
         let entries = Store::list_read_only(roots);
+        let mut latest = std::collections::BTreeMap::new();
+        for entry in &entries {
+            let key = (
+                entry.reference.as_str(),
+                entry.name.as_str(),
+                entry.version.as_str(),
+                entry.envelope.output_hash.as_str(),
+            );
+            let replace = latest.get(&key).is_none_or(|current: &&Store::StoreEntry| {
+                (entry.last_used_at, entry.id.as_str())
+                    > (current.last_used_at, current.id.as_str())
+            });
+            if replace {
+                latest.insert(key, entry);
+            }
+        }
         for selection in &mut self.realized {
-            if let Some(entry) = entries.iter().find(|entry| {
-                entry.reference == selection.0
-                    && entry.name == selection.1
-                    && entry.version == selection.2
-                    && entry.envelope.output_hash == selection.3
-            }) {
+            let key = (
+                selection.0.as_str(),
+                selection.1.as_str(),
+                selection.2.as_str(),
+                selection.3.as_str(),
+            );
+            if let Some(entry) = latest.get(&key) {
                 *selection = Store::environment_entry_selection(entry);
             }
         }
@@ -562,7 +582,16 @@ pub(super) fn compose_env_scoped_with_stats(
     scope: RealizeScope,
     confirm_download: bool,
 ) -> Result<(Env, EnvReadyStats), i32> {
-    compose_env_scoped_with_warm(theme, roots, flags, plan, scope, confirm_download, None)
+    compose_env_scoped_with_warm(
+        theme,
+        roots,
+        flags,
+        plan,
+        scope,
+        confirm_download,
+        None,
+        true,
+    )
 }
 
 pub(super) fn compose_env_scoped_with_warm(
@@ -573,11 +602,25 @@ pub(super) fn compose_env_scoped_with_warm(
     scope: RealizeScope,
     confirm_download: bool,
     warm: Option<Vec<Store::VerifiedRealization>>,
+    collect_stats: bool,
 ) -> Result<(Env, EnvReadyStats), i32> {
-    let warm_path = warm.is_some();
-    let mut lock_diff = (scope == RealizeScope::Project && !warm_path)
+    let mut warm_realizations = warm.map(index_warm_realizations);
+    let warm_complete = warm_realizations.as_ref().is_some_and(|realized| {
+        plan.refs
+            .iter()
+            .all(|spec| realized.contains_key(&spec.raw))
+            && plan.adapters.iter().all(|adapter| {
+                let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+                realized.contains_key(&reference)
+            })
+    });
+    // Cold/partial project composition still needs selections for the receipt
+    // and producer sealing; a complete warm hook can skip their per-entry
+    // metadata hashing when its caller does not consume readiness stats.
+    let needs_stats = collect_stats || (scope == RealizeScope::Project && !warm_complete);
+    let mut lock_diff = (scope == RealizeScope::Project && !warm_complete)
         .then(|| super::lock::LockDiffGuard::new(theme, &plan.project_root));
-    let download_plan = if confirm_download && !warm_path {
+    let download_plan = if confirm_download && !warm_complete {
         Some(reject_unprompted_acquisition(
             theme, roots, flags, plan, scope,
         )?)
@@ -627,13 +670,16 @@ pub(super) fn compose_env_scoped_with_warm(
     let mut unavailable = false;
     let mut cache_leases = Vec::new();
     let mut ready_stats = EnvReadyStats::default();
-    let name_w = name_column_width(&plan.refs);
-    let mut warm_realizations = warm.map(index_warm_realizations);
+    let name_w = if warm_complete {
+        0
+    } else {
+        name_column_width(&plan.refs)
+    };
     // Multi-package realization gets one pinned aggregate on a TTY and one
     // settled row per package. Plain output keeps only those settled rows so
     // a large package set does not become a duplicate status/row ledger.
     let total_steps = plan.refs.len() + plan.adapters.len();
-    let live_mode = total_steps > 1 && !warm_path;
+    let live_mode = total_steps > 1 && !warm_complete;
     let live_tty = live_mode && theme.live_enabled();
     let mut live = theme.live_region();
     let mut completed_steps = 0usize;
@@ -684,12 +730,9 @@ pub(super) fn compose_env_scoped_with_warm(
                     live.finish(&line);
                 }
                 completed_steps += 1;
-                let version = if entry.version.is_empty() {
-                    super::realize::version_from_out(&entry.name, &entry.out).unwrap_or_default()
-                } else {
-                    entry.version.clone()
-                };
-                ready_stats.record(&entry, state, &version);
+                if needs_stats {
+                    ready_stats.record(&entry, state);
+                }
                 let leased_output = match lease.stable_path(&entry.out) {
                     Ok(path) => path,
                     Err(error) => {
@@ -706,7 +749,7 @@ pub(super) fn compose_env_scoped_with_warm(
                 };
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
-                if let Some(bin) = lease.projected_bin_dir() {
+                if let Some(bin) = lease.projected_bin_dir_after_validation() {
                     bin_dirs.push(bin.to_string_lossy().into_owned());
                 }
                 let mut invalid_metadata = None;
@@ -769,7 +812,7 @@ pub(super) fn compose_env_scoped_with_warm(
     }
     for (idx, adapter) in plan.adapters.iter().enumerate() {
         live.clear();
-        if total_steps > 1 && !warm_path {
+        if total_steps > 1 && !warm_complete {
             theme.progress_chain(
                 "Adapt",
                 plan.refs.len() + idx + 1,
@@ -784,12 +827,9 @@ pub(super) fn compose_env_scoped_with_warm(
             .or_else(|| realize_adapter(theme, roots, flags, adapter, &plan.table, true));
         match adapter_outcome {
             Some((entry, state, lease)) => {
-                let version = if entry.version.is_empty() {
-                    super::realize::version_from_out(&entry.name, &entry.out).unwrap_or_default()
-                } else {
-                    entry.version.clone()
-                };
-                ready_stats.record(&entry, state, &version);
+                if needs_stats {
+                    ready_stats.record(&entry, state);
+                }
                 if let Some(bin) = lease.projected_bin_dir() {
                     bin_dirs.push(bin.to_string_lossy().into_owned());
                 }
@@ -922,7 +962,7 @@ pub(super) fn compose_env_scoped_with_warm(
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above remain the realization
     // report — callers may append a measured env-entry banner, but this shared
     // composer does not print a second package summary before shell handoff.
-    if scope == RealizeScope::Project && !warm_path {
+    if scope == RealizeScope::Project && !warm_complete {
         if let Err(error) = seal_project_producer_records(roots, &plan.project_root, &ready_stats)
         {
             live.clear();
@@ -938,7 +978,7 @@ pub(super) fn compose_env_scoped_with_warm(
     // Warm reuse already carries the exact entries selected under the Hangar
     // lock; re-listing to canonicalize repeats that read-only scan. Cold
     // realizations still refresh selections after publication.
-    if !warm_path {
+    if !warm_complete {
         ready_stats.canonicalize(roots);
     }
     Ok((

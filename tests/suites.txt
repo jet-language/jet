@@ -12,9 +12,9 @@
 # their package and are covered by `--workspace`; they cannot fall out of a set
 # on their own, which is the failure mode this file exists to stop.
 #
-# Nothing here is decorative. `scripts/agent/time-suites.sh --set <name>` reads
-# this file to decide what to run, and `--set all` is the union, so the sets are
-# a partition of the inventory rather than a description of one.
+# Nothing here is decorative. `tools/ci/test-shards.sh` reads this file when
+# sharding the inventory, and `tests/suite_membership.rs` fails if a declared
+# target sits in no set, so the sets are a partition rather than a description.
 #
 # The pins live OUTSIDE this file, in tests/suite_membership.rs, so a hand-edit
 # cannot green the check by deleting the row that fails:
@@ -83,6 +83,7 @@ dev_loop:
   tests/live_inspect
   tests/learn
   tests/lsp
+  tests/nbody_witness
   tests/notebook
   tests/repl
   tests/report
@@ -91,6 +92,8 @@ dev_loop:
   tests/run_interpret
   tests/run_tier_diagnostics
   tests/semindex
+  tests/simd_witness
+  tests/s5_columnar_witness
   tests/testing_tiers
 
 # Front end and semantics: sema soundness, TIR lowering, grammar, generics,
@@ -111,6 +114,7 @@ language:
   tests/comptime_core_pure_parity
   tests/comptime_sequence_parity
   tests/decisions
+  tests/decimal_fast_path
   tests/dsl_blocks
   tests/effects
   tests/fact_contribution_law
@@ -159,6 +163,7 @@ language:
   tests/sema_soundness_invalid
   tests/sema_soundness_provenance
   tests/same_subject_dispatch
+  tests/redundant_final_return
   tests/shared_guards
   tests/shared_weak
   tests/single_use

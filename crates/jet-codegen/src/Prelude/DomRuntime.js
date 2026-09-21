@@ -713,7 +713,7 @@ function jetWebAppServerBoundary(app, name, action, handler) {
 export function jetAppAction(app, action, handler) {
   return jetWebAppServerBoundary(app, "action", action, handler);
 }
-export function jetAppForm(app, action, handler) {
+export function jetAppForm(app, action, handler, _binding) {
   return jetWebAppServerBoundary(app, "form", action, handler);
 }
 export function jetAppData(app, action, handler) {
@@ -2502,19 +2502,7 @@ export async function instantiateWasm(wasmPath, imports = {}) {
       ?.trim()
       ?.toLowerCase();
     if (contentType === "application/wasm" && typeof WebAssembly.instantiateStreaming === "function") {
-      let fallback = null;
-      try {
-        fallback = response.clone?.() ?? null;
-      } catch (_) {}
-      if (fallback) {
-        try {
-          ({ instance } = await WebAssembly.instantiateStreaming(response, importObject));
-        } catch (_) {
-          ({ instance } = await WebAssembly.instantiate(await fallback.arrayBuffer(), importObject));
-        }
-      } else {
-        ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), importObject));
-      }
+      ({ instance } = await WebAssembly.instantiateStreaming(response, importObject));
     } else {
       ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), importObject));
     }

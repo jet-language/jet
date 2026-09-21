@@ -4,15 +4,11 @@ use core.files as fs
 
 fn run() {
     headline := "hello from the static generator"
-    if fs.exists("content.txt") {
-        headline = fs.read("content.txt")
-    }
+    if fs.exists("content.txt") -> headline = fs.read("content.txt")
 
     fs.create_dir_all("dist")
     page :: HTML{"<!doctype html><html><body><h1>{headline}</h1></body></html>"}
     fs.write("dist/index.html", page.text())
-    if fs.exists("widget.wasm") {
-        fs.copy("widget.wasm", "dist/widget.wasm")
-    }
+    if fs.exists("widget.wasm") -> fs.copy("widget.wasm", "dist/widget.wasm")
     print("generated: {headline}")
 }

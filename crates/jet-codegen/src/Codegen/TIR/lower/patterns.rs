@@ -423,7 +423,7 @@ pub(crate) fn lower_fallible_match<'a>(
     // Preserve a fallible core/helper call as its Result/Option carrier while
     // lowering the scrutinee. Normal value lowering consumes that carrier via
     // `Try`, but an outcome pattern needs to inspect it directly.
-    let subject_t = {
+    let mut subject_t = {
         let _fallible_match_cache_scope = super::expressions::ExprCacheScope::enter();
         let fallback_subject = env.fallback_subject;
         env.fallback_subject = true;
@@ -431,11 +431,34 @@ pub(crate) fn lower_fallible_match<'a>(
         env.fallback_subject = fallback_subject;
         subject_t
     };
-    let subject_ty = subject_t.ty.clone();
+    let subject_ty = match subject_t.ty.without_user_tags() {
+        Type::Option(_) | Type::Result { .. } => subject_t.ty.clone(),
+        _ => {
+            let declared = match subject.without_parens() {
+                Expr::Call(call) => call.resolved_ret.as_ref(),
+                Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
+                _ => None,
+            };
+            declared
+                .map(|ty| {
+                    jet_foundation::AST::FailureContract::from_return_type(Some(ty))
+                        .effective_type()
+                })
+                .filter(|ty| matches!(ty.without_user_tags(), Type::Option(_) | Type::Result { .. }))
+                .unwrap_or_else(|| subject_t.ty.clone())
+        }
+    };
+    if subject_t.ty != subject_ty {
+        subject_t.ty = subject_ty.clone();
+    }
     let is_option = match subject_ty.without_user_tags() {
         Type::Option(_) => true,
         Type::Result { .. } => false,
         _ => {
+            eprintln!(
+                "fallible match debug: subject_ty={:?} lowered_ty={:?}",
+                subject_ty, subject_t.ty
+            );
             return LowerStmtPlan::ready(invariant_stmt(
                 "fallible match subject type",
                 subject.span(),

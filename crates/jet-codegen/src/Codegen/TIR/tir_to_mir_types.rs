@@ -1961,6 +1961,43 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("GlyphShaper", &["HarfBuzz", "HeadlessFallback"]),
     ("WebFormValueType", &["String", "Int", "Bool", "Float"]),
     ("WebFormControl", &["Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden"]),
+    // D-DX-LOADERS1: the native Prelude carrier still needs a checked MIR
+    // owner row so tag-only `DataLoaderKind` patterns lower on every tier.
+    ("DataLoaderKind", &["File", "Url", "Database", "Value"]),
+    // D-DX-LOADERS1: the source-facing data records carry these closed native
+    // enums; keep their checked tag rows beside DataLoaderKind.
+    (
+        "DataErrorKind",
+        &[
+            "Decode",
+            "Limit",
+            "IO",
+            "Empty",
+            "InvalidArgument",
+            "NonFinite",
+            "Overflow",
+            "State",
+            "Bridge",
+        ],
+    ),
+    ("DataFormat", &["CSV", "JSON", "JSONL", "Parquet", "Arrow"]),
+    (
+        "DataFreshness",
+        &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
+    ),
+    (
+        "DataInvalidationCause",
+        &[
+            "None",
+            "Loader",
+            "Input",
+            "ArchiveMember",
+            "Parameters",
+            "Credential",
+            "Capability",
+            "Manual",
+        ],
+    ),
     (
         "DataTree",
         &[
@@ -2052,7 +2089,84 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
+    (
+        "DataLineOptions",
+        &[
+            "title",
+            "x_label",
+            "y_label",
+            "markers",
+            "reference",
+            "style",
+            "color",
+            "legend",
+        ],
+    ),
+    (
+        "DataLimits",
+        &[
+            "encoding",
+            "max_groups",
+            "max_sort_rows",
+            "max_join_rows",
+            "max_output_rows",
+        ],
+    ),
+    ("DataSourceIdentity", &["kind", "locator", "member", "parameters"]),
+    ("DataAuthority", &["scope", "revision"]),
+    (
+        "DataError",
+        &["kind", "operation", "row", "column", "index", "reason", "cause"],
+    ),
+    ("DataProvenance", &["source", "format", "authority"]),
+    ("DataSchema", &["identity", "format", "columns", "projection"]),
+    (
+        "DataSnapshotIdentity",
+        &["id", "source", "content", "schema", "format"],
+    ),
+    (
+        "DataLoaderStatus",
+        &[
+            "identity",
+            "freshness",
+            "invalidated_by",
+            "error",
+            "cleanup",
+            "buffered_bytes",
+            "backpressure",
+            "last_good",
+        ],
+    ),
+    (
+        "Claims",
+        &[
+            "subject",
+            "audience",
+            "issuer",
+            "expires_at",
+            "not_before",
+            "issued_at",
+        ],
+    ),
     ("WebFormFieldSpec", &["name", "value_type", "required", "default", "label", "control", "group", "wire_name"]),
+    ("WebFormFieldState", &["name", "value_type", "required", "value", "touched", "validating", "errors"]),
+    ("WebTableState", &["sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"]),
+    ("WebTablePage", &["rows", "row_keys", "total_rows", "page_index", "page_size", "page_count"]),
+    ("WebVirtualPlan", &[
+        "total_count",
+        "scroll_offset",
+        "viewport_width",
+        "viewport_height",
+        "estimated_item_size",
+        "overscan",
+        "start",
+        "end",
+        "total_size",
+        "measured_count",
+        "anchor_index",
+        "anchor_offset",
+        "measurements",
+    ]),
     (
         crate::Syntax::TYPE_MEMO_STATS,
         &["hits", "misses", "size", "bound"],
@@ -2444,16 +2558,45 @@ const COMPILER_OWNED_MATH_RECORDS: &[(&str, &[&str])] = &[
     ("Vec3", &["x", "y", "z"]),
     ("Vec4", &["x", "y", "z", "w"]),
 ];
+const COMPILER_OWNED_GEOMETRY_RECORDS: &[(&str, &[&str], &[&str])] = &[
+    ("Point2", &["T", "Space"], &["x", "y"]),
+    ("Delta2", &["T", "Space"], &["x", "y"]),
+    ("ScreenPoint", &[], &["x", "y"]),
+    ("WorldPoint", &[], &["x", "y"]),
+    ("ViewPoint", &[], &["x", "y"]),
+    ("CameraPoint", &[], &["x", "y"]),
+    ("DevicePoint", &[], &["x", "y"]),
+    ("ScreenDelta", &[], &["x", "y"]),
+    ("WorldDelta", &[], &["x", "y"]),
+    ("ViewDelta", &[], &["x", "y"]),
+    ("CameraDelta", &[], &["x", "y"]),
+    ("DeviceDelta", &[], &["x", "y"]),
+    ("Ray2", &["T", "From", "To"], &["origin", "direction"]),
+    (
+        "Transform",
+        &["From", "To"],
+        &["m00", "m01", "m10", "m11", "tx", "ty"],
+    ),
+    (
+        "Transform2",
+        &["T", "From", "To"],
+        &["m00", "m01", "m10", "m11", "tx", "ty"],
+    ),
+];
 
 
 pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
+        || jet_foundation::CoreModuleExports::core_enum_variants(name).is_some()
         || COMPILER_OWNED_CORE_RECORDS
             .iter()
             .any(|(owned, _)| *owned == name)
         || COMPILER_OWNED_MATH_RECORDS
             .iter()
             .any(|(owned, _)| *owned == name)
+        || COMPILER_OWNED_GEOMETRY_RECORDS
+            .iter()
+            .any(|(owned, _, _)| *owned == name)
         || crate::Codegen::core_email_rust_type_name(name).is_some()
         || name == crate::Syntax::TYPE_ERR
         || matches!(
@@ -2461,6 +2604,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
             "VjpRun"
                 | "Group"
                 | "DataJoin"
+                | "DataSnapshot"
                 | "DataPivotCell"
                 | "DataSummary"
                 | "FieldError"
@@ -2480,7 +2624,60 @@ pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'sta
         .map(|(_, variants)| *variants)
 }
 
-
+/// Project generated unit-variant Core enums into checked MIR declarations.
+/// Explicit compiler-owned rows above retain their specialized payload shapes.
+fn compiler_owned_core_unit_enums(module: &str) -> Vec<TirTypeDef> {
+    let span = Span::new(0, 0);
+    let mut seen = HashSet::new();
+    jet_foundation::CoreModuleExports::core_modules()
+        .iter()
+        .flat_map(|entry| entry.type_exports.iter().map(|&(name, _)| name))
+        .filter_map(|name| {
+            if compiler_owned_enum_variants(name).is_some() {
+                return None;
+            }
+            let variants = jet_foundation::CoreModuleExports::core_enum_variants(name)?;
+            if !seen.insert(name) {
+                return None;
+            }
+            Some(TirTypeDef {
+                module: module.to_string(),
+                key: name.to_string(),
+                name: name.to_string(),
+                span,
+                public: true,
+                package_public: false,
+                generic_params: Vec::new(),
+                derives: Vec::new(),
+                auto_derive_default: false,
+                auto_printable: false,
+                published_schema: false,
+                single_use: false,
+                must_use: false,
+                layout: None,
+                layout_alignment: None,
+                serde: Vec::new(),
+                cli_bindings: Vec::new(),
+                cli: None,
+                ownership: TirOwnership::Owned,
+                boxed_edges: Vec::new(),
+                kind: TirTypeDefKind::Enum {
+                    variants: variants
+                        .iter()
+                        .map(|variant| TirVariant {
+                            name: variant.to_string(),
+                            wire_name: variant.to_string(),
+                            span,
+                            payload: TirVariantPayload::Unit,
+                            discriminant: None,
+                        })
+                        .collect(),
+                    methods: Vec::new(),
+                },
+            })
+        })
+        .collect()
+}
 
 fn compiler_owned_default_err(module: &str) -> TirTypeDef {
     let span = Span::new(0, 0);
@@ -2530,6 +2727,7 @@ fn compiler_owned_default_err(module: &str) -> TirTypeDef {
         },
     }
 }
+
 fn compiler_owned_record(
     module: &str,
     name: &str,
@@ -2963,6 +3161,7 @@ fn compiler_owned_type_defs(
                 methods: Vec::new(),
             },
         })
+        .chain(compiler_owned_core_unit_enums(module))
         .chain(std::iter::once(compiler_owned_default_err(module)))
         .chain(std::iter::once(compiler_owned_record(
             module,
@@ -2986,32 +3185,71 @@ fn compiler_owned_type_defs(
         )))
         .chain(
             [
-                ("DataJoin", ["L", "R"], ["left", "right"]),
-                ("Group", ["K", "V"], ["key", "value"]),
+                ("DataJoin", &["L", "R"][..], &["left", "right"][..]),
+                ("Group", &["K", "V"][..], &["key", "value"][..]),
+                (
+                    "DataSnapshot",
+                    &["T"][..],
+                    &["value", "identity", "provenance", "schema", "status", "content"][..],
+                ),
             ]
             .into_iter()
             .map(move |(name, params, fields)| {
-                let args = params.map(|name| Type::Named(name.to_string()));
+                let args = params
+                    .iter()
+                    .map(|name| Type::Named((*name).to_string()))
+                    .collect::<Vec<_>>();
                 let mut row = compiler_owned_record(
                     module,
                     name,
-                    fields.map(|field| {
+                    fields.iter().map(|field| {
                         (
-                            field,
+                            *field,
                             crate::Sema::core_struct_field_type(name, field, &args)
                                 .expect("canonical generic Core record field"),
                         )
                     }),
                 );
                 row.generic_params = params
-                    .into_iter()
+                    .iter()
                     .map(|name| super::TGenericParam {
-                        name: name.to_string(),
+                        name: (*name).to_string(),
                         bounds: Vec::new(),
                     })
                     .collect();
                 row
             }),
+        )
+        .chain(
+            COMPILER_OWNED_GEOMETRY_RECORDS
+                .iter()
+                .map(move |(name, params, fields)| {
+                    let args = params
+                        .iter()
+                        .copied()
+                        .map(|name| Type::Named(name.to_string()))
+                        .collect::<Vec<_>>();
+                    let mut row = compiler_owned_record(
+                        module,
+                        *name,
+                        fields.iter().copied().map(|field| {
+                            (
+                                field,
+                                crate::Sema::core_struct_field_type(*name, field, &args)
+                                    .expect("canonical geometry Core record field"),
+                            )
+                        }),
+                    );
+                    row.generic_params = params
+                        .iter()
+                        .copied()
+                        .map(|name| super::TGenericParam {
+                            name: name.to_string(),
+                            bounds: Vec::new(),
+                        })
+                        .collect();
+                    row
+                }),
         )
         .chain(
             ["KeyRef", "MutationPlan", "VaultWrite"]

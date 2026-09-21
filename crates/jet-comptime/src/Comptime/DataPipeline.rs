@@ -2244,6 +2244,13 @@ fn data_snapshot_dynamic(
     ))
 }
 
+fn data_stream_row_type(ty: &Type) -> Type {
+    match ty {
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+        _ => ty.clone(),
+    }
+}
+
 fn data_stream_rows(
     loader: &ComptimeLoader,
     interp: &mut super::Interpreter::Interp<'_>,
@@ -2252,7 +2259,8 @@ fn data_stream_rows(
     let (payload, _) = data_loader_payload(&loader.state)?;
     let tree = data_dynamic_tree(&payload, &loader.state.format, &loader.state.limits)?;
     let rows = data_dynamic_rows(&tree);
-    let Some(ty) = loader.decode_ty.clone() else {
+    let ty = loader.decode_ty.clone().map(|ty| data_stream_row_type(&ty));
+    let Some(ty) = ty else {
         return Ok(rows);
     };
     rows.into_iter()
@@ -3386,7 +3394,10 @@ fn eval_data_loader_method_in_state(
                                 rows,
                                 cursor: 0,
                                 cancelled: false,
-                                row_ty: slot.decode_ty.clone(),
+                                row_ty: slot
+                                    .decode_ty
+                                    .as_ref()
+                                    .map(data_stream_row_type),
                             },
                         ))))
                     }
@@ -3867,7 +3878,10 @@ pub(super) fn eval_data_loader_method(
                                 rows,
                                 cursor: 0,
                                 cancelled: false,
-                                row_ty: slot.decode_ty.clone(),
+                                row_ty: slot
+                                    .decode_ty
+                                    .as_ref()
+                                    .map(data_stream_row_type),
                             },
                         ))))
                     }

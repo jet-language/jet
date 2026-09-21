@@ -1,5 +1,6 @@
 // D-FACT-READ1=A: every compiler-held plane uses one typed `@` read.
-#Numeric Severity :: distinct Int(0..10)
+#Numeric
+Severity :: distinct Int(0..10)
 
 #UnitFamily(Length, dimension) { meter }
 
@@ -9,17 +10,18 @@ struct PlaneFacts {
     approximate: F32
     shape: [Int#4]
     classified: #Audited Int
-    callable: fn(value: Int) Int
+    callable: fn(value: Int, *, label: Bool) -> Int
 }
 
 struct Order {
     state { Draft, Confirmed }
+
     id: Int
 }
 
 fn send_report() {}
 
-fn sendability_for(cell: Cell<Int>) Bool -> {
+fn sendability_for(cell: Cell<Int>) -> Bool {
     @known :: cell.@sendability.known
     return @known
 }

@@ -368,7 +368,7 @@ async function buildJetLibrary(outDir, cc, jetEnv) {
   await fs.cp(jetDir, stage, { recursive: true });
   const jetBuild = await runCommand(jetEnv, ["jet", "build", "--lib", "library.jet"], { cwd: stage });
   if (jetBuild.code !== 0) throw new Error(`Jet library build failed:\n${jetBuild.stderr.toString("utf8")}`);
-  const target = path.join(stage, "target");
+  const target = path.join(stage, ".jet/build");
   const archive = path.join(target, "libffiassurance.a");
   const header = path.join(target, "ffiassurance.h");
   if (!(await exists(archive)) || !(await exists(header))) throw new Error("Jet library build produced no archive/header pair");
@@ -537,8 +537,8 @@ async function runJetHost(options, manifest) {
     source_closure_sha256: closure.sha256,
     native_artifact: hostArtifact,
     generated_library: [
-      await artifactRecord(path.join(outDir, "jet-source", "target", "libffiassurance.a")),
-      await artifactRecord(path.join(outDir, "jet-source", "target", "ffiassurance.h"))
+      await artifactRecord(path.join(outDir, "jet-source", ".jet/build", "libffiassurance.a")),
+      await artifactRecord(path.join(outDir, "jet-source", ".jet/build", "ffiassurance.h"))
     ],
     dependency_probe: hostDependencies,
     loaded_dependencies: hostDependencies.entries,

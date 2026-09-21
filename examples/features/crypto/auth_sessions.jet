@@ -3,7 +3,6 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [DB, Exec, IO, Mem.Alloc] } }
 }
-
 // D-AUTH1=A (#506): sessions, password login, OAuth begin/finish, magic links.
 use core.auth as auth
 use core.text as text
@@ -30,7 +29,7 @@ fn run() {
     if auth.oauth_begin("google") == {
         .Ok(state) -> {
             if auth.oauth_finish(state, "carol", 1_700_000_000_200, 3_600_000) == {
-                .Ok(oauth_sess) -> print("oauth_user:{auth.session_user(oauth_sess)}")
+                .Ok(oauth_sess) -> { print("oauth_user:{auth.session_user(oauth_sess)}") }
                 .Err(_) -> print("oauth:rejected")
             }
         }

@@ -1,8 +1,8 @@
 // ── D-HTTPLIB2=B / D-HTTPLIB4=B: core.http.client — request builder ─────────
 // JetHTTPRequest and JetHTTPResponse live here (in the generated program's
 // crate) so they're accessible without cross-crate type imports. The native
-// client FFI seam uses only primitive types (i64, String, Vec<String>) through
-// wrappers here. This is the I6-safe pattern.
+// client seam passes owned request/response rows through the bridge; legacy
+// primitive wrappers remain only for direct compatibility callers.
 
 #[derive(Clone)]
 enum JetHTTPProxy {
@@ -73,9 +73,13 @@ impl JetHTTPClient {
 }
 
 fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest {
+    jet_http_client_request_new_owned(method.clone(), url.clone())
+}
+
+fn jet_http_client_request_new_owned(method: String, url: String) -> JetHTTPRequest {
     JetHTTPRequest {
-        method: method.clone(),
-        url: url.clone(),
+        method,
+        url,
         path: String::new(),
         version: "HTTP/1.1".to_string(),
         headers: JetHTTPHeaders::new(),
@@ -101,22 +105,49 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest 
     }
 }
 
-fn jet_http_client_request_header(
+fn jet_http_client_request_header_owned(
     mut req: JetHTTPRequest,
-    name: &String,
-    value: &String,
+    name: String,
+    value: String,
 ) -> JetHTTPRequest {
-    if let Err(error) = req.headers.append(name, value) {
-        let _ = error;
+    if !JetHTTPHeaders::valid_name(&name) || !JetHTTPHeaders::valid_value(&value) {
         req.header_error = Some(JetHTTPError::InvalidHeader);
+    } else {
+        req.headers.entries.push((name, value));
     }
     req
 }
 
-fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &String) -> JetHTTPRequest {
-    req.body = JetHTTPBody::from_text(body.clone());
+fn jet_http_client_request_body_owned(mut req: JetHTTPRequest, body: String) -> JetHTTPRequest {
+    req.body = JetHTTPBody::from_text(body);
     req.body_set = true;
     req
+}
+
+fn jet_http_client_request_json_text_owned(
+    req: JetHTTPRequest,
+    body: String,
+) -> JetHTTPRequest {
+    jet_http_client_request_json_body(
+        req,
+        JetHTTPBody::from_bytes_with_content_type(
+            body.into_bytes(),
+            Some("application/json".to_string()),
+        ),
+    )
+}
+
+
+fn jet_http_client_request_header(
+    req: JetHTTPRequest,
+    name: &String,
+    value: &String,
+) -> JetHTTPRequest {
+    jet_http_client_request_header_owned(req, name.clone(), value.clone())
+}
+
+fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &String) -> JetHTTPRequest {
+    jet_http_client_request_body_owned(req, body.clone())
 }
 
 fn jet_http_client_request_json_body(
@@ -142,14 +173,9 @@ fn jet_http_client_request_json_text(
     req: JetHTTPRequest,
     body: &String,
 ) -> JetHTTPRequest {
-    jet_http_client_request_json_body(
-        req,
-        JetHTTPBody::from_bytes_with_content_type(
-            body.clone().into_bytes(),
-            Some("application/json".to_string()),
-        ),
-    )
+    jet_http_client_request_json_text_owned(req, body.clone())
 }
+
 
 fn jet_http_client_request_body_stream(mut req: JetHTTPRequest, body: JetHTTPBody) -> JetHTTPRequest {
     req.body = body;
@@ -219,39 +245,70 @@ fn jet_http_client_request_redirects(mut req: JetHTTPRequest, limit: i64) -> Jet
     req
 }
 
-fn jet_http_client_request_proxy(mut req: JetHTTPRequest, proxy: &String) -> JetHTTPRequest {
-    req.proxy = Some(proxy.clone());
+fn jet_http_client_request_proxy_owned(
+    mut req: JetHTTPRequest,
+    proxy: String,
+) -> JetHTTPRequest {
+    req.proxy = Some(proxy);
+    req
+}
+
+fn jet_http_client_request_proxy(req: JetHTTPRequest, proxy: &String) -> JetHTTPRequest {
+    jet_http_client_request_proxy_owned(req, proxy.clone())
+}
+
+fn jet_http_client_request_cookie_owned(
+    mut req: JetHTTPRequest,
+    name: String,
+    value: String,
+) -> JetHTTPRequest {
+    req.cookies.push(name);
+    req.cookies.push(value);
     req
 }
 
 fn jet_http_client_request_cookie(
-    mut req: JetHTTPRequest,
+    req: JetHTTPRequest,
     name: &String,
     value: &String,
 ) -> JetHTTPRequest {
-    req.cookies.push(name.clone());
-    req.cookies.push(value.clone());
+    jet_http_client_request_cookie_owned(req, name.clone(), value.clone())
+}
+
+fn jet_http_client_request_form_owned(
+    mut req: JetHTTPRequest,
+    name: String,
+    value: String,
+) -> JetHTTPRequest {
+    req.form.push(name);
+    req.form.push(value);
     req
 }
 
 fn jet_http_client_request_form(
-    mut req: JetHTTPRequest,
+    req: JetHTTPRequest,
     name: &String,
     value: &String,
 ) -> JetHTTPRequest {
-    req.form.push(name.clone());
-    req.form.push(value.clone());
+    jet_http_client_request_form_owned(req, name.clone(), value.clone())
+}
+
+fn jet_http_client_request_multipart_text_owned(
+    mut req: JetHTTPRequest,
+    name: String,
+    value: String,
+) -> JetHTTPRequest {
+    req.multipart.push(name);
+    req.multipart.push(value);
     req
 }
 
 fn jet_http_client_request_multipart_text(
-    mut req: JetHTTPRequest,
+    req: JetHTTPRequest,
     name: &String,
     value: &String,
 ) -> JetHTTPRequest {
-    req.multipart.push(name.clone());
-    req.multipart.push(value.clone());
-    req
+    jet_http_client_request_multipart_text_owned(req, name.clone(), value.clone())
 }
 
 fn jet_http_client_response_status(resp: &JetHTTPResponse) -> i64 {
@@ -268,7 +325,7 @@ fn jet_http_client_response_new(
     status: i64,
     body_handle: i64,
     body_length: Option<i64>,
-    headers: Vec<String>,
+    headers: Vec<(String, String)>,
     body_read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHTTPError>,
     body_close: fn(i64),
     protocol: String,
@@ -285,11 +342,18 @@ fn jet_http_client_response_new(
             return Err(JetHTTPError::InvalidFraming);
         }
     };
+    if headers
+        .iter()
+        .any(|(name, value)| !JetHTTPHeaders::valid_name(name) || !JetHTTPHeaders::valid_value(value))
+    {
+        body_close(body_handle);
+        return Err(JetHTTPError::InvalidHeader);
+    }
     Ok(JetHTTPResponse {
         status,
         version: "HTTP/1.1".to_string(),
         body: JetHTTPBody::bridge(body_handle, body_length, body_read, body_close),
-        headers: JetHTTPHeaders::from_flat(headers).map_err(|_| JetHTTPError::InvalidHeader)?,
+        headers: JetHTTPHeaders { entries: headers },
         trailers: JetHTTPHeaders::new(),
         head_content_length: None,
         suppress_body: false,
@@ -360,60 +424,94 @@ macro_rules! jet_http_client_bridge {
             }
         }
 
+        fn native_http_body_read(
+            handle: i64,
+            max_chunk: usize,
+        ) -> Result<Option<Vec<u8>>, JetHTTPError> {
+            $bridge::jet_http_client_body_read_impl(handle, max_chunk).map_err(native_http_error)
+        }
+
         fn native_http_body_close(handle: i64) {
             $bridge::jet_http_client_body_close_impl(handle);
         }
 
-        fn native_http_body_read(handle: i64, max_chunk: usize) -> Result<Option<Vec<u8>>, JetHTTPError> {
-            $bridge::jet_http_client_body_read_impl(handle, max_chunk).map_err(|error| {
-                native_http_body_close(handle);
-                native_http_error(error)
-            })
-        }
-
         fn native_http_response(
-            result: Result<(i64, i64, Option<i64>, Vec<String>), $bridge::JetHTTPBridgeError>,
+            result: Result<$bridge::JetHTTPResponseParts, $bridge::JetHTTPBridgeError>,
         ) -> Result<JetHTTPResponse, JetHTTPError> {
-            let (status, body, length, headers) = result.map_err(native_http_error)?;
-            let protocol = $bridge::jet_http_client_response_protocol_impl(body);
-            let remote_address = $bridge::jet_http_client_response_remote_address_impl(body);
-            let redirect_history = $bridge::jet_http_client_response_redirect_history_impl(body);
-            let timings_ms = $bridge::jet_http_client_response_timings_impl(body);
-            let reused_connection = $bridge::jet_http_client_response_reused_impl(body);
-            let raw_content_encoding = $bridge::jet_http_client_response_raw_encoding_impl(body);
-            $bridge::jet_http_client_response_facts_drop_impl(body);
+            let parts = result.map_err(native_http_error)?;
+            let context = parts.context;
             jet_http_client_response_new(
-                status, body, length, headers, native_http_body_read, native_http_body_close,
-                protocol, remote_address, redirect_history, timings_ms, reused_connection,
-                raw_content_encoding,
+                parts.status,
+                parts.body_handle,
+                parts.body_length,
+                parts.headers,
+                native_http_body_read,
+                native_http_body_close,
+                context.protocol,
+                context.remote_address,
+                context.redirect_history,
+                context.timings_ms.to_vec(),
+                context.reused_connection,
+                context.raw_content_encoding,
             )
         }
-
         fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
             if let Some(error) = req.header_error.as_ref() {
                 return Err(error.clone());
             }
-            let body = if req.body_set {
-                Some(req.body.bytes(8 * 1024 * 1024)?)
+            let JetHTTPRequest {
+                method,
+                url,
+                headers,
+                body,
+                body_set,
+                timeout_ms,
+                connect_timeout_ms,
+                read_timeout_ms,
+                total_timeout_ms,
+                dns_timeout_ms,
+                tls_timeout_ms,
+                write_timeout_ms,
+                first_byte_timeout_ms,
+                redirects,
+                proxy,
+                cookies,
+                form,
+                multipart,
+                ..
+            } = req;
+            let body = if body_set {
+                Some(body.bytes(8 * 1024 * 1024)?)
             } else {
                 None
             };
-            let headers = req.headers.to_flat();
-            native_http_response($bridge::jet_http_client_send_impl(
-                &req.method, &req.url, &headers, body.as_deref(), req.timeout_ms,
-                req.connect_timeout_ms, req.read_timeout_ms, req.total_timeout_ms,
-                req.dns_timeout_ms, req.tls_timeout_ms, req.write_timeout_ms,
-                req.first_byte_timeout_ms, req.redirects, req.proxy.as_deref(),
-                &req.cookies, &req.form, &req.multipart,
+            native_http_response($bridge::jet_http_client_send_owned_impl(
+                &method,
+                &url,
+                headers.entries,
+                body,
+                timeout_ms,
+                connect_timeout_ms,
+                read_timeout_ms,
+                total_timeout_ms,
+                dns_timeout_ms,
+                tls_timeout_ms,
+                write_timeout_ms,
+                first_byte_timeout_ms,
+                redirects,
+                proxy.as_deref(),
+                &cookies,
+                &form,
+                &multipart,
             ))
         }
 
         fn jet_http_client_get(url: &String) -> Result<JetHTTPResponse, JetHTTPError> {
-            native_http_response($bridge::jet_http_client_get_impl(url))
+            native_http_response($bridge::jet_http_client_get_parts_impl(url))
         }
 
         fn jet_http_client_post(url: &String, body: &String) -> Result<JetHTTPResponse, JetHTTPError> {
-            native_http_response($bridge::jet_http_client_post_impl(url, body))
+            native_http_response($bridge::jet_http_client_post_parts_impl(url, body))
         }
 
         fn jet_http_client_request_send(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {

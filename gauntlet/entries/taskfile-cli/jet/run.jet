@@ -29,13 +29,21 @@ fn run() !(IOError | [FieldError]) {
         }
         "done" -> {
             id :: Int.parse(args.get(1) ?? "") ?? -1
-            if tasks.find(entry -> entry.id == id) == {
-                .Val(current) -> {
-                    tasks.update_first(entry -> entry.id == id, Task{id: current.id, text: current.text, done: true})
-                    save(tasks)
-                    print("done {id}")
+            updated := [Task]{}
+            found := false
+            loop entry in tasks {
+                if entry.id == id && !found {
+                    updated.push(Task{id: entry.id, text: entry.text, done: true})
+                    found = true
+                } else {
+                    updated.push(entry)
                 }
-                .None -> print("no task {id}")
+            }
+            if found {
+                save(updated)
+                print("done {id}")
+            } else {
+                print("no task {id}")
             }
         }
         "list" -> {

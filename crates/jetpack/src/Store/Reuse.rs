@@ -5,7 +5,11 @@ pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
     list(roots)
         .into_iter()
         .filter(|e| e.reference == reference)
-        .max_by_key(|e| e.last_used_at)
+        .max_by(|a, b| {
+            a.last_used_at
+                .cmp(&b.last_used_at)
+                .then_with(|| a.id.cmp(&b.id))
+        })
 }
 
 /// Return a cache candidate without taking the checked Store path. Prompt
@@ -15,7 +19,11 @@ pub(crate) fn find_by_reference_read_only(roots: &Roots, reference: &str) -> Opt
     list_read_only(roots)
         .into_iter()
         .filter(|e| e.reference == reference)
-        .max_by_key(|e| e.last_used_at)
+        .max_by(|a, b| {
+            a.last_used_at
+                .cmp(&b.last_used_at)
+                .then_with(|| a.id.cmp(&b.id))
+        })
 }
 
 /// Cheap provider-routing preflight for an exact cache identity. This is only
@@ -375,6 +383,13 @@ impl CacheLease {
     /// for validation and fd-backed handoff.
     pub(crate) fn projected_bin_dir(&self) -> Option<PathBuf> {
         self.validate().ok()?;
+        self.projected_bin_dir_after_validation()
+    }
+
+    /// Return the projected bin directory after the caller has revalidated the
+    /// lease. Composition uses this immediately after `stable_path` so one
+    /// entry path does not walk the same lease twice.
+    pub(crate) fn projected_bin_dir_after_validation(&self) -> Option<PathBuf> {
         let bin = self.bin_relative.as_ref()?;
         #[cfg(target_os = "linux")]
         if let Some(wrapper) = &self.wrapper_root {
@@ -1171,7 +1186,11 @@ pub fn find_verified_by_reference(
                 verify_cache_entry_with_graph(roots, entry, reference, expectation, Some(&graph))
                     .trusted()
             })
-            .max_by_key(|entry| entry.last_used_at);
+            .max_by(|a, b| {
+                a.last_used_at
+                    .cmp(&b.last_used_at)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
         let Some(entry) = entry else {
             return Ok(None);
         };
@@ -1206,10 +1225,9 @@ pub(crate) fn find_verified_user_profile_by_reference(
     }))
 }
 
-/// Reuse a complete set of user-profile entries with one Hangar lock, graph
-/// load, and metadata listing. A partial or invalid set returns `None` so the
-/// caller can use the ordinary per-reference path and preserve its exact
-/// acquisition and diagnostic behavior.
+/// Reuse independently valid user-profile entries with one Hangar lock, graph
+/// load, and metadata listing. Missing or invalid members are omitted so the
+/// caller can use the ordinary per-reference path for those exact holes.
 pub(crate) fn reuse_verified_user_profile_batch(
     roots: &Roots,
     references: &[String],
@@ -1218,36 +1236,51 @@ pub(crate) fn reuse_verified_user_profile_batch(
     if references.is_empty() {
         return None;
     }
-    // Avoid taking the Hangar lock on an obvious partial/cold set. This is
-    // only a candidate probe; the locked listing and verification below remain
-    // authoritative before any lease is published.
+    // This is only a candidate probe. A mixed cache is still worth the
+    // locked verification below: independently valid members can be reused
+    // while missing or damaged members take the ordinary realization path.
     let candidates = list_read_only(roots);
+    let candidate_refs = candidates
+        .iter()
+        .map(|entry| entry.reference.as_str())
+        .collect::<BTreeSet<_>>();
     if references
         .iter()
-        .any(|reference| !candidates.iter().any(|entry| entry.reference == reference.as_str()))
+        .all(|reference| !candidate_refs.contains(reference.as_str()))
     {
         return None;
     }
+
     let result = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let graph = Closure::closure_graph_structure_unlocked(roots)?;
         let entries = list_unlocked(roots)?;
+        let mut by_reference: BTreeMap<&str, Vec<&StoreEntry>> = BTreeMap::new();
+        for entry in &entries {
+            by_reference
+                .entry(entry.reference.as_str())
+                .or_default()
+                .push(entry);
+        }
         let mut selected = Vec::with_capacity(references.len());
         for reference in references {
-            let Some(candidate) = entries
+            let Some(reference_entries) = by_reference.get(reference.as_str()) else {
+                continue;
+            };
+            let Some(candidate) = reference_entries
                 .iter()
-                .filter(|entry| entry.reference == reference.as_str())
-                .max_by_key(|entry| entry.last_used_at)
+                .copied()
+                .max_by_key(|entry| (entry.last_used_at, entry.id.as_str()))
             else {
-                return Ok(None);
+                continue;
             };
             let expectation = CacheExpectation {
                 identity: candidate.cache_identity.clone(),
                 owned_output: None,
                 allow_unsigned_local: true,
             };
-            let Some(entry) = entries
+            let Some(entry) = reference_entries
                 .iter()
-                .filter(|entry| entry.reference == reference.as_str())
+                .copied()
                 .filter(|entry| {
                     verify_cache_entry_with_graph(
                         roots,
@@ -1258,14 +1291,17 @@ pub(crate) fn reuse_verified_user_profile_batch(
                     )
                     .trusted()
                 })
-                .max_by_key(|entry| entry.last_used_at)
+                .max_by_key(|entry| (entry.last_used_at, entry.id.as_str()))
             else {
-                return Ok(None);
+                continue;
             };
             if !nix_catalog_cache_entry_matches(entry, local_nix_catalog) {
-                return Ok(None);
+                continue;
             }
             selected.push(entry.clone());
+        }
+        if selected.is_empty() {
+            return Ok(None);
         }
         let projection_index = NixProjectionIndex::from_entries(&entries)?;
         let leases = selected
@@ -1294,6 +1330,81 @@ pub(crate) fn reuse_verified_user_profile_batch(
         ))
     });
     result.ok().flatten()
+}
+
+/// Reuse the valid members of a project receipt after its composite stamp
+/// changes. Each member is checked against the current provider identity and
+/// closure while one Hangar lock is held; holes stay on the normal realization
+/// path instead of invalidating unrelated verified members.
+pub(crate) fn reuse_verified_environment_members(
+    roots: &Roots,
+    selections: &[EnvironmentSelection],
+    expectations: &BTreeMap<String, CacheExpectation>,
+) -> std::io::Result<Option<Vec<VerifiedRealization>>> {
+    if selections.is_empty() || expectations.is_empty() {
+        return Ok(None);
+    }
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let graph = Closure::closure_graph_structure_unlocked(roots)?;
+        let entries = list_unlocked(roots)?;
+        let index = EnvironmentEntryIndex::from_entries_for_selections(&entries, selections);
+        let mut selected = Vec::with_capacity(selections.len());
+        for selection in selections {
+            let Some(expectation) = expectations.get(&selection.0) else {
+                continue;
+            };
+            let Some(entry) = index.get(selection) else {
+                continue;
+            };
+            let valid = verify_cache_entry_with_graph(
+                roots,
+                entry,
+                &selection.0,
+                expectation,
+                Some(&graph),
+            )
+            .trusted();
+            if !valid {
+                continue;
+            }
+            // The receipt stamp records external dependency metadata, but the
+            // member proof has no prior digest to compare for those auxiliary
+            // paths. The primary output is already covered by output_digest;
+            // keep opaque dependencies on the ordinary path.
+            let output = Path::new(&entry.out);
+            if super::external_output_paths(roots, std::iter::once(entry))
+                .into_iter()
+                .any(|path| path != output)
+            {
+                continue;
+            }
+            selected.push(entry.clone());
+        }
+        // A composite-stamp miss with every member independently valid is an
+        // environment-level invalidation (definition, loader, journal, or
+        // similar), not a partial cache. Reuse only a strict subset so those
+        // changes remain on the normal ready path.
+        if selected.is_empty() || selected.len() == selections.len() {
+            return Ok(None);
+        }
+        let projection_index = NixProjectionIndex::from_entries(&entries)?;
+        let mut realized = Vec::with_capacity(selected.len());
+        for entry in selected {
+            let lease = snapshot_lease_unlocked(roots, &entry, Some(&projection_index), true)?;
+            if matches!(lease.status(), ConsumptionStatus::Consumable) {
+                realized.push(VerifiedRealization {
+                    entry,
+                    source_state: crate::Provider::SourceState::Cached,
+                    lease,
+                });
+            }
+        }
+        if realized.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(realized))
+        }
+    })
 }
 
 fn nix_catalog_cache_entry_matches(entry: &StoreEntry, local: bool) -> bool {

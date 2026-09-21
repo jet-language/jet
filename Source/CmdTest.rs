@@ -238,13 +238,17 @@ pub(crate) fn run_test_compare(target: &str, args: &[String], mode: OutputMode) 
         record.reason = Some(format!("recorded runner outcome is {}", status.as_str()));
         record.universal_proof = false;
     }
-    if let Err(error) = persist_comparison_artifacts(target, args, &record, &binding) {
-        emit_error(
-            json_output,
-            &format!("could not persist comparison record: {error}"),
-        );
-        exit(ExitCodes::USER_ERROR);
-    }
+    let target = target.to_string();
+    let args = args.to_vec();
+    let record_for_history = record.clone();
+    let binding_for_history = binding.clone();
+    jet::ReceiptStore::enqueue_optional_history("writing a comparison record", move || {
+        if let Err(error) =
+            persist_comparison_artifacts(&target, &args, &record_for_history, &binding_for_history)
+        {
+            jet::ReceiptStore::optional_history_notice("writing a comparison record", &error);
+        }
+    });
     let rendered = render_record(&record, json_output);
     println!("{rendered}");
     exit(if record.status.is_success() {

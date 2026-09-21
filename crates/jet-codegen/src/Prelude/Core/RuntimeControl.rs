@@ -34,13 +34,15 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
 // Purely safe std Rust; no runtime effect machinery (I3).
 struct JetTransaction {
     hooks: Vec<Box<dyn FnOnce()>>,
-    undo: Vec<Box<dyn FnOnce()>>,
+    rollback_hooks: Vec<Box<dyn FnOnce()>>,
+    snapshots: Vec<Box<dyn FnOnce()>>,
     committed: bool,
 }
 fn jet_transaction() -> JetTransaction {
     JetTransaction {
         hooks: Vec::new(),
-        undo: Vec::new(),
+        rollback_hooks: Vec::new(),
+        snapshots: Vec::new(),
         committed: false,
     }
 }
@@ -49,7 +51,10 @@ impl JetTransaction {
         self.hooks.push(f);
     }
     fn on_rollback(&mut self, f: Box<dyn FnOnce()>) {
-        self.undo.push(f);
+        self.rollback_hooks.push(f);
+    }
+    fn on_snapshot(&mut self, f: Box<dyn FnOnce()>) {
+        self.snapshots.push(f);
     }
     fn commit(&mut self) {
         self.committed = true;
@@ -73,16 +78,17 @@ fn jet_transaction_commit(transaction: &mut JetTransaction) {
 impl Drop for JetTransaction {
     fn drop(&mut self) {
         if self.committed {
-            // Clean commit: run commit hooks LIFO; undo stack is dropped un-run.
+            // Clean commit: run commit hooks LIFO; rollback stacks are dropped un-run.
             while let Some(f) = self.hooks.pop() {
                 f();
             }
         } else {
             // Rollback path (`?`-failure / early return): restore auto-snapshots
-            // and run explicit rollback hooks, both LIFO; commit hooks drop un-run.
-            // `undo` holds both kinds interleaved in registration order, so a single
-            // LIFO drain mirrors the source order they were established in.
-            while let Some(f) = self.undo.pop() {
+            // first, then run explicit rollback hooks; both stacks are LIFO.
+            while let Some(f) = self.snapshots.pop() {
+                f();
+            }
+            while let Some(f) = self.rollback_hooks.pop() {
                 f();
             }
         }
@@ -91,19 +97,21 @@ impl Drop for JetTransaction {
 // D-TXN-ROLLBACK layer 1 (auto-snapshot): the snapshot/restore mechanism lives in a
 // vetted prelude module, mirroring `jet_mem`. `jet_txn_snapshot` clones the
 // pre-mutation state of a place and registers a Drop-backed restore on the
-// transaction's undo stack; on a `?`-failure the guard's Drop writes the clone back.
+// transaction's snapshot stack; on a `?`-failure the guard's Drop writes the clone
+// back before explicit rollback hooks run.
 // The raw-pointer writeback is sound because the transaction guard is declared after
 // the place and dropped before it (LIFO scope teardown), so the place is always live
 // when restore runs. The compiler picks WHICH places to snapshot (I3); this module is
 // just the dumb runtime. Stripped from the golden memory-safety check like `jet_mem`.
 mod jet_txn {
     use super::JetTransaction;
-    /// Snapshot `*place` (a `Clone` of its pre-mutation state) and register a restore
-    /// closure on `tx`'s undo stack. Restores on rollback; dropped un-run on commit.
+    /// Snapshot `*place` (a `Clone` of its pre-mutation state) and register a
+    /// Drop-backed restore on `tx`'s snapshot stack. Restores on rollback; dropped
+    /// un-run on commit.
     pub(crate) fn snapshot<T: Clone + 'static>(tx: &mut JetTransaction, place: &mut T) {
         let saved = place.clone();
         let raw: *mut T = place;
-        tx.on_rollback(Box::new(move || {
+        tx.on_snapshot(Box::new(move || {
             // `raw` points at a local that outlives the transaction guard; the
             // guard's Drop (the caller) runs before that local is dropped.
             let slot: &mut T = unsafe { &mut *raw };
@@ -121,7 +129,7 @@ mod jet_txn {
         restore: fn(&mut T, S),
     ) {
         let raw: *mut T = place;
-        tx.on_rollback(Box::new(move || {
+        tx.on_snapshot(Box::new(move || {
             let slot: &mut T = unsafe { &mut *raw };
             restore(slot, snap);
         }));

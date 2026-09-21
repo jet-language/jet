@@ -1,0 +1,47 @@
+package {
+    name: "core.reactive"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Signals, derived values, and effects."
+    license: "MIT"
+    outputs: {
+        reactive: .Library{ entry: reactive }
+    }
+}
+module loadable
+
+pub struct Signal {
+    pub value: Int
+    pub version: Int
+}
+
+pub struct Computed {
+    pub value: Int
+    pub version: Int
+}
+
+pub struct Effect {
+    pub last: Int
+}
+
+pub fn signal(value: Int) -> Signal { {value: value, version: 0} }
+
+pub fn computed(value: Int) -> Computed { {value: value, version: 0} }
+
+pub fn derived(value: Int) -> Computed { computed(value) }
+
+pub fn set(sig: Signal, value: Int) -> Signal { {value: value, version: sig.version + 1} }
+
+pub fn get(sig: Signal) -> Int { sig.value }
+
+pub fn version(sig: Signal) -> Int { sig.version }
+
+pub fn update(sig: Signal, delta: Int) -> Signal { set(sig, sig.value + delta) }
+
+pub fn computed_get(c: Computed) -> Int { c.value }
+
+pub fn computed_set(c: Computed, value: Int) -> Computed { {value: value, version: c.version + 1} }
+
+pub fn effect_run(e: Effect, value: Int) -> Effect { {last: value} }
+
+pub fn effect_last(e: Effect) -> Int { e.last }

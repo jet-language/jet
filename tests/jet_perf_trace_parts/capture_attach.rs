@@ -53,6 +53,7 @@ fn run() {
         String::from_utf8_lossy(&build.stderr)
     );
     let binary = root
+        .join(".jet")
         .join("build")
         .join(format!("live{}", std::env::consts::EXE_SUFFIX));
     let mut child = Command::new(&binary)

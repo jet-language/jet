@@ -4,14 +4,14 @@
 //! neutral assets shared by the MIR adapter, plugin guest generation, and the
 //! artifact writer; it does not inspect compiler semantic state or emit a bundle.
 
+use jet_foundation::MIR::MirRuntimePartId;
+use std::collections::BTreeSet;
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
 const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/RuntimeStop.js"),
     include_str!("../Prelude/Core/Keep.js"),
     include_str!("../Prelude/Core/Task.js"),
-    "\n",
-    include_str!("../Prelude/Core/Event.js"),
     "\n",
     include_str!("../Prelude/Core/Channel.js"),
     include_str!("../Prelude/Core/DeterministicWorld.js"),
@@ -20,8 +20,6 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Stream.js"),
     "\n",
-    include_str!("../Prelude/Core/Realtime.js"),
-    "\n",
     include_str!("../Prelude/Core/Option.js"),
     "\n",
     include_str!("../Prelude/Core/FixedList.js"),
@@ -29,11 +27,6 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Collections.js"),
     "\n",
     include_str!("../Prelude/Core/Text.js"),
-    "\n",
-    include_str!("../Prelude/Core/Data.js"),
-    "\n",
-    include_str!("../Prelude/Core/TestingHistory.js"),
-    "\n",
     "\n",
     include_str!("../Prelude/Core/StringConcat.js"),
     "\n",
@@ -60,20 +53,24 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Ui.js"),
     "\n",
     include_str!("../Prelude/Core/HttpRouter.js"),
-    include_str!("../Prelude/Core/OpenAPI.js"),
     "\n",
+    include_str!("../Prelude/Core/OpenAPI.js"),
     "\n",
     include_str!("../Prelude/Core/Authority.js"),
     "\n",
-    "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
-    "\n",
-    include_str!("../Prelude/Core/ComputeWebGpu.js"),
-    "\n",
-    include_str!("../Prelude/Core/Raylib.js"),
-    "\n",
-    include_str!("../Prelude/Core/Game.js"),
 );
+
+const JS_EVENT_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Event.js"), "\n");
+const JS_REALTIME_PRELUDE: &str =
+    concat!(include_str!("../Prelude/Core/Realtime.js"), "\n");
+const JS_DATA_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Data.js"), "\n");
+const JS_TESTING_HISTORY_PRELUDE: &str =
+    concat!(include_str!("../Prelude/Core/TestingHistory.js"), "\n");
+const JS_COMPUTE_PRELUDE: &str =
+    concat!(include_str!("../Prelude/Core/ComputeWebGpu.js"), "\n");
+const JS_RAYLIB_PRELUDE: &str = concat!(include_str!("../Prelude/Core/Raylib.js"), "\n");
+const JS_GAME_PRELUDE: &str = include_str!("../Prelude/Core/Game.js");
 
 const JS_TASK_GROUP_PRELUDE: &str = r#"
 function jet_task_group_body_failed() {
@@ -123,15 +120,49 @@ pub(crate) fn dom_runtime_source() -> &'static str {
 }
 
 /// Assemble the JavaScript runtime shared by MIR Web emission.
-pub(crate) fn shared_js_prelude() -> Result<String, std::io::Error> {
+///
+/// The HarfBuzz bridge is a target capability, not baseline web startup
+/// machinery. Keep its canonical bytes out of artifacts that cannot call
+/// `core.font.shape`; this preserves the exact bridge for shaping programs
+/// without making every Web module parse and retain an unused Wasm asset.
+pub(crate) fn shared_js_prelude(
+    include_harfbuzz: bool,
+    runtime_parts: &BTreeSet<MirRuntimePartId>,
+    include_history: bool,
+) -> Result<String, std::io::Error> {
+    // `runtime_parts` is the checked artifact closure; never infer reachability
+    // from a benchmark entry name or from the static Core registry.
     let mut out = String::from(JS_EXECUTION_PRELUDE);
-    out.push_str(&canonical_web_harfbuzz_asset()?);
-    out.push_str(&format!(
-        "\nconst JET_GAME_DEFAULT_FRAME_BUDGET = {};\nconst JET_GAME_FRAME_BUDGET_ERROR = {};\n",
-        jet_foundation::Game::JetGameFrameBudget::DEFAULT_HEADLESS_FRAMES,
-        json_quote(jet_foundation::Game::JetGameFrameBudget::FRAME_BUDGET_ERROR),
-    ));
-    out.push_str(&js_time_zone_prelude()?);
+    if runtime_parts.contains(&MirRuntimePartId::Event) {
+        out.push_str(JS_EVENT_PRELUDE);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Realtime) {
+        out.push_str(JS_REALTIME_PRELUDE);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Data) {
+        out.push_str(JS_DATA_PRELUDE);
+    }
+    if include_history {
+        out.push_str(JS_TESTING_HISTORY_PRELUDE);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Compute) {
+        out.push_str(JS_COMPUTE_PRELUDE);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Game) {
+        out.push_str(JS_RAYLIB_PRELUDE);
+        out.push_str(JS_GAME_PRELUDE);
+        out.push_str(&format!(
+            "\nconst JET_GAME_DEFAULT_FRAME_BUDGET = {};\nconst JET_GAME_FRAME_BUDGET_ERROR = {};\n",
+            jet_foundation::Game::JetGameFrameBudget::DEFAULT_HEADLESS_FRAMES,
+            json_quote(jet_foundation::Game::JetGameFrameBudget::FRAME_BUDGET_ERROR),
+        ));
+    }
+    if include_harfbuzz {
+        out.push_str(&canonical_web_harfbuzz_asset()?);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Math) {
+        out.push_str(&js_time_zone_prelude()?);
+    }
     out.push_str(JS_TASK_GROUP_PRELUDE);
     out.push_str(&js_runtime_stop_metadata());
     Ok(out)

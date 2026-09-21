@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeStatus, projectStatus } from "./status.mjs";
+import { mergeStatus, projectStatus, validateStatusGate } from "./status.mjs";
 
 function fixture(scope = "partial_entry") {
   return {
@@ -244,6 +244,84 @@ test("merges partial reports by cell, tier, and metric without erasing measureme
   assert.equal(fresh.measured_at, "2026-09-02");
   assert.deepEqual(merged.source.run_ids, ["run-old", "run-new"]);
 });
+test("latest explicit unavailable tiers cannot reuse older measured samples", () => {
+  const full = mergeReport("2026-09-03", "run-full", [measuredCell("text.kernel", {
+    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+  })]);
+  full.options = { scope: "full_matrix" };
+  const partialCell = measuredCell("text.kernel", {
+    rust: { aot: { ratio: 1.02, verdict: "parity" }, run: { ratio: 0.98, verdict: "win" } },
+  });
+  partialCell.entries[0].peers[0].metric_comparisons.runtime_wall_seconds.tiers.run = {
+    status: "inconclusive",
+    jet: 1,
+    peer: 1,
+    ratio: 1,
+    verdict: "inconclusive",
+    reason: "paired confidence interval crosses 1",
+  };
+  const partial = mergeReport("2026-09-15", "run-partial", [partialCell]);
+  partial.options = { scope: "partial_entry" };
+
+  const merged = mergeStatus([
+    { report: full, reportPath: "gauntlet/results/2026-09-03.json" },
+    { report: partial, reportPath: "gauntlet/results/2026-09-15-text-kernel.json" },
+  ]);
+  const cell = merged.cells[0];
+  const rust = cell.peers.find((peer) => peer.peer === "rust");
+  const run = rust.metrics.runtime_wall_seconds.tiers.run;
+  assert.equal(run.status, "inconclusive");
+  assert.equal(run.verdict, "inconclusive");
+  assert.equal(run.ratio, 1);
+  assert.equal(rust.metric_comparisons.runtime_wall_seconds.verdict, null);
+  assert.equal(cell.metric_verdicts.runtime_wall_seconds, "unmeasured");
+});
+
+
+test("axis-only receipts keep language cells and take the latest axis row", () => {
+  const full = mergeReport("2026-09-03", "run-full", [measuredCell("text.kernel", {
+    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+    python: { aot: { ratio: 0.8, verdict: "win" }, run: { ratio: 0.9, verdict: "win" } },
+  })]);
+  full.options = { scope: "full_matrix" };
+  full.axes = {
+    live_reload: {
+      status: "complete",
+      metric: "reload_latency_ms",
+      comparisons: {
+        vite: {
+          verdict: "win",
+          cold: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
+          warm: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
+        },
+      },
+    },
+  };
+  const axis = mergeReport("2026-09-15", "run-axis", []);
+  axis.options = { scope: "axis_live_reload" };
+  axis.axes = {
+    live_reload: {
+      status: "complete",
+      schema: "gauntlet-axis-live-reload-v1",
+      metric: "reload_latency_ms",
+      comparisons: {
+        vite: {
+          verdict: "loss",
+          cold: { status: "measured", jet: 10, peer: 1, ratio: 10, verdict: "loss" },
+          warm: { status: "measured", jet: 9, peer: 1, ratio: 9, verdict: "loss" },
+        },
+      },
+    },
+  };
+  const merged = mergeStatus([
+    { report: full, reportPath: "gauntlet/results/2026-09-03.json" },
+    { report: axis, reportPath: "gauntlet/results/2026-09-15-axis-live_reload.json" },
+  ]);
+  assert.equal(merged.summary.cells, 1);
+  assert.deepEqual(merged.cells[0].peers.map((peer) => peer.peer).sort(), ["python", "rust"]);
+  assert.equal(merged.axes.live_reload.comparisons.vite.verdict, "loss");
+  assert.equal(merged.axes.live_reload.comparisons.vite.cold.ratio, 10);
+});
 
 test("applies the Rust parity band and non-Rust strict win boundary", () => {
   const report = mergeReport("2026-09-03", "run-law", [measuredCell("law", {
@@ -260,4 +338,160 @@ test("applies the Rust parity band and non-Rust strict win boundary", () => {
   assert.equal(rust.metric_comparisons.runtime_wall_seconds.tiers.aot.verdict, null);
   assert.equal(rust.verdict, "parity");
   assert.equal(python.verdict, "loss");
+});
+
+test("status gate treats missing web artifact bytes as a required metric failure", () => {
+  const metrics = [
+    "runtime_first_stdout_seconds",
+    "runtime_wall_seconds",
+    "runtime_peak_rss_kb",
+    "cold_build_seconds",
+    "warm_build_seconds",
+    "binary_bytes",
+    "artifact_bytes",
+    "wasm_bytes",
+    "loc",
+    "source_bytes",
+    "tokens",
+    "source_tokens",
+  ];
+  const measured = { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" };
+  const notApplicable = {
+    status: "not_applicable",
+    jet: null,
+    peer: null,
+    ratio: null,
+    verdict: null,
+    reason: "compile-only metric has no interpreted tier",
+    basis: "no_compile_phase",
+  };
+  const metricComparisons = Object.fromEntries(metrics.filter((metric) => !["artifact_bytes", "wasm_bytes"].includes(metric)).map((metric) => [
+    metric,
+    { tiers: { aot: measured, run: (["cold_build_seconds", "warm_build_seconds", "binary_bytes"].includes(metric) ? notApplicable : measured) } },
+  ]));
+  const status = {
+    cells: [{
+      id: "webfront.widget",
+      mode: "web",
+      verdict: "win",
+      peers: [{
+        peer: "rust",
+        status: "ok",
+        required_tiers: ["aot", "run"],
+        metric_comparisons: metricComparisons,
+      }],
+    }],
+  };
+  const issues = validateStatusGate(status, {
+    cells: [{ id: "webfront.widget" }],
+    rails: { always: ["rust"], perf: [], incumbents: {} },
+  });
+  assert.ok(issues.some((issue) => issue.includes("webfront.widget/rust/artifact_bytes")));
+});
+
+test("projects distinct web artifact and Wasm bytes with N/A and confidence details", () => {
+  const notApplicable = {
+    status: "not_applicable",
+    jet: null,
+    peer: null,
+    ratio: null,
+    verdict: null,
+    applicability: {
+      status: "not_applicable",
+      basis: "no_compile_phase",
+      reason: "interpreted tier has no compile phase",
+      evidence: "Only AOT artifacts are measured for compile-only metrics",
+    },
+  };
+  const report = mergeReport("2026-09-20", "run-web-metrics", [{
+    id: "webfront.widget",
+    domain: "web",
+    kind: "web",
+    entries: [{
+      entry: "web-fixture",
+      mode: "web",
+      primary_metric: "runtime_first_stdout_seconds",
+      peers: [{
+        language: "rust",
+        required_tiers: ["aot", "run"],
+        metric_comparisons: {
+          runtime_first_stdout_seconds: {
+            tiers: {
+              aot: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
+              run: { status: "measured", jet: 1, peer: 2, ratio: 0.5, verdict: "win" },
+            },
+          },
+          artifact_bytes: {
+            tiers: {
+              aot: { status: "measured", jet: 20, peer: 40, ratio: 0.5, verdict: "win" },
+              run: notApplicable,
+            },
+          },
+          wasm_bytes: {
+            verdict: "inconclusive",
+            tiers: {
+              aot: {
+                status: "inconclusive",
+                jet: 8,
+                peer: 10,
+                ratio: 0.8,
+                verdict: "inconclusive",
+                reason: "paired confidence interval crosses 1",
+                confidence: { status: "not_computed", reason: "paired confidence evidence is unavailable" },
+                evidence: { method: "paired_samples", status: "inconclusive" },
+              },
+              run: notApplicable,
+            },
+          },
+        },
+      }],
+    }],
+  }]);
+  const status = projectStatus(report);
+  const peer = status.cells[0].peers[0];
+  assert.equal(peer.metrics.artifact_bytes.tiers.aot.jet, 20);
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.jet, 8);
+  assert.notEqual(peer.metrics.artifact_bytes.tiers.aot.jet, peer.metrics.wasm_bytes.tiers.aot.jet);
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.status, "inconclusive");
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.verdict, "inconclusive");
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.reason, "paired confidence interval crosses 1");
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.confidence.status, "not_computed");
+  assert.equal(peer.metrics.wasm_bytes.tiers.aot.evidence.status, "inconclusive");
+  assert.equal(peer.metrics.wasm_bytes.tiers.run.applicability.basis, "no_compile_phase");
+  assert.equal(peer.metrics.wasm_bytes.tiers.run.applicability.reason, "interpreted tier has no compile phase");
+});
+
+test("status gate accepts a structurally inapplicable web Wasm metric", () => {
+  const applicability = {
+    status: "not_applicable",
+    basis: "no_wasm_artifact",
+    reason: "script-only web rail has no Wasm binary artifact",
+    evidence: "Script rails are measured by artifact_bytes",
+  };
+  const notApplicable = { status: "not_applicable", jet: null, peer: null, ratio: null, verdict: null, applicability };
+  const status = {
+    cells: [{
+      id: "webfront.widget",
+      mode: "web",
+      verdict: "win",
+      peers: [{
+        peer: "js",
+        status: "ok",
+        required_tiers: ["aot", "run"],
+        metric_comparisons: {
+          wasm_bytes: {
+            status: "not_applicable",
+            verdict: "not_applicable",
+            applicability,
+            tiers: { aot: notApplicable, run: notApplicable },
+          },
+        },
+      }],
+    }],
+  };
+  const issues = validateStatusGate(status, {
+    cells: [{ id: "webfront.widget" }],
+    rails: { always: ["js"], perf: [], incumbents: {} },
+  });
+  assert.equal(issues.some((issue) => issue.includes("webfront.widget/js/wasm_bytes")), false);
 });

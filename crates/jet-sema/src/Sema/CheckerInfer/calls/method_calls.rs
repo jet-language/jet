@@ -894,6 +894,17 @@ impl<'a> Checker<'a> {
         }
     }
 }
+fn http_middleware_type() -> Type {
+    Type::Fn {
+        params: vec![Type::Named("HTTPHandler".to_string())],
+        ret: Some(Box::new(Type::Named("HTTPHandler".to_string()))),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+
 
 fn http_handler_type(params: Vec<Type>) -> Type {
     Type::Fn {
@@ -1312,7 +1323,9 @@ impl<'a> Checker<'a> {
         }
         // D-TOOL4 (E2-M11): `expect(x).snapshot()` — the special snapshot
         // assertion. Recognized by checking the receiver type.
-        if method == Syntax::BUILTIN_SNAPSHOT {
+        if method == Syntax::BUILTIN_SNAPSHOT
+            && self.core_module_path_from_receiver(receiver).is_none()
+        {
             let recv_ty = self.infer(receiver);
             if recv_ty
                 .as_ref()
@@ -2671,7 +2684,7 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);
             }
-            // #1477: `Map.new()` / `Map.from_keys(keys, default)`.
+            // #1477: `Map.new()` / `Map.from_keys(keys, default)` / `Map.fromkeys(keys, default)`.
             if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
                 let (key, value) = match &self.expected_type {
                     Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
@@ -2685,7 +2698,10 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);
             }
-            if type_name == Syntax::TYPE_MAP && method == "from_keys" && args.len() == 2 {
+            if type_name == Syntax::TYPE_MAP
+                && matches!(method, "from_keys" | "fromkeys")
+                && args.len() == 2
+            {
                 let keys_ty = self.infer(&mut args[0].expr);
                 let key = match keys_ty {
                     Some(Type::List(inner)) => *inner,
@@ -3706,12 +3722,14 @@ impl<'a> Checker<'a> {
                 };
                 let carried = self.carrier_report_fact(err, field, why, span)?;
                 self.check_type_assignable(&wanted, &carried, span);
-                *recv_type_out = Some("__Carrier__".to_string());
-                return Some(if notes {
+                let ret = if notes {
                     wanted
                 } else {
                     Type::Option(Box::new(wanted))
-                });
+                };
+                *recv_type_out = Some("__Carrier__".to_string());
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
             }
         }
 
@@ -4795,6 +4813,22 @@ impl<'a> Checker<'a> {
                 self.check_http_route_constant(handle_ty, method, args);
                 if is_http_route_registration(handle_ty, method) {
                     self.check_http_router_contract(method, args, span);
+                } else if handle_ty == "HTTPMux" && method == "middleware" {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity(method, 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    } else {
+                        let middleware_ty = http_middleware_type();
+                        self.expect_http_handler_arg(
+                            method,
+                            0,
+                            &middleware_ty,
+                            &mut args[0],
+                        );
+                    }
                 }
                 require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
                 if self.check_browser_method_args(handle_ty, method, args, span) {
@@ -5252,10 +5286,11 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
             }
-            *recv_type_out = Some(match &recv_ty {
-                Type::Named(n) => n.clone(),
-                _ => "HTTPRequest".to_string(),
-            });
+            *recv_type_out = match &recv_ty {
+                Type::Named(n) => Some(n.clone()),
+                _ => None,
+            };
+            *resolved_ret_out = ret.clone();
             return ret;
         }
         // D-URL1=A: method calls on typed Url/Mime values.
@@ -6442,7 +6477,10 @@ impl<'a> Checker<'a> {
                 if let Some(result) = geometry_method_return(&recv_ty, method, &arg_types) {
                     *recv_type_out = Some(base.to_string());
                     match result {
-                        Ok(ret) => return Some(ret),
+                        Ok(ret) => {
+                            *resolved_ret_out = Some(ret.clone());
+                            return Some(ret);
+                        }
                         Err(()) => {
                             if let Some((first, second, middle_a, middle_b)) =
                                 geometry_transform_diagnostic(&recv_ty, method, &arg_types)
@@ -6646,9 +6684,9 @@ impl<'a> Checker<'a> {
                             false,
                             false,
                         );
-                        let (_, carrier) =
+                        let (resolved_ret, _carrier) =
                             self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
-                        *resolved_ret_out = Some(carrier);
+                        *resolved_ret_out = Some(resolved_ret);
                         return msig.return_type.clone();
                     }
                 }
@@ -7730,9 +7768,9 @@ impl<'a> Checker<'a> {
                     false,
                     false,
                 );
-                let (_, carrier) =
+                let (resolved_ret, _carrier) =
                     self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
-                *resolved_ret_out = Some(carrier);
+                *resolved_ret_out = Some(resolved_ret);
                 return source;
             }
             // Keep the original single-trait wording byte-for-byte (it's snapshot-
@@ -7970,10 +8008,10 @@ impl<'a> Checker<'a> {
         let raw_protocol_return = self.raw_protocol_return_for_method(&type_name, method);
         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
         if !self.bind_method_args(method, &msig, args, span) {
-            let (_, return_type) =
+            let (resolved_ret, return_type) =
                 self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
             let ret = Some(return_type);
-            *resolved_ret_out = ret.clone();
+            *resolved_ret_out = Some(resolved_ret);
             return ret;
         }
         self.normalize_method_variadic_call(method, &msig, args, span);
@@ -8057,10 +8095,10 @@ impl<'a> Checker<'a> {
             pre_inferred_method.as_deref(),
             Some(call_access),
         )?;
-        let (_, return_type) =
+        let (resolved_ret, return_type) =
             self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
         let ret = Some(return_type);
-        *resolved_ret_out = ret.clone();
+        *resolved_ret_out = Some(resolved_ret);
         ret
     }
 }

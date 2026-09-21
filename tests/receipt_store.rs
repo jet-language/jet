@@ -81,11 +81,12 @@ fn content_keys_reuse_without_timestamps_and_invalidate_only_dependents() {
 fn check_reuses_receipt_at_the_cli_boundary() {
     let root = temp_root("cli");
     let source = root.join("main.jet");
-    let receipt_dir = root.join("receipts");
+    let receipt_dir = root.join(".jet").join("receipts");
     std::fs::write(&source, "fn run() {}\n").unwrap();
     let jet = env!("CARGO_BIN_EXE_jet");
 
     let first = Command::new(&jet)
+        .current_dir(&root)
         .args(["check", source.to_str().unwrap()])
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()
@@ -97,6 +98,7 @@ fn check_reuses_receipt_at_the_cli_boundary() {
     );
 
     let second = Command::new(&jet)
+        .current_dir(&root)
         .args(["check", source.to_str().unwrap()])
         .env("JET_RECEIPT_DIR", &receipt_dir)
         .output()
@@ -119,7 +121,7 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 fn project_check_does_not_replay_after_higher_priority_entry_appears() {
     let root = temp_root("stale-entry");
     let source_dir = root.join("src");
-    let receipt_dir = root.join("receipts");
+    let receipt_dir = root.join(".jet").join("receipts");
     std::fs::create_dir_all(&source_dir).unwrap();
     std::fs::write(
         root.join("package.jet"),
@@ -269,4 +271,154 @@ fn result_payloads_share_one_receipt_codec_and_store() {
     assert_eq!(store.list().unwrap().len(), payloads.len());
 
     let _ = std::fs::remove_dir_all(root);
+}
+#[cfg(unix)]
+#[test]
+fn canonical_history_keeps_legacy_namespaces_and_separates_checkout_identities() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let write_project = |root: &std::path::Path| {
+        std::fs::write(
+            root.join("package.jet"),
+            "name: \"receipt-boundary\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+    };
+    let run_check = |root: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "main.jet"])
+            .current_dir(root)
+            .output()
+            .unwrap()
+    };
+    let root = temp_root("canonical");
+    write_project(&root);
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::write(root.join("build/legacy-output"), b"legacy-build").unwrap();
+    std::fs::create_dir_all(root.join(".jet-build")).unwrap();
+    std::fs::write(root.join(".jet-build/legacy-output"), b"legacy-jet-build").unwrap();
+    std::fs::create_dir_all(root.join("src/.jet")).unwrap();
+    std::fs::write(root.join("src/.jet/legacy-output"), b"legacy-input").unwrap();
+    let mut source_permissions = std::fs::metadata(root.join("main.jet"))
+        .unwrap()
+        .permissions();
+    source_permissions.set_mode(0o444);
+    std::fs::set_permissions(root.join("main.jet"), source_permissions).unwrap();
+
+    let first = run_check(&root);
+    assert!(
+        first.status.success(),
+        "canonical check failed:\n{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let receipts = root.join(".jet/receipts");
+    assert!(receipts.is_dir(), "history must use the selected `.jet` root");
+    assert_eq!(
+        std::fs::read(root.join("build/legacy-output")).unwrap(),
+        b"legacy-build"
+    );
+    assert_eq!(
+        std::fs::read(root.join(".jet-build/legacy-output")).unwrap(),
+        b"legacy-jet-build"
+    );
+    assert_eq!(
+        std::fs::read(root.join("src/.jet/legacy-output")).unwrap(),
+        b"legacy-input"
+    );
+    assert!(
+        !root.join("build/objects").exists()
+            && !root.join(".jet-build/objects").exists()
+            && !root.join("src/.jet/objects").exists(),
+        "legacy namespaces must not receive duplicate history"
+    );
+
+    let moved = temp_root("moved");
+    write_project(&moved);
+    let second = run_check(&moved);
+    assert!(
+        second.status.success(),
+        "moved checkout check failed:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(moved.join(".jet/receipts").is_dir());
+    assert_ne!(
+        std::fs::canonicalize(&receipts).unwrap(),
+        std::fs::canonicalize(moved.join(".jet/receipts")).unwrap(),
+        "moved checkout history must not escape into the old project"
+    );
+
+    let store = ReceiptStore::new(&receipts);
+    let source = root.join("main.jet");
+    let debug = vec![
+        "check".to_string(),
+        source.display().to_string(),
+        "--profile=debug".to_string(),
+    ];
+    let release = vec![
+        "check".to_string(),
+        source.display().to_string(),
+        "--profile=release".to_string(),
+    ];
+    let debug_claim = store
+        .claim("check", &debug, std::slice::from_ref(&source))
+        .unwrap();
+    let release_claim = store
+        .claim("check", &release, std::slice::from_ref(&source))
+        .unwrap();
+    assert_ne!(
+        debug_claim.key, release_claim.key,
+        "profile selection must remain part of receipt identity"
+    );
+    let moved_source = moved.join("main.jet");
+    let moved_claim = ReceiptStore::new(moved.join(".jet/receipts"))
+        .claim(
+            "check",
+            &debug,
+            std::slice::from_ref(&moved_source),
+        )
+        .unwrap();
+    assert_ne!(
+        debug_claim.key, moved_claim.key,
+        "project roots must remain separate after a checkout move"
+    );
+
+    let alias = temp_root("symlink-alias");
+    std::fs::remove_dir_all(&alias).unwrap();
+    symlink(&root, &alias).unwrap();
+    let alias_run = run_check(&alias);
+    assert!(
+        alias_run.status.success(),
+        "symlink checkout check failed:\n{}",
+        String::from_utf8_lossy(&alias_run.stderr)
+    );
+    assert_eq!(
+        std::fs::canonicalize(alias.join(".jet/receipts")).unwrap(),
+        std::fs::canonicalize(&receipts).unwrap(),
+        "a symlinked checkout must resolve to its canonical project root"
+    );
+    std::fs::remove_file(&alias).unwrap();
+
+    let outside = temp_root("escape-outside");
+    let escaped = temp_root("escape-project");
+    write_project(&escaped);
+    std::fs::create_dir_all(escaped.join(".jet")).unwrap();
+    symlink(&outside, escaped.join(".jet/receipts")).unwrap();
+    let escaped_run = run_check(&escaped);
+    assert!(
+        escaped_run.status.success(),
+        "an unsafe history destination must not fail the required check:\n{}",
+        String::from_utf8_lossy(&escaped_run.stderr)
+    );
+    assert!(
+        !outside.join("objects").exists()
+            && !outside.join("contexts").exists()
+            && !outside.join("records").exists(),
+        "a symlinked `.jet/receipts` must never receive history"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(moved);
+    let _ = std::fs::remove_dir_all(outside);
+    let _ = std::fs::remove_dir_all(escaped);
 }

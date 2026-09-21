@@ -19,8 +19,9 @@ use super::Features::{
     compute_discovery_hover, compute_hover, compute_refactor_actions, compute_references,
     compute_rename, encode_semantic_tokens_in_span_with_arithmetic,
     encode_semantic_tokens_with_arithmetic, format_inlay_hints, generated_declaration_at,
-    reasoning_inlay_hints, reasoning_view_json, register_generated_declarations,
-    semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json, RefactorAction,
+    generated_definition_for_reference, reasoning_inlay_hints, reasoning_view_json,
+    register_generated_declarations, semantic_symbol_at, semantic_symbol_at_span,
+    semantic_symbol_metadata_json, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -2171,15 +2172,25 @@ fn definition_response(
             Err(_) => {}
         }
     }
-    let Some((def_path, def_span)) =
-        compute_definition(&db, &tokens, &doc.text, module_path, offset)
-    else {
+    let Some((def_path, def_span)) = compute_definition(
+        &db,
+        &tokens,
+        &doc.text,
+        module_path,
+        offset,
+    )
+    .or_else(|| {
+        generated_definition_for_reference(&db, &generated, &tokens, module_path, offset)
+    }) else {
         return Some(response(id, "null"));
     };
 
     if let Some(declaration) = generated_declaration_at(&generated, &def_path, def_span) {
-        let root = std::path::Path::new(&doc.path)
-            .parent()
+        let root = checked
+            .bundle
+            .as_ref()
+            .map(|bundle| bundle.project_root.as_path())
+            .or_else(|| std::path::Path::new(&doc.path).parent())
             .unwrap_or(std::path::Path::new("."));
         let absolute_path = root.join(&declaration.module_path);
         let Some(range) = checked_byte_span_to_range(&declaration.source, declaration.span) else {

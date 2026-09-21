@@ -5,7 +5,7 @@
 // reuses the indexed chunks consumed by ParallelKernel.  It never creates a
 // second scheduler or lets an unproved callback cross the worker boundary.
 
-use std::fmt;
+use std::fmt as parallel_fmt;
 use std::ops::Range;
 
 /// The chunk size shared by the existing indexed parallel collection kernel.
@@ -547,6 +547,86 @@ where
         sample_nanos,
     })
 }
+/// Measured explicit `para_*` chunk selection. Static refusals and one-worker
+/// calls never read a clock. Eligible calls time the first canonical chunk once,
+/// retain its result, and run only the remaining chunks on the selected rail.
+pub(crate) fn jet_list_para_chunks_measured<R, E, F>(
+    len: usize,
+    worker_limit: usize,
+    worker_cap: usize,
+    release_build: bool,
+    cross_mode_parity_proven: bool,
+    proof_proven: bool,
+    transform: JetAccelerationTransform,
+    nested_reuse: bool,
+    single_pass: bool,
+    pin: Option<JetAccelerationPin>,
+    f: F,
+) -> (Vec<(usize, Result<R, E>)>, JetAccelerationDecision)
+where
+    R: Send,
+    E: Send,
+    F: Fn(std::ops::Range<usize>) -> Result<R, E> + Sync,
+{
+    let gate = JetAccelerationGate::d_accel1();
+    let chunk_count = len.div_ceil(JET_PARALLEL_DEFAULT_CHUNK_ITEMS);
+    let worker_count = worker_cap
+        .min(worker_limit.max(1))
+        .min(chunk_count);
+    if chunk_count == 0
+        || len <= JET_ACCEL_STATIC_FLOOR_ITEMS
+        || worker_count <= 1
+        || !release_build
+        || !cross_mode_parity_proven
+        || !proof_proven
+    {
+        let input = JetAccelerationGateInput {
+            cross_mode_parity_proven,
+            proof_proven,
+            pin,
+            ..JetAccelerationGateInput::deferred(len, release_build)
+        };
+        let decision = gate.evaluate(transform, input);
+        return (jet_list_para_chunks_serial_kernel(len, f), decision);
+    }
+
+    let Some(sample) = jet_acceleration_first_chunk(len, |range| f(range)) else {
+        unreachable!("D-ACCEL1 first chunk must exist above the static floor");
+    };
+    let costs = JetAccelerationRuntimeCosts::once(len);
+    let input = JetAccelerationGateInput::measured(
+        len,
+        sample.sample_items,
+        sample.sample_nanos,
+        costs,
+        release_build,
+        cross_mode_parity_proven,
+        proof_proven,
+        nested_reuse,
+        single_pass,
+        pin,
+    );
+    let decision = gate.evaluate(transform, input);
+    let tail_len = len.saturating_sub(sample.sample_items);
+    let tail = if decision.selected() {
+        jet_list_para_chunks_kernel(tail_len, worker_limit.max(1), worker_cap, |range| {
+            let start = sample.sample_items.saturating_add(range.start);
+            let end = sample.sample_items.saturating_add(range.end);
+            f(start..end)
+        })
+    } else {
+        jet_list_para_chunks_serial_kernel(tail_len, |range| {
+            let start = sample.sample_items.saturating_add(range.start);
+            let end = sample.sample_items.saturating_add(range.end);
+            f(start..end)
+        })
+    };
+    let mut indexed = Vec::with_capacity(chunk_count);
+    indexed.push((0, sample.value));
+    indexed.extend(tail.into_iter().map(|(chunk, value)| (chunk + 1, value)));
+    (indexed, decision)
+}
+
 
 /// Complete a column-copy map from an optional retained typed first-chunk
 /// probe. The probe is emitted exactly once: a selected decision copies only
@@ -607,69 +687,51 @@ where
     U: Send,
     F: Fn(usize) -> U + Sync,
 {
-    let gate = JetAccelerationGate::d_accel1();
     let start = range.start;
-    let end = range.end;
-    let items = end.saturating_sub(start);
-    // A caller with one worker has no parallel plan to justify a timing probe.
-    // Keep the whole operation serial and let the gate record a deferred
-    // decision rather than timing a kernel that cannot accelerate the work.
-    if items <= JET_ACCEL_STATIC_FLOOR_ITEMS
-        || worker_limit <= 1
-        || !release_build
-        || !cross_mode_parity_proven
-        || !proof_proven
-    {
-        let input = JetAccelerationGateInput::deferred(items, release_build);
-        let input = JetAccelerationGateInput {
-            cross_mode_parity_proven,
-            proof_proven,
-            pin,
-            ..input
-        };
-        let decision = gate.evaluate(JetAccelerationTransform::PooledParallelChunks, input);
-        let result = (start..end).map(&f).collect();
-        return (result, decision);
-    }
-
-    let Some(sample) = jet_acceleration_first_chunk(items, |relative| {
-        relative
-            .map(|index| f(start + index))
-            .collect::<Vec<_>>()
-    }) else {
-        unreachable!("D-ACCEL1 first chunk must exist above the static floor");
-    };
-    let costs = JetAccelerationRuntimeCosts::once(items);
-    let input = JetAccelerationGateInput::measured(
+    let items = range.end.saturating_sub(start);
+    #[cfg(jet_para_test_workers)]
+    let worker_cap = 3;
+    #[cfg(not(jet_para_test_workers))]
+    let worker_cap = std::thread::available_parallelism()
+        .map(|workers| workers.get())
+        .unwrap_or(1);
+    let (indexed, decision) = jet_list_para_chunks_measured(
         items,
-        sample.sample_items,
-        sample.sample_nanos,
-        costs,
+        worker_limit,
+        worker_cap,
         release_build,
         cross_mode_parity_proven,
         proof_proven,
+        JetAccelerationTransform::PooledParallelChunks,
         false,
         false,
         pin,
+        |relative_range| {
+            let mut output = Vec::with_capacity(relative_range.len());
+            for relative in relative_range {
+                let index = start + relative;
+                output.push(jet_para_call(index, || f(index))?);
+            }
+            Ok::<Vec<U>, JetParaFailure>(output)
+        },
     );
-    let decision = gate.evaluate(JetAccelerationTransform::PooledParallelChunks, input);
-    let mut result = sample.value;
-    if decision.selected() {
-        let tail = jet_list_para_chunks(
-            items - sample.sample_items,
-            worker_limit.max(1),
-            |relative_range| {
-                let mut output = Vec::with_capacity(relative_range.len());
-                for relative in relative_range {
-                    let index = start + sample.sample_items + relative;
-                    output.push(jet_para_call(index, || f(index))?);
-                }
-                Ok(output)
-            },
-        );
-        result.extend(tail.into_iter().flatten());
-    } else {
-        result.extend((start + sample.sample_items..end).map(&f));
+    let mut result = Vec::with_capacity(items);
+    let mut first_failure: Option<JetParaFailure> = None;
+    for (_, outcome) in indexed {
+        match outcome {
+            Ok(values) => result.extend(values),
+            Err(failure)
+                if first_failure
+                    .as_ref()
+                    .is_none_or(|first| failure.index < first.index) =>
+            {
+                first_failure = Some(failure);
+            }
+            Err(_) => {}
+        }
+    }
+    if let Some(failure) = first_failure {
+        jet_para_raise_failure(failure);
     }
     (result, decision)
 }
@@ -727,8 +789,8 @@ impl JetParallelOperation {
     }
 }
 
-impl fmt::Display for JetParallelOperation {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelOperation {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(self.surface_name())
     }
 }
@@ -822,8 +884,8 @@ impl JetParallelAccessMode {
     }
 }
 
-impl fmt::Display for JetParallelAccessMode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelAccessMode {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::Read => "read",
             Self::Write => "write",
@@ -846,8 +908,8 @@ pub enum JetParallelAccessScope {
     Unknown,
 }
 
-impl fmt::Display for JetParallelAccessScope {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelAccessScope {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::Invariant => "invariant",
             Self::IterationLocal => "iteration-local",
@@ -960,8 +1022,8 @@ pub enum JetParallelEffectKind {
     Unknown,
 }
 
-impl fmt::Display for JetParallelEffectKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelEffectKind {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::Pure => "pure",
             Self::ReadOnly => "read-only",
@@ -1075,8 +1137,8 @@ impl JetParallelDependencyKind {
     }
 }
 
-impl fmt::Display for JetParallelDependencyKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelDependencyKind {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::Independent => "independent",
             Self::ReadAfterWrite => "read-after-write",
@@ -1210,8 +1272,8 @@ pub enum JetParallelReductionOrder {
     StableAdjacentPair,
 }
 
-impl fmt::Display for JetParallelReductionOrder {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelReductionOrder {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::SourceOrder => "source-order",
             Self::StableAdjacentPair => "stable-adjacent-pair",
@@ -1445,8 +1507,8 @@ pub enum JetParallelSequentialReason {
     ExplicitSerial,
 }
 
-impl fmt::Display for JetParallelSequentialReason {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelSequentialReason {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::EmptyDomain => "empty iteration domain",
             Self::SingleChunk => "one deterministic chunk does not justify worker setup",
@@ -1641,8 +1703,8 @@ impl JetParallelRejection {
     }
 }
 
-impl fmt::Display for JetParallelRejection {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelRejection {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(&self.reason())
     }
 }
@@ -1779,8 +1841,8 @@ pub enum JetParallelReceiptStatus {
     Cancelled,
 }
 
-impl fmt::Display for JetParallelReceiptStatus {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl parallel_fmt::Display for JetParallelReceiptStatus {
+    fn fmt(&self, formatter: &mut parallel_fmt::Formatter<'_>) -> parallel_fmt::Result {
         formatter.write_str(match self {
             Self::Running => "running",
             Self::Completed => "completed",

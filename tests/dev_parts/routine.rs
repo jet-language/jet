@@ -7211,8 +7211,7 @@ fn tower_1754_collection_parity_focus() {
 /// the tests were not in a routine set and nothing said so.
 ///
 /// Naming the target is all it takes to be routine: cargo makes a test binary
-/// out of every `tests/*.rs` file by itself, `scripts/agent/time-suites.sh`
-/// times each one against this same guard, and `tools/ci/test-shards.sh`
+/// out of every `tests/*.rs` file by itself, and `tools/ci/test-shards.sh`
 /// enumerates the whole target inventory fresh on every run (D-CI1=A). So the
 /// only thing left to check is that no slice is orphaned.
 #[test]

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jet — click counter</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background: radial-gradient(circle at 20% 20%, #1c2333, #0b0d14 60%);
+    color: #e8ebf5;
+  }
+  .card {
+    width: 360px;
+    padding: 36px 32px 32px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    text-align: center;
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8a92ad;
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 24px;
+    color: #f4f6ff;
+  }
+  #jet-app {
+    position: relative;
+    height: 120px;
+    margin-bottom: 8px;
+  }
+  /* Jet paints the counter node and the portable on_click button into #jet-app. */
+  #jet-app > [data-jet-node] {
+    left: 50% !important;
+    transform: translateX(-50%);
+    transition: background 160ms ease;
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    border: none !important;
+    box-shadow: 0 12px 24px -8px rgba(0,0,0,0.5);
+  }
+  #jet-app > button[data-jet-node] {
+    appearance: none;
+    padding: 12px 28px;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    color: #0b0d14;
+    background: linear-gradient(160deg, #ffffff, #cdd3e6) !important;
+    cursor: pointer;
+    box-shadow: 0 8px 20px -6px rgba(255,255,255,0.25);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  #jet-app > button[data-jet-node]:hover { transform: translateX(-50%) translateY(-1px); }
+  #jet-app > button[data-jet-node]:active { transform: translateX(-50%) translateY(1px) scale(0.98); }
+  .footer {
+    margin-top: 20px;
+    font-size: 12px;
+    color: #5b6280;
+  }
+  code { color: #a9b4e8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="kicker">jet · compiled to js</p>
+  <h1>Reactive counter, rendered live</h1>
+  <div id="jet-app"></div>
+  <p class="footer">Portable <code>ui.button(..., on_click:)</code> —<br><code>examples/features/web/ui_web_click.jet</code></p>
+</div>
+<script type="module">
+import { jet_main } from "./app.js";
+jet_main();
+</script>
+</body>
+</html>

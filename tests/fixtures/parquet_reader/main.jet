@@ -11,7 +11,7 @@ fn run() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("int32 loader")
-    int_snapshot :: data.snapshot<[DataTree]>(int_loader) ?? panic("int32 snapshot")
+    int_snapshot :: data.snapshot<[DataTree]>(&int_loader) ?? panic("int32 snapshot")
     int_rows :: int_snapshot.value
 
     // The upstream column index documents rows 200..299 as an all-null page.
@@ -37,7 +37,7 @@ fn run() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("dictionary loader")
-    dictionary_snapshot :: data.snapshot<[DataTree]>(dictionary_loader) ?? panic("dictionary snapshot")
+    dictionary_snapshot :: data.snapshot<[DataTree]>(&dictionary_loader) ?? panic("dictionary snapshot")
     dictionary_rows :: dictionary_snapshot.value
     first_dictionary_row :: dictionary_rows.at(0) ?? panic("dictionary first row")
     // `string_col` is dictionary encoded in the upstream Impala alltypes file.
@@ -51,7 +51,7 @@ fn run() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("malformed loader")
-    malformed :: data.snapshot<[DataTree]>(malformed_loader)
+    malformed :: data.snapshot<[DataTree]>(&malformed_loader)
     if malformed == {
         .Ok(_) -> print("malformed: unexpectedly accepted")
         .Err(error) -> print("malformed: rejected {error.kind} {error.operation}")

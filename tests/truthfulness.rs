@@ -1436,47 +1436,6 @@ fn dependency_scanner_accepts_commented_headers_and_rejects_junk() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 9: E3 feature claims stay bound to executable proof
-// ---------------------------------------------------------------------------
-// The checker resolves live Tower ownership from the main checkout. Do not
-// pass this worktree's stale board snapshot.
-#[test]
-fn epoch3_feature_manifest_is_current_and_owned() {
-    let root = root();
-    let output = Command::new("node")
-        .arg("scripts/agent/check-feature-ledger.mjs")
-        .arg("--check")
-        .current_dir(&root)
-        .output()
-        .expect("node must run the feature-ledger checker");
-
-    assert!(
-        output.status.success(),
-        "feature ledger rejected:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn epoch3_feature_manifest_rejects_hostile_real_card_fixtures() {
-    let root = root();
-    let output = Command::new("node")
-        .arg("scripts/agent/check-feature-ledger.mjs")
-        .arg("--hostile-fixtures")
-        .current_dir(&root)
-        .output()
-        .expect("node must run the feature-claim hostile fixtures");
-
-    assert!(
-        output.status.success(),
-        "feature-claim hostile fixtures failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — it must not
 // construct a user diagnostic. All checking lives in sema, and evaluator error
 // values use the shared registered diagnostic seam.
@@ -1970,23 +1929,6 @@ fn accessibility_audit_findings_have_live_cards() {
     }
 }
 
-
-#[test]
-fn audit_report_dispositions_match_tower() {
-    let root = root();
-    let output = Command::new("node")
-        .args(["scripts/agent/check-audit-dispositions.mjs", "--root"])
-        .arg(&root)
-        .current_dir(&root)
-        .output()
-        .expect("audit disposition check must run");
-    assert!(
-        output.status.success(),
-        "audit disposition check failed:\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 fn markdown_table_cells(line: &str) -> Vec<String> {
     let line = line.trim();

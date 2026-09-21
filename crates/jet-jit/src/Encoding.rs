@@ -15,6 +15,7 @@ use crate::Time::TimeValue;
 use crate::{JetDebug, JetDisplay, JetShow};
 use jet_foundation::AST::{CtKey, CtReport, CtValue, Type};
 use jet_foundation::base_encoding_dispatch;
+use jet_foundation::SchemaMigration::{SchemaMigrationOp, SchemaMigrationPlan};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 use jet_foundation::CborKernel::{self, Value};
@@ -241,6 +242,12 @@ const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DATATREE_OBJECT;
 // Private adapter tags: these carriers never escape a typed JSON decode.
 const DT_NUMBER: i64 = -1;
 const DT_TYPED_TEXT: i64 = -2;
+// Hidden JSON lexical variants cross generated Decode copies through the
+// public Text enum arm. Plain Text stays untagged so dynamic pattern captures
+// receive the source string; the legacy text prefix remains readable below.
+const DT_TEXT_PREFIX: &str = "\u{0}jet-dt-text\0";
+const DT_NUMBER_PREFIX: &str = "\u{0}jet-dt-number\0";
+const DT_TYPED_TEXT_PREFIX: &str = "\u{0}jet-dt-typed-text\0";
 
 /// One enum-record ABI: slot 0 is the discriminant and slot 1 holds the
 /// payload under its own `JetVal` tag, exactly as `pack_enum_record` writes a
@@ -275,10 +282,17 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
             DT_NULL | DT_INT => {
                 let _ = rt.heap.record_set_int(h, 1, payload);
             }
+
             _ => jet_foundation::ice!(None, "invalid DataTree discriminant"),
         }
         h
     })
+}
+fn tagged_datatree_text(prefix: &str, text: &str) -> String {
+    let mut tagged = String::with_capacity(prefix.len() + text.len());
+    tagged.push_str(prefix);
+    tagged.push_str(text);
+    tagged
 }
 
 pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
@@ -288,12 +302,14 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
         json_rt::DataTree::Int(n) => alloc_dt_record(DT_INT, *n),
         json_rt::DataTree::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
         json_rt::DataTree::Number(text) => {
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
-            alloc_dt_record(DT_NUMBER, sid)
+            let text = tagged_datatree_text(DT_NUMBER_PREFIX, text);
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+            alloc_dt_record(DT_TEXT, sid)
         }
         json_rt::DataTree::TypedText(text) => {
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
-            alloc_dt_record(DT_TYPED_TEXT, sid)
+            let text = tagged_datatree_text(DT_TYPED_TEXT_PREFIX, text);
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+            alloc_dt_record(DT_TEXT, sid)
         }
         json_rt::DataTree::Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s.clone()));
@@ -437,7 +453,18 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
         DT_BOOL => Some(json_rt::DataTree::Bool(payload != 0)),
         DT_INT => Some(json_rt::DataTree::Int(payload)),
         DT_FLOAT => Some(json_rt::DataTree::Float(float_val?)),
-        DT_TEXT => Some(json_rt::DataTree::Text(text?)),
+        DT_TEXT => {
+            let text = text?;
+            if let Some(text) = text.strip_prefix(DT_NUMBER_PREFIX) {
+                Some(json_rt::DataTree::Number(text.to_owned()))
+            } else if let Some(text) = text.strip_prefix(DT_TYPED_TEXT_PREFIX) {
+                Some(json_rt::DataTree::TypedText(text.to_owned()))
+            } else if let Some(text) = text.strip_prefix(DT_TEXT_PREFIX) {
+                Some(json_rt::DataTree::Text(text.to_owned()))
+            } else {
+                Some(json_rt::DataTree::Text(text))
+            }
+        }
         DT_NUMBER => Some(json_rt::DataTree::Number(text?)),
         DT_TYPED_TEXT => Some(json_rt::DataTree::TypedText(text?)),
         DT_ARRAY => {
@@ -723,6 +750,9 @@ fn jet_jit_env_config_map(result: i64, origins: i64) -> i64 {
 fn hex_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_hex_encode(&bytes.to_vec())
 }
+fn hex_encode_upper(bytes: &[u8]) -> String {
+    encoding_base_rt::jet_std_hex_encode_upper(&bytes.to_vec())
+}
 
 fn b64_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_b64_encode(&bytes.to_vec())
@@ -731,9 +761,43 @@ fn b64_encode(bytes: &[u8]) -> String {
 fn b64url_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_b64url_encode(&bytes.to_vec())
 }
+fn b64url_encode_padded(bytes: &[u8]) -> String {
+    encoding_base_rt::jet_std_b64url_encode_padded(&bytes.to_vec())
+}
+fn b64_pad(text: &str) -> String {
+    encoding_base_rt::jet_std_b64_pad(&text.to_string())
+}
+fn b64_unpad(text: &str) -> String {
+    encoding_base_rt::jet_std_b64_unpad(&text.to_string())
+}
+fn b64_is_base64(text: &str) -> bool {
+    encoding_base_rt::jet_std_b64_is_base64(&text.to_string())
+}
+fn base32_is_base32(text: &str) -> bool {
+    encoding_base_rt::jet_std_base32_is_base32(&text.to_string())
+}
 
 fn base32_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_base32_encode(&bytes.to_vec())
+}
+fn base32hex_encode(bytes: &[u8]) -> String {
+    encoding_base_rt::jet_std_base32hex_encode(&bytes.to_vec())
+}
+
+fn base32hex_decode(text: &str) -> Result<Vec<u8>, String> {
+    const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut canonical = String::with_capacity(text.len());
+    for ch in text.chars() {
+        let mapped = match ch {
+            '0'..='9' => STANDARD[(ch as u8 - b'0') as usize],
+            'A'..='V' => STANDARD[(ch as u8 - b'A' + 10) as usize],
+            '=' => b'=',
+            _ => return Err("invalid Base32hex character".to_string()),
+        };
+        canonical.push(mapped as char);
+    }
+    let edition = PackageEdition::package_edition();
+    base_encoding_dispatch::decode_base32(&edition, &canonical, false, false, false)
 }
 
 fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
@@ -745,10 +809,219 @@ fn jet_jit_hex_encode(bytes: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
+fn jet_jit_hex_encode_upper(bytes: i64) -> i64 {
+    let encoded = hex_encode_upper(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+fn jet_jit_hex_encode_prefixed(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_hex_encode_prefixed(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+fn jet_jit_hex_is_hex(text: i64) -> i8 {
+    i8::from(encoding_base_rt::jet_std_hex_is_hex(&clone_string(text)))
+}
+fn jet_jit_hex_encode_sep(bytes: i64, separator: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_hex_encode_sep(
+        &clone_bytes(bytes),
+        &clone_string(separator),
+    );
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+fn jet_jit_hex_dump(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_hex_dump(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
 fn jet_jit_hex_decode(text: i64) -> i64 {
     match hex_decode(&clone_string(text)) {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
+    }
+}
+fn binary_list_i64s(list: i64) -> Vec<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        (0..len)
+            .map(|index| rt.heap.list_get_int(list, index).unwrap_or(0))
+            .collect()
+    })
+}
+
+fn binary_alloc_i64_list(values: &[i64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list(values.to_vec()))
+}
+
+fn binary_alloc_i64_matrix(values: &[Vec<i64>]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let outer = rt.heap.alloc_empty_list();
+        for row in values {
+            let inner = rt.heap.alloc_int_list(row.clone());
+            let _ = rt.heap.list_push_int(outer, inner);
+        }
+        outer
+    })
+}
+
+fn binary_option_i64(value: Option<i64>) -> i64 {
+    value.map(|value| value.wrapping_add(1)).unwrap_or(0)
+}
+
+fn binary_option_f64(value: Option<f64>) -> i64 {
+    value
+        .map(|value| (value.to_bits() as i64).wrapping_add(1))
+        .unwrap_or(0)
+}
+
+fn jet_jit_binary_pack_u8(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u8(value))
+}
+fn jet_jit_binary_pack_i8(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_i8(value))
+}
+fn jet_jit_binary_pack_u16le(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u16le(value))
+}
+fn jet_jit_binary_pack_u16be(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u16be(value))
+}
+fn jet_jit_binary_pack_u32le(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u32le(value))
+}
+fn jet_jit_binary_pack_u32be(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u32be(value))
+}
+fn jet_jit_binary_pack_u64le(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u64le(value))
+}
+fn jet_jit_binary_pack_u64be(value: i64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_u64be(value))
+}
+fn jet_jit_binary_unpack_u8(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u8(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u16le(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u16le(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u16be(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u16be(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u32le(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u32le(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u32be(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u32be(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u64le(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u64le(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_u64be(data: i64, offset: i64) -> i64 {
+    binary_option_i64(encoding_base_rt::jet_std_binary_unpack_u64be(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_sign_extend(value: i64, bits: i64) -> i64 {
+    encoding_base_rt::jet_std_binary_sign_extend(value, bits)
+}
+fn jet_jit_binary_pack_f64le(value: f64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_f64le(value))
+}
+fn jet_jit_binary_pack_f64be(value: f64) -> i64 {
+    alloc_byte_list(&encoding_base_rt::jet_std_binary_pack_f64be(value))
+}
+fn jet_jit_binary_unpack_f64le(data: i64, offset: i64) -> i64 {
+    binary_option_f64(encoding_base_rt::jet_std_binary_unpack_f64le(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_unpack_f64be(data: i64, offset: i64) -> i64 {
+    binary_option_f64(encoding_base_rt::jet_std_binary_unpack_f64be(
+        &clone_bytes(data),
+        offset,
+    ))
+}
+fn jet_jit_binary_calcsize(format: i64) -> i64 {
+    match encoding_base_rt::jet_std_binary_calcsize(&clone_string(format)) {
+        Ok(size) => result_ok(size as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+fn jet_jit_binary_pack(format: i64, values: i64) -> i64 {
+    match encoding_base_rt::jet_std_binary_pack(
+        &clone_string(format),
+        &binary_list_i64s(values),
+    ) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+fn jet_jit_binary_iter_unpack(format: i64, data: i64) -> i64 {
+    match encoding_base_rt::jet_std_binary_iter_unpack(
+        &clone_string(format),
+        &clone_bytes(data),
+    ) {
+        Ok(rows) => result_ok(binary_alloc_i64_matrix(&rows) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+fn jet_jit_binary_unpack(format: i64, data: i64) -> i64 {
+    match encoding_base_rt::jet_std_binary_unpack(
+        &clone_string(format),
+        &clone_bytes(data),
+    ) {
+        Ok(values) => result_ok(binary_alloc_i64_list(&values) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
+fn jet_jit_crc_hqx(bytes: i64, value: i64) -> i64 {
+    encoding_base_rt::jet_std_crc_hqx(&clone_bytes(bytes), value)
+}
+
+fn jet_jit_crc32(bytes: i64) -> i64 {
+    encoding_base_rt::jet_std_crc32(&clone_bytes(bytes))
+}
+
+fn jet_jit_b2a_qp(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_b2a_qp(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_a2b_qp(text: i64) -> i64 {
+    match encoding_base_rt::jet_std_a2b_qp(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
+fn jet_jit_b2a_uu(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_b2a_uu(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_a2b_uu(text: i64) -> i64 {
+    match encoding_base_rt::jet_std_a2b_uu(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
     }
 }
 
@@ -760,6 +1033,24 @@ fn jet_jit_b64_encode(bytes: i64) -> i64 {
 fn jet_jit_b64_encode_url(bytes: i64) -> i64 {
     let encoded = b64url_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+fn jet_jit_b64_encode_url_padded(bytes: i64) -> i64 {
+    let encoded = b64url_encode_padded(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+fn jet_jit_b64_decode_padded(text: i64) -> i64 {
+    jet_jit_b64_decode(text)
+}
+fn jet_jit_b64_pad(text: i64) -> i64 {
+    let padded = b64_pad(&clone_string(text));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(padded))
+}
+fn jet_jit_b64_unpad(text: i64) -> i64 {
+    let unpadded = b64_unpad(&clone_string(text));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(unpadded))
+}
+fn jet_jit_b64_is_base64(text: i64) -> i8 {
+    i8::from(b64_is_base64(&clone_string(text)))
 }
 
 fn jet_jit_b64_decode(text: i64) -> i64 {
@@ -778,6 +1069,40 @@ fn jet_jit_b64_decode_url(text: i64) -> i64 {
     }
 }
 
+fn jet_jit_b64_encodebytes(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_b64_encode(&clone_bytes(bytes));
+    let mut wrapped = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
+    for chunk in encoded.as_bytes().chunks(76) {
+        for &byte in chunk {
+            wrapped.push(byte as char);
+        }
+        wrapped.push('\n');
+    }
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(wrapped))
+}
+
+fn jet_jit_b64_decodebytes(text: i64) -> i64 {
+    let edition = PackageEdition::package_edition();
+    match base_encoding_dispatch::decode_base64(&edition, &clone_string(text), true, false) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+fn jet_jit_base32_is_base32(text: i64) -> i8 {
+    i8::from(base32_is_base32(&clone_string(text)))
+}
+fn jet_jit_base32hex_encode(bytes: i64) -> i64 {
+    let encoded = base32hex_encode(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_base32hex_decode(text: i64) -> i64 {
+    match base32hex_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
 fn jet_jit_base32_encode(bytes: i64) -> i64 {
     let encoded = base32_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
@@ -789,6 +1114,42 @@ fn jet_jit_base32_decode(text: i64) -> i64 {
     {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
+    }
+}
+
+fn jet_jit_a85_encode(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_a85_encode(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_a85_decode(text: i64) -> i64 {
+    match encoding_base_rt::jet_std_a85_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
+fn jet_jit_b85_encode(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_b85_encode(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_b85_decode(text: i64) -> i64 {
+    match encoding_base_rt::jet_std_b85_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
+    }
+}
+
+fn jet_jit_z85_encode(bytes: i64) -> i64 {
+    let encoded = encoding_base_rt::jet_std_z85_encode(&clone_bytes(bytes));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
+}
+
+fn jet_jit_z85_decode(text: i64) -> i64 {
+    match encoding_base_rt::jet_std_z85_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&error),
     }
 }
 
@@ -1288,6 +1649,14 @@ fn typed_codec_kind(descriptor: &runtime_host::RuntimeTypeDescriptor) -> Option<
         "Decimal" => Some(CODEC_KIND_DECIMAL),
         _ => None,
     }
+}
+
+fn typed_is_secret(descriptor: &runtime_host::RuntimeTypeDescriptor) -> bool {
+    fn leaf(name: &str) -> &str {
+        let after_path = name.rsplit(['.', ':']).next().unwrap_or(name);
+        after_path.split('<').next().unwrap_or(after_path)
+    }
+    leaf(&descriptor.name) == "Secret" || leaf(&descriptor.canonical) == "Secret"
 }
 
 fn typed_codec_slot(
@@ -1942,6 +2311,12 @@ fn typed_decode_value(
             });
             Ok(JetVal::RecordRef(record))
         }
+        runtime_host::RuntimeValueKind::Named | runtime_host::RuntimeValueKind::Handle
+            if typed_is_secret(descriptor) =>
+        {
+            let text = json_rt::decode_string(tree)?;
+            Ok(JetVal::Int(crate::Crypto::secret_from_text_value(text)))
+        }
         _ => Err(json_rt::FieldError::one(format!(
             "type `{}` has no checked JSON decoder",
             descriptor.name
@@ -1958,17 +2333,177 @@ pub(crate) fn decode_datatree_for_type(
     typed_decode_value(tree, &descriptor)
         .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
 }
+fn json_decode_callback_slot(
+    callback: i64,
+) -> Result<Option<runtime_host::JitCallableSlot>, ()> {
+    if callback == 0 {
+        return Ok(None);
+    }
+    let slot = Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = runtime_host::jit_callable_parts(rt, callback) else {
+            rt.set_host_fault("JSON Decode callback is invalid");
+            return None;
+        };
+        if slot.raw_unary.is_none() || slot.raw_pair.is_some() || slot.raw_many.is_some() {
+            rt.set_host_fault("JSON Decode callback has no unary universal thunk");
+            return None;
+        }
+        Some(slot)
+    });
+    slot.map(Some).ok_or(())
+}
+fn migration_default_tree(type_name: &str) -> Option<json_rt::DataTree> {
+    let leaf = type_name
+        .rsplit(['.', ':'])
+        .next()
+        .unwrap_or(type_name)
+        .split('<')
+        .next()
+        .unwrap_or(type_name);
+    Some(match leaf {
+        "Bool" => json_rt::DataTree::Bool(false),
+        "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
+        | "U64" | "U128" => json_rt::DataTree::Int(0),
+        "Float" | "F32" | "F64" => json_rt::DataTree::Float(0.0),
+        "String" => json_rt::DataTree::Text(String::new()),
+        _ => return None,
+    })
+}
 
-fn jet_jit_json_decode_typed(text: i64, type_key: i64) -> i64 {
+fn migrate_typed_tree(
+    tree: &json_rt::DataTree,
+    plan: &SchemaMigrationPlan,
+) -> Result<json_rt::DataTree, Vec<json_rt::FieldError>> {
+    let json_rt::DataTree::Object(entries) = tree else {
+        return Err(json_rt::FieldError::one(format!(
+            "migration `{}` expects an object",
+            plan.type_name
+        )));
+    };
+    let keys = entries.iter().map(|(key, _)| key.clone()).collect::<std::collections::BTreeSet<_>>();
+    if keys == plan.current_shape_keys() {
+        return Ok(tree.clone());
+    }
+    let Some(start) = plan
+        .historical_shapes
+        .iter()
+        .position(|shape| shape.iter().cloned().collect::<std::collections::BTreeSet<_>>() == keys)
+    else {
+        return Err(json_rt::FieldError::one(format!(
+            "migration `{}` does not recognize the input fields",
+            plan.type_name
+        )));
+    };
+    let mut fields = entries.clone();
+    for step in plan.steps.iter().skip(start) {
+        for op in &step.ops {
+            match op {
+                SchemaMigrationOp::Rename { from_key, to_key } => {
+                    let Some(index) = fields.iter().position(|(key, _)| key == from_key) else {
+                        return Err(json_rt::FieldError::one(format!(
+                            "migration `{}` is missing `{from_key}`",
+                            plan.type_name
+                        )));
+                    };
+                    if fields.iter().any(|(key, _)| key == to_key) {
+                        return Err(json_rt::FieldError::one(format!(
+                            "migration `{}` already has `{to_key}`",
+                            plan.type_name
+                        )));
+                    }
+                    let (_, value) = fields.remove(index);
+                    fields.push((to_key.clone(), value));
+                }
+                SchemaMigrationOp::Remove { key } => {
+                    let Some(index) = fields.iter().position(|(field, _)| field == key) else {
+                        return Err(json_rt::FieldError::one(format!(
+                            "migration `{}` is missing `{key}`",
+                            plan.type_name
+                        )));
+                    };
+                    fields.remove(index);
+                }
+                SchemaMigrationOp::Add {
+                    key, type_name, ..
+                } => {
+                    if fields.iter().any(|(field, _)| field == key) {
+                        return Err(json_rt::FieldError::one(format!(
+                            "migration `{}` already has `{key}`",
+                            plan.type_name
+                        )));
+                    }
+                    let Some(value) = migration_default_tree(type_name) else {
+                        return Err(json_rt::FieldError::one(format!(
+                            "migration `{}` cannot evaluate default for `{key}`",
+                            plan.type_name
+                        )));
+                    };
+                    fields.push((key.clone(), value));
+                }
+                SchemaMigrationOp::Change { key, .. } => {
+                    return Err(json_rt::FieldError::one(format!(
+                        "migration `{}` cannot convert `{key}` in resident JSON decode",
+                        plan.type_name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(json_rt::DataTree::Object(fields))
+}
+
+
+fn jet_jit_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
     let text = clone_string(text);
     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
         return result_err_fields(json_rt::FieldError::one("typed JSON received an invalid type key"));
     };
+    let migration = typed_runtime_descriptor(&type_key).and_then(|descriptor| descriptor.migration);
+    let callback = match json_decode_callback_slot(callback) {
+        Ok(callback) => callback,
+        Err(()) => return 0,
+    };
     match json_rt::parse_datatree_typed_ordered(&text) {
-        Ok(tree) => match decode_datatree_for_type(&tree, &type_key) {
-            Ok(value) => result_ok(value as u64),
-            Err(errors) => result_err_fields(errors),
-        },
+        Ok(tree) => {
+            let tree = match migration.as_ref() {
+                Some(plan) => match migrate_typed_tree(&tree, plan) {
+                    Ok(tree) => tree,
+                    Err(error) => return result_err_fields(error),
+                },
+                None => tree,
+            };
+            if let Some(callback) = callback {
+                let tree_handle = alloc_datatree(&tree);
+                let Some(decoded_result) =
+                    runtime_host::invoke_universal_unary(callback, tree_handle)
+                else {
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_host_fault("JSON Decode callback invocation failed")
+                    });
+                    return 0;
+                };
+                let Some((ok, _)) =
+                    Concurrency::with_runtime_mut(|rt| runtime_host::jit_result_parts(rt, decoded_result))
+                else {
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_host_fault("JSON Decode callback returned an invalid Result")
+                    });
+                    return 0;
+                };
+                if !ok && result_errors(decoded_result).is_none() {
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_host_fault("JSON Decode callback returned an invalid error")
+                    });
+                    return 0;
+                }
+                decoded_result
+            } else {
+                match decode_datatree_for_type(&tree, &type_key) {
+                    Ok(value) => result_ok(value as u64),
+                    Err(errors) => result_err_fields(errors),
+                }
+            }
+        }
         Err(error) => result_err_fields(json_rt::FieldError::one(format!(
             "invalid JSON (line {}): {}",
             error.line.unwrap_or(0),
@@ -1976,13 +2511,18 @@ fn jet_jit_json_decode_typed(text: i64, type_key: i64) -> i64 {
         ))),
     }
 }
+
 /// Typed `core.data.json<T>` host. Unlike `core.encoding.json.decode<T>`, the
 /// data route's generic result is always a list, so each ordered JSON array
 /// element is decoded against the supplied element type key.
-fn jet_jit_data_json_decode_typed(text: i64, type_key: i64) -> i64 {
+fn jet_jit_data_json_decode_typed(text: i64, callback: i64, type_key: i64) -> i64 {
     let text = clone_string(text);
     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
         return result_err_fields(json_rt::FieldError::one("typed JSON received an invalid type key"));
+    };
+    let callback = match json_decode_callback_slot(callback) {
+        Ok(callback) => callback,
+        Err(()) => return 0,
     };
     match json_rt::parse_datatree_typed_ordered(&text) {
         Ok(json_rt::DataTree::Array(items)) => {
@@ -1993,14 +2533,55 @@ fn jet_jit_data_json_decode_typed(text: i64, type_key: i64) -> i64 {
             };
             let mut raw_values = Vec::with_capacity(items.len());
             let mut errors = Vec::new();
+            let mut callback_fault = false;
             for (index, item) in items.iter().enumerate() {
-                match decode_datatree_for_type(item, &type_key) {
-                    Ok(value) => raw_values.push(value),
-                    Err(error) => errors.extend(json_rt::FieldError::under_errors(
-                        &format!("[{index}]"),
-                        error,
-                    )),
+                if let Some(callback) = callback {
+                    let tree_handle = alloc_datatree(item);
+                    let Some(decoded_result) =
+                        runtime_host::invoke_universal_unary(callback, tree_handle)
+                    else {
+                        callback_fault = true;
+                        Concurrency::with_runtime_mut(|rt| {
+                            rt.set_host_fault("JSON Decode callback invocation failed")
+                        });
+                        break;
+                    };
+                    let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+                        runtime_host::jit_result_parts(rt, decoded_result)
+                    }) else {
+                        callback_fault = true;
+                        Concurrency::with_runtime_mut(|rt| {
+                            rt.set_host_fault("JSON Decode callback returned an invalid Result")
+                        });
+                        break;
+                    };
+                    if !ok {
+                        let Some(callback_errors) = result_errors(decoded_result) else {
+                            callback_fault = true;
+                            Concurrency::with_runtime_mut(|rt| {
+                                rt.set_host_fault("JSON Decode callback returned an invalid error")
+                            });
+                            break;
+                        };
+                        errors.extend(json_rt::FieldError::under_errors(
+                            &format!("[{index}]"),
+                            callback_errors,
+                        ));
+                    } else {
+                        raw_values.push(bits as i64);
+                    }
+                } else {
+                    match decode_datatree_for_type(item, &type_key) {
+                        Ok(value) => raw_values.push(value),
+                        Err(error) => errors.extend(json_rt::FieldError::under_errors(
+                            &format!("[{index}]"),
+                            error,
+                        )),
+                    }
                 }
+            }
+            if callback_fault {
+                return 0;
             }
             if !errors.is_empty() {
                 return result_err_fields(errors);
@@ -2380,6 +2961,53 @@ fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
     }
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
+fn jet_jit_jsonl_loads(text: i64) -> i64 {
+    jet_jit_jsonl_parse(text)
+}
+
+fn jet_jit_jsonl_dumps(rows: i64) -> i64 {
+    jet_jit_jsonl_to_string(rows)
+}
+fn jet_jit_jsonl_count_rows(text: i64) -> i64 {
+    clone_string(text)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count() as i64
+}
+
+fn jet_jit_jsonl_append_line(text: i64, value: i64) -> i64 {
+    let source = clone_string(text);
+    let rendered = read_datatree(value)
+        .map(|tree| render_canonical(&tree))
+        .unwrap_or_else(|| "null".to_string());
+    let output = if source.is_empty() {
+        format!("{rendered}\n")
+    } else if source.ends_with('\n') {
+        format!("{source}{rendered}\n")
+    } else {
+        format!("{source}\n{rendered}\n")
+    };
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(output))
+}
+
+fn jet_jit_jsonl_first(text: i64) -> i64 {
+    let source = clone_string(text);
+    for (idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match json_rt::parse_datatree(trimmed) {
+            Ok(tree) => return result_ok(alloc_datatree(&tree) as u64),
+            Err(mut error) => {
+                error.format = json_rt::EncodingFormat::JSONL;
+                error.line = error.line.map(|line| idx as i64 + line);
+                return result_err_encoding(error);
+            }
+        }
+    }
+    result_ok(0)
+}
 
 // ── XML via the shared foundation kernel ────────────────────────────────────
 
@@ -2429,7 +3057,7 @@ fn datatree_to_xml_value(
     }
 }
 
-fn xml_shape_error(reason: impl Into<String>) -> json_rt::EncodingError {
+pub(crate) fn xml_shape_error(reason: impl Into<String>) -> json_rt::EncodingError {
     json_rt::EncodingError::new(
         json_rt::EncodingFormat::XML,
         json_rt::EncodingErrorKind::Syntax,
@@ -2474,7 +3102,7 @@ fn jet_jit_xml_parse(text: i64) -> i64 {
     }
 }
 
-fn xml_parse_options_from_heap(
+pub(crate) fn xml_parse_options_from_heap(
     handle: i64,
 ) -> Result<jet_foundation::XmlPull::ParseOptions, String> {
     Concurrency::with_runtime_mut(|rt| {
@@ -3132,26 +3760,34 @@ fn jet_jit_csv_decode_scalar(kind: i64, tree: i64) -> i64 {
 }
 
 fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) -> i64 {
-    if !matches!(element_kind, CSV_DECODE_INT | CSV_DECODE_FLOAT) {
-        return result_err_fields(json_rt::FieldError::one(
-            "CSV query row type has an unsupported list carrier",
-        ));
-    }
+    eprintln!(
+        "csv query debug start: path={path} sql={sql} callback={callback} element_kind={element_kind}"
+    );
     let path = clone_string(path);
-    let sql = clone_string(sql);
+    let Some((sql, _params)) = crate::DB::clone_sql_value(sql) else {
+        eprintln!("csv query debug SQL handle is not a SQL value");
+        return result_err_fields(json_rt::FieldError::one("query SQL is not a SQL value"));
+    };
     let text = match data_query_rt::jet_data_query_read(&path) {
         Ok(text) => text,
-        Err(errors) => return result_err_fields(errors),
+        Err(errors) => {
+            eprintln!("csv query read errors: {errors:?}");
+            return result_err_fields(errors);
+        }
     };
     let rows = match csv_parse(&text, ",", false, false) {
         Ok(rows) => rows,
-        Err(error) => return result_err_fields(json_rt::FieldError::one(error)),
+        Err(error) => {
+            eprintln!("csv query parse error: {error:?}");
+            return result_err_fields(json_rt::FieldError::one(error));
+        }
     };
     let fields = rows
         .first()
         .map(|row| row.fields.clone())
         .unwrap_or_default();
     if let Err(errors) = data_query_rt::jet_data_query_validate_fields(&fields, &sql) {
+        eprintln!("csv query field errors: {errors:?}");
         return result_err_fields(errors);
     }
     let trees = rows
@@ -3211,12 +3847,16 @@ fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) 
         decoded.push(bits);
     }
     if !decode_errors.is_empty() {
+        eprintln!("csv query decode errors: {decode_errors:?}");
         return result_err_fields(decode_errors);
     }
 
     let selected = match data_query_rt::jet_data_query_indices(&trees, &sql) {
         Ok(indices) => indices,
-        Err(errors) => return result_err_fields(errors),
+        Err(errors) => {
+            eprintln!("csv query selection errors: {errors:?}");
+            return result_err_fields(errors);
+        }
     };
     let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_list_values(Vec::new()));
     let built = Concurrency::with_runtime_mut(|rt| {
@@ -3234,11 +3874,13 @@ fn jet_jit_enc_csv_query(path: i64, sql: i64, callback: i64, element_kind: i64) 
         })
     });
     if !built {
+        eprintln!("csv query build error: selected={selected:?} decoded={decoded:?}");
         return result_err_fields(json_rt::FieldError::one(
             "CSV query selected row has no decoded value",
         ));
     }
-    result_ok(list as u64)
+    let query = crate::Data::jet_jit_data_query(list);
+    result_ok(query as u64)
 }
 
 
@@ -3565,6 +4207,13 @@ fn jet_jit_toml_parse(text: i64) -> i64 {
         )),
     }
 }
+fn jet_jit_toml_load(text: i64) -> i64 {
+    jet_jit_toml_parse(text)
+}
+
+fn jet_jit_toml_loads(text: i64) -> i64 {
+    jet_jit_toml_parse(text)
+}
 
 fn jet_jit_toml_to_string(tree: i64) -> i64 {
     let rendered = read_datatree(tree)
@@ -3873,6 +4522,9 @@ host_fns! {
         let mut sig_unary = Signature::new(cc);
         sig_unary.params.push(AbiParam::new(types::I64));
         sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_unary_i8 = Signature::new(cc);
+        sig_unary_i8.params.push(AbiParam::new(types::I64));
+        sig_unary_i8.returns.push(AbiParam::new(types::I8));
         let mut sig_nullary = Signature::new(cc);
         sig_nullary.returns.push(AbiParam::new(types::I64));
         let mut sig_binary = Signature::new(cc);
@@ -3889,6 +4541,9 @@ host_fns! {
             sig_quaternary.params.push(AbiParam::new(types::I64));
         }
         sig_quaternary.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64_i64 = Signature::new(cc);
+        sig_f64_i64.params.push(AbiParam::new(types::F64));
+        sig_f64_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_quinary = Signature::new(cc);
         for _ in 0..5 {
             sig_quinary.params.push(AbiParam::new(types::I64));
@@ -3897,14 +4552,65 @@ host_fns! {
 
 
     }
+    binary_pack_u8: "jet_jit_binary_pack_u8" => jet_jit_binary_pack_u8: sig_unary;
+    binary_pack_i8: "jet_jit_binary_pack_i8" => jet_jit_binary_pack_i8: sig_unary;
+    binary_pack_u16le: "jet_jit_binary_pack_u16le" => jet_jit_binary_pack_u16le: sig_unary;
+    binary_pack_u16be: "jet_jit_binary_pack_u16be" => jet_jit_binary_pack_u16be: sig_unary;
+    binary_pack_u32le: "jet_jit_binary_pack_u32le" => jet_jit_binary_pack_u32le: sig_unary;
+    binary_pack_u32be: "jet_jit_binary_pack_u32be" => jet_jit_binary_pack_u32be: sig_unary;
+    binary_pack_u64le: "jet_jit_binary_pack_u64le" => jet_jit_binary_pack_u64le: sig_unary;
+    binary_pack_u64be: "jet_jit_binary_pack_u64be" => jet_jit_binary_pack_u64be: sig_unary;
+    binary_unpack_u8: "jet_jit_binary_unpack_u8" => jet_jit_binary_unpack_u8: sig_binary;
+    binary_unpack_u16le: "jet_jit_binary_unpack_u16le" => jet_jit_binary_unpack_u16le: sig_binary;
+    binary_unpack_u16be: "jet_jit_binary_unpack_u16be" => jet_jit_binary_unpack_u16be: sig_binary;
+    binary_unpack_u32le: "jet_jit_binary_unpack_u32le" => jet_jit_binary_unpack_u32le: sig_binary;
+    binary_unpack_u32be: "jet_jit_binary_unpack_u32be" => jet_jit_binary_unpack_u32be: sig_binary;
+    binary_unpack_u64le: "jet_jit_binary_unpack_u64le" => jet_jit_binary_unpack_u64le: sig_binary;
+    binary_unpack_u64be: "jet_jit_binary_unpack_u64be" => jet_jit_binary_unpack_u64be: sig_binary;
+    binary_sign_extend: "jet_jit_binary_sign_extend" => jet_jit_binary_sign_extend: sig_binary;
+    binary_pack_f64le: "jet_jit_binary_pack_f64le" => jet_jit_binary_pack_f64le: sig_f64_i64;
+    binary_pack_f64be: "jet_jit_binary_pack_f64be" => jet_jit_binary_pack_f64be: sig_f64_i64;
+    binary_unpack_f64le: "jet_jit_binary_unpack_f64le" => jet_jit_binary_unpack_f64le: sig_binary;
+    binary_unpack_f64be: "jet_jit_binary_unpack_f64be" => jet_jit_binary_unpack_f64be: sig_binary;
+    binary_calcsize: "jet_jit_binary_calcsize" => jet_jit_binary_calcsize: sig_unary;
+    binary_pack: "jet_jit_binary_pack" => jet_jit_binary_pack: sig_binary;
+    binary_unpack: "jet_jit_binary_unpack" => jet_jit_binary_unpack: sig_binary;
+    binary_iter_unpack: "jet_jit_binary_iter_unpack" => jet_jit_binary_iter_unpack: sig_binary;
     hex_encode: "jet_jit_hex_encode" => jet_jit_hex_encode: sig_unary;
+    hex_encode_prefixed: "jet_jit_hex_encode_prefixed" => jet_jit_hex_encode_prefixed: sig_unary;
+    hex_is_hex: "jet_jit_hex_is_hex" => jet_jit_hex_is_hex: sig_unary_i8;
+    hex_encode_sep: "jet_jit_hex_encode_sep" => jet_jit_hex_encode_sep: sig_binary;
+    hex_dump: "jet_jit_hex_dump" => jet_jit_hex_dump: sig_unary;
+    hex_encode_upper: "jet_jit_hex_encode_upper" => jet_jit_hex_encode_upper: sig_unary;
     hex_decode: "jet_jit_hex_decode" => jet_jit_hex_decode: sig_unary;
+    crc_hqx: "jet_jit_crc_hqx" => jet_jit_crc_hqx: sig_binary;
+    crc32: "jet_jit_crc32" => jet_jit_crc32: sig_unary;
+    b2a_qp: "jet_jit_b2a_qp" => jet_jit_b2a_qp: sig_unary;
+    a2b_qp: "jet_jit_a2b_qp" => jet_jit_a2b_qp: sig_unary;
+    b2a_uu: "jet_jit_b2a_uu" => jet_jit_b2a_uu: sig_unary;
+    b64_encode_url_padded: "jet_jit_b64_encode_url_padded" => jet_jit_b64_encode_url_padded: sig_unary;
+    b64_decode_padded: "jet_jit_b64_decode_padded" => jet_jit_b64_decode_padded: sig_unary;
+    b64_pad: "jet_jit_b64_pad" => jet_jit_b64_pad: sig_unary;
+    b64_unpad: "jet_jit_b64_unpad" => jet_jit_b64_unpad: sig_unary;
+    b64_is_base64: "jet_jit_b64_is_base64" => jet_jit_b64_is_base64: sig_unary_i8;
+    a2b_uu: "jet_jit_a2b_uu" => jet_jit_a2b_uu: sig_unary;
     b64_encode: "jet_jit_b64_encode" => jet_jit_b64_encode: sig_unary;
     b64_encode_url: "jet_jit_b64_encode_url" => jet_jit_b64_encode_url: sig_unary;
     b64_decode: "jet_jit_b64_decode" => jet_jit_b64_decode: sig_unary;
+    b64_encodebytes: "jet_jit_b64_encodebytes" => jet_jit_b64_encodebytes: sig_unary;
+    b64_decodebytes: "jet_jit_b64_decodebytes" => jet_jit_b64_decodebytes: sig_unary;
     b64_decode_url: "jet_jit_b64_decode_url" => jet_jit_b64_decode_url: sig_unary;
     base32_encode: "jet_jit_base32_encode" => jet_jit_base32_encode: sig_unary;
     base32_decode: "jet_jit_base32_decode" => jet_jit_base32_decode: sig_unary;
+    base32hex_encode: "jet_jit_base32hex_encode" => jet_jit_base32hex_encode: sig_unary;
+    base32_is_base32: "jet_jit_base32_is_base32" => jet_jit_base32_is_base32: sig_unary_i8;
+    base32hex_decode: "jet_jit_base32hex_decode" => jet_jit_base32hex_decode: sig_unary;
+    a85_encode: "jet_jit_a85_encode" => jet_jit_a85_encode: sig_unary;
+    a85_decode: "jet_jit_a85_decode" => jet_jit_a85_decode: sig_unary;
+    b85_encode: "jet_jit_b85_encode" => jet_jit_b85_encode: sig_unary;
+    b85_decode: "jet_jit_b85_decode" => jet_jit_b85_decode: sig_unary;
+    z85_encode: "jet_jit_z85_encode" => jet_jit_z85_encode: sig_unary;
+    z85_decode: "jet_jit_z85_decode" => jet_jit_z85_decode: sig_unary;
     csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_quaternary;
     csv_rows: "jet_jit_csv_rows" => jet_jit_csv_rows: sig_quaternary;
     csv_to_string: "jet_jit_csv_to_string" => jet_jit_csv_to_string: sig_unary;
@@ -3916,9 +4622,9 @@ host_fns! {
     json_parse: "jet_jit_json_parse" => jet_jit_json_parse: sig_unary;
     json_parse_ordered: "jet_jit_json_parse_ordered" => jet_jit_json_parse_ordered: sig_unary;
     json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
-    json_decode_typed: "jet_jit_json_decode_typed" => jet_jit_json_decode_typed: sig_binary;
-    data_json_decode_typed: "jet_jit_data_json_decode_typed" => jet_jit_data_json_decode_typed: sig_binary;
-    data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_binary;
+    json_decode_typed: "jet_jit_json_decode_typed" => jet_jit_json_decode_typed: sig_ternary;
+    data_json_decode_typed: "jet_jit_data_json_decode_typed" => jet_jit_data_json_decode_typed: sig_ternary;
+    data_json_decode: "jet_data_json_decode" => jet_jit_data_json_decode_typed: sig_ternary;
     db_decode: "jet_jit_db_decode" => jet_jit_db_decode: sig_binary;
     json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
     datatree_display: "jet_jit_datatree_display" => jet_jit_json_to_string: sig_unary;
@@ -3928,6 +4634,11 @@ host_fns! {
     json_events: "jet_jit_json_events" => jet_jit_json_events: sig_unary;
     jsonl_parse: "jet_jit_jsonl_parse" => jet_jit_jsonl_parse: sig_unary;
     jsonl_to_string: "jet_jit_jsonl_to_string" => jet_jit_jsonl_to_string: sig_unary;
+    jsonl_loads: "jet_jit_jsonl_loads" => jet_jit_jsonl_loads: sig_unary;
+    jsonl_dumps: "jet_jit_jsonl_dumps" => jet_jit_jsonl_dumps: sig_unary;
+    jsonl_count_rows: "jet_jit_jsonl_count_rows" => jet_jit_jsonl_count_rows: sig_unary;
+    jsonl_append_line: "jet_jit_jsonl_append_line" => jet_jit_jsonl_append_line: sig_binary;
+    jsonl_first: "jet_jit_jsonl_first" => jet_jit_jsonl_first: sig_unary;
     xml_parse: "jet_jit_xml_parse" => jet_jit_xml_parse: sig_unary;
     xml_canonical: "jet_jit_xml_canonical" => jet_jit_xml_canonical: sig_binary;
     xml_to_string: "jet_jit_xml_to_string" => jet_jit_xml_to_string: sig_unary;
@@ -3988,13 +4699,14 @@ host_fns! {
     datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
     datatree_to_text: "jet_jit_datatree_to_text" => jet_jit_datatree_to_text: sig_unary;
     datatree_equal_unordered: "jet_jit_datatree_equal_unordered" => jet_jit_datatree_equal_unordered: sig_binary;
-    datatree_pack: "jet_jit_datatree_pack" => jet_jit_datatree_pack: sig_binary;
-    published_schema_empty: "jet_jit_published_schema_empty" => jet_jit_published_schema_empty: sig_nullary;
     published_schema_merge: "jet_jit_published_schema_merge" => jet_jit_published_schema_merge: sig_binary;
     object_from_map: "jet_jit_object_from_map" => jet_jit_object_from_map: sig_unary;
+    object_from_map_ordered: "jet_jit_object_from_map_ordered" => jet_jit_object_from_map_ordered: sig_binary;
     object_entries_to_map: "jet_jit_object_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     data_entries_to_map: "jet_data_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
     toml_parse: "jet_jit_toml_parse" => jet_jit_toml_parse: sig_unary;
+    toml_load: "jet_jit_toml_load" => jet_jit_toml_load: sig_unary;
+    toml_loads: "jet_jit_toml_loads" => jet_jit_toml_loads: sig_unary;
     toml_decode: "jet_enc_toml_decode" => jet_jit_toml_parse: sig_unary;
     toml_decode_typed: "jet_jit_toml_decode_typed" => jet_jit_toml_decode_typed: sig_binary;
     toml_to_string: "jet_jit_toml_to_string" => jet_jit_toml_to_string: sig_unary;
@@ -4045,6 +4757,40 @@ fn jet_jit_object_from_map(map: i64) -> i64 {
             let rec = rt.heap.alloc_record(2);
             let _ = rt.heap.record_set_int(rec, 0, k);
             let _ = rt.heap.record_set_int(rec, 1, v);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        list
+    })
+}
+
+/// Materialize a `DataTree.Object` map using checked source-order keys.
+///
+/// Generated Codable encoders build a temporary String map in schema order,
+/// while ordinary map encoding intentionally remains key-sorted. The compiler
+/// supplies that order only for this DataTree boundary; absent keys (optional
+/// fields) are skipped rather than materialized as zero handles.
+fn jet_jit_object_from_map_ordered(map: i64, order: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(_) = rt.heap.map_len(map) else {
+            rt.set_trap("data object ordered payload is not a map");
+            return 0;
+        };
+        let Some(len) = rt.heap.list_len(order) else {
+            rt.set_trap("data object ordered keys are not a list");
+            return 0;
+        };
+        let list = rt.heap.alloc_empty_list();
+        for i in 0..len {
+            let Some(key) = rt.heap.list_get_int(order, i) else {
+                rt.set_trap("data object ordered key list contains a non-integer handle");
+                return 0;
+            };
+            let Some(value) = rt.heap.map_get(map, key) else {
+                continue;
+            };
+            let rec = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(rec, 0, key);
+            let _ = rt.heap.record_set_int(rec, 1, value);
             let _ = rt.heap.list_push_int(list, rec);
         }
         list

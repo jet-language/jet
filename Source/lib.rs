@@ -724,9 +724,9 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
 }
 
 /// D-BUILDGEN1 / #1040: compile a programmable build and copy the exact
-/// generated Jet sources from this transaction into `build/generated/` for
+/// generated Jet sources from this transaction into `.jet/generated/` for
 /// inspection. The build still compiles the normal `.jet/generated` inputs;
-/// this is only a visible export of the same materialized bytes.
+/// this is the canonical project-local materialized source tree.
 pub fn compile_programmable_build_emit_generated_opts(
     file: &str,
     grants: &[String],
@@ -1643,7 +1643,7 @@ fn export_generated_sources(
         return Ok(());
     };
     let project_root = build_project_root(file)?;
-    let export_root = project_root.join("build/generated");
+    let export_root = project_root.join(".jet/generated");
     let mut exports = Vec::new();
     for generated in build.generated.iter().filter(|generated| {
         generated
@@ -1689,7 +1689,8 @@ fn export_generated_sources(
                 format!("could not prepare generated export: {error}"),
                 "the visible export must be all-or-nothing and must not alter the compiled source"
                     .to_string(),
-                "fix the build/generated directory permissions and try again".to_string(),
+                "make sure `.jet/generated` is writable and the generated module name is unique"
+                    .to_string(),
                 None,
             )]
         })?;
@@ -1698,8 +1699,10 @@ fn export_generated_sources(
             vec![Diagnostic::error(
                 "E3510",
                 format!("could not write generated module `{name}`: {error}"),
-                "the visible export must not alter the compiled source".to_string(),
-                "fix the build/generated directory permissions and try again".to_string(),
+                "the visible export must be all-or-nothing and must not alter the compiled source"
+                    .to_string(),
+                "make sure `.jet/generated` is writable and the generated module name is unique"
+                    .to_string(),
                 None,
             )]
         })?;
@@ -2103,7 +2106,11 @@ fn ensure_real_directory(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>> {
+
+/// Internal CLI bridge for commands that must share the library's checked
+/// project-root authority; this is not a stable public Jet API.
+#[doc(hidden)]
+pub fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>> {
     let entry = std::path::Path::new(file);
     let absolute = if entry.is_absolute() {
         entry.to_path_buf()
@@ -2116,18 +2123,7 @@ fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>>
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    let workspace_root = Loader::find_workspace_root_checked(&directory)
-        .map_err(|diagnostic| vec![workspace_build_root_diagnostic(&directory, &diagnostic)])?;
-    let package_root = Loader::find_package_root_checked(&directory)
-        .map_err(|diagnostic| vec![diagnostic])?;
-    Ok(match (workspace_root, package_root) {
-        (Some(workspace), Some(package)) if Loader::is_physically_within(&workspace, &package) => {
-            package
-        }
-        (Some(workspace), _) => workspace,
-        (None, Some(package)) => package,
-        (None, None) => directory,
-    })
+    Loader::selected_project_root(&directory).map_err(|diagnostic| vec![diagnostic])
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {

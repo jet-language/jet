@@ -1,4 +1,4 @@
-const projection = @import("target/bindings/projection_zig.zig");
+const projection = @import(".jet/build/bindings/projection_zig.zig");
 
 pub fn main() !void {
     const initial = [_]u8{ 10, 20, 30 };

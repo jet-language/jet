@@ -14,7 +14,7 @@ struct Velocity {
 
 // Resolve the fixture root for both a repository checkout and an installed
 // package. The asset itself remains a real file; this only chooses its root.
-fn battery_root() String -> {
+fn battery_root() -> String {
     candidates :: [String]{
         "examples/features/game/battery",
         "battery",
@@ -40,10 +40,15 @@ fn run() {
     scene.component<Position>()
     scene.component<Velocity>()
     rows :: scene.query<Position, Velocity>()
-    print("query={rows.len()} row={rows[0]}")
-    scene.on_frame(frame -> {
+    print(
+    "query={rows.len(
+    )} row={rows[0]}",
+    )
+    scene.on_frame(
+    frame -> {
         if frame.input.pressed("jump") -> print("scene_input={frame.index}")
-    })
+    },
+    )
 
     nodes :: [games.SceneNode]{
         {parent: -1, local: games.Transform{x: 100, y: 40}},
@@ -103,10 +108,14 @@ fn run() {
 
     // `core.rt` owns callback scheduling and stream cancellation. The lambda
     // only consumes its reusable block, with no allocation, wait, or I/O.
-    stream := rt.callback(48000, 256, samples -> {
+    stream := rt.callback(
+    48000,
+    256,
+    samples -> {
         total := 0.0
         loop sample in samples -> total += sample
-    })
+    },
+    )
     stream.next_deadline()
     receipt :: stream.receipt()
     stream.cancel()

@@ -1824,19 +1824,16 @@ impl<'a> Checker<'a> {
                 // chain back to run time.
                 self.forget_ct_bindings(&changed);
             } else if let Ok((v, _)) = folded {
-                // Only record a folded value codegen can write back out.
-                // The comptime evaluator models many builtins as a struct
-                // with an internal field encoding (`Set` as `{items}`,
-                // `Duration` as `{ms}`, …). Serializing one emits
-                // `__jet_Set { __jet_items: … }`, naming a Rust type that was
-                // never declared, which rustc rejects and I2 counts as an
-                // internal compiler error. Folding here is an optimization
-                // (D-VERDICT-1308-1: failure is silent), so decline it and
-                // let the ordinary runtime path build the value.
-                if self.ct_value_fits_binding(&v, &final_ty) {
+                // Optional folding must not turn a runtime-sized result into
+                // a giant generated literal.  Keep the checked type/effects
+                // and the original initializer; only the optimization is
+                // declined when the evaluator's result exceeds its generic
+                // structural output budget.
+                let fold_allowed = crate::Comptime::implicit_fold_value_within_budget(&v);
+                if fold_allowed && self.ct_value_fits_binding(&v, &final_ty) {
                     b.ct = Some(v.clone());
                 }
-                if !is_patch_binding {
+                if !is_patch_binding && fold_allowed {
                     self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
                 }
             }

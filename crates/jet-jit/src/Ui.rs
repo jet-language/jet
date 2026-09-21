@@ -1812,6 +1812,7 @@ fn ambient_capability_value(capability: ui_rt::JetUiCapability) -> CtValue {
             ui_rt::JetUiCapability::DragDrop => "DragDrop",
             ui_rt::JetUiCapability::Shortcuts => "Shortcuts",
             ui_rt::JetUiCapability::Accessibility => "Accessibility",
+            ui_rt::JetUiCapability::FontShaping => "FontShaping",
         },
         Vec::new(),
     )

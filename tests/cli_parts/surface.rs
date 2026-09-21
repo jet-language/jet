@@ -309,7 +309,7 @@ fn run(args: Commands) {}
         "program build failed: {}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let help = Command::new(dir.join("build/commands"))
+    let help = Command::new(dir.join(".jet/build/commands"))
         .arg("--help")
         .current_dir(&dir)
         .output()
@@ -410,7 +410,7 @@ fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
         "typed build failed: {}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let built = dir.join("build/typed").canonicalize().unwrap();
+    let built = dir.join(".jet/build/typed").canonicalize().unwrap();
     let compiled_help = Command::new(&built)
         .arg("--help")
         .current_dir(&dir)
@@ -468,7 +468,7 @@ fn derived_program_help_uses_program_basename_for_compiled_and_jet_run_paths() {
         "program build failed: {}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let built = dir.join("build/commands").canonicalize().unwrap();
+    let built = dir.join(".jet/build/commands").canonicalize().unwrap();
     let compiled_root = Command::new(&built)
         .arg("--help")
         .current_dir(&dir)
@@ -527,6 +527,7 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
         ("semindex", "jet inspect semindex"),
         ("doctor", "jet self doctor"),
         ("lsp", "jet self lsp"),
+        ("devtools", "jet self devtools"),
         ("push", "jet os push"),
     ] {
         let out = Command::new(jet())

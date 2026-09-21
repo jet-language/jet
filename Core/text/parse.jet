@@ -1,0 +1,716 @@
+package {
+    name: "core.text.parse"
+    version: "0.1.0"
+    edition: "2026"
+    description: "core.text.parse core library."
+    license: "MIT"
+    outputs: {
+        parse: .Library{ entry: parse }
+    }
+}
+// core.text.parse — scanning, splitting, and number parsers.
+//
+// These sit beside Unicode segmentation in `core.text`. Python's `str.split`
+// `partition`, `find`, `replace`, `int()`, and `float()` are the bar; Jet
+// returns `None` instead of raising on a bad number.
+pub fn split(text: String, sep: String) -> [String] {
+    if sep.bytes().len() == 0 -> return chars(text)
+    out := [String]{}
+    raw :: text.bytes()
+    needle :: sep.bytes()
+    start := 0
+    i := 0
+    loop i + needle.len() <= raw.len() {
+        if match_at(raw, i, needle) {
+            out.push(slice_b(raw, start, i))
+            i = i + needle.len()
+            start = i
+            next
+        }
+        i = i + 1
+    }
+    out.push(slice_b(raw, start, raw.len()))
+    out
+}
+
+pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] {
+    parts :: split(text, sep)
+    if maxsplit < 0 || parts.len() <= maxsplit + 1 -> return parts
+    keep := parts.len() - maxsplit
+    head := ""
+    i := 0
+    loop i < keep {
+        if i == 0 -> head = parts[0] else -> head = "{head}{sep}{parts[i]}"
+        i = i + 1
+    }
+    out := [String]{head}
+    loop i < parts.len() {
+        out.push(parts[i])
+        i = i + 1
+    }
+    out
+}
+
+pub fn split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String) {
+    i :: find(text, sep)
+    if i < 0 -> return (head: text, tail: "", found: false)
+    n :: sep.bytes().len()
+    (head: slice_str(text, 0, i), tail: slice_str(text, i + n, text.bytes().len()), found: true)
+}
+
+pub fn partition(text: String, sep: String) -> (head: String, sep: String, tail: String) {
+    i :: find(text, sep)
+    if i < 0 -> return (head: text, sep: "", tail: "")
+    n :: sep.bytes().len()
+    (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
+}
+
+pub fn rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String) {
+    i :: rfind(text, sep)
+    if i < 0 -> return (head: "", sep: "", tail: text)
+    n :: sep.bytes().len()
+    (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
+}
+
+pub fn find(text: String, needle: String) -> Int {
+    if needle.bytes().len() == 0 -> return 0
+    raw :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() > raw.len() -> return -1
+    loop i in 0..<(raw.len() - nd.len() + 1) {
+        if match_at(raw, i, nd) -> return i
+    }
+    -1
+}
+
+pub fn rfind(text: String, needle: String) -> Int {
+    if needle.bytes().len() == 0 -> return text.bytes().len()
+    raw :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() > raw.len() -> return -1
+    i := raw.len() - nd.len()
+    loop i >= 0 {
+        if match_at(raw, i, nd) -> return i
+        i = i - 1
+    }
+    -1
+}
+
+pub fn count(text: String, needle: String) -> Int {
+    if needle.bytes().len() == 0 -> return text.bytes().len() + 1
+    n := 0
+    i := 0
+    step :: needle.bytes().len()
+    loop {
+        j :: find(slice_str(text, i, text.bytes().len()), needle)
+        if j < 0 -> return n
+        n = n + 1
+        i = i + j + step
+    }
+}
+
+pub fn replace(text: String, old: String, new: String, count: Int) -> String {
+    if old.bytes().len() == 0 -> return text
+    out := ""
+    i := 0
+    done := 0
+    loop {
+        rest :: slice_str(text, i, text.bytes().len())
+        j :: find(rest, old)
+        if j < 0 || (count >= 0 && done >= count) -> return "{out}{rest}"
+        out = "{out}{slice_str(rest, 0, j)}{new}"
+        i = i + j + old.bytes().len()
+        done = done + 1
+    }
+}
+
+pub fn starts_with(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+pub fn ends_with(text: String, suffix: String) -> Bool {
+    a :: text.bytes()
+    b :: suffix.bytes()
+    if b.len() > a.len() -> return false
+    off :: a.len() - b.len()
+    loop i in 0..<b.len() {
+        if a[off + i] != b[i] -> return false
+    }
+    true
+}
+
+pub fn strip_prefix(text: String, prefix: String) -> String {
+    if starts_with(text, prefix) -> return slice_str(text, prefix.bytes().len(), text.bytes().len())
+    text
+}
+
+pub fn strip_suffix(text: String, suffix: String) -> String {
+    if ends_with(text, suffix) {
+        return slice_str(text, 0, text.bytes().len() - suffix.bytes().len())
+    }
+    text
+}
+
+pub fn parse_int(text: String) -> ?Int { parse_int_base(text, 10) }
+
+/// Parse the canonical integer representation used by String.parse.
+pub fn parse(text: String) -> ?Int { parse_int(text) }
+
+pub fn parse_int_base(text: String, base: Int) -> ?Int {
+    if base < 2 || base > 36 -> return None
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    sign := 1
+    i := 0
+    if {
+        raw[0] == (U8{45}) -> {
+            sign = -1
+            i = 1
+        }
+        raw[0] == (U8{43}) -> { i = 1 }
+    }
+    if i >= raw.len() -> return None
+    n := 0
+    any := false
+    loop i < raw.len() {
+        d :: digit_value(raw[i])
+        if d < 0 || d >= base -> return None
+        n = n * base + d
+        any = true
+        i = i + 1
+    }
+    if !any -> return None
+    Val(sign * n)
+}
+
+pub fn parse_float(text: String) -> ?Float {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    sign := 1.0
+    i := 0
+    if {
+        raw[0] == (U8{45}) -> {
+            sign = -1.0
+            i = 1
+        }
+        raw[0] == (U8{43}) -> { i = 1 }
+    }
+    acc := 0.0
+    seen := false
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 46 -> break
+        d :: n
+        if d < 48 || d > 57 -> return None
+        acc = acc * 10.0 + (Float{d - 48})
+        seen = true
+        i = i + 1
+    }
+    if i < raw.len() && raw[i] == (U8{46}) {
+        i = i + 1
+        place := 0.1
+        loop i < raw.len() {
+            n :: raw[i]
+            if n == 101 || n == 69 -> break
+            d :: n
+            if d < 48 || d > 57 -> return None
+            acc = acc + (Float{d - 48}) * place
+            place = place / 10.0
+            seen = true
+            i = i + 1
+        }
+    }
+    if i < raw.len() && (raw[i] == (U8{101}) || raw[i] == (U8{69})) {
+        i = i + 1
+        exp_sign := 1
+        if {
+            i < raw.len() && raw[i] == (U8{45}) -> {
+                exp_sign = -1
+                i = i + 1
+            }
+            i < raw.len() && raw[i] == (U8{43}) -> { i = i + 1 }
+        }
+        exp := 0
+        if i >= raw.len() -> return None
+        loop i < raw.len() {
+            d :: raw[i]
+            if d < 48 || d > 57 -> return None
+            exp = exp * 10 + (d - 48)
+            i = i + 1
+        }
+        pow := 1.0
+        k := 0
+        loop k < exp {
+            pow = pow * 10.0
+            k = k + 1
+        }
+        if exp_sign < 0 -> acc = acc / pow else -> acc = acc * pow
+    }
+    if !seen || i != raw.len() -> return None
+    Val(sign * acc)
+}
+
+pub fn is_digit(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n :: b
+        if n < 48 || n > 57 -> return false
+    }
+    true
+}
+
+pub fn is_alnum(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n :: b
+        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        digit := n >= 48 && n <= 57
+        if !letter && !digit -> return false
+    }
+    true
+}
+
+fn chars(text: String) -> [String] {
+    out := [String]{}
+    loop b in text.bytes() -> out.push(String.from_bytes([U8]{b}) ?? "")
+    out
+}
+
+fn match_at(raw: [U8], i: Int, needle: [U8]) -> Bool {
+    loop j in 0..<needle.len() {
+        if raw[i + j] != needle[j] -> return false
+    }
+    true
+}
+
+fn slice_b(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn slice_str(text: String, start: Int, end: Int) -> String { slice_b(text.bytes(), start, end) }
+
+fn digit_value(b: U8) -> Int {
+    n :: b
+    if n >= 48 && n <= 57 -> return n - 48
+    if n >= 65 && n <= 90 -> return n - 55
+    if n >= 97 && n <= 122 -> return n - 87 - 1
+}
+
+pub fn join(parts: [String], sep: String) -> String {
+    s := ""
+    i := 0
+    loop i < parts.len() {
+        if i == 0 -> s = parts[0] else -> s = "{s}{sep}{parts[i]}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn splitlines(text: String, keepends: Bool) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 10 || n == 13 {
+            end := i
+            eat := 1
+            if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> eat = 2
+            if keepends -> out.push(slice_b(raw, start, i + eat)) else {
+                out.push(slice_b(raw, start, end))
+            }
+            i = i + eat
+            start = i
+            next
+        }
+        i = i + 1
+    }
+    if start <= raw.len() -> out.push(slice_b(raw, start, raw.len()))
+    out
+}
+
+pub fn lstrip(text: String) -> String {
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, i, raw.len())
+        i = i + 1
+    }
+    ""
+}
+
+pub fn rstrip(text: String) -> String {
+    raw :: text.bytes()
+    i := raw.len()
+    loop i > 0 {
+        n :: raw[i - 1]
+        if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, 0, i)
+        i = i - 1
+    }
+    ""
+}
+
+pub fn strip(text: String) -> String { lstrip(rstrip(text)) }
+
+pub fn ljust(text: String, width: Int, fill: String) -> String {
+    pad :: fill_to(fill)
+    n := width - text.bytes().len()
+    if n <= 0 -> return text
+    "{text}{repeat_char(pad, n)}"
+}
+
+pub fn rjust(text: String, width: Int, fill: String) -> String {
+    pad :: fill_to(fill)
+    n := width - text.bytes().len()
+    if n <= 0 -> return text
+    "{repeat_char(pad, n)}{text}"
+}
+
+pub fn center(text: String, width: Int, fill: String) -> String {
+    pad :: fill_to(fill)
+    n := width - text.bytes().len()
+    if n <= 0 -> return text
+    left :: n / 2
+    "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
+}
+
+pub fn zfill(text: String, width: Int) -> String {
+    raw :: text.bytes()
+    sign := ""
+    rest := text
+    if raw.len() > 0 && (raw[0] == (U8{45}) || raw[0] == (U8{43})) {
+        sign = slice_b(raw, 0, 1)
+        rest = slice_b(raw, 1, raw.len())
+    }
+    n := width - text.bytes().len()
+    if n <= 0 -> return text
+    "{sign}{repeat_char("0", n)}{rest}"
+}
+
+pub fn capitalize(text: String) -> String {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return text
+    first :: ascii_case(raw[0], true)
+    out := [U8]{first}
+    i := 1
+    loop i < raw.len() {
+        out.push(ascii_case(raw[i], false))
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn title(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    word := true
+    loop b in raw {
+        n :: b
+        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        if letter {
+            out.push(ascii_case(b, word))
+            word = false
+        } else {
+            out.push(b)
+            word = true
+        }
+    }
+    String.from_bytes(out) ?? text
+}
+
+/// Python `string.capwords`: collapse whitespace and capitalize each word.
+pub fn capwords(text: String) -> String {
+    parts := split_ws(text)
+    i := 0
+    loop i < parts.len() {
+        parts[i] = capitalize(parts[i])
+        i = i + 1
+    }
+    join(parts, " ")
+}
+
+pub fn swapcase(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n >= 65 && n <= 90 -> { out.push(U8{n + 32}) }
+            n >= 97 && n <= 122 -> { out.push(U8{n - 32}) }
+            else -> { out.push(b) }
+        }
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn upper(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn is_space(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n :: b
+        if n != 32 && n != 9 && n != 10 && n != 13 -> return false
+    }
+    true
+}
+
+pub fn is_lower(text: String) -> Bool {
+    any := false
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> return false
+        if n >= 97 && n <= 122 -> any = true
+    }
+    any
+}
+
+pub fn is_upper(text: String) -> Bool {
+    any := false
+    loop b in text.bytes() {
+        n :: b
+        if n >= 97 && n <= 122 -> return false
+        if n >= 65 && n <= 90 -> any = true
+    }
+    any
+}
+
+pub fn is_title(text: String) -> Bool { text == title(text) && text.bytes().len() > 0 }
+
+pub fn is_ascii(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: b
+        if n > 127 -> return false
+    }
+    true
+}
+
+pub fn is_identifier(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    n0 :: raw[0]
+    ok0 := n0 == 95 || (n0 >= 65 && n0 <= 90) || (n0 >= 97 && n0 <= 122)
+    if !ok0 -> return false
+    loop b in raw {
+        n :: b
+        if n == 95 -> next
+        if n >= 48 && n <= 57 -> next
+        if n >= 65 && n <= 90 -> next
+        if n >= 97 && n <= 122 -> next
+        return false
+    }
+    true
+}
+
+/// Python `str` spellings over the same UTF-8 byte-preserving primitives.
+pub fn startswith(text: String, prefix: String) -> Bool { starts_with(text, prefix) }
+pub fn endswith(text: String, suffix: String) -> Bool { ends_with(text, suffix) }
+pub fn removeprefix(text: String, prefix: String) -> String { strip_prefix(text, prefix) }
+pub fn removesuffix(text: String, suffix: String) -> String { strip_suffix(text, suffix) }
+pub fn rindex(text: String, needle: String) -> Int { rfind(text, needle) }
+pub fn encode(text: String) -> [U8] { text.bytes() }
+pub fn isalpha(text: String) -> Bool {
+    if text.bytes().len() == 0 -> return false
+    loop b in text.bytes() {
+        n :: b
+        if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122)) -> return false
+    }
+    true
+}
+pub fn isdecimal(text: String) -> Bool { is_digit(text) }
+pub fn isnumeric(text: String) -> Bool { is_digit(text) }
+pub fn isalnum(text: String) -> Bool { is_alnum(text) }
+pub fn isascii(text: String) -> Bool { is_ascii(text) }
+pub fn isdigit(text: String) -> Bool { is_digit(text) }
+pub fn isidentifier(text: String) -> Bool { is_identifier(text) }
+pub fn islower(text: String) -> Bool { is_lower(text) }
+pub fn isspace(text: String) -> Bool { is_space(text) }
+pub fn istitle(text: String) -> Bool { is_title(text) }
+pub fn isupper(text: String) -> Bool { is_upper(text) }
+pub fn isprintable(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: b
+        if n < 32 || n > 126 -> return false
+    }
+    true
+}
+pub fn expandtabs(text: String, tabsize: Int) -> String {
+    out := ""
+    column := 0
+    width := tabsize
+    if width < 0 -> width = 0
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 9 -> {
+                spaces := 0
+                if width > 0 -> spaces = width - (column % width)
+                loop _ in 0..<spaces -> out = "{out} "
+                column = column + spaces
+            }
+            else -> {
+                ch :: String.from_bytes([U8]{b}) ?? ""
+                out = "{out}{ch}"
+                if n == 10 || n == 13 -> column = 0 else -> column = column + 1
+            }
+        }
+    }
+    out
+}
+
+
+pub fn find_from(text: String, needle: String, start: Int) -> Int {
+    s := start
+    if s < 0 -> s = 0
+    rest :: slice_str(text, s, text.bytes().len())
+    j :: find(rest, needle)
+    if j < 0 -> return -1
+    s + j
+}
+
+pub fn rfind_from(text: String, needle: String, end: Int) -> Int {
+    e := end
+    if e > text.bytes().len() -> e = text.bytes().len()
+    rfind(slice_str(text, 0, e), needle)
+}
+
+pub fn index(text: String, needle: String) -> Int {
+    i :: find(text, needle)
+    if i < 0 -> return -1
+    i
+}
+
+pub fn contains(text: String, needle: String) -> Bool { find(text, needle) >= 0 }
+
+pub fn parse_bool(text: String) -> ?Bool {
+    t :: lower(strip(text))
+    if t == {
+        "true" | "1" | "yes" | "on" -> Val(true)
+        "false" | "0" | "no" | "off" -> Val(false)
+        else -> None
+    }
+}
+
+pub fn parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String) {
+    p :: partition(text, sep)
+    if p.sep.bytes().len() == 0 -> return (key: strip(text), value: "", ok: false)
+    (key: strip(p.head), value: strip(p.tail), ok: true)
+}
+
+pub fn split_ws(text: String) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    start := -1
+    i := 0
+    loop i <= raw.len() {
+        space := false
+        if i == raw.len() -> space = true else {
+            n :: raw[i]
+            space = n == 32 || n == 9 || n == 10 || n == 13
+        }
+        if {
+            space -> {
+                if start >= 0 {
+                    out.push(slice_b(raw, start, i))
+                    start = -1
+                }
+            }
+            start < 0 -> { start = i }
+        }
+        i = i + 1
+    }
+    out
+}
+
+pub fn unescape_c(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{92}) && i + 1 < raw.len() {
+            n :: raw[i + 1]
+            if {
+                n == 110 -> { out.push(U8{10}) }
+                n == 116 -> { out.push(U8{9}) }
+                n == 114 -> { out.push(U8{13}) }
+                n == 92 -> { out.push(U8{92}) }
+                n == 34 -> { out.push(U8{34}) }
+                else -> { out.push(raw[i + 1]) }
+            }
+            i = i + 2
+            next
+        }
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn escape_c(text: String) -> String {
+    out := ""
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 10 -> { out = "{out}\\n" }
+            n == 9 -> { out = "{out}\\t" }
+            n == 13 -> { out = "{out}\\r" }
+            n == 92 -> { out = "{out}\\\\" }
+            n == 34 -> { out = "{out}\\\"" }
+            else -> { out = "{out}{String.from_bytes([U8]{b}) ?? ""}" }
+        }
+    }
+    out
+}
+
+fn fill_to(fill: String) -> String {
+    if fill.bytes().len() == 0 -> return " "
+    slice_b(fill.bytes(), 0, 1)
+}
+
+fn repeat_char(ch: String, n: Int) -> String {
+    s := ""
+    i := 0
+    loop i < n {
+        s = "{s}{ch}"
+        i = i + 1
+    }
+    s
+}
+
+fn ascii_case(b: U8, upper: Bool) -> U8 {
+    n :: b
+    if upper {
+        if n >= 97 && n <= 122 -> return (U8{n - 32})
+        return b
+    }
+    if n >= 65 && n <= 90 -> return (U8{n + 32})
+    b
+}

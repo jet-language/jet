@@ -536,7 +536,7 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
         "missing compiler identity emitted an artifact"
     );
     assert!(
-        !dir.join("build/run").exists(),
+        !dir.join(".jet/build/run").exists(),
         "missing compiler identity started the selected artifact build"
     );
 }
@@ -570,7 +570,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         String::from_utf8_lossy(&primed.stdout),
         String::from_utf8_lossy(&primed.stderr)
     );
-    let seed_artifact = dirs[0].join("build/run");
+    let seed_artifact = dirs[0].join(".jet/build/run");
     let expected_artifact = (
         CanonicalJson::String(jet::SHA256::sha256_file_hex(&seed_artifact).unwrap()),
         CanonicalJson::Integer(fs::metadata(seed_artifact).unwrap().len().to_string()),
@@ -640,7 +640,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         let CanonicalJson::Object(artifact) = &subject["artifact"] else {
             panic!("artifact object")
         };
-        let artifact_path = dir.join("build/run");
+        let artifact_path = dir.join(".jet/build/run");
         assert_eq!(
             artifact["sha256"],
             CanonicalJson::String(jet::SHA256::sha256_file_hex(&artifact_path).unwrap())

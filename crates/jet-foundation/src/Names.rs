@@ -5,11 +5,23 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Stable package scope used by every module identity.
+///
+/// A package rooted inside the loaded project uses its project-relative
+/// directory as scope. This keeps semantic identities stable when the same
+/// checkout moves, while distinct nested packages remain disjoint. A package
+/// outside the project root retains its normalized parent path because that
+/// path is the only available identity at this layer.
 pub fn package_scope_for(path: &Path, project_root: &Path) -> String {
     let norm_path = normalize_path(path);
     let norm_root = normalize_path(project_root);
     let scope = if norm_path.starts_with(&norm_root) {
-        norm_root
+        norm_path
+            .strip_prefix(&norm_root)
+            .ok()
+            .and_then(|relative| relative.parent())
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
     } else {
         norm_path.parent().map(normalize_path).unwrap_or(norm_path)
     };

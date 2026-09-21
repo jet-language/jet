@@ -752,7 +752,7 @@ pub fn build_release_and_run_multi(
             String::from_utf8_lossy(&build.stderr).into_owned(),
         );
     }
-    let artifact = dir.join("build").join(
+    let artifact = dir.join(".jet/build").join(
         std::path::Path::new(entry)
             .file_stem()
             .expect("release entry has a file stem"),

@@ -903,6 +903,14 @@ fn adapter_command(
     scratch: &Path,
     task_id: &str,
 ) -> Command {
+    if adapter != "jet" {
+        let package = scratch.join("package.jet");
+        match fs::remove_file(&package) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("remove fixture package `{}`: {error}", package.display()),
+        }
+    }
     let mut command = match adapter {
         "jet" => {
             write_agent_workload_package(scratch);
@@ -1197,10 +1205,11 @@ fn scratch_output_violations(adapter: &str, path: &Path, jet_artifact_name: &str
     let (required, optional) = if adapter == "jet" {
         (
             BTreeMap::from([
-                ("build".to_string(), "directory"),
-                (format!("build/{jet_artifact_name}"), "file"),
+                (".jet".to_string(), "directory"),
+                (".jet/build".to_string(), "directory"),
+                (format!(".jet/build/{jet_artifact_name}"), "file"),
             ]),
-            BTreeMap::from([(format!("build/{jet_artifact_name}.rs"), "file")]),
+            BTreeMap::from([(format!(".jet/build/{jet_artifact_name}.rs"), "file")]),
         )
     } else {
         (BTreeMap::new(), BTreeMap::new())
@@ -2538,9 +2547,9 @@ fn run() {
 fn scratch_output_shape_rejects_arbitrary_build_residue() {
     fn valid_jet_scratch(prefix: &str) -> Scratch {
         let scratch = Scratch::new(prefix);
-        fs::create_dir(scratch.path.join("build")).unwrap();
+        fs::create_dir_all(scratch.path.join(".jet/build")).unwrap();
         fs::write(
-            scratch.path.join("build/process_batch"),
+            scratch.path.join(".jet/build/process_batch"),
             "declared artifact",
         )
         .unwrap();
@@ -2555,7 +2564,7 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
 
     let cache_miss = valid_jet_scratch("jet_agent_scratch_cache_miss");
     fs::write(
-        cache_miss.path.join("build/process_batch.rs"),
+        cache_miss.path.join(".jet/build/process_batch.rs"),
         "declared generated Rust",
     )
     .unwrap();
@@ -2565,10 +2574,14 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
     );
 
     let build_leak = valid_jet_scratch("jet_agent_scratch_build_leak");
-    fs::write(build_leak.path.join("build/leak"), "undeclared residue").unwrap();
+    fs::write(
+        build_leak.path.join(".jet/build/leak"),
+        "undeclared residue",
+    )
+    .unwrap();
     assert_eq!(
         scratch_output_violations("jet", &build_leak.path, "process_batch"),
-        vec!["unexpected file: build/leak".to_string()]
+        vec!["unexpected file: .jet/build/leak".to_string()]
     );
 
     let root_leak = valid_jet_scratch("jet_agent_scratch_root_leak");
@@ -2579,25 +2592,25 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
     );
 
     let nested_leak = valid_jet_scratch("jet_agent_scratch_nested_leak");
-    fs::create_dir(nested_leak.path.join("build/nested")).unwrap();
+    fs::create_dir(nested_leak.path.join(".jet/build/nested")).unwrap();
     fs::write(
-        nested_leak.path.join("build/nested/leak"),
+        nested_leak.path.join(".jet/build/nested/leak"),
         "undeclared residue",
     )
     .unwrap();
     assert_eq!(
         scratch_output_violations("jet", &nested_leak.path, "process_batch"),
         vec![
-            "unexpected directory: build/nested".to_string(),
-            "unexpected file: build/nested/leak".to_string(),
+            "unexpected directory: .jet/build/nested".to_string(),
+            "unexpected file: .jet/build/nested/leak".to_string(),
         ]
     );
 
     let wrong_type = valid_jet_scratch("jet_agent_scratch_wrong_type");
-    fs::create_dir(wrong_type.path.join("build/process_batch.rs")).unwrap();
+    fs::create_dir(wrong_type.path.join(".jet/build/process_batch.rs")).unwrap();
     assert_eq!(
         scratch_output_violations("jet", &wrong_type.path, "process_batch"),
-        vec!["unexpected directory: build/process_batch.rs".to_string()]
+        vec!["unexpected directory: .jet/build/process_batch.rs".to_string()]
     );
 
     #[cfg(unix)]
@@ -2607,12 +2620,12 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
         let symlink_leak = valid_jet_scratch("jet_agent_scratch_symlink");
         symlink(
             "missing-target",
-            symlink_leak.path.join("build/process_batch.rs"),
+            symlink_leak.path.join(".jet/build/process_batch.rs"),
         )
         .unwrap();
         assert_eq!(
             scratch_output_violations("jet", &symlink_leak.path, "process_batch"),
-            vec!["unexpected symlink: build/process_batch.rs".to_string()]
+            vec!["unexpected symlink: .jet/build/process_batch.rs".to_string()]
         );
     }
 }
@@ -2727,8 +2740,8 @@ fn equivalent_adapters_complete_declared_tasks() {
             let jet_artifact_name = source.file_stem().unwrap().to_string_lossy();
             // This must run before Scratch::drop so adapter residue cannot be
             // mistaken for successful cleanup. Jet may leave only its exact
-            // public AOT cache-hit or cache-miss shape; no adapter gets a broad
-            // path exception.
+            // public AOT `.jet/build` cache-hit or cache-miss shape; no adapter
+            // gets a broad path exception.
             assert_eq!(
                 scratch_output_violations(adapter, &scratch.path, &jet_artifact_name),
                 Vec::<String>::new(),

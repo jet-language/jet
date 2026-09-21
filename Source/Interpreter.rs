@@ -514,10 +514,25 @@ fn checked_snapshot_with_application_authority_and_entry_with_overlays(
                         Err(diags) => return Err(diags),
                     }
                 };
-                let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(
-                    &bundle,
-                    artifact_request_for(&bundle, artifact_target, profile),
-                );
+                let requested_artifact =
+                    artifact_request_for(&bundle, artifact_target, profile);
+                let (mir, artifact) =
+                    crate::lower_checked_semantic_mir_program_for(&bundle, requested_artifact);
+                let (mir, artifact) = if artifact_target
+                    == jet_foundation::MIR::MirArtifactTarget::Cranelift
+                    && !jet_jit::resident_jit_safe_program(&mir)
+                {
+                    crate::lower_checked_semantic_mir_program_for(
+                        &bundle,
+                        artifact_request_for(
+                            &bundle,
+                            jet_foundation::MIR::MirArtifactTarget::Interpreter,
+                            profile,
+                        ),
+                    )
+                } else {
+                    (mir, artifact)
+                };
                 Ok(CheckedSnapshot {
                     snapshot: crate::CheckedMirSnapshot {
                         bundle,
@@ -886,6 +901,7 @@ fn run_jit_once_on_compiler_stack_with_overlays(
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     let entry = std::path::Path::new(file);
+    let cache_root = crate::RunCache::cache_root_for_entry(entry);
     if let Some(result) = job_help_if_requested(
         file,
         program_args,
@@ -909,7 +925,14 @@ fn run_jit_once_on_compiler_stack_with_overlays(
     {
         let release_devtools_policy = ReleaseDevtoolsPolicy::development();
         if let Some(outcome) =
-            crate::RunCache::try_warm_run(entry, program_args, None, None, &release_devtools_policy)
+            crate::RunCache::try_warm_run(
+                entry,
+                cache_root.as_deref(),
+                program_args,
+                None,
+                None,
+                &release_devtools_policy,
+            )
         {
             return RunWithLints {
                 outcome,
@@ -943,6 +966,7 @@ fn run_jit_once_on_compiler_stack_with_overlays(
             {
                 if let Some(outcome) = crate::RunCache::try_warm_run(
                     entry,
+                    cache_root.as_deref(),
                     program_args,
                     selected,
                     Some(snapshot.artifact),
@@ -967,9 +991,13 @@ fn run_jit_once_on_compiler_stack_with_overlays(
             args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
             let outcome = jet_jit::with_program_args(&args, || {
                 with_ffi_cdylib(ffi_cdylib.clone(), || {
-                    use crate::JitBackend::JitBackend;
-                    let mut backend = jet_jit::CraneliftBackend::new();
-                    backend.run(mir, snapshot.artifact, false, &release_devtools_policy)
+                    dev_run_snapshot_on_compiler_stack(
+                        mir,
+                        snapshot.artifact,
+                        false,
+                        InterpreterInvocation::RunDefault,
+                        &release_devtools_policy,
+                    )
                 })
             });
             if overlays.is_empty()
@@ -977,7 +1005,7 @@ fn run_jit_once_on_compiler_stack_with_overlays(
                 && setting_overrides.is_empty()
                 && matches!(outcome, RunOutcome::Ran { .. })
             {
-                crate::RunCache::store_after_miss(entry, program_args);
+                crate::RunCache::store_after_miss(entry, cache_root.as_deref(), program_args);
             }
             RunWithLints {
                 outcome,
@@ -1477,11 +1505,10 @@ fn dev_run_snapshot_on_compiler_stack(
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> RunOutcome {
     use crate::JitBackend::{InterpreterBackend, JitBackend};
-    if invocation.uses_interpreter() {
+    if invocation.uses_interpreter() || !jet_jit::resident_jit_safe_program(program) {
         let mut backend = InterpreterBackend::new(invocation);
         backend.run(program, artifact, try_anyway, release_devtools_policy)
     } else {
-        use crate::JitBackend::JitBackend;
         let mut backend = jet_jit::CraneliftBackend::new();
         backend.run(program, artifact, try_anyway, release_devtools_policy)
     }

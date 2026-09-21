@@ -2164,7 +2164,7 @@ where
     })
 }
 
-fn jet_data_csv_reader(
+fn jet_data_csv_reader<T: __jet_Decode>(
     input: JetFileReader,
     limits: jet_std::DataLimits,
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
@@ -2190,7 +2190,7 @@ fn jet_data_csv_reader(
     })
 }
 
-fn jet_data_json_reader(
+fn jet_data_json_reader<T: __jet_Decode>(
     input: JetFileReader,
     limits: jet_std::DataLimits,
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
@@ -3711,8 +3711,8 @@ fn jet_data_loader_stream_from_payload<T>(
     Ok(stream)
 }
 
-fn jet_data_loader_stream<T>(
-    loader: &mut jet_std::DataLoader<T>,
+fn jet_data_loader_stream<R: __jet_Decode>(
+    loader: &mut jet_std::DataLoader<impl Sized>,
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
     if loader.cancelled {
         return Err(jet_data_loader_error(
@@ -3770,8 +3770,8 @@ fn jet_data_loader_stream<T>(
         path: raw_locator,
     };
     let stream = match loader.format {
-        jet_std::DataFormat::CSV => jet_data_csv_reader(input, loader.limits.clone()),
-        jet_std::DataFormat::JSON => jet_data_json_reader(input, loader.limits.clone()),
+        jet_std::DataFormat::CSV => jet_data_csv_reader::<R>(input, loader.limits.clone()),
+        jet_std::DataFormat::JSON => jet_data_json_reader::<R>(input, loader.limits.clone()),
         jet_std::DataFormat::JSONL => jet_data_jsonl_reader(input, loader.limits.clone()),
         jet_std::DataFormat::Parquet => unreachable!(),
         jet_std::DataFormat::Arrow => Err(jet_data_loader_error(
@@ -4088,7 +4088,7 @@ mod jet_data_web {
         }
         fn stream(&mut self) -> Result<Box<dyn WebTypedStream>, jet_std::DataError> {
             Ok(Box::new(TypedStream::<T> {
-                stream: jet_data_loader_stream(&mut self.loader)?,
+                stream: jet_data_loader_stream::<T>(&mut self.loader)?,
                 marker: std::marker::PhantomData,
             }))
         }

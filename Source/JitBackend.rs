@@ -29,6 +29,9 @@ impl InterpreterBackend {
         Self { invocation }
     }
 }
+fn interpreter_bridge_failure(error: String) -> Diagnostic {
+    Diagnostic::runtime_host_fault(String::new(), format!("interpreter FFI bridge failed to load: {error}"))
+}
 
 /// These methods deliberately run on their caller's thread. A resident session
 /// keeps `#Persist` state (D-PERSIST1) in thread-local storage seeded while the
@@ -51,6 +54,9 @@ impl JitBackend for InterpreterBackend {
         // sessions use `hot_swap` and retain the store until `restart`.
         jet_foundation::Persist::shared_clear();
         jet_jit::reset_one_shot_core_state();
+        if let Err(error) = jet_jit::bind_interpreter_ffi(program, artifact) {
+            return RunOutcome::Problems(vec![interpreter_bridge_failure(error)]);
+        }
         jet_jit::with_interpreter_ambient(|ambient| {
             jet_jit::register_db_interpreter_ambient(ambient);
             jet_jit::register_raylib_interpreter_ambient(ambient);
@@ -78,6 +84,9 @@ impl JitBackend for InterpreterBackend {
         try_anyway: bool,
         policy: &Self::InvocationPolicy,
     ) -> Result<RunOutcome, Vec<Diagnostic>> {
+        if let Err(error) = jet_jit::bind_interpreter_ffi(program, artifact) {
+            return Err(vec![interpreter_bridge_failure(error)]);
+        }
         match jet_jit::with_interpreter_ambient(|ambient| {
             jet_jit::register_db_interpreter_ambient(ambient);
             jet_jit::register_raylib_interpreter_ambient(ambient);
@@ -117,6 +126,9 @@ impl JitBackend for InterpreterBackend {
     ) -> RunOutcome {
         // D-HOTSWAP1 / D-PERSIST1: interpreter restart drops shared persist.
         jet_foundation::Persist::shared_clear();
+        if let Err(error) = jet_jit::bind_interpreter_ffi(program, artifact) {
+            return RunOutcome::Problems(vec![interpreter_bridge_failure(error)]);
+        }
         jet_jit::with_interpreter_ambient(|ambient| {
             jet_jit::register_db_interpreter_ambient(ambient);
             jet_jit::register_raylib_interpreter_ambient(ambient);

@@ -197,21 +197,33 @@ impl Env {
 }
 
 /// Run `cmd_args` inside the composed env and return its exit code. The parent
-/// process env is untouched (we mutate only the child's `Command`).
+/// process env is untouched (we mutate only the child's `Command`), and the
+/// Jetpack process remains the parent so callers can perform post-command
+/// bookkeeping.
 pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
-    run_command_in(env, cmd_args, None)
+    run_command_in_mode(env, cmd_args, None, false, false, false)
+}
+
+/// Replace the current Jetpack process with a verified environment command.
+///
+/// This is intentionally separate from [`run_command`]: cold realization and
+/// lifecycle callers need to retain their post-child receipt/cleanup steps.
+/// The replacement is attempted only for a lease-resolved executable; Nix
+/// namespace projections and ordinary host commands retain the status path.
+pub(crate) fn exec_command(env: &Env, cmd_args: &[String]) -> i32 {
+    run_command_in_mode(env, cmd_args, None, false, false, true)
 }
 
 /// Run a command with the composed environment and an explicit working
 /// directory. The directory belongs to the child, never to this process.
 pub fn run_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
-    run_command_in_mode(env, cmd_args, cwd, false, false)
+    run_command_in_mode(env, cmd_args, cwd, false, false, false)
 }
 
 /// Run a composed command while keeping its stdout out of a generated shell
 /// script. Stderr remains visible so a failed task still explains itself.
 pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
-    run_command_in_mode(env, cmd_args, cwd, false, true)
+    run_command_in_mode(env, cmd_args, cwd, false, true, false)
 }
 
 struct NixProjection {
@@ -680,6 +692,7 @@ fn run_command_in_mode(
     cwd: Option<&Path>,
     clean: bool,
     silent: bool,
+    replace_process: bool,
 ) -> i32 {
     if !env.validate_cache(&Theme::resolve_choice(
         jet_foundation::Terminal::ColorChoice::Never,
@@ -709,6 +722,7 @@ fn run_command_in_mode(
             return 126;
         }
     };
+    let direct_exec = replace_process && stable_program.is_some();
     let (mut cmd, _projection_keepers, _projection_scratch) =
         if let Some(stable_program) = stable_program {
             let mut command = Command::new(stable_program);
@@ -744,6 +758,20 @@ fn run_command_in_mode(
     if silent {
         cmd.stdout(Stdio::null());
     }
+    #[cfg(unix)]
+    if direct_exec {
+        use std::os::unix::process::CommandExt;
+        let error = cmd.exec();
+        let suffix = if clean { " in a clean env" } else { "" };
+        Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
+            &format!("could not run `{program}`{suffix}"),
+            &error.to_string(),
+            "check that the command exists in this environment and can start",
+        );
+        return jet_foundation::ExitCodes::USER_ERROR;
+    }
+    #[cfg(not(unix))]
+    let _ = direct_exec;
     let code = match cmd.status() {
         Ok(status) => status
             .code()
@@ -758,11 +786,6 @@ fn run_command_in_mode(
             jet_foundation::ExitCodes::USER_ERROR
         }
     };
-    if !env.validate_cache(&Theme::resolve_choice(
-        jet_foundation::Terminal::ColorChoice::Never,
-    )) {
-        return 126;
-    }
     code
 }
 
@@ -775,13 +798,17 @@ pub fn run_clean_command(env: &Env, cmd_args: &[String]) -> i32 {
 /// Run a command with no inherited host variables and an explicit working
 /// directory. This is the clean-shell counterpart to `run_command_in`.
 pub fn run_clean_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
-    run_command_in_mode(env, cmd_args, cwd, true, false)
+    run_command_in_mode(env, cmd_args, cwd, true, false, false)
 }
 
 /// Run a clean-shell command without letting job stdout corrupt a generated
 /// activation script.
-pub fn run_clean_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
-    run_command_in_mode(env, cmd_args, cwd, true, true)
+pub fn run_clean_command_in_silent(
+    env: &Env,
+    cmd_args: &[String],
+    cwd: Option<&Path>,
+) -> i32 {
+    run_command_in_mode(env, cmd_args, cwd, true, true, false)
 }
 
 /// Enter an interactive temporary shell. Returns the child's exit code.
@@ -880,9 +907,6 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
             jet_foundation::ExitCodes::USER_ERROR
         }
     };
-    if !env.validate_cache(theme) {
-        return 126;
-    }
     let left = format!("left {}", env.label);
     theme.rule(&[left.as_str(), "your machine is unchanged"]);
     code

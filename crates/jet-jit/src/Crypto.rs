@@ -147,6 +147,12 @@ fn push(value: CryptoValue) -> i64 {
     })
 }
 
+pub(crate) fn secret_from_text_value(text: String) -> i64 {
+    push(CryptoValue::Secret(
+        runtime::jet_crypto_secret_from_text_impl(text),
+    ))
+}
+
 fn clone_bytes(handle: i64) -> Vec<u8> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(handle).unwrap_or(0);
@@ -1129,13 +1135,12 @@ fn jet_jit_auth_verify_jwt(
     audience: i64,
     issuer: i64,
     skew_ns: i64,
-    skew_present: i64,
 ) -> i64 {
     let token = clone_string(token);
     let key = clone_bytes(key);
     let audience = clone_string(audience);
-    let issuer = (issuer != 0).then(|| clone_string(issuer - 1));
-    let clock_skew_ns = (skew_present != 0).then_some(skew_ns);
+    let issuer = Some(clone_string(issuer));
+    let clock_skew_ns = Some(skew_ns);
     match runtime::auth_verify_jwt_defaulted(
         &token,
         &key,
@@ -1154,19 +1159,16 @@ fn jet_jit_auth_verify_paseto(
     audience: i64,
     issuer: i64,
     skew_ns: i64,
-    skew_present: i64,
     footer: i64,
-    footer_present: i64,
     implicit: i64,
-    implicit_present: i64,
 ) -> i64 {
     let token = clone_string(token);
     let key = clone_bytes(key);
     let audience = clone_string(audience);
-    let issuer = (issuer != 0).then(|| clone_string(issuer - 1));
-    let clock_skew_ns = (skew_present != 0).then_some(skew_ns);
-    let footer = (footer_present != 0).then(|| clone_bytes(footer));
-    let implicit = (implicit_present != 0).then(|| clone_bytes(implicit));
+    let issuer = Some(clone_string(issuer));
+    let clock_skew_ns = Some(skew_ns);
+    let footer = Some(clone_bytes(footer));
+    let implicit = Some(clone_bytes(implicit));
     match runtime::auth_verify_paseto_defaulted(
         &token,
         &key,
@@ -3875,8 +3877,8 @@ host_fns! {
     row_expert_x25519: "jet_crypto_expert_x25519_impl" => jet_jit_crypto_expert_x25519_raw: binary;
     expert_hkdf_sha256: "jet_jit_crypto_expert_hkdf_sha256" => jet_jit_crypto_expert_hkdf_sha256: quaternary;
     expert_secret_bytes: "jet_jit_crypto_expert_secret_bytes" => jet_jit_crypto_expert_secret_bytes: unary;
-    verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: senary;
-    verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: denary;
+    verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: quinary;
+    verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: septenary;
     auth_register_user: "jet_jit_auth_register_user" => jet_jit_auth_register_user: binary;
     auth_password_login: "jet_jit_auth_password_login" => jet_jit_auth_password_login: quaternary;
     auth_session_validate: "jet_jit_auth_session_validate" => jet_jit_auth_session_validate: binary;

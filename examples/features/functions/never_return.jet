@@ -7,47 +7,47 @@ enum StopError {
     Closed
 }
 
-fn usage() Never -> {
+fn usage() -> Never {
     print("usage: tool <count>")
     process.exit(2)
 }
 
-fn count(arg: String) Int -> {
-    return Int.parse(arg) ?? usage()
-}
+fn count(arg: String) -> Int { return Int.parse(arg) ?? usage() }
 
-fn serve(addr: String) Never !NetError -> {
+fn serve(addr: String) -> Never !NetError {
     loop { panic("serve stopped") }
 }
 
-fn propagate(error: NetError) Never !NetError -> {
-    return Err(error)
-}
+fn propagate(error: NetError) -> Never !NetError { return Err(error) }
 
-fn stop() Never -> panic("stop")
+fn stop() -> Never { panic("stop") }
 
-fn run_then_stop(stop: fn() Never) Never -> stop()
+fn run_then_stop(stop: fn() -> Never) -> Never { stop() }
 
-fn fail() Never !StopError -> {
-    return Err(StopError.Closed)
-}
+fn fail() -> Never !StopError { return Err(StopError.Closed) }
 
-fn unbounded() Never -> {
-    loop { }
+fn unbounded() -> Never {
+    loop {
+
+    }
 }
 
 fn inferred() {
-    loop { }
+    loop {
+
+    }
 }
 
 trait Terminator {
-    fn stop(self) Never
+    fn stop(self) -> Never
 }
 
-struct Worker {}
+struct Worker {
+
+}
 
 impl Worker.Terminator {
-    fn stop(self) Never -> panic("worker stopped")
+    fn stop(self) -> Never { panic("worker stopped") }
 }
 
 fn run() {

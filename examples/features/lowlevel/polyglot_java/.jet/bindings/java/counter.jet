@@ -11,7 +11,7 @@ use c.jet_java_counter as abi
 pub struct Handle { value: Int }
 pub enum JavaError { Exception }
 
-pub fn new(arg0: Int) Handle !JavaError -[FFI.Java]> {
+pub fn new(arg0: Int) -[FFI.Java]> Handle !JavaError {
     value :: abi.new(arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(Handle{ value: value })
@@ -23,19 +23,19 @@ impl Handle.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn add(handle: Handle, arg0: Int) Int !JavaError -[FFI.Java]> {
+pub fn add(handle: Handle, arg0: Int) -[FFI.Java]> Int !JavaError {
     value :: abi.add(handle.value, arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)
 }
 
-pub fn explode(handle: Handle, arg0: Int) Int !JavaError -[FFI.Java]> {
+pub fn explode(handle: Handle, arg0: Int) -[FFI.Java]> Int !JavaError {
     value :: abi.explode(handle.value, arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)
 }
 
-pub fn twice(arg0: Float) Float !JavaError -[FFI.Java]> {
+pub fn twice(arg0: Float) -[FFI.Java]> Float !JavaError {
     value :: abi.twice(arg0)
     if abi.take_error() != 0 { return Err(JavaError.Exception) }
     return Ok(value)

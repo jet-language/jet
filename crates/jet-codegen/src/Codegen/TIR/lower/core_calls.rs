@@ -357,7 +357,8 @@ pub(crate) fn lower_query_receiver_call(
         }
         None if method == "query"
             && args.len() == 1
-            && resolved_ret.is_some_and(|ty| matches!(ty, Type::Result { .. })) =>
+            && resolved_ret.is_some_and(|ty| matches!(ty, Type::Result { .. }))
+            && core_module_path_from_receiver(receiver, cx, env).is_none() =>
         {
             (crate::Syntax::INTERNAL_LIST_QUERY_HANDLE, 0)
         }
@@ -477,7 +478,11 @@ pub(crate) fn lower_query_receiver_call(
             record,
             args: call_args,
             source_span: method_span,
-            type_args: Vec::new(),
+            type_args: if receiver_type == crate::Syntax::INTERNAL_LIST_QUERY_HANDLE {
+                vec![row_ty.clone()]
+            } else {
+                Vec::new()
+            },
             widen_to_vec,
             data_plan,
             fallibility: TFailureCarrier::from_checked_type(&result_ty),
@@ -575,8 +580,21 @@ pub(crate) fn lower_core_closure_call(
                 "checked Core call `core.data.query` did not retain its row type",
             ));
         };
+        let rows_is_stream = matches!(
+            &rows.ty,
+            Type::Apply { name, args } if name == "DataStream" && args.len() == 1
+        );
         let widen_to_vec = data_widening(std::slice::from_ref(&rows), &[(0, &row_ty)]);
-        let call_args = vec![rows];
+        let call_args = if rows_is_stream
+            && !matches!(&rows.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
+        {
+            vec![TExpr {
+                ty: rows.ty.clone(),
+                kind: TExprKind::Move(Box::new(rows)),
+            }]
+        } else {
+            vec![rows]
+        };
         let result_ty = Type::Apply {
             name: "Query".to_string(),
             args: vec![row_ty.clone()],
@@ -596,7 +614,11 @@ pub(crate) fn lower_core_closure_call(
                 record,
                 args: call_args,
                 source_span,
-                type_args: Vec::new(),
+                type_args: if rows_is_stream {
+                    vec![row_ty.clone()]
+                } else {
+                    Vec::new()
+                },
                 widen_to_vec,
                 data_plan,
                 fallibility: TFailureCarrier::from_checked_type(&result_ty),

@@ -929,13 +929,67 @@ pub fn render_vscode_generated_highlights() -> String {
     for class in classes {
         let words = class_words(class);
         let symbols = class_symbols(class);
-        if !words.is_empty() {
+        let (global_words, contextual_words) = split_vscode_keyword_words(class, words);
+        if !global_words.is_empty() {
+            let pattern = match class {
+                HighlightClass::MarkerRule => {
+                    // Applied rules are `#Error` / `#[Codable]` / `@allow`, not bare names.
+                    format!("#\\[?({})\\b", global_words.join("|"))
+                }
+                HighlightClass::Builtin => format!(
+                    "(?<![.A-Za-z0-9_])({})(?=\\s*\\()",
+                    global_words.join("|")
+                ),
+                HighlightClass::KeywordControl
+                | HighlightClass::KeywordDeclaration
+                | HighlightClass::KeywordOther
+                | HighlightClass::KeywordOwnership => format!(
+                    "(?<![.A-Za-z0-9_])({})(?![A-Za-z0-9_])",
+                    global_words.join("|")
+                ),
+                _ => format!("\\b({})\\b", global_words.join("|")),
+            };
             push_vscode_pattern(
                 &mut out,
                 &mut first,
                 class.textmate_scope(),
-                &format!("\\b({})\\b", words.join("|")),
+                &pattern,
             );
+        }
+        if !contextual_words.is_empty() {
+            // Identifier-like keywords must not steal ordinary names. Keep
+            // them in the generated section, but only color declaration shape.
+            let mut as_word = false;
+            let rest: Vec<String> = contextual_words
+                .into_iter()
+                .filter(|word| {
+                    if word == "as" {
+                        as_word = true;
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            if as_word {
+                push_vscode_pattern(
+                    &mut out,
+                    &mut first,
+                    class.textmate_scope(),
+                    "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
+                );
+            }
+            if !rest.is_empty() {
+                push_vscode_pattern(
+                    &mut out,
+                    &mut first,
+                    class.textmate_scope(),
+                    &format!(
+                        "(?<![.A-Za-z0-9_])({})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))",
+                        rest.join("|")
+                    ),
+                );
+            }
         }
         if !symbols.is_empty() {
             push_vscode_pattern(
@@ -1007,6 +1061,13 @@ pub fn render_zed_generated_highlights() -> String {
         let query_words = values
             .iter()
             .filter(|s| is_word_token(s) && is_zed_anonymous_word_token(s))
+            .filter(|s| match class {
+                HighlightClass::KeywordControl
+                | HighlightClass::KeywordDeclaration
+                | HighlightClass::KeywordOwnership
+                | HighlightClass::KeywordOther => vscode_global_keyword_word(s),
+                _ => true,
+            })
             .map(|s| format!("  {:?}", s))
             .collect::<Vec<_>>();
         if !query_words.is_empty() {
@@ -1037,6 +1098,7 @@ fn class_texts(class: HighlightClass) -> Vec<&'static str> {
     let mut values = highlighted_tokens_sorted()
         .into_iter()
         .filter(|token| token.class == class)
+        .filter(|token| !is_bracket_token(token.text))
         .map(|token| token.text)
         .collect::<Vec<_>>();
     values.sort();
@@ -1055,9 +1117,52 @@ fn class_words(class: HighlightClass) -> Vec<String> {
 fn class_symbols(class: HighlightClass) -> Vec<String> {
     class_texts(class)
         .into_iter()
-        .filter(|s| !is_word_token(s))
+        .filter(|s| !is_word_token(s) && !is_bracket_token(s))
         .map(regex_escape)
         .collect()
+}
+
+/// `{` / `[` / `(` are grammar brackets, not highlight operators. Coloring
+/// `{` as an operator makes nested braces and interpolations lose scopes.
+fn is_bracket_token(s: &str) -> bool {
+    matches!(s, "{" | "}" | "[" | "]" | "(" | ")")
+}
+
+/// Lexer-reserved words stay global. Identifier-like declaration words
+/// (`add`, `client`, `as`, …) are colored only in declaration-shaped positions.
+fn vscode_global_keyword_word(word: &str) -> bool {
+    matches!(
+        word,
+        "fn" | "pub" | "priv" | "if" | "else" | "in" | "break" | "true" | "false"
+            | "mutate" | "move" | "copy" | "struct" | "enum" | "impl" | "trait"
+            | "tag" | "effect" | "derive" | "self" | "it" | "null" | "const"
+            | "comptime" | "return" | "loop" | "yield" | "use" | "extern"
+            | "module"
+    )
+}
+
+fn split_vscode_keyword_words(
+    class: HighlightClass,
+    words: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    match class {
+        HighlightClass::KeywordControl
+        | HighlightClass::KeywordDeclaration
+        | HighlightClass::KeywordOther
+        | HighlightClass::KeywordOwnership => {
+            let mut global = Vec::new();
+            let mut contextual = Vec::new();
+            for word in words {
+                if vscode_global_keyword_word(&word) {
+                    global.push(word);
+                } else {
+                    contextual.push(word);
+                }
+            }
+            (global, contextual)
+        }
+        _ => (words, Vec::new()),
+    }
 }
 
 fn is_word_token(s: &str) -> bool {

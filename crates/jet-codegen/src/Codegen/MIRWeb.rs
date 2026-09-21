@@ -46,6 +46,12 @@ fn foreign_abi_name(abi: &MirForeignAbi) -> String {
 pub struct WebArtifacts {
     pub manifest_json: String,
     pub wasm_rust: String,
+    /// Stable compilation-context identity for rustc's incremental cache.
+    ///
+    /// This deliberately excludes the edited MIR body. Rustc uses the
+    /// persistent context directory to retain unchanged generated items while
+    /// its own item hashes decide which function bodies need recompilation.
+    pub rustc_incremental_identity: String,
     pub js_app: String,
     pub js_source_map: String,
     pub source_names: Vec<String>,
@@ -95,11 +101,58 @@ pub struct MirWebTarget {
     pub layout: TargetLayout,
     pub assets: MirWebAssets,
     pub semantic_digest: [u8; 32],
+
+
     /// The checked artifact plan selected by the caller. Web emission never
     /// guesses an application from the program's artifact table.
     pub artifact: jet_foundation::MIR::MirArtifactId,
     /// D-DX-PROD1: the same typed policy used by native MIR Rust emission.
     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
+}
+/// Return the stable rustc incremental context for one Web artifact.
+///
+/// The source/MIR digest is intentionally absent: that is the input rustc
+/// should compare at item granularity. This key changes only when the target
+/// ABI, compiler/runtime identity, artifact kind, or folded devtools policy
+/// changes, preventing incompatible generated crates from sharing state.
+pub fn web_rustc_incremental_identity(
+    program: &MirProgram,
+    target: &MirWebTarget,
+) -> String {
+    let artifact_kind = program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == target.artifact)
+        .map(|artifact| format!("{:?}", artifact.kind))
+        .unwrap_or_else(|| "missing".to_string());
+    let context = format!(
+        "jet-web-rustc-incremental-v1\
+         |target={}\
+         |pointer-size={}\
+         |pointer-align={}\
+         |layout={:?}\
+         |artifact={}\
+         |artifact-kind={}\
+         |compiler={}\
+         |environment={}\
+         |tier={}\
+         |edition={}\
+         |model-runtime={}\
+         |policy={:?}",
+        target.layout.triple,
+        target.layout.pointer_size,
+        target.layout.pointer_alignment,
+        target.layout.layout_facts,
+        target.artifact.0,
+        artifact_kind,
+        program.facts.target_dossier.compiler_identity,
+        program.facts.target_dossier.environment_identity,
+        program.facts.target_dossier.tier_identity,
+        program.facts.edition,
+        !program.facts.model_outputs.is_empty(),
+        target.release_devtools_policy,
+    );
+    sha256_hex(context.as_bytes())
 }
 
 
@@ -164,6 +217,7 @@ pub fn emit_web(program: &MirProgram, target: &MirWebTarget) -> Result<WebArtifa
         ),
     };
     let artifact_identity_text = artifact_identity.canonical_text();
+    let rustc_incremental_identity = web_rustc_incremental_identity(program, target);
     let entry = selected_web_entry(artifact)?;
     let functions = program
         .functions
@@ -199,10 +253,10 @@ pub fn emit_web(program: &MirProgram, target: &MirWebTarget) -> Result<WebArtifa
     let js_source_map = emit_source_map(&target.assets);
     let manifest_json = emit_manifest(program, target, &functions, artifact, entry, &artifact_identity_text)?;
     let command_record = emit_command_record(program, functions.as_slice(), artifact, entry)?;
-
     Ok(WebArtifacts {
         manifest_json,
         wasm_rust,
+        rustc_incremental_identity,
         js_app,
         js_source_map,
         onnx_runtime_js: if program.facts.model_outputs.is_empty() {
@@ -872,6 +926,57 @@ fn web_model_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCal
         .find(|call| call.id == id)
         .is_some_and(|call| call.module == "core.models" && call.member == "open")
 }
+fn web_font_shape_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
+    program
+        .core_calls
+        .iter()
+        .find(|call| call.id == id)
+        .is_some_and(|call| call.module == "core.font" && call.member == "shape")
+}
+
+fn web_uses_font_shaping(program: &MirProgram, functions: &[&MirFunction]) -> bool {
+    functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            block.instructions.iter().any(|instruction| match &instruction.operation {
+                MirOperation::CoreCall { call, .. } => web_font_shape_core_call(program, *call),
+                MirOperation::Call { callee, .. } => match callee {
+                    MirCallee::Core(id) => web_font_shape_core_call(program, *id),
+                    _ => false,
+                },
+                _ => false,
+            })
+        })
+    })
+}
+
+fn web_history_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
+    program
+        .core_calls
+        .iter()
+        .find(|call| call.id == id)
+        .is_some_and(|call| call.module == "core.testing" && call.member == "histories")
+}
+
+fn web_uses_history_runtime(program: &MirProgram, functions: &[&MirFunction]) -> bool {
+    functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            block.instructions.iter().any(|instruction| {
+                let uses_history_call = match &instruction.operation {
+                    MirOperation::CoreCall { call, .. } => web_history_core_call(program, *call),
+                    MirOperation::Call { callee, .. } => match callee {
+                        MirCallee::Core(id) => web_history_core_call(program, *id),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                let emits_history_closure = function_in_bucket(function, WebBucket::JS)
+                    && matches!(&instruction.operation, MirOperation::Closure { .. });
+                uses_history_call || emits_history_closure
+            })
+        })
+    })
+}
+
 fn web_task_join_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
         call.family == MirPreludeFamily::HandleMethod
@@ -933,6 +1038,17 @@ fn web_channel_select_wait_call(program: &MirProgram, id: MirPreludeCallId) -> b
         })
 }
 
+
+fn web_transaction_function(function: &MirFunction) -> bool {
+    function.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instruction| {
+            matches!(
+                &instruction.operation,
+                MirOperation::Global { name } if name == "transaction"
+            )
+        })
+    })
+}
 
 fn web_async_function_ids(program: &MirProgram) -> BTreeSet<jet_foundation::MIR::MirFunctionId> {
     let mut async_functions = BTreeSet::new();
@@ -998,6 +1114,7 @@ fn web_async_function_ids(program: &MirProgram) -> BTreeSet<jet_foundation::MIR:
                     MirOperation::Semantic(MirSemanticOp::Select { call, .. }) => {
                         web_channel_async_call(program, *call)
                     }
+                    MirOperation::Global { name } => name == "transaction",
                     _ => false,
                 })
             });
@@ -1502,16 +1619,25 @@ fn emit_js_app(
         .runtime_parts
         .iter()
         .any(|part| matches!(part, jet_foundation::MIR::MirRuntimePartId::Game));
-    let has_model_runtime = !program.facts.model_outputs.is_empty();
-    let has_ui_runtime = artifact
+    let has_data_runtime = artifact
         .runtime_parts
-        .contains(&jet_foundation::MIR::MirRuntimePartId::Ui);
+        .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
+    let has_model_runtime = !program.facts.model_outputs.is_empty();
+    let include_history = web_uses_history_runtime(program, functions);
+    // HarfBuzz is needed only when an emitted MIR function retains the
+    // semantic `core.font.shape` call; UI itself must not bind it eagerly.
+    let needs_font_shaping = web_uses_font_shaping(program, functions);
     let mut out = String::new();
     out.push_str("import * as jetDom from \"./jet_dom_runtime.js\";\n");
     if has_model_runtime {
         out.push_str("import { createOnnxRuntimeWebHost } from \"./jet_onnx_runtime.js\";\n");
     }
-    let shared_prelude = shared_js_prelude().map_err(|error| MirWebError::InvalidAssets {
+    let shared_prelude = shared_js_prelude(
+        needs_font_shaping,
+        &artifact.runtime_parts,
+        include_history,
+    )
+    .map_err(|error| MirWebError::InvalidAssets {
         message: error.to_string(),
     })?;
     out.push_str(&shared_prelude);
@@ -1519,38 +1645,55 @@ fn emit_js_app(
     emit_js_print_type_facts(&mut out, program);
     emit_js_copy_type_facts(&mut out, program);
     out.push('\n');
-    out.push_str(if has_ui_runtime {
+    out.push_str(if needs_font_shaping {
         "const __jetFontImports = await jet_ui_web_harfbuzz_imports();\n"
     } else {
-        "const __jetFontImports = {};\n"
+        "const __jetFontImports = jet_ui_web_unreachable_harfbuzz_imports();\n"
     });
     if has_model_runtime {
         out.push_str(
-            "const __jetModelHost = createOnnxRuntimeWebHost(globalThis.__JET_ONNX_RUNTIME_ARCHIVE ?? null);\n\
-             const __jetDataImports = jet_data_web_imports();\n\
-             const __jetTestingHistoryImports = jet_testing_history_web_imports();\n\
-             const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, { ...__jetFontImports, ...__jetDataImports, ...__jetTestingHistoryImports, ...__jetModelHost.imports })).exports;\n\
-             __jetModelHost.bind(__jetPreludeWasm);\n\
-             const __jetModelTransport = __jetModelHost.transport;\n\
-             const __jetModelTransportAwait = (session, operation, packet, signal) => {\
-               const job = __jetModelTransport.start(session, operation, packet, signal ? { signal } : {});\
-               return __jetModelTransport.resume(job);\
-             };\n\
-             jet_data_web_bind_wasm(__jetPreludeWasm);\n\
-             jet_testing_history_web_bind_wasm(__jetPreludeWasm);\n\
-             if (typeof __jetPreludeWasm.jet_data_web_register_types === \"function\") __jetPreludeWasm.jet_data_web_register_types();\n",
+            "const __jetModelHost = createOnnxRuntimeWebHost(globalThis.__JET_ONNX_RUNTIME_ARCHIVE ?? null);\n",
         );
-    } else {
+    }
+    if has_data_runtime {
+        out.push_str("const __jetDataImports = jet_data_web_imports();\n");
+    }
+    if include_history {
+        out.push_str("const __jetTestingHistoryImports = jet_testing_history_web_imports();\n");
+    }
+    out.push_str(
+        "const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, { ...__jetFontImports",
+    );
+    if has_data_runtime {
+        out.push_str(", ...__jetDataImports");
+    }
+    if include_history {
+        out.push_str(", ...__jetTestingHistoryImports");
+    }
+    if has_model_runtime {
+        out.push_str(", ...__jetModelHost.imports");
+    }
+    out.push_str(" })).exports;\n");
+    if has_model_runtime {
         out.push_str(
-            "const __jetDataImports = jet_data_web_imports();\n\
-             const __jetTestingHistoryImports = jet_testing_history_web_imports();\n\
-             const __jetPreludeWasm = (await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url).href, { ...__jetFontImports, ...__jetDataImports, ...__jetTestingHistoryImports })).exports;\n\
-             jet_data_web_bind_wasm(__jetPreludeWasm);\n\
-             jet_testing_history_web_bind_wasm(__jetPreludeWasm);\n\
+            "__jetModelHost.bind(__jetPreludeWasm);\n\
+             const __jetModelTransport = __jetModelHost.transport;\n\
+             const __jetModelTransportAwait = (session, operation, packet, signal) => {\n\
+               const job = __jetModelTransport.start(session, operation, packet, signal ? { signal } : {});\n\
+               return __jetModelTransport.resume(job);\n\
+             };\n",
+        );
+    }
+    if has_data_runtime {
+        out.push_str(
+            "jet_data_web_bind_wasm(__jetPreludeWasm);\n\
              if (typeof __jetPreludeWasm.jet_data_web_register_types === \"function\") __jetPreludeWasm.jet_data_web_register_types();\n",
         );
     }
-    if has_ui_runtime {
+    if include_history {
+        out.push_str("jet_testing_history_web_bind_wasm(__jetPreludeWasm);\n");
+    }
+    if needs_font_shaping {
         out.push_str("jet_ui_web_harfbuzz_bind_app(__jetPreludeWasm);\n");
     }
     if has_game_runtime {
@@ -1825,6 +1968,7 @@ fn emit_js_function(
             ensure_type_instance(program, type_id)?;
         }
     }
+    let has_transaction = web_transaction_function(function);
     let (source_file, source_line, source_text) = js_function_stack_context(program, function)?;
     let function_name = js_string(&function.name);
     let function_keyword = if function.generator.is_some() {
@@ -1842,7 +1986,7 @@ fn emit_js_function(
     )
     .unwrap();
     out.push_str("  try {\n");
-    out.push_str("  const __jet_values = new Map();\n  const __jet_cells = new Map();\n  const __jet_places = new Map();\n  const __jet_moved = Symbol.for(\"jet.moved\");\n  let __jet_break_value;\n");
+    out.push_str("  const __jet_values = new Map();\n  const __jet_cells = new Map();\n  const __jet_places = new Map();\n  const __jet_transactions = [];\n  const __jet_moved = Symbol.for(\"jet.moved\");\n  let __jet_break_value;\n");
     for place in &function.places {
         if matches!(&place.base, MirPlaceBase::Local(_)) {
             writeln!(out, "  __jet_places.set({}, {{ value: undefined }});", place.id.0).unwrap();
@@ -1926,9 +2070,19 @@ fn emit_js_function(
          \
          }\n\
          \
-         } finally {\n\
-         \
-         jetDom.exitRenderScope();\n\
+         } finally {\n",
+    );
+    if has_transaction && function.generator.is_none() {
+        out.push_str(
+            "         for (let __jet_transaction_index = __jet_transactions.length - 1; __jet_transaction_index >= 0; __jet_transaction_index -= 1) {\n\
+             \
+             await __jet_transactions[__jet_transaction_index].rollback();\n\
+             \
+             }\n",
+        );
+    }
+    out.push_str(
+        "         jetDom.exitRenderScope();\n\
          \
          jet_stack_leave(__jet_stack_frame);\n\
          \
@@ -2479,7 +2633,11 @@ fn js_operation_expression(
                     .unwrap_or(expression),
             }
         }
-        MirOperation::Global { name } => format!("globalThis[{}]", js_string(name)),
+        MirOperation::Global { name } => match name.as_str() {
+            "transaction" => "(() => { const __jet_transaction = jet_transaction(); __jet_transactions.push(__jet_transaction); return __jet_transaction; })()".to_string(),
+            "stm" => "jet_stm_begin()".to_string(),
+            _ => format!("globalThis[{}]", js_string(name)),
+        },
         MirOperation::Phi { incoming } => {
             js_phi_expression(program, function, incoming)?
         }
@@ -5589,6 +5747,17 @@ fn js_prelude_call_expression(
     let Some(row) = program.prelude_calls.iter().find(|call| call.id == id) else {
         return Err(MirWebError::MissingPreludeCall { call: id.0 });
     };
+    if matches!(
+        &row.symbol,
+        MirSymbol::Prelude(name) if name == "jet_transaction_commit"
+    ) {
+        let Some(transaction) = args.first() else {
+            return Err(MirWebError::InvalidMir {
+                message: "Web transaction commit is missing its handle".to_string(),
+            });
+        };
+        return Ok(format!("await ({transaction}).commit()"));
+    }
     let symbol = js_symbol_expression(&row.symbol)?;
     Ok(format!("{symbol}({})", args.join(", ")))
 }
@@ -6031,6 +6200,8 @@ fn js_core_call_expression(
 // checked chain is recorded by the browser adapter, while `jet_app_graph`
 // remains the compiler-owned route authority.
 const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
+    ("jet_transaction_on_commit", "jet_transaction_on_commit"),
+    ("jet_transaction_on_rollback", "jet_transaction_on_rollback"),
     ("jet_data_track", "jet_data_track"),
     ("jet_data_query_tracked", "jet_data_query_tracked"),
     ("jet_data_track_insert", "jet_data_track_insert"),
@@ -6244,6 +6415,7 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_std::JetAsyncEvent::once", "jet_async_event_once"),
     ("jet_std::JetAsyncEvent::on_priority", "jet_async_event_on_priority"),
     ("jet_std::JetAsyncEvent::emit_async", "jet_async_event_emit"),
+    ("jet_std::JetAsyncEvent::emit_async_result", "jet_async_event_emit"),
     ("jet_std::JetAsyncEvent::close", "jet_async_event_close"),
     ("jet_std::JetAsyncEvent::listener_count", "jet_async_event_listener_count"),
     ("jet_std::JetAsyncEvent::queued_count", "jet_async_event_queued_count"),

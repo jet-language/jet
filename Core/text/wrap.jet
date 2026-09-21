@@ -1,0 +1,399 @@
+package {
+    name: "core.text.wrap"
+    version: "0.1.0"
+    edition: "2026"
+    description: "core.text.wrap core library."
+    license: "MIT"
+    outputs: {
+        wrap: .Library{ entry: wrap }
+    }
+}
+// core.text.wrap — paragraph filling, indent, and HTML escaping.
+//
+// Python `textwrap` plus `html.escape` / `html.unescape` for the common
+// document-prep jobs. Width is measured in bytes of UTF-8 (ASCII-first);
+// CJK display width lives in `core.text.display_width`.
+pub fn wrap(text: String, width: Int) -> [String] {
+    if width <= 0 -> return [String]{text}
+    words := split_ws(text)
+    out := [String]{}
+    line := ""
+    loop w in words {
+        if line.bytes().len() == 0 {
+            line = w
+            next
+        }
+        trial :: "{line} {w}"
+        if trial.bytes().len() <= width -> line = trial else {
+            out.push(line)
+            line = w
+        }
+    }
+    if line.bytes().len() > 0 -> out.push(line)
+    out
+}
+
+pub fn fill(text: String, width: Int) -> String {
+    lines :: wrap(text, width)
+    s := ""
+    i := 0
+    loop i < lines.len() {
+        if i == 0 -> s = lines[0] else -> s = "{s}\n{lines[i]}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn shorten(text: String, width: Int, placeholder: String) -> String {
+    if text.bytes().len() <= width -> return text
+    keep := width - placeholder.bytes().len()
+    if keep < 0 -> keep = 0
+    "{slice_b(text.bytes(), 0, keep)}{placeholder}"
+}
+
+pub fn indent(text: String, prefix: String) -> String {
+    lines :: split_lines(text)
+    s := ""
+    i := 0
+    loop i < lines.len() {
+        piece :: "{prefix}{lines[i]}"
+        if i == 0 -> s = piece else -> s = "{s}\n{piece}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn dedent(text: String) -> String {
+    lines :: split_lines(text)
+    margin := -1
+    loop line in lines {
+        if is_blank(line) -> next
+        m :: leading_spaces(line)
+        if margin < 0 || m < margin -> margin = m
+    }
+    if margin <= 0 -> return text
+    s := ""
+    i := 0
+    loop i < lines.len() {
+        line := lines[i]
+        if !is_blank(line) && line.bytes().len() >= margin {
+            line = slice_b(line.bytes(), margin, line.bytes().len())
+        }
+        if i == 0 -> s = line else -> s = "{s}\n{line}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn expand_tabs(text: String, tabsize: Int) -> String {
+    size := tabsize
+    if size <= 0 -> size = 8
+    out := [U8]{}
+    col := 0
+    loop b in text.bytes() {
+        if b == (U8{9}) {
+            n := size - (col %% size)
+            loop n > 0 {
+                out.push(U8{32})
+                col = col + 1
+                n = n - 1
+            }
+            next
+        }
+        out.push(b)
+        if b == (U8{10}) -> col = 0 else -> col = col + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+pub fn html_escape(text: String, quote: Bool) -> String {
+    out := ""
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 38 -> { out = "{out}&amp;" }
+            n == 60 -> { out = "{out}&lt;" }
+            n == 62 -> { out = "{out}&gt;" }
+            quote && n == 34 -> { out = "{out}&quot;" }
+            quote && n == 39 -> { out = "{out}&#x27;" }
+            else -> { out = "{out}{String.from_bytes([U8]{b}) ?? ""}" }
+        }
+    }
+    out
+}
+
+pub fn html_unescape(text: String) -> String {
+    s := replace_all(text, "&amp;", "&")
+    s = replace_all(s, "&lt;", "<")
+    s = replace_all(s, "&gt;", ">")
+    s = replace_all(s, "&quot;", "\"")
+    s = replace_all(s, "&#x27;", "'")
+    s = replace_all(s, "&apos;", "'")
+    s
+}
+
+fn split_ws(text: String) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    start := -1
+    i := 0
+    loop i <= raw.len() {
+        space := false
+        if i == raw.len() -> space = true else {
+            n :: raw[i]
+            space = n == 32 || n == 9 || n == 10 || n == 13
+        }
+        if {
+            space -> {
+                if start >= 0 {
+                    out.push(slice_b(raw, start, i))
+                    start = -1
+                }
+            }
+            start < 0 -> { start = i }
+        }
+        i = i + 1
+    }
+    out
+}
+
+fn split_lines(text: String) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{10}) {
+            end := i
+            if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
+            out.push(slice_b(raw, start, end))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out.push(slice_b(raw, start, raw.len()))
+    out
+}
+
+fn is_blank(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: b
+        if n != 32 && n != 9 -> return false
+    }
+    true
+}
+
+fn leading_spaces(text: String) -> Int {
+    n := 0
+    loop b in text.bytes() {
+        if b == (U8{32}) || b == (U8{9}) -> n = n + 1 else -> return n
+    }
+    n
+}
+
+fn slice_b(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+
+fn replace_all(text: String, old: String, new: String) -> String {
+    if old.bytes().len() == 0 -> text
+    out := ""
+    i := 0
+    loop {
+        rest :: slice_b(text.bytes(), i, text.bytes().len())
+        j :: find_at(rest, old)
+        if j < 0 -> return "{out}{rest}"
+        out = "{out}{slice_b(rest.bytes(), 0, j)}{new}"
+        i = i + j + old.bytes().len()
+    }
+}
+
+fn find_at(text: String, needle: String) -> Int {
+    raw :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() == 0 -> return 0
+    if nd.len() > raw.len() -> return -1
+    loop i in 0..<(raw.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if raw[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return i
+    }
+    -1
+}
+
+pub struct Wrapper {
+    pub width: Int
+    pub initial_indent: String
+    pub subsequent_indent: String
+    pub expand_tabs: Bool
+    pub drop_whitespace: Bool
+    pub break_long_words: Bool
+    pub break_on_hyphens: Bool
+    pub max_lines: Int
+    pub placeholder: String
+    pub tabsize: Int
+}
+
+pub fn wrapper(width: Int) -> Wrapper {
+    {
+        width: width,
+        initial_indent: "",
+        subsequent_indent: "",
+        expand_tabs: true,
+        drop_whitespace: true,
+        break_long_words: true,
+        break_on_hyphens: true,
+        max_lines: 0,
+        placeholder: " [...]",
+        tabsize: 8,
+    }
+}
+
+pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
+    body := text
+    if spec.expand_tabs -> body = expand_tabs(body, spec.tabsize)
+    width := spec.width
+    if width <= 0 -> width = 1
+    words := split_ws(body)
+    out := [String]{}
+    prefix := spec.initial_indent
+    line := prefix
+    loop w in words {
+        piece := w
+        if spec.drop_whitespace && is_blank(piece) -> next
+        sep := " "
+        if line.bytes().len() == prefix.bytes().len() -> sep = ""
+        trial :: "{line}{sep}{piece}"
+        if trial.bytes().len() <= width {
+            line = trial
+            next
+        }
+        if line.bytes().len() > prefix.bytes().len() -> out.push(line)
+        if {
+            piece.bytes().len() > width && spec.break_long_words -> {
+                chunks :: break_word(piece, width)
+                k := 0
+                loop k < chunks.len() {
+                    if k + 1 == chunks.len() -> line = "{spec.subsequent_indent}{chunks[k]}" else {
+                        out.push("{spec.subsequent_indent}{chunks[k]}")
+                    }
+                    k = k + 1
+                }
+            }
+            else -> line = "{spec.subsequent_indent}{piece}"
+        }
+        prefix = spec.subsequent_indent
+    }
+    if line.bytes().len() > prefix.bytes().len() || prefix.bytes().len() == 0 && line.bytes().len() > 0 {
+        out.push(line)
+    }
+    if spec.max_lines > 0 && out.len() > spec.max_lines {
+        keep := [String]{}
+        i := 0
+        loop i < spec.max_lines {
+            if i + 1 == spec.max_lines -> keep.push(shorten(out[i], spec.width, spec.placeholder)) else {
+                keep.push(out[i])
+            }
+            i = i + 1
+        }
+        return keep
+    }
+    out
+}
+
+pub fn fill_with(text: String, spec: Wrapper) -> String { join_lines(wrap_with(text, spec)) }
+
+pub fn indent_with(text: String, prefix: String, predicate_nonblank: Bool) -> String {
+    lines :: split_lines(text)
+    s := ""
+    i := 0
+    loop i < lines.len() {
+        line := lines[i]
+        if !predicate_nonblank || !is_blank(line) -> line = "{prefix}{line}"
+        if i == 0 -> s = line else -> s = "{s}\n{line}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn wrap_paragraphs(text: String, width: Int) -> String {
+    paras :: split_paragraphs(text)
+    s := ""
+    i := 0
+    loop i < paras.len() {
+        filled :: fill(paras[i], width)
+        if i == 0 -> s = filled else -> s = "{s}\n\n{filled}"
+        i = i + 1
+    }
+    s
+}
+
+pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> String {
+    spec :: Wrapper{
+        width: width,
+        initial_indent: first,
+        subsequent_indent: rest,
+        expand_tabs: true,
+        drop_whitespace: true,
+        break_long_words: true,
+        break_on_hyphens: true,
+        max_lines: 0,
+        placeholder: " [...]",
+        tabsize: 8,
+    }
+    fill_with(text, spec)
+}
+
+fn break_word(word: String, width: Int) -> [String] {
+    out := [String]{}
+    raw :: word.bytes()
+    i := 0
+    loop i < raw.len() {
+        end := i + width
+        if end > raw.len() -> end = raw.len()
+        out.push(slice_b(raw, i, end))
+        i = end
+    }
+    out
+}
+
+fn join_lines(lines: [String]) -> String {
+    s := ""
+    i := 0
+    loop i < lines.len() {
+        if i == 0 -> s = lines[0] else -> s = "{s}\n{lines[i]}"
+        i = i + 1
+    }
+    s
+}
+
+fn split_paragraphs(text: String) -> [String] {
+    lines :: split_lines(text)
+    out := [String]{}
+    cur := ""
+    started := false
+    loop line in lines {
+        if is_blank(line) {
+            if started {
+                out.push(cur)
+                cur = ""
+                started = false
+            }
+            next
+        }
+        if started -> cur = "{cur} {line}" else {
+            cur = line
+            started = true
+        }
+    }
+    if started -> out.push(cur)
+    out
+}

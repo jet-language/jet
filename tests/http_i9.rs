@@ -320,14 +320,14 @@ struct HandlerState {
     label: String
 }
 
-fn route_error(req: HTTPRequest) HTTPResponse !HTTPError -> {
+fn route_error(req: HTTPRequest) -> HTTPResponse !HTTPError {
     if req.path() == "/error" -> return Err(.InvalidFraming)
     return Err(.InvalidFraming)
 }
 
 fn run() !(HTTPError | NetError | TaskFailure) {
-    listener :: net.tcp_listen("127.0.0.1:0")
-    address :: listener.local_addr()
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
@@ -340,9 +340,9 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     mux.get("/error", route_error)
     state.label = "captured"
     t :: task {
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
     }
     zero :: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
     print(zero.text() ?? "zero body")
@@ -352,7 +352,60 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     print(detail.text() ?? "detail body")
     failed :: http.request("GET", "http://{address}/error").send() ?? panic("error")
     print(failed.status())
-    t.join()
+    t.join() ?? panic("join")
+}
+"#;
+const HTTP_SERVICE_GET_PUT_GET: &str = r#"
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+fn reply(status: Int, body: String) -> HTTPResponse !HTTPError {
+    return Ok(server.response(status, body).header("content-type", "application/json"))
+}
+
+fn kv(
+    key: String,
+    req: HTTPRequest,
+    store: Shared<[String:String]>,
+    put: Bool,
+) -> HTTPResponse !HTTPError {
+    if put {
+        value :: req.body().text(8388608) ?? ""
+        store.guard_edit().value[key] = value
+        return reply(200, "{{\"stored\":\"{key}\"}}")
+    }
+    stored :: store.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
+    return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
+}
+
+fn run() !(HTTPError | NetError | TaskFailure) {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    store :: shared [String:String]{}
+    mux :: server.mux()
+    mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
+    mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
+    mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
+    mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    health :: http.request("GET", "http://{address}/health").send() ?? panic("health")
+    print("{health.status()}|{health.text() ?? "health body"}")
+    put :: http.request("PUT", "http://{address}/kv/alpha").body("one").send() ?? panic("put")
+    print("{put.status()}|{put.text() ?? "put body"}")
+    get :: http.request("GET", "http://{address}/kv/alpha").send() ?? panic("get")
+    print("{get.status()}|{get.text() ?? "get body"}")
+    missing :: http.request("GET", "http://{address}/kv/nope").send() ?? panic("missing")
+    print("{missing.status()}|{missing.text() ?? "missing body"}")
+    shutdown :: http.request("GET", "http://{address}/shutdown").send() ?? panic("shutdown")
+    print("{shutdown.status()}|{shutdown.text() ?? "shutdown body"}")
+    server_task.join() ?? panic("join")
 }
 "#;
 
@@ -919,6 +972,42 @@ fn http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers() {
         ] {
             let output = run_with_mode(ROUTE_HANDLERS, name, use_interpreter);
             assert_eq!(output.stdout, "zero\n/items/42|42|captured-header|captured\n400\n");
+            assert_eq!(output.stderr, "");
+            assert_eq!(output.exit_code, 0);
+        }
+    });
+}
+
+#[test]
+fn http_service_get_put_get_404_matches_across_aot_run_and_interpreter() {
+    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_rustc = common::have_rustc();
+    let mut modes = vec![(true, false, "http_i9_service_interpreter")];
+    if has_cranelift {
+        modes.insert(0, (false, false, "http_i9_service_jit"));
+    }
+    if has_rustc {
+        modes.push((false, true, "http_i9_service_aot"));
+    }
+    let expected = "200|{\"status\":\"ok\"}\n\
+200|{\"stored\":\"alpha\"}\n\
+200|{\"key\":\"alpha\",\"value\":\"one\"}\n\
+404|{\"error\":\"not found\"}\n\
+200|{\"bye\":true}\n";
+    on_large_stack(|| {
+        for (use_interpreter, use_aot, name) in modes {
+            let output = if use_aot {
+                let (exit_code, stdout, stderr) =
+                    common::build_and_run("http_i9_service_get_put_get", "aot", HTTP_SERVICE_GET_PUT_GET);
+                Output {
+                    stdout,
+                    stderr,
+                    exit_code,
+                }
+            } else {
+                run_with_mode(HTTP_SERVICE_GET_PUT_GET, name, use_interpreter)
+            };
+            assert_eq!(output.stdout, expected);
             assert_eq!(output.stderr, "");
             assert_eq!(output.exit_code, 0);
         }

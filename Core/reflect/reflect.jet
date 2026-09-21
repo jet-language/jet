@@ -1,0 +1,108 @@
+package {
+    name: "core.reflect"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Runtime type names for values."
+    license: "MIT"
+    outputs: {
+        reflect: .Library{ entry: reflect }
+    }
+}
+
+// core.reflect — a text projection of a value, not a type registry.
+//
+// `of` takes the `Show` text of a value (the compiler will pass that at
+// cutover). It returns a compact type guess: quoted text → String, digits
+// → Int, true/false → Bool, `{…}` → Struct, `[…]` → List, otherwise the
+// leading identifier.
+
+pub struct ReflectValue {
+    pub type_name: String
+    pub display: String
+}
+
+/// Project `value`'s show-text into a type name.
+pub fn of(value: String) -> String { classify(value).type_name }
+
+pub fn inspect(value: String) -> ReflectValue { classify(value) }
+
+fn classify(value: String) -> ReflectValue {
+    t :: trim(value)
+    if t.len() == 0 -> return (ReflectValue{type_name: "Empty", display: t})
+    raw :: t.bytes()
+    if raw[0] == (U8{34}) -> return (ReflectValue{type_name: "String", display: t})
+    if t == {
+        "true" | "false" -> return (ReflectValue{type_name: "Bool", display: t})
+        "None" -> return (ReflectValue{type_name: "Option", display: t})
+        else -> { _ := 0 }
+    }
+    if starts(t, "Ok(") || starts(t, "Err(") -> return (ReflectValue{type_name: "Result", display: t})
+    if raw[0] == (U8{91}) -> return (ReflectValue{type_name: "List", display: t})
+    if raw[0] == (U8{123}) -> return (ReflectValue{type_name: "Struct", display: t})
+    if is_number(t) -> return (ReflectValue{type_name: "Int", display: t})
+    name := ident_prefix(t)
+    if name.len() > 0 -> return (ReflectValue{type_name: name, display: t})
+    ReflectValue{type_name: "Value", display: t}
+}
+
+fn starts(text: String, prefix: String) -> Bool {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn trim(text: String) -> String {
+    raw :: text.bytes()
+    s := 0
+    e := raw.len()
+    loop s < e {
+        n :: raw[s]
+        if {
+            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> s = s + 1
+            else -> break
+        }
+    }
+    loop e > s {
+        n :: raw[e - 1]
+        if {
+            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> e = e - 1
+            else -> break
+        }
+    }
+    out := [U8]{}
+    loop i in s..<e -> out.push(raw[i])
+    String.from_bytes(out) ?? ""
+}
+
+fn is_number(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    i := 0
+    if raw[0] == (U8{45}) {
+        if raw.len() == 1 -> return false
+        i = 1
+    }
+    loop i < raw.len() {
+        n :: raw[i]
+        if n < (U8{48}) || n > (U8{57}) -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn ident_prefix(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<raw.len() {
+        n :: raw[i]
+        ok := (n >= (U8{65}) && n <= (U8{90})) || (n >= (U8{97}) && n <= (U8{122})) || n == (U8{95})
+        if i > 0 -> ok = ok || (n >= (U8{48}) && n <= (U8{57}))
+        if !ok -> break
+        out.push(raw[i])
+    }
+    String.from_bytes(out) ?? ""
+}

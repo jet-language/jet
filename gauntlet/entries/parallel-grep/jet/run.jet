@@ -6,18 +6,31 @@ struct Args {
     needle: String
 }
 
+struct ScanInput {
+    rows: [String]
+    needle: String
+}
+
+fn count_lines(input: ScanInput) -> Int {
+    total := 0
+    loop line in input.rows {
+        total += line.count(input.needle)
+    }
+    total
+}
 fn run(args: Args) {
     root :: args.root
     needle :: ~args.needle
     paths := (files.walk_files(root) ?? panic("walk failed")).filter(entry -> entry.path.ends_with(".txt")).map(entry -> entry.path)
-    line_groups :: paths.map(path -> (files.read(path) ?? panic("read failed")).lines())
-    counts :: line_groups.para_map((rows: [String]) -> rows.map(line -> line.count(needle)).sum())
+    inputs :: paths.map(path -> ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle})
+    counts :: inputs.para_map((input: ScanInput) -> count_lines(input))
     matched := 0
     total := 0
-    loop pair in paths.zip(counts) {
-        count :: pair.b
+    loop index in 0..<paths.len() {
+        path :: paths[index]
+        count :: counts[index]
         if count > 0 {
-            print("{pair.a}:{count}")
+            print("{path}:{count}")
             matched++
         }
         total += count

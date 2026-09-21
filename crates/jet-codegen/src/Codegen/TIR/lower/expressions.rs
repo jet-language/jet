@@ -36,6 +36,7 @@ use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::view_copy_owned_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListSpreadPart;
@@ -366,6 +367,33 @@ pub(crate) fn lower_fn_value_call(
     }
 }
 
+/// Recover the canonical layout selector spelling from either AST carrier used
+/// across the compile-time boundary.  Parser-created selectors are identifiers;
+/// fact-folding may retain the same sentinel in a `ComptimeName`.
+fn layout_selector_name(index: &Expr) -> Option<&str> {
+    match index {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+            Syntax::layout_selector_name(name)
+        }
+        _ => None,
+    }
+}
+
+/// A layout value keeps its nominal owner in both its checked type and its
+/// compile-time literal carrier.  The carrier check is needed only for a
+/// pre-sema fragment whose local type has not been copied onto the TIR node;
+/// it still requires the exact canonical `LayoutInfo` owner.
+fn is_layout_info_expr(expr: &TExpr) -> bool {
+    matches!(
+        expr.ty.without_user_tags(),
+        Type::Named(name) if name == Syntax::TYPE_LAYOUT_INFO
+    ) || matches!(
+        &expr.kind,
+        TExprKind::CtLit(CtValue::Struct { type_name, .. })
+            if type_name == Syntax::TYPE_LAYOUT_INFO
+    )
+}
+
 /// Recover the canonical index route when a pre-sema fragment still carries
 /// the parser's `IndexKind::Unknown`. Normal checked functions already carry
 /// this fact from sema; fragment lowering can instead use the lowered operand
@@ -376,14 +404,9 @@ pub(crate) fn resolve_unknown_index_kind(
     index: &Expr,
     cx: &Cx,
 ) -> Option<IndexKind> {
-    if let Expr::Ident(name, _) = index {
-        if let Some(field) = Syntax::layout_selector_name(name) {
-            return matches!(
-                base_t.ty.without_user_tags(),
-                Type::Named(name) if name == Syntax::TYPE_LAYOUT_INFO
-            )
+    if let Some(field) = layout_selector_name(index) {
+        return is_layout_info_expr(base_t)
             .then(|| IndexKind::LayoutField(field.to_string()));
-        }
     }
 
     let base_ty = base_t.ty.without_user_tags();
@@ -732,6 +755,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         let receiver_type = call_receiver.as_ref().and_then(|recv| match &recv.ty {
             Type::String => Some("String".to_string()),
+            Type::List(_) | Type::FixedList { .. } => Some("List".to_string()),
             Type::Named(name) if matches!(name.as_str(), "Decimal" | "Fraction" | "String") => {
                 Some(name.clone())
             }
@@ -741,7 +765,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         let method_sig = expr_cache_take_method_sig(call, cx);
         let precise_method = matches!(
             (dispatch_recv_type.as_deref(), method.as_str(), args.len()),
-            (Some("Decimal"), "add" | "sub" | "mul" | "div" | "equal", 1)
+            (Some("Decimal"), "add" | "sub" | "mul" | "div" | "equal" | "compare", 1)
                 | (
                     Some("Decimal"),
                     "round" | "floor" | "ceil" | "to_string" | "to_float",
@@ -765,6 +789,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 "div" => Type::Named("Fraction".to_string()),
                 "numerator" | "denominator" => Type::Int,
                 "to_float" => Type::Float,
+                "compare" => Type::Named(Syntax::TYPE_ORDERING.to_string()),
                 "is_zero" | "equal" => Type::Bool,
                 _ => Type::Named(
                     dispatch_recv_type
@@ -820,6 +845,32 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             )
         };
         canonicalize_operator_method_identity(&mut lowered);
+        // D-VALIDATE1: `check` is synthesized after sema's ordinary call
+        // propagation pass. Its callable still uses the default Result carrier,
+        // so project that carrier here before the next method in the chain
+        // receives the builder value.
+        if method == "check"
+            && recv_type.as_deref() == Some(Syntax::TYPE_VALIDATE_BUILDER)
+            && !matches!(lowered.ty, Type::Result { .. } | Type::Option(_))
+        {
+            let success = lowered.ty.clone();
+            lowered.ty = Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+            };
+            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+            lowered = TExpr {
+                ty: success,
+                kind: TExprKind::Try {
+                    inner: Box::new(lowered),
+                    note: None,
+                    convert: TTryConvert::None,
+                    file: escape_rust_str(&cx.file),
+                    line,
+                    fn_name: escape_rust_str(&env.fn_name),
+                },
+            };
+        }
         // D-MAPTYPE1: `shared [K:V]{}` is elaborated to an untyped empty
         // `MapLit` before TIR lowering. Its `Shared<T>` return still carries
         // the exact payload, so restore that context before Rust infers `V`.
@@ -4456,16 +4507,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Copy(inner, copy_span) => {
             in_own_frame(|| {
                 let operand = lower_expr(inner, cx, env);
-                let view_owned_ty = match &operand.ty {
-                    Type::Apply { name, args } if name == "View" && args.len() == 1 => Some(
-                        if matches!(&args[0], Type::Named(element) if element == "str") {
-                            Type::String
-                        } else {
-                            Type::List(Box::new(args[0].clone()))
-                        },
-                    ),
-                    _ => None,
-                };
+                let view_owned_ty = view_copy_owned_type(&operand.ty);
                 let is_view_type = view_owned_ty.is_some();
                 let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
                 // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
@@ -4477,10 +4519,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     || matches!(
                         &**inner,
                         Expr::Ident(name, _)
-                            if matches!(
-                                env.split_view_handle(name),
-                                Some(Type::Apply { name, .. }) if name == "View"
-                            )
+                            if env
+                                .split_view_handle(name)
+                                .is_some_and(|ty| view_copy_owned_type(&ty).is_some())
                     );
                 // Parser-created `~` spans begin at the sigil. Sema-created
                 // ownership clones reuse the operand span. Preserve that
@@ -4946,12 +4987,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // Result.  Lower only the two arithmetic operations for which
                 // that table has a geometry builtin; every other binary shape
                 // remains on the generic path below.
-                let geometry_operand = |ty: &Type| {
-                    crate::Sema::geometry_is_point(ty) || crate::Sema::geometry_is_delta(ty)
-                };
                 if matches!(*op, BinOp::Add | BinOp::Sub)
-                    && geometry_operand(&lhs.ty)
-                    && geometry_operand(&rhs.ty)
                 {
                     if let Some(Ok(result_ty)) =
                         crate::Sema::geometry_binop_result(*op, &lhs.ty, &rhs.ty)
@@ -5270,31 +5306,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             }
                         }
                         let operand = lower_expr(source, cx, env);
-                        let view_owned_ty = match &operand.ty {
-                            Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-                                Some(if matches!(&args[0], Type::Named(element) if element == "str") {
-                                    Type::String
-                                } else {
-                                    Type::List(Box::new(args[0].clone()))
-                                })
-                            }
-                            _ => None,
-                        }
-                        .or_else(|| match source {
-                            Expr::Ident(name, _)
-                                if matches!(
-                                    env.split_view_handle(name),
-                                    Some(Type::Apply { name, .. }) if name == "View"
-                                ) => env.split_view_handle(name).and_then(|ty| match ty {
-                                    Type::Apply { args, .. } if args.len() == 1 => Some(
-                                        if matches!(&args[0], Type::Named(element) if element == "str") {
-                                            Type::String
-                                        } else {
-                                            Type::List(Box::new(args[0].clone()))
-                                        },
-                                    ),
-                                    _ => None,
-                                }),
+                        let view_owned_ty = view_copy_owned_type(&operand.ty).or_else(|| match source {
+                            Expr::Ident(name, _) => env
+                                .split_view_handle(name)
+                                .and_then(|ty| view_copy_owned_type(&ty)),
                             _ => None,
                         });
                         let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
@@ -8285,6 +8300,24 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
             };
             continue;
         }
+        let source_ty = expr.ty.without_user_tags();
+        let head_ty = head.without_user_tags();
+        if matches!(head_ty, Type::Int) && matches!(source_ty, Type::IntN { .. }) {
+            let source = std::mem::replace(
+                expr,
+                TExpr {
+                    ty: head.clone(),
+                    kind: TExprKind::Unit,
+                },
+            );
+            expr.kind = TExprKind::NumericMethod {
+                recv: Box::new(source),
+                op: TNumericOp::CastAs {
+                    dst_rust: String::new(),
+                },
+            };
+            continue;
+        }
         expr.ty = head.clone();
         if !matches!(head, Type::Float | Type::Float32) {
             continue;
@@ -8323,7 +8356,8 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
             }
             TExprKind::Clone(inner)
             | TExprKind::ExplicitCopy(inner)
-            | TExprKind::MaterializeView(inner) => work.push(inner),
+            | TExprKind::MaterializeView(inner)
+            | TExprKind::Move(inner) => work.push(inner),
             _ => {}
         }
     }
@@ -8482,6 +8516,13 @@ pub(crate) fn consume_plain_helper_route(
 ) -> TExpr {
     if env.fallback_subject
         || !resolved_ret.is_some_and(|declared| !declared.is_fallible())
+        || resolved_ret.is_some_and(|declared| {
+            matches!(
+                declared,
+                Type::Apply { name, args }
+                    if name == Syntax::TYPE_STREAM && args.len() == 1
+            )
+        })
     {
         return lowered;
     }

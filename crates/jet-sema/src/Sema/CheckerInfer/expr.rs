@@ -21,19 +21,18 @@ use jet_foundation::Prelude::Target;
 use std::collections::HashSet;
 fn is_http_handler_type(ty: &Type) -> bool {
     match ty {
-        Type::Named(name) => name == "HTTPHandler",
-        Type::Result { ok, .. } => is_http_handler_type(ok),
+        Type::Named(name) => name.rsplit('.').next() == Some("HTTPHandler"),
         Type::Fn { params, ret, .. } => {
             let params_match = params.is_empty()
                 || matches!(
                     params.as_slice(),
-                    [Type::Named(name)] if name == "HTTPRequest"
+                    [Type::Named(name)] if name.rsplit('.').next() == Some("HTTPRequest")
                 );
             let result_match = matches!(
                 ret.as_deref(),
                 Some(Type::Result { ok, err })
-                    if matches!(ok.as_ref(), Type::Named(name) if name == "HTTPResponse")
-                        && matches!(err.as_ref(), Type::Named(name) if name == "HTTPError")
+                    if matches!(ok.as_ref(), Type::Named(name) if name.rsplit('.').next() == Some("HTTPResponse"))
+                        && matches!(err.as_ref(), Type::Named(name) if name.rsplit('.').next() == Some("HTTPError"))
             );
             params_match && result_match
         }
@@ -2054,10 +2053,22 @@ impl<'a> Checker<'a> {
                         Type::Result { err, .. }
                             if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
                     )
-                })
-                && !nested_statement_value)
+                }))
         {
+            // D-FAIL-CARRIER1=A: a `T !E` expectation is the carrier itself.
+            // That includes a statement-nested argument (`report(import_rows())`).
+            // `print(f())` still unwraps, because print does not expect Result.
             return result;
+        }
+        if let Some(Type::Result { err, .. }) = &propagation_result {
+            // `Never` is the uninhabited failure rail, not a domain that
+            // needs conversion into the caller's error contract. Ordinary
+            // value positions still consume this carrier through the one
+            // canonical `Try` below; explicit Result expectations and the
+            // callback-carrier branch above return before reaching here.
+            if !err.is_never() && !self.error_converts_into_current_return(err) {
+                return result;
+            }
         }
         let span = e.span();
         let inner = std::mem::replace(e, Expr::Absent(span));
@@ -2201,6 +2212,30 @@ impl<'a> Checker<'a> {
         let saved = self.expected_type.replace(expected.clone());
         let result = self.infer(e);
         self.expected_type = saved;
+        result
+    }
+    /// Infer a value that is being placed into an aggregate slot.
+    ///
+    /// A lambda in a list/tuple/map (or another owning literal) is retained
+    /// after the current expression, so its captures must use the escaping
+    /// ownership path even when the aggregate element has an expected type.
+    /// Keep this context local: `infer_owning_value` also serves direct local
+    /// bindings, where a non-escaping `FnMut` may borrow its captures.
+    fn infer_aggregate_value(
+        &mut self,
+        e: &mut Expr,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let escapes = matches!(e.without_parens(), Expr::Lambda(_));
+        let saved_escapes = self.lambda_escapes;
+        if escapes {
+            self.lambda_escapes = true;
+        }
+        let result = match expected {
+            Some(expected) => self.infer_with_expected(e, expected),
+            None => self.infer_owning_value(e),
+        };
+        self.lambda_escapes = saved_escapes;
         result
     }
 
@@ -2842,15 +2877,12 @@ impl<'a> Checker<'a> {
             Expr::Call(call) => call.name.clone(),
             _ => return,
         };
-        if self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
+        if self.funcs.contains_key(&name) && !self.core_item_imports.contains_key(&name) {
             return;
         }
         let Some(item) = self.core_item_imports.get(&name).cloned() else {
             return;
         };
-        if !self.core_imports.contains_key(&name) {
-            return;
-        }
         crate::AST::rewrite_core_item_call(e, &item);
     }
 
@@ -2859,7 +2891,11 @@ impl<'a> Checker<'a> {
             Expr::Call(call) => (call.name.clone(), call.name_span),
             _ => return,
         };
-        if self.no_prelude || self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
+        if self.no_prelude
+            || self.core_item_imports.contains_key(&name)
+            || self.funcs.contains_key(&name)
+            || self.lookup(&name).is_some()
+        {
             return;
         }
         let Some(entry) = CorePrelude::entry(&name) else {
@@ -3813,8 +3849,16 @@ impl<'a> Checker<'a> {
                                         super::stdlib_lints::is_display_migration_candidate(
                                             self, &t,
                                         );
-                                    if (!is_displayable(&t, self.registry, self.trait_reg)
-                                        && !self.is_unit_type(&t))
+                                    let generic_display_bound = self.type_param_has_bound(
+                                        &t,
+                                        crate::Generics::DISPLAY,
+                                    ) || self.type_param_has_bound(
+                                        &t,
+                                        crate::Generics::PRINTABLE,
+                                    );
+                                    if !is_displayable(&t, self.registry, self.trait_reg)
+                                        && !generic_display_bound
+                                        && !self.is_unit_type(&t)
                                         || display_migration_lint
                                     {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
@@ -4233,10 +4277,10 @@ impl<'a> Checker<'a> {
                 }
                 // D-MEM-COPYSEM1: a read-only string-view name crossing an
                 // owning destination is materialized by `infer_checked`.
-                // `allow_string_view_read` remains false here only when the
-                // destination is an explicit-copy policy refusal or a direct
-                // non-owning operation that cannot accept the view.
+                // An active `copies: .Explicit` policy is the only case where
+                // a bare view read remains a diagnostic.
                 if self.is_string_view(name)
+                    && self.copies_explicit()
                     && !self.allow_string_view_read
                     && !(self.in_lambda_body && self.lambda_escapes)
                 {
@@ -5359,9 +5403,9 @@ impl<'a> Checker<'a> {
                     .clone()
                     .and_then(|ty| ty.unwrap_option().cloned())
                 {
-                    self.infer_with_expected(inner, &expected)?
+                    self.infer_aggregate_value(inner, Some(&expected))?
                 } else {
-                    self.infer_owning_value(inner)?
+                    self.infer_aggregate_value(inner, None)?
                 };
                 Some(Type::Option(Box::new(t)))
             }
@@ -5464,17 +5508,19 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .is_some_and(is_http_handler_type);
                 let expected = match self.expected_type.as_ref() {
-                    Some(Type::Named(name)) if name == "HTTPHandler" => Some(Type::Fn {
-                        params: vec![Type::Named("HTTPRequest".to_string())],
-                        ret: Some(Box::new(Type::Result {
-                            ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                            err: Box::new(Type::Named("HTTPError".to_string())),
-                        })),
-                        effect_bound: None,
-                        return_view_provenance: None,
-                        param_contract: None,
-                        call_metadata: None,
-                    }),
+                    Some(Type::Named(name))
+                        if name.rsplit('.').next() == Some("HTTPHandler") =>
+                        Some(Type::Fn {
+                            params: vec![Type::Named("HTTPRequest".to_string())],
+                            ret: Some(Box::new(Type::Result {
+                                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                                err: Box::new(Type::Named("HTTPError".to_string())),
+                            })),
+                            effect_bound: None,
+                            return_view_provenance: None,
+                            param_contract: None,
+                            call_metadata: None,
+                        }),
                     _ => self.expected_type.clone(),
                 };
                 let saved_http_depth = self.http_handler_depth;
@@ -5874,7 +5920,7 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
-        let ty = self.infer_owning_value(elem);
+        let ty = self.infer_aggregate_value(elem, None);
         if ty.is_some() {
             self.note_move_if_direct_ident(elem);
         }
@@ -6178,11 +6224,9 @@ impl<'a> Checker<'a> {
                     .map(|(_, expected_ty)| (**expected_ty).clone()),
                 _ => None,
             };
-            let ty = match expected_field.as_ref() {
-                Some(expected) => self.infer_with_expected(expr, expected),
-                None => self.infer_owning_value(expr),
-            }
-            .unwrap_or(Type::Int);
+            let ty = self
+                .infer_aggregate_value(expr, expected_field.as_ref())
+                .unwrap_or(Type::Int);
             typed.push((name.clone(), ty));
         }
         let canonical = crate::AST::canonicalize_tuple_fields(typed);
@@ -6273,15 +6317,15 @@ impl<'a> Checker<'a> {
             self.reject_fixed_storage(v, "be stored in a map");
             let Some(kt) = expected_map
                 .as_ref()
-                .map(|(expected_key, _)| self.infer_with_expected(k, expected_key))
-                .unwrap_or_else(|| self.infer_owning_value(k))
+                .map(|(expected_key, _)| self.infer_aggregate_value(k, Some(expected_key)))
+                .unwrap_or_else(|| self.infer_aggregate_value(k, None))
             else {
                 continue;
             };
             let Some(vt) = expected_map
                 .as_ref()
-                .map(|(_, expected_value)| self.infer_with_expected(v, expected_value))
-                .unwrap_or_else(|| self.infer_owning_value(v))
+                .map(|(_, expected_value)| self.infer_aggregate_value(v, Some(expected_value)))
+                .unwrap_or_else(|| self.infer_aggregate_value(v, None))
             else {
                 continue;
             };

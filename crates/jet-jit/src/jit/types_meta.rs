@@ -137,7 +137,13 @@ impl<'a> JitMeta<'a> {
                             fields.iter().map(|field| field.ty.clone()).collect(),
                         ),
                     );
-                    struct_type_params.entry(def.name.clone()).or_default();
+                    struct_type_params.insert(
+                        def.name.clone(),
+                        def.generic_params
+                            .iter()
+                            .map(|parameter| parameter.name.clone())
+                            .collect(),
+                    );
                 }
                 MirTypeDefKind::Enum { variants, .. } => {
                     enum_variants.insert(

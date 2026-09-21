@@ -3,34 +3,33 @@ package {
     version: "0.1.0"
     authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
 }
-
 // D-ENCSTREAM-SURFACE1=A: bounded JSON reader/writer lifecycle.
 use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 use core.testing as testing
 
-fn write_catalog(path: Path) Bool !(EncodingError | IOError) -> {
-    out :: files.create(path)
+fn write_catalog(path: Path) -> Bool !(EncodingError | IOError) {
+    out :: files.create(path) ?? return Err(err)
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer :: json.writer(^out, canonical: true)
-    writer.write(encoding.DataEvent.ObjectStart)
-    writer.write(encoding.DataEvent.Key("b"))
-    writer.write(encoding.DataEvent.Int(2))
-    writer.write(encoding.DataEvent.Key("a"))
-    writer.write(encoding.DataEvent.Int(1))
-    writer.write(encoding.DataEvent.ObjectEnd)
-    writer.flush()
-    writer.finish()
+    writer :: json.writer(^out, canonical: true) ?? return Err(err)
+    writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
+    writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
+    writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
+    writer.write(encoding.DataEvent.Key("a")) ?? return Err(err)
+    writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
+    writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
-    write_catalog(path)
-    input :: files.open(path)
-    reader :: json.reader(^input)
+    write_catalog(path) ?? return
+    input :: files.open(path) ?? return
+    reader :: json.reader(^input) ?? return
     read_count := 0
     loop event in reader {
         if event == {
@@ -48,6 +47,8 @@ fn run() !(EncodingError | IOError) {
     }
     print("read-count:{read_count}")
     print("eof")
-    print(files.read(path))
-    files.remove(path)
+    text :: files.read(path) ?? return
+    print(text)
+    files.remove(path) ?? return
 }
+

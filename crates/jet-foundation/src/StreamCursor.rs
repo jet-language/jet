@@ -510,6 +510,7 @@ pub fn jet_cursor_tail(c: &JetCursor) -> &str {
     &c.buf[c.pos..]
 }
 
+#[inline(always)]
 pub fn jet_reader_tail(r: &JetReader) -> &[u8] {
     &r.buf[r.pos..]
 }
@@ -523,6 +524,7 @@ pub fn jet_cursor_take_pattern(c: &mut JetCursor, consumed: usize) {
 ///
 /// Reader pattern execution is fallible: a malformed/partial scan must never
 /// move the cursor past the resident buffer.
+#[inline(always)]
 pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) -> Result<(), String> {
     let end = r
         .pos
@@ -536,6 +538,23 @@ pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) -> Result<(),
     }
     r.pos = end;
     Ok(())
+}
+/// Advance a fixed-width pattern after `jet_reader_region_bounds` has proved
+/// the complete `[start, end)` range is resident. The proof is part of the
+/// caller contract: keeping this helper unchecked removes the second bounds
+/// test from the fixed-pattern hot loop while the public fallible helper above
+/// retains its ordinary error behavior for every other caller.
+#[inline(always)]
+#[allow(dead_code)]
+pub(crate) fn jet_reader_take_pattern_checked(
+    r: &mut JetReader,
+    start: usize,
+    end: usize,
+) {
+    debug_assert_eq!(r.pos, start);
+    debug_assert!(start <= end);
+    debug_assert!(end <= r.buf.len());
+    r.pos = end;
 }
 
 /// A miss leaves the position untouched and names it, so a caller can see

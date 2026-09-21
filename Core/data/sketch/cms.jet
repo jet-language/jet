@@ -1,0 +1,72 @@
+// Count-min sketch. Width 256, depth 4. Update and query are Jet.
+
+pub struct CountMin {
+    pub depth: Int
+    pub width: Int
+    pub table: [Int]
+}
+
+pub fn new() -> CountMin {
+    table := [Int]{}
+    loop i in 0..<1024 -> table.push(0)
+    CountMin{depth: 4, width: 256, table: table}
+}
+
+pub fn add(sketch: CountMin, key: String, n: Int) -> CountMin {
+    table := [Int]{}
+    loop x in sketch.table -> table.push(x)
+    loop d in 0..<sketch.depth {
+        h :: (hashd(key, d) % sketch.width + sketch.width) % sketch.width
+        idx :: d * sketch.width + h
+        table[idx] = table[idx] + n
+    }
+    CountMin{depth: sketch.depth, width: sketch.width, table: table}
+}
+
+pub fn estimate(sketch: CountMin, key: String) -> Int {
+    min := 9223372036854775807
+    loop d in 0..<sketch.depth {
+        h :: (hashd(key, d) % sketch.width + sketch.width) % sketch.width
+        v :: sketch.table[d * sketch.width + h]
+        if v < min -> min = v
+    }
+    if min == 9223372036854775807 -> return 0
+    min
+}
+
+fn hashd(key: String, d: Int) -> Int {
+    h := 2166136261 + d * 16777619
+    loop b in key.bytes() {
+        h = (h ~| (b & 255)) * 16777619
+    }
+    h & 2147483647
+}
+
+pub fn merge(a: CountMin, b: CountMin) -> CountMin {
+    depth := a.depth
+    if b.depth < depth -> depth = b.depth
+    width := a.width
+    if b.width < width -> width = b.width
+    table := [Int]{}
+    d := 0
+    loop d < depth {
+        i := 0
+        loop i < width {
+            av := 0
+            bv := 0
+            ai := d * a.width + i
+            bi := d * b.width + i
+            if ai < a.table.len() -> av = a.table[ai]
+            if bi < b.table.len() -> bv = b.table[bi]
+            if {
+                av > bv -> table.push(av)
+                else -> table.push(bv)
+            }
+            i = i + 1
+        }
+        d = d + 1
+    }
+    CountMin{depth: depth, width: width, table: table}
+}
+
+pub fn increment(sketch: CountMin, key: String) -> CountMin { add(sketch, key, 1) }

@@ -2912,9 +2912,9 @@ pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagn
     let mut dir =
         AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
     loop {
-        if let Some(resolver) =
-            AuthorityResolver::open_for_authority_walk(&dir).map_err(|error| error.diagnostic())?
-        {
+        let authority = AuthorityResolver::open_for_authority_walk(&dir)
+            .map_err(|error| error.diagnostic())?;
+        if let Some(resolver) = authority {
             match resolver.resolve_workspace_source() {
                 Ok(Some(_)) => {
                     return resolver
@@ -2936,6 +2936,22 @@ pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagn
                 Err(error) if error.is_missing() => {}
                 Err(error) => return Err(error.diagnostic()),
             }
+        } else {
+            // An explicitly supplied directory is already the caller's
+            // authority boundary. Shared-directory pruning still applies to
+            // upward discovery, but must not discard a package manifest at
+            // that exact boundary before its declared capabilities reach the
+            // loader.
+            let resolver =
+                AuthorityResolver::open(&dir).map_err(|error| error.diagnostic())?;
+            match resolver.checked_manifest(Path::new(".")) {
+                Ok(_) => match resolver.resolve_workspace_source() {
+                    Ok(_) => return Ok(Some(dir)),
+                    Err(error) => return Err(error.workspace_diagnostic()),
+                },
+                Err(error) if error.is_missing() => {}
+                Err(error) => return Err(error.diagnostic()),
+            }
         }
         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
             return Ok(None);
@@ -2943,6 +2959,25 @@ pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagn
         dir = parent;
     }
 }
+
+fn checked_inline_root_at_explicit_boundary(
+    dir: &Path,
+) -> Result<(Option<PathBuf>, bool), Diagnostic> {
+    let resolver = AuthorityResolver::open(dir).map_err(|error| error.diagnostic())?;
+    let has_manifest = match resolver.checked_manifest(Path::new(".")) {
+        Ok(_) => true,
+        Err(error) if error.is_missing() => false,
+        Err(error) => return Err(error.diagnostic()),
+    };
+    let has_inline = checked_inline_package_entry(&resolver)?.is_some();
+    if has_manifest || has_inline {
+        resolver
+            .resolve_workspace_source()
+            .map_err(|error| error.workspace_diagnostic())?;
+    }
+    Ok((has_inline.then(|| dir.to_path_buf()), has_manifest))
+}
+
 fn checked_inline_package_entry(
     resolver: &AuthorityResolver,
 ) -> Result<Option<CheckedFile>, Diagnostic> {
@@ -2976,9 +3011,16 @@ pub fn find_inline_package_root_checked(start: &Path) -> Result<Option<PathBuf>,
     let mut dir =
         AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
     loop {
-        let Some(resolver) =
-            AuthorityResolver::open_for_authority_walk(&dir).map_err(|error| error.diagnostic())?
-        else {
+        let authority = AuthorityResolver::open_for_authority_walk(&dir)
+            .map_err(|error| error.diagnostic())?;
+        let Some(resolver) = authority else {
+            let (inline_root, has_manifest) = checked_inline_root_at_explicit_boundary(&dir)?;
+            if let Some(root) = inline_root {
+                return Ok(Some(root));
+            }
+            if has_manifest {
+                return Ok(None);
+            }
             let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
                 return Ok(None);
             };
@@ -3004,6 +3046,37 @@ pub fn find_inline_package_root_checked(start: &Path) -> Result<Option<PathBuf>,
         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
             return Ok(None);
         };
+        dir = parent;
+    }
+}
+
+/// Find the one canonical project root for generated artifacts.
+///
+/// A declared workspace owns its members; otherwise the nearest checked
+/// package owns the source. Standalone sources stay at their canonical parent
+/// directory. Repository markers alone never claim generated output.
+pub fn selected_project_root(start: &Path) -> Result<PathBuf, Diagnostic> {
+    if let Some(root) = find_workspace_root_checked(start)? {
+        return Ok(root);
+    }
+    if let Some(root) = find_package_root_checked(start)? {
+        return Ok(root);
+    }
+    AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())
+}
+
+/// Walk upward for a real repository marker without following a `.git`
+/// symlink.  A worktree's `.git` file is a valid repository marker.
+pub fn find_repository_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = AuthorityResolver::authority_walk_root(start).ok()?;
+    loop {
+        let marker = dir.join(".git");
+        if let Ok(metadata) = fs::symlink_metadata(&marker) {
+            if !metadata.file_type().is_symlink() && (metadata.is_dir() || metadata.is_file()) {
+                return Some(dir);
+            }
+        }
+        let parent = AuthorityResolver::authority_walk_parent(&dir)?;
         dir = parent;
     }
 }
@@ -3814,7 +3887,7 @@ fn collect_dep_dirs(
                     )
                 } else {
                     (
-                        project_root.join(".jet-build").join("deps").join(dep_name),
+                        project_root.join(".jet").join("build").join("deps").join(dep_name),
                         false,
                         None,
                     )
@@ -5151,6 +5224,83 @@ mod stale_manifest_name_tests {
             .expect_err("ambiguous inner workspace must not expose an outer Package");
         assert_eq!(diagnostic.code, "E1239");
         assert_eq!(find_manifest_root(&source), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_shared_package_manifest_needs_reach_bundle_and_core_usage() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir("shared-package-authority");
+        let entry = dir.join(Syntax::DEFAULT_ENTRY_FILE);
+        let source = "use core.font as font\nfn run() {\n    face :: font.system(.Body)\n    _shaped :: font.shape(\"x\", face)\n}\n";
+        let manifest = "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] },\n    needs: [UI.FontShaping]\n}\n";
+        fs::write(dir.join(Syntax::PACKAGE_FILE), manifest).unwrap();
+        fs::write(&entry, source).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let expected_root = fs::canonicalize(&dir).unwrap();
+        assert_eq!(
+            find_manifest_root_checked(&dir).unwrap(),
+            Some(expected_root),
+        );
+        let facts = package_facts_for_entry(&entry)
+            .unwrap()
+            .expect("explicit package manifest should load");
+        assert_eq!(facts.authority.needs, vec!["UI.FontShaping"]);
+
+        let mut bundle = load_entry(entry.to_str().unwrap()).expect("bundle should load");
+        let bundle_facts = package_facts_for_bundle(&bundle)
+            .unwrap()
+            .expect("bundle package manifest should load");
+        assert_eq!(bundle_facts.authority.needs, vec!["UI.FontShaping"]);
+        assert_eq!(
+            bundle.package_guarantees.authority_needs,
+            vec!["UI.FontShaping"],
+        );
+        assert!(
+            bundle
+                .package_guarantees
+                .application_authority
+                .granted_effects
+                .contains("IO"),
+            "authority.holds.allow must remain the execution grant"
+        );
+        let diagnostics = crate::Sema::check_bundle(
+            &mut bundle,
+            crate::Sema::CompileMode::Run,
+        );
+        assert!(
+            !diagnostics.iter().any(|diagnostic| diagnostic.code == "E2937"),
+            "declared UI.FontShaping must satisfy CoreUsage: {diagnostics:?}"
+        );
+
+        fs::write(
+            dir.join(Syntax::PACKAGE_FILE),
+            "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] }\n}\n",
+        )
+        .unwrap();
+        let mut omitted_bundle =
+            load_entry(entry.to_str().unwrap()).expect("bundle without needs should load");
+        assert!(
+            omitted_bundle
+                .package_guarantees
+                .authority_needs
+                .is_empty()
+        );
+        let omitted_diagnostics = crate::Sema::check_bundle(
+            &mut omitted_bundle,
+            crate::Sema::CompileMode::Run,
+        );
+        assert!(
+            omitted_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E2937"),
+            "omitting UI.FontShaping must retain E2937: {omitted_diagnostics:?}"
+        );
+
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]

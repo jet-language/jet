@@ -1,0 +1,103 @@
+// core.archive.gzip — RFC 1952 gzip members as whole-buffer codecs.
+//
+// Header + deflate payload + CRC-32 + ISIZE. Uses `core.archive` deflate/crc32.
+pub fn compress(data: [U8]) -> [U8] {
+    out := [U8]{}
+    out.push(U8{31})
+    out.push(U8{139})
+    out.push(U8{8})
+    out.push(U8{0})
+    loop _ in 0..<4 -> out.push(U8{0})
+    out.push(U8{0})
+    out.push(U8{255})
+    payload :: deflate(data)
+    loop b in payload -> out.push(b)
+    crc :: crc32(data)
+    loop k in 0..<4 -> out.push(to_u8(crc >> (k * 8)))
+    n :: data.len()
+    loop k in 0..<4 -> out.push(to_u8(n >> (k * 8)))
+    out
+}
+
+pub fn decompress(data: [U8]) -> [U8] {
+    if data.len() < 18 -> return [U8]{}
+    if data[0] != (U8{31}) || data[1] != (U8{139}) || data[2] != (U8{8}) -> return [U8]{}
+    flags :: u8_int(data[3])
+    i := 10
+    if (flags & 4) != 0 {
+        if i + 2 > data.len() -> return [U8]{}
+        xlen :: u8_int(data[i]) | (u8_int(data[i + 1]) << 8)
+        i = i + 2 + xlen
+    }
+    if (flags & 8) != 0 {
+        loop i < data.len() {
+            if data[i] == (U8{0}) {
+                i = i + 1
+                break
+            }
+            i = i + 1
+        }
+    }
+    if (flags & 16) != 0 {
+        loop i < data.len() {
+            if data[i] == (U8{0}) {
+                i = i + 1
+                break
+            }
+            i = i + 1
+        }
+    }
+    if (flags & 2) != 0 -> i = i + 2
+    if i + 8 > data.len() -> return [U8]{}
+    payload := [U8]{}
+    loop k in i..<(data.len() - 8) -> payload.push(data[k])
+    body :: inflate(payload)
+    body
+}
+
+pub fn is_gzip(data: [U8]) -> Bool {
+    data.len() >= 3 && data[0] == (U8{31}) && data[1] == (U8{139}) && data[2] == (U8{8})
+}
+
+pub fn isize(data: [U8]) -> Int {
+    if data.len() < 8 -> return 0
+    n := 0
+    i := data.len() - 4
+    k := 0
+    loop k < 4 {
+        n = n | (u8_int(data[i + k]) << (k * 8))
+        k = k + 1
+    }
+    n
+}
+
+pub fn magic() -> [U8] { [U8]{(U8{31}), (U8{139}), (U8{8})} }
+
+pub fn crc(data: [U8]) -> Int { crc32(data) }
+
+pub fn compress_text(text: String) -> [U8] { compress(text.bytes()) }
+
+pub fn decompress_text(data: [U8]) -> String { String.from_bytes(decompress(data)) ?? "" }
+
+pub fn peek_isize(data: [U8]) -> Int { isize(data) }
+
+fn host_read_bytes(path: String) -[FS]> [U8] { panic("host_read_bytes") }
+
+fn host_write_bytes(path: String, data: [U8]) -[FS]> { panic("host_write_bytes") }
+
+pub fn compress_file(src: String, dst: String) -[FS]> {
+    data :: host_read_bytes(src)
+    host_write_bytes(dst, compress(data))
+}
+
+pub fn decompress_file(src: String, dst: String) -[FS]> {
+    data :: host_read_bytes(src)
+    host_write_bytes(dst, decompress(data))
+}
+
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
+fn to_u8(n: Int) -> U8 {
+    v :: n & 255
+    (U8{v})
+}

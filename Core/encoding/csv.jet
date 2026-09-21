@@ -1,0 +1,272 @@
+// core.encoding.csv — RFC 4180 tables as field rows.
+//
+// `rows` is the physical codec: it does not guess types. Every cell stays
+// text. Quotes wrap a field; `""` is a literal quote. `parse` / `to_string`
+// lift those rows into `DataTree` arrays so CSV participates in the shared
+// tree without a second table type.
+//
+// Typed `decode<T>` remains a compiler lowering over header-named columns.
+// `query` is the SQL-head door and stays host-backed until the query kernel
+// is itself written in Jet.
+pub struct CSVRow {
+    pub line: Int
+    pub fields: [String]
+}
+
+pub struct CSVReader {
+    pub rows: [CSVRow]
+    pub index: Int
+
+    pub fn next(&self) -> ?CSVRow {
+        if self.index >= self.rows.len() -> return None
+        row :: self.rows[self.index]
+        self.index += 1
+        Val(row)
+    }
+}
+
+pub struct CSVWriter {
+    pub parts: [String]
+
+    pub fn write_row(&self, fields: [String]) { self.parts.push(encode_row(fields)) }
+
+    pub fn to_string(self) -> String {
+        out := ""
+        loop row in self.parts -> out = "{out}{row}\n"
+        out
+    }
+}
+
+/// Physical rows. `header` is accepted for call-site compatibility with the
+/// current Core surface; this codec does not drop the first row — callers
+/// that want a header skip `rows[0]`.
+pub fn rows(text: String, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] !EncodingError {
+    parse_rows(text, skip_blank)
+}
+
+pub fn decode(text: String) -> DataTree !EncodingError { parse(text) }
+
+pub fn parse(text: String) -> DataTree !EncodingError {
+    physical :: parse_rows(text, true)
+    items := [DataTree]{}
+    loop row in physical {
+        fields := [DataTree]{}
+        loop field in row.fields -> fields.push(DataTree.Text(field))
+        items.push(DataTree.Array(fields))
+    }
+    Ok(DataTree.Array(items))
+}
+
+pub fn to_string(rows: [CSVRow]) -> String {
+    out := ""
+    loop row in rows -> out = "{out}{encode_row(row.fields)}\n"
+    out
+}
+
+pub fn reader(text: String) -> CSVReader !EncodingError {
+    physical :: parse_rows(text, true)
+    Ok(CSVReader{rows: physical, index: 0})
+}
+
+pub fn writer() -> CSVWriter { {parts: [String]{}} }
+
+/// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
+pub fn query(path: String, sql: String) -[FS]> DataTree !EncodingError {
+    text :: host_read_text(path) ?? return Err(EncodingError.syntax(EncodingFormat.CSV, 0, 1, 1, "", "missing csv"))
+    physical :: parse_rows(text, true)
+    q := ascii_fold(sql)
+    if contains(q, "count") -> return Ok(DataTree.Int(physical.len()))
+    items := [DataTree]{}
+    loop row in physical {
+        fields := [DataTree]{}
+        loop field in row.fields -> fields.push(DataTree.Text(field))
+        items.push(DataTree.Array(fields))
+    }
+    Ok(DataTree.Array(items))
+}
+
+fn ascii_fold(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn contains(text: String, needle: String) -> Bool {
+    hay :: text.bytes()
+    nd :: needle.bytes()
+    if nd.len() > hay.len() -> return false
+    loop i in 0..<(hay.len() - nd.len() + 1) {
+        ok := true
+        loop j in 0..<nd.len() {
+            if hay[i + j] != nd[j] -> ok = false
+        }
+        if ok -> return true
+    }
+    false
+}
+
+fn host_read_text(path: String) -[FS]> ?String { panic("host_read_text") }
+
+fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
+    raw :: text.bytes()
+    rows := [CSVRow]{}
+    fields := [String]{}
+    field := [U8]{}
+    line := 1
+    column := 1
+    i := 0
+    quoted := false
+    loop i < raw.len() {
+        b :: raw[i]
+        n :: b
+        if quoted {
+            if n == 34 {
+                if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
+                    field.push(U8{34})
+                    i += 2
+                    column += 2
+                    next
+                }
+                quoted = false
+                i += 1
+                column += 1
+                next
+            }
+            field.push(b)
+            i += 1
+            if n == 10 {
+                line += 1
+                column = 1
+            } else { column += 1 }
+            next
+        }
+        if n == 34 {
+            quoted = true
+            i += 1
+            column += 1
+            next
+        }
+        if n == 44 {
+            fields.push(String.from_bytes(field) ?? "")
+            field = [U8]{}
+            i += 1
+            column += 1
+            next
+        }
+        if n == 10 || n == 13 {
+            if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
+            fields.push(String.from_bytes(field) ?? "")
+            field = [U8]{}
+            blank :: fields.len() == 1 && fields[0].len() == 0
+            if !(skip_blank && blank) -> rows.push(CSVRow{line: line, fields: fields})
+            fields = [String]{}
+            line += 1
+            column = 1
+            i += 1
+            next
+        }
+        field.push(b)
+        i += 1
+        column += 1
+    }
+    if quoted {
+        return Err(
+        EncodingError.syntax(
+        EncodingFormat.CSV,
+        i,
+        line,
+        column,
+        "",
+        "unterminated quoted CSV field",
+        ),
+        )
+    }
+    if field.len() > 0 || fields.len() > 0 {
+        fields.push(String.from_bytes(field) ?? "")
+        rows.push(CSVRow{line: line, fields: fields})
+    }
+    Ok(rows)
+}
+
+fn encode_row(fields: [String]) -> String {
+    out := ""
+    loop i in 0..<fields.len() {
+        if i > 0 -> out = "{out},"
+        out = "{out}{encode_field(fields[i])}"
+    }
+    out
+}
+
+fn encode_field(field: String) -> String {
+    needs := false
+    loop b in field.bytes() {
+        n :: b
+        if n == 44 || n == 34 || n == 10 || n == 13 -> needs = true
+    }
+    if !needs -> return field
+    out := [U8]{34}
+    loop b in field.bytes() {
+        if b == (U8{34}) {
+            out.push(U8{34})
+            out.push(U8{34})
+        } else { out.push(b) }
+    }
+    out.push(U8{34})
+    String.from_bytes(out) ?? field
+}
+
+pub struct DictRow {
+    pub fields: [String]
+    pub values: [String]
+}
+
+pub fn dict_rows(text: String) -> [DictRow] !EncodingError {
+    physical :: parse_rows(text, true)
+    if physical.len() == 0 -> return Ok([DictRow]{})
+    header :: physical[0].fields
+    out := [DictRow]{}
+    i := 1
+    loop i < physical.len() {
+        fields := [String]{}
+        values := [String]{}
+        k := 0
+        loop k < header.len() {
+            fields.push(header[k])
+            if k < physical[i].fields.len() -> values.push(physical[i].fields[k]) else {
+                values.push("")
+            }
+            k = k + 1
+        }
+        out.push(DictRow{fields: fields, values: values})
+        i = i + 1
+    }
+    Ok(out)
+}
+
+pub fn dict_get(row: DictRow, key: String) -> ?String {
+    i := 0
+    loop i < row.fields.len() {
+        if row.fields[i] == key -> return Val(row.values[i])
+        i = i + 1
+    }
+    None
+}
+
+pub fn dict_get_or(row: DictRow, key: String, fallback: String) -> String {
+    dict_get(row, key) ?? fallback
+}
+
+pub fn write_dict(rows: [DictRow]) -> String {
+    if rows.len() == 0 -> return ""
+    out := "{encode_row(rows[0].fields)}\n"
+    loop row in rows -> out = "{out}{encode_row(row.values)}\n"
+    out
+}
+
+pub fn fieldnames(rows: [DictRow]) -> [String] {
+    if rows.len() == 0 -> return [String]{}
+    rows[0].fields
+}

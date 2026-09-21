@@ -1,0 +1,64 @@
+package {
+    name: "core.mem"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Arenas, pins, atomics, and volatile access."
+    license: "MIT"
+    outputs: {
+        mem: .Library{ entry: mem }
+    }
+}
+module scope
+
+#Error
+pub enum AllocError {
+    Exhausted
+    Misaligned
+    Released
+}
+
+// Allocator and pointer values are compiler-owned nominal surfaces. Their
+// constructors and methods are lowered by the memory CoreLib; the source twin
+// keeps only the portable carrier shapes.
+pub struct Arena {
+    pub cap: Int
+    pub used: Int
+}
+
+pub struct Bump {
+    pub cap: Int
+    pub used: Int
+}
+
+pub struct Fixed {
+    pub cap: Int
+    pub used: Int
+}
+
+pub struct Pool {
+    pub slot: Int
+    pub free: [Int]
+}
+
+pub struct Pin {
+    pub id: Int
+    pub value: Int
+}
+
+pub struct Atomic {
+    pub value: Int
+}
+
+pub fn pin(value: Int) -> Pin { {id: value, value: value} }
+
+pub fn address_of(value: Int) -> Int { value }
+
+pub fn from_addr(addr: Int) -> Int { addr }
+
+pub fn volatile_read(addr: Int) -> Int { addr }
+
+pub fn volatile_write(addr: Int, value: Int) {
+    if addr == -1 || value == -1 {
+        return
+    }
+}

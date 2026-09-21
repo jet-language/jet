@@ -99,6 +99,31 @@ impl<'a> Checker<'a> {
     fn tail_has_authored_semicolon(&self, span: Span) -> bool {
         find_authored_semicolon(self.source, span.end).is_some()
     }
+    /// L0530 / D-TAIL-RETURN1: a value block's final expression is already
+    /// its implicit return. A final explicit return therefore only adds
+    /// syntax; early returns remain outside this tail check. Offer one safe
+    /// edit for the keyword plus a second edit for an authored terminator.
+    fn check_redundant_final_return(&mut self, _value: &Expr, return_span: Span) {
+        // Imported/generated Core bodies may retain their own source offsets,
+        // which are outside this user module's source map. Never expose a
+        // source lint with an unappliable range; authored user returns still
+        // receive the normal L0530 diagnostic below.
+        if self.compiler_generated || return_span.end > self.source.len() {
+            return;
+        }
+        let mut diagnostic = Diagnostic::from_row("L0530", &[], Some(return_span))
+            .with_edit(TextEdit {
+                span: return_span,
+                new_text: String::new(),
+            });
+        if let Some(semicolon) = find_authored_semicolon(self.source, return_span.end) {
+            diagnostic = diagnostic.with_alternative_edit(TextEdit {
+                span: Span::new(semicolon, semicolon + 1),
+                new_text: String::new(),
+            });
+        }
+        self.diags.push(diagnostic);
+    }
 
     fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type) {
         if !self.flow.reachable {
@@ -132,9 +157,15 @@ impl<'a> Checker<'a> {
                 self.check_stmt(stmt);
                 self.report_missing_block_value(expected, span);
             }
-            Stmt::Return(..) => {
+            Stmt::Return(Some(value), return_span) => {
+                self.check_redundant_final_return(value, *return_span);
                 // An explicit return is an early exit. Its existing checker
                 // owns both its value type and its divergence semantics.
+                self.check_stmt(stmt);
+            }
+            Stmt::Return(None, _) => {
+                // A bare return remains an early exit, including in a
+                // fallible function or generator.
                 self.check_stmt(stmt);
             }
             Stmt::Switch {

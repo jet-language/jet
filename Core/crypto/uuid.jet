@@ -1,0 +1,105 @@
+// core.crypto.uuid — RFC 4122 / 9562 UUIDs as plain strings (D-UUIDENC1=A).
+//
+// There is no `Uuid` nominal type. A UUID is a 36-character lowercase hex
+// string with hyphens. `parse` validates and normalizes; `v5` is pure;
+// `v4` and `v7` need the host CSPRNG (`core.crypto.random.bytes`).
+/// Random UUID. Fail-closed if the OS RNG is unavailable.
+pub fn v4() -> String !CryptoError {
+    bytes :: random.bytes(16)
+    bytes[6] = (U8{(bytes[6] & 0x0f) | 0x40})
+    bytes[8] = (U8{(bytes[8] & 0x3f) | 0x80})
+    Ok(format_uuid(bytes))
+}
+
+/// Time-ordered UUID. The timestamp is Unix milliseconds in the high 48 bits.
+pub fn v7() -[Time]> String !CryptoError {
+    bytes :: random.bytes(16)
+    ms :: host_unix_ms()
+    bytes[0] = (U8{(ms >> 40) & 255})
+    bytes[1] = (U8{(ms >> 32) & 255})
+    bytes[2] = (U8{(ms >> 24) & 255})
+    bytes[3] = (U8{(ms >> 16) & 255})
+    bytes[4] = (U8{(ms >> 8) & 255})
+    bytes[5] = (U8{ms & 255})
+    bytes[6] = (U8{(bytes[6] & 0x0f) | 0x70})
+    bytes[8] = (U8{(bytes[8] & 0x3f) | 0x80})
+    Ok(format_uuid(bytes))
+}
+
+/// Name-based UUID (SHA-1). Same namespace + name always yields the same id.
+/// `namespace` must itself be a UUID string.
+pub fn v5(namespace: String, name: String) -> String {
+    ns :: parse_bytes(namespace)
+    material := [U8]{}
+    loop b in ns -> material.push(b)
+    loop b in name.bytes() -> material.push(b)
+    digest :: sha1_raw(material)
+    digest[6] = (U8{(digest[6] & 0x0f) | 0x50})
+    digest[8] = (U8{(digest[8] & 0x3f) | 0x80})
+    out := [U8]{}
+    loop i in 0..<16 -> out.push(digest[i])
+    Ok(format_uuid(out))
+}
+
+/// Python-compatible name for the SHA-1 name-based UUID constructor.
+pub fn uuid5(namespace: String, name: String) -> String { v5(namespace, name) }
+
+/// Validate and lowercase a UUID. Hyphens may be omitted; other separators fail.
+pub fn parse(text: String) -> String {
+    bytes :: parse_bytes(text)
+    Ok(format_uuid(bytes))
+}
+
+fn parse_bytes(text: String) -> [U8] {
+    hex := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n == 45 -> next
+        hex.push(b)
+    }
+    if hex.len() != 32 -> return Err("UUID must be 32 hex digits, with or without hyphens")
+    out := [U8]{}
+    loop i in 0..<32, 2 {
+        hi :: hex_digit(hex[i]) ?? return Err("UUID contains a non-hex character")
+        lo :: hex_digit(hex[i + 1]) ?? return Err("UUID contains a non-hex character")
+        out.push(U8{hi * 16 + lo})
+    }
+    Ok(out)
+}
+
+fn format_uuid(bytes: [U8]) -> String {
+    h :: hex_encode(bytes)
+    raw :: h.bytes()
+    // 8-4-4-4-12
+    "{slice_ascii(raw, 0, 8)}-{slice_ascii(raw, 8, 12)}-{slice_ascii(raw, 12, 16)}-{slice_ascii(raw, 16, 20)}-{slice_ascii(raw, 20, 32)}"
+}
+
+fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(raw[start..end - 1]) ?? ""
+}
+
+fn hex_digit(b: U8) -> ?Int {
+    n :: b
+    if n >= 48 && n <= 57 -> return Val(n - 48)
+    if n >= 97 && n <= 102 -> return Val(n - 87)
+    if n >= 65 && n <= 70 -> return Val(n - 55)
+    None
+}
+
+fn hex_encode(bytes: [U8]) -> String {
+    out := [U8]{}
+    loop b in bytes {
+        n :: b
+        out.push(nibble(n / 16))
+        out.push(nibble(n % 16))
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn nibble(n: Int) -> U8 {
+    if n < 10 -> return (U8{48 + n})
+    (U8{87 + n})
+}
+
+/// Host clock for v7. One millisecond read; not a public time API.
+fn host_unix_ms() -[Time]> Int { panic("host_unix_ms") }

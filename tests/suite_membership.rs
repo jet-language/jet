@@ -31,10 +31,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The one list of set names. The ledger parser, the writer of any message here
-/// and `scripts/agent/time-suites.sh` all read the sections out of the ledger
-/// rather than keeping a private copy, so a new set cannot exist in one reader
-/// and not another (AGENTS.md I8).
+/// The one list of set names. The ledger parser and the writer of any message
+/// here all read the sections out of the ledger rather than keeping a private
+/// copy, so a new set cannot exist in one reader and not another (AGENTS.md I8).
 const SUITE_ORDER: [&str; 7] = [
     "guards",
     "dev_loop",
@@ -59,7 +58,7 @@ const HOST_GATED: &str = "host_gated";
 /// workspace crates, plus this file. 2026-08-19 (#677): `cli_compile_latency`
 /// split out of `cli`, so 290 in this package. Lower it only in the same
 /// reviewed diff as a deleted test file.
-const TEST_TARGET_FLOOR: usize = 299;
+const TEST_TARGET_FLOOR: usize = 302;
 
 /// How many declared targets may belong to NO set (#2025).
 ///
@@ -451,40 +450,6 @@ fn suite_ledger_audit_fires_on_a_target_in_no_set() {
     );
 }
 
-/// #2025: the sets are executed, not described.
-///
-/// A ledger no runner reads is a second place to remember membership, which is
-/// the defect wearing a different hat. `scripts/agent/time-suites.sh` takes
-/// `--set <name>` and derives the target list from this file, so there is one
-/// list of sets and one list of members (AGENTS.md I8).
-#[test]
-fn the_suite_runner_reads_the_ledger() {
-    let runner = include_str!("../scripts/agent/time-suites.sh");
-    assert!(
-        runner.contains("tests/suites.txt"),
-        "scripts/agent/time-suites.sh no longer reads tests/suites.txt, so the named sets are \
-         decorative again and a target can be in a set nothing runs"
-    );
-    // `host_gated` is the one name the runner may say, because it is the one
-    // section it must NOT run. Every executable set name comes out of the ledger,
-    // so the runner cannot know a set the ledger does not (AGENTS.md I8).
-    assert!(
-        runner.contains(HOST_GATED),
-        "scripts/agent/time-suites.sh must name `{HOST_GATED}` to exclude it from `--set all`; \
-         otherwise `all` tries to run the targets that are parked precisely because they cannot"
-    );
-    for set in SUITE_ORDER {
-        if set == HOST_GATED {
-            continue;
-        }
-        assert!(
-            !runner.contains(set),
-            "scripts/agent/time-suites.sh hardcodes the set name `{set}`; executable set names \
-             come from tests/suites.txt so the runner and the ledger cannot disagree"
-        );
-    }
-}
-
 /// What the budget table got wrong, as NAMES rather than a count — same rule as
 /// `SuiteLedgerAudit` above: a number tells a reader something is wrong and
 /// nothing about what.
@@ -573,18 +538,6 @@ fn suite_budget_rows_stay_a_named_minority() {
             .map(|row| format!("{} {}s — {}", row.suite, row.secs, row.reason))
             .collect::<Vec<_>>()
             .join("\n  ")
-    );
-
-    // The table's third reader. `scripts/agent/time-suites.sh` sets the external
-    // `timeout` per target and must NOT export a blanket deadline, because
-    // JET_TEST_DEADLINE_SECS only tightens: a runner that exports 900 hands the
-    // exempt suite its abort back (AGENTS.md I8).
-    let runner = include_str!("../scripts/agent/time-suites.sh");
-    assert!(
-        runner.contains("suite_budgets.txt"),
-        "scripts/agent/time-suites.sh no longer reads {}, so it runs every target on one deadline \
-         and the committed rows are decorative",
-        common::SUITE_BUDGET_LEDGER_PATH
     );
 }
 

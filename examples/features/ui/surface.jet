@@ -11,14 +11,18 @@ use core.ui.host.drag_drop as drag_drop
 use core.ui.host.ime as ime
 use core.ui.host.shortcuts as shortcuts
 
-fn preview_body() UiNode -> ui.box([
-    ui.node_role("Preview label", 160.0, 24.0, ui.aria_role_label()),
-    ui.text("The same node tree is rendered by every backend"),
-])
+fn preview_body() -> UiNode {
+    ui.box(
+    [
+        ui.node_role("Preview label", 160.0, 24.0, ui.aria_role_label()),
+        ui.text("The same node tree is rendered by every backend"),
+    ],
+    )
+}
 
-fn playground_body() UiNode -> ui.text_input("Try the playground", .Native)
+fn playground_body() -> UiNode { ui.text_input("Try the playground", .Native) }
 
-fn save_command() UiShortcut -> .cmd("s")
+fn save_command() -> UiShortcut { .cmd("s") }
 
 fn run() {
     point :: ui.point(8.0, 12.0)
@@ -141,9 +145,7 @@ fn run() {
             accessible :: ui.node_accessibility(tree, ~metadata)
             _attached :: accessibility.attach(accessible, metadata)
             if _ime_event == {
-                .Ok(event) -> {
-                    _projected :: accessibility.project(accessible, event.target)
-                }
+                .Ok(event) -> { _projected :: accessibility.project(accessible, event.target) }
                 .Err(_) -> {}
             }
         }

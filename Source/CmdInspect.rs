@@ -5413,7 +5413,54 @@ pub(crate) fn capability_relation_projection(root: &Path) -> Result<StatusValue,
 }
 
 /// `inspect claims --json` consumes this exact manifest relation without
-/// rebuilding capability identities, dispositions, or evidence.
+/// rebuilding capability identities, dispositions, or evidence. Evidence
+/// reports remain diagnostic observations; they are not release truth.
+const RELEASE_CLAIM_SOURCE: &str = "manifest.capability_relation.rows";
+
+fn release_claim_rows(relation: &StatusValue) -> Vec<StatusValue> {
+    let Some(StatusValue::Array(rows)) = capability_status_field(relation, "rows") else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter_map(|row| {
+            let row_id = capability_status_field(row, "row_id")
+                .and_then(capability_status_string)?;
+            let capability = capability_status_field(row, "capability_id")
+                .and_then(capability_status_string)?;
+            let mode = capability_status_field(row, "mode")
+                .and_then(capability_status_string)?;
+            let disposition = capability_status_field(row, "disposition")
+                .and_then(capability_status_string)?;
+            let status = capability_status_field(row, "status")
+                .and_then(capability_status_string)
+                .unwrap_or(disposition);
+            let candidate = capability_status_field(row, "candidate_identity")
+                .cloned()
+                .unwrap_or(StatusValue::Null);
+            Some(StatusValue::object(
+                StatusFields::new()
+                    .with("claim", row_id)
+                    .with("capability", capability)
+                    .with("mode", mode)
+                    .with("disposition", disposition)
+                    .with("status", status)
+                    .with(
+                        "counted",
+                        capability_status_field(row, "counted")
+                            .and_then(capability_status_bool)
+                            .unwrap_or(false),
+                    )
+                    .with(
+                        "owner_link",
+                        capability_status_field(row, "owner_link")
+                            .cloned()
+                            .unwrap_or(StatusValue::Null),
+                    )
+                    .with("candidate_identity", candidate),
+            ))
+        })
+        .collect()
+}
 
 fn run_claims(file: &str, json: bool) {
     let source_path = Path::new(file);
@@ -5425,92 +5472,6 @@ fn run_claims(file: &str, json: bool) {
         .ok()
         .flatten()
         .unwrap_or_else(|| base.to_path_buf());
-    let index = jet::RecordIndex::RecordIndex::load_for_project(&root).unwrap_or_else(|error| {
-        crate::cli_error!(
-            @fix "E2105",
-            format!("can't read evidence index: {error}"),
-            "repair `.jet/records/index.jsonl`, then rerun inspect claims"
-        );
-        exit(jet::ExitCodes::USER_ERROR);
-    });
-    let mut claims = Vec::new();
-    let mut derivation_dispositions = BTreeMap::new();
-    let mut derivation_values = BTreeMap::new();
-    let mut derivation_summaries = BTreeMap::new();
-    let mut records = Vec::new();
-    for entry in index
-        .query(false)
-        .into_iter()
-        .filter(|entry| entry.kind == jet::RecordKind::Evidence)
-    {
-        let path = index.root().join(&entry.path);
-        let report =
-            jet_foundation::Evidence::EvidenceReport::read(&path).unwrap_or_else(|error| {
-                crate::cli_error!(
-                    @fix "E2105",
-                    format!("can't read evidence artifact `{}`: {error}", path.display()),
-                    "repair the indexed artifact or rerun the producer"
-                );
-                exit(jet::ExitCodes::USER_ERROR);
-            });
-        for derivation in &report.derivations {
-            derivation_dispositions.insert(
-                derivation.id.clone(),
-                derivation.disposition.as_str().to_string(),
-            );
-            derivation_values.insert(
-                derivation.id.clone(),
-                StatusValue::parse(&derivation.to_json()).unwrap_or(StatusValue::Null),
-            );
-            let observation = derivation
-                .observation
-                .as_ref()
-                .map(|observation| {
-                    format!(
-                        "event={},counterexample={}",
-                        observation.event_id.as_deref().unwrap_or("none"),
-                        observation.counterexample_id.as_deref().unwrap_or("none")
-                    )
-                })
-                .unwrap_or_else(|| "none".to_string());
-            derivation_summaries.insert(
-                derivation.id.clone(),
-                format!(
-                    "method={} disposition={} rule={} source={} build={} run={} target={} observation={}",
-                    derivation.method.as_str(),
-                    derivation.disposition.as_str(),
-                    derivation.rule,
-                    derivation.identity.source,
-                    derivation.identity.build,
-                    derivation.identity.run,
-                    derivation.identity.target,
-                    observation
-                ),
-            );
-        }
-        for claim in report.project() {
-            let count = report
-                .records
-                .iter()
-                .find(|record| record.identity.evidence_id == claim.evidence_id)
-                .map_or(0, |record| record.count);
-            claims.push((claim, count));
-        }
-        records.extend(report.records.iter().cloned());
-    }
-    claims.sort_by(|left, right| {
-        left.0
-            .claim_id
-            .cmp(&right.0.claim_id)
-            .then(left.0.evidence_id.cmp(&right.0.evidence_id))
-    });
-    let projection = jet::Package::ClaimsProjection::from_records(&records);
-    let grade = projection.grade;
-    let floor = jet::Loader::package_facts_for_entry(source_path)
-        .ok()
-        .flatten()
-        .and_then(|facts| facts.policy.claims_min);
-    let floor_met = projection.floor_met(floor);
     let capability_relation = capability_relation_projection(&root).unwrap_or_else(|error| {
         crate::cli_error!(
             @fix "E2105",
@@ -5520,74 +5481,38 @@ fn run_claims(file: &str, json: bool) {
         exit(jet::ExitCodes::USER_ERROR);
     });
     let release = jet::Manifest::current_release_status();
-    let release_ready = floor_met
-        && capability_relation_status(&capability_relation) == "available"
-        && capability_relation_has_candidate_evidence(&capability_relation)
-        && release.readiness() == "ready";
+    let claims = release_claim_rows(&capability_relation);
+    let relation_ready = capability_relation_status(&capability_relation) == "available"
+        && capability_relation_has_candidate_evidence(&capability_relation);
+    // A complete relation is necessary but never sufficient while the owner
+    // still identifies the toolchain as prerelease and the 1.0 policy future.
+    let release_ready = release.policy_active()
+        && release.readiness() == "ready"
+        && relation_ready;
 
     if json {
-        let rows = claims
-            .iter()
-            .map(|(claim, count)| {
-                let derivation = claim
-                    .derivation
-                    .as_ref()
-                    .map(|reference| {
-                        derivation_values
-                            .get(&reference.id)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                let disposition = derivation_dispositions
-                                    .get(&reference.id)
-                                    .map(String::as_str)
-                                    .unwrap_or("unknown");
-                                StatusValue::object(
-                                    StatusFields::new()
-                                        .with("id", reference.id.clone())
-                                        .with("disposition", disposition),
-                                )
-                            })
-                    })
-                    .unwrap_or(StatusValue::Null);
-                StatusValue::object(
-                    StatusFields::new()
-                        .with("claim", claim.claim_id.clone())
-                        .with("evidence", claim.evidence_id.clone())
-                        .with("kind", claim.kind.as_str())
-                        .with("facet", claim.facet.as_str())
-                        .with("producer", claim.producer.as_str())
-                        .with("outcome", claim.outcome.as_str())
-                        .with("count", *count)
-                        .with("path", claim.source.path.clone())
-                        .with("line", claim.source.line)
-                        .with("column", claim.source.column)
-                        .with("completeness", claim.completeness.state())
-                        .with("derivation", derivation),
-                )
-            })
-            .collect::<Vec<_>>();
-        let claims_floor = floor
-            .map(|floor| StatusValue::String(floor.render()))
-            .unwrap_or(StatusValue::Null);
         let fields = StatusFields::new()
             .with("file", file)
-            .with("release", StatusValue::object(
-                StatusFields::new()
-                    .with("status", release.channel())
-                    .with("readiness", release.readiness())
-                    .with("compatibility_policy", release.policy())
-                    .with("compatibility_policy_active", release.policy_active()),
-            ))
+            .with("source", RELEASE_CLAIM_SOURCE)
+            .with(
+                "release",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("version", jet::Manifest::COMPILER_VERSION)
+                        .with("status", release.channel())
+                        .with("disposition", release.disposition())
+                        .with("readiness", release.readiness())
+                        .with("compatibility_policy", release.policy())
+                        .with(
+                            "compatibility_policy_disposition",
+                            release.policy_disposition(),
+                        )
+                        .with("compatibility_policy_active", release.policy_active()),
+                ),
+            )
             .with("release_ready", release_ready)
             .with("capability_relation", capability_relation.clone())
-            .with("claims", StatusValue::array(rows))
-            .with("grade", grade.render())
-            .with("generated_attempts", projection.generated_attempts)
-            .with("generated_successes", projection.generated_successes)
-            .with("examples_successes", projection.examples_successes)
-            .with("failed", projection.failed)
-            .with("claims_floor", claims_floor)
-            .with("floor_met", floor_met);
+            .with("claims", StatusValue::array(claims.clone()));
         println!(
             "{}",
             StatusEnvelope::new("inspect.claims", release_ready)
@@ -5597,56 +5522,45 @@ fn run_claims(file: &str, json: bool) {
     } else {
         println!("claims");
         println!(
-            "release: {} (readiness: {}; 1.0 compatibility policy: {} [{}])",
+            "release: {} (disposition: {}; readiness: {}; 1.0 compatibility policy: {} [{}; {}])",
             release.channel(),
+            release.disposition(),
             release.readiness(),
             release.policy(),
+            release.policy_disposition(),
             if release.policy_active() {
                 "active"
             } else {
                 "not active"
             }
         );
+        println!("claim source: {RELEASE_CLAIM_SOURCE}");
         println!("release ready: {}", if release_ready { "yes" } else { "no" });
         println!(
             "capability relation: {}",
             capability_relation_status(&capability_relation)
         );
-        println!("grade: {}", grade.render());
-        println!(
-            "generated: {} successful / {} attempted; examples: {}; failed: {}",
-            projection.generated_successes,
-            projection.generated_attempts,
-            projection.examples_successes,
-            projection.failed
-        );
-        println!(
-            "package floor: {} ({})",
-            floor
-                .map(|floor| floor.render())
-                .unwrap_or_else(|| "none".to_string()),
-            if floor_met { "met" } else { "not met" }
-        );
         if claims.is_empty() {
             println!("none");
-        }
-        for (claim, _) in claims {
-            let derivation = claim.derivation.as_ref().map(|reference| {
-                let summary = derivation_summaries
-                    .get(&reference.id)
-                    .map(String::as_str)
-                    .unwrap_or("disposition=unknown");
-                format!(" derivation={}({summary})", reference.id)
-            });
-            println!(
-                "{} {} {} {}:{}{}",
-                claim.claim_id,
-                claim.kind.as_str(),
-                claim.outcome.as_str(),
-                claim.source.path,
-                claim.source.line,
-                derivation.as_deref().unwrap_or("")
-            );
+        } else {
+            for claim in claims {
+                let claim = match claim {
+                    StatusValue::Object(fields) => fields,
+                    _ => continue,
+                };
+                let field = |name: &str| {
+                    capability_status_field(&StatusValue::Object(claim.clone()), name)
+                        .and_then(capability_status_string)
+                        .unwrap_or("unknown")
+                        .to_string()
+                };
+                println!(
+                    "{} {} {}",
+                    field("claim"),
+                    field("mode"),
+                    field("disposition")
+                );
+            }
         }
     }
 }

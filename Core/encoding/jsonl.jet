@@ -1,0 +1,98 @@
+// core.encoding.jsonl — JSON Lines (one JSON value per LF-terminated row).
+//
+// Blank lines are skipped. Each non-empty line is one `parse` of `core.encoding.json`.
+// `to_string` writes one compact JSON value per row and a trailing newline so
+// concatenation of documents stays a valid JSONL stream. There is no pretty
+// form; pretty JSON contains newlines and would break the line protocol.
+use json
+
+/// Parse every non-empty line as JSON. Allocates one `DataTree` per row.
+pub fn parse(text: String) -> [DataTree] !EncodingError {
+    rows := [DataTree]{}
+    loop line in lines_of(text) {
+        if line.len() == 0 -> next
+        rows.push(json.parse(line))
+    }
+    Ok(rows)
+}
+
+/// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
+pub fn to_string(rows: [DataTree]) -> String {
+    out := ""
+    loop row in rows -> out = "{out}{json.to_string(row)}\n"
+    out
+}
+
+pub struct JSONLReader {
+    pub rows: [String]
+    pub index: Int
+
+    pub fn next(&self) -> ?DataTree !EncodingError {
+        loop self.index < self.rows.len() {
+            line :: self.rows[self.index]
+            self.index += 1
+            if line.len() == 0 -> next
+            return Val(json.parse(line))
+        }
+        Ok(None)
+    }
+}
+
+pub struct JSONLWriter {
+    pub parts: [String]
+
+    pub fn write(&self, value: DataTree) { self.parts.push(json.to_string(value)) }
+
+    pub fn to_string(self) -> String {
+        out := ""
+        loop row in self.parts -> out = "{out}{row}\n"
+        out
+    }
+}
+
+pub fn reader(text: String) -> JSONLReader { {rows: lines_of(text), index: 0} }
+
+pub fn writer() -> JSONLWriter { {parts: [String]{}} }
+
+pub fn loads(text: String) -> [DataTree] !EncodingError { parse(text) }
+
+pub fn dumps(rows: [DataTree]) -> String { to_string(rows) }
+
+pub fn count_rows(text: String) -> Int {
+    n := 0
+    loop line in lines_of(text) {
+        if line.len() > 0 -> n = n + 1
+    }
+    n
+}
+
+pub fn append_line(text: String, value: DataTree) -> String {
+    if text.bytes().len() == 0 -> return "{json.to_string(value)}\n"
+    last :: text.bytes()[text.bytes().len() - 1]
+    if last == (U8{10}) -> "{text}{json.to_string(value)}\n"
+    "{text}\n{json.to_string(value)}\n"
+}
+
+pub fn first(text: String) -> ?DataTree !EncodingError {
+    loop line in lines_of(text) {
+        if line.len() == 0 -> next
+        return Val(json.parse(line))
+    }
+    Ok(None)
+}
+
+fn lines_of(text: String) -> [String] {
+    rows := [String]{}
+    buf := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{10}) {
+            rows.push(String.from_bytes(buf) ?? "")
+            buf = [U8]{}
+            next
+        }
+        if b == (U8{13}) -> next
+        buf.push(b)
+    }
+    if buf.len() > 0 || text.bytes().len() > 0 -> rows.push(String.from_bytes(buf) ?? "")
+    rows
+}

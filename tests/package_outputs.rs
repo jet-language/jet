@@ -82,7 +82,7 @@ fn outputs_block_drives_jet_build_aot() {
         return;
     }
     let dir = example_dir();
-    let build_dir = dir.join("build");
+    let build_dir = dir.join(".jet/build");
     let _ = fs::remove_dir_all(&build_dir);
 
     let build = Command::new(jet_bin())
@@ -104,7 +104,7 @@ fn outputs_block_drives_jet_build_aot() {
     let binary = build_dir.join("module");
     assert!(
         binary.is_file(),
-        "jet build did not produce build/module (resolved via outputs:); found: {:?}",
+        "jet build did not produce .jet/build/module (resolved via outputs:); found: {:?}",
         fs::read_dir(&build_dir)
             .map(|entries| entries.flatten().map(|e| e.path()).collect::<Vec<_>>())
             .unwrap_or_default()
@@ -202,7 +202,7 @@ fn nested_outputs_entry_invokes_leaf_on_every_run_tier() {
             "nested output build failed:\n{}",
             String::from_utf8_lossy(&build.stderr)
         );
-        let binary = dir.join("build/main");
+        let binary = dir.join(".jet/build/main");
         let run = Command::new(&binary)
             .output()
             .expect("nested output binary should run");
@@ -517,8 +517,8 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
         "jet build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let binary = scratch.join("build/main");
-    assert!(binary.is_file(), "jet build did not produce build/main");
+    let binary = scratch.join(".jet/build/main");
+    assert!(binary.is_file(), "jet build did not produce .jet/build/main");
     let built = Command::new(binary)
         .output()
         .expect("manifest-selected nested binary should run");
@@ -621,7 +621,7 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
         assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
     }
 
-    let build_dir = dir.join("build");
+    let build_dir = dir.join(".jet/build");
     let _ = fs::remove_dir_all(&build_dir);
     let build = Command::new(jet_bin())
         .arg("build")

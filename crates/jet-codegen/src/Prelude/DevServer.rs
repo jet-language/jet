@@ -153,7 +153,7 @@ mod jet_devserver_impl {
             self.clone()
         }
 
-        /// Build once, serve `build/` with live-reload, then watch the app
+        /// Build once, serve `.jet/build/` with live-reload, then watch the app
         /// file and rebuild on every save. Blocks forever (Ctrl-C stops it)
         /// — the same contract as `jet dev <file> --target=web`.
         pub fn serve(&self) {
@@ -281,16 +281,15 @@ mod jet_devserver_impl {
     }
 
     /// Compile `app_file` for the web target by shelling out to the real
-    /// `jet` binary, and on success atomically replace `build/*` with the
-    /// new output.
+    /// `jet` binary, and on success atomically replace `.jet/build/*` with
+    /// the new output.
     ///
     /// The subprocess runs with its OWN working directory pointed at a fresh
-    /// staging root, passing
-    /// `app_file` as an absolute path so it resolves the same regardless of
-    /// that working directory. The subprocess therefore writes into
-    /// `<staging>/build/*` — untouched by any previous good build. Only after
-    /// the complete build succeeds do held directory authorities publish the
-    /// expected files into the real `build/`.
+    /// staging root, passing `app_file` as an absolute path so it resolves the
+    /// same regardless of that working directory. The subprocess therefore
+    /// writes into `<staging>/.jet/build/*` — untouched by any previous good build.
+    /// Only after the complete build succeeds do held directory authorities
+    /// publish the expected files into the real `.jet/build/`.
     fn jet_devserver_rebuild(
         app_file: &str,
         html_override: Option<&str>,
@@ -556,16 +555,21 @@ mod jet_devserver_impl {
     }
 
     fn jet_devserver_build_dir() -> Result<PathBuf, String> {
-        let cwd = std::fs::canonicalize(".").map_err(|e| e.to_string())?;
-        let build = PathBuf::from("build");
+        let root = std::env::var_os("JET_PROJECT_ROOT")
+            .map(PathBuf::from)
+            .ok_or_else(|| "JET_PROJECT_ROOT is required under `jet dev`".to_string())?;
+        if !root.is_absolute() {
+            return Err("JET_PROJECT_ROOT must be absolute".to_string());
+        }
+        let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+        let build = root.join(".jet").join("build");
         jet_devserver_ensure_directory(&build).map_err(|e| e.to_string())?;
         let real = std::fs::canonicalize(&build).map_err(|e| e.to_string())?;
-        if !real.starts_with(&cwd) {
-            return Err("build directory escapes the working directory".to_string());
+        if !real.starts_with(&root) {
+            return Err("web output directory escapes the selected project root".to_string());
         }
         Ok(real)
     }
-
     fn jet_devserver_ensure_directory(path: &Path) -> std::io::Result<()> {
         match std::fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(

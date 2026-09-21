@@ -574,6 +574,45 @@ fn run() {}
     }
 
     #[test]
+    fn semantic_tokens_keep_string_interpolations_one_color() {
+        let src = "fn run() {\n    line :: \"{escape(level)}\"\n}\n";
+        let (toks, diags) = crate::Lexer::lex(src);
+        assert!(diags.is_empty(), "{diags:?}");
+        let data = encode_semantic_tokens_with_arithmetic(&toks, src, &[]);
+        const STRING: u32 = 7;
+        let quote = src.find('"').unwrap();
+        let end = src.rfind('"').unwrap() + 1;
+        let mut line = 0u32;
+        let mut character = 0u32;
+        let mut saw_string = false;
+        for chunk in data.chunks_exact(5) {
+            if chunk[0] == 0 {
+                character += chunk[1];
+            } else {
+                line += chunk[0];
+                character = chunk[1];
+            }
+            let start = lsp_pos_to_offset(
+                src,
+                LspPos {
+                    line,
+                    character,
+                },
+            );
+            let tok_end = start + chunk[2] as usize;
+            if tok_end > quote && start < end {
+                assert_eq!(
+                    chunk[3], STRING,
+                    "quoted span must stay string, got type {} at {start}..{tok_end}",
+                    chunk[3]
+                );
+                saw_string = true;
+            }
+        }
+        assert!(saw_string, "expected a string semantic token over the quoted span");
+    }
+
+    #[test]
     fn semantic_tokens_name_arithmetic_policy() {
         let src = "fn run() { #Arithmetic(.Wrapping) { value :: U8{250} + U8{10} } }\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);

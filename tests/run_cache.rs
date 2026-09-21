@@ -437,19 +437,18 @@ fn example_stems_replay_identically_on_a_second_run() {
     let cache = common::unique_tmp("jet_run_cache_replay");
     let _ = std::fs::remove_dir_all(&cache);
 
-    // Precondition, not inheritance. Ask the product where its cache root is
-    // rather than restating the path law here, and prove the redirect is in
-    // force — an inherited `~/.cache/jet/run` would let a warm artifact from a
-    // previous run of this machine decide the result.
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let entry = repo.join("examples/features/streams/generators.jet");
+    // Precondition, not inheritance. Ask the product where its entry-scoped
+    // cache root is and prove the explicit redirect is in force.
     std::env::set_var("JET_RUN_CACHE_DIR", &cache);
     assert_eq!(
-        jet::RunCache::cache_root(),
-        cache,
+        jet::RunCache::cache_root_for_entry(&entry),
+        Some(cache.clone()),
         "JET_RUN_CACHE_DIR must redirect the run-cache root away from the machine's"
     );
     std::env::remove_var("JET_RUN_CACHE_DIR");
 
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // (stem, must warm-hit on the replay, must exit non-zero)
     let rows: [(&str, bool, bool); 3] = [
         // A generator: the second run was exit 101, an ICE out of

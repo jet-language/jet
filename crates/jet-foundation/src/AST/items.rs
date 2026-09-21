@@ -1426,6 +1426,195 @@ pub enum JobCachePolicy {
 /// `#FFI(<lang>) fn`. `lang` is the raw language name written in `#FFI(<lang>)`
 /// (validated in sema, not the parser — same convention as effect names);
 /// `source` is the single `"""…"""` string body of foreign source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlineAsmOutput {
+    /// The checked named placeholder that carries the result.
+    Parameter(usize),
+    /// The checked fixed register that carries the result.
+    Register(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineAsmContract {
+    /// Target triple selected while sema checked the assembly body.
+    pub target: String,
+    /// Checked result destination. `None` means the function returns unit.
+    pub output: Option<InlineAsmOutput>,
+    /// Checked fixed-register clobbers, in source order and without duplicates.
+    pub clobbers: Vec<String>,
+}
+
+/// The target register namespace audited by the inline-assembly contract.
+///
+/// This is deliberately a closed, target-derived fact. Backends must never
+/// accept a register merely because it is spelled like a register on the host
+/// that happens to run the compiler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineAsmTargetArch {
+    X86_64,
+    X86,
+    Aarch64,
+    Arm,
+    Riscv64,
+}
+
+impl InlineAsmTargetArch {
+    pub fn for_target(target: &str) -> Option<Self> {
+        let arch = target.split('-').next().unwrap_or_default();
+        match arch {
+            "x86_64" => Some(Self::X86_64),
+            "i386" | "i586" | "i686" | "x86" => Some(Self::X86),
+            "aarch64" => Some(Self::Aarch64),
+            "arm" | "armv7" => Some(Self::Arm),
+            _ if arch.starts_with("thumb") => Some(Self::Arm),
+            _ if arch.starts_with("riscv64") => Some(Self::Riscv64),
+            _ => None,
+        }
+    }
+
+    pub fn register_known(self, register: &str) -> bool {
+        let register = register
+            .strip_prefix('%')
+            .unwrap_or(register)
+            .to_ascii_lowercase();
+        match self {
+            Self::X86_64 => x86_64_register_known(&register),
+            Self::X86 => x86_register_known(&register),
+            Self::Aarch64 => register
+                .strip_prefix('x')
+                .or_else(|| register.strip_prefix('w'))
+                .and_then(|number| number.parse::<u8>().ok())
+                .is_some_and(|number| number <= 30),
+            Self::Arm => register
+                .strip_prefix('r')
+                .and_then(|number| number.parse::<u8>().ok())
+                .is_some_and(|number| number <= 12 || number == 14),
+            Self::Riscv64 => register
+                .strip_prefix('x')
+                .and_then(|number| number.parse::<u8>().ok())
+                .is_some_and(|number| (1..=31).contains(&number)),
+        }
+    }
+}
+
+impl InlineAsmContract {
+    pub fn target_arch(&self) -> Option<InlineAsmTargetArch> {
+        InlineAsmTargetArch::for_target(&self.target)
+    }
+
+    pub fn register_known(&self, register: &str) -> bool {
+        self.target_arch()
+            .is_some_and(|arch| arch.register_known(register))
+    }
+}
+
+pub fn inline_asm_target_arch(target: &str) -> Option<InlineAsmTargetArch> {
+    InlineAsmTargetArch::for_target(target)
+}
+
+pub fn inline_asm_register_known(target: &str, register: &str) -> bool {
+    InlineAsmTargetArch::for_target(target)
+        .is_some_and(|arch| arch.register_known(register))
+}
+
+fn x86_64_register_known(register: &str) -> bool {
+    matches!(
+        register,
+        "rax"
+            | "eax"
+            | "ax"
+            | "al"
+            | "ah"
+            | "rbx"
+            | "ebx"
+            | "bx"
+            | "bl"
+            | "bh"
+            | "rcx"
+            | "ecx"
+            | "cx"
+            | "cl"
+            | "ch"
+            | "rdx"
+            | "edx"
+            | "dx"
+            | "dl"
+            | "dh"
+            | "rsi"
+            | "esi"
+            | "si"
+            | "sil"
+            | "rdi"
+            | "edi"
+            | "di"
+            | "dil"
+            | "r8"
+            | "r8d"
+            | "r8w"
+            | "r8b"
+            | "r9"
+            | "r9d"
+            | "r9w"
+            | "r9b"
+            | "r10"
+            | "r10d"
+            | "r10w"
+            | "r10b"
+            | "r11"
+            | "r11d"
+            | "r11w"
+            | "r11b"
+            | "r12"
+            | "r12d"
+            | "r12w"
+            | "r12b"
+            | "r13"
+            | "r13d"
+            | "r13w"
+            | "r13b"
+            | "r14"
+            | "r14d"
+            | "r14w"
+            | "r14b"
+            | "r15"
+            | "r15d"
+            | "r15w"
+            | "r15b"
+    )
+}
+
+fn x86_register_known(register: &str) -> bool {
+    matches!(
+        register,
+        "eax"
+            | "ax"
+            | "al"
+            | "ah"
+            | "ebx"
+            | "bx"
+            | "bl"
+            | "bh"
+            | "ecx"
+            | "cx"
+            | "cl"
+            | "ch"
+            | "edx"
+            | "dx"
+            | "dl"
+            | "dh"
+            | "esi"
+            | "si"
+            | "sil"
+            | "edi"
+            | "di"
+            | "dil"
+    )
+}
+
+/// D-FFI-INLINE1=A (card #501): the inline foreign tier payload on a
+/// `#FFI(<lang>) fn`. `lang` is the raw language name written in `#FFI(<lang>)`
+/// (validated in sema, not the parser — same convention as effect names);
+/// `source` is the single `"""…"""` string body of foreign source.
 #[derive(Debug, Clone)]
 pub struct InlineForeign {
     /// The language name inside `#FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
@@ -1438,6 +1627,8 @@ pub struct InlineForeign {
     pub source: String,
     /// Span of the foreign-source string literal.
     pub source_span: Span,
+    /// Sema-owned normalized facts consumed by every native lowering.
+    pub asm_contract: Option<InlineAsmContract>,
 }
 
 /// D-PREPOST1: one `#Pre`/`#Post` contract clause — a pure condition plus the

@@ -52,9 +52,8 @@ impl<'a> Parser<'a> {
                         expr = self.parse_member_spread(expr, start)?;
                         continue;
                     }
-                    // D-LIT-DOT1 migration arm: `alias.Type.{ … }` is the
-                    // retired spelling of a qualified literal. The canonical
-                    // form is handled by the direct-brace branch below.
+                    // D-LIT-DOT1: `alias.Type.{ … }` is retired. Canonical
+                    // form is `alias.Type{ … }`. Fmt rewrites; compile rejects.
                     if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
                         let start = expr.span().start;
                         if let Expr::Field(inner, type_name, _) = &expr {
@@ -62,7 +61,7 @@ impl<'a> Parser<'a> {
                                 let alias = alias.clone();
                                 let type_name = type_name.clone();
                                 let brace_span = self.peek().span;
-                                self.diags.push(Diagnostic::error(
+                                let diagnostic = Diagnostic::error(
                                     "E0320",
                                     format!(
                                         "literal construction uses `{}.{}{{…}}`, not `{}.{}.{{…}}`",
@@ -72,7 +71,11 @@ impl<'a> Parser<'a> {
                                         .to_string(),
                                     format!("write `{}.{}{{…}}`", alias, type_name),
                                     Some(brace_span),
-                                ));
+                                );
+                                if !self.migration_mode {
+                                    return Err(diagnostic);
+                                }
+                                self.diags.push(diagnostic);
                                 if alias.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
                                     let full = format!("{alias}.{type_name}");
                                     let span = expr.span();

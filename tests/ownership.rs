@@ -1,6 +1,7 @@
 //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
 
 mod common;
+mod tir_support;
 
 use std::fs;
 use std::process::Command;
@@ -1042,6 +1043,27 @@ fn run() {
     let diags = jet::compile(reverse_view_alias)
         .expect_err("a closure keeps its copied View alias live across the whole call");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn erased_capture_and_view_do_not_consume_outer_values() {
+    let src = r#"
+struct NoClone { label: Int }
+
+fn run() {
+    item :: NoClone{ label: 7 }
+    values := [1, 2]
+    #Off {
+        callback :: () -> item.label
+        window :: values[0..1]
+        retained :: () -> window[0]
+    }
+    values.push(3)
+    print(item.label)
+    print(values.len())
+}
+"#;
+    tir_support::assert_tiers_agree("erased_capture_view", src, "7\n3\n");
 }
 
 #[test]

@@ -11,7 +11,7 @@ struct RegressionEvidence {
     passed: Bool
 }
 
-fn fit() RegressionEvidence -> {
+fn fit() -> RegressionEvidence {
     x1 :: Float{1.0}
     x2 :: Float{2.0}
     x3 :: Float{3.0}
@@ -26,21 +26,21 @@ fn fit() RegressionEvidence -> {
         y1 - (intercept + slope * x1),
         y2 - (intercept + slope * x2),
         y3 - (intercept + slope * x3),
-        y4 - (intercept + slope * x4)
+        y4 - (intercept + slope * x4),
     }
     max_residual :: math.max(
-        math.max(math.abs(residuals[0]), math.abs(residuals[1])),
-        math.max(math.abs(residuals[2]), math.abs(residuals[3]))
+    math.max(math.abs(residuals[0]), math.abs(residuals[1])),
+    math.max(math.abs(residuals[2]), math.abs(residuals[3])),
     )
     tolerance :: Float{0.25}
     passed :: max_residual <= tolerance
     RegressionEvidence{
-        slope,
-        intercept,
-        residuals,
-        tolerance,
-        max_residual,
-        passed
+        slope: slope,
+        intercept: intercept,
+        residuals: residuals,
+        tolerance: tolerance,
+        max_residual: max_residual,
+        passed: passed,
     }
 }
 

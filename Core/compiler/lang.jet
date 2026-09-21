@@ -1,0 +1,176 @@
+// core.compiler.lang — closed menus the compiler itself consults.
+//
+// These enums are the public names of marker arguments (`#Inline`, `#Layout`
+// `#FX`, `#Meta`, `#Job`, `#RenameAll`, …). Variant spellings match
+// `Policy::canonical_rule_arg_variants`. They are values, not a second
+// type system: a Jet program names a variant; the compiler records the fact.
+/// Calling convention for `#Import` / `#Export`.
+pub enum ABI {
+    System
+    Cdecl
+    Stdcall
+    Fastcall
+    Win64
+    Sysv64
+}
+
+/// Overflow behaviour for integer arithmetic markers.
+pub enum ArithmeticMode {
+    Checked
+    Wrapping
+    Saturating
+}
+
+/// Capability roots that may appear in an effect_name row ``.
+pub enum Effect {
+    FS
+    Net
+    Crypto
+    Time
+    Random
+    Env
+    Proc
+    IO
+    DB
+    Exec
+    Browser
+    Secret
+}
+
+/// Guest language named by `#Import`.
+pub enum FfiLanguage {
+    C
+    Cpp
+    Asm
+}
+
+/// Inlining hint for `#Inline`.
+pub enum InlineMode {
+    Hint
+    Always
+    Never
+}
+
+/// `#Job` publication scope.
+pub enum JobScope {
+    Dev
+    Ship
+    Internal
+}
+
+/// Parallel kernel marker.
+pub enum KernelMode {
+    Parallel
+}
+
+/// Representation requested by `#Layout`.
+pub enum Layout {
+    C
+    Columnar
+}
+
+/// `#Meta(maturity: …)` closed set.
+pub enum Maturity {
+    Experimental
+    Tested
+    Hardened
+}
+
+/// `#Memo` bound. `None` means "do not memoize".
+pub enum MemoBound {
+    Default
+    Unset
+}
+
+/// Field-rename policy for codecs (`#RenameAll`).
+pub enum NamingCase {
+    Camel
+    Snake
+    Pascal
+    Kebab
+    Screaming
+}
+
+/// Proof obligation intensity.
+pub enum ObligationMode {
+    Unspecified
+    GateOnly
+    Obligations
+    PerSite
+    Track
+    Skip
+}
+
+/// Source path named by a marker argument. Empty variant menu: the value is
+/// the path text.
+pub struct Path {
+    pub text: String
+}
+
+/// Build / capability policy knobs.
+pub enum PolicySetting {
+    Allow
+    Deny
+    Unsafe
+    Gc
+    ExplicitUnits
+    Copies
+    Sentries
+    Explicit
+    On
+    Off
+}
+
+/// Placement site for a `marker` declaration's `@sites`.
+pub enum Site {
+    Package
+    File
+    Module
+    Function
+    Method
+    Block
+    Statement
+    Expression
+    Type
+    Impl
+    Declaration
+    Constant
+    Field
+    Variant
+    Parameter
+    Test
+    Operation
+    Text
+}
+
+/// Typestate tag named by `#State`. The compiler threads the name; this
+/// struct is the runtime projection.
+pub struct State {
+    pub name: String
+}
+
+/// Built-in taint tags (`#Tag`).
+pub enum TaintKind {
+    Input
+    PII
+    Secret
+    Credential
+}
+
+/// Codegen target family.
+pub enum Target {
+    Native
+    Web
+    Wasm
+    JS
+    Freestanding
+    OS
+}
+
+/// Rule-reflection track.
+pub enum Track {
+    Frontend
+    Backend
+    Runtime
+    Tooling
+}

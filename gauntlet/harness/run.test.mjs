@@ -237,6 +237,9 @@ test("parallel-grep para_map probe preserves byte-exact output", stagedEntryTest
     await fs.writeFile(path.join(fixture, "b.txt"), "none\n");
     await fs.writeFile(path.join(fixture, "ignored.md"), "needle-7f\n");
     const expected = `${path.join(fixture, "a.txt")}:2\nfiles 1/2 total 2\n`;
+    const source = await fs.readFile(path.join(parallelGrepDir, "run.jet"), "utf8");
+    assert.doesNotMatch(source, /pair\.b/);
+    assert.match(source, /\.para_map\(/);
     const result = await execFileAsync(
       envRunner,
       ["jet", "run", "run.jet", "--", fixture, "needle-7f"],

@@ -152,14 +152,6 @@ use crate::AST::{
     UnOp, VariantPayload,
 };
 
-/// Stable suffix for the raw C ABI trampoline around a fallible Jet callable.
-///
-/// A normal Jet function returns its typed failure carrier. C callback slots
-/// carry only the success value, so the emitted trampoline owns the one-way
-/// error edge instead of giving the foreign caller a Rust `Result` ABI.
-pub(crate) fn c_callback_adapter_name(name: &str) -> String {
-    format!("{name}__c_callback")
-}
 
 /// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with a
 /// `ComptimeName` carrying its enum value before sema sees the generated body.
@@ -1753,11 +1745,19 @@ fn lower_demanded_generic_methods(
                 cx.current_type_params.replace(previous_type_params);
                 continue;
             }
+            let static_checked_text = trait_name == Some(crate::Generics::CHECKED_TEXT)
+                && !specialized
+                    .params
+                    .iter()
+                    .any(|param| param.name == crate::Syntax::KW_SELF);
             let mut lowered = if let Some(trait_name) = trait_name {
-                // Bind `self` as `Wrap<Int>` so field reads substitute `T` → arg.
                 // Encode is an ordinary instance method; Decode stays on the static
-                // trait-method ABI (`tree` only, no receiver).
-                if trait_name == crate::Generics::ENCODE && matches!(&owner_ty, Type::Apply { .. })
+                // trait-method ABI (`tree` only, no receiver). CheckedText static
+                // methods are ordinary associated functions too: their source
+                // call is a concrete `Type::method__generic__T` target, not a
+                // trait-vtable slot.
+                if (trait_name == crate::Generics::ENCODE && matches!(&owner_ty, Type::Apply { .. }))
+                    || static_checked_text
                 {
                     lower_method_for_owner(
                         &specialized,
@@ -2869,6 +2869,43 @@ fn lower_mir_fragment(
     for family in context.unit_families {
         items.push(crate::AST::Item::UnitFamily(family.clone()));
     }
+    // Checked-text comptime evaluation supplies method bodies but historically
+    // omits the trait map. Reconstruct only this exact nominal contract from
+    // the retained String-backed declaration rows; never infer an owner from a
+    // lowered receiver value.
+    let fragment_checked_text_owners = context
+        .distinct_bases
+        .iter()
+        .filter(|(owner, base)| {
+            matches!(base, Type::String)
+                && context
+                    .methods
+                    .contains_key(&(owner.to_string(), "check".to_string()))
+                && context
+                    .methods
+                    .contains_key(&(owner.to_string(), "encode_hole".to_string()))
+        })
+        .map(|(owner, _)| owner.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let fragment_trait_name =
+        |owner: &str, method_name: &str, method: &crate::AST::Func| -> Option<String> {
+            if let Some(trait_name) = context
+                .method_traits
+                .get(&(owner.to_string(), method_name.to_string()))
+            {
+                return Some(trait_name.clone());
+            }
+            if fragment_checked_text_owners.contains(owner)
+                && matches!(method_name, "check" | "encode_hole")
+                && !method
+                    .params
+                    .iter()
+                    .any(|param| param.name == crate::Syntax::KW_SELF)
+            {
+                return Some(crate::Generics::CHECKED_TEXT.to_string());
+            }
+            None
+        };
     for ((owner, method_name), method) in context.methods {
         if !reachable.contains(&FragmentCallable::Method {
             owner: owner.clone(),
@@ -2894,10 +2931,7 @@ fn lower_mir_fragment(
         if declared {
             continue;
         }
-        let trait_name = context
-            .method_traits
-            .get(&(owner.clone(), method_name.clone()))
-            .cloned();
+        let trait_name = fragment_trait_name(owner, method_name, method);
         let operator_rhs = trait_name
             .as_deref()
             .filter(|trait_name| {
@@ -3008,16 +3042,16 @@ fn lower_mir_fragment(
         }) {
             continue;
         }
-        if matches!(method_name.as_str(), "encode" | "decode") {
+        if matches!(method_name.as_str(), "encode" | "decode")
+            || !method.type_params.is_empty()
+        {
             continue;
         }
-        let mut lowered = if let Some(trait_name) = context
-            .method_traits
-            .get(&(owner.clone(), method_name.clone()))
-        {
-            trait_method_traits.insert((owner.clone(), method_name.clone()), trait_name.clone());
+        let trait_name = fragment_trait_name(owner, method_name, method);
+        let mut lowered = if let Some(trait_name) = trait_name.as_deref() {
+            trait_method_traits.insert((owner.clone(), method_name.clone()), trait_name.to_string());
             let operator_rhs = matches!(
-                trait_name.as_str(),
+                trait_name,
                 crate::Syntax::TRAIT_ADD
                     | crate::Syntax::TRAIT_SUB
                     | crate::Syntax::TRAIT_MUL
@@ -3103,6 +3137,7 @@ fn lower_mir_fragment(
                 fields,
             },
         })));
+        lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
         specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
         return lower_mir_fragment_program(
             module,
@@ -3149,6 +3184,7 @@ fn lower_mir_fragment(
             fields,
         },
     })));
+    lower_demanded_generic_methods(&items, &cx, &mut extra_funcs)?;
     specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
     lower_mir_fragment_program(
         module,
@@ -4014,7 +4050,9 @@ fn lower_checked_tir_program_on_stack(
         auto_debug_by_module.insert(entry_module_identity.clone(), cx.auto_debug.clone());
         let (entry_name, cli_schema) = if matches!(
             request.kind,
-            jet_foundation::MIR::MirArtifactKind::TestExecutable
+            jet_foundation::MIR::MirArtifactKind::NativeLibrary
+                | jet_foundation::MIR::MirArtifactKind::SandboxPlugin
+                | jet_foundation::MIR::MirArtifactKind::TestExecutable
                 | jet_foundation::MIR::MirArtifactKind::FuzzExecutable
         ) {
             (None, None)
@@ -4080,9 +4118,12 @@ fn lower_checked_tir_program_on_stack(
                         &mut funcs,
                         &mut contract_rows,
                     );
-                    if f.inline_foreign.is_some() || !f.type_params.is_empty() || !covered {
+                    if f.inline_foreign.is_some() || !f.type_params.is_empty() {
                         continue;
                     }
+                    // Resident `jet run` has no AST fallback. Lower sibling
+                    // functions even when a conservative subset gate said no
+                    // (`mark_ready`, `produce`, `async_check`).
                     let lowered = lower_func(f, &cx);
                     funcs.push(lowered);
                 }
@@ -4288,7 +4329,7 @@ fn lower_checked_tir_program_on_stack(
                                     &mut contract_rows,
                                 );
                                 cx.jit_local_call_prefix = previous_prefix;
-                                if !f.type_params.is_empty() || !covered {
+                                if f.inline_foreign.is_some() || !f.type_params.is_empty() {
                                     continue;
                                 }
                                 // Match the AOT inline-module path: lower against the
@@ -4428,7 +4469,10 @@ fn lower_checked_tir_program_on_stack(
                             function.type_params.is_empty() && tir_covers(function, &imported_cx);
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
-                        if covered {
+                        // Resident imported calls have no AST fallback either. Retain every
+                        // ordinary checked body so MIR can resolve cross-module sibling calls;
+                        // contract sampling still records the original coverage fact above.
+                        if function.inline_foreign.is_none() && function.type_params.is_empty() {
                             let mut lowered = lower_func(function, &imported_cx);
                             let binders = qualification_binders(&[], Some(function));
                             for (_, ty, _) in &mut lowered.params {
@@ -4505,7 +4549,7 @@ fn lower_checked_tir_program_on_stack(
                                 &mut funcs,
                                 &mut contract_rows,
                             );
-                            if !covered {
+                            if !function.type_params.is_empty() {
                                 continue;
                             }
                             // Keep inline body-local import lookup aligned with the
@@ -6209,7 +6253,9 @@ pub enum TStmt {
         cond: TExpr,
         step: Option<Box<TStmt>>,
         /// D-SIMD3=B: preserve sema's complete loop proof when a numeric range
-        /// is canonicalized into this counted shape.
+        /// is canonicalized into this counted shape.  The TIR-to-MIR boundary
+        /// binds it to the emitted header, cursor, body, advance, and access
+        /// identities; consumers never rebind it from source spelling.
         auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
         body: Vec<TStmt>,
     },
@@ -6226,7 +6272,9 @@ pub enum TStmt {
         end: TExpr,
         step: Option<TExpr>,
         exclusive: bool,
-        /// D-SIMD3=B: sema's complete proof for the loop's vectorizable shape.
+        /// D-SIMD3=B: sema's complete loop proof for the loop's vectorizable
+        /// shape.  Lowering carries it with the exact emitted MIR scope and
+        /// access identities, rather than reconstructing proof from syntax.
         auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
         body: Vec<TStmt>,
     },
@@ -7623,7 +7671,7 @@ impl TExpr {
         let exclusivity = match &self.kind {
             TExprKind::Borrow { mutable: true, .. } => TExclusivity::Exclusive,
             TExprKind::Borrow { mutable: false, .. } => TExclusivity::Shared,
-            TExprKind::ResourceTake(_) => TExclusivity::Move,
+            TExprKind::ResourceTake(_) | TExprKind::Move(_) => TExclusivity::Move,
             _ => TExclusivity::Unknown,
         };
         let comptime_value = match &self.kind {
@@ -8062,7 +8110,8 @@ fn collect_cost_expr_with_state_and_context(
         }
         TExprKind::LayoutLit { inner }
         | TExprKind::Unary { operand: inner, .. }
-        | TExprKind::Borrow { place: inner, .. } => {
+        | TExprKind::Borrow { place: inner, .. }
+        | TExprKind::Move(inner) => {
             collect_cost_expr(inner, function, expr_span, loop_depth, sites);
         }
         TExprKind::IncDec { place, .. } => {
@@ -9368,7 +9417,7 @@ fn validate_tir_method(
 /// that is not list-shaped here is the string case.
 pub fn view_copy_symbol(source: &Type) -> &'static str {
     match source {
-        Type::Apply { name, args } if name == "View" => {
+        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             if matches!(args.as_slice(), [Type::Named(element)] if element == "str") {
                 "jet_string_view_copy"
             } else {
@@ -9388,7 +9437,7 @@ pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
     let Type::Apply { name, args } = source else {
         return None;
     };
-    if name != "View" || args.len() != 1 {
+    if !matches!(name.as_str(), "View" | "ViewMut") || args.len() != 1 {
         return None;
     }
     if matches!(&args[0], Type::Named(element) if element == "str") {
@@ -9529,14 +9578,19 @@ pub enum TExprKind {
     },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
+    /// Explicit terminal ownership consumption.
+    Drop(Box<TExpr>),
+    /// Explicit resource close operation.
+    Close(Box<TExpr>),
     /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
     /// value (a `#SingleUse` value's audited terminal consumption). Lowers to a
     /// plain `drop(arg)` in Rust: a move-to-nowhere whose `Drop` runs. No
     /// `unsafe` is emitted (I3) — the `#Unsafe` gate is a sema-only audit.
-    Drop(Box<TExpr>),
-    /// D-SHAPE-RESOURCE2=A: ambient `close(^value)` after sema has proved the
-    /// concrete value implements the nominal `Close` trait.
-    Close(Box<TExpr>),
+    /// Explicit source `AccessConvention::Move` for a Core argument.  This
+    /// ownership marker is distinct from the Core row's borrow mask: a
+    /// non-borrowed scalar/value argument may still be read or copied, while
+    /// this node is emitted only when sema proved an owning move.
+    Move(Box<TExpr>),
     ResourceNew(Box<TExpr>),
     ResourceTake(String),
     /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
@@ -10745,10 +10799,18 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
             web: true,
         };
     };
-    if foreign.lang.eq_ignore_ascii_case("asm") {
-        // Assembly has no target-aware MIRRust lowering or resident provider;
-        // keep every tier unavailable rather than claiming a partial bridge.
-        return TTargetApplicability::default();
+    if matches!(
+        foreign.lang.to_ascii_lowercase().as_str(),
+        "c" | "cpp" | "c++" | "asm" | "assembly"
+    ) {
+        // Native inline bodies share the checked bridge across AOT, Cranelift,
+        // and the resident interpreter; Web has no native provider.
+        return TTargetApplicability {
+            rust_aot: true,
+            cranelift: true,
+            interpreter: true,
+            web: false,
+        };
     }
     let web = foreign.lang.eq_ignore_ascii_case("js") || foreign.lang.eq_ignore_ascii_case("web");
     TTargetApplicability {
@@ -11005,6 +11067,10 @@ pub enum TBuiltinOp {
     InsertMap,
     /// `add_new(k, v)` on a map → false without overwriting an existing key.
     AddNewMap,
+    /// `setdefault(k, v)` on a map → return existing value or insert and return `v`.
+    MapSetDefault,
+    /// `update(other)` on a map → mutate the receiver; right wins on shared keys.
+    MapUpdate,
     /// D-MAP-MERGE1=E: `merge(other)` → right wins on shared keys.
     MapMerge,
     /// D-MAP-MERGE1=E: `merge(other, conflict)` → callback resolves shared keys.
@@ -11240,6 +11306,7 @@ pub enum TBuiltinOp {
     MapFromKeys,
     MapContainsValue,
     MapPopFirst,
+    /// `list.replace(i, v)` → the prior indexed value.
     ListReplace,
     /// `indexed()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
@@ -11277,6 +11344,14 @@ pub enum TBuiltinOp {
     SetFrom,
     /// `set.add(v)` → `(recv).insert(a0)` (HashSet::insert; bool result discarded).
     SetInsert,
+    /// `set.update(other)` → mutate the receiver with every value in `other`.
+    SetUpdate,
+    /// `set.difference_update(other)` → retain values absent from `other`.
+    SetDifferenceUpdate,
+    /// `set.intersection_update(other)` → retain values present in `other`.
+    SetIntersectionUpdate,
+    /// `set.symmetric_difference_update(other)` → retain values in exactly one set.
+    SetSymmetricDifferenceUpdate,
     /// `set.remove(v)` → `(recv).remove(&a0)` (bool result discarded).
     SetRemove,
     /// `set.to_list()` → `(recv).iter().cloned().collect::<Vec<_>>()`.
@@ -11297,10 +11372,12 @@ pub enum TBuiltinOp {
     SetCapacity,
     /// #1478: `set.first()` → arbitrary element (unordered).
     SetFirst,
-    /// #1478: `set.values()` → lazy view over the same arbitrary order as `to_list`.
+    /// `set.values()` → lazy view over the same arbitrary order as `to_list`.
     SetValues,
-    /// D-ONCE-VERB1=A: `set.pop(v)` → shared remove-and-return kernel.
+    /// `set.pop(v)` / `set.take(v)` → shared remove-and-return kernel.
     SetPop,
+    /// `set.replace(v)` → insert and return the displaced equal value.
+    SetReplace,
     /// D-SET-DECLINE1=C: `set.sort()` → a fresh sorted `List`, same
     /// to-list-then-sort machinery `to_list()` already runs (Set never mutates).
     SetSort,
@@ -11432,9 +11509,10 @@ impl TBuiltinOp {
             | Self::TryInsertMap
             | Self::TryStringPush
             | Self::Pop
-            | Self::PriorityQueuePop
             | Self::InsertMap
             | Self::AddNewMap
+            | Self::MapSetDefault
+            | Self::MapUpdate
             | Self::InsertList
             | Self::RemoveMap
             | Self::RemoveList { .. }
@@ -11446,6 +11524,10 @@ impl TBuiltinOp {
             | Self::SortDesc
             | Self::Clear
             | Self::SetInsert
+            | Self::SetUpdate
+            | Self::SetDifferenceUpdate
+            | Self::SetIntersectionUpdate
+            | Self::SetSymmetricDifferenceUpdate
             | Self::SetRemove
             | Self::SetPop
             | Self::SortedSetInsert
@@ -11838,7 +11920,8 @@ pub enum THandleOp {
     HTTPReqField(&'static str),
     /// c109 Phase 20: HTTPRequest `header(name)` → `(recv).headers.get(&a0).cloned()`.
     HTTPReqHeader,
-    /// c109 Phase 20: HTTPRequest `param(name)` → `{root}jet_http_request_param(&(recv), &(a0))`.
+    /// c109 Phase 20: HTTPRequest `param(name)` uses the canonical checked
+    /// outcome route (`jet_http_srv_req_param`) for every MIR carrier.
     HTTPReqParam,
     HTTPReqTrailers,
     /// c109 Phase 20: HTTPResponse `status()`/`body()` → `(recv).<field>.clone()`.
@@ -12260,7 +12343,10 @@ impl TCallArg {
             TExclusivity::Exclusive
         } else if self.borrow {
             TExclusivity::Shared
-        } else if matches!(&self.value.kind, TExprKind::ResourceTake(_)) {
+        } else if matches!(
+            &self.value.kind,
+            TExprKind::ResourceTake(_) | TExprKind::Move(_)
+        ) {
             TExclusivity::Move
         } else {
             TExclusivity::Unknown

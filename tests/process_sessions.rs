@@ -131,6 +131,138 @@ fn run() {{
 
 #[cfg(unix)]
 #[test]
+fn process_spawn_collects_stdout_and_stderr() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    spec :: process.cmd(["sh", "-c", "printf out; printf err >&2"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+    child :: spec.spawn() ?? panic("spawn failed")
+    receipt :: child.wait() ?? panic("wait failed")
+    print(receipt.output)
+    print(receipt.errors)
+    print(receipt.success)
+}
+"#;
+    tir_support::assert_tiers_agree("process_spawn_collect", source, "out\nerr\ntrue\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn process_pipeline_streaming_lifecycle_matches_all_execution_tiers() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    streamed :: process.pipeline([
+        process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]),
+        process.cmd(["wc", "-c"])
+    ]) ?? panic("stream pipeline failed")
+    print("stream:{streamed.output.trim()}")
+
+    bounded :: process.pipeline([
+        process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]).output_limit(4096),
+        process.cmd(["cat"])
+    ])
+    if bounded == {
+        .Err(error) -> {
+            if error == {
+                .ResourceLimit(limit) -> print(if limit == .Output -> "bounded:output" else -> "bounded:wrong")
+                else -> print("bounded:wrong")
+            }
+        }
+        .Ok(_) -> print("bounded:accepted")
+    }
+
+    early :: process.pipeline([
+        process.cmd(["yes", "x"]),
+        process.cmd(["head", "-c", "4"])
+    ])
+    if early == {
+        .Ok(receipt) -> print("early:{receipt.output.len()}:{receipt.success}")
+        .Err(_) -> print("early:error")
+    }
+
+    nonzero :: process.pipeline([
+        process.cmd(["sh", "-c", "printf out; printf err >&2; exit 7"]),
+        process.cmd(["cat"])
+    ]) ?? panic("nonzero pipeline failed")
+    print("nonzero:{nonzero.output.trim()}:{nonzero.errors.trim()}:{nonzero.code}:{nonzero.success}")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "process_pipeline_streaming_lifecycle",
+        source,
+        "stream:131072\nbounded:output\nearly:4:false\nnonzero:out:err:7:false\n",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn process_pipeline_timeout_reaps_descendants_across_execution_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_pipeline_timeout_tree_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let pid_files = ["aot", "jit", "interp"].map(|name| dir.join(format!("{name}.pid")));
+    for path in &pid_files {
+        let _ = fs::remove_file(path);
+    }
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    first :: process.pipeline([
+        process.cmd(["{fixture}", "tree", "{aot}"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("aot-shaped pipeline failed")
+    print(first.timed_out)
+    second :: process.pipeline([
+        process.cmd(["{fixture}", "tree", "{jit}"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("jit-shaped pipeline failed")
+    print(second.timed_out)
+    third :: process.pipeline([
+        process.cmd(["{fixture}", "tree", "{interp}"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("interpreter-shaped pipeline failed")
+    print(third.timed_out)
+}}
+"#,
+        fixture = fixture,
+        aot = jet_string_path(&pid_files[0]),
+        jit = jet_string_path(&pid_files[1]),
+        interp = jet_string_path(&pid_files[2]),
+    );
+    tir_support::assert_tiers_agree(
+        "process_pipeline_timeout_tree",
+        &src,
+        "true\ntrue\ntrue\n",
+    );
+    for path in &pid_files {
+        let pid = fs::read_to_string(path).expect("pipeline descendant wrote pid");
+        let pid = pid.trim();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while native_pid_alive(pid) {
+            if std::time::Instant::now() >= deadline {
+                stop_native_pid(pid);
+                panic!("pipeline descendant {pid} survived timeout");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn pipeline_stage_timeout_matches_all_execution_tiers() {
     let dir = std::env::temp_dir().join(format!(
         "jet_process_session_pipeline_timeout_tiers_{}",

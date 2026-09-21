@@ -1,7 +1,7 @@
 //! D-INTBIG1 / D-DECIMAL1: arbitrary-precision default `Int` and base-10 `Decimal`.
 //! Shared name/method tables for sema and codegen.
 
-use crate::JSONNumber::{json_decimal_lexeme, json_exact_integer_text};
+use crate::JSONNumber::{json_decimal_lexeme, json_decimal_small, json_exact_integer_text};
 use crate::Syntax;
 use crate::AST::{Expr, Marker, Type};
 
@@ -115,7 +115,9 @@ pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
         ("div", 1) => Some(Some(Type::Named(Syntax::TYPE_FRACTION.to_string()))),
         ("round" | "floor" | "ceil", 0) => Some(Some(decimal())),
         ("equal", 1) => Some(Some(Type::Bool)),
+        ("compare", 1) => Some(Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))),
         ("to_string", 0) => Some(Some(Type::String)),
+        ("to_float", 0) => Some(Some(Type::Float)),
         _ => None,
     }
 }
@@ -182,6 +184,19 @@ impl CtFraction {
         Some(Self {
             numerator: numerator.div_rem(&divisor)?.0,
             denominator: denominator.div_rem(&divisor)?.0,
+        })
+    }
+    fn from_reduced_bigints(mut numerator: CtBigInt, mut denominator: CtBigInt) -> Option<Self> {
+        if denominator.is_zero() {
+            return None;
+        }
+        if denominator.negative {
+            numerator = numerator.neg();
+            denominator = denominator.neg();
+        }
+        Some(Self {
+            numerator,
+            denominator,
         })
     }
 
@@ -778,30 +793,6 @@ impl CtBigInt {
         .normalize()
     }
 
-    fn to_decimal_digits(&self) -> Vec<u8> {
-        let length = ctbi_limb_len(&self.limbs);
-        if length == 0 || (length == 1 && self.limbs[0] == 0) {
-            return vec![0];
-        }
-        let mut digits = Vec::with_capacity(ctbi_limb_decimal_digits(&self.limbs));
-        let top = self.limbs[length - 1];
-        let mut divisor = 1_000_000_000u32;
-        while divisor > 1 && top < divisor {
-            divisor /= 10;
-        }
-        while divisor != 0 {
-            digits.push(((top / divisor) % 10) as u8);
-            divisor /= 10;
-        }
-        for &limb in self.limbs[..length - 1].iter().rev() {
-            let mut divisor = 100_000_000u32;
-            while divisor != 0 {
-                digits.push(((limb / divisor) % 10) as u8);
-                divisor /= 10;
-            }
-        }
-        digits
-    }
 
     /// Project the exact integer into binary64 without allocating its decimal
     /// spelling. Keep the conversion here so Decimal and Fraction share one
@@ -1405,6 +1396,30 @@ impl CtBigInt {
         if width == 0 {
             return None;
         }
+        if matches!(method, "bit_count" | "bit_length") {
+            if let Some(value) = self.try_i64() {
+                let magnitude = value.unsigned_abs();
+                return Some(match method {
+                    "bit_count" => i64::from(magnitude.count_ones()),
+                    "bit_length" => i64::from(64 - magnitude.leading_zeros()),
+                    _ => unreachable!(),
+                });
+            }
+            let bit_width = self.bit_width();
+            let count = if method == "bit_length" {
+                bit_width
+            } else {
+                let mut value = self.abs();
+                let mut ones = 0usize;
+                while !value.is_zero() {
+                    let (next, remainder) = value.div_rem_small(2);
+                    ones += usize::from(remainder != 0);
+                    value = next;
+                }
+                ones
+            };
+            return i64::try_from(count).ok();
+        }
         let bits = self.twos_complement(width);
         let ones = bits.iter().filter(|bit| **bit).count();
         let count = match method {
@@ -1724,31 +1739,179 @@ impl CtBigInt {
 // arithmetic match across tiers (D-DECIMAL1 / R12).
 // parity: guard tests/repl.rs::repl_decimal_exact_transcript
 
+// Keep fitting mantissas on the scalar rail; only overflow spills to limbs.
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum CtDecimalMagnitude {
+    Small(i128),
+    Big(CtBigInt),
+}
+
+fn ct_decimal_bigint_from_i128(value: i128) -> CtBigInt {
+    let negative = value < 0;
+    let mut magnitude = if negative {
+        value.wrapping_neg() as u128
+    } else {
+        value as u128
+    };
+    if magnitude == 0 {
+        return CtBigInt::from_int(0);
+    }
+    let mut limbs = Vec::new();
+    while magnitude != 0 {
+        limbs.push((magnitude % u128::from(CTBI_BASE)) as u32);
+        magnitude /= u128::from(CTBI_BASE);
+    }
+    CtBigInt { negative, limbs }
+}
+
+fn ct_decimal_strip_trailing_zeros(value: &mut CtBigInt, scale: &mut u32) {
+    while *scale > 0 && !value.is_zero() {
+        let zero_chunks = value.limbs.iter().take_while(|limb| **limb == 0).count();
+        let removable_chunks = zero_chunks.min((*scale / 9) as usize);
+        if removable_chunks > 0 {
+            value.limbs.drain(..removable_chunks);
+            *scale -= (removable_chunks as u32) * 9;
+            continue;
+        }
+
+        let low = *value.limbs.first().unwrap_or(&0);
+        let mut zeros = 0u32;
+        let mut factor = 1u32;
+        while zeros < 9 && low % (factor * 10) == 0 {
+            factor *= 10;
+            zeros += 1;
+        }
+        let removable = zeros.min(*scale);
+        if removable == 0 {
+            break;
+        }
+        let divisor = 10u32.pow(removable);
+        let (next, remainder) = value.div_rem_small(divisor);
+        debug_assert_eq!(remainder, 0);
+        *value = next;
+        *scale -= removable;
+    }
+}
+
+fn ct_decimal_magnitude_from_digits(digits: &[u8]) -> CtDecimalMagnitude {
+    debug_assert!(!digits.is_empty());
+    if digits.len() <= 39 {
+        let mut small = 0i128;
+        let mut fits = true;
+        for &digit in digits {
+            let Some(next) = small
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(i128::from(digit)))
+            else {
+                fits = false;
+                break;
+            };
+            small = next;
+        }
+        if fits {
+            return CtDecimalMagnitude::Small(small);
+        }
+    }
+    CtDecimalMagnitude::Big(CtBigInt::from_decimal_digits(digits))
+}
+fn ct_decimal_magnitude_from_ascii_digits(
+    digits: &str,
+) -> Result<CtDecimalMagnitude, String> {
+    if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
+        return Err("malformed Decimal.digits".to_string());
+    }
+    let mut small = 0i128;
+    let mut fits = true;
+    for digit in digits.bytes() {
+        if !fits {
+            break;
+        }
+        let Some(next) = small
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(i128::from(digit - b'0')))
+        else {
+            fits = false;
+            break;
+        };
+        small = next;
+    }
+    if fits {
+        return Ok(CtDecimalMagnitude::Small(small));
+    }
+    CtBigInt::from_str(digits)
+        .map(CtDecimalMagnitude::Big)
+        .map_err(|_| "malformed Decimal.digits".to_string())
+}
+
+fn ct_decimal_parse(s: &str) -> Result<(bool, CtDecimalMagnitude, u32), String> {
+    if let Some((negative, value, scale)) = json_decimal_small(s)? {
+        return Ok((negative, CtDecimalMagnitude::Small(value), scale));
+    }
+    let (negative, digits, scale) = json_decimal_lexeme(s)?;
+    Ok((
+        negative,
+        ct_decimal_magnitude_from_digits(&digits),
+        scale,
+    ))
+}
+
+#[derive(Clone, Debug)]
 pub struct CtDecimal {
     pub negative: bool,
-    pub digits: Vec<u8>, // big-endian mantissa digits 0-9, no dot
+    magnitude: CtDecimalMagnitude,
     pub scale: u32,
+}
+impl PartialEq for CtDecimal {
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        self.equal(other)
+    }
+}
+
+impl Eq for CtDecimal {}
+impl PartialOrd for CtDecimal {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.compare_value(other))
+    }
+}
+
+impl Ord for CtDecimal {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.compare_value(other)
+    }
 }
 
 impl CtDecimal {
+    #[inline(always)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         if s.trim().is_empty() {
             return Err("empty Decimal string".to_string());
         }
-        let (negative, digits, scale) = json_decimal_lexeme(s)?;
+        let (negative, magnitude, scale) = ct_decimal_parse(s)?;
         // D-DECIMAL1 / D-TYPE2-DEFAULT1: preserve lexical scale at the
         // source boundary; arithmetic applies the shared scale rule below.
         Ok(CtDecimal {
             negative,
-            digits,
+            magnitude,
             scale,
         })
     }
 
     pub fn from_int(value: i64) -> Self {
-        Self::from_signed_small_preserving_scale(i128::from(value), 0)
-            .expect("an i64 always fits in the small Decimal magnitude")
+        let value = i128::from(value);
+        let negative = value < 0;
+        let magnitude = if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        };
+        Self {
+            negative,
+            magnitude: CtDecimalMagnitude::Small(magnitude),
+            scale: 0,
+        }
     }
 
     /// Preserve the exact binary64 value as a finite decimal. A binary value
@@ -1787,11 +1950,12 @@ impl CtDecimal {
 
     /// Project one JSON number token into an exact base-10 value. Unlike the
     /// ordinary constructor, this keeps the token's written scale.
+    #[inline(always)]
     pub fn from_json_number(s: &str) -> Result<Self, String> {
-        let (negative, digits, scale) = json_decimal_lexeme(s)?;
+        let (negative, magnitude, scale) = ct_decimal_parse(s)?;
         Ok(CtDecimal {
             negative,
-            digits,
+            magnitude,
             scale,
         })
     }
@@ -1800,30 +1964,39 @@ impl CtDecimal {
         // Same law as AOT `JetDecimal::normalize` (CommonTypes.rs): trailing
         // fractional zeros drop with scale. Digits-only pop silently shifts
         // the radix point and violates D-DECIMAL1 / R12.
-        while self.scale > 0 && self.digits.len() > 1 && self.digits.last() == Some(&0) {
-            self.digits.pop();
-            self.scale -= 1;
+        match &mut self.magnitude {
+            CtDecimalMagnitude::Small(value) => {
+                while self.scale > 0 && *value != 0 && *value % 10 == 0 {
+                    *value /= 10;
+                    self.scale -= 1;
+                }
+            }
+            CtDecimalMagnitude::Big(value) => {
+                ct_decimal_strip_trailing_zeros(value, &mut self.scale);
+            }
         }
-        if self.digits == [0] {
+        if self.is_zero() {
             self.negative = false;
             self.scale = 0;
         }
         self
     }
+
+    fn is_zero(&self) -> bool {
+        match &self.magnitude {
+            CtDecimalMagnitude::Small(value) => *value == 0,
+            CtDecimalMagnitude::Big(value) => value.is_zero(),
+        }
+    }
+
     fn signed_small(&self) -> Option<i128> {
-        if self.digits.len() > 39 {
+        let CtDecimalMagnitude::Small(value) = &self.magnitude else {
             return None;
-        }
-        let mut value = 0i128;
-        for &digit in &self.digits {
-            value = value
-                .checked_mul(10)?
-                .checked_add(i128::from(digit))?;
-        }
+        };
         if self.negative {
             value.checked_neg()
         } else {
-            Some(value)
+            Some(*value)
         }
     }
 
@@ -1834,6 +2007,78 @@ impl CtDecimal {
         value.checked_mul(10i128.checked_pow(places)?)
     }
 
+    fn small_fraction(numerator: i128, denominator: i128) -> Option<CtFraction> {
+        if denominator == 0 {
+            return None;
+        }
+        let negative = numerator.is_negative() != denominator.is_negative();
+        let numerator_abs = numerator.unsigned_abs();
+        let denominator_abs = denominator.unsigned_abs();
+        let mut left = numerator_abs;
+        let mut right = denominator_abs;
+        while right != 0 {
+            let remainder = left % right;
+            left = right;
+            right = remainder;
+        }
+        let numerator_abs = i128::try_from(numerator_abs / left).ok()?;
+        let denominator_abs = i128::try_from(denominator_abs / left).ok()?;
+        let numerator = if negative {
+            numerator_abs.checked_neg()?
+        } else {
+            numerator_abs
+        };
+        CtFraction::from_reduced_bigints(
+            ct_decimal_bigint_from_i128(numerator),
+            ct_decimal_bigint_from_i128(denominator_abs),
+        )
+    }
+
+    fn compare_value(&self, other: &CtDecimal) -> std::cmp::Ordering {
+        let left_zero = self.is_zero();
+        let right_zero = other.is_zero();
+        match (left_zero, right_zero) {
+            (true, true) => return std::cmp::Ordering::Equal,
+            (true, false) => {
+                return if other.negative {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                };
+            }
+            (false, true) => {
+                return if self.negative {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
+            (false, false) => {}
+        }
+        if self.negative != other.negative {
+            return if self.negative {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+        }
+        let scale = self.scale.max(other.scale);
+        if let (Some(left), Some(right)) = (self.signed_small(), other.signed_small()) {
+            if let (Some(left), Some(right)) = (
+                Self::scale_small(left, scale - self.scale),
+                Self::scale_small(right, scale - other.scale),
+            ) {
+                return left.cmp(&right);
+            }
+        }
+        self.scaled_bigint(scale).compare(&other.scaled_bigint(scale))
+    }
+
+    #[inline(always)]
+    pub fn equal(&self, other: &CtDecimal) -> bool {
+        self.compare_value(other) == std::cmp::Ordering::Equal
+    }
+
     fn from_signed_small_preserving_scale(value: i128, scale: u32) -> Option<Self> {
         let negative = value < 0;
         let magnitude = if negative {
@@ -1841,30 +2086,18 @@ impl CtDecimal {
         } else {
             value
         };
-        let mut digits = if magnitude == 0 {
-            vec![0]
-        } else {
-            let mut magnitude = magnitude as u128;
-            let mut digits = Vec::new();
-            while magnitude != 0 {
-                digits.push((magnitude % 10) as u8);
-                magnitude /= 10;
-            }
-            digits.reverse();
-            digits
-        };
-        if digits.is_empty() {
-            digits.push(0);
-        }
         Some(Self {
             negative,
-            digits,
+            magnitude: CtDecimalMagnitude::Small(magnitude),
             scale,
         })
     }
 
-    fn to_bigint(&self) -> CtBigInt {
-        CtBigInt::from_decimal_digits(&self.digits)
+    fn magnitude_bigint(&self) -> CtBigInt {
+        match &self.magnitude {
+            CtDecimalMagnitude::Small(value) => ct_decimal_bigint_from_i128(*value),
+            CtDecimalMagnitude::Big(value) => value.clone(),
+        }
     }
 
     /// D-DECIMAL1 / D-TYPE2-DEFAULT1: preserve exact presentation scale.
@@ -1872,20 +2105,27 @@ impl CtDecimal {
     /// starts at the sum of operand scales and trims only exact trailing
     /// zero places down to that same finer scale.
     fn from_bigint_preserving_scale(v: CtBigInt, scale: u32, negative: bool) -> CtDecimal {
-        let digits = v.to_decimal_digits();
+        let magnitude = v.abs();
+        let negative = negative && !magnitude.is_zero();
+        let magnitude = if let Some(value) = magnitude.try_i128() {
+            CtDecimalMagnitude::Small(value)
+        } else {
+            CtDecimalMagnitude::Big(magnitude)
+        };
         CtDecimal {
-            negative: negative && digits != [0],
-            digits,
+            negative,
+            magnitude,
             scale,
         }
     }
+
 
     fn from_bigint(v: CtBigInt, scale: u32, negative: bool) -> CtDecimal {
         Self::from_bigint_preserving_scale(v, scale, negative).normalize()
     }
 
     fn scaled_bigint(&self, scale: u32) -> CtBigInt {
-        let mut value = ctbi_mul_pow10(&self.to_bigint(), scale - self.scale);
+        let mut value = ctbi_mul_pow10(&self.magnitude_bigint(), scale - self.scale);
         if self.negative && !value.is_zero() {
             value.negative = true;
         }
@@ -1917,14 +2157,17 @@ impl CtDecimal {
         Self::from_signed_bigint_preserving_scale(left.add(&right), scale)
     }
 
+    #[inline(always)]
     pub fn add(&self, other: &CtDecimal) -> CtDecimal {
         self.add_with_sign(other, false)
     }
 
+    #[inline(always)]
     pub fn sub(&self, other: &CtDecimal) -> CtDecimal {
         self.add_with_sign(other, true)
     }
 
+    #[inline(always)]
     pub fn mul(&self, other: &CtDecimal) -> CtDecimal {
         let mut scale = self.scale + other.scale;
         let minimum_scale = self.scale.max(other.scale);
@@ -1943,7 +2186,7 @@ impl CtDecimal {
                 }
             }
         }
-        let mut prod = self.to_bigint().mul(&other.to_bigint());
+        let mut prod = self.magnitude_bigint().mul(&other.magnitude_bigint());
         let mut scale = self.scale + other.scale;
         while scale > minimum_scale {
             let (next, remainder) = prod.div_rem_small(10);
@@ -1962,7 +2205,7 @@ impl CtDecimal {
 
 
     fn signed_bigint(&self) -> CtBigInt {
-        let value = self.to_bigint();
+        let value = self.magnitude_bigint();
         if self.negative {
             value.neg()
         } else {
@@ -1984,11 +2227,35 @@ impl CtDecimal {
     }
 
     /// Exact quotient in the shared arbitrary-precision rational carrier.
+    #[inline(always)]
     pub fn to_fraction(&self) -> Option<CtFraction> {
+        if let Some(value) = self.signed_small() {
+            if let Some(denominator) = 10i128.checked_pow(self.scale) {
+                if let Some(fraction) = Self::small_fraction(value, denominator) {
+                    return Some(fraction);
+                }
+            }
+        }
         CtFraction::from_bigints(self.signed_bigint(), Self::scale_factor(self.scale))
     }
 
     pub fn div(&self, other: &CtDecimal) -> Option<CtFraction> {
+        if other.is_zero() {
+            return None;
+        }
+        if let (Some(left), Some(right)) = (self.signed_small(), other.signed_small()) {
+            let numerator = 10i128
+                .checked_pow(other.scale)
+                .and_then(|scale| left.checked_mul(scale));
+            let denominator = 10i128
+                .checked_pow(self.scale)
+                .and_then(|scale| right.checked_mul(scale));
+            if let (Some(numerator), Some(denominator)) = (numerator, denominator) {
+                if let Some(fraction) = Self::small_fraction(numerator, denominator) {
+                    return Some(fraction);
+                }
+            }
+        }
         self.to_fraction()?.div(&other.to_fraction()?)
     }
 
@@ -2088,19 +2355,112 @@ impl CtDecimal {
         Some(Self::from_signed_bigint(digits, scale))
     }
 
+    fn magnitude_len(&self) -> usize {
+        match &self.magnitude {
+            CtDecimalMagnitude::Small(value) => {
+                let mut value = *value as u128;
+                let mut digits = 1usize;
+                while value >= 10 {
+                    value /= 10;
+                    digits += 1;
+                }
+                digits
+            }
+            CtDecimalMagnitude::Big(value) => ctbi_limb_decimal_digits(&value.limbs),
+        }
+    }
+
+    fn write_u128_magnitude(out: &mut String, mut value: u128) {
+        if value == 0 {
+            out.push('0');
+            return;
+        }
+        let mut digits = [0u8; 39];
+        let mut len = 0usize;
+        while value != 0 {
+            digits[len] = (value % 10) as u8;
+            value /= 10;
+            len += 1;
+        }
+        for digit in digits[..len].iter().rev() {
+            out.push(char::from(b'0' + *digit));
+        }
+    }
+
+    fn write_u32_padded9(out: &mut String, mut value: u32) {
+        let mut divisor = 100_000_000u32;
+        loop {
+            out.push(char::from(b'0' + (value / divisor) as u8));
+            value %= divisor;
+            if divisor == 1 {
+                break;
+            }
+            divisor /= 10;
+        }
+    }
+
+    fn write_magnitude(&self, out: &mut String) {
+        match &self.magnitude {
+            CtDecimalMagnitude::Small(value) => {
+                Self::write_u128_magnitude(out, *value as u128);
+            }
+            CtDecimalMagnitude::Big(value) => {
+                let length = ctbi_limb_len(&value.limbs);
+                let top = *value.limbs.get(length.saturating_sub(1)).unwrap_or(&0);
+                Self::write_u128_magnitude(out, u128::from(top));
+                for &limb in value.limbs[..length].iter().rev().skip(1) {
+                    Self::write_u32_padded9(out, limb);
+                }
+            }
+        }
+    }
+
+    fn write_small_scaled(value: i128, fraction_len: usize, out: &mut String) {
+        let mut value = value as u128;
+        let mut digits = [0u8; 39];
+        let mut digit_len = 0usize;
+        while value != 0 {
+            digits[digit_len] = (value % 10) as u8;
+            value /= 10;
+            digit_len += 1;
+        }
+        if digit_len == 0 {
+            digits[0] = 0;
+            digit_len = 1;
+        }
+        if fraction_len == 0 {
+            for digit in digits[..digit_len].iter().rev() {
+                out.push(char::from(b'0' + *digit));
+            }
+            return;
+        }
+        if digit_len <= fraction_len {
+            out.push('0');
+            out.push('.');
+            out.extend(std::iter::repeat_n('0', fraction_len - digit_len));
+            for digit in digits[..digit_len].iter().rev() {
+                out.push(char::from(b'0' + *digit));
+            }
+            return;
+        }
+        for digit in digits[..digit_len].iter().rev().take(digit_len - fraction_len) {
+            out.push(char::from(b'0' + *digit));
+        }
+        out.push('.');
+        for digit in digits[..fraction_len].iter().rev() {
+            out.push(char::from(b'0' + *digit));
+        }
+    }
+
+    #[inline(always)]
     pub fn to_string_rep(&self) -> String {
         let frac_len = self.scale as usize;
-        let sign_len = usize::from(self.negative && self.digits != [0]);
-        if self.digits == [0] {
+        if self.is_zero() {
             let mut out = String::with_capacity(
-                sign_len
-                    .saturating_add(1)
+                1usize
                     .saturating_add(usize::from(frac_len != 0))
                     .saturating_add(frac_len),
             );
-            if sign_len != 0 {
-                out.push('-');
-            }
             out.push('0');
             if frac_len != 0 {
                 out.push('.');
@@ -2109,51 +2469,36 @@ impl CtDecimal {
             return out;
         }
 
-        let mut out = String::with_capacity(
-            sign_len
-                .saturating_add(self.digits.len().max(frac_len.saturating_add(1)))
-                .saturating_add(usize::from(frac_len != 0)),
-        );
-        if sign_len != 0 {
+        let digit_len = self.magnitude_len();
+        let capacity = digit_len
+            .max(frac_len.saturating_add(1))
+            .saturating_add(usize::from(self.negative))
+            .saturating_add(usize::from(frac_len > 0));
+        let mut out = String::with_capacity(capacity);
+        if self.negative {
             out.push('-');
         }
-        if frac_len == 0 {
-            out.extend(self.digits.iter().map(|digit| (b'0' + *digit) as char));
+        if let CtDecimalMagnitude::Small(value) = &self.magnitude {
+            Self::write_small_scaled(*value, frac_len, &mut out);
             return out;
         }
-        if self.digits.len() <= frac_len {
+        if frac_len == 0 {
+            self.write_magnitude(&mut out);
+            return out;
+        }
+        if digit_len <= frac_len {
             out.push('0');
             out.push('.');
-            out.extend(std::iter::repeat_n(
-                '0',
-                frac_len.saturating_sub(self.digits.len()),
-            ));
-            out.extend(self.digits.iter().map(|digit| (b'0' + *digit) as char));
-            return out;
+            out.extend(std::iter::repeat_n('0', frac_len - digit_len));
+            self.write_magnitude(&mut out);
+        } else {
+            self.write_magnitude(&mut out);
+            let split = out.len() - frac_len;
+            out.insert(split, '.');
         }
-        let split = self.digits.len() - frac_len;
-        out.extend(
-            self.digits[..split]
-                .iter()
-                .map(|digit| (b'0' + *digit) as char),
-        );
-        out.push('.');
-        out.extend(
-            self.digits[split..]
-                .iter()
-                .map(|digit| (b'0' + *digit) as char),
-        );
         out
     }
-
-    /// D-TYPE2-DEFAULT1: the one place an exact `Decimal` becomes an
-    /// approximate `Float`, at the irrational-result math functions that leave
-    /// the exact world. The ratio is rounded directly from base-10 limbs, so
-    /// the conversion does not allocate or pass through a decimal string.
     pub fn to_f64(&self) -> f64 {
-        if self.digits.is_empty() {
-            return f64::NAN;
-        }
         if let Some(value) = self.signed_small() {
             let magnitude = value.unsigned_abs();
             if self.scale == 0 {
@@ -2185,7 +2530,10 @@ impl CtDecimal {
             let denominator = ctbi_decimal_power10_limbs(self.scale);
             return ctbi_ratio_limbs_to_f64(&limbs[..numerator_length], &denominator, self.negative);
         }
-        let numerator = CtBigInt::from_decimal_digits(&self.digits);
+
+        let CtDecimalMagnitude::Big(numerator) = &self.magnitude else {
+            unreachable!("every small Decimal magnitude is handled above");
+        };
         if self.scale == 0 {
             let value = numerator.to_f64();
             return if self.negative { -value } else { value };
@@ -2219,9 +2567,11 @@ impl CtDecimal {
                 ),
                 (
                     "digits".to_string(),
-                    crate::AST::CtValue::Str(
-                        self.digits.iter().map(|d| (b'0' + *d) as char).collect(),
-                    ),
+                    crate::AST::CtValue::Str({
+                        let mut digits = String::new();
+                        self.write_magnitude(&mut digits);
+                        digits
+                    }),
                 ),
                 (
                     "scale".to_string(),
@@ -2249,13 +2599,10 @@ impl CtDecimal {
                 _ => return Err(format!("malformed Decimal.{name}")),
             }
         }
-        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-            return Err("malformed Decimal.digits".to_string());
-        }
-
+        let magnitude = ct_decimal_magnitude_from_ascii_digits(&digits)?;
         Ok(CtDecimal {
             negative,
-            digits: digits.bytes().map(|b| b - b'0').collect(),
+            magnitude,
             scale,
         })
     }

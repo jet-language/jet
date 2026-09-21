@@ -1,7 +1,7 @@
 package main
 
 import (
-    projection "ffi-projection-go/target/bindings"
+    projection "ffi-projection-go/.jet/build/bindings"
 )
 
 func main() {

@@ -1,0 +1,141 @@
+package {
+    name: "core.jobs"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Durable job queues."
+    license: "MIT"
+    outputs: {
+        jobs: .Library{ entry: jobs }
+    }
+}
+
+// core.jobs — an in-memory at-least-once queue.
+//
+// `queue` is the constructor. Enqueue assigns a monotonic id. `claim` moves
+// Queued → Running; `ack` completes; `fail` retries until `max_attempts`
+// then dead-letters. Persistence is a later host cell; the state machine
+// is Jet so tests do not need a broker.
+
+#Error
+pub enum JobError {
+    Empty
+    Duplicate
+    Failed
+    Missing
+}
+
+pub enum JobQueueDeliveryPolicy {
+    AtLeastOnce
+}
+
+pub enum JobQueueState {
+    Queued
+    Running
+    Retrying
+    Completed
+    Failed
+    DeadLettered
+    Cancelled
+}
+
+pub struct JobPayload { pub body: String }
+pub struct JobResult { pub ok: Bool, pub detail: String }
+pub struct JobQueueReceipt { pub id: String }
+pub struct JobQueueClaim { pub id: String, pub payload: String }
+pub struct JobQueueEvent { pub kind: String, pub id: String }
+pub struct JobQueueRecord {
+    pub id: String
+    pub payload: String
+    pub state: JobQueueState
+    pub attempts: Int
+}
+pub struct JobQueueStatus {
+    pub queued: Int
+    pub running: Int
+    pub done: Int
+    pub failed: Int
+}
+
+pub struct JobQueue {
+    pub name: String
+    pub next_id: Int
+    pub max_attempts: Int
+    pub policy: JobQueueDeliveryPolicy
+    pub records: [JobQueueRecord]
+}
+
+pub fn queue() -> JobQueue {
+    JobQueue{name: "default", next_id: 1, max_attempts: 8, policy: JobQueueDeliveryPolicy.AtLeastOnce, records: [JobQueueRecord]{}}
+}
+
+pub fn named(name: String) -> JobQueue {
+    q :: queue()
+    JobQueue{name: name, next_id: 1, max_attempts: q.max_attempts, policy: q.policy, records: [JobQueueRecord]{}}
+}
+
+pub fn enqueue(q: JobQueue, job: String) -> (queue: JobQueue, receipt: JobQueueReceipt) {
+    id :: "{q.next_id}"
+    recs := copy_recs(q.records)
+    recs.push(JobQueueRecord{id: id, payload: job, state: JobQueueState.Queued, attempts: 0})
+    nq :: JobQueue{name: q.name, next_id: q.next_id + 1, max_attempts: q.max_attempts, policy: q.policy, records: recs}
+    (queue: nq, receipt: JobQueueReceipt{id: id})
+}
+
+pub fn claim(q: JobQueue) -> (queue: JobQueue, taken: ?JobQueueClaim) {
+    recs := copy_recs(q.records)
+    loop i in 0..<recs.len() {
+        st :: recs[i].state
+        if st == JobQueueState.Queued || st == JobQueueState.Retrying {
+            recs[i] = JobQueueRecord{id: recs[i].id, payload: recs[i].payload, state: JobQueueState.Running, attempts: recs[i].attempts + 1}
+            nq :: JobQueue{name: q.name, next_id: q.next_id, max_attempts: q.max_attempts, policy: q.policy, records: recs}
+            return (queue: nq, taken: Val(JobQueueClaim{id: recs[i].id, payload: recs[i].payload}))
+        }
+    }
+    (queue: q, taken: None)
+}
+
+pub fn ack(q: JobQueue, id: String) -> JobQueue !JobError { set_state(q, id, JobQueueState.Completed) }
+
+pub fn fail(q: JobQueue, id: String) -> JobQueue !JobError {
+    recs := copy_recs(q.records)
+    loop i in 0..<recs.len() {
+        if recs[i].id != id -> next
+        next_state := JobQueueState.Retrying
+        if recs[i].attempts >= q.max_attempts -> next_state = JobQueueState.DeadLettered
+        recs[i] = JobQueueRecord{id: recs[i].id, payload: recs[i].payload, state: next_state, attempts: recs[i].attempts}
+        return Ok(JobQueue{name: q.name, next_id: q.next_id, max_attempts: q.max_attempts, policy: q.policy, records: recs})
+    }
+    Err(JobError.Missing)
+}
+
+pub fn cancel(q: JobQueue, id: String) -> JobQueue !JobError { set_state(q, id, JobQueueState.Cancelled) }
+
+pub fn status(q: JobQueue) -> JobQueueStatus {
+    queued := 0
+    running := 0
+    done := 0
+    failed := 0
+    loop r in q.records {
+        if r.state == JobQueueState.Queued || r.state == JobQueueState.Retrying -> queued = queued + 1
+        if r.state == JobQueueState.Running -> running = running + 1
+        if r.state == JobQueueState.Completed -> done = done + 1
+        if r.state == JobQueueState.Failed || r.state == JobQueueState.DeadLettered -> failed = failed + 1
+    }
+    JobQueueStatus{queued: queued, running: running, done: done, failed: failed}
+}
+
+fn set_state(q: JobQueue, id: String, state: JobQueueState) -> JobQueue !JobError {
+    recs := copy_recs(q.records)
+    loop i in 0..<recs.len() {
+        if recs[i].id != id -> next
+        recs[i] = JobQueueRecord{id: recs[i].id, payload: recs[i].payload, state: state, attempts: recs[i].attempts}
+        return Ok(JobQueue{name: q.name, next_id: q.next_id, max_attempts: q.max_attempts, policy: q.policy, records: recs})
+    }
+    Err(JobError.Missing)
+}
+
+fn copy_recs(xs: [JobQueueRecord]) -> [JobQueueRecord] {
+    out := [JobQueueRecord]{}
+    loop x in xs -> out.push(x)
+    out
+}

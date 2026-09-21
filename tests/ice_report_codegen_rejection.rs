@@ -41,7 +41,7 @@ fn generated_rust_rejection_is_a_branded_ice_and_preserves_backend_evidence() {
         "backend rejection must remain an internal compiler error:\n{stderr}"
     );
     assert!(
-        stderr.contains(project.join("build/main.rs").to_string_lossy().as_ref()),
+        stderr.contains(project.join(".jet/build/main.rs").to_string_lossy().as_ref()),
         "report must identify the preserved generated source:\n{stderr}"
     );
     assert!(
@@ -49,8 +49,8 @@ fn generated_rust_rejection_is_a_branded_ice_and_preserves_backend_evidence() {
         "report must retain the first backend error:\n{stderr}"
     );
 
-    assert!(project.join("build/main.rs").is_file());
-    let log_path = project.join("build/main.rustc.log");
+    assert!(project.join(".jet/build/main.rs").is_file());
+    let log_path = project.join(".jet/build/main.rustc.log");
     assert!(
         stderr.contains(log_path.to_string_lossy().as_ref()),
         "report must identify the complete backend log:\n{stderr}"

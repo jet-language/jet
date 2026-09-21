@@ -1,12 +1,12 @@
 use core.time as time
 
-fn use_slot(token: Int, token_sender: Sender<Int>) Int -> {
+fn use_slot(token: Int, token_sender: Sender<Int>) -> Int {
     time.sleep(20ms)
     token_sender.send(token)
     return token
 }
 
-fn receive_one(receiver: Receiver<Int>) Int -> {
+fn receive_one(receiver: Receiver<Int>) -> Int {
     return receiver.receive() ?? panic("value channel closed")
 }
 
@@ -51,7 +51,7 @@ fn run() {
         first.join() ?? panic("first worker failed"),
         second_worker.join() ?? panic("second worker failed"),
         third.join() ?? panic("third worker failed"),
-        fourth.join() ?? panic("fourth worker failed")
+        fourth.join() ?? panic("fourth worker failed"),
     ]
     leases.sort()
     if leases != [1, 1, 2, 2] -> panic("workers escaped the two-slot token pool")

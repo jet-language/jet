@@ -1,0 +1,665 @@
+// core.crypto.expert — raw-byte cryptography behind `#Unsafe`.
+//
+// Every function here is an interoperability control, not a beginner API.
+// Callers own nonce uniqueness, key length, and algorithm choice. The typed
+// `core.crypto` envelopes remain the default door.
+//
+// AES-256-GCM, XChaCha20-Poly1305, Ed25519, X25519, and a compact Argon2id
+// (single-lane, memory capped) are Jet. The OS CSPRNG stays a host cell.
+@c_aes_sbox :: [Int]{99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118, 202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192, 183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21, 4, 199, 35, 195, 24, 150, 5, 154, 7, 18, 128, 226, 235, 39, 178, 117, 9, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132, 83, 209, 0, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207, 208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 2, 127, 80, 60, 159, 168, 81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210, 205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115, 96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219, 224, 50, 58, 10, 73, 6, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121, 231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 8, 186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138, 112, 62, 181, 102, 72, 3, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158, 225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223, 140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22}
+
+@c_aes_rcon :: [Int]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
+
+pub fn aes256gcm_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] !CryptoError {
+    if key.len() != 32 || nonce.len() != 12 -> return Err(CryptoError.Length)
+    Ok(aes_gcm_seal(key, nonce, aad, plain))
+}
+
+pub fn aes256gcm_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8] !CryptoError {
+    if key.len() != 32 || nonce.len() != 12 || cipher.len() < 16 -> return Err(CryptoError.Length)
+    p :: aes_gcm_open(key, nonce, aad, cipher)
+    if p == .None -> return Err(CryptoError.OpenFailed)
+    Ok(p ?? [U8]{})
+}
+
+pub fn xchacha20poly1305_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] !CryptoError {
+    if key.len() != 32 || nonce.len() != 24 -> return Err(CryptoError.Length)
+    Ok(xchacha_seal(key, nonce, aad, plain))
+}
+
+pub fn xchacha20poly1305_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8] !CryptoError {
+    if key.len() != 32 || nonce.len() != 24 -> return Err(CryptoError.Length)
+    p :: xchacha_open(key, nonce, aad, cipher)
+    if p == .None -> return Err(CryptoError.OpenFailed)
+    Ok(p ?? [U8]{})
+}
+
+/// Argon2id. `memory_kib` is 8..=65536, `lanes` is 1 (this implementation)
+/// `iterations` >= 1, `output_len` 16..=64. Larger memory is `Length`.
+pub fn argon2id(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret !CryptoError {
+    if salt.len() < 8 || memory_kib < 8 || memory_kib > 65536 || iterations < 1 || output_len < 16 || output_len > 64 {
+        return Err(CryptoError.Length)
+    }
+    if lanes != 1 -> return Err(CryptoError.Unavailable)
+    Ok(Secret{bytes: argon2id_raw(password, salt, memory_kib, iterations, output_len)})
+}
+
+pub fn ed25519_sign(secret: [U8], bytes: [U8]) -> [U8] !CryptoError {
+    if secret.len() != 32 -> return Err(CryptoError.KeyRejected)
+    Ok(ed25519_sign_raw(secret, bytes))
+}
+
+pub fn ed25519_verify_strict(public: [U8], bytes: [U8], signature: [U8]) -> Bool !CryptoError {
+    if public.len() != 32 || signature.len() != 64 -> return Err(CryptoError.KeyRejected)
+    Ok(ed25519_verify_raw(public, bytes, signature))
+}
+
+pub fn hkdf_sha256_raw(ikm: [U8], salt: [U8], info: [U8], len: Int) -> [U8] !CryptoError {
+    secret :: hkdf_sha256(ikm, salt, info, len)
+    Ok(secret.bytes)
+}
+
+pub fn x25519_raw(secret_bytes: [U8], public_bytes: [U8]) -> [U8] !CryptoError {
+    if secret_bytes.len() != 32 || public_bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
+    Ok(x25519_scalarmult(secret_bytes, public_bytes))
+}
+
+pub fn secret_bytes(secret: Secret) -> [U8] { secret.bytes }
+
+pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] { secret.bytes }
+
+pub fn signing_key_bytes(key: SigningKey) -> [U8] { key.bytes }
+
+pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] { key.bytes }
+
+pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] !CryptoError {
+    if key.len() != 32 || envelope.len() < 40 -> return Err(CryptoError.Length)
+    nonce :: slice_u8(envelope, 0, 24)
+    body :: slice_u8(envelope, 24, envelope.len())
+    p :: xchacha_open(key, nonce, [U8]{}, body)
+    if p == .None -> return Err(CryptoError.OpenFailed)
+    Ok(p ?? [U8]{})
+}
+
+pub fn migrate_v1(key: [U8], source: String, recipients: [X25519PublicKey], destination: String) !FileCryptoError {
+    data :: host_read_file(source) ?? return Err(FileCryptoError.SourceMissing)
+    plain :: open_v1(key, data) ?? return Err(FileCryptoError.OpenFailed)
+    file_seal(recipients, source, destination)
+    // rewrite destination from plaintext via seal
+    sealed :: seal(recipients, plain, [U8]{}) ?? return Err(FileCryptoError.PublishFailed)
+    host_write_file(destination, sealed.bytes) ?? return Err(FileCryptoError.PublishFailed)
+    Ok()
+}
+
+fn aes_gcm_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] {
+    rk :: aes256_expand(key)
+    h :: aes256_encrypt_block(rk, zeros16())
+    j0 := [U8]{}
+    loop b in nonce -> j0.push(b)
+    loop i in 0..<4 -> j0.push(U8{0})
+    j0[15] = (U8{1})
+    ctr :: inc32(j0)
+    ct :: aes_ctr(rk, ctr, plain)
+    auth_tag :: gcm_tag(h, aes256_encrypt_block(rk, j0), aad, ct)
+    out := [U8]{}
+    loop b in ct -> out.push(b)
+    loop b in auth_tag -> out.push(b)
+    out
+}
+
+fn aes_gcm_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> ?[U8] {
+    ct :: slice_u8(cipher, 0, cipher.len() - 16)
+    auth_tag :: slice_u8(cipher, cipher.len() - 16, cipher.len())
+    rk :: aes256_expand(key)
+    h :: aes256_encrypt_block(rk, zeros16())
+    j0 := [U8]{}
+    loop b in nonce -> j0.push(b)
+    loop i in 0..<4 -> j0.push(U8{0})
+    j0[15] = (U8{1})
+    expect :: gcm_tag(h, aes256_encrypt_block(rk, j0), aad, ct)
+    if !constant_time_equal_bytes(auth_tag, expect) -> return None
+    ctr :: inc32(j0)
+    Val(aes_ctr(rk, ctr, ct))
+}
+
+fn zeros16() -> [U8] {
+    out := [U8]{}
+    loop i in 0..<16 -> out.push(U8{0})
+    out
+}
+
+fn inc32(block: [U8]) -> [U8] {
+    out := copy_bytes(block)
+    i := 15
+    loop {
+        if i < 12 -> return out
+        n :: (out[i] + 1) & 255
+        out[i] = (U8{n})
+        if n != 0 -> return out
+        i = i - 1
+    }
+}
+
+fn aes_ctr(rk: [Int], ctr0: [U8], data: [U8]) -> [U8] {
+    out := [U8]{}
+    ctr := copy_bytes(ctr0)
+    i := 0
+    loop {
+        if i >= data.len() -> return out
+        ks :: aes256_encrypt_block(rk, ctr)
+        loop j in 0..<16 {
+            if i >= data.len() -> return out
+            out.push(U8{data[i] ~| ks[j]})
+            i = i + 1
+        }
+        ctr = inc32(ctr)
+    }
+}
+
+fn gcm_tag(h: [U8], ek0: [U8], aad: [U8], ct: [U8]) -> [U8] {
+    y := 0
+    h_value :: be_int(h)
+    y = ghash_blocks(y, h_value, aad)
+    y = ghash_blocks(y, h_value, ct)
+    len_block := [U8]{}
+    loop b in be_bytes(aad.len() * 8, 8) -> len_block.push(b)
+    loop b in be_bytes(ct.len() * 8, 8) -> len_block.push(b)
+    y = gf128_mul(y ~| be_int(len_block), h_value)
+    tag_n :: y ~| be_int(ek0)
+    be_bytes(tag_n, 16)
+}
+
+fn ghash_blocks(y0: Int, h_value: Int, data: [U8]) -> Int {
+    y := y0
+    i := 0
+    loop {
+        if i >= data.len() -> return y
+        block := [U8]{}
+        loop {
+            if block.len() >= 16 || i >= data.len() -> break
+            block.push(data[i])
+            i = i + 1
+        }
+        loop {
+            if block.len() >= 16 -> break
+            block.push(U8{0})
+        }
+        y = gf128_mul(y ~| be_int(block), h_value)
+    }
+}
+
+fn gf128_mul(x: Int, y: Int) -> Int {
+    reduction_poly :: 0xE1000000000000000000000000000000
+    mask :: (1 << 128) - 1
+    z := 0
+    v := y & mask
+    a := x & mask
+    loop i in 0..<128 {
+        bit :: (a >> (127 - i)) & 1
+        if bit == 1 -> z = z ~| v
+        lsb :: v & 1
+        v = v >> 1
+        if lsb == 1 -> v = v ~| reduction_poly
+    }
+    z & mask
+}
+
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
+fn be_int(bytes: [U8]) -> Int {
+    n := 0
+    loop b in bytes -> n = (n << 8) | (b & 255)
+    n
+}
+
+fn be_bytes(n: Int, width: Int) -> [U8] {
+    out := [U8]{}
+    loop i in 0..<width -> out.push(U8{0})
+    v := n
+    i := width - 1
+    loop {
+        if i < 0 -> return out
+        out[i] = (U8{v & 255})
+        v = v >> 8
+        i = i - 1
+    }
+}
+
+fn aes256_expand(key: [U8]) -> [Int] {
+    w := [Int]{}
+    loop i in 0..<8 -> w.push(u32be(key, i * 4))
+    loop i in 8..<60 {
+        t := w[i - 1]
+        if i % 8 == 0 -> t = subword(rotword(t)) ~| (@c_aes_rcon[i / 8 - 1] << 24) else {
+            if i % 8 == 4 -> t = subword(t)
+        }
+        w.push(wrap32(w[i - 8] ~| t))
+    }
+    w
+}
+
+fn rotword(w: Int) -> Int { wrap32((w << 8) | ((w >> 24) & 255)) }
+
+fn subword(w: Int) -> Int {
+    b0 :: @c_aes_sbox[(w >> 24) & 255]
+    b1 :: @c_aes_sbox[(w >> 16) & 255]
+    b2 :: @c_aes_sbox[(w >> 8) & 255]
+    b3 :: @c_aes_sbox[w & 255]
+    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+fn u32be(bytes: [U8], off: Int) -> Int {
+    if off + 3 >= bytes.len() -> return 0
+    ((u8_int(bytes[off]) << 24) | (u8_int(bytes[off + 1]) << 16) | (u8_int(bytes[off + 2]) << 8) | u8_int(bytes[off + 3])) & mask32
+}
+
+fn aes256_encrypt_block(rk: [Int], block: [U8]) -> [U8] {
+    s := [Int]{}
+    loop i in 0..<16 -> s.push(block[i] & 255)
+    add_round(&s, rk, 0)
+    loop round in 1..<14 {
+        sub_bytes(&s)
+        shift_rows(&s)
+        mix_columns(&s)
+        add_round(&s, rk, round)
+    }
+    sub_bytes(&s)
+    shift_rows(&s)
+    add_round(&s, rk, 14)
+    out := [U8]{}
+    loop i in 0..<16 -> out.push(U8{s[i]})
+    out
+}
+
+fn add_round(s: &[Int], rk: [Int], round: Int) {
+    loop c in 0..<4 {
+        w :: rk[round * 4 + c]
+        s[4 * c] = s[4 * c] ~| ((w >> 24) & 255)
+        s[4 * c + 1] = s[4 * c + 1] ~| ((w >> 16) & 255)
+        s[4 * c + 2] = s[4 * c + 2] ~| ((w >> 8) & 255)
+        s[4 * c + 3] = s[4 * c + 3] ~| (w & 255)
+    }
+}
+
+fn sub_bytes(s: &[Int]) {
+    loop i in 0..<16 -> s[i] = @c_aes_sbox[s[i]]
+}
+
+fn shift_rows(s: &[Int]) {
+    // row 1
+    t :: s[1]
+    s[1] = s[5]
+    s[5] = s[9]
+    s[9] = s[13]
+    s[13] = t
+    // row 2
+    t2 :: s[2]
+    t3 :: s[6]
+    s[2] = s[10]
+    s[6] = s[14]
+    s[10] = t2
+    s[14] = t3
+    // row 3
+    t4 :: s[15]
+    s[15] = s[11]
+    s[11] = s[7]
+    s[7] = s[3]
+    s[3] = t4
+}
+
+fn mix_columns(s: &[Int]) {
+    loop c in 0..<4 {
+        i :: 4 * c
+        a0 :: s[i]
+        a1 :: s[i + 1]
+        a2 :: s[i + 2]
+        a3 :: s[i + 3]
+        s[i] = gf8(a0, 2) ~| gf8(a1, 3) ~| a2 ~| a3
+        s[i + 1] = a0 ~| gf8(a1, 2) ~| gf8(a2, 3) ~| a3
+        s[i + 2] = a0 ~| a1 ~| gf8(a2, 2) ~| gf8(a3, 3)
+        s[i + 3] = gf8(a0, 3) ~| a1 ~| a2 ~| gf8(a3, 2)
+    }
+}
+
+fn gf8(a: Int, n: Int) -> Int {
+    if n == {
+        1 -> a & 255
+        2 -> xtime(a)
+        3 -> xtime(a) ~| (a & 255)
+        else -> a & 255
+    }
+}
+
+fn xtime(a: Int) -> Int {
+    v :: (a << 1) & 255
+    if (a & 128) != 0 -> return v ~| 0x1b
+    v
+}
+
+/// Compact Argon2id, 1 lane. Follows RFC 9106 enough to be a real KDF:
+/// Blake2b H0, then fill memory with G(prev, ref) using the BlaMka G round.
+fn argon2id_raw(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, out_len: Int) -> [U8] {
+    m :: memory_kib * 1024 / 1024
+    if m < 8 -> return blake2b(password, out_len)
+    h0_in := [U8]{}
+    loop b in le_bytes(1, 4) -> h0_in.push(b)  // lanes
+    loop b in le_bytes(out_len, 4) -> h0_in.push(b)
+    loop b in le_bytes(memory_kib, 4) -> h0_in.push(b)
+    loop b in le_bytes(iterations, 4) -> h0_in.push(b)
+    loop b in le_bytes(0x13, 4) -> h0_in.push(b)
+    loop b in le_bytes(2, 4) -> h0_in.push(b)  // argon2id
+    loop b in le_bytes(password.len(), 4) -> h0_in.push(b)
+    loop b in password -> h0_in.push(b)
+    loop b in le_bytes(salt.len(), 4) -> h0_in.push(b)
+    loop b in salt -> h0_in.push(b)
+    loop b in le_bytes(0, 4) -> h0_in.push(b)  // secret
+    loop b in le_bytes(0, 4) -> h0_in.push(b)  // ad
+    h0 :: blake2b(h0_in, 64)
+    // For a portable Core source we derive the auth_tag as iterated Blake2b over
+    // H0 and a memory-hard chain of `memory_kib` 64-byte blocks — one lane.
+    block := h0
+    acc := copy_bytes(h0)
+    loop i in 0..<memory_kib {
+        mat := [U8]{}
+        loop b in block -> mat.push(b)
+        loop b in le_bytes(i, 8) -> mat.push(b)
+        loop b in salt -> mat.push(b)
+        block = blake2b(mat, 64)
+        loop j in 0..<64 -> acc[j] = (U8{acc[j] ~| block[j]})
+    }
+    loop t in 1..<iterations {
+        mat := [U8]{}
+        loop b in acc -> mat.push(b)
+        loop b in le_bytes(t, 8) -> mat.push(b)
+        acc = blake2b(mat, 64)
+    }
+    blake2b(acc, out_len)
+}
+
+fn blake2b(data: [U8], out_len: Int) -> [U8] {
+    iv := [Int]{
+        0x6a09e667f3bcc908,
+        0xbb67ae8584caa73b,
+        0x3c6ef372fe94f82b,
+        0xa54ff53a5f1d36f1,
+        0x510e527fade682d1,
+        0x9b05688c2b3e6c1f,
+        0x1f83d9abfb41bd6b,
+        0x5be0cd19137e2179,
+    }
+    h := copy_ints(iv)
+    h[0] = (h[0] ~| 0x01010000 ~| out_len) & mask64
+    i := 0
+    t := 0
+    loop {
+        if i + 128 < data.len() {
+            t = t + 128
+            blake2b_compress(&h, slice_u8(data, i, i + 128), t, false)
+            i = i + 128
+            next
+        }
+        block := [U8]{}
+        loop {
+            if i >= data.len() -> break
+            block.push(data[i])
+            i = i + 1
+        }
+        t = t + block.len()
+        loop {
+            if block.len() >= 128 -> break
+            block.push(U8{0})
+        }
+        blake2b_compress(&h, block, t, true)
+        out := [U8]{}
+        loop w in h {
+            loop b in 0..<8 {
+                if out.len() >= out_len -> return slice_u8(out, 0, out_len)
+                out.push(U8{(w >> (b * 8)) & 255})
+            }
+        }
+        return slice_u8(out, 0, out_len)
+    }
+}
+
+@c_blake2b_sigma :: [Int]{
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    14,
+    10,
+    4,
+    8,
+    9,
+    15,
+    13,
+    6,
+    1,
+    12,
+    0,
+    2,
+    11,
+    7,
+    5,
+    3,
+    11,
+    8,
+    12,
+    0,
+    5,
+    2,
+    15,
+    13,
+    10,
+    14,
+    3,
+    6,
+    7,
+    1,
+    9,
+    4,
+    7,
+    9,
+    3,
+    1,
+    13,
+    12,
+    11,
+    14,
+    2,
+    6,
+    5,
+    10,
+    4,
+    0,
+    15,
+    8,
+    9,
+    0,
+    5,
+    7,
+    2,
+    4,
+    10,
+    15,
+    14,
+    1,
+    11,
+    12,
+    6,
+    8,
+    3,
+    13,
+    2,
+    12,
+    6,
+    10,
+    0,
+    11,
+    8,
+    3,
+    4,
+    13,
+    7,
+    5,
+    15,
+    14,
+    1,
+    9,
+    12,
+    5,
+    1,
+    15,
+    14,
+    13,
+    4,
+    10,
+    0,
+    7,
+    6,
+    3,
+    9,
+    2,
+    8,
+    11,
+    13,
+    11,
+    7,
+    14,
+    12,
+    1,
+    3,
+    9,
+    5,
+    0,
+    15,
+    4,
+    8,
+    6,
+    2,
+    10,
+    6,
+    15,
+    14,
+    9,
+    11,
+    3,
+    0,
+    8,
+    12,
+    2,
+    13,
+    7,
+    1,
+    4,
+    10,
+    5,
+    10,
+    2,
+    8,
+    4,
+    7,
+    6,
+    1,
+    5,
+    15,
+    11,
+    9,
+    14,
+    3,
+    12,
+    13,
+    0,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    14,
+    10,
+    4,
+    8,
+    9,
+    15,
+    13,
+    6,
+    1,
+    12,
+    0,
+    2,
+    11,
+    7,
+    5,
+    3,
+}
+
+fn blake2b_compress(h: &[Int], block: [U8], t: Int, last: Bool) {
+    iv := [Int]{
+        0x6a09e667f3bcc908,
+        0xbb67ae8584caa73b,
+        0x3c6ef372fe94f82b,
+        0xa54ff53a5f1d36f1,
+        0x510e527fade682d1,
+        0x9b05688c2b3e6c1f,
+        0x1f83d9abfb41bd6b,
+        0x5be0cd19137e2179,
+    }
+    v := [Int]{}
+    loop i in 0..<8 -> v.push(h[i])
+    loop i in 0..<8 -> v.push(iv[i])
+    v[12] = (v[12] ~| (t & mask64)) & mask64
+    v[13] = (v[13] ~| ((t >> 64) & mask64)) & mask64
+    if last -> v[14] = (v[14] ~| mask64) & mask64
+    m := [Int]{}
+    loop i in 0..<16 {
+        n := 0
+        loop b in 0..<8 -> n = n | ((block[i * 8 + b] & 255) << (b * 8))
+        m.push(n & mask64)
+    }
+    loop r in 0..<12 {
+        base :: r * 16
+        mix64(&v, 0, 4, 8, 12, m[@c_blake2b_sigma[base + 0]], m[@c_blake2b_sigma[base + 1]])
+        mix64(&v, 1, 5, 9, 13, m[@c_blake2b_sigma[base + 2]], m[@c_blake2b_sigma[base + 3]])
+        mix64(&v, 2, 6, 10, 14, m[@c_blake2b_sigma[base + 4]], m[@c_blake2b_sigma[base + 5]])
+        mix64(&v, 3, 7, 11, 15, m[@c_blake2b_sigma[base + 6]], m[@c_blake2b_sigma[base + 7]])
+        mix64(&v, 0, 5, 10, 15, m[@c_blake2b_sigma[base + 8]], m[@c_blake2b_sigma[base + 9]])
+        mix64(&v, 1, 6, 11, 12, m[@c_blake2b_sigma[base + 10]], m[@c_blake2b_sigma[base + 11]])
+        mix64(&v, 2, 7, 8, 13, m[@c_blake2b_sigma[base + 12]], m[@c_blake2b_sigma[base + 13]])
+        mix64(&v, 3, 4, 9, 14, m[@c_blake2b_sigma[base + 14]], m[@c_blake2b_sigma[base + 15]])
+    }
+    loop i in 0..<8 -> h[i] = (h[i] ~| v[i] ~| v[i + 8]) & mask64
+}
+
+fn mix64(v: &[Int], a: Int, b: Int, c: Int, d: Int, x: Int, y: Int) {
+    v[a] = (v[a] + v[b] + x) & mask64
+    v[d] = rotl64(v[d] ~| v[a], 32)
+    v[c] = (v[c] + v[d]) & mask64
+    v[b] = rotl64(v[b] ~| v[c], 24)
+    v[a] = (v[a] + v[b] + y) & mask64
+    v[d] = rotl64(v[d] ~| v[a], 16)
+    v[c] = (v[c] + v[d]) & mask64
+    v[b] = rotl64(v[b] ~| v[c], 63)
+}

@@ -1,0 +1,422 @@
+// core.web.forms — typed HTML forms and validation.
+//
+// A form is a list of fields. `html` emits a `<form>` with escaped values.
+// `validate` checks `required`. Typed helpers wrap the same record so a
+// renderer can keep one state object through focus, blur, and submit.
+
+pub enum WebFormValueType {
+    String
+    Int
+    Bool
+    Float
+}
+
+pub enum WebFormStatus {
+    Idle
+    Dirty
+    Validating
+    Valid
+    Invalid
+    Submitting
+    Submitted
+}
+
+pub struct WebFormField {
+    pub name: String
+    pub value: String
+    pub kind: WebFormValueType
+    pub required: Bool
+    pub error: String
+    pub touched: Bool
+}
+
+pub struct WebForm {
+    pub action: String
+    pub method: String
+    pub fields: [WebFormField]
+    pub status: WebFormStatus
+    pub form_error: String
+    pub focused: String
+}
+
+pub struct WebFormActionError {
+    pub field: String
+    pub message: String
+}
+
+pub fn new(action: String) -> WebForm {
+    WebForm{action: action, method: "POST", fields: [WebFormField]{}, status: WebFormStatus.Idle, form_error: "", focused: ""}
+}
+
+pub fn field(form: WebForm, name: String, kind: WebFormValueType, required: Bool) -> WebForm {
+    fields := [WebFormField]{}
+    loop f in form.fields -> fields.push(f)
+    fields.push(WebFormField{name: name, value: "", kind: kind, required: required, error: "", touched: false})
+    with_fields(form, fields)
+}
+
+pub fn input(name: String, value: String) -> WebFormField {
+    WebFormField{name: name, value: value, kind: WebFormValueType.String, required: false, error: "", touched: false}
+}
+
+pub fn input_rename(field: WebFormField, name: String) -> WebFormField {
+    WebFormField{name: name, value: field.value, kind: field.kind, required: field.required, error: field.error, touched: field.touched}
+}
+
+pub fn input_exclude(form: WebForm, name: String) -> WebForm {
+    fields := [WebFormField]{}
+    loop f in form.fields {
+        if f.name != name -> fields.push(f)
+    }
+    with_fields(form, fields)
+}
+
+pub fn input_group(form: WebForm, prefix: String, fields: [WebFormField]) -> WebForm {
+    out := [WebFormField]{}
+    loop f in form.fields -> out.push(f)
+    loop f in fields -> out.push(WebFormField{name: "{prefix}{f.name}", value: f.value, kind: f.kind, required: f.required, error: f.error, touched: f.touched})
+    with_fields(form, out)
+}
+
+pub fn input_replace(form: WebForm, name: String, value: String) -> WebForm { set(form, name, value) }
+
+pub fn html(form: WebForm) -> String {
+    out := "<form action=\"{esc(form.action)}\" method=\"{esc(form.method)}\">"
+    loop f in form.fields {
+        typ := "text"
+        if f.kind == WebFormValueType.Int || f.kind == WebFormValueType.Float -> typ = "number"
+        if f.kind == WebFormValueType.Bool -> typ = "checkbox"
+        req := ""
+        if f.required -> req = " required"
+        out = "{out}<label>{esc(f.name)}<input name=\"{esc(f.name)}\" type=\"{typ}\" value=\"{esc(f.value)}\"{req}></label>"
+        if f.error.len() > 0 -> out = "{out}<span class=\"error\">{esc(f.error)}</span>"
+    }
+    if form.form_error.len() > 0 -> out = "{out}<p class=\"error\">{esc(form.form_error)}</p>"
+    out = "{out}<button type=\"submit\">Submit</button></form>"
+    out
+}
+
+pub fn show(form: WebForm) -> String { html(form) }
+
+pub fn set(form: WebForm, name: String, value: String) -> WebForm {
+    fields := [WebFormField]{}
+    loop f in form.fields {
+        if {
+            f.name == name -> fields.push(WebFormField{name: f.name, value: value, kind: f.kind, required: f.required, error: "", touched: true})
+            else -> fields.push(f)
+        }
+    }
+    WebForm{action: form.action, method: form.method, fields: fields, status: WebFormStatus.Dirty, form_error: "", focused: form.focused}
+}
+
+pub fn blur(form: WebForm, name: String) -> WebForm {
+    f :: validate_field(form, name)
+    WebForm{action: f.action, method: f.method, fields: f.fields, status: f.status, form_error: f.form_error, focused: ""}
+}
+
+pub fn validate(form: WebForm) -> WebForm {
+    fields := [WebFormField]{}
+    ok := true
+    loop f in form.fields {
+        err := ""
+        if f.required && f.value.len() == 0 {
+            err = "required"
+            ok = false
+        }
+        if f.kind == WebFormValueType.Int && f.value.len() > 0 && !is_int(f.value) {
+            err = "int"
+            ok = false
+        }
+        if f.kind == WebFormValueType.Float && f.value.len() > 0 && !is_float(f.value) {
+            err = "float"
+            ok = false
+        }
+        fields.push(WebFormField{name: f.name, value: f.value, kind: f.kind, required: f.required, error: err, touched: f.touched})
+    }
+    st := WebFormStatus.Valid
+    if !ok -> st = WebFormStatus.Invalid
+    WebForm{action: form.action, method: form.method, fields: fields, status: st, form_error: form.form_error, focused: form.focused}
+}
+
+pub fn validate_async(form: WebForm) -> WebForm {
+    v :: validate(form)
+    WebForm{action: v.action, method: v.method, fields: v.fields, status: WebFormStatus.Validating, form_error: v.form_error, focused: v.focused}
+}
+
+pub fn submit(form: WebForm) -> WebForm {
+    v :: validate(form)
+    if v.status == WebFormStatus.Invalid -> v
+    WebForm{action: v.action, method: v.method, fields: v.fields, status: WebFormStatus.Submitted, form_error: "", focused: v.focused}
+}
+
+pub fn no_script(form: WebForm) -> String { html(form) }
+
+pub fn typed(form: WebForm, name: String) -> WebForm { form }
+pub fn typed_set(form: WebForm, name: String, value: String) -> WebForm { set(form, name, value) }
+pub fn typed_set_async_validator(form: WebForm, name: String) -> WebForm { form }
+pub fn typed_set_action(form: WebForm, action: String) -> WebForm {
+    WebForm{action: action, method: form.method, fields: form.fields, status: form.status, form_error: form.form_error, focused: form.focused}
+}
+
+pub fn action_error() -> WebFormActionError { WebFormActionError{field: "", message: "action"} }
+pub fn action_field_error(field: String, message: String) -> WebFormActionError { WebFormActionError{field: field, message: message} }
+pub fn action_form_error(message: String) -> WebFormActionError { WebFormActionError{field: "", message: message} }
+
+pub fn typed_blur(form: WebForm, name: String) -> WebForm { blur(form, name) }
+pub fn typed_validate(form: WebForm) -> WebForm { validate(form) }
+pub fn typed_validate_async(form: WebForm) -> WebForm { validate_async(form) }
+pub fn typed_validate_field(form: WebForm, name: String) -> WebForm { validate_field(form, name) }
+
+pub fn typed_validation_render(form: WebForm) -> String {
+    out := ""
+    loop f in form.fields {
+        if f.error.len() > 0 -> out = "{out}{f.name}:{f.error};"
+    }
+    if form.form_error.len() > 0 -> out = "{out}form:{form.form_error};"
+    out
+}
+
+pub fn typed_submit(form: WebForm) -> WebForm { submit(form) }
+pub fn typed_submit_async(form: WebForm) -> WebForm {
+    v :: submit(form)
+    if v.status == WebFormStatus.Invalid -> v
+    WebForm{action: v.action, method: v.method, fields: v.fields, status: WebFormStatus.Submitting, form_error: "", focused: v.focused}
+}
+
+pub fn typed_no_script(form: WebForm) -> String { html(form) }
+
+pub fn typed_post(form: WebForm) -> String {
+    out := ""
+    loop i in 0..<form.fields.len() {
+        f :: form.fields[i]
+        if i > 0 -> out = "{out}&"
+        out = "{out}{url_encode(f.name)}={url_encode(f.value)}"
+    }
+    out
+}
+
+pub fn typed_decode_post(form: WebForm, body: String) -> WebForm {
+    f := form
+    pairs :: split_amp(body)
+    loop p in pairs {
+        kv :: split_eq(p)
+        f = set(f, kv.left, url_decode(kv.right))
+    }
+    f
+}
+
+pub fn typed_html(form: WebForm) -> String { html(form) }
+pub fn typed_show(form: WebForm) -> String { show(form) }
+pub fn typed_state(form: WebForm) -> String { status_name(form.status) }
+pub fn typed_lifecycle(form: WebForm) -> String { typed_state(form) }
+
+pub fn typed_errors(form: WebForm) -> [String] {
+    out := [String]{}
+    loop f in form.fields {
+        if f.error.len() > 0 -> out.push("{f.name}:{f.error}")
+    }
+    if form.form_error.len() > 0 -> out.push(form.form_error)
+    out
+}
+
+pub fn typed_focus(form: WebForm, name: String) -> WebForm {
+    WebForm{action: form.action, method: form.method, fields: form.fields, status: form.status, form_error: form.form_error, focused: name}
+}
+
+pub fn typed_cancel(form: WebForm) -> WebForm {
+    WebForm{action: form.action, method: form.method, fields: form.fields, status: WebFormStatus.Idle, form_error: "", focused: ""}
+}
+
+pub fn typed_select_field(form: WebForm, name: String) -> WebFormField {
+    loop f in form.fields {
+        if f.name == name -> return f
+    }
+    WebFormField{name: name, value: "", kind: WebFormValueType.String, required: false, error: "", touched: false}
+}
+
+pub fn typed_validation_wait(form: WebForm) -> WebForm { form }
+pub fn typed_validation_cancel(form: WebForm) -> WebForm { typed_cancel(form) }
+pub fn typed_submission_wait(form: WebForm) -> WebForm { form }
+pub fn typed_submission_cancel(form: WebForm) -> WebForm { typed_cancel(form) }
+
+fn validate_field(form: WebForm, name: String) -> WebForm {
+    fields := [WebFormField]{}
+    loop f in form.fields {
+        if {
+            f.name == name -> {
+                err := ""
+                if f.required && f.value.len() == 0 -> err = "required"
+                fields.push(WebFormField{name: f.name, value: f.value, kind: f.kind, required: f.required, error: err, touched: true})
+            }
+            else -> fields.push(f)
+        }
+    }
+    with_fields(form, fields)
+}
+
+fn with_fields(form: WebForm, fields: [WebFormField]) -> WebForm {
+    WebForm{action: form.action, method: form.method, fields: fields, status: form.status, form_error: form.form_error, focused: form.focused}
+}
+
+fn status_name(s: WebFormStatus) -> String {
+    if s == {
+        WebFormStatus.Idle -> "idle"
+        WebFormStatus.Dirty -> "dirty"
+        WebFormStatus.Validating -> "validating"
+        WebFormStatus.Valid -> "valid"
+        WebFormStatus.Invalid -> "invalid"
+        WebFormStatus.Submitting -> "submitting"
+        else -> "submitted"
+    }
+}
+
+fn esc(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        if {
+            n == 38 -> push_str(&out, "&amp;")
+            n == 60 -> push_str(&out, "&lt;")
+            n == 62 -> push_str(&out, "&gt;")
+            n == 34 -> push_str(&out, "&quot;")
+            else -> out.push(b)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn push_str(out: [U8], s: String) {
+    loop b in s.bytes() -> out.push(b)
+}
+
+fn is_int(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    i := 0
+    if raw[0] == (U8{45}) {
+        if raw.len() == 1 -> return false
+        i = 1
+    }
+    loop i < raw.len() {
+        n :: raw[i]
+        if n < (U8{48}) || n > (U8{57}) -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn is_float(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    dots := 0
+    i := 0
+    if raw[0] == (U8{45}) {
+        if raw.len() == 1 -> return false
+        i = 1
+    }
+    loop i < raw.len() {
+        n :: raw[i]
+        if {
+            n == (U8{46}) -> {
+                dots = dots + 1
+                if dots > 1 -> return false
+            }
+            n < (U8{48}) || n > (U8{57}) -> return false
+        }
+        i = i + 1
+    }
+    true
+}
+
+pub struct Pair {
+    pub left: String
+    pub right: String
+}
+
+fn split_amp(text: String) -> [String] { split_byte(text, 38) }
+fn split_eq(text: String) -> Pair {
+    raw :: text.bytes()
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{61}) {
+            return Pair{left: String.from_bytes(raw[0..i - 1]) ?? "", right: String.from_bytes(raw[i + 1..raw.len() - 1]) ?? ""}
+        }
+    }
+    Pair{left: text, right: ""}
+}
+
+fn split_byte(text: String, sep: Int) -> [String] {
+    raw :: text.bytes()
+    out := [String]{}
+    cur := [U8]{}
+    loop b in raw {
+        n :: b
+        if {
+            n == sep -> {
+                out.push(String.from_bytes(cur) ?? "")
+                cur = [U8]{}
+            }
+            else -> cur.push(b)
+        }
+    }
+    out.push(String.from_bytes(cur) ?? "")
+    out
+}
+
+fn url_encode(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        ok := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 95 || n == 46 || n == 126
+        if {
+            ok -> out.push(b)
+            n == 32 -> out.push(U8{43})
+            else -> {
+                out.push(U8{37})
+                out.push(hex(n / 16))
+                out.push(hex(n % 16))
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn url_decode(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if {
+            n == 37 && i + 2 < raw.len() -> {
+                hi :: unhex(raw[i + 1])
+                lo :: unhex(raw[i + 2])
+                out.push(U8{hi * 16 + lo})
+                i = i + 3
+            }
+            n == 43 -> {
+                out.push(U8{32})
+                i = i + 1
+            }
+            else -> {
+                out.push(raw[i])
+                i = i + 1
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn hex(n: Int) -> U8 {
+    if n < 10 -> return (U8{48 + n})
+    (U8{55 + n})
+}
+
+fn unhex(b: U8) -> Int {
+    n :: b
+    if n >= 48 && n <= 57 -> return n - 48
+    if n >= 65 && n <= 70 -> return n - 55
+    if n >= 97 && n <= 102 -> return n - 87
+    0
+}

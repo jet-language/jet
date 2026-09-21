@@ -1,0 +1,606 @@
+package {
+    name: "core.collections"
+    version: "0.1.0"
+    edition: "2026"
+    description: "Counters, deques, heaps, bisection, and ordered maps."
+    license: "MIT"
+    outputs: {
+        collections: .Library{ entry: collections }
+    }
+}
+
+module set
+
+// core.collections — the containers Python keeps in `collections` / `heapq` /
+// `bisect`, written in Jet over arrays.
+//
+// There is no hidden hash table here. A `Counter` is parallel key/count arrays
+// so iteration order is insertion order. A `Deque` stores a head index and
+// compacts when the wasted prefix grows. A heap is a binary min-heap on
+// `[Int]`. Missing keys return `0` / `None` rather than raising.
+
+/// Insertion-ordered string multiset. `get` is `0` for an unseen key.
+pub struct Counter {
+    pub keys: [String]
+    pub counts: [Int]
+}
+
+/// Double-ended queue. `head` is the live front; slots before it are dead.
+pub struct Deque {
+    pub items: [String]
+    pub head: Int
+}
+
+/// Insertion-ordered string map. Replacing a key keeps its original position.
+pub struct OrderedMap {
+    pub keys: [String]
+    pub values: [String]
+}
+
+/// One map layer in a `Chain`. Earlier layers win on lookup.
+pub struct Layer {
+    pub keys: [String]
+    pub values: [String]
+}
+
+/// Stack of maps. `get` walks from the front.
+pub struct Chain {
+    pub layers: [Layer]
+}
+
+pub fn counter() -> Counter { Counter{keys: [String]{}, counts: [Int]{}} }
+
+pub fn counter_from(keys: [String]) -> Counter {
+    c := counter()
+    loop k in keys -> c = add(c, k, 1)
+    c
+}
+
+pub fn add(c: Counter, key: String, n: Int) -> Counter {
+    keys := [String]{}
+    counts := [Int]{}
+    found := false
+    i := 0
+    loop i < c.keys.len() {
+        if c.keys[i] == key {
+            next_n := c.counts[i] + n
+            if next_n != 0 {
+                keys.push(key)
+                counts.push(next_n)
+            }
+            found = true
+        } else {
+            keys.push(c.keys[i])
+            counts.push(c.counts[i])
+        }
+        i = i + 1
+    }
+    if !found && n != 0 {
+        keys.push(key)
+        counts.push(n)
+    }
+    Counter{keys: keys, counts: counts}
+}
+
+pub fn inc(c: Counter, key: String) -> Counter { add(c, key, 1) }
+
+pub fn dec(c: Counter, key: String) -> Counter { add(c, key, -1) }
+
+pub fn get(c: Counter, key: String) -> Int {
+    i := 0
+    loop i < c.keys.len() {
+        if c.keys[i] == key -> return c.counts[i]
+        i = i + 1
+    }
+    0
+}
+
+pub fn set_count(c: Counter, key: String, n: Int) -> Counter {
+    cur :: get(c, key)
+    add(c, key, n - cur)
+}
+
+pub fn total(c: Counter) -> Int {
+    acc := 0
+    loop n in c.counts -> acc = acc + n
+    acc
+}
+
+pub fn names(c: Counter) -> [String] { c.keys }
+
+pub fn elements(c: Counter) -> [String] {
+    out := [String]{}
+    i := 0
+    loop i < c.keys.len() {
+        n := c.counts[i]
+        loop n > 0 {
+            out.push(c.keys[i])
+            n = n - 1
+        }
+        i = i + 1
+    }
+    out
+}
+
+/// Highest counts first. Ties keep insertion order.
+pub fn most_common(c: Counter, k: Int) -> Counter {
+    limit := k
+    if limit < 0 || limit > c.keys.len() -> limit = c.keys.len()
+    used := [Bool]{}
+    loop _ in 0..<c.keys.len() -> used.push(false)
+    keys := [String]{}
+    counts := [Int]{}
+    pick := 0
+    loop pick < limit {
+        best := -1
+        i := 0
+        loop i < c.keys.len() {
+            if !used[i] {
+                if best < 0 || c.counts[i] > c.counts[best] -> best = i
+            }
+            i = i + 1
+        }
+        if best < 0 -> break
+        used = mark(used, best)
+        keys.push(c.keys[best])
+        counts.push(c.counts[best])
+        pick = pick + 1
+    }
+    Counter{keys: keys, counts: counts}
+}
+
+fn mark(flags: [Bool], index: Int) -> [Bool] {
+    out := [Bool]{}
+    i := 0
+    loop i < flags.len() {
+        if i == index {
+            out.push(true)
+        } else {
+            out.push(flags[i])
+        }
+        i = i + 1
+    }
+    out
+}
+pub fn subtract(a: Counter, b: Counter) -> Counter {
+    c := a
+    i := 0
+    loop i < b.keys.len() {
+        c = add(c, b.keys[i], -b.counts[i])
+        i = i + 1
+    }
+    c
+}
+
+pub fn merge_add(a: Counter, b: Counter) -> Counter {
+    c := a
+    i := 0
+    loop i < b.keys.len() {
+        c = add(c, b.keys[i], b.counts[i])
+        i = i + 1
+    }
+    c
+}
+
+pub fn clear_counter(c: Counter) -> Counter {
+    _ :: c
+    counter()
+}
+
+pub fn deque() -> Deque { Deque{items: [String]{}, head: 0} }
+
+pub fn deque_from(items: [String]) -> Deque {
+    xs := [String]{}
+    loop x in items -> xs.push(x)
+    Deque{items: xs, head: 0}
+}
+
+fn live_len(d: Deque) -> Int {
+    n := d.items.len() - d.head
+    if n < 0 -> return 0
+    n
+}
+
+pub fn deque_len(d: Deque) -> Int { live_len(d) }
+
+pub fn deque_is_empty(d: Deque) -> Bool { live_len(d) == 0 }
+
+fn compact(d: Deque) -> Deque {
+    if d.head <= 0 -> return d
+    xs := [String]{}
+    i := d.head
+    loop i < d.items.len() {
+        xs.push(d.items[i])
+        i = i + 1
+    }
+    Deque{items: xs, head: 0}
+}
+
+fn maybe_compact(d: Deque) -> Deque {
+    if d.head >= 32 && d.head * 2 >= d.items.len() -> return compact(d)
+    d
+}
+
+pub fn append(d: Deque, value: String) -> Deque {
+    xs := d.items
+    xs.push(value)
+    Deque{items: xs, head: d.head}
+}
+
+pub fn appendleft(d: Deque, value: String) -> Deque {
+    d2 :: compact(d)
+    xs := [String]{value}
+    loop x in d2.items -> xs.push(x)
+    Deque{items: xs, head: 0}
+}
+
+pub fn pop(d: Deque) -> (deque: Deque, value: ?String) {
+    if live_len(d) == 0 -> return (deque: d, value: None)
+    last := d.items[d.items.len() - 1]
+    xs := [String]{}
+    i := d.head
+    loop i < d.items.len() - 1 {
+        xs.push(d.items[i])
+        i = i + 1
+    }
+    (deque: Deque{items: xs, head: 0}, value: Val(last))
+}
+
+pub fn popleft(d: Deque) -> (deque: Deque, value: ?String) {
+    if live_len(d) == 0 -> return (deque: d, value: None)
+    value :: d.items[d.head]
+    (deque: maybe_compact(Deque{items: d.items, head: d.head + 1}), value: Val(value))
+}
+
+pub fn peek(d: Deque) -> ?String {
+    if live_len(d) == 0 -> return None
+    Val(d.items[d.items.len() - 1])
+}
+
+pub fn peekleft(d: Deque) -> ?String {
+    if live_len(d) == 0 -> return None
+    Val(d.items[d.head])
+}
+
+pub fn extend(d: Deque, values: [String]) -> Deque {
+    out := d
+    loop v in values -> out = append(out, v)
+    out
+}
+
+pub fn extendleft(d: Deque, values: [String]) -> Deque {
+    out := d
+    i := values.len()
+    loop i > 0 {
+        i = i - 1
+        out = appendleft(out, values[i])
+    }
+    out
+}
+
+pub fn rotate(d: Deque, n: Int) -> Deque {
+    if live_len(d) == 0 -> return d
+    steps := n
+    out := d
+    loop steps > 0 {
+        pair :: pop(out)
+        v :: pair.value ?? return out
+        out = appendleft(pair.deque, v)
+        steps = steps - 1
+    }
+    loop steps < 0 {
+        pair :: popleft(out)
+        v :: pair.value ?? return out
+        out = append(pair.deque, v)
+        steps = steps + 1
+    }
+    out
+}
+
+pub fn deque_items(d: Deque) -> [String] {
+    d2 :: compact(d)
+    d2.items
+}
+
+pub fn heapify(xs: [Int]) -> [Int] {
+    out := [Int]{}
+    loop x in xs -> out.push(x)
+    n :: out.len()
+    i := n / 2
+    loop i >= 0 {
+        out = sift_down(out, i, n)
+        if i == 0 -> break
+        i = i - 1
+    }
+    out
+}
+
+fn swap_int(xs: [Int], i: Int, j: Int) -> [Int] {
+    if i == j -> return xs
+    out := [Int]{}
+    k := 0
+    loop k < xs.len() {
+        if k == i {
+            out.push(xs[j])
+        } else if k == j {
+            out.push(xs[i])
+        } else {
+            out.push(xs[k])
+        }
+        k = k + 1
+    }
+    out
+}
+
+fn sift_down(xs: [Int], start: Int, end: Int) -> [Int] {
+    i := start
+    cur := xs
+    loop {
+        left := i * 2 + 1
+        if left >= end -> return cur
+        smallest := i
+        if cur[left] < cur[smallest] -> smallest = left
+        right := left + 1
+        if right < end && cur[right] < cur[smallest] -> smallest = right
+        if smallest == i -> return cur
+        cur = swap_int(cur, i, smallest)
+        i = smallest
+    }
+}
+
+fn sift_up(xs: [Int], start: Int) -> [Int] {
+    i := start
+    cur := xs
+    loop i > 0 {
+        parent := (i - 1) / 2
+        if cur[i] >= cur[parent] -> return cur
+        cur = swap_int(cur, i, parent)
+        i = parent
+    }
+    cur
+}
+
+pub fn heappush(xs: [Int], value: Int) -> [Int] {
+    out := [Int]{}
+    loop x in xs -> out.push(x)
+    out.push(value)
+    sift_up(out, out.len() - 1)
+}
+
+pub fn heappop(xs: [Int]) -> (heap: [Int], value: ?Int) {
+    if xs.len() == 0 -> return (heap: [Int]{}, value: None)
+    if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
+    last := xs[xs.len() - 1]
+    rest := [Int]{last}
+    i := 1
+    loop i < xs.len() - 1 {
+        rest.push(xs[i])
+        i = i + 1
+    }
+    (heap: sift_down(rest, 0, rest.len()), value: Val(xs[0]))
+}
+
+pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) {
+    if xs.len() == 0 || value <= xs[0] -> return (heap: xs, value: value)
+    popped := xs[0]
+    rest := [Int]{value}
+    i := 1
+    loop i < xs.len() {
+        rest.push(xs[i])
+        i = i + 1
+    }
+    (heap: sift_down(rest, 0, rest.len()), value: popped)
+}
+
+pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: ?Int) {
+    if xs.len() == 0 -> return (heap: [Int]{value}, value: None)
+    popped := xs[0]
+    rest := [Int]{value}
+    i := 1
+    loop i < xs.len() {
+        rest.push(xs[i])
+        i = i + 1
+    }
+    (heap: sift_down(rest, 0, rest.len()), value: Val(popped))
+}
+
+pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
+    if n <= 0 -> return [Int]{}
+    h := [Int]{}
+    loop x in xs {
+        if h.len() < n {
+            h = heappush(h, -x)
+        } else if h.len() > 0 && -h[0] > x {
+            pair :: heapreplace(h, -x)
+            h = pair.heap
+        }
+    }
+    out := [Int]{}
+    loop _ in 0..<h.len() {
+        pair :: heappop(h)
+        v :: pair.value ?? break
+        out.push(-v)
+        h = pair.heap
+    }
+    i := 0
+    j := out.len() - 1
+    loop i < j {
+        tmp := out[i]
+        out[i] = out[j]
+        out[j] = tmp
+        i = i + 1
+        j = j - 1
+    }
+    out
+}
+
+pub fn nlargest(n: Int, xs: [Int]) -> [Int] {
+    if n <= 0 -> return [Int]{}
+    negated := [Int]{}
+    loop x in xs -> negated.push(-x)
+    small :: nsmallest(n, negated)
+    out := [Int]{}
+    loop x in small -> out.push(-x)
+    out
+}
+
+pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] {
+    out := [Int]{}
+    i := 0
+    j := 0
+    loop i < left.len() && j < right.len() {
+        if left[i] <= right[j] {
+            out.push(left[i])
+            i = i + 1
+        } else {
+            out.push(right[j])
+            j = j + 1
+        }
+    }
+    loop i < left.len() {
+        out.push(left[i])
+        i = i + 1
+    }
+    loop j < right.len() {
+        out.push(right[j])
+        j = j + 1
+    }
+    out
+}
+
+pub fn bisect_left(xs: [Int], value: Int) -> Int {
+    lo := 0
+    hi := xs.len()
+    loop lo < hi {
+        mid := lo + (hi - lo) / 2
+        if xs[mid] < value {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    lo
+}
+
+pub fn bisect_right(xs: [Int], value: Int) -> Int {
+    lo := 0
+    hi := xs.len()
+    loop lo < hi {
+        mid := lo + (hi - lo) / 2
+        if xs[mid] <= value {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
+    }
+    lo
+}
+
+pub fn insort_left(xs: [Int], value: Int) -> [Int] {
+    i :: bisect_left(xs, value)
+    out := [Int]{}
+    k := 0
+    loop k < i {
+        out.push(xs[k])
+        k = k + 1
+    }
+    out.push(value)
+    loop k < xs.len() {
+        out.push(xs[k])
+        k = k + 1
+    }
+    out
+}
+
+pub fn insort_right(xs: [Int], value: Int) -> [Int] {
+    i :: bisect_right(xs, value)
+    out := [Int]{}
+    k := 0
+    loop k < i {
+        out.push(xs[k])
+        k = k + 1
+    }
+    out.push(value)
+    loop k < xs.len() {
+        out.push(xs[k])
+        k = k + 1
+    }
+    out
+}
+
+pub fn ordered_map() -> OrderedMap { OrderedMap{keys: [String]{}, values: [String]{}} }
+
+pub fn map_get(m: OrderedMap, key: String) -> ?String {
+    i := 0
+    loop i < m.keys.len() {
+        if m.keys[i] == key -> return Val(m.values[i])
+        i = i + 1
+    }
+    None
+}
+
+pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap {
+    keys := [String]{}
+    values := [String]{}
+    found := false
+    i := 0
+    loop i < m.keys.len() {
+        if m.keys[i] == key {
+            keys.push(key)
+            values.push(value)
+            found = true
+        } else {
+            keys.push(m.keys[i])
+            values.push(m.values[i])
+        }
+        i = i + 1
+    }
+    if !found {
+        keys.push(key)
+        values.push(value)
+    }
+    OrderedMap{keys: keys, values: values}
+}
+
+pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap {
+    keys := [String]{}
+    values := [String]{}
+    i := 0
+    loop i < m.keys.len() {
+        if m.keys[i] != key {
+            keys.push(m.keys[i])
+            values.push(m.values[i])
+        }
+        i = i + 1
+    }
+    OrderedMap{keys: keys, values: values}
+}
+
+pub fn map_keys(m: OrderedMap) -> [String] { m.keys }
+
+pub fn map_values(m: OrderedMap) -> [String] { m.values }
+
+pub fn map_contains(m: OrderedMap, key: String) -> Bool { map_get(m, key) != None }
+
+pub fn map_len(m: OrderedMap) -> Int { m.keys.len() }
+
+pub fn chain() -> Chain { Chain{layers: [Layer]{}} }
+
+pub fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain {
+    layers := [Layer]{Layer{keys: keys, values: values}}
+    loop layer in c.layers -> layers.push(layer)
+    Chain{layers: layers}
+}
+
+pub fn chain_get(c: Chain, key: String) -> ?String {
+    loop layer in c.layers {
+        i := 0
+        loop i < layer.keys.len() {
+            if layer.keys[i] == key -> return Val(layer.values[i])
+            i = i + 1
+        }
+    }
+    None
+}
+
+pub fn chain_contains(c: Chain, key: String) -> Bool { chain_get(c, key) != None }

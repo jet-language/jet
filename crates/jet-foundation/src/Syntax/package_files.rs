@@ -68,11 +68,12 @@ pub fn command_role_file(command: &str) -> Option<&'static str> {
 
 /// D-LIT-DOT1=B (ratified 2026-08-20): named struct construction `Type{ field: val }`.
 /// Inferred form (type from context): `{ field: val }` — no type name.
-/// The retired dotted forms remain parser migration arms and emit E0320.
-/// D-UITREE1 (ratified 2026-06-30): the same sigil also constructs a named-payload
-/// enum variant — `.Variant{ field: val }` / `Type.Variant{ field: val }` (S30
-/// multi-field variants). No new token; `enum_lit_named_fields` in
-/// `Parser/Expressions.rs` reuses this `.{` adjacency after a leading-dot variant name.
+/// The retired dotted forms (`.{…}`, `Type.{…}`) are compile errors (E0320).
+/// `jet fmt` still rewrites them. D-UITREE1 (ratified 2026-06-30): the same
+/// sigil also constructs a named-payload enum variant — `.Variant{ field: val }`
+/// / `Type.Variant{ field: val }` (S30 multi-field variants). No new token;
+/// `enum_lit_named_fields` in `Parser/Expressions.rs` parses `{` immediately
+/// after a leading-dot variant name.
 /// D-LIT-DOT1=B amends D-DOTCTOR3: the same `Type{ body }` head is universal —
 /// scalars (`U8{ 250 }`), lists (`[U8]{ 1, 2 }`), fixed arrays (`[U8#3]{ … }`),
 /// maps (`[String:Int]{}`), and one-expression assertions (`Int{ fetch_rows() }`).

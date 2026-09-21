@@ -2,7 +2,7 @@ import { installDom } from "./fixtures/domshim.mjs";
 
 const document = installDom();
 globalThis.document = document;
-await import("./build/app.js");
+await import("./.jet/build/app.js");
 await new Promise((resolve) => setImmediate(resolve));
 
 const container = document.getElementById("jet-app");
