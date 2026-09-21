@@ -281,6 +281,7 @@ pub fn apply_impure_core_call_with_type_args(
             "path.from"
                 | "path.home"
                 | "path.join"
+                | "path.to_string"
                 | "path.parent"
                 | "path.extension"
                 | "path.stem"

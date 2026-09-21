@@ -220,7 +220,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
     if module == "core.handle"
         && matches!(
             method,
-            "path.from" | "path.join" | "path.parent" | "path.extension"
+            "path.from" | "path.join" | "path.to_string" | "path.parent" | "path.extension"
                 | "path.stem" | "path.normalize" | "path.is_within"
         )
     {

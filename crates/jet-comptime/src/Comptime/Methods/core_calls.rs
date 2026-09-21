@@ -170,6 +170,7 @@ fn apply_path_call(
         "path.from" => path(text(0)?.clone()),
         "path.home" => path(path_kernel::jet_std_path_home()),
         "path.join" => path(path_kernel::jet_std_path_join(text(0)?, text(1)?)),
+        "path.to_string" => CtValue::Str(text(0)?.clone()),
         "path.normalize" => path(path_kernel::jet_std_path_normalize(text(0)?)),
         "path.is_within" => CtValue::Bool(path_kernel::jet_std_path_is_within(text(0)?, text(1)?)),
         "path.parent" => path_kernel::jet_std_path_parent_opt(text(0)?)
