@@ -1,0 +1,82 @@
+{
+  "card": "#3110",
+  "kind": "plugin-retention-static-prep",
+  "status": "docs-only",
+  "source_revision": "2999fe335",
+  "scope": "Source inspection only; this manifest is not a runtime measurement receipt.",
+  "contracts": {
+    "plugin": "D-PLUGIN1=A",
+    "embedding": "D-EMBED2=C",
+    "collector": "D-DEP-GC1=A"
+  },
+  "surfaces": [
+    {
+      "id": "component-bridge",
+      "accounting": "component-store",
+      "sources": [
+        {
+          "path": "crates/jet-pkg-model/src/Prelude/Plugin.rs",
+          "lines": "1110-1229,1240-1464"
+        },
+        {
+          "path": "crates/jet-foundation/src/PluginWire.rs",
+          "lines": "1-303"
+        }
+      ],
+      "sequence": [
+        "load",
+        "call-success",
+        "call-repeat",
+        "call-failure",
+        "close"
+      ],
+      "supported_observations": [
+        "A failed call returns a typed error without panicking the host.",
+        "Aggregate results are copied before the Component post-return hook.",
+        "Closing an idle handle removes it; nested or active-call close is rejected."
+      ],
+      "measurements": {
+        "guest_roots": "unknown",
+        "finalizer_timing": "unknown",
+        "allocator_bytes": "unknown",
+        "managed_peak_retained_bytes": "unknown",
+        "wire_copy_bytes": "unknown"
+      },
+      "boundary": "Fuel, store limits, and wire-size checks are rejection budgets, not allocation or retained-memory counters."
+    },
+    {
+      "id": "native-callback",
+      "accounting": "trusted-native",
+      "sources": [
+        {
+          "path": "crates/jet-codegen/src/Prelude/CoreLib/JetStd/FfiCallbacks.rs",
+          "lines": "623-814,1007-1128"
+        }
+      ],
+      "sequence": [
+        "register",
+        "invoke-and-drain-in-flight-callbacks",
+        "unsubscribe",
+        "native-stop-ack",
+        "release"
+      ],
+      "supported_observations": [
+        "The raw registration remains live until native acknowledgement and callback quiescence.",
+        "A failed stop is retained as quarantined live state rather than dropped."
+      ],
+      "measurements": {
+        "native_allocated_bytes": "unknown",
+        "native_retained_bytes": "unknown",
+        "managed_capture_bytes": "unknown",
+        "finalizer_timing": "unknown"
+      },
+      "boundary": "Callback phase/status proves lifecycle ordering only; it does not expose a byte counter."
+    }
+  ],
+  "explicit_unknowns": [
+    "No source-facing guest-root, finalizer, allocator, or peak-retained-memory counter exists at either seam.",
+    "No runtime execution receipt is claimed by this static preparation.",
+    "Native allocation/retention and Component store accounting must remain separate; values must not be combined."
+  ],
+  "no_api_change": true
+}
