@@ -22044,7 +22044,20 @@ impl<'a> RustEmitter<'a> {
             return format!("({}).into_bytes()", self.value_move(receiver));
         }
         let receiver_value = receiver;
-        let receiver = if let Some(place) = receiver_place {
+        let literal_string_iter_route = matches!(
+            row.symbol.name(),
+            "jet_iter_string_split" | "jet_iter_string_rsplit"
+        );
+        let receiver = if literal_string_iter_route
+            && receiver_place.is_none()
+            && row.signature.borrow_mask.first().copied() == Some(true)
+        {
+            self.literal_string_value(function, receiver_value)
+                .map(|value| format!("{value:?}"))
+                .unwrap_or_else(|| {
+                    self.borrowed_value_reference(function, receiver_value, MirAccess::Read)
+                })
+        } else if let Some(place) = receiver_place {
             if !row.signature.borrow_mask[0] {
                 panic!(
                     "MIR builtin mutating receiver route {:?} is not borrowed",
@@ -22123,7 +22136,15 @@ impl<'a> RustEmitter<'a> {
         values.extend(args.iter().enumerate().map(|(index, value_id)| {
             let borrowed = row.signature.borrow_mask[index + 1];
             let value = if borrowed {
-                self.borrowed_value_reference(function, *value_id, MirAccess::Read)
+                if literal_string_iter_route {
+                    self.literal_string_value(function, *value_id)
+                        .map(|value| format!("{value:?}"))
+                        .unwrap_or_else(|| {
+                            self.borrowed_value_reference(function, *value_id, MirAccess::Read)
+                        })
+                } else {
+                    self.borrowed_value_reference(function, *value_id, MirAccess::Read)
+                }
             } else {
                 self.value_read(*value_id)
             };

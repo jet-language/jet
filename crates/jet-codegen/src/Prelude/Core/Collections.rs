@@ -2116,7 +2116,7 @@ impl Iterator for JetStringSplitIter {
     }
 }
 
-fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
+fn jet_iter_string_split(s: &str, sep: &str) -> JetIter<String> {
     let mut chars = sep.chars();
     let separator = match (chars.next(), chars.next()) {
         (None, _) => JetStringSplitSeparator::Empty,
@@ -2124,7 +2124,7 @@ fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
         (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
     };
     JetIter(Box::new(JetStringSplitIter {
-        source: s.clone(),
+        source: s.to_owned(),
         separator,
         offset: 0,
         phase: 0,
@@ -2175,7 +2175,7 @@ fn jet_bytes_ascii_whitespace_for_each<F>(
 
 /// Lazy `String.rsplit` — same left-to-right part order as Python `str.rsplit`
 /// without a limit (Rust's `rsplit` yields right-to-left; reverse after collect).
-fn jet_iter_string_rsplit(s: &String, sep: &str) -> JetIter<String> {
+fn jet_iter_string_rsplit(s: &str, sep: &str) -> JetIter<String> {
     if sep.is_empty() {
         return jet_iter_string_split(s, sep);
     }
