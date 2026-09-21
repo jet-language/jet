@@ -606,13 +606,19 @@ pub(super) fn compose_env_scoped_with_warm(
 ) -> Result<(Env, EnvReadyStats), i32> {
     let mut warm_realizations = warm.map(index_warm_realizations);
     let warm_complete = warm_realizations.as_ref().is_some_and(|realized| {
-        plan.refs
-            .iter()
-            .all(|spec| realized.contains_key(&spec.raw))
-            && plan.adapters.iter().all(|adapter| {
-                let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
-                realized.contains_key(&reference)
-            })
+        let mut required = std::collections::BTreeMap::<String, usize>::new();
+        for spec in &plan.refs {
+            *required.entry(spec.raw.clone()).or_default() += 1;
+        }
+        for adapter in &plan.adapters {
+            let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
+            *required.entry(reference).or_default() += 1;
+        }
+        required.into_iter().all(|(reference, count)| {
+            realized
+                .get(&reference)
+                .is_some_and(|entries| entries.len() >= count)
+        })
     });
     // Cold/partial project composition still needs selections for the receipt
     // and producer sealing; a complete warm hook can skip their per-entry

@@ -2357,15 +2357,22 @@ fn warm_realizations_complete(
     let Some(realized) = warm else {
         return false;
     };
-    plan.refs.iter().all(|spec| {
-        realized
-            .iter()
-            .any(|entry| entry.original_reference() == spec.raw)
-    }) && plan.adapters.iter().all(|adapter| {
+    let mut available = BTreeMap::<&str, usize>::new();
+    for entry in realized {
+        *available.entry(entry.original_reference()).or_default() += 1;
+    }
+    let mut required = BTreeMap::<String, usize>::new();
+    for spec in &plan.refs {
+        *required.entry(spec.raw.clone()).or_default() += 1;
+    }
+    for adapter in &plan.adapters {
         let reference = format!("adapt:{}:{}", adapter.name, adapter.source);
-        realized
-            .iter()
-            .any(|entry| entry.original_reference() == reference)
+        *required.entry(reference).or_default() += 1;
+    }
+    required.into_iter().all(|(reference, count)| {
+        available
+            .get(reference.as_str())
+            .is_some_and(|available| *available >= count)
     })
 }
 
