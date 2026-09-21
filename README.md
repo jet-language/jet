@@ -26,7 +26,8 @@ The example prints `hello, world`. Continue with the
 [first-hour guide](docs/spec/guides/first-hour.md), or use `jet help` for the
 commands provided by your installed compiler. Read the
 [release policy](docs/spec/release-policy.md) for compatibility rules rather
-than inferring production suitability from an example.
+than inferring production suitability from an example. Jet is pre-release; no
+1.0 release has shipped.
 
 ## Work on Jet
 
@@ -79,6 +80,11 @@ scripts/agent/jet-env jet inspect digest --topic diagnostics
 | [Prelude](crates/jet-codegen/src/Prelude/) and [CoreLib](corelib/) | Shared semantic and library sources |
 | [CLI implementation](crates/jet-cli/src/) | Commands, flags, and explanations |
 | [Editors](editors/) | Editor integrations and grammar sources |
+| [Source/](Source/) | Compiler host and command implementations |
+| [AGENTS.md](AGENTS.md) | Contributor decision boundaries and conduct |
+| [Tower](plugins/tower/skills/tower/SKILL.md) | Plans, decisions, and development status |
+| [llms.text](llms.text) | Machine-readable repository digest |
+| [.agents/](.agents/) | Agent skills and routing |
 
 ## License
 

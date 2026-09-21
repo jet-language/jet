@@ -54,7 +54,7 @@
 
         jet = pkgs.rustPlatform.buildRustPackage {
           pname = "jet";
-          version = "1.0.0";
+          version = "0.1.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 

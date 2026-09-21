@@ -157,7 +157,6 @@ function checkDocumentationPolicy() {
   for (const retired of [
     "docs/spec/roadmap.md", "docs/plans", "docs/spec/reference/errors",
     "docs/spec/diagnostic-rows.md", "docs/spec/reference/core-surface-ledger.md",
-    "llms.text",
     "docs/spec/reference/core-backend-facts.md", "docs/spec/reference/feature-claims.md",
   ]) {
     if (existsSync(join(ROOT, retired))) failures.push(`${retired}: use Tower or generate the reference from code on demand`);

@@ -10,6 +10,7 @@ decisions, and work state. No documentation page is a development dashboard.
 - [First hour](spec/guides/first-hour.md) and [diagnostic recovery](spec/guides/diagnostic-recovery.md)
 - [Executable examples](../examples/README.md) and [syntax examples](../examples/canon.jet)
 - [Contributor workflow](spec/contributing/issue-tracker.md) and [example procedure](spec/contributing/examples.md)
+- [Release policy](spec/release-policy.md) and [versioning](spec/versioning.md)
 
 ## Read the source for current behavior
 
