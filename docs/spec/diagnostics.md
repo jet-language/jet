@@ -78,3 +78,22 @@ the source.
 Keep one meaning across AOT, `jet run`, the interpreter, LSP, machine output,
 and web. A documentation or rendering change must not mint a new diagnostic or
 change compiler semantics.
+
+## Method-call fallback diagnostics
+
+The existing `E0102` method fallback keeps the call span and the registered
+What/Why/Fix representation. When a generic type parameter call matches a
+known trait method, the checker reports that method's existing `E0104` arity
+contract and uses `E0901` when the required trait bound is missing; it does not
+invent a method or diagnostic code.
+
+One-pass `Iter` and `ViewIter` values do not hold a cursor. A diagnostic for a
+declined cursor-style operation must say that pulling a value consumes the
+source. A list-only operation must also say that `.to_list()` consumes the
+source and allocates the materialized list. The fix names the loop, lazy
+adapter, or materializer that the programmer can use.
+
+Core receiver types have a closed method surface. Their fallback fixes may
+name a documented operation or a safe spelling edit, but must not suggest
+adding an `impl` to a protected Core type. A user-defined type wins the
+reserved-name guard and retains the ordinary user-type fix.

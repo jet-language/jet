@@ -110,6 +110,18 @@ impl<'a> Checker<'a> {
         let receiver_family = Self::receiver_method_label(receiver_ty);
         suggest_method_for_receiver(method, Some(&receiver_family), &candidates)
     }
+    /// Return the arity of a reserved cursor method when its call has reached
+    /// the generic fallback. The Core return tables key on `(method, arity)`,
+    /// so a wrong-arity call would otherwise look like an unknown method and
+    /// suggest an illegal `impl Cursor`/`impl Reader`.
+    fn protected_cursor_method_arity(type_name: &str, method: &str) -> Option<usize> {
+        (0..=8).find(|arity| match type_name {
+            "Reader" => binary_reader_method_return(type_name, method, *arity).is_some(),
+            "Cursor" => text_cursor_method_return(type_name, method, *arity).is_some(),
+            _ => false,
+        })
+    }
+
 
     fn receiver_method_label(receiver_ty: &Type) -> String {
         match receiver_ty {
@@ -6653,42 +6665,54 @@ impl<'a> Checker<'a> {
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 let bounds = param.bounds.clone();
-                for (trait_name, info) in &self.trait_reg.traits {
-                    if let Some(msig) = info.methods.get(method) {
-                        self.record_open_memory_dispatch(
-                            span,
-                            "generic trait dispatch has no sealed target set",
-                        );
-                        self.record_edge(
-                            format!(
-                                "{}::<static>",
-                                crate::Sema::effect_key(Some(trait_name), method)
-                            ),
-                            span,
-                        );
-                        if !bounds.iter().any(|b| b == trait_name) {
-                            self.diags.push(e0901(method, trait_name, span));
-                        }
-                        *recv_type_out = Some(trait_name.clone());
-                        for (arg, param) in args.iter_mut().zip(msig.params.iter().skip(1)) {
-                            arg.convention = param.convention;
-                            let old = self.expected_type.replace(param.ty.clone());
-                            self.infer(&mut arg.expr);
-                            self.expected_type = old;
-                        }
-                        // The AST fact is the checked carrier for ordinary
-                        // trait calls. Raw protocol traits retain their ABI
-                        // declaration so auto-propagation cannot add `Try`.
-                        let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
-                            Some(trait_name),
-                            false,
-                            false,
-                        );
-                        let (resolved_ret, _carrier) =
-                            self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
-                        *resolved_ret_out = Some(resolved_ret);
-                        return msig.return_type.clone();
+                let known_method = bounds
+                    .iter()
+                    .find_map(|trait_name| {
+                        self.trait_reg
+                            .traits
+                            .get(trait_name)
+                            .and_then(|info| info.methods.get(method))
+                            .map(|msig| (trait_name.clone(), msig.clone()))
+                    })
+                    .or_else(|| {
+                        self.trait_reg
+                            .traits
+                            .iter()
+                            .filter_map(|(trait_name, info)| {
+                                info.methods.get(method).map(|msig| (trait_name, msig))
+                            })
+                            .min_by(|(left, _), (right, _)| left.cmp(right))
+                            .map(|(trait_name, msig)| (trait_name.clone(), msig.clone()))
+                    });
+                if let Some((trait_name, msig)) = known_method {
+                    self.record_open_memory_dispatch(
+                        span,
+                        "generic trait dispatch has no sealed target set",
+                    );
+                    self.record_edge(
+                        format!(
+                            "{}::<static>",
+                            crate::Sema::effect_key(Some(&trait_name), method)
+                        ),
+                        span,
+                    );
+                    if !bounds.iter().any(|bound| bound == &trait_name) {
+                        self.diags.push(e0901(method, &trait_name, span));
                     }
+                    *recv_type_out = Some(trait_name.clone());
+                    let source = self.check_trait_method_args(method, &msig, receiver, args, span);
+                    // The AST fact is the checked carrier for ordinary trait
+                    // calls. Raw protocol traits retain their ABI declaration
+                    // so auto-propagation cannot add `Try`.
+                    let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
+                        Some(&trait_name),
+                        false,
+                        false,
+                    );
+                    let (resolved_ret, _carrier) =
+                        self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+                    *resolved_ret_out = Some(resolved_ret);
+                    return source;
                 }
             }
         }
@@ -7908,6 +7932,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             let iter_positional_pick = iter_elem.is_some() && method == "nth";
+            let held_cursor_pick = iter_elem.is_some() && method == "next";
             // #1887: `.to_list()` is the truthful fix only when the collected
             // list really carries the method that was asked for — a lazy view
             // has to be materialized before a positional read. A name the
@@ -7921,6 +7946,38 @@ impl<'a> Checker<'a> {
                 })
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
+            // A cursor method is present in the Core signature table even
+            // when its arity-specific return lookup misses. Recover that
+            // method here so the fallback reports E0104 rather than suggesting
+            // an extension to a protected Core type.
+            if let Some(expected_args) = Self::protected_cursor_method_arity(&type_name, method) {
+                if args.len() != expected_args {
+                    let plural = if expected_args == 1 { "" } else { "s" };
+                    let fix = if expected_args == 0 {
+                        format!("call `{display_type_name}.{method}()` with no arguments")
+                    } else {
+                        format!(
+                            "call `{display_type_name}.{method}(…)` with exactly {expected_args} argument{plural}"
+                        )
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!(
+                            "`{display_type_name}.{method}` expects {expected_args} argument{plural}, got {}",
+                            args.len()
+                        ),
+                        format!(
+                            "`{display_type_name}` is a consuming cursor; this operation advances its source"
+                        ),
+                        fix,
+                        Some(span),
+                    ));
+                }
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
             // #1887: a hand-authored hint for a known receiver/method pair
             // outranks the generic edit-distance near-miss. `len` is one edit
             // away from `get` but semantically unrelated, and offering it
@@ -7928,33 +7985,97 @@ impl<'a> Checker<'a> {
             // fallback for a receiver nothing specific is known about, and it
             // also owns the suggested source edit: renaming the method is an
             // honest edit only when renaming is the fix being offered.
+            let protected_core = (!self.registry.contains(&type_name))
+                && (crate::Sema::CheckerCoreLib::core_type_known(&type_name)
+                    || Collections::is_reserved_type(&type_name)
+                    || crate::Sema::Diagnostics::is_one_pass_source(&recv_ty));
+            let generic_bounds = match &recv_ty {
+                Type::Named(name) => self
+                    .type_param_scope
+                    .iter()
+                    .find(|param| param.name == *name)
+                    .map(|param| param.bounds.clone()),
+                _ => None,
+            };
             let (why, fix, rename_edit) = if iter_positional_pick {
                 (
                     "positional picks on `Iter` use one consuming path".to_string(),
                     "use `.skip(n).first()`; `nth` is not part of the API".to_string(),
                     None,
                 )
+            } else if held_cursor_pick {
+                (
+                    format!(
+                        "`{display_type_name}` is a one-pass source with no held cursor; pulling one item would consume it, while materializing it would allocate a list"
+                    ),
+                    "use `loop item in source { … }`, or `.skip(n).first()` for a positional pick; materialize with `.to_list()` only when the list allocation is intended"
+                        .to_string(),
+                    None,
+                )
             } else if let Some(materializer) = collect_first {
                 (
-                    "check the method name on this type".to_string(),
-                    format!("call `{materializer}` first"),
+                    format!(
+                        "`{display_type_name}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list"
+                    ),
+                    format!(
+                        "materialize it first with `{materializer}`; this consumes the source and allocates a list"
+                    ),
                     None,
                 )
             } else {
                 let suggestion = self.method_suggestion(method, &recv_ty, Some(&type_name));
-                let fix = suggestion
-                        .as_ref()
-                        .map(|suggestion| suggestion.fix.clone())
-                        .unwrap_or_else(|| {
+                if protected_core {
+                    let fix = suggestion.as_ref().map_or_else(
+                        || format!("use a documented method on `{display_type_name}`"),
+                        |suggestion| suggestion.fix.clone(),
+                    );
+                    (
+                        format!(
+                            "`{display_type_name}` is a protected Core type with a closed method surface"
+                        ),
+                        fix,
+                        suggestion.map(|suggestion| suggestion.name),
+                    )
+                } else if let Some(bounds) = generic_bounds {
+                    let bound_names = bounds
+                        .iter()
+                        .map(|bound| format!("`{bound}`"))
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let why = if bounds.is_empty() {
+                        format!(
+                            "type parameter `{type_name}` has no bound that provides `{method}`"
+                        )
+                    } else {
+                        format!(
+                            "none of type parameter `{type_name}`'s bounds ({bound_names}) provides `{method}`"
+                        )
+                    };
+                    let fix = if bounds.is_empty() {
+                        format!(
+                            "add a trait bound that defines `{method}`, or use a method available on `{type_name}`"
+                        )
+                    } else {
+                        format!(
+                            "add a bound that defines `{method}`, or use a method from {bound_names}"
+                        )
+                    };
+                    (why, fix, None)
+                } else {
+                    let fix = suggestion.as_ref().map_or_else(
+                        || {
                             format!(
                                 "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
                             )
-                        });
-                (
-                    "check the method name on this type".to_string(),
-                    fix,
-                    suggestion.map(|suggestion| suggestion.name),
-                )
+                        },
+                        |suggestion| suggestion.fix.clone(),
+                    );
+                    (
+                        "check the method name on this type".to_string(),
+                        fix,
+                        suggestion.map(|suggestion| suggestion.name),
+                    )
+                }
             };
             let mut diagnostic = Diagnostic::error(
                 "E0102",
