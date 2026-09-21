@@ -2502,6 +2502,13 @@ const HTTP_FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
     "proxy-authenticate",
     "proxy-authorization",
 ];
+fn connection_close_value(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value
+            .split(',')
+            .all(|item| item.trim().eq_ignore_ascii_case("close"))
+}
+
 
 fn validate_request_header(name: &str, value: &str) -> Result<(), JetHTTPBridgeError> {
     if name.is_empty()
@@ -2513,9 +2520,11 @@ fn validate_request_header(name: &str, value: &str) -> Result<(), JetHTTPBridgeE
     if HTTP_FORBIDDEN_REQUEST_HEADERS
         .iter()
         .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        && !(name.eq_ignore_ascii_case("connection") && connection_close_value(value))
     {
         return Err(JetHTTPBridgeError::InvalidFraming);
     }
+
     Ok(())
 }
 
@@ -5047,6 +5056,9 @@ fn hpack_request(
     let mut has_accept_encoding = false;
     for (name, value) in headers {
         let name = name.to_ascii_lowercase();
+        if name == "connection" {
+            return Err(JetHTTPBridgeError::InvalidFraming);
+        }
         has_length |= name == "content-length";
         has_accept_encoding |= name == "accept-encoding";
         hpack_literal(
