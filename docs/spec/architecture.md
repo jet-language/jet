@@ -514,6 +514,48 @@ and the function-extract helper returns no action. Other non-scalar parameters
 and results stay unsupported until sema supplies a complete ownership contract
 for reads, writes, takes, and returned values.
 
+## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / D-DEP-WASM1)
+
+An application `target: sandbox` is a WASM Component Model guest in the
+existing `jet-pkg-model::Prelude::Plugin` host. The native library boundary is
+different: a native library is trusted code and has no Wasmtime sandbox or
+implicit capability reduction. Both surfaces keep the same checked export
+shape, but only the Component path makes an isolation guarantee.
+
+The Component loader reads the module below the caller's canonical,
+resource-scoped `FS.Read` authority, then preflights every import as a typed
+`HostImportFact`. The declared `authority.needs` and the one authority lent to
+the load must cover each fact before the linker registers it or instantiation
+can occur. An unknown or denied import fails closed; no adapter can reach the
+filesystem, network, process, or another external effect first. An empty
+grant is explicit zero authority, never an ambient fallback. Host adapters
+re-check the typed decision at the call edge and apply the same resource scope
+to path/endpoint arguments.
+
+The host applies fuel, linear-memory, table, wire-size, and wall-call budgets.
+The failure envelope records which budget was actually consumed; a guest
+memory/table request is not relabeled as fuel exhaustion, and an oversized
+wire is rejected before an unbounded host encoding. A call trap is classified
+as user/guest failure, denied authority, budget exhaustion, or internal host
+defect from typed boundary state, not by parsing backend error text. The
+wire keeps the original Jet operation and exported call name and remains the
+transport envelope; no public `Plugin` error type is added.
+
+Handles and Wasmtime stores are owner-thread state. Cross-thread use and
+unload of an active call are rejected by the existing handle boundary, and
+nested host/guest entry is explicitly rejected rather than borrowing the
+thread-local store map recursively. Bounded external adapters (network and
+process) use the same call deadline; cancellation stops the deadline worker
+before the store becomes idle. Component values are copied while the call
+owns guest memory and before `post_return`; no borrowed guest or host view
+escapes its call/owner.
+A failed guest returns a Jet error frame and keeps any failure scoped to its
+own instance; unrelated native work is not terminated.
+
+This boundary does not turn a native library into a sandbox and does not make
+the sandbox an ambient host. New host capabilities or a new public error API
+require a ratified ballot rather than an adapter-local policy.
+
 ## Compiler-extension plugins (D-DX5-HOOK1=A)
 
 After sema, the compiler may freeze a **versioned typed read-only snapshot** and
