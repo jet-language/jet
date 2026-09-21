@@ -1,4 +1,10 @@
 // List predicate traversal and first-match replacement.
+// Concrete list operations run eagerly. `count_where` reads `values` and
+// returns a count; it does not change the receiver.
+// `update_first` has a mutating receiver: it writes the first matching slot
+// in place and returns a Bool telling whether a write occurred. The `changed`
+// binding is immutable, while the `values` storage it reports on is changed.
+// A false result means no write; the receiver remains as it was.
 fn run() {
     values := [1, 2, 2, 3]
     print(values.count_where(item -> item % 2 == 0))

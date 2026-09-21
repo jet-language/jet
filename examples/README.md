@@ -59,6 +59,61 @@ not to teach — citing a card number *alongside* a decision ID or real
 explanation (the norm across this corpus) needs no marker; only the bare,
 unexplained case does.
 
+## Current-law teaching manifest (READ-F08 / READ-F12)
+
+This finite manifest covers only the selected examples whose local contracts
+are easy to lose in a short name or snippet. The current spellings come from
+the [Syntax decisions](../docs/spec/syntax-decisions.md); retained research
+captures, including the corrected `loop_forms`, `bounded_workers`, and
+`all_failfast` source identities, remain historical evidence rather than
+replacement source files.
+The local-contract criteria come from [READ-F12](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f12);
+the example boundary and source-integrity rules come from [READ-F08](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f08).
+
+| Source | Local contract made visible | Normative decisions |
+|---|---|---|
+| `features/basics/loop_forms.jet` | One `loop` keyword; source and range evaluation is eager, `next` advances the current source, and iteration reads rather than mutates its source. | S19, S22, S23; D-LOOP-IN1, D-RANGE-EXCL1, D-LOOP-CONTROLWORD1 |
+| `../tests/ui/list_loop_mutate.jet` | A mutable binding does not authorize changing a collection while that collection is being read. E0507 leaves the traversal domain and repair intent explicit. | D-BIND1, D-MEM1; E0507 |
+| `features/errors/errors.jet` | `Ok`/`Err` exits, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are four different routes. | S34, S35, S36, S7; D-FAILURE-FOUNDATION1, D-FAIL-EXIT1 |
+| `features/errors/typed_error_families.jet` | One declared `impl Source -> Target` rail changes the error carrier while preserving the success payload; it is not an implicit logging or alias mechanism. | D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2 |
+| `features/io/scope_guard.jet` | A registered guard callback is deferred, runs once at scope exit in reverse registration order, and remains distinct from resource-only `defer close(^resource)`. | D-DEFER1, D-SHAPE-RESOURCE2, D-FAIL-EXIT1 |
+
+The adjacent collection examples (`collections/list_predicate_ops.jet` and
+`collections/indexed_mutation.jet`) distinguish an eager read from an
+in-place write and show the observed storage update. Collection API
+completeness belongs to [IteratorAstra's iterator work](../docs/research/mine-for-jet-2026-09-12.md#topic-iterators);
+this manifest does not create a second API inventory. Identity and refactoring
+claims belong to [BigCodeAstra's checked identity work](../docs/research/mine-for-jet-2026-09-12.md#topic-bigcode).
+Runtime scope cleanup is covered separately by [READ-F05](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f05),
+and formatter preservation by [READ-F07](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f07);
+this patch keeps their receipts distinct from teaching-source conformance.
+Current-law example conformance is the boundary of
+[READ-F08](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f08).
+
+### Source identity and output shape
+
+`features/basics/values.jet` uses the current interpolation form. An output
+line is not a source-search key: source wrapping does not add a newline, while
+the explicit `\n` escape does. E0109's existing interpolation diagnostic and
+its source-specific operands teach the one text-composition mechanism; this
+does not authorize a logging or localization framework. The
+[message-identity investigation](../docs/research/mine-for-jet-2026-09-12.md#finding-read-f11)
+keeps source identity, event keys, trace context, and message text separate.
+
+### Full-state C contrast
+
+The visible C control `while (*dest++ = *src++);` stores the assigned byte,
+uses the copied NUL byte as its termination condition, and post-increments
+both pointers. The reviewed expanded form can copy the same bytes, including
+the NUL terminator, under ordinary valid nonvolatile source/destination
+storage, but it leaves the final pointers at different positions. A truthful
+comparison therefore exposes postconditions, capacity/bounds, alias
+obligations, and the nonvolatile assumption; matching printed bytes alone is
+not equivalence. This is a teaching control, not an executed enclosing
+program or proof of the earlier unsafe rewrite. See
+[READ-C015](../docs/research/mine-for-jet-2026-09-12.md#claim-c-copy-refactor-termination-and-capacity-read-c015)
+and [READ-C028](../docs/research/mine-for-jet-2026-09-12.md#claim-c-copy-refactor-observable-state-read-c028).
+
 ## Auxiliary golden stream suffixes (one rule per meaning)
 
 `features/expected/<stem>.out` always holds the plain `jet run` stdout. Every

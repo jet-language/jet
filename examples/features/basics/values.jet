@@ -1,17 +1,20 @@
 // Values and types.
-// `name :: value` names a value that never changes; `name := value` names one
-// that can (D-BIND1). Type annotations are optional — Jet infers locals (S4).
+// `name :: value` names an immutable binding; `name := value` names one that
+// may be reassigned (D-BIND1). Binding immutability is not deep object
+// immutability: an object/alias still needs the collection's write contract.
+// Type annotations are optional — Jet infers locals (S4).
 fn run() {
-    name :: "Jet"  // annotated
-    year :: 2026  // inferred as Int
+    name :: "Jet"  // immutable inferred String
+    year :: 2026  // immutable inferred Int
     version :: Float{0.1}  // explicit approximate Float
-    ready :: true
+    ready :: true  // immutable Bool
     // arithmetic, with the usual precedence
     sum :: (7 + (3 * 4))  // 19, not 40
     half :: (Float{19.0} / Float{2.0})  // Float division keeps the fraction
     leftover :: (19 % 4)  // remainder
     depth :: (-12)
-    // any expression can sit inside { } in quoted text (S8)
+    // Interpolation evaluates the expression and inserts its value into this
+    // line. Source wrapping is not an output newline; `\n` below is explicit.
     print("{name} {version} (ready: {ready})")
     print("sum {sum}, half {half}, leftover {leftover}")
     print("next year is {(year + 1)}, depth {depth}")

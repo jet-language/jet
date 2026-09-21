@@ -1,6 +1,10 @@
-// 67 — scope-exit cleanup via core.mem.scope.guard (D-DEFER1 option B).
-// Guard fires on every exit path — normal return, early return, and `?`
-// propagation. Guards run once at scope exit in reverse declaration order.
+// Scope-exit cleanup via `core.mem.scope.guard` (D-DEFER1 option B).
+// `scope.guard` registers a zero-parameter callback in a must-use Guard value.
+// Registration itself does not run the callback: it runs once when the owning
+// scope exits, in reverse registration order. This covers normal success,
+// explicit failure, and plain-call failure propagation; no postfix `?` operator
+// is used. `print` gives the sample an inferred IO effect; a runtime marker is an
+// observation, not a substitute for that checked effect fact.
 use core.mem.scope as scope
 
 #Error
@@ -12,19 +16,24 @@ fn with_guards(succeed: Bool) -> Int !Fail {
     _g1 :: scope.guard(() -> print("guard 1 runs"))
     _g2 :: scope.guard(() -> print("guard 2 runs"))
     print("body")
-    if succeed -> return Ok(42)
-    return Err(Fail.Bad)
+    if succeed -> return Ok(42)  // normal early success still cleans up
+    Err(Fail.Bad)  // final failure result also cleans up
 }
 
 fn question_path() -> Int !Fail {
     _cleanup :: scope.guard(() -> print("cleanup before ?"))
-    n :: with_guards(false)
-    return Ok(n)
+    // A plain fallible call propagates Fail.Bad from with_guards. The `return`
+    // below is reached only on success, so this function's failure exit still
+    // runs its own guard.
+    parsed_value :: with_guards(false)
+    Ok(parsed_value)
 }
 
 fn run() {
-    r1 :: with_guards(true) ?? 0
-    print(r1)
-    r2 :: question_path() ?? -1
-    print(r2)
+    // `??` handles question_path's propagated failure at this boundary; it
+    // does not suppress the cleanup that happened while unwinding scopes.
+    normal_result :: with_guards(true) ?? 0
+    print(normal_result)
+    propagated_result :: question_path() ?? -1
+    print(propagated_result)
 }

@@ -1,4 +1,6 @@
-// 13 — Errors as values (M4, S34/S35/S36/S7).
+// Errors as values (M4, S34/S35/S36/S7).
+// `#Error` makes this application-owned family eligible for a typed failure
+// contract. `Err` and `Ok` are the only result constructors shown here.
 #Error
 enum ParseError {
     Empty
@@ -6,23 +8,32 @@ enum ParseError {
 }
 
 fn parse_age(raw: String) -> Int !ParseError {
+    // An explicit `Err` exits this function. A plain fallible call in a
+    // caller propagates that result; final `Ok` is the success expression.
     if raw == "" -> return Err(ParseError.Empty)
     if raw == "x" -> return Err(ParseError.BadDigit(~raw))
-    return Ok(42)
+    Ok(42)
 }
 
 fn load() -> Int !ParseError {
-    n :: parse_age("7")
-    return Ok((n * 2))
+    // This unmarked call either binds the successful age or returns the
+    // ParseError from `load`; the final expression runs only on success.
+    age :: parse_age("7")
+    Ok((age * 2))
 }
 
 fn run() {
-    a :: parse_age("42") ?? 0
-    print(a)
-    doubled :: load() ?? 0
-    print(doubled)
+    // `??` is local fallback recovery: a parse failure becomes 0 and the
+    // entry continues. It is not the same exit as propagation from `load`.
+    parsed_age :: parse_age("42") ?? 0
+    print(parsed_age)
+    doubled_age :: load() ?? 0
+    print(doubled_age)
+
+    // A pattern table observes both result routes and handles the error
+    // explicitly, so neither branch propagates out of `run`.
     if parse_age("x") == {
-        .Ok(n) -> print(n)
-        .Err(e) -> print(e)
+        .Ok(age) -> print(age)
+        .Err(error) -> print(error)
     }
 }

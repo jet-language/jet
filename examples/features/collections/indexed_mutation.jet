@@ -1,4 +1,8 @@
 // Card #2291: mutating methods on indexed collection elements update storage.
+// `outer` and `lists` are mutable bindings; `i` and `k` are immutable selectors.
+// Indexing a mutable collection exposes the selected element's write contract,
+// so `push` changes the original nested storage rather than a temporary copy.
+// Each print is the observed write, not merely permission to write.
 struct Bucket {
     values: [Int]
 }

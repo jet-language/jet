@@ -1,5 +1,6 @@
-// 72 — Typed error families + error conversion (D-ERR-CONV, ratified 2026-06-19).
-// Demonstrates `impl Source -> Target { … }` and automatic conversion.
+// Typed error families + error conversion (D-ERR-CONV, ratified 2026-06-19).
+// `#Error` declares application-owned result families; `impl Source -> Target`
+// is the one conversion rail. It is not a logging layer or a generic alias.
 #Error
 enum FileErr {
     NotFound(String)
@@ -19,37 +20,41 @@ enum AppErr {
     Missing(String)
 }
 
-// D-ERR-CONV: declare how each lower-level error becomes an AppErr.
-impl FileErr -> AppErr { return AppErr.File(self) }
+// Each conversion preserves the original source error as a payload in the
+// application family. The body receives that error as `self`.
+impl FileErr -> AppErr { AppErr.File(self) }
 
-impl ParseErr -> AppErr { return AppErr.Parse(self) }
+impl ParseErr -> AppErr { AppErr.Parse(self) }
 
-fn read_file(path: String) -> String !FileErr {
+fn read_config(path: String) -> String !FileErr {
     if path == "" -> return Err(FileErr.NotFound("(empty path)"))
-    return Ok("42")
+    Ok("42")
 }
 
-fn parse_int(s: String) -> Int !ParseErr {
-    if s == "" -> return Err(ParseErr.Empty)
-    if s == "x" -> return Err(ParseErr.BadInt(~s))
-    return Ok(42)
+fn parse_int(text: String) -> Int !ParseErr {
+    if text == "" -> return Err(ParseErr.Empty)
+    if text == "x" -> return Err(ParseErr.BadInt(~text))
+    Ok(42)
 }
 
-// Both calls cross error-type boundaries implicitly via the declared conversions.
+// Plain fallible calls propagate automatically. At each call, the declared
+// conversion changes only the error carrier; the success payload stays intact.
 fn load(path: String) -> Int !AppErr {
-    raw :: read_file(path)  // FileErr  -> AppErr.File  (declared)
-    port :: parse_int(raw)  // ParseErr -> AppErr.Parse (declared)
-    return Ok(port)
+    raw :: read_config(path)  // FileErr -> AppErr.File
+    port :: parse_int(raw)  // ParseErr -> AppErr.Parse
+    Ok(port)
 }
 
 fn run() {
-    // Use 0 when load fails instead of propagating its error.
-    n :: load("config.txt") ?? 0
-    print(n)
-    // Trigger the declared FileErr -> AppErr conversion inside load.
+    // Fallback recovery handles either converted failure locally and keeps
+    // this entry moving. It is distinct from propagation inside `load`.
+    loaded_value :: load("config.txt") ?? 0
+    print(loaded_value)
+    // This pattern observes the declared FileErr -> AppErr conversion inside
+    // `load`; both result routes are handled here rather than propagated.
     if load("") == {
-        .Ok(v) -> { print(v) }
-        .Err(e) -> { print("error") }
+        .Ok(value) -> { print(value) }
+        .Err(_error) -> { print("error") }
         else -> {}
     }
 }
