@@ -2,6 +2,7 @@
 //! refactors, semantic tokens, inlay hints.
 
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::AST;
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
 use std::collections::BTreeMap;
@@ -611,6 +612,11 @@ pub(crate) fn semantic_symbol_at<'a>(
             }
         }
     }
+    if let Some(identity) = enum_variant_identity_at(db, tokens, path, offset) {
+        if let Some(symbol) = db.symbols.lookup_identity(&identity) {
+            return Some(symbol);
+        }
+    }
     find_ident_at(tokens, offset).and_then(|name| db.symbols.resolve_visible_in(name, Some(path)))
 }
 
@@ -895,6 +901,234 @@ fn checked_identity_in_span(
     checked_instance_identity(db, path, start, end)
 }
 
+fn previous_code_token(tokens: &[Token], index: usize) -> Option<usize> {
+    tokens[..index]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(candidate, token)| (!is_trivia(token)).then_some(candidate))
+}
+
+fn active_pattern_subject<'a>(tokens: &'a [Token], index: usize) -> Option<&'a str> {
+    for (brace_index, token) in tokens[..index].iter().enumerate().rev() {
+        if !matches!(&token.kind, TokKind::LBrace) {
+            continue;
+        }
+        let Some(eq_index) = previous_code_token(tokens, brace_index) else {
+            continue;
+        };
+        if !matches!(
+            &tokens[eq_index].kind,
+            TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Gt | TokKind::Le | TokKind::Ge
+        ) {
+            continue;
+        }
+        let Some(subject_index) = previous_code_token(tokens, eq_index) else {
+            continue;
+        };
+        let TokKind::Ident(subject) = &tokens[subject_index].kind else {
+            continue;
+        };
+        let Some(if_index) = previous_code_token(tokens, subject_index) else {
+            continue;
+        };
+        if !matches!(&tokens[if_index].kind, TokKind::KwIf) {
+            continue;
+        }
+        let mut depth = 0usize;
+        for candidate in tokens.iter().skip(brace_index).take(index - brace_index) {
+            match &candidate.kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if depth > 0 {
+            return Some(subject);
+        }
+    }
+    None
+}
+
+fn enum_variant_definition_at<'a>(
+    db: &'a SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    index: usize,
+) -> Option<&'a jet_semindex::SymDef> {
+    let TokKind::Ident(variant) = &tokens[index].kind else {
+        return None;
+    };
+    let dot_index = previous_code_token(tokens, index)?;
+    if !matches!(&tokens[dot_index].kind, TokKind::Dot) {
+        return None;
+    }
+    let receiver_index = previous_code_token(tokens, dot_index);
+    let receiver = receiver_index.and_then(|receiver_index| {
+        if let TokKind::Ident(name) = &tokens[receiver_index].kind {
+            Some(name.clone())
+        } else {
+            None
+        }
+    });
+    let enum_name = if let Some(receiver) = receiver {
+        let receiver_type = db
+            .defs
+            .iter()
+            .filter(|definition| {
+                definition.module_path == path
+                    && definition.name == receiver
+                    && definition.def_span.start <= tokens[index].span.start
+                    && matches!(
+                        &definition.kind,
+                        SymKind::Local { .. } | SymKind::Param { .. }
+                    )
+            })
+            .max_by_key(|definition| definition.def_span.start)
+            .and_then(|definition| match &definition.kind {
+                SymKind::Local { ty: Some(AST::Type::Named(name)), .. }
+                | SymKind::Param { ty: AST::Type::Named(name) }
+                | SymKind::Local { ty: Some(AST::Type::Apply { name, .. }), .. }
+                | SymKind::Param { ty: AST::Type::Apply { name, .. } } => Some(name.clone()),
+                _ => None,
+            });
+        receiver_type.unwrap_or(receiver)
+    } else {
+        let subject = active_pattern_subject(tokens, dot_index)?;
+        let subject_def = db
+            .defs
+            .iter()
+            .filter(|definition| {
+                definition.module_path == path
+                    && definition.name == subject
+                    && definition.def_span.start <= tokens[index].span.start
+            })
+            .max_by_key(|definition| definition.def_span.start)?;
+        match &subject_def.kind {
+            SymKind::Local { ty: Some(AST::Type::Named(name)), .. }
+            | SymKind::Param { ty: AST::Type::Named(name) }
+            | SymKind::Local { ty: Some(AST::Type::Apply { name, .. }), .. }
+            | SymKind::Param { ty: AST::Type::Apply { name, .. } } => name.clone(),
+            _ => return None,
+        }
+    };
+    let leaf = enum_name
+        .rsplit_once('.')
+        .map_or(enum_name.as_str(), |(_, leaf)| leaf);
+    if !db.defs.iter().any(|definition| {
+        matches!(&definition.kind, SymKind::Enum { .. })
+            && (definition.name == enum_name || definition.name == leaf)
+    }) {
+        return None;
+    }
+    let local = db
+        .defs
+        .iter()
+        .filter(|definition| {
+            definition.module_path == path
+                && definition.name == *variant
+                && matches!(
+                    &definition.kind,
+                    SymKind::EnumVariant { parent }
+                        if parent == &enum_name || parent == leaf
+                )
+        })
+        .collect::<Vec<_>>();
+    let candidates = if local.is_empty() {
+        db.defs
+            .iter()
+            .filter(|definition| {
+                definition.name == *variant
+                    && matches!(
+                        &definition.kind,
+                        SymKind::EnumVariant { parent }
+                            if parent == &enum_name || parent == leaf
+                    )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        local
+    };
+    let mut selected = None;
+    for candidate in candidates {
+        if selected
+            .as_ref()
+            .is_some_and(|existing: &&jet_semindex::SymDef| existing.identity != candidate.identity)
+        {
+            return None;
+        }
+        selected = Some(candidate);
+    }
+    selected
+}
+
+fn enum_variant_identity_at(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    offset: usize,
+) -> Option<String> {
+    let index = tokens.iter().position(|token| {
+        matches!(&token.kind, TokKind::Ident(_))
+            && token.span.start <= offset
+            && offset <= token.span.end
+    })?;
+    enum_variant_definition_at(db, tokens, path, index).map(|definition| definition.identity.clone())
+}
+
+fn enum_variant_spans(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    identity: &str,
+) -> Vec<Span> {
+    let mut spans = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if !matches!(&token.kind, TokKind::Ident(_)) {
+            continue;
+        }
+        if enum_variant_definition_at(db, tokens, path, index)
+            .is_some_and(|definition| definition.identity == identity)
+        {
+            spans.push(token.span);
+        }
+    }
+    spans
+}
+
+fn is_enum_variant_identity(db: &SymbolDB, identity: &str) -> bool {
+    let Some(variant) = db
+        .defs
+        .iter()
+        .find(|definition| definition.identity == identity)
+    else {
+        return false;
+    };
+    let SymKind::EnumVariant { parent } = &variant.kind else {
+        return false;
+    };
+    db.defs.iter().any(|definition| {
+        definition.name == *parent && matches!(&definition.kind, SymKind::Enum { .. })
+    })
+}
+
+fn enum_variant_leaf_span(
+    db: &SymbolDB,
+    reference: &jet_semindex::SymRef,
+    identity: &str,
+) -> Option<Span> {
+    if !is_enum_variant_identity(db, identity) {
+        return None;
+    }
+    let definition = db
+        .defs
+        .iter()
+        .find(|definition| definition.identity == identity)?;
+    let leaf_len = definition.def_span.end.saturating_sub(definition.def_span.start);
+    let start = reference.span.end.checked_sub(leaf_len)?;
+    (reference.span.start <= start).then_some(Span::new(start, reference.span.end))
+}
+
 /// Resolve only the checked target under the cursor. Unlike completion and
 /// hover, semantic refactors never recover from an unresolved target by name.
 pub(crate) fn checked_semantic_identity_at(
@@ -904,6 +1138,9 @@ pub(crate) fn checked_semantic_identity_at(
     offset: usize,
 ) -> Option<String> {
     if let Ok(Some(identity)) = checked_identity_in_span(db, path, offset, offset) {
+        return Some(identity);
+    }
+    if let Some(identity) = enum_variant_identity_at(db, tokens, path, offset) {
         return Some(identity);
     }
     let receiver = compiler_fact_receiver_span(tokens, offset)?;
@@ -919,9 +1156,17 @@ pub(crate) fn checked_rename_span_at(
     offset: usize,
 ) -> Option<(String, Span)> {
     let identity = checked_semantic_identity_at(db, tokens, path, offset)?;
-    let span = match checked_reference_in_span(db, path, offset, offset).ok()? {
-        Some(reference) if reference.target.as_ref().is_some_and(|target| target.kind == "state") => {
+    let span = match checked_reference_in_span(db, path, offset, offset) {
+        Ok(Some(reference))
+            if reference
+                .target
+                .as_ref()
+                .is_some_and(|target| target.kind == "state") =>
+        {
             state_leaf_span(reference)?
+        }
+        Ok(Some(reference)) if is_enum_variant_identity(db, &identity) => {
+            enum_variant_leaf_span(db, reference, &identity)?
         }
         _ => token_span_at(tokens, offset)?,
     };
@@ -1233,15 +1478,30 @@ pub(crate) fn compute_references(
     let Some(identity) = checked_semantic_identity_at(db, tokens, path, offset) else {
         return Vec::new();
     };
+    let enum_variant = is_enum_variant_identity(db, &identity);
     let mut result: Vec<(String, Span)> = db
         .refs
         .iter()
         .filter_map(|reference| {
             let target = reference.target.as_ref()?;
-            (checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()))
-                .then_some((reference.module_path.clone(), reference.span))
+            if checked_anchor_identity(db, target).as_deref() != Some(identity.as_str()) {
+                return None;
+            }
+            let span = if enum_variant {
+                enum_variant_leaf_span(db, reference, &identity).unwrap_or(reference.span)
+            } else {
+                reference.span
+            };
+            Some((reference.module_path.clone(), span))
         })
         .collect();
+    if enum_variant {
+        result.extend(
+            enum_variant_spans(db, tokens, path, &identity)
+                .into_iter()
+                .map(|span| (path.to_string(), span)),
+        );
+    }
     if include_declaration {
         result.extend(
             db.defs
@@ -1691,15 +1951,30 @@ pub(crate) fn compute_rename(
             return Ok(spans);
         }
     }
+    let enum_variant = is_enum_variant_identity(db, &identity);
     let mut spans: Vec<(String, Span)> = db
         .refs
         .iter()
         .filter_map(|reference| {
             let target = reference.target.as_ref()?;
-            (checked_anchor_identity(db, target).as_deref() == Some(identity.as_str()))
-                .then_some((reference.module_path.clone(), reference.span))
+            if checked_anchor_identity(db, target).as_deref() != Some(identity.as_str()) {
+                return None;
+            }
+            let span = if enum_variant {
+                enum_variant_leaf_span(db, reference, &identity).unwrap_or(reference.span)
+            } else {
+                reference.span
+            };
+            Some((reference.module_path.clone(), span))
         })
         .collect();
+    if enum_variant {
+        spans.extend(
+            enum_variant_spans(db, tokens, path, &identity)
+                .into_iter()
+                .map(|span| (path.to_string(), span)),
+        );
+    }
     spans.extend(
         db.defs
             .iter()

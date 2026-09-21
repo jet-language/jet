@@ -2,6 +2,7 @@
 
 use crate::Syntax;
 use crate::AST;
+use crate::Lexer::{TokKind, Token};
 use jet_cli::DynamicCompletions::{
     self, CompletionContext, CompletionKind as DynamicCompletionKind, CompletionRequest,
     CompletionTarget, CompletionValueFact, PathAuthority, TypedCompletionFact,
@@ -173,39 +174,98 @@ fn context_is_compiler_fact_access(src: &str, offset: usize) -> Option<(String, 
     ))
 }
 
-/// Is the cursor inside a switch body for an enum type?
-fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Option<&'a str> {
-    // Look backward for `when <ident> {` pattern
-    let before = &src[..offset.min(src.len())];
-    if let Some(kw_pos) = before.rfind("when ") {
-        let after_kw = before[kw_pos + 5..].trim_start();
-        let ident_end = after_kw
-            .find(|c: char| !c.is_alphanumeric() && c != '_')
-            .unwrap_or(after_kw.len());
-        let ident = &after_kw[..ident_end];
-        if !ident.is_empty() {
-            // Look up ident in DB to find its type
-            for d in &db.defs {
-                if d.name == ident {
-                    if let SymKind::Local {
-                        ty: Some(AST::Type::Named(type_name)),
-                        ..
-                    }
-                    | SymKind::Param {
-                        ty: AST::Type::Named(type_name),
-                    } = &d.kind
-                    {
-                        // Check if that type is an enum
-                        for ed in &db.defs {
-                            if ed.name == *type_name {
-                                if let SymKind::Enum { .. } = &ed.kind {
-                                    return Some(&ed.name);
-                                }
-                            }
-                        }
-                    }
-                }
+/// Is the cursor inside a canonical `if subject == { … }` dispatch for an enum?
+///
+/// The parser's old `when` spelling is retired.  Keep this resolver token based
+/// so strings and comments containing a similar sequence cannot manufacture a
+/// case catalog.
+fn detect_switch_enum_type<'a>(
+    tokens: &[Token],
+    offset: usize,
+    current_path: &str,
+    db: &'a SymbolDB,
+) -> Option<&'a jet_semindex::SymDef> {
+    let previous = |index: usize| {
+        tokens[..index]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(candidate, token)| {
+                (!matches!(
+                    &token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                ))
+                .then_some(candidate)
+            })
+    };
+    for (brace_index, brace) in tokens.iter().enumerate().rev() {
+        if !matches!(&brace.kind, TokKind::LBrace) || brace.span.start >= offset {
+            continue;
+        }
+        let Some(eq_index) = previous(brace_index) else {
+            continue;
+        };
+        if !matches!(
+            &tokens[eq_index].kind,
+            TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Gt | TokKind::Le | TokKind::Ge
+        ) {
+            continue;
+        }
+        let Some(subject_index) = previous(eq_index) else {
+            continue;
+        };
+        let TokKind::Ident(subject_name) = &tokens[subject_index].kind else {
+            continue;
+        };
+        let Some(if_index) = previous(subject_index) else {
+            continue;
+        };
+        if !matches!(&tokens[if_index].kind, TokKind::KwIf) {
+            continue;
+        }
+
+        let mut depth = 0usize;
+        for token in tokens.iter().skip(brace_index) {
+            if token.span.start >= offset {
+                break;
             }
+            match &token.kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if depth == 0 {
+            continue;
+        }
+
+        let binding = db
+            .defs
+            .iter()
+            .filter(|definition| {
+                definition.module_path == current_path
+                    && definition.name == *subject_name
+                    && definition.def_span.start <= offset
+            })
+            .max_by_key(|definition| definition.def_span.start)?;
+        let type_name = match &binding.kind {
+            SymKind::Local { ty: Some(AST::Type::Named(name)), .. }
+            | SymKind::Param { ty: AST::Type::Named(name) } => name,
+            SymKind::Local { ty: Some(AST::Type::Apply { name, .. }), .. }
+            | SymKind::Param { ty: AST::Type::Apply { name, .. } } => name,
+            _ => continue,
+        };
+        let leaf = type_name
+            .rsplit_once('.')
+            .map_or(type_name.as_str(), |(_, leaf)| leaf);
+        let mut enums = db.defs.iter().filter(|definition| {
+            definition.module_path == current_path
+                && matches!(&definition.kind, SymKind::Enum { .. })
+                && (definition.name == *type_name || definition.name == leaf)
+        });
+        let definition = enums.next()?;
+        if enums.next().is_none() {
+            return Some(definition);
         }
     }
     None
@@ -501,26 +561,45 @@ pub(crate) fn compute_completions(
         return items;
     }
 
-    // Switch-arm enum snippet completion
-    if let Some(enum_type) = detect_switch_enum_type(src, offset, db) {
-        for def in &db.defs {
-            if def.name == enum_type {
-                if let SymKind::Enum { variants, .. } = &def.kind {
-                    for v in variants {
-                        let label = format!("{}.{}", enum_type, v);
-                        if seen.insert(label.clone()) {
-                            items.push(CompletionItem {
-                                label: label.clone(),
-                                kind: ck::ENUM_MEMBER,
-                                detail: Some(format!("variant of {}", enum_type)),
-                                documentation: None,
-                                insert_text: Some(format!("{}.{} {{}}", enum_type, v)),
-                                insert_text_format: 2,
-                                auto_import: None,
-                            });
-                        }
-                    }
-                    break;
+    // Switch-arm enum snippet completion. Dispatch arms use the same leading
+    // dot spelling as diagnostics and quick-fix edits (`.Variant -> {}`).
+    let source_tokens = crate::Lexer::lex(src).0;
+    if let Some(enum_definition) =
+        detect_switch_enum_type(&source_tokens, offset, current_path, db)
+    {
+        if let SymKind::Enum { variants, .. } = &enum_definition.kind {
+            let prefix = current_identifier_prefix(src, offset);
+            for variant in variants {
+                if !variant.starts_with(&prefix) {
+                    continue;
+                }
+                let label = format!(".{variant}");
+                let identity = db
+                    .defs
+                    .iter()
+                    .find(|definition| {
+                        definition.module_path == enum_definition.module_path
+                            && definition.name == *variant
+                            && matches!(
+                                &definition.kind,
+                                SymKind::EnumVariant { parent } if parent == &enum_definition.name
+                            )
+                    })
+                    .map(|definition| definition.identity.clone())
+                    .unwrap_or_else(|| label.clone());
+                if seen.insert(identity) {
+                    items.push(CompletionItem {
+                        label,
+                        kind: ck::ENUM_MEMBER,
+                        detail: Some(format!("variant of {}", enum_definition.name)),
+                        documentation: None,
+                        insert_text: Some(format!(
+                            ".{variant} {} {{}}",
+                            crate::Syntax::OP_UNIFIED_ARROW
+                        )),
+                        insert_text_format: 2,
+                        auto_import: None,
+                    });
                 }
             }
         }
