@@ -101,6 +101,10 @@ pub(super) fn main(verb: &str, args: &[String]) -> i32 {
             return ExitCodes::USAGE;
         }
     };
+    if let Err(error) = Provider::cc_toolchain::requested_target(&spec) {
+        report_usage_error(verb, &format!("invalid target selection: {error}"));
+        return ExitCodes::USAGE;
+    }
     let roots = Store::resolve();
     let fixtures = Provider::fixtures_from_env(options.fixtures.clone());
     let descriptor = match resolve_toolchain(
@@ -619,6 +623,10 @@ fn response_scope_roots(args: &[String], current_dir: &Path) -> Result<Vec<PathB
     let mut index = 0;
     while index < args.len() {
         let argument = &args[index];
+        if argument == "--" {
+            break;
+        }
+
         let value = if argument == "--project-root" || argument == "--build-root" {
             index += 1;
             args.get(index)
@@ -1345,6 +1353,7 @@ fn resolve_build_root(
 }
 
 fn canonical_real_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
+    reject_symlinks_in_path(path, label)?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("inspect {label} {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -1352,6 +1361,40 @@ fn canonical_real_directory(path: &Path, label: &str) -> Result<PathBuf, String>
     }
     fs::canonicalize(path)
         .map_err(|error| format!("{label} {} is unavailable: {error}", path.display()))
+}
+
+fn reject_symlinks_in_path(path: &Path, label: &str) -> Result<(), String> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(format!("{label} {} is not normalized", path.display()));
+            }
+            Component::Normal(part) => {
+                current.push(part);
+                match fs::symlink_metadata(&current) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(format!(
+                            "{label} {} traverses a symlink",
+                            path.display()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                    Err(error) => {
+                        return Err(format!(
+                            "inspect {label} path {}: {error}",
+                            path.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_source(
@@ -1740,4 +1783,15 @@ mod tests {
         assert!(options.verbose);
         assert!(options.sources.is_empty());
     }
+
+    #[test]
+    fn separator_keeps_source_names_from_being_scanned_as_driver_options() {
+        let args = ["--", "--project-root", "literal.c"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let options = parse_args("cc", &args).unwrap();
+        assert_eq!(options.sources, vec!["--project-root", "literal.c"]);
+    }
+
 }
