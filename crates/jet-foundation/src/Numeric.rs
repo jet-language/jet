@@ -2414,6 +2414,49 @@ impl CtDecimal {
             }
         }
     }
+    fn write_u32_digits_with_split(
+        out: &mut String,
+        mut value: u32,
+        width: usize,
+        split: usize,
+        written: &mut usize,
+    ) {
+        debug_assert!(width > 0);
+        let mut divisor = 10u32.pow((width - 1) as u32);
+        for _ in 0..width {
+            out.push(char::from(b'0' + (value / divisor) as u8));
+            value %= divisor;
+            *written += 1;
+            if *written == split {
+                out.push('.');
+            }
+            if divisor > 1 {
+                divisor /= 10;
+            }
+        }
+    }
+
+    fn write_magnitude_split(&self, split: usize, out: &mut String) {
+        let CtDecimalMagnitude::Big(value) = &self.magnitude else {
+            debug_assert!(false, "split writer requires a big magnitude");
+            return;
+        };
+        let length = ctbi_limb_len(&value.limbs);
+        let top_index = length.saturating_sub(1);
+        let top = *value.limbs.get(top_index).unwrap_or(&0);
+        let mut top_width = 1usize;
+        let mut probe = top;
+        while probe >= 10 {
+            probe /= 10;
+            top_width += 1;
+        }
+        let mut written = 0usize;
+        Self::write_u32_digits_with_split(out, top, top_width, split, &mut written);
+        for &limb in value.limbs[..length].iter().rev().skip(1) {
+            Self::write_u32_digits_with_split(out, limb, 9, split, &mut written);
+        }
+        debug_assert_eq!(written, self.magnitude_len());
+    }
 
     fn write_small_scaled(value: i128, fraction_len: usize, out: &mut String) {
         let mut value = value as u128;
@@ -2492,9 +2535,7 @@ impl CtDecimal {
             out.extend(std::iter::repeat_n('0', frac_len - digit_len));
             self.write_magnitude(&mut out);
         } else {
-            self.write_magnitude(&mut out);
-            let split = out.len() - frac_len;
-            out.insert(split, '.');
+            self.write_magnitude_split(digit_len - frac_len, &mut out);
         }
         out
     }
