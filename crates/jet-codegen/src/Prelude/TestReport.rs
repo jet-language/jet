@@ -461,4 +461,26 @@ mod test_report_tests {
         assert!(status.contains("\"expectation\":\"expected_failure\""));
         assert!(status.contains("\"outcome\":\"error\""));
     }
+    #[test]
+    fn projection_negative_control_changes_with_record_outcome() {
+        let passed = JetTestOutcomeRecord {
+            terminal: true,
+            outcome: JetTestRecordOutcome::Passed,
+            expected_failure: false,
+        };
+        let failed = JetTestOutcomeRecord {
+            outcome: JetTestRecordOutcome::Failed,
+            ..passed
+        };
+        let baseline = JetTestOutcomeProjection::from_records([passed]);
+        let altered = JetTestOutcomeProjection::from_records([failed]);
+
+        assert_eq!(baseline.passed, 1);
+        assert_eq!(baseline.failed, 0);
+        assert_eq!(baseline.selected(), 1);
+        assert_eq!(altered.passed, 0);
+        assert_eq!(altered.failed, 1);
+        assert_eq!(altered.selected(), 1);
+        assert_ne!(baseline, altered);
+    }
 }
