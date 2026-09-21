@@ -51,6 +51,10 @@ use jet_foundation::Authority::{
 
 const PLUGIN_MAX_FUEL: u64 = 10_000_000;
 const PLUGIN_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+const PLUGIN_MAX_TABLE_ELEMENTS: u32 = 10_000;
+const PLUGIN_MAX_WIRE_BYTES: usize = 16 * 1024 * 1024;
+const PLUGIN_MAX_VALUE_DEPTH: usize = 64;
+const PLUGIN_TIMEOUT_MS: u64 = 2_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PluginBudgetKind {
     Fuel,
