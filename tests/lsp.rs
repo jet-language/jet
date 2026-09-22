@@ -4655,7 +4655,7 @@ fn run() {}
         .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("spawn jet self lsp");
     let mut stdin = child.stdin.take().expect("stdin");
