@@ -1855,7 +1855,30 @@ pub fn evaluate_mir_program_with_config(
                 None,
             ))
         })?;
-    let entry_function = program_function(program, selection.entry_function)?;
+    let argv = crate::Comptime::runtime_argv()
+        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
+    let entry_function_id = if argv.get(1).map(String::as_str) == Some("--__jet-private-job") {
+        let name = argv.get(2).map(String::as_str).ok_or_else(|| {
+            MirEvalError::from(mir_error(
+                "MIR private job dispatch is missing a job name",
+                None,
+            ))
+        })?;
+        program
+            .jobs
+            .iter()
+            .find(|job| job.name == name)
+            .map(|job| job.function)
+            .ok_or_else(|| {
+                MirEvalError::from(mir_error(
+                    &format!("MIR private job dispatch names unknown job `{name}`"),
+                    None,
+                ))
+            })?
+    } else {
+        selection.entry_function
+    };
+    let entry_function = program_function(program, entry_function_id)?;
     let cli_entry = program
         .artifacts
         .iter()
@@ -1873,8 +1896,6 @@ pub fn evaluate_mir_program_with_config(
         execution,
         Some(&mut data_pipeline),
     );
-    let argv = crate::Comptime::runtime_argv()
-        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
     let params = if let Some(cli_entry) = cli_entry {
         let program_name = argv.first().map(String::as_str).unwrap_or("");
         if let Some(output) =
