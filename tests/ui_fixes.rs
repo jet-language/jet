@@ -498,4 +498,29 @@ fn run() {
             .all(|diagnostic| diagnostic.edit.is_none()),
         "L0523 must not offer a growable-list edit for a fixed-length expected type"
     );
+
+    let commented = r#"struct LineItem {
+    label: String
+    cents: Int
+}
+
+fn run() {
+    items :: [
+        LineItem /* keep this constructor spelling */ {label: "coffee", cents: 450},
+        LineItem{label: "tea", cents: 325}
+    ]
+}
+"#;
+    fs::write(scratch.join("commented.jet"), commented).unwrap();
+    let commented_output =
+        jet::compile_with_path(commented, &scratch.join("commented.jet").to_string_lossy())
+            .unwrap();
+    assert!(
+        commented_output
+            .lints
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0523")
+            .all(|diagnostic| diagnostic.edit.is_none()),
+        "L0523 must not offer an edit when constructor comments make the head ambiguous"
+    );
 }
