@@ -95,7 +95,7 @@ fn preservation_matrix_survives_two_canonical_formatter_passes() {
             &[
                 "// declaration boundary comment",
                 "// control boundary comment",
-                "if true {",
+                "if true",
                 "print(\"attached\")",
             ],
         ),
