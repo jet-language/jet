@@ -4099,6 +4099,11 @@ fn lower_checked_tir_program_on_stack(
         let mut uncovered_entry_reason = None;
         for item in &module.items {
             match item {
+                Item::Func(f) if crate::Sema::is_guest_import(f) => {
+                    // `#Import(c)` is a declaration backed by the generated C
+                    // ABI wrapper, not a Jet body. Its calls lower as ExternCall.
+                    continue;
+                }
                 Item::Func(f) => {
                     // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
                     // Named HTTP callbacks are checked at the route boundary and must

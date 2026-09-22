@@ -16348,6 +16348,9 @@ impl<'a> RustEmitter<'a> {
             .collect::<Vec<_>>()
             .join(", ");
         let call = format!("unsafe {{ {}({call_args}) }}", self.foreign_name(id));
+        if foreign.callback_transport.as_deref() == Some("guest-import-result") {
+            return format!("Ok({call})");
+        }
         if foreign
             .return_type
             .as_ref()
