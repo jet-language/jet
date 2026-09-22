@@ -264,14 +264,14 @@ fn completion_subject_type_name(
             .refs
             .iter()
             .filter(|reference| {
-                reference.module_path == path
-                    && (reference.name == "choice"
-                        || (reference.span.start <= span.end
-                            && span.start <= reference.span.end))
+                reference.name == "choice"
+                    || (reference.span.start <= span.end
+                        && span.start <= reference.span.end)
             })
             .take(20)
             .map(|reference| {
                 (
+                    reference.module_path.as_str(),
                     reference.name.as_str(),
                     reference.span.start,
                     reference.span.end,
@@ -286,8 +286,21 @@ fn completion_subject_type_name(
                 )
             })
             .collect();
+        let definitions: Vec<_> = db
+            .defs
+            .iter()
+            .filter(|definition| definition.name == "choice")
+            .map(|definition| {
+                (
+                    definition.module_path.as_str(),
+                    definition.name.as_str(),
+                    definition.def_span,
+                    format!("{:?}", definition.kind),
+                )
+            })
+            .collect();
         eprintln!(
-            "subject debug: path={path:?} span={span:?} token={:?} refs={candidates:?}",
+            "subject debug: path={path:?} span={span:?} token={:?} refs={candidates:?} defs={definitions:?}",
             tokens[subject_index].kind
         );
     }
