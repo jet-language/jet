@@ -221,3 +221,238 @@ fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
     assert!(stdout.contains("command attach"), "{stdout}");
     let _ = fs::remove_dir_all(&root);
 }
+fn profiler_fixture_source() -> &'static str {
+    "fn run() {\n    hot()\n}\nfn hot() {\n}\nfn cold() {\n}\n"
+}
+
+fn profiler_fixture_row(
+    clock: &str,
+    name: &str,
+    start_line: u64,
+    end_column: u64,
+    sample_count: u64,
+    source_sha256: &str,
+) -> TraceProfileRow {
+    TraceProfileRow {
+        clock: clock.into(),
+        execution_count: None,
+        sample_count,
+        sample_weight: sample_count,
+        source: TraceProfileSource {
+            path: "profile.jet".into(),
+            sha256: source_sha256.into(),
+            start_line,
+            start_column: 1,
+            end_line: start_line,
+            end_column,
+        },
+        symbol: JetSymbolRef {
+            path: "profile.jet".into(),
+            name: name.into(),
+        },
+    }
+}
+
+fn profiler_fixture(state: &str) -> Vec<u8> {
+    let source = profiler_fixture_source();
+    let source_sha256 = SHA256::sha256_hex(source.as_bytes());
+    let hot_wall = profiler_fixture_row("wall", "hot", 4, 7, 37, &source_sha256);
+    let hot_cpu = profiler_fixture_row("cpu", "hot", 4, 7, 11, &source_sha256);
+    let cold_wall = profiler_fixture_row("wall", "cold", 6, 8, 1, &source_sha256);
+    let profile = match state {
+        "captured" => TraceProfile {
+            method: "sampling".into(),
+            status: "captured".into(),
+            coverage: "complete".into(),
+            rows: vec![hot_wall, hot_cpu, cold_wall],
+            row_limit: TRACE_PROFILE_ROW_LIMIT as u64,
+            rows_truncated: false,
+            overhead_ns: Some(3),
+            overhead_status: "measured".into(),
+            overhead_reason: "fixture sampling overhead".into(),
+            reason: "source-attributed sampling retained hot and cold rows".into(),
+        },
+        "no_samples" => TraceProfile {
+            method: "sampling".into(),
+            status: "no_samples".into(),
+            coverage: "none".into(),
+            rows: Vec::new(),
+            row_limit: TRACE_PROFILE_ROW_LIMIT as u64,
+            rows_truncated: false,
+            overhead_ns: None,
+            overhead_status: "not_measured".into(),
+            overhead_reason: "no source samples were retained".into(),
+            reason: "the observe channel produced no source-attributed samples".into(),
+        },
+        "unsupported" => TraceProfile::unsupported("source sampling is unsupported for fixture"),
+        "truncated" => TraceProfile {
+            method: "sampling".into(),
+            status: "truncated".into(),
+            coverage: "partial".into(),
+            rows: vec![hot_wall],
+            row_limit: TRACE_PROFILE_ROW_LIMIT as u64,
+            rows_truncated: true,
+            overhead_ns: None,
+            overhead_status: "not_measured".into(),
+            overhead_reason: "no matched non-profiled run was captured".into(),
+            reason: "sampling observations exceeded the bounded profile sample limit".into(),
+        },
+        "dropped" => TraceProfile {
+            method: "sampling".into(),
+            status: "truncated".into(),
+            coverage: "partial".into(),
+            rows: vec![hot_wall],
+            row_limit: TRACE_PROFILE_ROW_LIMIT as u64,
+            rows_truncated: true,
+            overhead_ns: None,
+            overhead_status: "not_measured".into(),
+            overhead_reason: "no matched non-profiled run was captured".into(),
+            reason: "dropped_rows=1 at bounded profile sample limit".into(),
+        },
+        _ => panic!("unknown profiler fixture state {state}"),
+    };
+    let skeleton = TraceSkeleton {
+        command: "run".into(),
+        argv: vec!["run".into(), "profile.jet".into()],
+        toolchain: TraceToolchain {
+            jet_version: "fixture".into(),
+            compiler_build_id: "profile-fixture".into(),
+            stdlib_id: "profile-stdlib".into(),
+            runner_id: "profile-runner".into(),
+        },
+        hardware: TraceHardware {
+            cpu_arch: "x86_64".into(),
+            logical_cpus: 1,
+            os: "fixture".into(),
+            target: "profile-target".into(),
+        },
+        capture_policy: CapturePolicy::default_exclusions(),
+        samples: Vec::new(),
+        profile,
+        allocations: Vec::new(),
+        browser: Vec::new(),
+        game_frames: Vec::new(),
+        game_draw_events: Vec::new(),
+        tasks: Vec::new(),
+        locks: Vec::new(),
+        io: Vec::new(),
+        native: Vec::new(),
+        spans: Vec::new(),
+        receipt_sections: Vec::new(),
+        source_identity: vec![SourceIdentity {
+            path: "profile.jet".into(),
+            sha256: source_sha256,
+            symbols: vec![
+                ("cold".into(), "fn".into()),
+                ("hot".into(), "fn".into()),
+                ("run".into(), "fn".into()),
+            ],
+        }],
+        source_maps: vec![TraceSourceMap::jet_with_source("profile.jet", source)],
+    };
+    build_skeleton_bytes(&skeleton).unwrap()
+}
+
+#[test]
+fn perf_source_profile_view_preserves_ranges_and_coverage_states() {
+    let root = temp_workspace();
+    let source_sha256 = SHA256::sha256_hex(profiler_fixture_source().as_bytes());
+    let captured_path = root.join("captured-profile.jettrace");
+    let captured = profiler_fixture("captured");
+    verify_jettrace(&captured).unwrap();
+    let captured_text = String::from_utf8(captured.clone()).unwrap();
+    assert!(captured_text.contains("\"method\":\"sampling\""), "{captured_text}");
+    assert!(captured_text.contains("\"execution_count\":null"), "{captured_text}");
+    assert!(captured_text.contains("\"sample_count\":37"), "{captured_text}");
+    assert!(captured_text.contains("\"sample_weight\":37"), "{captured_text}");
+    assert!(captured_text.contains(&format!("\"sha256\":\"{source_sha256}\"")), "{captured_text}");
+    assert!(captured_text.contains("\"start_line\":4"), "{captured_text}");
+    assert!(captured_text.contains("\"end_column\":7"), "{captured_text}");
+    fs::write(&captured_path, captured).unwrap();
+
+    let view = run_jet(&root, &["perf", "view", captured_path.to_str().unwrap()]);
+    let view_out = String::from_utf8_lossy(&view.stdout);
+    assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
+    assert!(
+        view_out.contains("profile method=sampling status=captured coverage=complete rows=3 clocks=cpu,wall overhead=measured"),
+        "{view_out}"
+    );
+    assert!(view_out.contains("profile.jet#hot profile:wall samples=37"), "{view_out}");
+    assert!(view_out.contains("profile.jet#cold profile:wall samples=1"), "{view_out}");
+    assert!(!view_out.contains("samples=0"), "{view_out}");
+
+    let view_json = run_jet(&root, &["perf", "view", captured_path.to_str().unwrap(), "--json"]);
+    let view_json_out = String::from_utf8_lossy(&view_json.stdout);
+    assert!(view_json.status.success(), "{}", String::from_utf8_lossy(&view_json.stderr));
+    for marker in [
+        "\"kind\":\"jet.trace.view\"",
+        "\"method\":\"sampling\"",
+        "\"execution_count\":null",
+        "\"sample_count\":37",
+        "\"sample_weight\":37",
+        "\"start_line\":4",
+        "\"end_column\":7",
+        "\"coverage\":\"complete\"",
+    ] {
+        assert!(view_json_out.contains(marker), "{marker}: {view_json_out}");
+    }
+    assert!(view_json_out.contains(&format!("\"sha256\":\"{source_sha256}\"")), "{view_json_out}");
+
+    let profile_map = run_jet(
+        &root,
+        &["perf", "export", captured_path.to_str().unwrap(), "--emit-profile-map"],
+    );
+    let profile_map_out = String::from_utf8_lossy(&profile_map.stdout);
+    assert!(profile_map.status.success(), "{}", String::from_utf8_lossy(&profile_map.stderr));
+    for marker in [
+        "\"kind\":\"jet.trace.profile-map-projection\"",
+        "\"source_identity\":[{\"path\":\"profile.jet\"",
+        "\"source_maps\":[{\"kind\":\"jet\"",
+        "\"method\":\"sampling\"",
+        "\"sample_weight\":37",
+        "\"start_line\":4",
+        "\"coverage\":\"complete\"",
+    ] {
+        assert!(profile_map_out.contains(marker), "{marker}: {profile_map_out}");
+    }
+
+    for (state, summary) in [
+        ("no_samples", "status=no_samples coverage=none rows=0 clocks=none"),
+        ("unsupported", "status=unsupported coverage=unsupported rows=0 clocks=none"),
+        ("truncated", "status=truncated coverage=partial rows=1 clocks=wall"),
+        ("dropped", "status=truncated coverage=partial rows=1 clocks=wall"),
+    ] {
+        let path = root.join(format!("{state}.jettrace"));
+        let bytes = profiler_fixture(state);
+        verify_jettrace(&bytes).unwrap();
+        fs::write(&path, bytes).unwrap();
+        let view = run_jet(&root, &["perf", "view", path.to_str().unwrap()]);
+        let view_out = String::from_utf8_lossy(&view.stdout);
+        assert!(view.status.success(), "{state}: {}", String::from_utf8_lossy(&view.stderr));
+        assert!(
+            view_out.contains(&format!("profile method=sampling {summary}")),
+            "{state}: {view_out}"
+        );
+        assert!(!view_out.contains("coverage=complete"), "{state}: {view_out}");
+        assert!(!view_out.contains("samples=0"), "{state}: {view_out}");
+        match state {
+            "no_samples" | "unsupported" => {
+                assert!(!view_out.contains("profile:wall"), "{state}: {view_out}");
+            }
+            "truncated" | "dropped" => {
+                assert!(view_out.contains("profile.jet#hot profile:wall samples=37"), "{state}: {view_out}");
+            }
+            _ => unreachable!(),
+        }
+        if state == "dropped" {
+            let view_json = run_jet(&root, &["perf", "view", path.to_str().unwrap(), "--json"]);
+            let view_json_out = String::from_utf8_lossy(&view_json.stdout);
+            assert!(view_json.status.success(), "{}", String::from_utf8_lossy(&view_json.stderr));
+            assert!(view_json_out.contains("\"reason\":\"dropped_rows=1 at bounded profile sample limit\""));
+            assert!(view_json_out.contains("\"rows_truncated\":true"));
+            assert!(!view_json_out.contains("\"coverage\":\"complete\""));
+        }
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}

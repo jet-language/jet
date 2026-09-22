@@ -4,8 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-use jet_foundation::JetTrace::{jettrace_artifact, trace_id, verify_jettrace};
+use jet_foundation::JetTrace::{
+    build_skeleton_bytes, jettrace_artifact, trace_id, verify_jettrace, CapturePolicy,
+    JetSymbolRef, SourceIdentity, TraceHardware, TraceProfile, TraceProfileRow,
+    TraceProfileSource, TraceSkeleton, TraceSourceMap, TraceToolchain, TRACE_PROFILE_ROW_LIMIT,
+};
 use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::SHA256;
 
 static SELF_ATTACH_LOCK: Mutex<()> = Mutex::new(());
 
