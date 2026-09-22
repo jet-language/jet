@@ -387,7 +387,7 @@ fn unmatched_diagnostic_relation(
                 "diagnostic is present only on the baseline side".to_string()
             },
             base: if status == "resolved" {
-                Some(occurrence)
+                Some(occurrence.clone())
             } else {
                 None
             },
@@ -402,7 +402,7 @@ fn unmatched_diagnostic_relation(
             status: "unknown",
             reason,
             base: if status == "resolved" {
-                Some(occurrence)
+                Some(occurrence.clone())
             } else {
                 None
             },
@@ -526,7 +526,7 @@ fn compare_diagnostics(base: &DiagnosticSide, head: &DiagnosticSide) -> Diagnost
                     }
                 }
             }
-            ([], []) => {}
+            _ => {}
         }
     }
     for (index, occurrence) in base_occurrences.iter().enumerate() {
@@ -733,20 +733,32 @@ fn render_diagnostic_json(
         .map(|relation| diagnostic_relation_json(relation, base, head))
         .collect::<Vec<_>>()
         .join(",");
-    println!(
-        "{{\"schema\":\"jet.diagnostic-review/v1\",\"kind\":\"diagnostic-review\",\"mode\":\"diagnostics\",\"status\":\"completed\",\"limitations\":[\"checker projection has no explicit truncation marker; incomplete means no final bundle\"],\"base\":{},\"head\":{},\"comparison\":{{\"new\":[{}],\"existing\":[{}],\"resolved\":[{}],\"unknown\":[{}],\"counts\":{{\"new\":{},\"existing\":{},\"resolved\":{},\"unknown\":{}}}},\"issues\":[{}]}}",
-        diagnostic_side_json(base),
-        diagnostic_side_json(head),
-        new,
-        existing,
-        resolved,
-        unknown,
-        diff.new.len(),
-        diff.existing.len(),
-        diff.resolved.len(),
-        diff.unknown.len(),
-        issues,
+    let mut output = String::from(
+        "{\"schema\":\"jet.diagnostic-review/v1\",\"kind\":\"diagnostic-review\",\"mode\":\"diagnostics\",\"status\":\"completed\",\"limitations\":[\"checker projection has no explicit truncation marker; incomplete means no final bundle\"],\"base\":",
     );
+    output.push_str(&diagnostic_side_json(base));
+    output.push_str(",\"head\":");
+    output.push_str(&diagnostic_side_json(head));
+    output.push_str(",\"comparison\":{\"new\":[");
+    output.push_str(&new);
+    output.push_str("],\"existing\":[");
+    output.push_str(&existing);
+    output.push_str("],\"resolved\":[");
+    output.push_str(&resolved);
+    output.push_str("],\"unknown\":[");
+    output.push_str(&unknown);
+    output.push_str("],\"counts\":{\"new\":");
+    output.push_str(&diff.new.len().to_string());
+    output.push_str(",\"existing\":");
+    output.push_str(&diff.existing.len().to_string());
+    output.push_str(",\"resolved\":");
+    output.push_str(&diff.resolved.len().to_string());
+    output.push_str(",\"unknown\":");
+    output.push_str(&diff.unknown.len().to_string());
+    output.push_str("}},\"issues\":[");
+    output.push_str(&issues);
+    output.push_str("]}");
+    println!("{output}");
 }
 
 fn render_diagnostic_text(
