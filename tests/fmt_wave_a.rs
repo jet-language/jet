@@ -37,6 +37,16 @@ const INTERPOLATION_SELECTORS: &str = concat!(
     "}\n",
 );
 
+const ATTACHED_COMMENTS: &str = concat!(
+    "// declaration boundary comment\n",
+    "fn run(){\n",
+    "    // control boundary comment\n",
+    "    if true {\n",
+    "        print(\"attached\")\n",
+    "    }\n",
+    "}\n",
+);
+
 fn semantic_identity(source: &str) -> Vec<u8> {
     let (tokens, diagnostics) = jet::Lexer::lex(source);
     assert!(
@@ -77,6 +87,16 @@ fn preservation_matrix_survives_two_canonical_formatter_passes() {
             &[
                 "print(\"{price:Fixed(2)}\")",
                 "print(\"{price:Grouped(2)}\")",
+            ],
+        ),
+        (
+            "comments attached to declaration and control boundaries",
+            ATTACHED_COMMENTS,
+            &[
+                "// declaration boundary comment",
+                "// control boundary comment",
+                "if true {",
+                "print(\"attached\")",
             ],
         ),
     ];
