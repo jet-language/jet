@@ -763,6 +763,32 @@ fn e0109_simple_names_carry_source_derived_code_action() {
 }
 
 #[test]
+fn l0523_source_edit_is_exposed_to_editor_actions() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/ui_lint/repeated_list_head.jet");
+    let source = fs::read_to_string(&path).expect("repeated-list-head fixture");
+    let diagnostics = jet::compile_with_path(&source, &path.to_string_lossy())
+        .expect("repeated-list-head fixture must compile with lints");
+    let live = diagnostics
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0523")
+        .expect("repeated-list-head fixture must produce L0523");
+    let editor_edits = live.all_edits();
+    assert_eq!(editor_edits.len(), 1, "L0523 must expose one editor action");
+    assert_eq!(editor_edits[0].span, live.span.expect("L0523 source span"));
+    assert_eq!(
+        editor_edits[0].new_text,
+        "[Point]{{x: 1}, {x: 2}}",
+        "editor action must reuse the canonical L0523 source edit"
+    );
+    assert_eq!(
+        editor_edits[0].new_text,
+        live.edit.as_ref().expect("L0523 source edit").new_text
+    );
+}
+
+#[test]
 fn e0507_unknown_traversal_intent_stays_explanatory() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = root.join("tests/ui/list_loop_mutate.jet");
