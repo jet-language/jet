@@ -1466,6 +1466,12 @@ fn completion_response(
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let checked = server.check_with_bundle(doc);
+    let current_path = checked
+        .bundle
+        .as_ref()
+        .and_then(|bundle| checked_module(bundle, &doc.path))
+        .map(|module| module.display.clone())
+        .unwrap_or_else(|| doc.path.clone());
     let workspace_root = workspace_root_for_path(server, &doc.path);
     match super::Completion::dynamic_completion_json(
         params,
@@ -1491,7 +1497,7 @@ fn completion_response(
         &db,
         &doc.text,
         offset,
-        &doc.path,
+        &current_path,
         workspace_root.as_deref(),
         discovery.as_ref(),
     );
