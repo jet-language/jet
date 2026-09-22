@@ -762,6 +762,69 @@ fn review_observation_identity_mismatches_remain_unknown() {
 }
 
 #[test]
+fn review_receipts_bind_to_sides_and_do_not_infer_proof() {
+    let derivation = |id: &str, method: &str, disposition: &str| {
+        format!(
+            r#"{{"id":"{id}","subject":"value","claim":"value:contract","producer":"test","method":"{method}","rule":"same-inputs","premises":["schedule:v1"],"identity":{{"source":"review-source","build":"build-1","run":"run-1","target":"target-1"}}, "assumptions":["finite-input"],"disposition":"{disposition}","observation":{{"event":"event-1","counterexample":null}}}}"#
+        )
+    };
+    let evidence = |claim_id: &str, derivation_id: &str| {
+        format!(
+            r#"{{"id":"{claim_id}","claimId":"{claim_id}","kind":"contract","facet":"contracts","producer":"test","outcome":"passed","state":"proved","contract":{{"marker":"review","observation":"reached"}},"inputs":{{"arg":1}},"environment":{{"target":"target-1"}},"premises":["schedule:v1"],"derivation":{{"id":"{derivation_id}"}}}}"#
+        )
+    };
+
+    let root = scratch("receipt-binding");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "", REVIEW_SOURCE);
+    let head = project(&root, "head", "", REVIEW_SOURCE);
+    let base_receipt = root.join("base.jetproof");
+    let head_receipt = root.join("head.jetproof");
+    write(
+        &base_receipt,
+        &proof_receipt(
+            &[derivation("base-derivation", "formal_proof", "current")],
+            &[evidence("base-claim", "base-derivation")],
+        ),
+    );
+    write(
+        &head_receipt,
+        &proof_receipt(
+            &[derivation("head-derivation", "formal_proof", "current")],
+            &[evidence("head-claim", "head-derivation")],
+        ),
+    );
+    let output = review_command(&base, &head, Some(&base_receipt), Some(&head_receipt));
+    assert!(output.status.success(), "receipt binding failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"base_recorded\":true"));
+    assert!(stdout.contains("\"head_recorded\":true"));
+    assert!(stdout.contains("\"gained\":1"));
+    assert!(stdout.contains("\"lost\":1"));
+
+    let external_receipt = root.join("external.jetproof");
+    write(
+        &external_receipt,
+        &proof_receipt(
+            &[derivation("shared-derivation", "formal_proof", "external")],
+            &[evidence("shared-claim", "shared-derivation")],
+        ),
+    );
+    let output = review_command(
+        &base,
+        &head,
+        Some(&external_receipt),
+        Some(&external_receipt),
+    );
+    assert!(output.status.success(), "external receipt review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"unproved\""));
+    assert!(stdout.contains("not a checked universal contract"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn review_default_rejects_error_bearing_side() {
     let root = scratch("default-error-side");
     let _ = fs::remove_dir_all(&root);
