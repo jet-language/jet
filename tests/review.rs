@@ -53,6 +53,20 @@ fn review_command(
         .unwrap()
 }
 
+fn diagnostic_review_command(base: &Path, head: &Path) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "review",
+            base.join("run.jet").to_str().unwrap(),
+            head.join("run.jet").to_str().unwrap(),
+            "--diagnostics",
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap()
+}
+
 fn checked_derivation(
     id: &str,
     build: &str,
@@ -671,5 +685,119 @@ fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
         !stdout.contains("\"kind\":\"renamed\""),
         "stale operation receipt was accepted:\n{stdout}"
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_diagnostics_mode_compares_error_occurrences_without_receipts() {
+    let root = scratch("diagnostics-statuses");
+    let _ = fs::remove_dir_all(&root);
+    let clean = project(&root, "clean", "", "fn run() {}\n");
+    let broken = project(&root, "broken", "", "fn run() { missing() }\n");
+
+    let output = diagnostic_review_command(&clean, &broken);
+    assert!(
+        output.status.success(),
+        "diagnostic review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("{\"schema\":\"jet.diagnostic-review/v1\""));
+    assert!(stdout.contains("\"base\""));
+    assert!(stdout.contains("\"head\""));
+    assert!(stdout.contains("\"valid\":true"));
+    assert!(stdout.contains("\"valid\":false"));
+    assert!(stdout.contains("\"origin\""));
+    assert!(stdout.contains("\"cause\""));
+    assert!(!stdout.contains("jet.status/v1"));
+
+    let output = diagnostic_review_command(&broken, &clean);
+    assert!(output.status.success(), "reverse diagnostic review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"status\":\"resolved\""));
+
+    let output = diagnostic_review_command(&broken, &broken);
+    assert!(output.status.success(), "existing diagnostic review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"status\":\"existing\""));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_diagnostics_mode_keeps_moved_same_code_unknown() {
+    let root = scratch("diagnostics-moved");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "", "fn run() { missing() }\n");
+    let head = project(
+        &root,
+        "head",
+        "",
+        "fn run() {\n    print(\"x\")\n    missing()\n}\n",
+    );
+
+    let output = diagnostic_review_command(&base, &head);
+    assert!(output.status.success(), "moved diagnostic review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"status\":\"unknown\""));
+    assert!(stdout.contains("different location"));
+    assert!(!stdout.contains("\"status\":\"resolved\""));
+    assert!(!stdout.contains("\"status\":\"new\""));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_diagnostics_mode_exposes_incomplete_missing_import_coverage() {
+    let root = scratch("diagnostics-incomplete");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "", "fn run() {}\n");
+    let head = project(
+        &root,
+        "head",
+        "",
+        "use project.missing\nfn run() {}\n",
+    );
+
+    let output = diagnostic_review_command(&base, &head);
+    assert!(
+        output.status.success(),
+        "incomplete diagnostic review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"schema\":\"jet.diagnostic-review/v1\""));
+    assert!(stdout.contains("\"complete\":false"));
+    assert!(stdout.contains("\"completeness\":\"incomplete\""));
+    assert!(stdout.contains("\"status\":\"unknown\""));
+    assert!(!stdout.contains("\"status\":\"new\""));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_diagnostics_mode_setup_failure_is_nonzero() {
+    let root = scratch("diagnostics-setup-failure");
+    let _ = fs::remove_dir_all(&root);
+    let missing = root.join("missing").join("run.jet");
+    let head = project(&root, "head", "", "fn run() {}\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "review",
+            missing.to_str().unwrap(),
+            head.join("run.jet").to_str().unwrap(),
+            "--diagnostics",
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(diagnostic.contains("E2105"));
     let _ = fs::remove_dir_all(root);
 }

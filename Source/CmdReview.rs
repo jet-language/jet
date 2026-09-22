@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 use std::process::exit;
 
-use jet::Diagnostics::json_str as json_string;
+use jet::Diagnostics::{json_str as json_string, Diagnostic};
 use jet::ExitCodes;
 use jet::Sema::GateLedger::GateLedger;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
@@ -25,6 +25,38 @@ struct ReviewSide {
     authority: BTreeMap<String, String>,
     source_hash: String,
     semantic_ops: Vec<SemanticOp>,
+}
+
+struct DiagnosticSide {
+    path: std::path::PathBuf,
+    source_hash: String,
+    scope_root: Option<std::path::PathBuf>,
+    entry_scope: String,
+    input_revisions: BTreeMap<String, String>,
+    diagnostics: Vec<Diagnostic>,
+    valid: bool,
+    complete: bool,
+}
+
+#[derive(Clone)]
+struct DiagnosticOccurrence {
+    diagnostic: Diagnostic,
+    scope: String,
+    identity: Option<String>,
+}
+
+struct DiagnosticRelation {
+    status: &'static str,
+    reason: String,
+    base: Option<DiagnosticOccurrence>,
+    head: Option<DiagnosticOccurrence>,
+}
+
+struct DiagnosticDiff {
+    new: Vec<DiagnosticRelation>,
+    existing: Vec<DiagnosticRelation>,
+    resolved: Vec<DiagnosticRelation>,
+    unknown: Vec<DiagnosticRelation>,
 }
 
 #[derive(Clone)]
@@ -114,6 +146,10 @@ struct ReceiptDiff {
 }
 
 pub(crate) fn run_review(args: &[String], json: bool) {
+    if args.iter().any(|argument| argument == "--diagnostics") {
+        run_diagnostic_review(args, json);
+        return;
+    }
     let paths = positional(args);
     if paths.len() != 2 {
         crate::cli_error!(
@@ -173,6 +209,573 @@ pub(crate) fn run_review(args: &[String], json: bool) {
         render_json(&meaning, &authority, &receipts, verdict);
     } else {
         render_text(&meaning, &authority, &receipts, verdict);
+    }
+}
+
+fn run_diagnostic_review(args: &[String], json: bool) {
+    let paths = positional(args);
+    if paths.len() != 2 {
+        diagnostic_usage_error(
+            "`jet review --diagnostics` needs a base and a reviewed Jet file",
+        );
+    }
+    let base_path = Path::new(&paths[0]);
+    let head_path = Path::new(&paths[1]);
+    let base = match load_diagnostic_side(base_path) {
+        Ok(side) => side,
+        Err(message) => input_error(base_path, &message),
+    };
+    let head = match load_diagnostic_side(head_path) {
+        Ok(side) => side,
+        Err(message) => input_error(head_path, &message),
+    };
+    let diff = compare_diagnostics(&base, &head);
+    if json {
+        render_diagnostic_json(&base, &head, &diff);
+    } else {
+        render_diagnostic_text(&base, &head, &diff);
+    }
+}
+
+fn load_diagnostic_side(path: &Path) -> Result<DiagnosticSide, String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("could not read `{}`: {error}", path.display()))?;
+    let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
+    let projection = crate::CmdInspect::check_diagnostics(path)?;
+    let scope_root = diagnostic_scope_root(path);
+    let entry_scope = diagnostic_scope_key(path, scope_root.as_deref());
+    let input_revisions: BTreeMap<String, String> = projection
+        .source_revisions
+        .into_iter()
+        .map(|(path, revision)| (diagnostic_scope_key(&path, scope_root.as_deref()), revision))
+        .collect();
+    Ok(DiagnosticSide {
+        path: path.to_path_buf(),
+        source_hash,
+        scope_root,
+        entry_scope,
+        input_revisions,
+        diagnostics: projection.diagnostics,
+        valid: projection.valid,
+        complete: projection.complete,
+    })
+}
+
+fn diagnostic_scope_root(path: &Path) -> Option<std::path::PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let root = jet::Loader::find_package_root_checked(parent).ok().flatten()?;
+    Some(fs::canonicalize(&root).unwrap_or(root))
+}
+
+fn diagnostic_scope_key(path: &Path, root: Option<&Path>) -> String {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Some(root) = root {
+        root.join(path)
+    } else {
+        path.to_path_buf()
+    };
+    let path = fs::canonicalize(&path).unwrap_or(path);
+    if let Some(root) = root {
+        if let Ok(relative) = path.strip_prefix(root) {
+            return relative.to_string_lossy().replace('\\', "/");
+        }
+    }
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn diagnostic_occurrences(side: &DiagnosticSide) -> Vec<DiagnosticOccurrence> {
+    side.diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let origin_path = diagnostic
+                .origin
+                .as_ref()
+                .filter(|origin| !origin.path.is_empty())
+                .map(|origin| Path::new(origin.path.as_str()))
+                .unwrap_or(side.path.as_path());
+            let scope = diagnostic_scope_key(origin_path, side.scope_root.as_deref());
+            let identity = diagnostic.span.map(|span| {
+                format!(
+                    "{}|{}|{}:{}",
+                    diagnostic.code, scope, span.start, span.end
+                )
+            });
+            DiagnosticOccurrence {
+                diagnostic: diagnostic.clone(),
+                scope,
+                identity,
+            }
+        })
+        .collect()
+}
+
+fn diagnostic_identity_map(
+    occurrences: &[DiagnosticOccurrence],
+) -> BTreeMap<String, Vec<usize>> {
+    let mut map = BTreeMap::new();
+    for (index, occurrence) in occurrences.iter().enumerate() {
+        if let Some(identity) = &occurrence.identity {
+            map.entry(identity.clone())
+                .or_insert_with(Vec::new)
+                .push(index);
+        }
+    }
+    map
+}
+
+fn compatible_code_occurrence(
+    occurrence: &DiagnosticOccurrence,
+    other: &[DiagnosticOccurrence],
+) -> bool {
+    other.iter().any(|candidate| {
+        candidate.diagnostic.code == occurrence.diagnostic.code
+            && candidate.scope == occurrence.scope
+    })
+}
+
+fn input_changed_for_occurrence(
+    occurrence: &DiagnosticOccurrence,
+    side: &DiagnosticSide,
+    other: &DiagnosticSide,
+) -> bool {
+    if occurrence.scope == side.entry_scope {
+        return false;
+    }
+    match (
+        side.input_revisions.get(&occurrence.scope),
+        other.input_revisions.get(&occurrence.scope),
+    ) {
+        (Some(before), Some(after)) => before != after,
+        _ => true,
+    }
+}
+
+fn unmatched_diagnostic_relation(
+    occurrence: DiagnosticOccurrence,
+    side_complete: bool,
+    other_complete: bool,
+    other: &[DiagnosticOccurrence],
+    input_changed: bool,
+    status: &'static str,
+) -> DiagnosticRelation {
+    let reason = if occurrence.identity.is_none() {
+        "diagnostic occurrence has no proven source span".to_string()
+    } else if !side_complete || !other_complete {
+        "one side has incomplete checker coverage".to_string()
+    } else if input_changed {
+        "diagnostic source snapshot changed in a dependency scope".to_string()
+    } else if compatible_code_occurrence(&occurrence, other) {
+        "same-code occurrence has a different location in the compatible scope".to_string()
+    } else {
+        String::new()
+    };
+    if reason.is_empty() {
+        DiagnosticRelation {
+            status,
+            reason: if status == "new" {
+                "diagnostic is present only on the reviewed side".to_string()
+            } else {
+                "diagnostic is present only on the baseline side".to_string()
+            },
+            base: if status == "resolved" {
+                Some(occurrence)
+            } else {
+                None
+            },
+            head: if status == "new" {
+                Some(occurrence)
+            } else {
+                None
+            },
+        }
+    } else {
+        DiagnosticRelation {
+            status: "unknown",
+            reason,
+            base: if status == "resolved" {
+                Some(occurrence)
+            } else {
+                None
+            },
+            head: if status == "new" {
+                Some(occurrence)
+            } else {
+                None
+            },
+        }
+    }
+}
+
+fn compare_diagnostics(base: &DiagnosticSide, head: &DiagnosticSide) -> DiagnosticDiff {
+    let base_occurrences = diagnostic_occurrences(base);
+    let head_occurrences = diagnostic_occurrences(head);
+    let base_map = diagnostic_identity_map(&base_occurrences);
+    let head_map = diagnostic_identity_map(&head_occurrences);
+    let keys = base_map
+        .keys()
+        .chain(head_map.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut diff = DiagnosticDiff {
+        new: Vec::new(),
+        existing: Vec::new(),
+        resolved: Vec::new(),
+        unknown: Vec::new(),
+    };
+    let mut base_seen = BTreeSet::new();
+    let mut head_seen = BTreeSet::new();
+    for key in keys {
+        let old = base_map.get(&key).cloned().unwrap_or_default();
+        let new = head_map.get(&key).cloned().unwrap_or_default();
+        match (old.as_slice(), new.as_slice()) {
+            ([base_index], [head_index]) => {
+                base_seen.insert(*base_index);
+                head_seen.insert(*head_index);
+                let base_occurrence = base_occurrences[*base_index].clone();
+                let head_occurrence = head_occurrences[*head_index].clone();
+                if input_changed_for_occurrence(&base_occurrence, base, head)
+                    || input_changed_for_occurrence(&head_occurrence, head, base)
+                {
+                    diff.unknown.push(DiagnosticRelation {
+                        status: "unknown",
+                        reason: "diagnostic source snapshot changed in a dependency scope"
+                            .to_string(),
+                        base: Some(base_occurrence),
+                        head: Some(head_occurrence),
+                    });
+                } else {
+                    diff.existing.push(DiagnosticRelation {
+                        status: "existing",
+                        reason: "diagnostic occurrence identity matches on both sides"
+                            .to_string(),
+                        base: Some(base_occurrence),
+                        head: Some(head_occurrence),
+                    });
+                }
+            }
+            _ if !old.is_empty() && !new.is_empty() => {
+                for base_index in old {
+                    base_seen.insert(base_index);
+                    diff.unknown.push(DiagnosticRelation {
+                        status: "unknown",
+                        reason: "diagnostic occurrence identity is ambiguous".to_string(),
+                        base: Some(base_occurrences[base_index].clone()),
+                        head: None,
+                    });
+                }
+                for head_index in new {
+                    head_seen.insert(head_index);
+                    diff.unknown.push(DiagnosticRelation {
+                        status: "unknown",
+                        reason: "diagnostic occurrence identity is ambiguous".to_string(),
+                        base: None,
+                        head: Some(head_occurrences[head_index].clone()),
+                    });
+                }
+            }
+            (old, []) => {
+                for base_index in old {
+                    base_seen.insert(*base_index);
+                    let relation = unmatched_diagnostic_relation(
+                        base_occurrences[*base_index].clone(),
+                        base.complete,
+                        head.complete,
+                        &head_occurrences,
+                        input_changed_for_occurrence(
+                            &base_occurrences[*base_index],
+                            base,
+                            head,
+                        ),
+                        "resolved",
+                    );
+                    if relation.status == "resolved" {
+                        diff.resolved.push(relation);
+                    } else {
+                        diff.unknown.push(relation);
+                    }
+                }
+            }
+            ([], new) => {
+                for head_index in new {
+                    head_seen.insert(*head_index);
+                    let relation = unmatched_diagnostic_relation(
+                        head_occurrences[*head_index].clone(),
+                        head.complete,
+                        base.complete,
+                        &base_occurrences,
+                        input_changed_for_occurrence(
+                            &head_occurrences[*head_index],
+                            head,
+                            base,
+                        ),
+                        "new",
+                    );
+                    if relation.status == "new" {
+                        diff.new.push(relation);
+                    } else {
+                        diff.unknown.push(relation);
+                    }
+                }
+            }
+            ([], []) => {}
+        }
+    }
+    for (index, occurrence) in base_occurrences.iter().enumerate() {
+        if base_seen.contains(&index) {
+            continue;
+        }
+        diff.unknown.push(DiagnosticRelation {
+            status: "unknown",
+            reason: "diagnostic occurrence identity is unavailable".to_string(),
+            base: Some(occurrence.clone()),
+            head: None,
+        });
+    }
+    for (index, occurrence) in head_occurrences.iter().enumerate() {
+        if head_seen.contains(&index) {
+            continue;
+        }
+        diff.unknown.push(DiagnosticRelation {
+            status: "unknown",
+            reason: "diagnostic occurrence identity is unavailable".to_string(),
+            base: None,
+            head: Some(occurrence.clone()),
+        });
+    }
+    diff
+}
+
+fn diagnostic_origin_json(
+    origin: Option<&jet::Diagnostics::DiagnosticOrigin>,
+    side: &DiagnosticSide,
+    has_span: bool,
+) -> String {
+    match origin {
+        Some(origin) => format!(
+            "{{\"display\":{},\"path\":{},\"revision\":{},\"inferred\":false}}",
+            json_string(&origin.display),
+            json_string(&origin.path),
+            json_string(&origin.revision),
+        ),
+        None if has_span => format!(
+            "{{\"display\":{},\"path\":{},\"revision\":{},\"inferred\":true}}",
+            json_string(&side.path.display().to_string()),
+            json_string(&side.path.display().to_string()),
+            json_string(&side.source_hash),
+        ),
+        None => "null".to_string(),
+    }
+}
+
+fn diagnostic_cause_json(cause: &jet::Diagnostics::DiagnosticCause) -> String {
+    let span = cause
+        .span
+        .map(|span| format!("{{\"start\":{},\"end\":{}}}", span.start, span.end))
+        .unwrap_or_else(|| "null".to_string());
+    let origin = cause
+        .origin
+        .as_deref()
+        .map(|origin| {
+            format!(
+                "{{\"display\":{},\"path\":{},\"revision\":{}}}",
+                json_string(&origin.display),
+                json_string(&origin.path),
+                json_string(&origin.revision),
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"code\":{},\"span\":{},\"origin\":{}}}",
+        json_string(&cause.code),
+        span,
+        origin
+    )
+}
+
+fn diagnostic_json(diagnostic: &Diagnostic, side: &DiagnosticSide) -> String {
+    let severity = match diagnostic.severity {
+        jet::Diagnostics::Severity::Error => "error",
+        jet::Diagnostics::Severity::Lint => "warning",
+    };
+    let span = diagnostic
+        .span
+        .map(|span| format!("{{\"start\":{},\"end\":{}}}", span.start, span.end))
+        .unwrap_or_else(|| "null".to_string());
+    let detail = diagnostic
+        .detail
+        .as_deref()
+        .map(json_string)
+        .unwrap_or_else(|| "null".to_string());
+    let causes = diagnostic
+        .cause
+        .iter()
+        .map(diagnostic_cause_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"code\":{},\"severity\":{},\"moment\":{},\"what\":{},\"why\":{},\"fix\":{},\"span\":{},\"origin\":{},\"cause\":[{}],\"detail\":{}}}",
+        json_string(&diagnostic.code),
+        json_string(severity),
+        json_string(diagnostic.moment.as_str()),
+        json_string(&diagnostic.what),
+        json_string(&diagnostic.why),
+        json_string(&diagnostic.fix),
+        span,
+        diagnostic_origin_json(
+            diagnostic.origin.as_deref(),
+            side,
+            diagnostic.span.is_some(),
+        ),
+        causes,
+        detail,
+    )
+}
+
+fn diagnostic_relation_json(
+    relation: &DiagnosticRelation,
+    base: &DiagnosticSide,
+    head: &DiagnosticSide,
+) -> String {
+    let identity = relation
+        .base
+        .as_ref()
+        .and_then(|occurrence| occurrence.identity.as_deref())
+        .or_else(|| {
+            relation
+                .head
+                .as_ref()
+                .and_then(|occurrence| occurrence.identity.as_deref())
+        })
+        .map(json_string)
+        .unwrap_or_else(|| "null".to_string());
+    let base_value = relation
+        .base
+        .as_ref()
+        .map(|occurrence| diagnostic_json(&occurrence.diagnostic, base))
+        .unwrap_or_else(|| "null".to_string());
+    let head_value = relation
+        .head
+        .as_ref()
+        .map(|occurrence| diagnostic_json(&occurrence.diagnostic, head))
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"status\":{},\"reason\":{},\"identity\":{},\"base\":{},\"head\":{}}}",
+        json_string(relation.status),
+        json_string(&relation.reason),
+        identity,
+        base_value,
+        head_value,
+    )
+}
+
+fn diagnostic_relation_list(
+    relations: &[DiagnosticRelation],
+    base: &DiagnosticSide,
+    head: &DiagnosticSide,
+) -> String {
+    relations
+        .iter()
+        .map(|relation| diagnostic_relation_json(relation, base, head))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn diagnostic_side_json(side: &DiagnosticSide) -> String {
+    let diagnostics = side
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic_json(diagnostic, side))
+        .collect::<Vec<_>>()
+        .join(",");
+    let validity = if side.valid { "valid" } else { "invalid" };
+    let completeness = if side.complete {
+        "complete"
+    } else {
+        "incomplete"
+    };
+    format!(
+        "{{\"path\":{},\"revision\":{},\"scope\":\"explicit-file\",\"valid\":{},\"validity\":{},\"complete\":{},\"completeness\":{},\"coverage\":{{\"status\":{},\"basis\":\"checker-bundle\"}},\"diagnostics\":[{}]}}",
+        json_string(&side.path.display().to_string()),
+        json_string(&side.source_hash),
+        side.valid,
+        json_string(validity),
+        side.complete,
+        json_string(completeness),
+        json_string(completeness),
+        diagnostics,
+    )
+}
+
+fn render_diagnostic_json(
+    base: &DiagnosticSide,
+    head: &DiagnosticSide,
+    diff: &DiagnosticDiff,
+) {
+    let new = diagnostic_relation_list(&diff.new, base, head);
+    let existing = diagnostic_relation_list(&diff.existing, base, head);
+    let resolved = diagnostic_relation_list(&diff.resolved, base, head);
+    let unknown = diagnostic_relation_list(&diff.unknown, base, head);
+    let issues = diff
+        .new
+        .iter()
+        .chain(diff.existing.iter())
+        .chain(diff.resolved.iter())
+        .chain(diff.unknown.iter())
+        .map(|relation| diagnostic_relation_json(relation, base, head))
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "{{\"schema\":\"jet.diagnostic-review/v1\",\"kind\":\"diagnostic-review\",\"mode\":\"diagnostics\",\"status\":\"completed\",\"limitations\":[\"checker projection has no explicit truncation marker; incomplete means no final bundle\"],\"base\":{},\"head\":{},\"comparison\":{{\"new\":[{}],\"existing\":[{}],\"resolved\":[{}],\"unknown\":[{}],\"counts\":{{\"new\":{},\"existing\":{},\"resolved\":{},\"unknown\":{}}}},\"issues\":[{}]}}",
+        diagnostic_side_json(base),
+        diagnostic_side_json(head),
+        new,
+        existing,
+        resolved,
+        unknown,
+        diff.new.len(),
+        diff.existing.len(),
+        diff.resolved.len(),
+        diff.unknown.len(),
+        issues,
+    );
+}
+
+fn render_diagnostic_text(
+    base: &DiagnosticSide,
+    head: &DiagnosticSide,
+    diff: &DiagnosticDiff,
+) {
+    println!(
+        "diagnostics base valid={} complete={} count={}",
+        base.valid,
+        base.complete,
+        base.diagnostics.len()
+    );
+    println!(
+        "diagnostics head valid={} complete={} count={}",
+        head.valid,
+        head.complete,
+        head.diagnostics.len()
+    );
+    for (status, relations) in [
+        ("new", &diff.new),
+        ("existing", &diff.existing),
+        ("resolved", &diff.resolved),
+        ("unknown", &diff.unknown),
+    ] {
+        for relation in relations {
+            let code = relation
+                .head
+                .as_ref()
+                .or_else(|| relation.base.as_ref())
+                .map(|occurrence| occurrence.diagnostic.code.as_str())
+                .unwrap_or("unknown");
+            println!("diagnostic {status} {code}: {}", relation.reason);
+        }
     }
 }
 
@@ -1528,6 +2131,15 @@ fn option_value(args: &[String], names: &[&str]) -> Result<Option<String>, Strin
         }
     }
     Ok(None)
+}
+
+fn diagnostic_usage_error(message: &str) -> ! {
+    crate::cli_error!(
+        @fix "E2104",
+        message,
+        "provide a base and reviewed Jet file after `--diagnostics`"
+    );
+    exit(ExitCodes::USAGE);
 }
 
 fn usage_error(message: &str) -> ! {

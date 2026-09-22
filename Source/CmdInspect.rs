@@ -39,6 +39,18 @@ pub(crate) struct CheckProjection {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) check: CheckResult,
 }
+/// The checker projection retained by `jet review --diagnostics`.
+///
+/// Unlike a normal semantic projection, a diagnostic comparison must keep the
+/// report when the checked side contains errors.  `complete` records whether
+/// the checker produced a usable bundle; it is deliberately separate from
+/// `valid`, because a complete check can still contain user errors.
+pub(crate) struct DiagnosticProjection {
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) valid: bool,
+    pub(crate) complete: bool,
+    pub(crate) source_revisions: Vec<(PathBuf, String)>,
+}
 
 const CHECK_RESULT_SCHEMA_VERSION: u32 = 1;
 const CHECK_RESULT_CONTRACT: &str = "jet.check/v1";
@@ -83,6 +95,55 @@ pub(crate) fn check_projection(path: &Path) -> Result<CheckProjection, Vec<Diagn
         "dev",
         &BTreeMap::new(),
     )
+}
+
+/// Run the same explicit-file checker used by ordinary inspect/review, but
+/// retain diagnostic rows when the side is not semantically valid.
+pub(crate) fn check_diagnostics(path: &Path) -> Result<DiagnosticProjection, String> {
+    fs::read_to_string(path)
+        .map_err(|error| format!("could not read `{}`: {error}", path.display()))?;
+    if let Some(diagnostic) = missing_project_context_diagnostic(path) {
+        return Ok(DiagnosticProjection {
+            diagnostics: vec![diagnostic],
+            valid: false,
+            complete: false,
+            source_revisions: Vec::new(),
+        });
+    }
+
+    let entry = path.display().to_string();
+    let (mut diagnostics, bundle, _facts) =
+        jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, "dev");
+    let mut complete = bundle.is_some();
+    if let Err(error) = jet_semindex::package_facts_for_entry(path) {
+        diagnostics.push(jet_semindex::package_facts_diagnostic(path, &error));
+        complete = false;
+    }
+    let valid = complete
+        && !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
+    let source_revisions = bundle
+        .as_ref()
+        .map(|bundle| {
+            bundle
+                .modules
+                .iter()
+                .map(|module| {
+                    (
+                        module.path.clone(),
+                        jet::SHA256::sha256_hex(module.source.as_bytes()),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(DiagnosticProjection {
+        diagnostics,
+        valid,
+        complete,
+        source_revisions,
+    })
 }
 
 pub(crate) fn check_projection_with_options(
