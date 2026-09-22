@@ -4640,6 +4640,8 @@ fn qualified_case() Choice {
 fn run() {}
 "#;
     let uri = "file:///tmp/lsp_enum_variant_protocol_test.jet";
+    let fixture_diagnostics = jet::check_document(uri, source);
+    eprintln!("enum fixture diagnostics: {fixture_diagnostics:#?}");
 
     // This proof intentionally stays in one open document. Sibling-module
     // bare-pattern snapshots are outside the current protocol boundary.
