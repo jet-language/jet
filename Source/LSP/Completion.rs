@@ -681,9 +681,18 @@ pub(crate) fn compute_completions(
     // Switch-arm enum snippet completion. Dispatch arms use the same leading
     // dot spelling as diagnostics and quick-fix edits (`.Variant -> {}`).
     let source_tokens = crate::Lexer::lex(src).0;
-    if let Some(enum_definition) =
-        detect_switch_enum_type(&source_tokens, offset, current_path, db)
-    {
+    let switch_enum =
+        detect_switch_enum_type(&source_tokens, offset, current_path, db);
+    if std::env::var_os("JET_DEBUG_LSP").is_some() {
+        let detected = switch_enum.map(|definition| definition.name.as_str());
+        eprintln!(
+            "completion debug: offset={offset} path={current_path:?} detected={detected:?} defs={} refs={} source_prefix={:?}",
+            db.defs.len(),
+            db.refs.len(),
+            src.get(offset.saturating_sub(24)..offset.min(src.len()))
+        );
+    }
+    if let Some(enum_definition) = switch_enum {
         if let SymKind::Enum { variants, .. } = &enum_definition.kind {
             let prefix = current_identifier_prefix(src, offset);
             let prefix_start = offset.saturating_sub(prefix.len());
