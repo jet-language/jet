@@ -788,6 +788,9 @@ pub(crate) fn compute_completions(
             }
         }
     }
+    if !items.is_empty() {
+        return items;
+    }
 
     // D-LSP5: for symbols from other modules, generate an auto-import edit if
     // that module isn't already imported in the current source.
