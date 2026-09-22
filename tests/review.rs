@@ -269,8 +269,14 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
     let package = "name: \"review_rename\"\nversion: \"0.1.0\"\nedition: \"2026\"\n";
     write(&base.join("package.jet"), package);
     write(&head.join("package.jet"), package);
-    let before = "fn report() Int -> {\n    return 1\n}\n";
-    let after = "fn summarize() Int -> {\n    return 1\n}\n";
+    let before = "fn report() -> Int {
+    return 1
+}
+";
+    let after = "fn summarize() -> Int {
+    return 1
+}
+";
     write(&base.join("run.jet"), before);
     write(&head.join("run.jet"), after);
     let before_hash = jet::SHA256::sha256_hex(before.as_bytes());
