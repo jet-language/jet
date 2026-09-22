@@ -4997,6 +4997,18 @@ fn run() {}
         .replacen("fn bare_case(Ready)", "fn bare_case(Queued)", 1)
         .replacen("Choice.Ready", "Choice.Queued", 1);
     assert!(updated.contains("#Rename(\"wire-ready\") Queued"));
+    let initial_checked =
+        format!("{:?}", jet::check_document("lsp_enum_variant_protocol_test.jet", source));
+    let updated_checked =
+        format!("{:?}", jet::check_document("lsp_enum_variant_protocol_test.jet", &updated));
+    assert_ne!(
+        updated_checked, initial_checked,
+        "changing the enum case set must refresh checked diagnostics"
+    );
+    assert!(
+        updated_checked.contains("Waiting"),
+        "removing Waiting must retain a diagnostic for the stale case"
+    );
     let change = format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{uri}","version":2}},"contentChanges":[{{"text":{}}}]}}}}"#,
         json_string(&updated),
