@@ -3596,6 +3596,18 @@ fn authority_flags_render_in_registry_completions_and_man() {
         assert!(!flags.verbose);
         assert!(!flags.json);
         assert!(!machine_output_requested(&args));
+
+        let verbose_args = [
+            "run".to_string(),
+            "--verbose".to_string(),
+            "--".to_string(),
+            "--quiet".to_string(),
+            "--json".to_string(),
+        ];
+        let verbose = OutputFlags::parse(&verbose_args).unwrap();
+        assert!(verbose.verbose);
+        assert!(!verbose.quiet);
+        assert!(!verbose.json);
     }
 
     #[test]
