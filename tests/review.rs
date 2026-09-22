@@ -746,6 +746,71 @@ fn review_diagnostics_mode_keeps_moved_same_code_unknown() {
 
     let _ = fs::remove_dir_all(root);
 }
+#[test]
+fn review_diagnostics_mode_keeps_repeated_same_code_unknown() {
+    let root = scratch("diagnostics-repeated");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(
+        &root,
+        "base",
+        "",
+        "fn run() {\n    missing()\n    missing()\n}\n",
+    );
+    let head = project(&root, "head", "", "fn run() {\n    missing()\n}\n");
+
+    let output = diagnostic_review_command(&base, &head);
+    assert!(
+        output.status.success(),
+        "repeated diagnostic review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"status\":\"unknown\""));
+    assert!(stdout.contains("same-code occurrence has a different location"));
+    assert!(!stdout.contains("\"status\":\"resolved\""));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_diagnostics_mode_keeps_changed_dependency_unknown() {
+    let root = scratch("diagnostics-dependency");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(
+        &root,
+        "base",
+        "",
+        "use project.dep as dep\nfn run() {\n    dep.call()\n}\n",
+    );
+    let head = project(
+        &root,
+        "head",
+        "",
+        "use project.dep as dep\nfn run() {\n    dep.call()\n}\n",
+    );
+    write(
+        &base.join("dep.jet"),
+        "module dep {\n    pub fn call() {\n        missing()\n    }\n}\n",
+    );
+    write(
+        &head.join("dep.jet"),
+        "module dep {\n    pub fn call() {\n        missing()\n    }\n}\n// dependency changed\n",
+    );
+
+    let output = diagnostic_review_command(&base, &head);
+    assert!(
+        output.status.success(),
+        "dependency diagnostic review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"status\":\"unknown\""));
+    assert!(stdout.contains("diagnostic source snapshot changed in a dependency scope"));
+    assert!(stdout.contains("dep.jet"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
 
 #[test]
 fn review_diagnostics_mode_exposes_incomplete_missing_import_coverage() {
