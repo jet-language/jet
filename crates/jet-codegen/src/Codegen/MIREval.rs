@@ -1855,7 +1855,30 @@ pub fn evaluate_mir_program_with_config(
                 None,
             ))
         })?;
-    let entry_function = program_function(program, selection.entry_function)?;
+    let argv = crate::Comptime::runtime_argv()
+        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
+    let entry_function_id = if argv.get(1).map(String::as_str) == Some("--__jet-private-job") {
+        let name = argv.get(2).map(String::as_str).ok_or_else(|| {
+            MirEvalError::from(mir_error(
+                "MIR private job dispatch is missing a job name",
+                None,
+            ))
+        })?;
+        program
+            .jobs
+            .iter()
+            .find(|job| job.name == name)
+            .map(|job| job.function)
+            .ok_or_else(|| {
+                MirEvalError::from(mir_error(
+                    &format!("MIR private job dispatch names unknown job `{name}`"),
+                    None,
+                ))
+            })?
+    } else {
+        selection.entry_function
+    };
+    let entry_function = program_function(program, entry_function_id)?;
     let cli_entry = program
         .artifacts
         .iter()
@@ -1873,8 +1896,6 @@ pub fn evaluate_mir_program_with_config(
         execution,
         Some(&mut data_pipeline),
     );
-    let argv = crate::Comptime::runtime_argv()
-        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
     let params = if let Some(cli_entry) = cli_entry {
         let program_name = argv.first().map(String::as_str).unwrap_or("");
         if let Some(output) =
@@ -5363,11 +5384,22 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             span,
         )?;
         let tasks = self.runtime_to_ct(tasks, span)?;
-        let CtValue::List(tasks) = tasks else {
-            return Err(mir_error_at(
-                "MIR task-group operation requires a List of tasks",
-                span,
-            ));
+        let (tasks, named_fields) = match tasks {
+            CtValue::List(tasks) => (tasks, None),
+            CtValue::Struct { fields, .. } if matches!(kind, MirTaskGroupKind::All) => {
+                let names = fields
+                    .iter()
+                    .map(|(name, _)| name.clone())
+                    .collect::<Vec<_>>();
+                let tasks = fields.into_iter().map(|(_, value)| value).collect();
+                (tasks, Some(names))
+            }
+            _ => {
+                return Err(mir_error_at(
+                    "MIR task-group operation requires a List or named record of tasks",
+                    span,
+                ));
+            }
         };
         if tasks.is_empty() && !matches!(kind, MirTaskGroupKind::All) {
             return Err(mir_error_at(
@@ -5400,6 +5432,22 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             entries.push(entry);
         }
+        let assemble_payload = |values: Vec<CtValue>| -> Result<CtValue, Diagnostic> {
+            if let Some(names) = named_fields.as_ref() {
+                if names.len() != values.len() {
+                    return Err(mir_error_at(
+                        "MIR named task-group result field count changed during join",
+                        span,
+                    ));
+                }
+                Ok(CtValue::Struct {
+                    type_name: "aggregate".to_string(),
+                    fields: names.iter().cloned().zip(values).collect(),
+                })
+            } else {
+                Ok(CtValue::List(values))
+            }
+        };
         let result = match kind {
             MirTaskGroupKind::All => {
                 let completions = match crate::scheduler::jet_scheduler_all(entries) {
@@ -5407,7 +5455,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     Err(failure) => return Ok(task_failure_result(failure)),
                 };
                 if !flatten_result {
-                    let payload = runtime_from_ct(CtValue::List(completions), span)?;
+                    let payload = runtime_from_ct(assemble_payload(completions)?, span)?;
                     RuntimeValue::Result {
                         ok: true,
                         value: Box::new(payload),
@@ -5435,7 +5483,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             }
                         }
                     }
-                    let payload = runtime_from_ct(CtValue::List(payloads), span)?;
+                    let payload = runtime_from_ct(assemble_payload(payloads)?, span)?;
                     RuntimeValue::Result {
                         ok: true,
                         value: Box::new(payload),
@@ -6059,18 +6107,23 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .push(transaction.clone());
                 Ok(RuntimeValue::Transaction(transaction))
             }
-            MirOperation::Global { name } => self
-                .config
-                .globals
-                .get(name)
-                .cloned()
-                .map(RuntimeValue::Data)
-                .ok_or_else(|| {
-                    mir_error_at(
-                        &format!("MIR global `{name}` is not provided by the run"),
-                        span,
-                    )
-                }),
+            MirOperation::Global { name } => {
+                if let Some(value) = self.config.globals.get(name).cloned() {
+                    return Ok(RuntimeValue::Data(value));
+                }
+                if let Some(constant) = self
+                    .program
+                    .constants
+                    .iter()
+                    .find(|constant| Self::mir_constant_matches_name(constant, name))
+                {
+                    return mir_constant_to_runtime(&constant.value, span);
+                }
+                Err(mir_error_at(
+                    &format!("MIR global `{name}` is not provided by the run"),
+                    span,
+                ))
+            }
             MirOperation::Phi { incoming } => {
                 let predecessor = self.frames[frame_index].predecessor;
                 let value = incoming
@@ -14258,6 +14311,40 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             });
         }
 
+        if type_name == crate::Syntax::TYPE_MEASUREMENT && func == "new" {
+            let [value, uncertainty] = values else {
+                return Some(Err(mir_error_at(
+                    "Measurement.new requires value and uncertainty",
+                    span,
+                )));
+            };
+            let value = match value {
+                CtValue::Float(value) => value.as_f64(),
+                _ => return Some(Err(mir_error_at(
+                    "Measurement.new requires a Float value",
+                    span,
+                ))),
+            };
+            let uncertainty = match uncertainty {
+                CtValue::Float(uncertainty) => uncertainty.as_f64(),
+                _ => return Some(Err(mir_error_at(
+                    "Measurement.new requires a Float uncertainty",
+                    span,
+                ))),
+            };
+            let (value, uncertainty) =
+                mir_measurement_prelude::jet_measurement_kernel_new(value, uncertainty);
+            return Some(Ok(CtValue::Struct {
+                type_name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                fields: vec![
+                    ("value".to_string(), CtValue::Float(CtFloat::f64(value))),
+                    (
+                        "uncertainty".to_string(),
+                        CtValue::Float(CtFloat::f64(uncertainty)),
+                    ),
+                ],
+            }));
+        }
         let constructor = match (type_name, func) {
             (_, "from_str") if type_name == crate::Syntax::TYPE_DECIMAL => Some("decimal"),
             (_, "from_parts" | "new") if type_name == crate::Syntax::TYPE_FRACTION => {
@@ -15697,6 +15784,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 self.runtime_to_ct(value, span)
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
+        if family == jet_foundation::MIR::MirPreludeFamily::StaticPrelude
+            && module == "core.data"
+            && member_name == "limits_safe"
+            && symbol == "jet_std::DataLimits::safe"
+        {
+            let value = crate::Comptime::xml_safe_static_for_tir(
+                "jet_std::DataLimits",
+                "safe",
+            )
+            .ok_or_else(|| mir_error_at("MIR DataLimits.safe route has no value", span))?;
+            return Ok(RuntimeValue::Data(
+                crate::Comptime::MirBridge::ct_to_mir_value(value, span)?,
+            ));
+        }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
             && module == "core.pending"
         {
@@ -16045,8 +16146,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     )
                 })?;
-                jet_foundation::Outcome::jet_err_apply_conversion(
-                    &mut error,
+                error = jet_foundation::Outcome::jet_err_apply_conversion(
+                    error,
                     source.clone(),
                     target.clone(),
                 );
@@ -21141,6 +21242,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(())
     }
 
+    fn mir_constant_matches_name(
+        constant: &jet_foundation::MIR::MirConstantDef,
+        name: &str,
+    ) -> bool {
+        constant.key.as_str() == name
+            || constant.name.as_str() == name
+            || constant
+                .key
+                .strip_suffix(name)
+                .is_some_and(|prefix| prefix.ends_with("::"))
+    }
+
     fn read_static_value(&self, name: &str, span: Span) -> Result<RuntimeValue, Diagnostic> {
         if let Some(value) = self.static_values.borrow().get(name).cloned() {
             if matches!(value, RuntimeValue::Moved) {
@@ -21148,13 +21261,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
             return Ok(value);
         }
-        let value = self
-            .config
-            .globals
-            .get(name)
-            .cloned()
-            .map(RuntimeValue::Data)
-            .ok_or_else(|| mir_error_at(&format!("MIR static `{name}` is not provided"), span))?;
+        let value = if let Some(value) = self.config.globals.get(name).cloned() {
+            RuntimeValue::Data(value)
+        } else if let Some(constant) = self
+            .program
+            .constants
+            .iter()
+            .find(|constant| Self::mir_constant_matches_name(constant, name))
+        {
+            mir_constant_to_runtime(&constant.value, span)?
+        } else {
+            return Err(mir_error_at(
+                &format!("MIR static `{name}` is not provided"),
+                span,
+            ));
+        };
         if matches!(value, RuntimeValue::Moved) {
             return Err(mir_error_at("MIR static value was moved", span));
         }
@@ -21172,8 +21293,27 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 .cloned()
                 .map(RuntimeValue::Data)
         });
-        value.ok_or_else(|| mir_error_at(&format!("MIR static `{name}` is not provided"), span))
+        let value = if let Some(value) = value {
+            value
+        } else if let Some(constant) = self
+            .program
+            .constants
+            .iter()
+            .find(|constant| Self::mir_constant_matches_name(constant, name))
+        {
+            mir_constant_to_runtime(&constant.value, span)?
+        } else {
+            return Err(mir_error_at(
+                &format!("MIR static `{name}` is not provided"),
+                span,
+            ));
+        };
+        if matches!(value, RuntimeValue::Moved) {
+            return Err(mir_error_at("MIR static value was moved", span));
+        }
+        Ok(value)
     }
+
 
     fn store_static_value(&self, name: &str, value: RuntimeValue) {
         self.static_values
