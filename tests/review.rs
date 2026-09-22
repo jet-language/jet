@@ -193,20 +193,66 @@ fn review_joins_meaning_authority_and_receipt_changes() {
 
     let base_receipt = root.join("base.jetproof");
     let head_receipt = root.join("head.jetproof");
-    write(
-        &base_receipt,
-        r#"{"proofReport":{"evidence":[
-            {"id":"old-retained","kind":"front_end","facet":"syntax","producer":"test","property":"retained","outcome":"proved","state":"checked"},
-            {"id":"old-lost","kind":"front_end","facet":"syntax","producer":"test","property":"lost","outcome":"proved","state":"checked"}
-        ]}}"#,
+    let base_receipt_value = proof_receipt(
+        &[
+            checked_derivation("d-retained", "build-1", "run-1", "target-1", "event-retained"),
+            checked_derivation("d-lost", "build-1", "run-1", "target-1", "event-lost"),
+        ],
+        &[
+            proof_evidence(
+                "claim-retained",
+                "d-retained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-lost",
+                "d-lost",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+        ],
     );
-    write(
-        &head_receipt,
-        r#"{"proofReport":{"evidence":[
-            {"id":"new-retained","kind":"front_end","facet":"syntax","producer":"test","property":"retained","outcome":"proved","state":"checked"},
-            {"id":"new-gained","kind":"front_end","facet":"syntax","producer":"test","property":"gained","outcome":"passed","state":"checked"}
-        ]}}"#,
+    let head_receipt_value = proof_receipt(
+        &[
+            checked_derivation(
+                "d-retained",
+                "build-1",
+                "run-1",
+                "target-1",
+                "event-retained",
+            ),
+            checked_derivation("d-gained", "build-1", "run-1", "target-1", "event-gained"),
+        ],
+        &[
+            proof_evidence(
+                "claim-retained",
+                "d-retained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-gained",
+                "d-gained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+        ],
     );
+    write(&base_receipt, &base_receipt_value);
+    write(&head_receipt, &head_receipt_value);
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args([
