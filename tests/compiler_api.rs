@@ -361,6 +361,30 @@ fn compiler_api_is_compile_time_only() {
 }
 
 #[test]
+fn compiler_api_rejects_zero_and_extra_arguments_at_checking() {
+    for operation in ["lex", "parse", "check", "source_map"] {
+        let zero = format!(
+            "use core.compiler as compiler\n@value :: compiler.{operation}()\n"
+        );
+        let diagnostics = jet::compile(&zero).expect_err("zero-argument call must be rejected");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0104"),
+            "{operation} zero-argument call must fail at checking: {diagnostics:?}"
+        );
+
+        let extra = format!(
+            "use core.compiler as compiler\n@value :: compiler.{operation}(\"source\", \"extra\")\n"
+        );
+        let diagnostics =
+            jet::compile(&extra).expect_err("extra-argument call must be rejected");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0104"),
+            "{operation} extra-argument call must fail at checking: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn compiler_api_failures_are_typed_and_schema_checked() {
     let bad_shape = jet::Compiler::eval_core_call(
         "core.compiler",
