@@ -4640,7 +4640,7 @@ fn qualified_case() Choice {
 fn run() {}
 "#;
     let uri = "file:///tmp/lsp_enum_variant_protocol_test.jet";
-    let fixture_diagnostics = jet::check_document(uri, source);
+    let fixture_diagnostics = jet::check_document("/tmp/lsp_enum_variant_protocol_test.jet", source);
     eprintln!("enum fixture diagnostics: {fixture_diagnostics:#?}");
 
     // This proof intentionally stays in one open document. Sibling-module
@@ -4689,6 +4689,7 @@ fn run() {}
     );
     send_msg(&mut stdin, &open);
     let open_diagnostics = parse_json(&read_msg(&mut stdout)).expect("valid didOpen notification");
+    eprintln!("open diagnostics: {open_diagnostics:#?}");
     assert_eq!(
         json_str(json_object_field(&open_diagnostics, "method")),
         Some("textDocument/publishDiagnostics")
