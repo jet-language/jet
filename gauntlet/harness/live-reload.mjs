@@ -15,6 +15,13 @@ const AXIS_JET_APP_BODY_LIMIT = 5 * 1024 * 1024;
 const AXIS_READY_SETTLE_MS = 150;
 const PROCESS_TERM_TIMEOUT_MS = 5_000;
 const PROCESS_KILL_TIMEOUT_MS = 1_000;
+const LIVE_RELOAD_LIFECYCLE_SCENARIO = Object.freeze({
+  name: "failed-edit-last-good",
+  max_failed_edits: 1,
+  side_effect: "readiness_counter",
+});
+const FAILED_EDIT_SOURCE = "__gauntlet_live_reload_failed_edit__ = ;";
+
 
 
 function monotonicNow() {
@@ -482,6 +489,23 @@ async function applyAxisEdit(file, from, to) {
   };
 }
 
+async function applyFailedAxisEdit(file) {
+  const before = await fs.readFile(file, "utf8");
+  if (before.includes(FAILED_EDIT_SOURCE)) {
+    throw new Error(`axis failed edit is already present in ${path.basename(file)}`);
+  }
+  const separator = before.endsWith("\n") ? "" : "\n";
+  const after = `${before}${separator}${FAILED_EDIT_SOURCE}\n`;
+  await fs.writeFile(file, after);
+  return {
+    file: path.basename(file),
+    source: FAILED_EDIT_SOURCE,
+    before_sha256: sha256(before),
+    after_sha256: sha256(after),
+  };
+}
+
+
 async function restoreAxisEdit(file, from, to) {
   const text = await fs.readFile(file, "utf8").catch(() => null);
   if (text === null || text === undefined) return;
@@ -784,6 +808,191 @@ function liveReloadComparisons(runners) {
 }
 
 
+export async function runLiveReloadLifecycleScenario({
+  runner,
+  stageDir,
+  editPath,
+  jetBin,
+  budget,
+  envRunner = null,
+  envRunnerArgs = [],
+}) {
+  const port = await freeTcpPort();
+  const command = axisCommand(runner.command, { port, jet_bin: jetBin });
+  const scenario = {
+    name: LIVE_RELOAD_LIFECYCLE_SCENARIO.name,
+    bound: {
+      max_failed_edits: LIVE_RELOAD_LIFECYCLE_SCENARIO.max_failed_edits,
+      max_processes: 1,
+    },
+    side_effect: {
+      kind: LIVE_RELOAD_LIFECYCLE_SCENARIO.side_effect,
+      path: runner.readiness?.path ?? null,
+    },
+    status: "failed",
+    command,
+    port,
+    process_pid: null,
+    observations: {
+      rerun: {
+        status: "unexpressible",
+        reason: "readiness is a counter, not an execution or module identity",
+      },
+      swap: { status: "unobserved" },
+      restart: {
+        status: "unexpressible",
+        reason: "the existing protocol does not expose the serving process identity",
+      },
+      last_good: { status: "unobserved" },
+      persist: { status: "unobserved" },
+    },
+  };
+  let child = null;
+  let baseline = null;
+  try {
+    const output = outputSpec(runner);
+    const outputBodyLimit = axisOutputBodyLimit(runner, output);
+    baseline = await normalizeAxisMarker(editPath, budget.edit_from, budget.edit_to);
+    child = startProcess(envRunner, stageDir, command, { envRunnerArgs });
+    scenario.process_pid = child.pid ?? null;
+    const initial = await waitForAxisState({
+      child,
+      port,
+      readiness: runner.readiness,
+      output,
+      expectedMarker: budget.edit_from,
+      staleMarker: budget.edit_to,
+      timeoutMs: budget.startup_timeout_ms,
+      pollIntervalMs: budget.poll_interval_ms,
+      bodyLimit: outputBodyLimit,
+    });
+    const initialStable = await waitForAxisReadyStable(
+      child,
+      port,
+      runner.readiness,
+      budget.startup_timeout_ms,
+      budget.poll_interval_ms,
+    );
+    const goodEdit = await applyAxisEdit(editPath, budget.edit_from, budget.edit_to);
+    const good = await waitForAxisState({
+      child,
+      port,
+      readiness: runner.readiness,
+      output,
+      expectedMarker: budget.edit_to,
+      staleMarker: budget.edit_from,
+      timeoutMs: budget.reload_timeout_ms,
+      pollIntervalMs: budget.poll_interval_ms,
+      previousValue: initial.ready.value,
+      bodyLimit: outputBodyLimit,
+    });
+    const goodStable = await waitForAxisReadyStable(
+      child,
+      port,
+      runner.readiness,
+      budget.reload_timeout_ms,
+      budget.poll_interval_ms,
+    );
+    scenario.readiness = {
+      path: runner.readiness.path,
+      initial: initialStable.value,
+      after_good_edit: goodStable.value,
+      good_edit_counter_delta: goodStable.value - initialStable.value,
+    };
+    scenario.good_edit = {
+      ...goodEdit,
+      readiness: good.ready.value,
+      output: good.output,
+    };
+    const goodOutputSha256 = good.output.body_sha256;
+    scenario.observations.swap = {
+      status: markerMatches(good.output.body, budget.edit_to, budget.edit_from) ? "marker_changed" : "not_observed",
+      evidence: "the output acknowledgement changed to the edited marker",
+      criterion: "output transition only; the existing protocol does not identify the swap mechanism",
+    };
+
+    const failedEditStartedAt = monotonicNow();
+    const failedEdit = await applyFailedAxisEdit(editPath);
+    const failedEditWrittenAt = monotonicNow();
+    const failedReady = await waitForAxisReadyStable(
+      child,
+      port,
+      runner.readiness,
+      budget.reload_timeout_ms,
+      budget.poll_interval_ms,
+    );
+    const failedOutput = await httpProbe(port, { path: output.path }, budget.reload_timeout_ms, outputBodyLimit);
+    if (!failedOutput.ok) throw new Error(failedOutput.error);
+    const failedOutputSha256 = sha256(failedOutput.body);
+    const markerPreserved = failedOutput.status === (output.status ?? 200) &&
+      markerMatches(failedOutput.body, budget.edit_to, budget.edit_from);
+    const exactOutputPreserved = markerPreserved && failedOutputSha256 === goodOutputSha256;
+    scenario.failed_edit = {
+      ...failedEdit,
+      started_at_ms: failedEditStartedAt,
+      written_at_ms: failedEditWrittenAt,
+      readiness: failedReady.value,
+      output: {
+        path: output.path,
+        status: failedOutput.status,
+        body: failedOutput.body,
+        body_sha256: failedOutputSha256,
+      },
+    };
+    scenario.readiness.after_failed_edit = failedReady.value;
+    scenario.readiness.failed_edit_counter_delta = failedReady.value - goodStable.value;
+    scenario.observations.last_good = {
+      status: markerPreserved ? "marker_preserved" : "not_observed",
+      marker: budget.edit_to,
+      output_body: exactOutputPreserved ? "preserved" : "changed",
+      actual_app_state: exactOutputPreserved ? "observed" : "unexpressible",
+      evidence: markerPreserved
+        ? "the failed edit left the last acknowledged marker in place"
+        : "the failed edit did not leave the last acknowledged marker in place",
+      reason: exactOutputPreserved
+        ? null
+        : "the output acknowledgement changed beyond the marker, so this protocol cannot prove the served last-good body",
+    };
+    scenario.status = markerPreserved ? "complete" : "failed";
+    if (!markerPreserved) scenario.reason = "failed edit did not preserve the last-good marker";
+    scenario.observations.rerun = {
+      status: "unexpressible",
+      counter_observation: failedReady.value > goodStable.value ? "advanced" : "unchanged",
+      readiness_counter_delta: failedReady.value - goodStable.value,
+      criterion: "the counter cannot distinguish a rerun from a swap or restart",
+    };
+    scenario.observations.persist = {
+      status: failedReady.value >= goodStable.value ? "observed" : "not_observed",
+      state: failedReady.value === goodStable.value ? "unchanged" : failedReady.value > goodStable.value ? "advanced" : "reset",
+      before: goodStable.value,
+      after: failedReady.value,
+      criterion: "the counted side effect did not reset below its last good value",
+    };
+    scenario.cleanup = await cleanupProcessGroup(child);
+    child = null;
+  } catch (error) {
+    scenario.reason = error instanceof Error ? error.message : String(error);
+    if (child?.spawnError) scenario.spawn_error = child.spawnError.message;
+    if (child?.stderrText) scenario.stderr = child.stderrText();
+  } finally {
+    if (child) {
+      scenario.cleanup = await cleanupProcessGroup(child);
+      if (!scenario.cleanup.group_gone) {
+        scenario.cleanup_error = "process group remained alive after SIGTERM and SIGKILL";
+      }
+    }
+    if (baseline !== null) {
+      try {
+        await fs.writeFile(editPath, baseline);
+      } catch (error) {
+        scenario.restore_error = error instanceof Error ? error.message : String(error);
+        scenario.status = "failed";
+      }
+    }
+  }
+  return scenario;
+}
+
 export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoDir = defaultRepoDir, envRunner = null, envRunnerArgs = [] } = {}) {
   const runnerDir = path.join(axisDir, runner.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_"));
   const budget = validateAxisBudget(axis);
@@ -835,6 +1044,15 @@ export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoD
   const successful = result.measurements.filter((sample) => sample.status === "complete").length;
   result.status = successful === expected ? "complete" : "failed";
   if (result.status !== "complete") result.reason = `${expected - successful}/${expected} reload samples failed`;
+  result.lifecycle_scenario = await runLiveReloadLifecycleScenario({
+    runner,
+    stageDir: runnerDir,
+    editPath,
+    jetBin,
+    budget,
+    envRunner,
+    envRunnerArgs,
+  });
   return result;
 }
 export async function runLiveReloadAxis(axis, runDir, jetBin, options = {}) {
@@ -899,4 +1117,6 @@ export const liveReloadInternals = {
   waitForAxisReady,
   waitForAxisReadyStable,
   liveReloadComparisons,
+  applyFailedAxisEdit,
+  runLiveReloadLifecycleScenario,
 };
