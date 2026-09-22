@@ -641,8 +641,8 @@ fn review_receipt_fixture_matrix_refuses_a_missing_receipt_path() {
 fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
     let root = scratch("matrix-changed-hash");
     let _ = fs::remove_dir_all(&root);
-    let base_source = "fn report() Int -> {\n    return 1\n}\n";
-    let head_source = "fn summarize() Int -> {\n    return 1\n}\n";
+    let base_source = "fn report() -> Int {\n    return 1\n}\n";
+    let head_source = "fn summarize() -> Int {\n    return 1\n}\n";
     let base = project(&root, "base", "", base_source);
     let head = project(&root, "head", "", head_source);
     let after_hash = jet::SHA256::sha256_hex(head_source.as_bytes());
