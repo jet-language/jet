@@ -191,11 +191,22 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
             .env("NO_COLOR", "1");
         command.output().unwrap()
     };
-    let report = |output: &Output| -> DataTree {
+    let parse_status = |output: &Output| -> DataTree {
         let payload = machine_payload(output);
         assert!(!payload.is_empty(), "check emitted no machine report");
         parse_json(&payload).unwrap_or_else(|_| panic!("invalid machine report:\n{payload}"))
     };
+    let diagnostic_report = |status: &DataTree| -> DataTree {
+        match jet_foundation::JSON::json_get(status, "reports").unwrap() {
+            DataTree::Array(reports) => reports
+                .first()
+                .cloned()
+                .expect("diagnostic status must contain one report"),
+            _ => panic!("diagnostic status reports is not an array"),
+        }
+    };
+    let report = |output: &Output| -> DataTree { parse_status(output) };
+    let first_report = |status: &DataTree| diagnostic_report(status);
     let assert_safe_edit = |value: &DataTree| {
         assert_eq!(
             jet_foundation::JSON::json_str(
@@ -247,7 +258,8 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
     assert_eq!(absent_first.status.code(), absent_second.status.code());
     assert_eq!(machine_payload(&absent_first), machine_payload(&absent_second));
     let absent_report = report(&absent_first);
-    assert_safe_edit(&absent_report);
+    let absent_diagnostic = first_report(&absent_report);
+    assert_safe_edit(&absent_diagnostic);
 
     // A discovered package and an explicit command-line setting must not
     // change the source-derived safe edit. The success projection below
@@ -270,18 +282,19 @@ build: {
     let configured = check(&["--profile=staging", "--set", "marker=cli"]);
     assert_eq!(configured.status.code(), Some(1));
     let configured_report = report(&configured);
-    assert_safe_edit(&configured_report);
+    let configured_diagnostic = first_report(&configured_report);
+    assert_safe_edit(&configured_diagnostic);
     assert_eq!(
-        jet_foundation::JSON::json_get(&absent_report, "code"),
-        jet_foundation::JSON::json_get(&configured_report, "code")
+        jet_foundation::JSON::json_get(&absent_diagnostic, "code"),
+        jet_foundation::JSON::json_get(&configured_diagnostic, "code")
     );
     assert_eq!(
-        jet_foundation::JSON::json_get(&absent_report, "applicability"),
-        jet_foundation::JSON::json_get(&configured_report, "applicability")
+        jet_foundation::JSON::json_get(&absent_diagnostic, "applicability"),
+        jet_foundation::JSON::json_get(&configured_diagnostic, "applicability")
     );
     assert_eq!(
-        jet_foundation::JSON::json_get(&absent_report, "fix_edits"),
-        jet_foundation::JSON::json_get(&configured_report, "fix_edits")
+        jet_foundation::JSON::json_get(&absent_diagnostic, "fix_edits"),
+        jet_foundation::JSON::json_get(&configured_diagnostic, "fix_edits")
     );
 
     let preview = || {
