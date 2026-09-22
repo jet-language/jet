@@ -381,8 +381,14 @@ fn detect_switch_enum_type<'a>(
             continue;
         }
 
-        let type_name =
-            completion_subject_type_name(db, tokens, current_path, subject_index)?;
+        let type_name = completion_subject_type_name(db, tokens, current_path, subject_index);
+        if std::env::var_os("JET_DEBUG_LSP").is_some() {
+            eprintln!(
+                "switch debug: brace={brace_index} eq={eq_index} subject={subject_index} if={if_index} depth={depth} type={type_name:?} subject_token={:?}",
+                tokens[subject_index].kind
+            );
+        }
+        let type_name = type_name?;
         return completion_enum_definition_for_type(db, &type_name, current_path, offset);
     }
     None
