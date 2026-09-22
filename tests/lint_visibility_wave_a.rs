@@ -29,6 +29,14 @@ fn combined(output: &Output) -> String {
     )
 }
 
+fn allow_io(root: &Path) {
+    fs::write(
+        root.join("package.jet"),
+        "name: \"lint-visibility\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write IO authority for lint visibility fixture");
+}
+
 fn assert_advisory_visible(label: &str, output: &Output) {
     assert!(
         output.status.success(),
@@ -46,6 +54,7 @@ fn assert_advisory_visible(label: &str, output: &Output) {
 fn check_and_build_show_advisories_while_execution_can_request_them() {
     let scratch = common::Scratch::new("lint-visibility-wave-a");
     fs::write(scratch.join("main.jet"), SOURCE).expect("write lint visibility fixture");
+    allow_io(&scratch.path);
 
     assert_advisory_visible("check", &run_jet(&scratch.path, &["check", "main.jet"]));
     assert_advisory_visible(
@@ -95,6 +104,7 @@ fn check_and_build_show_advisories_while_execution_can_request_them() {
 fn dev_watch_off_hides_advisories_by_default_and_verbose_requests_them() {
     let scratch = common::Scratch::new("lint-visibility-wave-a-dev");
     fs::write(scratch.join("main.jet"), SOURCE).expect("write dev lint fixture");
+    allow_io(&scratch.path);
 
     let quiet_dev = run_jet(&scratch.path, &["dev", "main.jet", "--watch=off"]);
     assert!(
