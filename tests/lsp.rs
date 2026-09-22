@@ -4621,9 +4621,15 @@ fn lsp_enum_variant_navigation_completion_and_rename() {
 
 fn dot_case(choice: Choice) {
     if choice == {
-        .Ready -> { return }
-        .Waiting -> { return }
-        else -> { return }
+        .Ready -> {
+            return
+        }
+        .Waiting -> {
+            return
+        }
+        else -> {
+            return
+        }
     }
 }
 
@@ -4632,7 +4638,7 @@ fn bare_case(Ready) {
 }
 
 
-fn qualified_case() Choice {
+fn qualified_case() -> Choice {
     return Choice.Ready
 }
 
