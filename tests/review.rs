@@ -689,6 +689,32 @@ fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
 }
 
 #[test]
+fn review_default_rejects_error_bearing_side() {
+    let root = scratch("default-error-side");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "", REVIEW_SOURCE);
+    let head = project(&root, "head", "", "fn run() { missing() }\n");
+
+    let output = review_command(&base, &head, None, None);
+    assert!(
+        !output.status.success(),
+        "default semantic review unexpectedly accepted an error-bearing side: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        diagnostic.contains("E"),
+        "default semantic review omitted its checker diagnostic:\n{diagnostic}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn review_diagnostics_mode_compares_error_occurrences_without_receipts() {
     let root = scratch("diagnostics-statuses");
     let _ = fs::remove_dir_all(&root);
