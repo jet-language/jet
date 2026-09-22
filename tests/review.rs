@@ -996,6 +996,37 @@ fn review_without_receipts_reports_unknown_provenance() {
 }
 
 #[test]
+fn review_with_checked_dependency_reports_complete_provenance() {
+    let root = scratch("complete-provenance");
+    let _ = fs::remove_dir_all(&root);
+    let source = "use \"./dep\" as dep\n\nfn run() {\n    dep.call()\n}\n";
+    let base = project(&root, "base", "", source);
+    let head = project(&root, "head", "", source);
+    write(&base.join("dep.jet"), "pub fn call() {\n}\n");
+    write(&head.join("dep.jet"), "pub fn call() {\n}\n");
+    let base_receipt = root.join("base.jetproof");
+    let head_receipt = root.join("head.jetproof");
+    write(
+        &base_receipt,
+        r#"{"claim_key":"base-claim","proofReport":{"derivations":[],"evidence":[]}}"#,
+    );
+    write(
+        &head_receipt,
+        r#"{"claim_key":"head-claim","proofReport":{"derivations":[],"evidence":[]}}"#,
+    );
+
+    let output = review_command(&base, &head, Some(&base_receipt), Some(&head_receipt));
+    assert!(output.status.success(), "complete provenance review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"closure\":\"complete\""), "{stdout}");
+    assert!(stdout.contains("dep.jet"), "{stdout}");
+    assert!(stdout.contains("\"claim_key\":\"base-claim\""), "{stdout}");
+    assert!(stdout.contains("\"claim_key\":\"head-claim\""), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn review_default_rejects_error_bearing_side() {
     let root = scratch("default-error-side");
     let _ = fs::remove_dir_all(&root);
