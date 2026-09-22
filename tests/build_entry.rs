@@ -422,6 +422,11 @@ fn multi_dependency_build_restores_semantic_noop_compiler_artifact() {
 #[test]
 fn enum_dependency_change_invalidates_compiler_package_chain() {
     let root = project("enum-package-invalidation");
+    let fixture_marker = root
+        .file_name()
+        .expect("fixture root has a name")
+        .to_string_lossy()
+        .replace('-', "_");
     let producer = root.join("deps/producer");
     let consumer = root.join("deps/consumer");
     fs::create_dir_all(&producer).unwrap();
@@ -439,9 +444,7 @@ fn enum_dependency_change_invalidates_compiler_package_chain() {
         "name: \"consumer\"\nversion: \"0.1.0\"\n",
     );
     let producer_source = producer.join("producer.jet");
-    write(
-        &producer_source,
-        r#"
+    let producer_fixture = r#"
 #Layout(c, tag: U8)
 pub enum Packet {
     Ping(value: Int) = 3
@@ -450,8 +453,13 @@ pub enum Packet {
 pub fn make() -> Packet {
     return Packet.Ping{value: 7}
 }
-"#,
-    );
+
+pub fn seed__MARKER__() -> Int {
+    return 0
+}
+"#
+    .replace("__MARKER__", &fixture_marker);
+    write(&producer_source, &producer_fixture);
     write(
         &consumer.join("consumer.jet"),
         r#"
@@ -512,9 +520,7 @@ fn run() {
     let first_rust = first.compile.rust.clone();
     assert!(first_rust.contains("Packet"));
 
-    write(
-        &producer_source,
-        r#"
+    let changed_fixture = r#"
 #Layout(c, tag: U8)
 pub enum Packet {
     Ping(value: Int, extra: Int) = 9
@@ -524,8 +530,13 @@ pub enum Packet {
 pub fn make() -> Packet {
     return Packet.Ping{value: 7, extra: 1}
 }
-"#,
-    );
+
+pub fn seed__MARKER__() -> Int {
+    return 0
+}
+"#
+    .replace("__MARKER__", &fixture_marker);
+    write(&producer_source, &changed_fixture);
 
     let second = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     let second_build = second
@@ -582,6 +593,23 @@ pub fn make() -> Packet {
     assert!(
         second.compile.rust.contains("Pong"),
         "compiled output must contain the added producer enum case"
+    );
+    let compatible_source = format!(
+        "{}\n// compatible source-only edit: enum codes must remain stable\n",
+        fs::read_to_string(&producer_source).expect("read changed producer source")
+    );
+    write(&producer_source, &compatible_source);
+    let third = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let enum_fragments = |rust: &str| {
+        rust.lines()
+            .filter(|line| line.contains("Ping") || line.contains("Pong"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        enum_fragments(&second.compile.rust),
+        enum_fragments(&third.compile.rust),
+        "a compatible source-only edit must preserve generated enum codes"
     );
     eprintln!(
         "enum invalidation: producer_source={} -> {}, consumer_source={} -> {}, cold_restored={}, incremental_restored={}, output_changed=true",
