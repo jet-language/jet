@@ -289,7 +289,12 @@ fn completion_subject_type_name(
         let definitions: Vec<_> = db
             .defs
             .iter()
-            .filter(|definition| definition.name == "choice")
+            .filter(|definition| {
+                matches!(
+                    definition.name.as_str(),
+                    "choice" | "Choice" | "dot_case" | "bare_case" | "qualified_case"
+                )
+            })
             .map(|definition| {
                 (
                     definition.module_path.as_str(),
