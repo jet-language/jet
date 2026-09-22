@@ -1282,6 +1282,51 @@ fn lower_inline_c_foreign(
         undo_function_key: None,
     })
 }
+/// Lower one per-callable `#Import(c)` declaration into the same foreign row
+/// used by its generated C ABI wrapper.  The expression lowering keeps the
+/// wrapper identity as the MIR foreign key; omitting this row leaves a
+/// checked `ExternCall` pointing at an unregistered foreign ID.
+fn lower_guest_import_foreign(
+    function: &Func,
+    module: &str,
+    module_alias: &str,
+    target: TirArtifactTarget,
+) -> Option<TirForeignFact> {
+    let import = crate::Sema::guest_import_function_signature(function)
+        .filter(|_| crate::Sema::guest_import_bridge_compatible(function))?;
+    let wrapper = crate::Sema::guest_import_wrapper_name(module_alias, &function.name);
+    let wraps_default_failure = function
+        .return_type
+        .as_ref()
+        .map(|ty| {
+            crate::AST::FailureContract::from_return_type(Some(ty))
+                .effective_type()
+                != *ty
+        })
+        .unwrap_or(false);
+    Some(TirForeignFact {
+        key: wrapper.clone(),
+        module: module.to_string(),
+        name: function.name.clone(),
+        span: function.span,
+        symbol: wrapper,
+        path: import.symbol,
+        params: lower_params(&function.params),
+        raw_scalar_abi: true,
+        return_type: function.return_type.clone(),
+        abi: "C".to_string(),
+        language: "c".to_string(),
+        applicability: target_applicability_for(target),
+        effect_root: None,
+        callback_transport: wraps_default_failure.then(|| "guest-import-result".to_string()),
+        callback_identity: None,
+        link_key: None,
+        callback_key: None,
+        handle_key: None,
+        close_function_key: None,
+        undo_function_key: None,
+    })
+}
 
 fn push_function(facts: &mut TirArtifactFacts, module: &str, function: &Func, name: String) {
     facts.functions.push(TirFunctionFact {
@@ -1308,6 +1353,14 @@ fn collect_items(
         let reference = item_ref(module, item);
         match item {
             Item::Func(function) => {
+                if let Some(foreign) = lower_guest_import_foreign(
+                    function,
+                    module,
+                    &bundle.modules[module_index].alias,
+                    target,
+                ) {
+                    facts.foreign.push(foreign);
+                }
                 if let Some(foreign) = lower_inline_c_foreign(function, module, target) {
                     facts.foreign.push(foreign);
                 }
