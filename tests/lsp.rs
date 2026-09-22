@@ -3184,6 +3184,149 @@ fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
         ],
     );
 }
+#[test]
+fn lsp_overlapping_edits_latest_checked_revision_wins() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let _guard = lock_lsp_process();
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    const COSTLY_CALLERS: usize = 256;
+    let source_for = |marker: &str| {
+        let mut source = format!(
+            "fn target(value: Int) Int {{ return value }}\nfn {marker}() Int {{ return target(1) }}\n"
+        );
+        for index in 0..COSTLY_CALLERS {
+            source.push_str(&format!(
+                "fn caller_{index}() Int {{ return target({index}) }}\n"
+            ));
+        }
+        source
+    };
+    let source_v1 = source_for("marker_one");
+    let uri = "file:///tmp/lsp_overlapping_revision_test.jet";
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let initialize = read_msg(&mut stdout);
+    assert!(
+        initialize.contains("documentSymbolProvider"),
+        "document symbols are the costly existing request used by this fixture: {initialize}"
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":10,"text":{}}}}}}}"#,
+            uri,
+            json_string(&source_v1)
+        ),
+    );
+    let opened = read_msg(&mut stdout);
+    assert!(
+        opened.contains("publishDiagnostics") && opened.contains(r#""version":10"#),
+        "open must publish the checked base revision: {opened}"
+    );
+
+    // Queue a full checked/indexed request before the three edits.  The edits
+    // replace the same range at successive revisions, so the old request and
+    // the overlapping edit stream exercise the existing document-version gate
+    // without introducing a scheduler or timing assumption.
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
+    );
+    let edit = |version: i32, marker: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{{"range":{{"start":{{"line":1,"character":3}},"end":{{"line":1,"character":13}}}},"rangeLength":10,"text":"{}"}}]}}}}"#,
+            uri, version, marker
+        )
+    };
+    send_msg(&mut stdin, &edit(11, "marker_two"));
+    send_msg(&mut stdin, &edit(12, "marker_new"));
+    // This is stale after revision 12 and must not roll the document back.
+    send_msg(&mut stdin, &edit(11, "marker_stale"));
+
+    let superseded = read_msg(&mut stdout);
+    assert!(
+        superseded.contains(r#""id":2"#)
+            && superseded.contains("marker_one")
+            && !superseded.contains("marker_new"),
+        "the costly request must describe only its checked base revision: {superseded}"
+    );
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
+    );
+    let latest_diagnostics = read_msg(&mut stdout);
+    assert!(
+        latest_diagnostics.contains("publishDiagnostics")
+            && latest_diagnostics.contains(r#""version":12"#),
+        "latest diagnostics must identify the winning checked revision: {latest_diagnostics}"
+    );
+    let latest_symbols = read_msg(&mut stdout);
+    assert!(
+        latest_symbols.contains(r#""id":3"#)
+            && latest_symbols.contains("marker_new")
+            && !latest_symbols.contains("marker_two")
+            && !latest_symbols.contains("marker_stale"),
+        "stale work must be refused and the latest edit must win: {latest_symbols}"
+    );
+
+    // A late cancellation is an observable release boundary in this
+    // protocol: reusing the request id must still run against the current
+    // revision rather than inheriting the completed request's cancellation.
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":3}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
+    );
+    let reused = read_msg(&mut stdout);
+    assert!(
+        reused.contains(r#""id":3"#)
+            && reused.contains("marker_new")
+            && !reused.contains(r#""code":-32800"#),
+        "late cancellation must be released before request-id reuse: {reused}"
+    );
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let shutdown = read_msg(&mut stdout);
+    assert!(shutdown.contains(r#""id":99"#) && shutdown.contains("result"));
+    drop(stdin);
+    let _ = child.wait();
+}
+
 
 #[test]
 fn lsp_accepts_hidden_generic_constructor_arguments() {
