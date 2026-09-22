@@ -5,7 +5,7 @@ use crate::Generics::{DECODE, ENCODE};
 use crate::Syntax::{self, WebBucket, WebPartitionMarker};
 use crate::AST::{EnumDef, Func, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use jet_foundation::WebPartition::{partition_effect_key, partition_key};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::effect_key;
 use super::effect_set_has_root;
@@ -504,6 +504,46 @@ fn check_target_browser(
     }
 }
 
+/// Collect the named values that App builder methods hand to the Web runtime.
+///
+/// These values are emitted as JS closures by TIR. The form facts projected
+/// from `web.form(Model, action: handler)` are deliberately not included:
+/// that core call is rewritten to a typed input plus an action-name string,
+/// rather than a callback value.
+fn app_web_callback_names(bundle: &ProgramBundle) -> HashSet<String> {
+    let Some(graph) = super::App::extract_app_graph(bundle).0 else {
+        return HashSet::new();
+    };
+    let mut callbacks = HashSet::new();
+    let mut insert = |name: &str| {
+        if !name.is_empty() && !name.starts_with('<') {
+            callbacks.insert(name.to_string());
+        }
+    };
+
+    for route in &graph.routes {
+        insert(&route.handler);
+        if let Some(loader) = &route.loader {
+            insert(&loader.handler);
+        }
+        if let Some(handler) = &route.boundaries.pending {
+            insert(handler);
+        }
+        if let Some(handler) = &route.boundaries.not_found {
+            insert(handler);
+        }
+        if let Some(handler) = &route.boundaries.error {
+            insert(handler);
+        }
+    }
+    for action in &graph.actions {
+        insert(&action.handler);
+    }
+    for mount in &graph.mounts {
+        insert(&mount.handler);
+    }
+    callbacks
+}
 
 /// Walk the bundle, assign buckets, and emit partition / ABI diagnostics.
 pub fn check_web_partition(
@@ -529,6 +569,21 @@ pub fn check_web_partition(
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         let bucket = checked_web_bucket(f.marker, f.ceiling, &effects, f.return_type.as_ref());
         partitions.insert(f.key.clone(), bucket);
+    }
+    // App builder callback values cross directly into the Web JS runtime, so
+    // they are JS roots even when their bodies are otherwise pure. Keep
+    // explicit per-function and file/module ceilings authoritative, matching
+    // the ordinary call-graph propagation below.
+    if web_partition_active(bundle) {
+        let app_callbacks = app_web_callback_names(bundle);
+        for function in &metas {
+            if app_callbacks.contains(&function.name)
+                && function.marker.is_none()
+                && function.ceiling.is_none()
+            {
+                partitions.insert(function.key.clone(), WebBucket::JS);
+            }
+        }
     }
 
     // D-WEBTIR1 / D-CONC-STREAM1: a JS generator can only be consumed by JS,
