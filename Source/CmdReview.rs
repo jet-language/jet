@@ -19,8 +19,21 @@ use jet_semindex::{
     SemanticOp,
 };
 
+struct SnapshotInput {
+    path: String,
+    digest: String,
+}
+
+struct ProofReceipt {
+    path: String,
+    digest: String,
+}
+
 struct ReviewSide {
     path: std::path::PathBuf,
+    entry: String,
+    inputs: Vec<SnapshotInput>,
+    closure: &'static str,
     index: SemIndex,
     authority: BTreeMap<String, String>,
     source_hash: String,
@@ -110,6 +123,8 @@ struct Receipt {
     recorded: bool,
     claims: BTreeMap<String, Claim>,
     derivations: BTreeMap<String, DerivationClaim>,
+    claim_key: Option<String>,
+    proof_receipt: Option<ProofReceipt>,
 }
 
 struct ReceiptChange {
@@ -206,7 +221,16 @@ pub(crate) fn run_review(args: &[String], json: bool) {
     link_source_operations(&mut receipts, &meaning);
     let verdict = verdict(&authority, &receipts);
     if json {
-        render_json(&meaning, &authority, &receipts, verdict);
+        render_json(
+            &base,
+            &head,
+            &base_proof,
+            &head_proof,
+            &meaning,
+            &authority,
+            &receipts,
+            verdict,
+        );
     } else {
         render_text(&meaning, &authority, &receipts, verdict);
     }
@@ -797,10 +821,6 @@ fn render_diagnostic_text(
 }
 
 fn load_side(path: &Path) -> Result<ReviewSide, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|error| format!("could not read `{}`: {error}", path.display()))?;
-    let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
-    let semantic_ops = semantic_ops_for_file(path, &source_hash);
     let projection = crate::CmdInspect::check_projection(path).map_err(|diagnostics| {
         diagnostics
             .iter()
@@ -808,6 +828,24 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
             .collect::<Vec<_>>()
             .join("\n")
     })?;
+    let mut inputs = projection
+        .bundle
+        .modules
+        .iter()
+        .map(|module| SnapshotInput {
+            path: module.path.display().to_string(),
+            digest: jet::SHA256::sha256_hex(module.source.as_bytes()),
+        })
+        .collect::<Vec<_>>();
+    inputs.sort_by(|left, right| left.path.cmp(&right.path));
+    inputs.dedup_by(|left, right| left.path == right.path);
+    let entry_path = normalized_snapshot_path(path);
+    let source_hash = inputs
+        .iter()
+        .find(|input| normalized_snapshot_path(Path::new(&input.path)) == entry_path)
+        .map(|input| input.digest.clone())
+        .ok_or_else(|| format!("checked bundle omitted entry `{}`", path.display()))?;
+    let semantic_ops = semantic_ops_for_file(path, &source_hash);
     let mut ledger = GateLedger::collect(&projection.bundle, jet::Policy::GateSet::default());
     crate::CmdGates::append_external_writers(&mut ledger, &projection.bundle, &[]);
     if let Some(diagnostic) = ledger.diagnostics().first() {
@@ -818,12 +856,32 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
     }
     ledger.sort();
     let authority = authority_facts(&ledger, &projection.index);
+    let closure = match inputs.len() {
+        0 => "unknown",
+        1 => "entry_only",
+        _ => "complete",
+    };
     Ok(ReviewSide {
         path: path.to_path_buf(),
+        entry: path.display().to_string(),
+        inputs,
+        closure,
         index: projection.index,
         authority,
         source_hash,
         semantic_ops,
+    })
+}
+
+fn normalized_snapshot_path(path: &Path) -> std::path::PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(path)
+        }
     })
 }
 
@@ -918,15 +976,30 @@ fn read_receipt(path: Option<&Path>) -> Result<Receipt, String> {
             recorded: false,
             claims: BTreeMap::new(),
             derivations: BTreeMap::new(),
+            claim_key: None,
+            proof_receipt: None,
         });
     };
-    let raw = fs::read_to_string(path)
+    let raw_bytes = fs::read(path)
         .map_err(|error| format!("could not read receipt `{}`: {error}", path.display()))?;
+    let raw = String::from_utf8(raw_bytes.clone())
+        .map_err(|error| format!("could not read receipt `{}`: {error}", path.display()))?;
+    let proof_receipt = Some(ProofReceipt {
+        path: path.display().to_string(),
+        digest: jet::SHA256::sha256_hex(&raw_bytes),
+    });
     let root = parse(&raw)
         .map_err(|error| format!("could not parse receipt `{}`: {error}", path.display()))?;
     let report = json_get(&root, "proofReport")
         .or_else(|| json_get(&root, "proof_report"))
         .unwrap_or(&root);
+    let receipt_claim_key = json_get(&root, "claim_key")
+        .or_else(|| json_get(&root, "claimKey"))
+        .or_else(|| json_get(report, "claim_key"))
+        .or_else(|| json_get(report, "claimKey"))
+        .and_then(json_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty());
     let mut derivations = BTreeMap::new();
     if let Some(values) = json_get(report, "derivations") {
         let values = values.as_array().map_err(|error| {
@@ -951,6 +1024,8 @@ fn read_receipt(path: Option<&Path>) -> Result<Receipt, String> {
             recorded: true,
             claims: BTreeMap::new(),
             derivations,
+            claim_key: receipt_claim_key,
+            proof_receipt,
         });
     };
     let evidence = evidence
@@ -1007,6 +1082,8 @@ fn read_receipt(path: Option<&Path>) -> Result<Receipt, String> {
         recorded: true,
         claims,
         derivations,
+        claim_key: receipt_claim_key,
+        proof_receipt,
     })
 }
 
@@ -1898,7 +1975,47 @@ fn receipt_change_value(change: &ReceiptChange) -> StatusValue {
 }
 
 
+fn snapshot_value(side: &ReviewSide, receipt: &Receipt) -> StatusValue {
+    let inputs = StatusValue::array(side.inputs.iter().map(|input| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("path", input.path.as_str())
+                .with("digest", input.digest.as_str()),
+        )
+    }));
+    let proof_receipt = receipt
+        .proof_receipt
+        .as_ref()
+        .map(|proof| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("path", proof.path.as_str())
+                    .with("digest", proof.digest.as_str()),
+            )
+        })
+        .unwrap_or(StatusValue::Null);
+    StatusValue::object(
+        StatusFields::new()
+            .with("entry", side.entry.as_str())
+            .with("inputs", inputs)
+            .with(
+                "claim_key",
+                receipt
+                    .claim_key
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with("closure", side.closure)
+            .with("proof_receipt", proof_receipt),
+    )
+}
+
 fn render_json(
+    base: &ReviewSide,
+    head: &ReviewSide,
+    base_receipt: &Receipt,
+    head_receipt: &Receipt,
     meaning: &[ReviewSemanticOp],
     authority: &[AuthorityChange],
     receipts: &ReceiptDiff,
@@ -2006,9 +2123,16 @@ fn render_json(
             .with("unknown", unknown)
             .with("unproved", unproved),
     );
+    let snapshots = StatusValue::object(
+        StatusFields::new()
+            .with("base", snapshot_value(base, base_receipt))
+            .with("head", snapshot_value(head, head_receipt)),
+    );
     let review = StatusValue::object(
         StatusFields::new()
+            .with("schema", "jet.review/v2")
             .with("kind", "review")
+            .with("snapshots", snapshots)
             .with(
                 "meaning",
                 StatusValue::object(StatusFields::new().with("semantic_ops", meaning)),

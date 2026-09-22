@@ -942,6 +942,15 @@ fn review_receipts_bind_to_sides_and_do_not_infer_proof() {
     assert!(stdout.contains("\"head_recorded\":true"));
     assert!(stdout.contains("\"gained\":1"));
     assert!(stdout.contains("\"lost\":1"));
+    assert!(stdout.contains("\"schema\":\"jet.review/v2\""), "{stdout}");
+    assert!(stdout.contains("\"snapshots\""), "{stdout}");
+    assert!(stdout.contains("\"inputs\":[{\"path\":"), "{stdout}");
+    assert!(stdout.contains("\"proof_receipt\":{\"path\":"), "{stdout}");
+    assert!(
+        stdout.contains("\"closure\":\"entry_only\"")
+            || stdout.contains("\"closure\":\"complete\""),
+        "{stdout}"
+    );
 
     let external_receipt = root.join("external.jetproof");
     write(
