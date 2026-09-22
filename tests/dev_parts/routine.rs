@@ -6771,6 +6771,44 @@ fn schedule_every_dev_loop_consumer() {
     let _ = fs::remove_file(dispatch_file);
 
 }
+/// D-SCHEDULE1: the local schedule clock uses UTC Unix-day windows, fires
+/// duration schedules once per interval, and does not replay a missed wall-clock
+/// window after a process-local restart.
+#[test]
+fn schedule_clock_records_window_and_missed_tick_behavior() {
+    let mut clock = jet_jit::Job::JetJobClock::new();
+    let interval = [(
+        "interval",
+        jet_jit::Job::JetJobSchedule::Duration {
+            nanos: 5 * 60 * 1_000_000_000,
+        },
+    )];
+    assert_eq!(clock.due_at(&interval, 0), vec!["interval".to_string()]);
+    assert!(
+        clock.due_at(&interval, 0).is_empty(),
+        "a local interval must not overlap itself before its duration elapses"
+    );
+
+    let wall_clock = [(
+        "cron",
+        jet_jit::Job::JetJobSchedule::WallClockTime { hour: 3, minute: 0 },
+    )];
+    let missed_window = 3 * 3_600 + 61;
+    assert!(
+        clock.due_at(&wall_clock, missed_window).is_empty(),
+        "a 03:00 UTC wall-clock schedule must not fire after its one-minute window"
+    );
+    let next_day = missed_window + 86_400 - 61;
+    assert_eq!(
+        clock.due_at(&wall_clock, next_day),
+        vec!["cron".to_string()],
+        "the next UTC day gets one fresh local tick, not a replay of the missed one"
+    );
+    assert!(
+        clock.due_at(&wall_clock, next_day + 30).is_empty(),
+        "a wall-clock schedule fires at most once in a UTC day"
+    );
+}
 /// c728 C6: a watching `jet dev` session deopts on a JIT-gap edit and accepts a
 /// later valid edit; one-shot dev exits 0.
 #[test]
