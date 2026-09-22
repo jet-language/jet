@@ -4606,6 +4606,486 @@ fn lsp_references_finds_all_uses() {
     );
 }
 
+#[test]
+fn lsp_enum_variant_navigation_completion_and_rename() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let _guard = lock_lsp_process();
+    let source = r#"enum Choice {
+    #Rename("wire-ready") Ready
+    Waiting
+}
+
+enum Other {
+    OtherReady
+    OtherOnly
+}
+
+fn dot_case(choice: Choice) {
+    if choice == {
+        .Ready -> { return }
+        .Waiting -> { return }
+        else -> { return }
+    }
+}
+
+fn bare_case(Ready) {
+    return
+}
+
+fn bare_case(Waiting) {
+    return
+}
+
+fn qualified_case() Choice {
+    return Choice.Ready
+}
+
+fn other_case(value: Other) {
+    if value == {
+        .OtherReady -> { return }
+        .OtherOnly -> { return }
+        else -> { return }
+    }
+}
+
+fn run() {}
+"#;
+    let uri = "file:///tmp/lsp_enum_variant_protocol_test.jet";
+
+    // This proof intentionally stays in one open document. Sibling-module
+    // bare-pattern snapshots are outside the current protocol boundary.
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    let initialize = parse_json(&request_lsp(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "initialize",
+        r#"{"capabilities":{}}"#,
+    ))
+    .expect("valid initialize response");
+    let capabilities = json_object_field(
+        json_object_field(&initialize, "result"),
+        "capabilities",
+    );
+    for capability in [
+        "completionProvider",
+        "definitionProvider",
+        "referencesProvider",
+        "renameProvider",
+    ] {
+        assert!(
+            json_get(capabilities, capability).is_some(),
+            "initialize omitted {capability}: {initialize:?}"
+        );
+    }
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{uri}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+        json_string(source),
+    );
+    send_msg(&mut stdin, &open);
+    let open_diagnostics = parse_json(&read_msg(&mut stdout)).expect("valid didOpen notification");
+    assert_eq!(
+        json_str(json_object_field(&open_diagnostics, "method")),
+        Some("textDocument/publishDiagnostics")
+    );
+    let diagnostic_params = json_object_field(&open_diagnostics, "params");
+    assert_eq!(
+        json_str(json_object_field(diagnostic_params, "uri")),
+        Some(uri)
+    );
+    let _ = json_array_field(diagnostic_params, "diagnostics");
+
+    let position = |text: &str, offset: usize| {
+        let prefix = &text[..offset];
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let character = prefix
+            .rsplit_once('\n')
+            .map_or(prefix.len(), |(_, line_text)| line_text.len());
+        (line, character)
+    };
+    let range = |text: &str, start: usize, end: usize| {
+        let (start_line, start_character) = position(text, start);
+        let (end_line, end_character) = position(text, end);
+        parse_json(&format!(
+            r#"{{"start":{{"line":{start_line},"character":{start_character}}},"end":{{"line":{end_line},"character":{end_character}}}}}"#
+        ))
+        .expect("valid expected LSP range")
+    };
+    let variant_offsets = |text: &str, variant: &str| {
+        let declaration_marker = format!("#Rename(\"wire-ready\") {variant}");
+        let declaration = text.find(&declaration_marker).expect("variant declaration")
+            + "#Rename(\"wire-ready\") ".len();
+        let dot_marker = format!("        .{variant} ->");
+        let dot = text.find(&dot_marker).expect("dot variant arm") + "        .".len();
+        let bare_marker = format!("fn bare_case({variant})");
+        let bare = text.find(&bare_marker).expect("bare variant head")
+            + "fn bare_case(".len();
+        let qualified_marker = format!("Choice.{variant}");
+        let qualified = text.find(&qualified_marker).expect("qualified variant use")
+            + "Choice.".len();
+        vec![declaration, dot, bare, qualified]
+    };
+
+    let mut next_id = 2;
+    let mut request = |method: &str, params: String| -> DataTree {
+        let id = next_id;
+        next_id += 1;
+        let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
+        parse_json(&body).unwrap_or_else(|error| panic!("invalid {method} response: {error}: {body}"))
+    };
+    let params_at = |text: &str, offset: usize| {
+        let (line, character) = position(text, offset);
+        format!(
+            r#"{{"textDocument":{{"uri":"{uri}"}},"position":{{"line":{line},"character":{character}}}}}"#
+        )
+    };
+
+    let assert_completion = |response: &DataTree, expected: &[&str]| {
+        assert!(json_get(response, "error").is_none(), "completion error: {response:?}");
+        let result = json_object_field(response, "result");
+        assert_json_values_equal(
+            "completion isIncomplete",
+            json_object_field(result, "isIncomplete"),
+            &DataTree::Bool(false),
+        );
+        let items = json_array_field(result, "items");
+        let labels: Vec<&str> = items
+            .iter()
+            .map(|item| json_str(json_object_field(item, "label")).expect("completion label"))
+            .collect();
+        assert_eq!(labels.len(), expected.len(), "completion items: {items:?}");
+        for wanted in expected {
+            assert_eq!(
+                labels.iter().filter(|actual| *actual == *wanted).count(),
+                1,
+                "completion identity was duplicated or missing: {labels:?}"
+            );
+        }
+        assert!(
+            labels
+                .iter()
+                .all(|actual| expected.iter().any(|wanted| *wanted == *actual)),
+            "completion returned an unrelated enum arm: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|actual| *actual == "wire-ready"),
+            "completion exposed the string wire name: {labels:?}"
+        );
+        for wanted in expected {
+            let item = items
+                .iter()
+                .find(|item| json_str(json_object_field(item, "label")) == Some(*wanted))
+                .expect("expected enum completion item");
+            assert_json_values_equal(
+                "enum completion kind",
+                json_object_field(item, "kind"),
+                &DataTree::Int(20),
+            );
+            assert_eq!(
+                json_str(json_object_field(item, "detail")),
+                Some("variant of Choice")
+            );
+            let variant = wanted.strip_prefix('.').expect("dot enum completion label");
+            let expected_insert = format!("{variant} -> {{}}");
+            assert_eq!(
+                json_str(json_object_field(item, "insertText")),
+                Some(expected_insert.as_str())
+            );
+            assert_json_values_equal(
+                "enum completion insert format",
+                json_object_field(item, "insertTextFormat"),
+                &DataTree::Int(2),
+            );
+            assert!(
+                json_get(item, "additionalTextEdits").is_none(),
+                "same-document enum completion unexpectedly imported a module: {item:?}"
+            );
+        }
+    };
+    let assert_definition = |response: &DataTree, expected_range: &DataTree| {
+        assert!(json_get(response, "error").is_none(), "definition error: {response:?}");
+        let result = json_object_field(response, "result");
+        assert_eq!(json_str(json_object_field(result, "uri")), Some(uri));
+        assert_json_values_equal(
+            "enum definition range",
+            json_object_field(result, "range"),
+            expected_range,
+        );
+    };
+    let assert_references =
+        |response: &DataTree, text: &str, offsets: &[usize], variant: &str| {
+        assert!(json_get(response, "error").is_none(), "references error: {response:?}");
+        let references = json_array(json_object_field(response, "result"), "enum references");
+        let expected_ranges: Vec<DataTree> = offsets
+            .iter()
+            .map(|offset| range(text, *offset, *offset + variant.len()))
+            .collect();
+        assert_eq!(
+            references.len(),
+            expected_ranges.len(),
+            "references included an unrelated enum identity: {references:?}"
+        );
+        for reference in references {
+            assert_eq!(json_str(json_object_field(reference, "uri")), Some(uri));
+            let actual_range = json_object_field(reference, "range");
+            assert_eq!(
+                expected_ranges
+                    .iter()
+                    .filter(|expected| json_values_equal(actual_range, *expected))
+                    .count(),
+                1,
+                "reference was not one of this enum's source occurrences: {reference:?}"
+            );
+        }
+        for expected in &expected_ranges {
+            assert_eq!(
+                references
+                    .iter()
+                    .filter(|reference| {
+                        json_values_equal(json_object_field(reference, "range"), expected)
+                    })
+                    .count(),
+                1,
+                "reference occurrence was duplicated or missing: {references:?}"
+            );
+        }
+    };
+    let assert_rename = |response: &DataTree,
+                         text: &str,
+                         offsets: &[usize],
+                         old_name: &str,
+                         new_name: &str,
+                         version: i64| {
+        assert!(json_get(response, "error").is_none(), "rename error: {response:?}");
+        let result = json_object_field(response, "result");
+        let changes = json_array_field(result, "documentChanges");
+        assert_eq!(changes.len(), 1, "rename crossed a document boundary: {result:?}");
+        let change = &changes[0];
+        let document = json_object_field(change, "textDocument");
+        assert_eq!(json_str(json_object_field(document, "uri")), Some(uri));
+        assert_json_values_equal(
+            "rename checked document version",
+            json_object_field(document, "version"),
+            &DataTree::Int(version),
+        );
+        let edits = json_array_field(change, "edits");
+        let expected_ranges: Vec<DataTree> = offsets
+            .iter()
+            .map(|offset| range(text, *offset, *offset + old_name.len()))
+            .collect();
+        assert_eq!(
+            edits.len(),
+            expected_ranges.len(),
+            "rename lost or duplicated an enum occurrence: {edits:?}"
+        );
+        for edit in edits {
+            assert_eq!(
+                json_str(json_object_field(edit, "newText")),
+                Some(new_name)
+            );
+            let actual_range = json_object_field(edit, "range");
+            assert_eq!(
+                expected_ranges
+                    .iter()
+                    .filter(|expected| json_values_equal(actual_range, *expected))
+                    .count(),
+                1,
+                "rename edited an unrelated range: {edit:?}"
+            );
+        }
+        for expected in &expected_ranges {
+            assert_eq!(
+                edits
+                    .iter()
+                    .filter(|edit| {
+                        json_values_equal(json_object_field(edit, "range"), expected)
+                    })
+                    .count(),
+                1,
+                "rename occurrence was duplicated or missing: {edits:?}"
+            );
+        }
+        let operations = json_array_field(result, "semantic_ops");
+        assert_eq!(operations.len(), 1);
+        let operation = &operations[0];
+        assert_eq!(json_str(json_object_field(operation, "kind")), Some("rename"));
+        assert_eq!(json_str(json_object_field(operation, "from")), Some(old_name));
+        assert_eq!(json_str(json_object_field(operation, "to")), Some(new_name));
+        let _ = json_array_field(operation, "targets");
+    };
+
+    let initial_offsets = variant_offsets(source, "Ready");
+    let initial_definition_range = range(
+        source,
+        initial_offsets[0],
+        initial_offsets[0] + "Ready".len(),
+    );
+    let completion = request(
+        "textDocument/completion",
+        params_at(source, initial_offsets[1]),
+    );
+    assert_completion(&completion, &[".Ready", ".Waiting"]);
+
+    for offset in &initial_offsets {
+        let definition = request("textDocument/definition", params_at(source, *offset));
+        assert_definition(&definition, &initial_definition_range);
+        let references = request(
+            "textDocument/references",
+            format!(
+                "{}{}",
+                params_at(source, *offset)
+                    .strip_suffix('}')
+                    .expect("params object"),
+                r#","context":{"includeDeclaration":true}}"#,
+            ),
+        );
+        assert_references(&references, source, &initial_offsets, "Ready");
+        let prepare = request("textDocument/prepareRename", params_at(source, *offset));
+        assert!(json_get(&prepare, "error").is_none(), "prepare rename error: {prepare:?}");
+        let prepare_result = json_object_field(&prepare, "result");
+        assert_json_values_equal(
+            "prepare rename range",
+            json_object_field(prepare_result, "range"),
+            &initial_definition_range,
+        );
+        assert_eq!(
+            json_str(json_object_field(prepare_result, "placeholder")),
+            Some("Ready")
+        );
+    }
+    let renamed = request(
+        "textDocument/rename",
+        format!(
+            "{}{}",
+            params_at(source, initial_offsets[3])
+                .strip_suffix('}')
+                .expect("params object"),
+            r#","newName":"Renamed"}"#,
+        ),
+    );
+    assert_rename(
+        &renamed,
+        source,
+        &initial_offsets,
+        "Ready",
+        "Renamed",
+        1,
+    );
+
+    drop(request);
+
+    let updated = source
+        .replacen(
+            "#Rename(\"wire-ready\") Ready",
+            "#Rename(\"wire-ready\") Queued",
+            1,
+        )
+        .replacen(".Ready ->", ".Queued ->", 1)
+        .replacen("fn bare_case(Ready)", "fn bare_case(Queued)", 1)
+        .replacen("Choice.Ready", "Choice.Queued", 1);
+    assert!(updated.contains("#Rename(\"wire-ready\") Queued"));
+    let change = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{uri}","version":2}},"contentChanges":[{{"text":{}}}]}}}}"#,
+        json_string(&updated),
+    );
+    send_msg(&mut stdin, &change);
+    let mut request = |method: &str, params: String| -> DataTree {
+        let id = next_id;
+        next_id += 1;
+        let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
+        parse_json(&body)
+            .unwrap_or_else(|error| panic!("invalid {method} response: {error}: {body}"))
+    };
+
+
+    let updated_offsets = variant_offsets(&updated, "Queued");
+    let updated_definition_range = range(
+        &updated,
+        updated_offsets[0],
+        updated_offsets[0] + "Queued".len(),
+    );
+    let updated_completion = request(
+        "textDocument/completion",
+        params_at(&updated, updated_offsets[1]),
+    );
+    assert_completion(&updated_completion, &[".Queued", ".Waiting"]);
+    for offset in &updated_offsets {
+        let definition = request("textDocument/definition", params_at(&updated, *offset));
+        assert_definition(&definition, &updated_definition_range);
+        let references = request(
+            "textDocument/references",
+            format!(
+                "{}{}",
+                params_at(&updated, *offset)
+                    .strip_suffix('}')
+                    .expect("params object"),
+                r#","context":{"includeDeclaration":true}}"#,
+            ),
+        );
+        assert_references(&references, &updated, &updated_offsets, "Queued");
+    }
+    let updated_prepare = request(
+        "textDocument/prepareRename",
+        params_at(&updated, updated_offsets[2]),
+    );
+    assert!(json_get(&updated_prepare, "error").is_none());
+    let updated_prepare_result = json_object_field(&updated_prepare, "result");
+    assert_json_values_equal(
+        "updated prepare rename range",
+        json_object_field(updated_prepare_result, "range"),
+        &updated_definition_range,
+    );
+    assert_eq!(
+        json_str(json_object_field(updated_prepare_result, "placeholder")),
+        Some("Queued")
+    );
+    let updated_rename = request(
+        "textDocument/rename",
+        format!(
+            "{}{}",
+            params_at(&updated, updated_offsets[2])
+                .strip_suffix('}')
+                .expect("params object"),
+            r#","newName":"Finished"}"#,
+        ),
+    );
+    assert_rename(
+        &updated_rename,
+        &updated,
+        &updated_offsets,
+        "Queued",
+        "Finished",
+        2,
+    );
+
+    let shutdown = request("shutdown", "{}".to_string());
+    assert_json_values_equal(
+        "shutdown result",
+        json_object_field(&shutdown, "result"),
+        &DataTree::Null,
+    );
+    drop(request);
+    drop(stdin);
+    assert!(child.wait().expect("wait for jet self lsp").success());
+}
+
 // ── C40: keyword-table correctness tests ─────────────────────────────────────
 //
 // Verifies that JET_KEYWORDS tracks Source/Syntax.rs (Fix A).
