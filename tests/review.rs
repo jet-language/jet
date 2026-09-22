@@ -762,6 +762,31 @@ fn review_observation_identity_mismatches_remain_unknown() {
 }
 
 #[test]
+fn review_aligns_signature_changes_by_checked_identity() {
+    let root = scratch("signature-change");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(
+        &root,
+        "base",
+        "",
+        "fn report() -> Int {\n    return 1\n}\n",
+    );
+    let head = project(
+        &root,
+        "head",
+        "",
+        "fn report(value: Int) -> Int {\n    return value\n}\n",
+    );
+
+    let output = review_command(&base, &head, None, None);
+    assert!(output.status.success(), "signature review failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"kind\":\"signature_changed\""), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn review_receipts_bind_to_sides_and_do_not_infer_proof() {
     let derivation = |id: &str, method: &str, disposition: &str| {
         format!(
