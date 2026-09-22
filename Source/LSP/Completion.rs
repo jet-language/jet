@@ -1178,6 +1178,23 @@ fn find_enum<'a>(
     })
 }
 
+pub(crate) fn module_file_path(
+    current_path: &str,
+    workspace_root: Option<&str>,
+    module_path: &str,
+) -> Option<std::path::PathBuf> {
+    let current_dir = std::path::Path::new(current_path).parent()?;
+    let base = workspace_root
+        .map(std::path::Path::new)
+        .unwrap_or(current_dir);
+    let module = std::path::Path::new(module_path);
+    Some(if module.is_absolute() {
+        module.to_path_buf()
+    } else {
+        base.join(module)
+    })
+}
+
 pub(crate) fn use_statement_for_module(
     current_path: &str,
     workspace_root: Option<&str>,
@@ -1187,7 +1204,7 @@ pub(crate) fn use_statement_for_module(
     let base = workspace_root
         .map(std::path::Path::new)
         .unwrap_or(current_dir);
-    let module = std::path::Path::new(module_path);
+    let module = module_file_path(current_path, workspace_root, module_path)?;
     let rel = module.strip_prefix(base).ok()?;
     let rel = rel.to_string_lossy();
     let rel = rel.trim_end_matches(".jet");

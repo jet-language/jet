@@ -8,8 +8,8 @@ use crate::Syntax;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::Completion::{
-    context_is_member_access, context_is_option_field, use_statement_for_module, JET_KEYWORDS,
-    JET_TYPES,
+    context_is_member_access, context_is_option_field, module_file_path,
+    use_statement_for_module, JET_KEYWORDS, JET_TYPES,
 };
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
@@ -2922,7 +2922,12 @@ fn import_actions(
             .lookup(name)
             .into_iter()
             .filter(|symbol| {
-                symbol.module_path != path
+                let source_path = module_file_path(path, workspace_root, &symbol.module_path)
+                    .map(|path| path.to_string_lossy().into_owned());
+                source_path.as_deref() != Some(path)
+                    && !source_path
+                        .as_deref()
+                        .is_some_and(|candidate| excluded_import_paths.contains(candidate))
                     && !excluded_import_paths.contains(&symbol.module_path)
                     && matches!(
                         symbol.provenance,

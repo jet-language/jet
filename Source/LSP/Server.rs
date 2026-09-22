@@ -3331,6 +3331,11 @@ fn merge_workspace_defs_with_sources(
         sources.insert(path.clone(), text.clone());
         let checked = server.queries.borrow_mut().check_text(&path, &text, true);
         if let Some(bundle) = checked.bundle {
+            for module in &bundle.modules {
+                sources
+                    .entry(module.display.clone())
+                    .or_insert_with(|| module.source.clone());
+            }
             let mut other = build_symbol_db(&bundle, &checked.effect_facts);
             db.symbols.extend(other.symbols.symbols().iter().cloned());
             db.defs.append(&mut other.defs);
