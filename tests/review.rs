@@ -945,6 +945,9 @@ fn review_receipts_bind_to_sides_and_do_not_infer_proof() {
     assert!(stdout.contains("\"schema\":\"jet.review/v2\""), "{stdout}");
     assert!(stdout.contains("\"snapshots\""), "{stdout}");
     assert!(stdout.contains("\"inputs\":[{\"path\":"), "{stdout}");
+    assert!(stdout.contains("\"entry\":\""), "{stdout}");
+    assert!(stdout.contains("\"digest\":\""), "{stdout}");
+    assert!(stdout.contains("\"claim_key\":null"), "{stdout}");
     assert!(stdout.contains("\"proof_receipt\":{\"path\":"), "{stdout}");
     assert!(
         stdout.contains("\"closure\":\"entry_only\"")
