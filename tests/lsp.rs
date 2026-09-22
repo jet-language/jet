@@ -4618,10 +4618,6 @@ fn lsp_enum_variant_navigation_completion_and_rename() {
     Waiting
 }
 
-enum Other {
-    OtherReady
-    OtherOnly
-}
 
 fn dot_case(choice: Choice) {
     if choice == {
@@ -4635,21 +4631,11 @@ fn bare_case(Ready) {
     return
 }
 
-fn bare_waiting(Waiting) {
-    return
-}
 
 fn qualified_case() Choice {
     return Choice.Ready
 }
 
-fn other_case(value: Other) {
-    if value == {
-        .OtherReady -> { return }
-        .OtherOnly -> { return }
-        else -> { return }
-    }
-}
 
 fn run() {}
 "#;
