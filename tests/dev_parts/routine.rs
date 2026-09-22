@@ -6726,11 +6726,36 @@ fn schedule_every_dev_loop_consumer() {
         "`#Every(1d)` must resolve through the canonical Time family"
     );
 
-    // Actually invoking a named job runs it like an ordinary call.
+    // This example's `fn run()` intentionally calls every job for its
+    // ordinary run golden. Exercise private named dispatch against the same
+    // declarations with an inert entry function so that the receipt proves
+    // one selected job rather than the example's unrelated run body.
+    let dispatch_root =
+        std::env::temp_dir().join(format!("jet-schedule-dispatch-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dispatch_root);
+    fs::create_dir_all(&dispatch_root).unwrap();
+    let dispatch_file = dispatch_root.join("schedule_every.jet");
+    let dispatch_src = src.replace(
+        "fn run() {\n    prune_sessions()\n    refresh_indexes()\n    compact_archive()\n    nightly_backup()\n    manual_only()\n}",
+        "fn run() {}",
+    );
+    assert_ne!(dispatch_src, src, "dispatch fixture must isolate fn run");
+    fs::write(&dispatch_file, &dispatch_src).unwrap();
+    let mut dispatch_bundle = jet::Loader::load_entry(dispatch_file.to_str().unwrap())
+        .unwrap_or_else(|diags| panic!("dispatch fixture failed to load: {diags:?}"));
+    let dispatch_diags =
+        jet::Sema::check_bundle(&mut dispatch_bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        dispatch_diags
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "dispatch fixture must compile clean:\n{}",
+        jet::render_diagnostics("schedule_every-dispatch.jet", &dispatch_src, &dispatch_diags)
+    );
     let policy = common::development_policy();
     match common::run_interpreter_named_job(
-        &bundle,
-        file.to_str().unwrap(),
+        &dispatch_bundle,
+        dispatch_file.to_str().unwrap(),
         "prune_sessions",
         false,
         &policy,
@@ -6743,8 +6768,9 @@ fn schedule_every_dev_loop_consumer() {
         }
         RunOutcome::Problems(diags) => panic!("named job failed: {diags:?}"),
     }
-}
+    let _ = fs::remove_dir_all(dispatch_root);
 
+}
 /// c728 C6: a watching `jet dev` session deopts on a JIT-gap edit and accepts a
 /// later valid edit; one-shot dev exits 0.
 #[test]
