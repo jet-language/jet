@@ -412,6 +412,239 @@ fn computed_constants_match_aot_default_and_interpreter() {
     );
 }
 
+const ENUM_DISCRIMINANT_SOURCE: &str = r#"
+@base :: 7
+@step :: 3
+
+#Layout(c)
+enum WireCode {
+    Explicit = 0
+    Sparse = 9
+    Negative = -7
+    Named = @base
+    Arithmetic = @base + @step * 2
+    Shifted = 1 << 4
+    ShiftedRight = 32 >> 3
+    Implicit
+}
+
+fn run() {}
+"#;
+
+const ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST: &str = r#"
+@base :: 7
+@step :: 3
+
+#Layout(c)
+enum WireCode {
+    Implicit
+    Explicit = 0
+    Sparse = 9
+    Negative = -7
+    Named = @base
+    Arithmetic = @base + @step * 2
+    Shifted = 1 << 4
+    ShiftedRight = 32 >> 3
+}
+
+fn run() {}
+"#;
+
+const ENUM_DISCRIMINANTS: &[(&str, Option<i64>)] = &[
+    ("Explicit", Some(0)),
+    ("Sparse", Some(9)),
+    ("Negative", Some(-7)),
+    ("Named", Some(7)),
+    ("Arithmetic", Some(13)),
+    ("Shifted", Some(16)),
+    ("ShiftedRight", Some(4)),
+    // An omitted discriminant remains declaration-order-dependent at the
+    // runtime boundary; it is deliberately not rewritten as prior + 1 here.
+    ("Implicit", None),
+];
+
+const ENUM_DISCRIMINANTS_IMPLICIT_FIRST: &[(&str, Option<i64>)] = &[
+    ("Implicit", None),
+    ("Explicit", Some(0)),
+    ("Sparse", Some(9)),
+    ("Negative", Some(-7)),
+    ("Named", Some(7)),
+    ("Arithmetic", Some(13)),
+    ("Shifted", Some(16)),
+    ("ShiftedRight", Some(4)),
+];
+
+const DUPLICATE_ENUM_DISCRIMINANT_SOURCE: &str = r#"
+enum DuplicateCode {
+    First = 7
+    Second = 7
+}
+
+fn run() {}
+"#;
+
+const ENUM_DISCRIMINANT_DIAGNOSTICS: &[(&str, &str, &str, &str)] = &[
+    (
+        "overflow",
+        r#"
+@max :: 9223372036854775807
+
+enum Bad {
+    TooWide = @max + 1
+}
+
+fn run() {}
+"#,
+        "@max + 1",
+        "An enum discriminant is outside the signed integer range",
+    ),
+    (
+        "noninteger",
+        r#"
+enum Bad {
+    Fractional = 1.5
+}
+
+fn run() {}
+"#,
+        "1.5",
+        "An enum discriminant must be an integer, got Decimal (an exact base-10 number)",
+    ),
+    (
+        "unknown",
+        r#"
+enum Bad {
+    Missing = missing
+}
+
+fn run() {}
+"#,
+        "missing",
+        "An enum discriminant must be computable at compile time",
+    ),
+];
+
+fn checked_enum_discriminants(path: &Path, enum_name: &str) -> Vec<(String, Option<i64>)> {
+    let mut bundle = jet::Loader::load_entry(
+        path.to_str()
+            .expect("enum discriminant fixture path is valid UTF-8"),
+    )
+    .unwrap_or_else(|diagnostics| panic!("enum discriminant fixture failed to load: {diagnostics:#?}"));
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "enum discriminant fixture failed sema: {errors:#?}"
+    );
+
+    bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Enum(definition) if definition.name == enum_name => Some(
+                definition
+                    .variants
+                    .iter()
+                    .map(|variant| (variant.name.clone(), variant.discriminant))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("enum `{enum_name}` was not registered"))
+}
+
+fn assert_enum_discriminants(
+    path: &Path,
+    enum_name: &str,
+    expected: &[(&str, Option<i64>)],
+) {
+    let observed = checked_enum_discriminants(path, enum_name);
+    assert_eq!(
+        observed.len(),
+        expected.len(),
+        "enum `{enum_name}` variant count changed: {observed:#?}"
+    );
+    for (observed, &(expected_name, expected_value)) in observed.iter().zip(expected.iter()) {
+        assert_eq!(observed.0.as_str(), expected_name);
+        assert_eq!(
+            *observed.1, expected_value,
+            "enum `{enum_name}` code for `{expected_name}` changed"
+        );
+    }
+}
+
+fn assert_enum_discriminant_error(path: &Path, source: &str, expression: &str, expected_what: &str) {
+    let mut bundle = jet::Loader::load_entry(
+        path.to_str()
+            .expect("enum discriminant diagnostic path is valid UTF-8"),
+    )
+    .unwrap_or_else(|diagnostics| panic!("enum diagnostic fixture failed to load: {diagnostics:#?}"));
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0035")
+        .unwrap_or_else(|| panic!("missing E0035 for `{expression}`: {diagnostics:#?}"));
+    let start = source
+        .find(expression)
+        .unwrap_or_else(|| panic!("expression `{expression}` is absent from fixture"));
+    assert_eq!(diagnostic.what, expected_what);
+    assert_eq!(
+        diagnostic.span,
+        Some(jet::Diagnostics::Span::new(start, start + expression.len())),
+        "diagnostic span changed for `{expression}`"
+    );
+}
+
+#[test]
+fn comptime_enum_discriminants_keep_explicit_codes_when_implicit_case_moves() {
+    let scratch = common::Scratch::new("enum_discriminant_codes");
+    for (stem, source, expected) in [
+        (
+            "wire_code",
+            ENUM_DISCRIMINANT_SOURCE,
+            ENUM_DISCRIMINANTS,
+        ),
+        (
+            "wire_code_implicit_first",
+            ENUM_DISCRIMINANT_SOURCE_IMPLICIT_FIRST,
+            ENUM_DISCRIMINANTS_IMPLICIT_FIRST,
+        ),
+    ] {
+        let path = scratch.join(format!("{stem}.jet"));
+        fs::write(&path, source).expect("write enum discriminant fixture");
+        let shown = path.to_string_lossy();
+        let _compiled = jet::compile_with_path(source, &shown)
+            .unwrap_or_else(|diagnostics| panic!("enum discriminant codegen failed: {diagnostics:#?}"));
+        assert_enum_discriminants(&path, "WireCode", expected);
+    }
+}
+
+#[test]
+fn comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions() {
+    let duplicate_scratch = common::Scratch::new("enum_discriminant_duplicates");
+    let duplicate_path = duplicate_scratch.join("duplicate_codes.jet");
+    fs::write(&duplicate_path, DUPLICATE_ENUM_DISCRIMINANT_SOURCE)
+        .expect("write duplicate enum discriminant fixture");
+    let shown = duplicate_path.to_string_lossy();
+    let _compiled = jet::compile_with_path(DUPLICATE_ENUM_DISCRIMINANT_SOURCE, &shown)
+        .unwrap_or_else(|diagnostics| panic!("duplicate enum codes failed to compile: {diagnostics:#?}"));
+    assert_enum_discriminants(
+        &duplicate_path,
+        "DuplicateCode",
+        &[("First", Some(7)), ("Second", Some(7))],
+    );
+
+    for &(name, source, expression, expected_what) in ENUM_DISCRIMINANT_DIAGNOSTICS {
+        let scratch = common::Scratch::new(&format!("enum_discriminant_{name}"));
+        let path = scratch.join("invalid.jet");
+        fs::write(&path, source).expect("write enum diagnostic fixture");
+        assert_enum_discriminant_error(&path, source, expression, expected_what);
+    }
+}
+
 #[test]
 fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
