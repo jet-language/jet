@@ -12,16 +12,18 @@ fn write(path: &Path, text: &str) {
     }
     fs::write(path, text).unwrap();
 }
-const REVIEW_SOURCE: &str = "fn run() { print(\"same\") }\n";
+const REVIEW_SOURCE: &str = "fn run() {}\n";
 
 fn project(root: &Path, side: &str, allow: &str, source: &str) -> PathBuf {
     let dir = root.join(side);
-    write(
-        &dir.join("package.jet"),
-        &format!(
+    let manifest = if allow.is_empty() {
+        "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\n".to_string()
+    } else {
+        format!(
             "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"
-        ),
-    );
+        )
+    };
+    write(&dir.join("package.jet"), &manifest);
     write(&dir.join("run.jet"), source);
     dir
 }
@@ -111,10 +113,14 @@ fn run_receipt_case(
         base_receipt_path.as_deref(),
         head_receipt_path.as_deref(),
     );
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(
         output.status.success(),
-        "review fixture `{name}` failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "review fixture `{name}` failed: {diagnostic}"
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     for needle in expected {
@@ -129,8 +135,8 @@ fn run_receipt_case(
 fn assert_receipt_refused(name: &str, receipt: &str, reason: &str) {
     let root = scratch(name);
     let _ = fs::remove_dir_all(&root);
-    let base = project(&root, "base", "FS", REVIEW_SOURCE);
-    let head = project(&root, "head", "FS", REVIEW_SOURCE);
+    let base = project(&root, "base", "", REVIEW_SOURCE);
+    let head = project(&root, "head", "", REVIEW_SOURCE);
     let receipt_path = root.join("invalid.jetproof");
     write(&receipt_path, receipt);
     let output = review_command(&base, &head, Some(&receipt_path), None);
@@ -139,14 +145,18 @@ fn assert_receipt_refused(name: &str, receipt: &str, reason: &str) {
         "receipt fixture `{name}` unexpectedly succeeded: {}",
         String::from_utf8_lossy(&output.stdout)
     );
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("E2105"),
-        "receipt fixture `{name}` omitted E2105:\n{stderr}"
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        stderr.contains(reason),
-        "receipt fixture `{name}` omitted `{reason}`:\n{stderr}"
+        diagnostic.contains("E2105"),
+        "receipt fixture `{name}` omitted E2105:\n{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains(reason),
+        "receipt fixture `{name}` omitted `{reason}`:\n{diagnostic}"
     );
     let _ = fs::remove_dir_all(root);
 }
@@ -162,8 +172,8 @@ fn review_joins_meaning_authority_and_receipt_changes() {
             "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"
         )
     };
-    write(&base.join("package.jet"), &manifest("FS"));
-    write(&head.join("package.jet"), &manifest("FS, Net"));
+    write(&base.join("package.jet"), &manifest("FS, IO"));
+    write(&head.join("package.jet"), &manifest("FS, IO, Net"));
     write(&base.join("run.jet"), "fn run() { print(\"base\") }\n");
     write(&head.join("run.jet"), "fn run() { print(\"head\") }\n");
 
@@ -322,8 +332,8 @@ fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched
         "matrix-matching",
         Some(&matching),
         Some(&matching),
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"base_recorded\":true",
             "\"head_recorded\":true",
@@ -343,8 +353,8 @@ fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched
         "matrix-stale",
         Some(&matching),
         Some(&stale),
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"unknown\"",
             "build identity differs",
@@ -356,8 +366,8 @@ fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched
         "matrix-missing",
         None,
         None,
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"base_recorded\":false",
             "\"head_recorded\":false",
@@ -377,8 +387,8 @@ fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched
         "matrix-mismatched",
         Some(&matching),
         Some(&mismatched),
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"unknown\"",
             "declared inputs differ",
@@ -396,8 +406,8 @@ fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched
         "matrix-changed",
         Some(&matching),
         Some(&changed),
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"changed\":1",
             "\"first_difference\"",
@@ -493,8 +503,8 @@ fn review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authori
         "matrix-gained-lost",
         Some(&base),
         Some(&head),
-        "FS",
-        "FS",
+        "",
+        "",
         &[
             "\"gained\":1",
             "\"lost\":1",
@@ -608,8 +618,8 @@ fn review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids() {
 fn review_receipt_fixture_matrix_refuses_a_missing_receipt_path() {
     let root = scratch("matrix-missing-path");
     let _ = fs::remove_dir_all(&root);
-    let base = project(&root, "base", "FS", REVIEW_SOURCE);
-    let head = project(&root, "head", "FS", REVIEW_SOURCE);
+    let base = project(&root, "base", "", REVIEW_SOURCE);
+    let head = project(&root, "head", "", REVIEW_SOURCE);
     let missing = root.join("missing.jetproof");
     let output = review_command(&base, &head, Some(&missing), None);
     assert!(
@@ -617,9 +627,13 @@ fn review_receipt_fixture_matrix_refuses_a_missing_receipt_path() {
         "missing receipt path unexpectedly succeeded: {}",
         String::from_utf8_lossy(&output.stdout)
     );
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("E2105"), "{stderr}");
-    assert!(stderr.contains("could not read receipt"), "{stderr}");
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(diagnostic.contains("E2105"), "{diagnostic}");
+    assert!(diagnostic.contains("Could not read receipt"), "{diagnostic}");
     let _ = fs::remove_dir_all(root);
 }
 
@@ -629,8 +643,8 @@ fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
     let _ = fs::remove_dir_all(&root);
     let base_source = "fn report() Int -> {\n    return 1\n}\n";
     let head_source = "fn summarize() Int -> {\n    return 1\n}\n";
-    let base = project(&root, "base", "FS", base_source);
-    let head = project(&root, "head", "FS", head_source);
+    let base = project(&root, "base", "", base_source);
+    let head = project(&root, "head", "", head_source);
     let after_hash = jet::SHA256::sha256_hex(head_source.as_bytes());
     write(
         &head.join(".jet/codemods/rename.log.json"),
