@@ -259,6 +259,38 @@ fn completion_subject_type_name(
     subject_index: usize,
 ) -> Option<String> {
     let span = tokens.get(subject_index)?.span;
+    if std::env::var_os("JET_DEBUG_LSP").is_some() {
+        let candidates: Vec<_> = db
+            .refs
+            .iter()
+            .filter(|reference| {
+                reference.module_path == path
+                    && (reference.name == "choice"
+                        || (reference.span.start <= span.end
+                            && span.start <= reference.span.end))
+            })
+            .take(20)
+            .map(|reference| {
+                (
+                    reference.name.as_str(),
+                    reference.span.start,
+                    reference.span.end,
+                    reference
+                        .target
+                        .as_ref()
+                        .map(|target| target.kind.as_str()),
+                    reference
+                        .target
+                        .as_ref()
+                        .and_then(|target| target.semantic_identity.as_deref()),
+                )
+            })
+            .collect();
+        eprintln!(
+            "subject debug: path={path:?} span={span:?} token={:?} refs={candidates:?}",
+            tokens[subject_index].kind
+        );
+    }
     let reference = db
         .refs
         .iter()
