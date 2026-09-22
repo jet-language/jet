@@ -479,7 +479,7 @@ fn run() {
     cents: Int
 }
 
-fn fixed() [LineItem#2] -> {
+fn fixed() -> [LineItem#2] {
     [LineItem{label: "coffee", cents: 450}, LineItem{label: "tea", cents: 325}]
 }
 

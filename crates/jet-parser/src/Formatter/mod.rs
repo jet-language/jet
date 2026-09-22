@@ -2350,7 +2350,8 @@ pub fn unified_diff(path: &str, old: &str, new: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_program, format_source, retired_interpolation_selector_edits, retired_type_edits,
+        format_program, format_source, format_source_with_options,
+        retired_interpolation_selector_edits, retired_type_edits, FormatOptions,
     };
 
     #[test]
@@ -2479,7 +2480,7 @@ fn run() {
     }
 
     #[test]
-    fn repeated_struct_list_heads_collapse_to_typed_list_head() {
+    fn repeated_struct_list_heads_preserve_explicit_heads() {
         let source = r#"struct Point {
     x: Int
 }
@@ -2492,18 +2493,25 @@ fn run() {
     ]
 }
 "#;
-        let once = format_source(source).expect("repeated struct heads should format");
+        let plain = format_source(source).expect("repeated struct heads should format");
         assert!(
-            once.contains("compact := [Point]{{x: 1}, {x: 2}}"),
-            "{once}"
+            plain.contains("compact := [Point{x: 1}, Point{x: 2}]"),
+            "{plain}"
         );
+        assert!(!plain.contains("compact := [Point]"));
+
+        let simplify = FormatOptions { simplify: true };
+        let simplified =
+            format_source_with_options(source, simplify).expect("repeated heads should format");
         assert!(
-            once.contains("spread := [Point]{\n        {x: 3},\n        {x: 4},\n    }"),
-            "{once}"
+            simplified.contains("compact := [Point{x: 1}, Point{x: 2}]"),
+            "{simplified}"
         );
+        assert!(!simplified.contains("compact := [Point]"));
         assert_eq!(
-            once,
-            format_source(&once).expect("collapsed typed list should re-format")
+            simplified,
+            format_source_with_options(&simplified, simplify)
+                .expect("explicit struct list heads should re-format")
         );
     }
 

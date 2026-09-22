@@ -1113,36 +1113,6 @@ impl<'a> Fmt<'a> {
         self.fmt_type(ty);
     }
 
-    fn repeated_struct_list_head<'b>(
-        elems: &'b [Expr],
-    ) -> Option<(&'b str, &'b [Type], Option<&'b str>)> {
-        if elems.len() < 2 {
-            return None;
-        }
-        let Expr::StructLit {
-            type_name,
-            type_args,
-            import_ns,
-            inferred: false,
-            ..
-        } = &elems[0]
-        else {
-            return None;
-        };
-        let repeated = elems.iter().all(|elem| {
-            matches!(
-                elem,
-                Expr::StructLit {
-                    type_name: elem_name,
-                    type_args: elem_args,
-                    import_ns: elem_ns,
-                    inferred: false,
-                    ..
-                } if elem_name == type_name && elem_args == type_args && elem_ns == import_ns
-            )
-        });
-        repeated.then_some((type_name, type_args, import_ns.as_deref()))
-    }
 
     fn fmt_named_struct_head(
         &mut self,
@@ -1308,17 +1278,10 @@ impl<'a> Fmt<'a> {
             Expr::Unit(_) => self.write("()"),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
             Expr::ListLit(elems, span) => {
-                let repeated_head = Self::repeated_struct_list_head(elems);
+                // Plain formatting preserves explicit constructor heads. The
+                // L0523 typed-list rewrite is an explicit safe fix, not a
+                // formatter rewrite.
                 self.write("[");
-                if let Some((type_name, type_args, import_ns)) = repeated_head {
-                    self.fmt_named_struct_head(
-                        type_name,
-                        type_args,
-                        import_ns,
-                        Some(elems[0].span()),
-                    );
-                    self.write("]{");
-                }
                 if self.source_span_multiline(*span) {
                     self.newline();
                     self.with_indent(|f| {
@@ -1327,16 +1290,7 @@ impl<'a> Fmt<'a> {
                                 f.newline();
                             }
                             f.emit_leading(e.span().start);
-                            if repeated_head.is_some() {
-                                let Expr::StructLit { fields, span, .. } = e else {
-                                    unreachable!(
-                                        "repeated struct list head changed during formatting"
-                                    );
-                                };
-                                f.fmt_struct_lit_body(fields, *span);
-                            } else {
-                                f.fmt_expr(e, Prec::OrFallback);
-                            }
+                            f.fmt_expr(e, Prec::OrFallback);
                             f.write(",");
                             f.emit_trailing(e.span().end);
                         }
@@ -1350,17 +1304,10 @@ impl<'a> Fmt<'a> {
                         if i > 0 {
                             self.write(", ");
                         }
-                        if repeated_head.is_some() {
-                            let Expr::StructLit { fields, span, .. } = e else {
-                                unreachable!("repeated struct list head changed during formatting");
-                            };
-                            self.fmt_struct_lit_body(fields, *span);
-                        } else {
-                            self.fmt_expr(e, Prec::OrFallback);
-                        }
+                        self.fmt_expr(e, Prec::OrFallback);
                     }
                 }
-                self.write(if repeated_head.is_some() { "}" } else { "]" });
+                self.write("]");
             }
             // D-SPREAD1=A: re-emit member spread sugar.
             Expr::MemberSpread {
