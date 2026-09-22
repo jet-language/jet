@@ -4748,7 +4748,7 @@ fn run() {}
         let id = next_id;
         next_id += 1;
         let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
-        parse_json(&body).unwrap_or_else(|error| panic!("invalid {method} response: {error}: {body}"))
+        parse_json(&body).unwrap_or_else(|error| panic!("invalid {method} response: {error:?}: {body}"))
     };
     let params_at = |text: &str, offset: usize| {
         let (line, character) = position(text, offset);
@@ -4773,7 +4773,7 @@ fn run() {}
         assert_eq!(labels.len(), expected.len(), "completion items: {items:?}");
         for wanted in expected {
             assert_eq!(
-                labels.iter().filter(|actual| *actual == *wanted).count(),
+                labels.iter().filter(|actual| **actual == *wanted).count(),
                 1,
                 "completion identity was duplicated or missing: {labels:?}"
             );
@@ -5011,7 +5011,7 @@ fn run() {}
         next_id += 1;
         let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
         parse_json(&body)
-            .unwrap_or_else(|error| panic!("invalid {method} response: {error}: {body}"))
+            .unwrap_or_else(|error| panic!("invalid {method} response: {error:?}: {body}"))
     };
 
 
