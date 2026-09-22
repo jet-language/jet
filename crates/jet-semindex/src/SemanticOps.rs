@@ -610,7 +610,11 @@ pub fn review_semantic_ops_with_receipts(
         .into_iter()
         .filter(|operation| operation.kind != ReviewOpKind::Renamed)
         .collect::<Vec<_>>();
-    for receipt in receipts.iter().filter(|receipt| receipt.kind == "rename") {
+    for receipt in receipts
+        .iter()
+        .filter(|receipt| matches!(receipt.kind.as_str(), "rename" | "move" | "moved"))
+    {
+        let is_move = matches!(receipt.kind.as_str(), "move" | "moved");
         let target = receipt.targets.first();
         let before_name = target
             .map(|target| target.before.clone())
@@ -619,9 +623,9 @@ pub fn review_semantic_ops_with_receipts(
             .map(|target| target.after.clone())
             .or_else(|| receipt.to.clone());
         let before_candidates =
-            rename_candidates(before.definition_facts(), target, before_name.as_deref());
+            rename_candidates(before.definition_facts(), target, before_name.as_deref(), true);
         let after_candidates =
-            rename_candidates(after.definition_facts(), target, after_name.as_deref());
+            rename_candidates(after.definition_facts(), target, after_name.as_deref(), false);
         let old = (before_candidates.len() == 1).then(|| {
             &before.definition_facts()[before_candidates[0]]
         });
@@ -630,9 +634,12 @@ pub fn review_semantic_ops_with_receipts(
         });
         let valid_pair = old.zip(new).filter(|(old, new)| {
             old.kind == new.kind
-                && old.module_path == new.module_path
                 && old.signature_id == new.signature_id
-                && old.name != new.name
+                && if is_move {
+                    old.name == new.name && old.module_path != new.module_path
+                } else {
+                    old.module_path == new.module_path && old.name != new.name
+                }
         });
         let alignment = if let Some((old, new)) = valid_pair {
             if target
@@ -664,7 +671,7 @@ pub fn review_semantic_ops_with_receipts(
             .map(|fact| fact.stable_id.clone())
             .or_else(|| old.map(|fact| fact.stable_id.clone()))
             .or_else(|| target.map(|target| target.stable_id.clone()))
-            .unwrap_or_else(|| "rename:unresolved".to_string());
+            .unwrap_or_else(|| format!("{}:unresolved", receipt.kind));
         let before_identity = old
             .map(|fact| fact.human_identity.clone())
             .or_else(|| before_name.clone());
@@ -675,12 +682,25 @@ pub fn review_semantic_ops_with_receipts(
             .clone()
             .or_else(|| before_identity.clone())
             .unwrap_or_else(|| "unknown".to_string());
+        let (kind, before, after) = if is_move {
+            (
+                ReviewOpKind::Moved,
+                old.map(|fact| fact.module_path.clone()),
+                new.map(|fact| fact.module_path.clone()),
+            )
+        } else {
+            (
+                ReviewOpKind::Renamed,
+                before_identity.clone(),
+                after_identity.clone(),
+            )
+        };
         let operation = ReviewSemanticOp {
-            kind: ReviewOpKind::Renamed,
+            kind,
             stable_id,
             identity,
-            before: before_identity.clone(),
-            after: after_identity.clone(),
+            before,
+            after,
             before_identity,
             after_identity,
             alignment,
@@ -733,15 +753,32 @@ fn rename_candidates(
     facts: &[DefinitionFact],
     target: Option<&SemanticOpTarget>,
     requested: Option<&str>,
+    before_side: bool,
 ) -> Vec<usize> {
     facts
         .iter()
         .enumerate()
         .filter(|(_, fact)| {
             target.map_or(true, |target| {
-                (target.stable_id.is_empty() || target.stable_id == fact.stable_id)
-                    && (target.kind.is_empty() || target.kind == fact.kind)
-                    && (target.module_path.is_empty() || target.module_path == fact.module_path)
+                let target_identity = if before_side {
+                    &target.before
+                } else {
+                    &target.after
+                };
+                let identity_matches = target_identity.is_empty()
+                    || target_identity == &fact.human_identity
+                    || target_identity == &fact.name
+                    || fact
+                        .human_identity
+                        .ends_with(&format!("::{target_identity}"));
+                let anchored_matches = (target.stable_id.is_empty()
+                    || target.stable_id == fact.stable_id)
+                    && (target.module_path.is_empty() || target.module_path == fact.module_path);
+                (if target_identity.is_empty() {
+                    anchored_matches
+                } else {
+                    identity_matches
+                }) && (target.kind.is_empty() || target.kind == fact.kind)
             })
         })
         .filter(|(_, fact)| {

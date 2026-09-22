@@ -387,6 +387,60 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn review_uses_a_recorded_move_across_module_paths() {
+    let root = scratch("recorded_move");
+    let _ = fs::remove_dir_all(&root);
+    let base = root.join("base");
+    let head = root.join("head");
+    let package = "name: \"review_move\"\nversion: \"0.1.0\"\nedition: \"2026\"\n";
+    write(&base.join("package.jet"), package);
+    write(&head.join("package.jet"), package);
+    let source = "fn report() -> Int {
+    return 1
+}
+";
+    write(&base.join("old.jet"), source);
+    write(&head.join("new.jet"), source);
+    let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
+    let receipt_dir = head.join(".jet/codemods");
+    fs::create_dir_all(&receipt_dir).unwrap();
+    write(
+        &receipt_dir.join("move.log.json"),
+        &format!(
+            "{{\"schema\":2,\"semantic_ops\":[{{\"kind\":\"move\",\"from\":\"report\",\"to\":\"report\",\"targets\":[{{\"stable_id\":\"\",\"before\":\"fn:module:old::report\",\"after\":\"fn:module:new::report\",\"kind\":\"function\",\"module_path\":\"\"}}]}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}]}}",
+            head.join("new.jet").display(),
+            source_hash,
+            source_hash,
+        ),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "review",
+            base.join("old.jet").to_str().unwrap(),
+            head.join("new.jet").to_str().unwrap(),
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "review failed: {:?}", output);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"kind\":\"moved\""), "{stdout}");
+    assert!(stdout.contains("\"alignment\":\"recorded\""), "{stdout}");
+    assert!(stdout.contains("\"before\":\"old.jet\""), "{stdout}");
+    assert!(stdout.contains("\"after\":\"new.jet\""), "{stdout}");
+    assert!(stdout.contains("\"before_identity\":\"fn:module:old::report\""), "{stdout}");
+    assert!(stdout.contains("\"after_identity\":\"fn:module:new::report\""), "{stdout}");
+    assert!(stdout.contains("\"source_operation\":\"move\""), "{stdout}");
+    assert!(!stdout.contains("\"kind\":\"renamed\""), "{stdout}");
+    assert!(!stdout.contains("\"kind\":\"added\""), "{stdout}");
+    assert!(!stdout.contains("\"kind\":\"removed\""), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched_and_changed() {
     let base_derivation = checked_derivation("d-shared", "build-1", "run-1", "target-1", "event-1");
