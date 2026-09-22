@@ -11,8 +11,8 @@
 mod common;
 
 use jet::Syntax::RuntimeLayer;
-use jet_foundation::Facts::TargetDossier;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,6 +55,250 @@ fn key_with_target_triple(bundle: &jet::AST::ProgramBundle, target_triple: &str)
 /// The common case: default profile, a fixed version salt.
 fn key(src: &str) -> String {
     key_with(src, "default", "test-version")
+}
+fn scratch_dir(label: &str) -> PathBuf {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "jet-buildnorm-scriptdeps-{label}-{}-{n}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn write_scratch_file(root: &Path, relative: &str, contents: &[u8]) -> PathBuf {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, contents).unwrap();
+    path
+}
+
+fn inline_dep(name: &str, selector: &str) -> jet::ScriptDeps::InlineDep {
+    jet::ScriptDeps::InlineDep {
+        name: name.to_string(),
+        selector: selector.to_string(),
+        span: jet::Diagnostics::Span::new(0, 0),
+    }
+}
+
+fn script_cache_digest(
+    source_hash: &str,
+    dependencies: &[jet::ScriptDeps::Resolved],
+    toolchain: &str,
+    target: &str,
+) -> String {
+    jet::ScriptDeps::cache_identity(source_hash, dependencies, toolchain, target).digest()
+}
+
+// ── ScriptDeps cache identity and preparation guards ───────────────────────
+
+#[test]
+fn script_cache_identity_changes_for_source_dependency_toolchain_and_target() {
+    let root = scratch_dir("identity");
+    let script = write_scratch_file(&root, "standalone.jet", b"print(\"before\")\n");
+    let dependency_file = write_scratch_file(
+        &root,
+        ".jet/inline-deps/textkit/1.4.2/value.jet",
+        b"pub fn value() String {\n    return \"before\"\n}\n",
+    );
+    let dependency = inline_dep("textkit", "1.4.2");
+    let resolved = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
+    let source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+    let baseline = script_cache_digest(
+        &source_hash,
+        std::slice::from_ref(&resolved),
+        "jet-toolchain-a",
+        "x86_64-unknown-linux-gnu",
+    );
+
+    write_scratch_file(&root, "standalone.jet", b"print(\"after\")\n");
+    let changed_source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+    assert_ne!(
+        baseline,
+        script_cache_digest(
+            &changed_source_hash,
+            std::slice::from_ref(&resolved),
+            "jet-toolchain-a",
+            "x86_64-unknown-linux-gnu",
+        ),
+        "changed standalone source must invalidate the prepared identity"
+    );
+
+    write_scratch_file(
+        &root,
+        ".jet/inline-deps/textkit/1.4.2/value.jet",
+        b"pub fn value() String {\n    return \"after\"\n}\n",
+    );
+    let changed_dependency = jet::ScriptDeps::resolve(&dependency, &root).unwrap();
+    assert_ne!(
+        resolved.content_hash, changed_dependency.content_hash,
+        "the changed local dependency must receive a new content hash"
+    );
+    assert_ne!(
+        baseline,
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&changed_dependency),
+            "jet-toolchain-a",
+            "x86_64-unknown-linux-gnu",
+        ),
+        "changed dependency material must invalidate the prepared identity"
+    );
+
+    assert_ne!(
+        baseline,
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&resolved),
+            "jet-toolchain-b",
+            "x86_64-unknown-linux-gnu",
+        ),
+        "changed toolchain identity must invalidate the prepared identity"
+    );
+    assert_ne!(
+        baseline,
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&resolved),
+            "jet-toolchain-a",
+            "aarch64-unknown-linux-gnu",
+        ),
+        "changed target identity must invalidate the prepared identity"
+    );
+
+    let mut relocated = resolved.clone();
+    relocated.dir = PathBuf::from("/another/checkout");
+    assert_eq!(
+        baseline,
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&relocated),
+            "jet-toolchain-a",
+            "x86_64-unknown-linux-gnu",
+        ),
+        "moving an otherwise identical local source must not change its identity"
+    );
+
+    assert_eq!(
+        fs::read(&dependency_file).unwrap(),
+        b"pub fn value() String {\n    return \"after\"\n}\n"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn script_dependency_missing_material_fails_closed_without_creating_state() {
+    let root = scratch_dir("missing");
+    let name = format!(
+        "missing_buildnorm_{}_{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let dependency = inline_dep(&name, "1.0.0");
+    let error = jet::ScriptDeps::resolve(&dependency, &root).unwrap_err();
+
+    assert!(matches!(
+        &error,
+        jet::ScriptDeps::Unresolved::UnknownPackage
+    ));
+    assert_eq!(jet::ScriptDeps::e1253(&dependency, &error).code, "E1253");
+    assert!(
+        !root.join(".jet").exists(),
+        "a missing dependency must not materialize a cache or lock tree"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn script_dependency_hostile_material_fails_closed_without_creating_state() {
+    use std::os::unix::fs::symlink;
+
+    let root = scratch_dir("hostile");
+    let package = root.join(".jet/inline-deps/hostile/1.0.0");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(package.join("value.jet"), b"stable\n").unwrap();
+    symlink(".", package.join("loop")).unwrap();
+
+    let dependency = inline_dep("hostile", "1.0.0");
+    let error = jet::ScriptDeps::resolve(&dependency, &root).unwrap_err();
+    assert!(matches!(
+        &error,
+        jet::ScriptDeps::Unresolved::InvalidTree(_)
+    ));
+    let diagnostic = jet::ScriptDeps::e1253(&dependency, &error);
+    assert_eq!(diagnostic.code, "E1253");
+    assert!(
+        diagnostic.why.contains("cannot be hashed safely"),
+        "hostile dependency diagnostics must explain the closed failure"
+    );
+    assert!(!root.join("standalone.jet.lock").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn standalone_local_selector_resolves_without_preparation_side_effects() {
+    let root = scratch_dir("selector");
+    let script = write_scratch_file(&root, "standalone.jet", b"print(\"stable\")\n");
+    write_scratch_file(
+        &root,
+        ".jet/inline-deps/local_only/1.4.1/value.jet",
+        b"one\n",
+    );
+    let selected_source = write_scratch_file(
+        &root,
+        ".jet/inline-deps/local_only/1.4.2/value.jet",
+        b"two\n",
+    );
+    let source_before = fs::read(&script).unwrap();
+    let selected_source_before = fs::read(&selected_source).unwrap();
+    let source_hash = jet::ScriptDeps::file_hash(&script).unwrap();
+
+    let loose = inline_dep("local_only", "1.4");
+    let resolved_loose = jet::ScriptDeps::resolve(&loose, &root).unwrap();
+    assert_eq!(resolved_loose.resolved_version, "1.4.2");
+    assert_eq!(
+        resolved_loose.dir,
+        selected_source.parent().unwrap().to_path_buf()
+    );
+
+    let exact = inline_dep("local_only", "1.4.2");
+    let resolved_exact = jet::ScriptDeps::resolve(&exact, &root).unwrap();
+    assert_eq!(
+        resolved_loose.content_hash, resolved_exact.content_hash,
+        "loose and exact selectors should use the same locally selected source"
+    );
+    assert_ne!(
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&resolved_loose),
+            "jet-toolchain-a",
+            "x86_64-unknown-linux-gnu",
+        ),
+        script_cache_digest(
+            &source_hash,
+            std::slice::from_ref(&resolved_exact),
+            "jet-toolchain-a",
+            "x86_64-unknown-linux-gnu",
+        ),
+        "the selector remains part of the identity even when it selects the same source"
+    );
+
+    assert_eq!(fs::read(&script).unwrap(), source_before);
+    assert_eq!(fs::read(&selected_source).unwrap(), selected_source_before);
+    assert!(
+        !root.join("package.jet").exists(),
+        "standalone preparation must not lift local dependencies into a manifest"
+    );
+    assert!(
+        !root.join("standalone.jet.lock").exists(),
+        "resolution must not write a lock sidecar"
+    );
+    assert!(
+        !root.join(".jet/lock").exists(),
+        "resolution must not create managed lock state"
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
