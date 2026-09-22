@@ -163,6 +163,234 @@ fn jet_fix_apply_writes_replay_log_and_undo_restores_source() {
     assert_eq!(fs::read_to_string(&file).unwrap(), original);
 }
 
+#[test]
+fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence() {
+    let dir = isolated_cwd("check_fix_fmt_determinism");
+    let file = dir.join("run.jet");
+    let control = dir.join("control.jet");
+    let package = dir.join("package.jet");
+    let source = "fn run(){println(\"safe\")}\n";
+    fs::write(&file, source).unwrap();
+    fs::write(&control, "fn run(){print(\"safe\")}\n").unwrap();
+
+    let machine_payload = |output: &Output| -> String {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stdout.trim_start().starts_with('{') {
+            stdout.trim().to_owned()
+        } else {
+            stderr.trim().to_owned()
+        }
+    };
+    let check = |extra: &[&str]| -> Output {
+        let mut command = Command::new(jet());
+        command
+            .args(["check", file.to_str().unwrap(), "--json"])
+            .args(extra)
+            .current_dir(&dir)
+            .env("NO_COLOR", "1");
+        command.output().unwrap()
+    };
+    let report = |output: &Output| -> DataTree {
+        let payload = machine_payload(output);
+        assert!(!payload.is_empty(), "check emitted no machine report");
+        parse_json(&payload).unwrap_or_else(|_| panic!("invalid machine report:\n{payload}"))
+    };
+    let assert_safe_edit = |value: &DataTree| {
+        assert_eq!(
+            jet_foundation::JSON::json_str(
+                jet_foundation::JSON::json_get(value, "applicability").unwrap()
+            )
+            .unwrap(),
+            "safe"
+        );
+        let edits = match jet_foundation::JSON::json_get(value, "fix_edits").unwrap() {
+            DataTree::Array(edits) => edits,
+            _ => panic!("fix_edits is not an array"),
+        };
+        assert_eq!(edits.len(), 1);
+        let edit = &edits[0];
+        assert_eq!(
+            jet_foundation::JSON::json_str(
+                jet_foundation::JSON::json_get(edit, "file").unwrap()
+            )
+            .unwrap(),
+            file.to_str().unwrap()
+        );
+        assert_eq!(
+            jet_foundation::JSON::json_str(
+                jet_foundation::JSON::json_get(edit, "safety").unwrap()
+            )
+            .unwrap(),
+            "behavior-preserving"
+        );
+        let span = jet_foundation::JSON::json_get(edit, "span").unwrap();
+        let start = jet_foundation::JSON::json_int(
+            jet_foundation::JSON::json_get(span, "start").unwrap(),
+        )
+        .unwrap() as usize;
+        let end =
+            jet_foundation::JSON::json_int(jet_foundation::JSON::json_get(span, "end").unwrap())
+                .unwrap() as usize;
+        let new_text = jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(&source[start..end], "println");
+        assert_eq!(new_text, "print");
+    };
+
+    // The same failed check must carry the same typed edit on every run.
+    let absent_first = check(&[]);
+    let absent_second = check(&[]);
+    assert_eq!(absent_first.status.code(), Some(1));
+    assert_eq!(absent_first.status.code(), absent_second.status.code());
+    assert_eq!(machine_payload(&absent_first), machine_payload(&absent_second));
+    let absent_report = report(&absent_first);
+    assert_safe_edit(&absent_report);
+
+    // A discovered package and an explicit command-line setting must not
+    // change the source-derived safe edit. The success projection below
+    // checks the selected profile; check JSON intentionally has no setting
+    // value field, so this test does not claim more configuration provenance
+    // than the machine contract exposes.
+    let package_source = r#"name: "check-fix-format-determinism"
+version: "0.1.0"
+authority: {
+    holds: { allow: [IO] }
+}
+settings: { marker: String = "package" }
+
+build: {
+    staging: Build{ optimize: basic, settings: { marker: "profile" } },
+}
+"#;
+    fs::write(&package, package_source).unwrap();
+    let package_bytes = fs::read(&package).unwrap();
+    let configured = check(&["--profile=staging", "--set", "marker=cli"]);
+    assert_eq!(configured.status.code(), Some(1));
+    let configured_report = report(&configured);
+    assert_safe_edit(&configured_report);
+    assert_eq!(
+        jet_foundation::JSON::json_get(&absent_report, "code"),
+        jet_foundation::JSON::json_get(&configured_report, "code")
+    );
+    assert_eq!(
+        jet_foundation::JSON::json_get(&absent_report, "applicability"),
+        jet_foundation::JSON::json_get(&configured_report, "applicability")
+    );
+    assert_eq!(
+        jet_foundation::JSON::json_get(&absent_report, "fix_edits"),
+        jet_foundation::JSON::json_get(&configured_report, "fix_edits")
+    );
+
+    let preview = || {
+        Command::new(jet())
+            .args(["fix", file.to_str().unwrap(), "--dry-run"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let preview_first = preview();
+    let preview_second = preview();
+    assert!(
+        preview_first.status.success(),
+        "fix preview failed: {}",
+        machine_payload(&preview_first)
+    );
+    assert_eq!(preview_first.status.code(), preview_second.status.code());
+    assert_eq!(preview_first.stdout, preview_second.stdout);
+    assert_eq!(preview_first.stderr, preview_second.stderr);
+    assert_eq!(fs::read_to_string(&file).unwrap(), source);
+
+    let applied = Command::new(jet())
+        .args(["fix", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        applied.status.success(),
+        "jet fix failed: {}",
+        machine_payload(&applied)
+    );
+    let fixed = fs::read_to_string(&file).unwrap();
+    assert!(fixed.contains("print(\"safe\")"), "{fixed}");
+    assert!(!fixed.contains("println"), "{fixed}");
+    assert_eq!(fs::read(&package).unwrap(), package_bytes);
+
+    let fmt_preview = || {
+        Command::new(jet())
+            .args(["fmt", file.to_str().unwrap(), "--check", "--json"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let fmt_first = fmt_preview();
+    let fmt_second = fmt_preview();
+    assert_eq!(fmt_first.status.code(), fmt_second.status.code());
+    assert_eq!(fmt_first.stdout, fmt_second.stdout);
+    assert_eq!(fmt_first.stderr, fmt_second.stderr);
+    assert_eq!(fs::read_to_string(&file).unwrap(), fixed);
+
+    let formatted = Command::new(jet())
+        .args(["fmt", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        formatted.status.success(),
+        "jet fmt failed: {}",
+        String::from_utf8_lossy(&formatted.stderr)
+    );
+
+    let run = |path: &Path| {
+        Command::new(jet())
+            .args(["run", "--profile=debug", path.to_str().unwrap()])
+            .current_dir(&dir)
+            .env("JET_STORE_DIR", dir.join("store"))
+            .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let expected = run(&control);
+    assert!(
+        expected.status.success(),
+        "control run failed: {}",
+        String::from_utf8_lossy(&expected.stderr)
+    );
+    assert_eq!(expected.stdout, b"safe\n");
+    let actual = run(&file);
+    assert!(
+        actual.status.success(),
+        "fixed run failed: {}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, expected.stdout);
+
+    let configured_clean = check(&["--profile=staging", "--set", "marker=cli"]);
+    assert!(
+        configured_clean.status.success(),
+        "configured check failed: {}",
+        machine_payload(&configured_clean)
+    );
+    let configured_clean_report = report(&configured_clean);
+    let provenance =
+        jet_foundation::JSON::json_get(&configured_clean_report, "provenance").unwrap();
+    assert_eq!(
+        jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(provenance, "profile").unwrap()
+        )
+        .unwrap(),
+        "staging"
+    );
+    assert_eq!(fs::read(&package).unwrap(), package_bytes);
+}
+
 /// #1659 criterion 4: `jet perf` and `jet diff`/`jet merge` route every exit
 /// through the `jet_foundation::ExitCodes` table, never a raw literal. This
 /// guards the two files migrated for #1659; it is not a repo-wide sweep.
