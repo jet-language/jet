@@ -4991,6 +4991,8 @@ fn run() {}
             "#Rename(\"wire-ready\") Queued",
             1,
         )
+        // Keep the old use site so removing the declaration exercises stale-case handling.
+        .replacen("    Waiting\n}\n", "}\n", 1)
         .replacen(".Ready ->", ".Queued ->", 1)
         .replacen("fn bare_case(Ready)", "fn bare_case(Queued)", 1)
         .replacen("Choice.Ready", "Choice.Queued", 1);
@@ -5019,7 +5021,7 @@ fn run() {}
         "textDocument/completion",
         params_at(&updated, updated_offsets[1]),
     );
-    assert_completion(&updated_completion, &[".Queued", ".Waiting"]);
+    assert_completion(&updated_completion, &[".Queued"]);
     for offset in &updated_offsets {
         let definition = request("textDocument/definition", params_at(&updated, *offset));
         assert_definition(&definition, &updated_definition_range);
