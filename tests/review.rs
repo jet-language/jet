@@ -12,6 +12,144 @@ fn write(path: &Path, text: &str) {
     }
     fs::write(path, text).unwrap();
 }
+const REVIEW_SOURCE: &str = "fn run() { print(\"same\") }\n";
+
+fn project(root: &Path, side: &str, allow: &str, source: &str) -> PathBuf {
+    let dir = root.join(side);
+    write(
+        &dir.join("package.jet"),
+        &format!(
+            "name: \"review_fixture\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n"
+        ),
+    );
+    write(&dir.join("run.jet"), source);
+    dir
+}
+
+fn review_command(
+    base: &Path,
+    head: &Path,
+    base_receipt: Option<&Path>,
+    head_receipt: Option<&Path>,
+) -> std::process::Output {
+    let mut args = vec![
+        "review".to_string(),
+        base.join("run.jet").to_str().unwrap().to_string(),
+        head.join("run.jet").to_str().unwrap().to_string(),
+        "--json".to_string(),
+    ];
+    if let Some(path) = base_receipt {
+        args.extend(["--base-receipt".to_string(), path.to_str().unwrap().to_string()]);
+    }
+    if let Some(path) = head_receipt {
+        args.extend(["--receipt".to_string(), path.to_str().unwrap().to_string()]);
+    }
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(args)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap()
+}
+
+fn checked_derivation(
+    id: &str,
+    build: &str,
+    run: &str,
+    target: &str,
+    event: &str,
+) -> String {
+    format!(
+        r#"{{"id":"{id}","subject":"value","claim":"value:contract","producer":"test","method":"formal_proof","rule":"same-inputs","premises":["schedule:v1"],"identity":{{"source":"review-source","build":"{build}","run":"{run}","target":"{target}"}}, "assumptions":["finite-input"],"disposition":"current","observation":{{"event":"{event}","counterexample":null}}}}"#
+    )
+}
+
+fn proof_evidence(
+    claim_id: &str,
+    derivation_id: &str,
+    outcome: &str,
+    state: &str,
+    target: &str,
+    argument: i64,
+    schedule: &str,
+) -> String {
+    format!(
+        r#"{{"id":"{claim_id}","claimId":"{claim_id}","kind":"contract","facet":"contracts","producer":"test","outcome":"{outcome}","state":"{state}","contract":{{"marker":"review","observation":"reached"}},"inputs":{{"arg":{argument}}},"environment":{{"target":"{target}"}}, "premises":["{schedule}"],"derivation":{{"id":"{derivation_id}"}}}}"#
+    )
+}
+
+fn proof_receipt(derivations: &[String], evidence: &[String]) -> String {
+    format!(
+        r#"{{"proofReport":{{"derivations":[{}],"evidence":[{}]}}}}"#,
+        derivations.join(","),
+        evidence.join(",")
+    )
+}
+
+fn run_receipt_case(
+    name: &str,
+    base_receipt: Option<&str>,
+    head_receipt: Option<&str>,
+    base_allow: &str,
+    head_allow: &str,
+    expected: &[&str],
+) {
+    let root = scratch(name);
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", base_allow, REVIEW_SOURCE);
+    let head = project(&root, "head", head_allow, REVIEW_SOURCE);
+    let base_receipt_path = base_receipt.map(|_| root.join("base.jetproof"));
+    let head_receipt_path = head_receipt.map(|_| root.join("head.jetproof"));
+    if let (Some(path), Some(contents)) = (&base_receipt_path, base_receipt) {
+        write(path, contents);
+    }
+    if let (Some(path), Some(contents)) = (&head_receipt_path, head_receipt) {
+        write(path, contents);
+    }
+    let output = review_command(
+        &base,
+        &head,
+        base_receipt_path.as_deref(),
+        head_receipt_path.as_deref(),
+    );
+    assert!(
+        output.status.success(),
+        "review fixture `{name}` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for needle in expected {
+        assert!(
+            stdout.contains(needle),
+            "review fixture `{name}` omitted `{needle}`:\n{stdout}"
+        );
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+fn assert_receipt_refused(name: &str, receipt: &str, reason: &str) {
+    let root = scratch(name);
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "FS", REVIEW_SOURCE);
+    let head = project(&root, "head", "FS", REVIEW_SOURCE);
+    let receipt_path = root.join("invalid.jetproof");
+    write(&receipt_path, receipt);
+    let output = review_command(&base, &head, Some(&receipt_path), None);
+    assert!(
+        !output.status.success(),
+        "receipt fixture `{name}` unexpectedly succeeded: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("E2105"),
+        "receipt fixture `{name}` omitted E2105:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(reason),
+        "receipt fixture `{name}` omitted `{reason}`:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
 
 #[test]
 fn review_joins_meaning_authority_and_receipt_changes() {
@@ -169,5 +307,349 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(!stdout.contains("\"kind\":\"renamed\""), "{stdout}");
 
+    let _ = fs::remove_dir_all(root);
+}
+#[test]
+fn review_receipt_fixture_matrix_distinguishes_matching_stale_missing_mismatched_and_changed() {
+    let base_derivation = checked_derivation("d-shared", "build-1", "run-1", "target-1", "event-1");
+    let matching_evidence =
+        proof_evidence("claim-shared", "d-shared", "passed", "checked", "target-1", 1, "schedule:v1");
+    let matching = proof_receipt(
+        std::slice::from_ref(&base_derivation),
+        std::slice::from_ref(&matching_evidence),
+    );
+    run_receipt_case(
+        "matrix-matching",
+        Some(&matching),
+        Some(&matching),
+        "FS",
+        "FS",
+        &[
+            "\"base_recorded\":true",
+            "\"head_recorded\":true",
+            "\"retained\":1",
+            "\"preserved_checked\"",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+
+    let stale_derivation =
+        checked_derivation("d-shared", "build-2", "run-1", "target-1", "event-1");
+    let stale = proof_receipt(
+        std::slice::from_ref(&stale_derivation),
+        std::slice::from_ref(&matching_evidence),
+    );
+    run_receipt_case(
+        "matrix-stale",
+        Some(&matching),
+        Some(&stale),
+        "FS",
+        "FS",
+        &[
+            "\"unknown\"",
+            "build identity differs",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+
+    run_receipt_case(
+        "matrix-missing",
+        None,
+        None,
+        "FS",
+        "FS",
+        &[
+            "\"base_recorded\":false",
+            "\"head_recorded\":false",
+            "\"gained\":0",
+            "\"lost\":0",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+
+    let mismatched_evidence =
+        proof_evidence("claim-shared", "d-shared", "passed", "checked", "target-1", 2, "schedule:v1");
+    let mismatched = proof_receipt(
+        std::slice::from_ref(&base_derivation),
+        std::slice::from_ref(&mismatched_evidence),
+    );
+    run_receipt_case(
+        "matrix-mismatched",
+        Some(&matching),
+        Some(&mismatched),
+        "FS",
+        "FS",
+        &[
+            "\"unknown\"",
+            "declared inputs differ",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+
+    let changed_evidence =
+        proof_evidence("claim-shared", "d-shared", "failed", "checked", "target-1", 1, "schedule:v1");
+    let changed = proof_receipt(
+        std::slice::from_ref(&base_derivation),
+        std::slice::from_ref(&changed_evidence),
+    );
+    run_receipt_case(
+        "matrix-changed",
+        Some(&matching),
+        Some(&changed),
+        "FS",
+        "FS",
+        &[
+            "\"changed\":1",
+            "\"first_difference\"",
+            "first differing comparable event or result",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+}
+
+#[test]
+fn review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authority_widening() {
+    let retained_derivation =
+        checked_derivation("d-retained", "build-1", "run-1", "target-1", "event-retained");
+    let changed_derivation =
+        checked_derivation("d-changed", "build-1", "run-1", "target-1", "event-changed");
+    let lost_derivation =
+        checked_derivation("d-lost", "build-1", "run-1", "target-1", "event-lost");
+    let gained_derivation =
+        checked_derivation("d-gained", "build-1", "run-1", "target-1", "event-gained");
+    let base = proof_receipt(
+        &[
+            retained_derivation.clone(),
+            changed_derivation.clone(),
+            lost_derivation.clone(),
+        ],
+        &[
+            proof_evidence(
+                "claim-retained",
+                "d-retained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-changed",
+                "d-changed",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-lost",
+                "d-lost",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+        ],
+    );
+    let head = proof_receipt(
+        &[
+            retained_derivation,
+            changed_derivation,
+            gained_derivation,
+        ],
+        &[
+            proof_evidence(
+                "claim-retained",
+                "d-retained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-changed",
+                "d-changed",
+                "failed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-gained",
+                "d-gained",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+        ],
+    );
+    run_receipt_case(
+        "matrix-gained-lost",
+        Some(&base),
+        Some(&head),
+        "FS",
+        "FS",
+        &[
+            "\"gained\":1",
+            "\"lost\":1",
+            "\"changed\":1",
+            "\"retained\":1",
+            "\"verdict\":\"proof lost\"",
+        ],
+    );
+
+    let retained = proof_receipt(
+        &[checked_derivation(
+            "d-authority",
+            "build-1",
+            "run-1",
+            "target-1",
+            "event-authority",
+        )],
+        &[proof_evidence(
+            "claim-authority",
+            "d-authority",
+            "passed",
+            "checked",
+            "target-1",
+            1,
+            "schedule:v1",
+        )],
+    );
+    run_receipt_case(
+        "matrix-authority-retained",
+        Some(&retained),
+        Some(&retained),
+        "FS",
+        "FS, Net",
+        &[
+            "\"status\":\"widened\"",
+            "\"lost\":0",
+            "\"verdict\":\"authority widened\"",
+        ],
+    );
+
+    let lost = proof_receipt(&[], &[]);
+    run_receipt_case(
+        "matrix-authority-lost",
+        Some(&retained),
+        Some(&lost),
+        "FS",
+        "FS, Net",
+        &[
+            "\"status\":\"widened\"",
+            "\"lost\":1",
+            "\"verdict\":\"authority widened and proof lost\"",
+        ],
+    );
+}
+
+#[test]
+fn review_receipt_fixture_matrix_refuses_duplicate_claim_and_derivation_ids() {
+    let first_derivation =
+        checked_derivation("d-first", "build-1", "run-1", "target-1", "event-first");
+    let second_derivation =
+        checked_derivation("d-second", "build-1", "run-1", "target-1", "event-second");
+    let duplicate_claim = proof_receipt(
+        &[first_derivation.clone(), second_derivation],
+        &[
+            proof_evidence(
+                "claim-duplicate",
+                "d-first",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+            proof_evidence(
+                "claim-duplicate",
+                "d-first",
+                "passed",
+                "checked",
+                "target-1",
+                1,
+                "schedule:v1",
+            ),
+        ],
+    );
+    assert_receipt_refused(
+        "matrix-duplicate-claim",
+        &duplicate_claim,
+        "duplicate evidence claim",
+    );
+
+    let duplicate_derivation = proof_receipt(
+        &[first_derivation.clone(), first_derivation],
+        &[proof_evidence(
+            "claim-duplicate-derivation",
+            "d-first",
+            "passed",
+            "checked",
+            "target-1",
+            1,
+            "schedule:v1",
+        )],
+    );
+    assert_receipt_refused(
+        "matrix-duplicate-derivation",
+        &duplicate_derivation,
+        "duplicate derivation ids",
+    );
+}
+
+#[test]
+fn review_receipt_fixture_matrix_refuses_a_missing_receipt_path() {
+    let root = scratch("matrix-missing-path");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "FS", REVIEW_SOURCE);
+    let head = project(&root, "head", "FS", REVIEW_SOURCE);
+    let missing = root.join("missing.jetproof");
+    let output = review_command(&base, &head, Some(&missing), None);
+    assert!(
+        !output.status.success(),
+        "missing receipt path unexpectedly succeeded: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("E2105"), "{stderr}");
+    assert!(stderr.contains("could not read receipt"), "{stderr}");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
+    let root = scratch("matrix-changed-hash");
+    let _ = fs::remove_dir_all(&root);
+    let base_source = "fn report() Int -> {\n    return 1\n}\n";
+    let head_source = "fn summarize() Int -> {\n    return 1\n}\n";
+    let base = project(&root, "base", "FS", base_source);
+    let head = project(&root, "head", "FS", head_source);
+    let after_hash = jet::SHA256::sha256_hex(head_source.as_bytes());
+    write(
+        &head.join(".jet/codemods/rename.log.json"),
+        &format!(
+            "{{\"schema\":2,\"semantic_ops\":[{{\"kind\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"stale-before-hash\",\"after_hash\":\"{}\"}}]}}",
+            head.join("run.jet").display(),
+            after_hash,
+        ),
+    );
+    let output = review_command(&base, &head, None, None);
+    assert!(
+        output.status.success(),
+        "changed-hash operation fixture failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !stdout.contains("\"kind\":\"renamed\""),
+        "stale operation receipt was accepted:\n{stdout}"
+    );
     let _ = fs::remove_dir_all(root);
 }
