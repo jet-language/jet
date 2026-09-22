@@ -689,6 +689,79 @@ fn review_operation_fixture_matrix_ignores_changed_hash_receipts() {
 }
 
 #[test]
+fn review_observation_identity_mismatches_remain_unknown() {
+    let derivation = |build: &str, run: &str, target: &str, premise: &str| {
+        format!(
+            r#"{{"id":"d-shared","subject":"value","claim":"value:contract","producer":"test","method":"formal_proof","rule":"same-inputs","premises":["{premise}"],"identity":{{"source":"review-source","build":"{build}","run":"{run}","target":"{target}"}}, "assumptions":["finite-input"],"disposition":"current","observation":{{"event":"event-1","counterexample":null}}}}"#
+        )
+    };
+    let evidence = |contract: &str, target: &str, premise: &str| {
+        format!(
+            r#"{{"id":"claim-shared","claimId":"claim-shared","kind":"contract","facet":"contracts","producer":"test","outcome":"passed","state":"checked","contract":{{"marker":"{contract}","observation":"reached"}},"inputs":{{"arg":1}},"environment":{{"target":"{target}"}},"premises":["{premise}"],"derivation":{{"id":"d-shared"}}}}"#
+        )
+    };
+    let run_case = |name: &str,
+                    base_derivation: String,
+                    head_derivation: String,
+                    base_evidence: String,
+                    head_evidence: String,
+                    reason: &str| {
+        let base = proof_receipt(&[base_derivation], &[base_evidence]);
+        let head = proof_receipt(&[head_derivation], &[head_evidence]);
+        run_receipt_case(name, Some(&base), Some(&head), "", "", &["\"unknown\"", reason]);
+    };
+
+    run_case(
+        "observation-contract-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        evidence("contract-a", "target-1", "schedule:v1"),
+        evidence("contract-b", "target-1", "schedule:v1"),
+        "observation contract differs",
+    );
+    run_case(
+        "observation-environment-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        evidence("contract", "target-2", "schedule:v1"),
+        "relevant environment identity differs",
+    );
+    run_case(
+        "observation-premise-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-1", "run-1", "target-1", "schedule:v2"),
+        evidence("contract", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        "numerical or scheduling premises differ",
+    );
+    run_case(
+        "observation-build-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-2", "run-1", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        "build identity differs",
+    );
+    run_case(
+        "observation-run-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-1", "run-2", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        "run identity differs",
+    );
+    run_case(
+        "observation-target-mismatch",
+        derivation("build-1", "run-1", "target-1", "schedule:v1"),
+        derivation("build-1", "run-1", "target-2", "schedule:v1"),
+        evidence("contract", "target-1", "schedule:v1"),
+        evidence("contract", "target-2", "schedule:v1"),
+        "target identity differs",
+    );
+}
+
+#[test]
 fn review_default_rejects_error_bearing_side() {
     let root = scratch("default-error-side");
     let _ = fs::remove_dir_all(&root);
