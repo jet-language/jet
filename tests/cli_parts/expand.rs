@@ -487,8 +487,8 @@ fn expand_callable_signature_shows_default_and_explicit_failure_routes() {
         &path,
         r#"#Error
 enum Problem { Bad }
-fn default_helper() Int -> { return 1 }
-fn explicit_helper() Int !Problem -> { return Ok(1) }
+fn default_helper() -> Int { return 1 }
+fn explicit_helper() -> Int !Problem { return Ok(1) }
 fn run() {}
 "#,
 
