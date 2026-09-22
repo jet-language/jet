@@ -6730,11 +6730,11 @@ fn schedule_every_dev_loop_consumer() {
     // ordinary run golden. Exercise private named dispatch against the same
     // declarations with an inert entry function so that the receipt proves
     // one selected job rather than the example's unrelated run body.
-    let dispatch_root =
-        std::env::temp_dir().join(format!("jet-schedule-dispatch-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dispatch_root);
-    fs::create_dir_all(&dispatch_root).unwrap();
-    let dispatch_file = dispatch_root.join("schedule_every.jet");
+    let dispatch_file = root.join(format!(
+        ".jet-schedule-dispatch-{}.jet",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&dispatch_file);
     let dispatch_src = src.replace(
         "fn run() {\n    prune_sessions()\n    refresh_indexes()\n    compact_archive()\n    nightly_backup()\n    manual_only()\n}",
         "fn run() {}",
@@ -6768,7 +6768,7 @@ fn schedule_every_dev_loop_consumer() {
         }
         RunOutcome::Problems(diags) => panic!("named job failed: {diags:?}"),
     }
-    let _ = fs::remove_dir_all(dispatch_root);
+    let _ = fs::remove_file(dispatch_file);
 
 }
 /// c728 C6: a watching `jet dev` session deopts on a JIT-gap edit and accepts a
