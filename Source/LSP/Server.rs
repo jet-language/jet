@@ -2856,7 +2856,11 @@ fn prepare_rename_response(
     let character = json_u32(json_get(pos, "character")?)?;
     let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
     let tokens = server.lex(doc);
-    let tok = match token_at(&tokens, offset) {
+    let tok = match tokens
+        .iter()
+        .find(|candidate| candidate.span.start == offset)
+        .or_else(|| token_at(&tokens, offset))
+    {
         Some(tok) => tok,
         None => return Some(response(id, "null")),
     };

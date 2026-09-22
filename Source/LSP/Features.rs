@@ -1972,7 +1972,8 @@ pub(crate) fn checked_rename_span_at(
             state_leaf_span(reference)?
         }
         Ok(Some(reference)) if is_enum_variant_identity(db, &identity) => {
-            enum_variant_leaf_span(db, reference, &identity)?
+            enum_variant_leaf_span(db, reference, &identity)
+                .or_else(|| token_span_at(tokens, offset))?
         }
         _ => token_span_at(tokens, offset)?,
     };
@@ -1980,9 +1981,15 @@ pub(crate) fn checked_rename_span_at(
 }
 
 fn token_span_at(tokens: &[Token], offset: usize) -> Option<Span> {
-    tokens.iter().find_map(|token| {
-        (token.span.start <= offset && offset <= token.span.end).then_some(token.span)
-    })
+    tokens
+        .iter()
+        .find(|token| token.span.start == offset)
+        .or_else(|| {
+            tokens
+                .iter()
+                .find(|token| token.span.start <= offset && offset <= token.span.end)
+        })
+        .map(|token| token.span)
 }
 
 

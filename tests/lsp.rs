@@ -4646,8 +4646,6 @@ fn qualified_case() -> Choice {
 fn run() {}
 "#;
     let uri = "file:///tmp/lsp_enum_variant_protocol_test.jet";
-    let fixture_diagnostics = jet::check_document("/tmp/lsp_enum_variant_protocol_test.jet", source);
-    eprintln!("enum fixture diagnostics: {fixture_diagnostics:#?}");
 
     // This proof intentionally stays in one open document. Sibling-module
     // bare-pattern snapshots are outside the current protocol boundary.
@@ -4655,7 +4653,7 @@ fn run() {}
         .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::null())
         .spawn()
         .expect("spawn jet self lsp");
     let mut stdin = child.stdin.take().expect("stdin");
@@ -4695,7 +4693,6 @@ fn run() {}
     );
     send_msg(&mut stdin, &open);
     let open_diagnostics = parse_json(&read_msg(&mut stdout)).expect("valid didOpen notification");
-    eprintln!("open diagnostics: {open_diagnostics:#?}");
     assert_eq!(
         json_str(json_object_field(&open_diagnostics, "method")),
         Some("textDocument/publishDiagnostics")
@@ -4955,10 +4952,12 @@ fn run() {}
         let prepare = request("textDocument/prepareRename", params_at(source, *offset));
         assert!(json_get(&prepare, "error").is_none(), "prepare rename error: {prepare:?}");
         let prepare_result = json_object_field(&prepare, "result");
+        let expected_prepare_range =
+            range(source, *offset, *offset + "Ready".len());
         assert_json_values_equal(
             "prepare rename range",
             json_object_field(prepare_result, "range"),
-            &initial_definition_range,
+            &expected_prepare_range,
         );
         assert_eq!(
             json_str(json_object_field(prepare_result, "placeholder")),
@@ -5042,10 +5041,15 @@ fn run() {}
     );
     assert!(json_get(&updated_prepare, "error").is_none());
     let updated_prepare_result = json_object_field(&updated_prepare, "result");
+    let updated_prepare_range = range(
+        &updated,
+        updated_offsets[2],
+        updated_offsets[2] + "Queued".len(),
+    );
     assert_json_values_equal(
         "updated prepare rename range",
         json_object_field(updated_prepare_result, "range"),
-        &updated_definition_range,
+        &updated_prepare_range,
     );
     assert_eq!(
         json_str(json_object_field(updated_prepare_result, "placeholder")),

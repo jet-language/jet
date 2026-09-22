@@ -259,56 +259,6 @@ fn completion_subject_type_name(
     subject_index: usize,
 ) -> Option<String> {
     let span = tokens.get(subject_index)?.span;
-    if std::env::var_os("JET_DEBUG_LSP").is_some() {
-        let candidates: Vec<_> = db
-            .refs
-            .iter()
-            .filter(|reference| {
-                reference.name == "choice"
-                    || (reference.span.start <= span.end
-                        && span.start <= reference.span.end)
-            })
-            .take(20)
-            .map(|reference| {
-                (
-                    reference.module_path.as_str(),
-                    reference.name.as_str(),
-                    reference.span.start,
-                    reference.span.end,
-                    reference
-                        .target
-                        .as_ref()
-                        .map(|target| target.kind.as_str()),
-                    reference
-                        .target
-                        .as_ref()
-                        .and_then(|target| target.semantic_identity.as_deref()),
-                )
-            })
-            .collect();
-        let definitions: Vec<_> = db
-            .defs
-            .iter()
-            .filter(|definition| {
-                matches!(
-                    definition.name.as_str(),
-                    "choice" | "Choice" | "dot_case" | "bare_case" | "qualified_case"
-                )
-            })
-            .map(|definition| {
-                (
-                    definition.module_path.as_str(),
-                    definition.name.as_str(),
-                    definition.def_span,
-                    format!("{:?}", definition.kind),
-                )
-            })
-            .collect();
-        eprintln!(
-            "subject debug: path={path:?} span={span:?} token={:?} refs={candidates:?} defs={definitions:?}",
-            tokens[subject_index].kind
-        );
-    }
     let reference = db
         .refs
         .iter()
@@ -432,12 +382,6 @@ fn detect_switch_enum_type<'a>(
         }
 
         let type_name = completion_subject_type_name(db, tokens, current_path, subject_index);
-        if std::env::var_os("JET_DEBUG_LSP").is_some() {
-            eprintln!(
-                "switch debug: brace={brace_index} eq={eq_index} subject={subject_index} if={if_index} depth={depth} type={type_name:?} subject_token={:?}",
-                tokens[subject_index].kind
-            );
-        }
         let type_name = type_name?;
         return completion_enum_definition_for_type(db, &type_name, current_path, offset);
     }
@@ -739,15 +683,6 @@ pub(crate) fn compute_completions(
     let source_tokens = crate::Lexer::lex(src).0;
     let switch_enum =
         detect_switch_enum_type(&source_tokens, offset, current_path, db);
-    if std::env::var_os("JET_DEBUG_LSP").is_some() {
-        let detected = switch_enum.map(|definition| definition.name.as_str());
-        eprintln!(
-            "completion debug: offset={offset} path={current_path:?} detected={detected:?} defs={} refs={} source_prefix={:?}",
-            db.defs.len(),
-            db.refs.len(),
-            src.get(offset.saturating_sub(24)..offset.min(src.len()))
-        );
-    }
     if let Some(enum_definition) = switch_enum {
         if let SymKind::Enum { variants, .. } = &enum_definition.kind {
             let prefix = current_identifier_prefix(src, offset);
