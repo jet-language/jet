@@ -4658,6 +4658,98 @@ mod project_part_tests {
         let sources = workspace_sources(&server, Some(&entry));
         assert!(sources.iter().any(|(path, _)| path.ends_with("bench.jet")));
     }
+    #[test]
+    fn card_3200_import_edit_uses_checked_document_version_and_respects_existing_import_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-card-3200-import-version-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let helper = root.join("helper.jet");
+        let source = "fn run() { print(answer()) }\n";
+        std::fs::write(&main, source).unwrap();
+        std::fs::write(&helper, "pub fn answer() Int { return 42 }\n").unwrap();
+
+        let path = main.to_string_lossy().into_owned();
+        let uri = path_to_uri(&path);
+        let mut server = Server::new();
+        server
+            .workspace_roots
+            .push(root.to_string_lossy().into_owned());
+        server.docs.insert(
+            uri.clone(),
+            Document::new(path, source.to_string(), 12),
+        );
+
+        let start = source.find("answer").unwrap();
+        let actions = code_actions_for(&server, &uri, source, start, start + "answer".len());
+        assert!(actions.contains("\"title\":\"Import `helper`\""), "{actions}");
+        assert!(actions.contains(r#""newText":"use helper\n""#), "{actions}");
+        assert!(
+            actions.contains(&format!(
+                r#""textDocument":{{"uri":"{}","version":12}}"#,
+                json_escape(&uri)
+            )),
+            "{actions}"
+        );
+
+        let imported = format!("use helper\n{source}");
+        server
+            .docs
+            .get_mut(&uri)
+            .unwrap()
+            .replace_text(imported.clone());
+        let start = imported.find("answer").unwrap();
+        let actions = code_actions_for(
+            &server,
+            &uri,
+            &imported,
+            start,
+            start + "answer".len(),
+        );
+        assert!(!actions.contains("Import `helper`"), "{actions}");
+        assert!(!actions.contains(r#""newText":"use helper\n""#), "{actions}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn card_3200_import_edit_declines_ambiguous_workspace_symbols() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-card-3200-import-ambiguous-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let left = root.join("left.jet");
+        let right = root.join("right.jet");
+        let source = "fn run() { print(answer()) }\n";
+        std::fs::write(&main, source).unwrap();
+        std::fs::write(&left, "pub fn answer() Int { return 1 }\n").unwrap();
+        std::fs::write(&right, "pub fn answer() Int { return 2 }\n").unwrap();
+
+        let path = main.to_string_lossy().into_owned();
+        let uri = path_to_uri(&path);
+        let mut server = Server::new();
+        server
+            .workspace_roots
+            .push(root.to_string_lossy().into_owned());
+        server.docs.insert(
+            uri.clone(),
+            Document::new(path, source.to_string(), 4),
+        );
+
+        let start = source.find("answer").unwrap();
+        let actions = code_actions_for(&server, &uri, source, start, start + "answer".len());
+        assert!(!actions.contains("\"title\":\"Import `"), "{actions}");
+        assert!(!actions.contains(r#""newText":"use "#), "{actions}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
 }
 
 fn build_navigation_symbol_db(
