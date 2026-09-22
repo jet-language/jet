@@ -975,6 +975,24 @@ fn review_receipts_bind_to_sides_and_do_not_infer_proof() {
 }
 
 #[test]
+fn review_without_receipts_reports_unknown_provenance() {
+    let root = scratch("unknown-provenance");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(&root, "base", "", REVIEW_SOURCE);
+    let head = project(&root, "head", "", REVIEW_SOURCE);
+
+    let output = review_command(&base, &head, None, None);
+    assert!(output.status.success(), "review without receipts failed");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"schema\":\"jet.review/v2\""), "{stdout}");
+    assert!(stdout.contains("\"claim_key\":null"), "{stdout}");
+    assert!(stdout.contains("\"closure\":\"unknown\""), "{stdout}");
+    assert!(stdout.contains("\"proof_receipt\":null"), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn review_default_rejects_error_bearing_side() {
     let root = scratch("default-error-side");
     let _ = fs::remove_dir_all(&root);

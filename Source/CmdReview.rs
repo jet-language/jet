@@ -1994,6 +1994,11 @@ fn snapshot_value(side: &ReviewSide, receipt: &Receipt) -> StatusValue {
             )
         })
         .unwrap_or(StatusValue::Null);
+    let closure = if side.inputs.is_empty() || receipt.proof_receipt.is_none() {
+        "unknown"
+    } else {
+        side.closure
+    };
     StatusValue::object(
         StatusFields::new()
             .with("entry", side.entry.as_str())
@@ -2006,7 +2011,7 @@ fn snapshot_value(side: &ReviewSide, receipt: &Receipt) -> StatusValue {
                     .map(StatusValue::from)
                     .unwrap_or(StatusValue::Null),
             )
-            .with("closure", side.closure)
+            .with("closure", closure)
             .with("proof_receipt", proof_receipt),
     )
 }
