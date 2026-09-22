@@ -370,6 +370,11 @@ fn unmatched_diagnostic_relation(
         "diagnostic source snapshot changed in a dependency scope".to_string()
     } else if compatible_code_occurrence(&occurrence, other) {
         "same-code occurrence has a different location in the compatible scope".to_string()
+    } else if other
+        .iter()
+        .any(|candidate| candidate.diagnostic.code == occurrence.diagnostic.code)
+    {
+        "same-code occurrence has an incompatible scope".to_string()
     } else {
         String::new()
     };
