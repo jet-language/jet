@@ -382,6 +382,8 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
     assert!(output.status.success(), "review failed: {:?}", output);
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(!stdout.contains("\"kind\":\"renamed\""), "{stdout}");
+    assert!(stdout.contains("\"kind\":\"removed\""), "{stdout}");
+    assert!(stdout.contains("\"kind\":\"added\""), "{stdout}");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -806,6 +808,74 @@ fn review_observation_identity_mismatches_remain_unknown() {
         "target identity differs",
     );
 }
+
+#[test]
+fn review_equal_sampled_observations_are_not_universal() {
+    let sampled_derivation = checked_derivation(
+        "d-sampled",
+        "build-1",
+        "run-1",
+        "target-1",
+        "event-sampled",
+    )
+    .replace("\"method\":\"formal_proof\"", "\"method\":\"sampled_agreement\"");
+    let evidence = proof_evidence(
+        "claim-sampled",
+        "d-sampled",
+        "passed",
+        "checked",
+        "target-1",
+        1,
+        "schedule:v1",
+    );
+    let receipt = proof_receipt(
+        std::slice::from_ref(&sampled_derivation),
+        std::slice::from_ref(&evidence),
+    );
+    run_receipt_case(
+        "observation-sampled-agreement",
+        Some(&receipt),
+        Some(&receipt),
+        "",
+        "",
+        &[
+            "\"sampled_agreements\":[",
+            "equal sampled traces do not establish universal equivalence",
+            "\"verdict\":\"reviewable\"",
+        ],
+    );
+}
+
+#[test]
+fn review_reports_effect_changes_as_checked_semantic_operations() {
+    let root = scratch("effect-change");
+    let _ = fs::remove_dir_all(&root);
+    let base = project(
+        &root,
+        "base",
+        "",
+        "fn report() -> Int { return 1 }\n",
+    );
+    let head = project(
+        &root,
+        "head",
+        "",
+        "fn report() -[IO]> Int {\n    print(\"head\")\n    return 1\n}\n",
+    );
+
+    let output = review_command(&base, &head, None, None);
+    assert!(
+        output.status.success(),
+        "effect review failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\"kind\":\"effect_changed\""), "{stdout}");
+    assert!(stdout.contains("\"alignment\":\"matched\""), "{stdout}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
 
 #[test]
 fn review_aligns_signature_changes_by_checked_identity() {

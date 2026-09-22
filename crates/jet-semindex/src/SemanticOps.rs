@@ -845,7 +845,10 @@ fn pair_by_key<F>(
         let Some(new) = after_by_key.get(&identity) else {
             continue;
         };
-        if old.len() == 1 && new.len() == 1 {
+        if old.len() == 1
+            && new.len() == 1
+            && before[old[0]].name == after[new[0]].name
+        {
             let old_index = old[0];
             let new_index = new[0];
             matched_before.insert(old_index);
@@ -868,19 +871,21 @@ fn append_effect_operations(
         .iter()
         .map(|fact| (fact.function.as_str(), fact))
         .collect::<BTreeMap<_, _>>();
-    for (function, old) in before_by_function {
-        let Some(new) = after_by_function.get(function) else {
-            continue;
-        };
-        let old_shape = effect_shape(old);
-        let new_shape = effect_shape(new);
+    let functions = before_by_function
+        .keys()
+        .chain(after_by_function.keys())
+        .copied()
+        .collect::<BTreeSet<_>>();
+    for function in functions {
+        let old_shape = before_by_function.get(function).map(|effect| effect_shape(effect));
+        let new_shape = after_by_function.get(function).map(|effect| effect_shape(effect));
         if old_shape != new_shape {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::EffectChanged,
                 stable_id: format!("effect:{function}"),
                 identity: function.to_string(),
-                before: Some(old_shape),
-                after: Some(new_shape),
+                before: old_shape,
+                after: new_shape,
                 before_identity: Some(function.to_string()),
                 after_identity: Some(function.to_string()),
                 alignment: ReviewAlignment::Matched,
