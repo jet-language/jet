@@ -4635,7 +4635,7 @@ fn bare_case(Ready) {
     return
 }
 
-fn bare_case(Waiting) {
+fn bare_waiting(Waiting) {
     return
 }
 
