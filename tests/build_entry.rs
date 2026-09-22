@@ -419,6 +419,180 @@ fn multi_dependency_build_restores_semantic_noop_compiler_artifact() {
         assert!(root.join(action.outputs[0].as_str()).is_file());
     }
 }
+#[test]
+fn enum_dependency_change_invalidates_compiler_package_chain() {
+    let root = project("enum-package-invalidation");
+    let producer = root.join("deps/producer");
+    let consumer = root.join("deps/consumer");
+    fs::create_dir_all(&producer).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+    write(
+        &root.join("package.jet"),
+        "name: \"enum-package-invalidation\"\nversion: \"0.1.0\"\ndeps: { producer: ./deps/producer, consumer: ./deps/consumer }\n",
+    );
+    write(
+        &producer.join("package.jet"),
+        "name: \"producer\"\nversion: \"0.1.0\"\n",
+    );
+    write(
+        &consumer.join("package.jet"),
+        "name: \"consumer\"\nversion: \"0.1.0\"\n",
+    );
+    let producer_source = producer.join("producer.jet");
+    write(
+        &producer_source,
+        r#"
+#Layout(c, tag: U8)
+pub enum Packet {
+    Ping(value: Int) = 3
+}
+
+pub fn make() -> Packet {
+    return Packet.Ping(7)
+}
+"#,
+    );
+    write(
+        &consumer.join("consumer.jet"),
+        r#"
+use producer
+
+pub fn inspect(value: producer.Packet) -> Int {
+    return 7
+}
+"#,
+    );
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+use producer
+use consumer
+
+fn build(b: BuildContext) -> BuildPlan {
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+
+fn run() {
+    print(consumer.inspect(producer.make()))
+}
+"#,
+    );
+
+    let source_identity = |build: &jet::Driver::BuildRun, package: &str| {
+        build
+            .plan
+            .actions()
+            .iter()
+            .find(|action| action.name == format!("compile-package:{package}"))
+            .and_then(|action| action.labels.get("compiler.source-digest"))
+            .cloned()
+            .unwrap_or_else(|| panic!("missing compiler source identity for {package}"))
+    };
+
+    let first = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let first_build = first
+        .build
+        .as_ref()
+        .expect("cold enum dependency build should expose execution");
+    assert_eq!(
+        first_build
+            .plan
+            .actions()
+            .iter()
+            .filter(|action| action.is_compiler_owned())
+            .count(),
+        3,
+        "root, producer, and consumer compiler actions should be planned"
+    );
+    assert_eq!(first_build.execution.metrics.cache_restored_actions, 0);
+    let first_producer_source = source_identity(first_build, "producer");
+    let first_consumer_source = source_identity(first_build, "consumer");
+    let first_rust = first.compile.rust.clone();
+    assert!(first_rust.contains("Packet"));
+
+    write(
+        &producer_source,
+        r#"
+#Layout(c, tag: U8)
+pub enum Packet {
+    Ping(value: Int, extra: Int) = 9
+    Pong(value: Int) = 11
+}
+
+pub fn make() -> Packet {
+    return Packet.Ping(7, 1)
+}
+"#,
+    );
+
+    let second = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    let second_build = second
+        .build
+        .as_ref()
+        .expect("incremental enum dependency build should expose execution");
+    assert_eq!(
+        second_build.execution.metrics.cache_restored_actions, 0,
+        "producer enum changes must invalidate producer and every dependent compiler action"
+    );
+    for action in second_build
+        .plan
+        .actions()
+        .iter()
+        .filter(|action| action.is_compiler_owned())
+    {
+        assert!(
+            second_build.execution.events.iter().any(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    action: finished,
+                    outcome: ActionOutcome::Succeeded { .. },
+                } if *finished == action.id
+            )),
+            "{} must rebuild successfully after the producer enum changes",
+            action.name
+        );
+        assert!(
+            !second_build.execution.events.iter().any(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    action: finished,
+                    outcome: ActionOutcome::RestoredFromCache,
+                } if *finished == action.id
+            )),
+            "{} must not be restored from stale cache state",
+            action.name
+        );
+    }
+    let second_producer_source = source_identity(second_build, "producer");
+    let second_consumer_source = source_identity(second_build, "consumer");
+    assert_ne!(
+        first_producer_source, second_producer_source,
+        "producer case/code/payload changes must change its source identity"
+    );
+    assert_eq!(
+        first_consumer_source, second_consumer_source,
+        "consumer source identity stays stable while its dependency changes"
+    );
+    assert_ne!(
+        first_rust, second.compile.rust,
+        "compiled output must reflect the changed enum shape"
+    );
+    assert!(
+        second.compile.rust.contains("Pong"),
+        "compiled output must contain the added producer enum case"
+    );
+    eprintln!(
+        "enum invalidation: producer_source={} -> {}, consumer_source={} -> {}, cold_restored={}, incremental_restored={}, output_changed=true",
+        first_producer_source,
+        second_producer_source,
+        first_consumer_source,
+        second_consumer_source,
+        first_build.execution.metrics.cache_restored_actions,
+        second_build.execution.metrics.cache_restored_actions,
+    );
+}
 
 #[test]
 fn warm_dependency_cache_still_runs_frontend_diagnostics() {
