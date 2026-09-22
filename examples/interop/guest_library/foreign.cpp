@@ -117,7 +117,10 @@ void run_cycles(const char *path) {
         /* Initialization row: dlopen is the only admission step. */
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (handle == nullptr) {
-            fail("dlopen failed");
+            const char *detail = dlerror();
+            std::fprintf(stderr, "guest embedding: dlopen failed: %s\n",
+                detail == nullptr ? "unknown loader error" : detail);
+            std::exit(1);
         }
         if (dlsym(handle, "jet_init") != nullptr || dlsym(handle, "jet_shutdown") != nullptr) {
             fail("unexpected init/shutdown symbol");
