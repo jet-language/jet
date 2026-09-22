@@ -508,7 +508,7 @@ enum Bad {
 fn run() {}
 "#,
         "1.5",
-        "An enum discriminant must be an integer, got Decimal (an exact base-10 number)",
+        "An enum discriminant must be an integer, got Float (an approximate binary number)",
     ),
     (
         "unknown",
@@ -570,7 +570,7 @@ fn assert_enum_discriminants(
     for (observed, &(expected_name, expected_value)) in observed.iter().zip(expected.iter()) {
         assert_eq!(observed.0.as_str(), expected_name);
         assert_eq!(
-            *observed.1, expected_value,
+            observed.1, expected_value,
             "enum `{enum_name}` code for `{expected_name}` changed"
         );
     }
@@ -613,7 +613,8 @@ fn comptime_enum_discriminants_keep_explicit_codes_when_implicit_case_moves() {
             ENUM_DISCRIMINANTS_IMPLICIT_FIRST,
         ),
     ] {
-        let path = scratch.join(format!("{stem}.jet"));
+        let filename = format!("{stem}.jet");
+        let path = scratch.join(&filename);
         fs::write(&path, source).expect("write enum discriminant fixture");
         let shown = path.to_string_lossy();
         let _compiled = jet::compile_with_path(source, &shown)
