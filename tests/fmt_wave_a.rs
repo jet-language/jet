@@ -132,6 +132,16 @@ fn preservation_matrix_survives_two_canonical_formatter_passes() {
     }
 }
 
+#[test]
+fn syntax_only_formatter_reports_invalid_input() {
+    let diagnostics = jet::format_source("fn broken(")
+        .expect_err("invalid syntax must not be accepted by the formatter");
+    assert!(
+        !diagnostics.is_empty(),
+        "invalid syntax should return at least one formatter diagnostic"
+    );
+}
+
 const CLI_FIXTURE: &str = WHITESPACE_AND_LITERALS;
 
 fn run_fmt(root: &Path, args: &[&str]) -> Output {
