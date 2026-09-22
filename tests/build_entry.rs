@@ -448,7 +448,7 @@ pub enum Packet {
 }
 
 pub fn make() -> Packet {
-    return Packet.Ping(7)
+    return Packet.Ping{value: 7}
 }
 "#,
     );
@@ -522,7 +522,7 @@ pub enum Packet {
 }
 
 pub fn make() -> Packet {
-    return Packet.Ping(7, 1)
+    return Packet.Ping{value: 7, extra: 1}
 }
 "#,
     );
