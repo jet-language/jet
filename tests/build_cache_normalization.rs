@@ -11,6 +11,7 @@
 mod common;
 
 use jet::Syntax::RuntimeLayer;
+use jet_foundation::Facts::TargetDossier;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
