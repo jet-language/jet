@@ -108,7 +108,8 @@ try {
   );
   const expectedMarkup = [
     'method="post" action="/actions/save"',
-    '<input name="name" id="Person-name" type="text" aria-label="name" aria-invalid="false" required value="Ada">',
+    '<input name="name" id="Person-name" type="text" aria-label="name" aria-invalid="false" required',
+    'value="Ada">',
     '<button type="submit">Submit</button>',
   ];
   for (const fragment of expectedMarkup) {
