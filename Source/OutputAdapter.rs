@@ -60,6 +60,39 @@ impl OutputMode {
     }
 }
 
+/// The command identity that controls ordinary advisory-lint presentation.
+///
+/// This is deliberately separate from [`OutputMode`]: the latter is a public
+/// stream projection consumed by many command helpers, while this policy is a
+/// host-owned presentation fact. Semantic checking and lint-policy enforcement
+/// continue to receive the complete checked lint set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommandIdentity {
+    Check,
+    Build,
+    Run,
+    Dev,
+    Test,
+    Other,
+}
+
+impl CommandIdentity {
+    fn from_name(name: &str) -> Self {
+        match name {
+            "check" => Self::Check,
+            "build" => Self::Build,
+            "run" => Self::Run,
+            "dev" => Self::Dev,
+            "test" => Self::Test,
+            _ => Self::Other,
+        }
+    }
+
+    fn advisory_lints_visible(self, verbose: bool) -> bool {
+        verbose || !matches!(self, Self::Run | Self::Dev | Self::Test)
+    }
+}
+
 /// One startup snapshot and its resolved output profile.
 #[derive(Clone, Copy)]
 pub(crate) struct OutputAdapter {
@@ -143,6 +176,14 @@ impl OutputAdapter {
     /// a fact handoff, not a second environment or terminal-policy lookup.
     pub(crate) fn activate(self) {
         let _ = ACTIVE_PROFILE.set(self.profile);
+        let _ = ACTIVE_VERBOSE.set(self.flags.verbose);
+    }
+
+    /// Bind the already-parsed command identity to this invocation's output
+    /// policy. The command is set after the host has split Jet arguments from
+    /// the program tail, so child arguments cannot change lint visibility.
+    pub(crate) fn activate_command(command: &str) {
+        let _ = ACTIVE_COMMAND.set(CommandIdentity::from_name(command));
     }
 
 
@@ -238,7 +279,21 @@ fn locale_supports_unicode() -> bool {
 }
 
 static ACTIVE_PROFILE: OnceLock<OutputProfile> = OnceLock::new();
+static ACTIVE_VERBOSE: OnceLock<bool> = OnceLock::new();
+static ACTIVE_COMMAND: OnceLock<CommandIdentity> = OnceLock::new();
 
 pub(crate) fn active_profile() -> Option<OutputProfile> {
     ACTIVE_PROFILE.get().copied()
+}
+
+/// Whether ordinary advisory lints belong in the current command's diagnostic
+/// presentation. This does not change checking or policy enforcement; it only
+/// controls the shared CLI report boundary.
+pub(crate) fn advisory_lints_visible() -> bool {
+    let command = ACTIVE_COMMAND
+        .get()
+        .copied()
+        .unwrap_or(CommandIdentity::Other);
+    let verbose = ACTIVE_VERBOSE.get().copied().unwrap_or(false);
+    command.advisory_lints_visible(verbose)
 }

@@ -39,6 +39,7 @@ pub struct OutputFlags {
 impl OutputFlags {
     /// Parse output policy flags from the command-owned argv prefix.
     pub fn parse(args: &[String]) -> Result<Self, OutputProfileError> {
+        let args = before_argument_separator(args);
         let mut color = ColorRequest::Auto;
         for argument in args {
             if let Some(value) = argument.strip_prefix("--color=") {
@@ -58,6 +59,12 @@ impl OutputFlags {
             color,
         })
     }
+}
+
+fn before_argument_separator(args: &[String]) -> &[String] {
+    args.split(|argument| argument == "--")
+        .next()
+        .unwrap_or(args)
 }
 
 /// One reserved word or sigil, for `jet inspect reserved` (#1659 criterion 5).
@@ -196,6 +203,7 @@ pub const MACHINE_OUTPUT_FLAG: &str = "--json";
 pub const CANVAS_FLAG: &str = "--canvas";
 
 pub fn machine_output_requested(args: &[String]) -> bool {
+    let args = before_argument_separator(args);
     args.iter().any(|arg| arg == MACHINE_OUTPUT_FLAG)
         || args.first().is_some_and(|arg| arg == "compiler")
         || args
@@ -3572,6 +3580,22 @@ fn authority_flags_render_in_registry_completions_and_man() {
             FLAGS.iter().filter(|flag| flag.long == MACHINE_OUTPUT_FLAG).count(),
             1
         );
+    }
+
+    #[test]
+    fn output_flags_ignore_program_arguments_after_separator() {
+        let args = [
+            "run".to_string(),
+            "--quiet".to_string(),
+            "--".to_string(),
+            "--verbose".to_string(),
+            "--json".to_string(),
+        ];
+        let flags = OutputFlags::parse(&args).unwrap();
+        assert!(flags.quiet);
+        assert!(!flags.verbose);
+        assert!(!flags.json);
+        assert!(!machine_output_requested(&args));
     }
 
     #[test]

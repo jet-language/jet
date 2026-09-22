@@ -14,7 +14,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet::Diagnostics::{Diagnostic, ReportPath};
+use jet::Diagnostics::{Diagnostic, ReportPath, Severity};
 use jet::ExitCodes;
 pub(crate) use jet::{Diagnostics, Syntax, SHA256};
 use jet_foundation::BuildEffect;
@@ -77,8 +77,8 @@ mod ProveSolver;
 #[allow(dead_code)]
 mod Store;
 use OutputAdapter::{
-    active_profile, write_machine, write_mode_diagnostic, write_mode_machine,
-    write_mode_renderable, write_mode_status, write_renderable, write_status,
+    active_profile, advisory_lints_visible, write_machine, write_mode_diagnostic,
+    write_mode_machine, write_mode_renderable, write_mode_status, write_renderable, write_status,
 };
 pub(crate) use OutputAdapter::{OutputAdapter as OutputAdapterHost, OutputMode};
 
@@ -3140,6 +3140,18 @@ fn main() {
             exit(ExitCodes::OK);
         }
     };
+
+    // D-LINT-VISIBILITY2=A: command identity is a host fact. Resolve bare
+    // source-path sugar as `run`, while keeping program arguments after `--`
+    // outside the output policy.
+    let output_command = if jet::CLI::is_builtin(cmd) {
+        cmd
+    } else if looks_like_jet_source(cmd) {
+        "run"
+    } else {
+        cmd
+    };
+    OutputAdapterHost::activate_command(output_command);
     let canvas_requested = jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG);
     let record_name = named_record_for_command(jet_argv, cmd, json);
     let no_capture = cmd == "dev" && jet_argv.iter().any(|arg| arg == "--no-capture");
@@ -6906,6 +6918,28 @@ pub(crate) fn report_problems(
     src: &str,
     diags: &[jet::Diagnostics::Diagnostic],
 ) {
+    // D-LINT-VISIBILITY2=A: run/dev/test keep ordinary lints in the checked
+    // set for enforcement, but omit them only at this shared presentation
+    // boundary unless the host saw --verbose/-v before `--`.
+    let hide_advisories = !advisory_lints_visible();
+    if hide_advisories
+        && !diags
+            .iter()
+            .any(|diagnostic| diagnostic.severity != Severity::Lint)
+    {
+        return;
+    }
+    let filtered = hide_advisories.then(|| {
+        diags
+            .iter()
+            .filter(|diagnostic| diagnostic.severity != Severity::Lint)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let diags = filtered.as_deref().unwrap_or(diags);
+    if diags.is_empty() {
+        return;
+    }
     if mode.json {
         let machine_file = machine_report_path_for_process(file);
         let clears = jet::Diagnostics::report_clear_counts(diags);
