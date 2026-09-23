@@ -1229,6 +1229,11 @@ fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion>
     suggest_method_for_receiver(name, None, candidates)
 }
 
+fn crypto_leaf(name: &str) -> Option<&str> {
+    let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
+    secret_bearing_crypto_leaf(leaf).then_some(leaf)
+}
+
 fn secret_bearing_crypto_leaf(name: &str) -> bool {
     matches!(
         name,
@@ -1238,9 +1243,11 @@ fn secret_bearing_crypto_leaf(name: &str) -> bool {
 
 pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
     match ty {
-        Type::Named(name) if secret_bearing_crypto_leaf(&name) => Type::Tagged {
+        Type::Named(name) if crypto_leaf(&name).is_some() => Type::Tagged {
             marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
-            inner: Box::new(Type::Named(name)),
+            inner: Box::new(Type::Named(
+                crypto_leaf(&name).expect("crypto leaf was checked").to_string(),
+            )),
         },
         Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
         Type::Shared(inner) => Type::Shared(Box::new(core_crypto_nominal(*inner))),
@@ -1450,16 +1457,15 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
 /// cannot be shown from a read, and codegen has no `jet_show` to call. Sema
 /// refuses showing it (I3).
 pub(crate) fn is_one_pass_source(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Apply { name, .. }
-            if name == Syntax::TYPE_ITER
+    match ty {
+        Type::Apply { name, .. } => {
+            name == Syntax::TYPE_ITER
                 || name == Syntax::TYPE_VIEW_ITER
                 || name == Syntax::TYPE_STREAM
-    ) || matches!(
-        ty,
-        Type::Named(name) if matches!(name.as_str(), "HTTPBody" | "HTTPBodyChunks")
-    )
+        }
+        Type::Named(name) => name == "Body" || name == "HTTPBodyChunks",
+        _ => false,
+    }
 }
 
 /// Name a real materializer when the one-pass type has one. `Stream<T>` and
@@ -1471,7 +1477,7 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
         {
             Some(".to_list()")
         }
-        Type::Named(n) if n == "HTTPBody" => Some(".text(limit)"),
+        Type::Named(n) if n == "Body" => Some(".text(limit)"),
         _ => None,
     }
 }
@@ -1573,6 +1579,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "FileCryptoError"
             | "HTTPError"
             | "IOError"
+            | "UiHostError"
             | "KeyWrapError"
             | "NetError"
             | "RangeError"
@@ -1832,6 +1839,13 @@ pub(crate) fn is_equatable(
                     | "DataError"
                     | "DataErrorKind"
                     | "DataLimits"
+                    | "DataFreshness"
+                    | "DataFormat"
+                    | "DataLoaderKind"
+                    | "DataInvalidationCause"
+                    | "JetDataPlotMark"
+                    | "JetDataPlotValue"
+                    | "JetDataPlotRenderFormat"
             ) =>
         {
             true

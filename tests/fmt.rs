@@ -66,20 +66,37 @@ fn type_alias_binding_sigils_are_canonical_and_idempotent() {
 }
 
 #[test]
-fn fmt_preserves_script_and_declaration_source_order() {
+fn fmt_preserves_module_declaration_and_function_source_order() {
     let source =
-        "message :: \"script entry\"\nprint(message)\n\nfn helper() Int {\n    return 42\n}\n";
-    let once = jet::format_source(source).expect("mixed script source should format");
+        "message :: \"module global\"\n\nfn helper() Int {\n    return 42\n}\n\nfn run() {\n    print(message)\n    print(helper())\n}\n";
+    let once = jet::format_source(source).expect("module globals should format");
     let message = once
         .find("message ::")
-        .expect("script binding should remain");
+        .expect("module binding should remain");
     let helper = once.find("fn helper").expect("declaration should remain");
     assert!(
         message < helper,
         "formatter reordered source items:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted source should reformat");
-    assert_eq!(once, twice, "mixed script formatting must be idempotent");
+    assert_eq!(once, twice, "module-global formatting must be idempotent");
+}
+
+#[test]
+fn fmt_separates_core_functions_with_exactly_two_newlines() {
+    let source =
+        "fn first() {}\n\n\n/// Documents the second function.\nfn second() {}\nfn third() {}\n";
+    let once = jet::format_source(source).expect("core-style functions should format");
+    assert!(
+        once.contains("}\n\n/// Documents the second function.\nfn second()"),
+        "{once}"
+    );
+    assert!(once.contains("}\n\nfn third()"), "{once}");
+    assert!(!once.contains("}\n\n\n"), "{once}");
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("formatting should be idempotent")
+    );
 }
 
 #[test]
@@ -635,6 +652,26 @@ fn fmt_preserves_concise_dispatch_arms() {
 }
 "#;
     assert_fmt_stable(src, "concise dispatch arms");
+}
+
+#[test]
+fn fmt_preserves_value_table_with_alternatives_in_first_arm() {
+    let source = r#"fn canonical_device(device: String) -> ?String {
+    if device == {
+        "CPU" | "cpu" -> Val("CPU")
+        "Auto" | "auto" -> Val("Auto")
+        else -> None
+    }
+}
+"#;
+    let once = jet::format_source(source).expect("value table should format");
+    assert!(once.contains("if device == {\n"), "{once}");
+    assert!(once.contains("\"CPU\" | \"cpu\" -> Val(\"CPU\")"), "{once}");
+    assert!(!once.contains("else if"), "{once}");
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("value table should reformat")
+    );
 }
 
 #[test]

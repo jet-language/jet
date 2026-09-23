@@ -1,14 +1,23 @@
 // core.encoding.base32 — RFC 4648 §6 Base32 (A-Z2-7) with padding.
 //
-// Encode emits uppercase and `=` padding to a multiple of 8 characters.
-// Decode accepts that alphabet only; lowercase is rejected so a mistyped
-// Both RFC 4648 alphabets are available; the hex profile uses 0-9A-V.
+// The default decoder is deliberately canonical: uppercase symbols, complete
+// RFC padding, zero unused bits, and no whitespace or aliases.  Keeping the
+// alphabet checks here (rather than relying on a host decoder) makes malformed
+// input behave identically on every execution tier.
+#Error
+pub struct Base32Error {
+    pub reason: String
+}
+
+impl Base32Error {
+    pub fn new(reason: String) -> Base32Error { Base32Error{reason: reason} }
+}
+
 fn u8_int(b: U8) -> Int { Int.from_u8(b) }
 
 @c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 @c_hex_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 
-/// Encode `data` as padded Base32 text.
 pub fn encode(data: [U8]) -> String { encode_with_alphabet(data, @c_alphabet) }
 
 fn encode_with_alphabet(data: [U8], alphabet: String) -> String {
@@ -43,48 +52,71 @@ fn encode_with_alphabet(data: [U8], alphabet: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-/// Decode padded Base32 text into bytes.
-pub fn decode(text: String) -> [U8] { decode_with_alphabet(text, @c_alphabet) }
+/// Decode the canonical padded RFC 4648 alphabet.
+pub fn decode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, @c_alphabet) }
 
-fn decode_with_alphabet(text: String, alphabet: String) -> [U8] {
+fn decode_with_alphabet(text: String, alphabet: String) -> [U8] !Base32Error {
     ab :: alphabet.bytes()
     raw :: text.bytes()
+    if raw.len() == 0 -> return Ok([U8]{})
+    if raw.len() %% 8 != 0 -> return Err(Base32Error{reason: "invalid Base32 length; canonical Base32 is padded to a multiple of 8 characters"})
     table := [Int]{}
     loop _ in 0..<256 -> table.push(-1)
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
+
+    pad := 0
     end := raw.len()
-    loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
-    if end == 0 -> return Ok([U8]{})
+    loop end > 0 && raw[end - 1] == (U8{61}) {
+        pad += 1
+        end -= 1
+    }
+    if pad > 6 -> return Err(Base32Error{reason: "invalid Base32 padding; at most six '=' characters may trail the alphabet"})
+    loop i in 0..<end {
+        if raw[i] == (U8{61}) -> return Err(Base32Error{reason: "invalid Base32 padding; '=' may appear only at the end"})
+        if table[u8_int(raw[i])] < 0 -> return Err(Base32Error{reason: "invalid Base32 character; expected the selected RFC 4648 alphabet"})
+    }
+    symbols :: end
+    rem :: symbols %% 8
+    expected := 0
+    if rem == 0 -> expected = 0
+    if rem == 2 -> expected = 6
+    if rem == 4 -> expected = 4
+    if rem == 5 -> expected = 3
+    if rem == 7 -> expected = 1
+    if expected < 0 || (rem != 0 && rem != 2 && rem != 4 && rem != 5 && rem != 7) {
+        return Err(Base32Error{reason: "invalid Base32 length; encoded length cannot represent whole bytes"})
+    }
+    if pad != expected -> return Err(Base32Error{reason: "invalid Base32 padding; expected the RFC 4648 padding for the final quantum"})
+    if rem > 0 {
+        last :: table[u8_int(raw[end - 1])]
+        unused := 0
+        if rem == 2 -> unused = 2
+        if rem == 4 -> unused = 4
+        if rem == 5 -> unused = 1
+        if rem == 7 -> unused = 3
+        if (last & ((1 << unused) - 1)) != 0 -> return Err(Base32Error{reason: "invalid Base32 encoding; non-zero unused bits"})
+    }
+
     out := [U8]{}
     acc := 0
     bits := 0
     loop i in 0..<end {
-        v :: table[u8_int(raw[i])]
-        if v < 0 {
-            return Err("invalid Base32 character; expected the selected RFC 4648 alphabet and optional trailing '='")
-        }
-        acc = (acc << 5) | v
+        acc = (acc << 5) | table[u8_int(raw[i])]
         bits += 5
         if bits >= 8 {
             bits -= 8
-            b :: (acc >> bits) & 255
-            out.push(U8{b})
+            out.push(U8{(acc >> bits) & 255})
         }
     }
     Ok(out)
 }
 
 pub fn is_base32(text: String) -> Bool {
-    if text.bytes().len() == 0 -> return false
-    loop b in text.bytes() {
-        n :: b
-        ok := (n >= 50 && n <= 55) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 61
-        if !ok -> return false
-    }
-    true
+    decode(text) == .Ok(_)
 }
+
 pub fn b32encode(data: [U8]) -> String { encode(data) }
-pub fn b32decode(text: String) -> [U8] { decode(text) }
+pub fn b32decode(text: String) -> [U8] !Base32Error { decode(text) }
 
 pub fn b32hexencode(data: [U8]) -> String { encode_with_alphabet(data, @c_hex_alphabet) }
-pub fn b32hexdecode(text: String) -> [U8] { decode_with_alphabet(text, @c_hex_alphabet) }
+pub fn b32hexdecode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, @c_hex_alphabet) }

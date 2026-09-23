@@ -5,14 +5,16 @@ use core.[data, files]
 struct Measurement { group: String, value: Float }
 
 fn run(args: Args) !(IOError | [FieldError]) {
-    measurements :: data.csv<Measurement>(files.read(args.path))
+    text :: files.read(args.path) ?? panic("read")
+    measurements :: data.csv<Measurement>(text) ?? panic("csv")
     loop (name, rows) in measurements.group_by(.group) {
-        values := rows.map(.value)
-        stats :: data.describe(values)
+        values :: rows.map(.value)
+        stats :: data.describe(values) ?? panic("describe")
         row_count :: stats.count
-        values.sort()
-        print("{name} n={row_count} mean={stats.mean:Fixed(2)} median={values[(row_count - 1) /% 2]:Fixed(2)} p95={values[(row_count * 19 - 1) /% 20]:Fixed(2)} sd={stats.stddev:Fixed(2)}")
+        median :: stats.median
+        p95 :: data.quantile(values, 0.95) ?? panic("quantile")
+        print("{name} n={row_count} mean={stats.mean:Fixed(2)} median={median:Fixed(2)} p95={p95:Fixed(2)} sd={stats.stddev:Fixed(2)}")
     }
-    overall :: data.describe(measurements.map(.value))
+    overall :: data.describe(measurements.map(.value)) ?? panic("describe")
     print("overall n={overall.count} mean={overall.mean:Fixed(2)}")
 }

@@ -228,15 +228,17 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
-**D-ENTRY-SCRIPT1=B / D-ENTRY-ORDER1=B — script entry sugar** *(ratified
-2026-08-08, card #1808)*: bare top-level statements in a direct entry file
-are the body of one implicit fallible `fn run()`. Top-level declarations stay
-file-wide declarations; loose statements keep written execution order and
-their bindings are local to that body. `jet run`, `jet dev`, and `jet test`
-use the same entry law. An explicit `fn run` alongside loose statements is
-E0621 with the `jet fix` auto-wrap; an imported file with loose statements is
-E0620 and never executes as an import. `fn dev`, `fn build`, and `#Test`
-declarations remain legal beside script statements.
+**D-ENTRY-SCRIPT1=C / D-ENTRY-ORDER1=C — explicit ordinary-file entry** *(amends
+the 2026-08-08 D-ENTRY-SCRIPT1=B ruling)*: ordinary files never synthesize a
+runtime function from loose top-level statements. `fn run` is the only ordinary
+file execution body; `jet run`, `jet dev`, and `jet test` use that same entry
+law. At file scope, `name :: value` and `name := value` are module globals
+initialized from tier-stable scalar literals or immutable string literals,
+visible to every function in the file; the mutable form is writable. Computed
+work belongs inside `fn run`. Loose top-level statements are E0621, and an
+imported file with loose statements is E0620. Notebook and REPL adapters may
+construct an explicit `fn run` for their submitted fragment. `fn dev`,
+`fn build`, and `#Test` declarations remain legal beside module globals.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -430,6 +432,8 @@ the error side. Members widen into the union only at binding, argument, return,
 Codable field, and `?` error boundaries. Match arms name member types; Codable
 decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
 form; crossings use ordinary match conversion. Does not reopen D-ANY-JAI1.
+
+**D-ENUM-EVOLUTION1=A — Caller-selected enum fallback** *(ratified 2026-09-12, card #3145)*: named enums remain closed. Adding a case can make downstream exhaustive matches fail until they handle it. Callers may add an explicit `else` when they choose future-case tolerance; publishers cannot require it with a marker, so that tolerance is the caller's choice rather than a publisher-enforced compatibility promise. The same completeness rule applies inside and outside the defining module. This policy adds no enum constructor, integer conversion, or unknown-case fallback; foreign and wire ingress remain separate contracts (D-ENUM-UNKNOWN1).
 
 **D-TRAILBLOCK1 — Trailing block argument** *(superseded by D-TRAILBLOCK2=A)*:
 when a call's final param was a function type, a bare `{ }` after `)` stood in

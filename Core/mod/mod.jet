@@ -8,36 +8,33 @@ package {
         mod: .Library{ entry: mod }
     }
 }
+use core as core
 
-// core.mod — a compiled Jet unit (`.jetc` / object) as a handle.
+// core.mod — a compiled Jet unit loaded under an explicit read grant.
 //
-// `load` is the host linker. The bytes on disk are opaque to this file.
-
+// The provider owns artifact validation, staging, ABI checks, and handle
+// lifetime.  The returned `Mod` is opaque; dropping it releases the native
+// module, so source cannot manufacture a detached or already-unloaded handle.
+pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod !Err {
+    core.mod.load(path, grant: grant)
+}
 pub struct CompiledModule {
     pub path: String
     pub handle: Int
 }
 
-/// Load a compiled compiled from `path`.
-pub fn load(path: String) -[FS]> CompiledModule !IOError {
-    h :: host_mod_load(path)
-    if h <= 0 {
-        return Err(IOError{operation: "mod.load", message: "load failed", path: path, os_code: None})
-    }
-    Ok(CompiledModule{path: path, handle: h})
+// The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native
+// handle and unloads on drop; a legacy value cannot truthfully be turned into
+// a detached carrier, so preserve the export as a typed refusal.
+pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule !Err {
+    Err("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop")
 }
 
-fn host_mod_load(path: String) -[FS]> Int { panic("host_mod_load") }
-
-
-pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule {
-    host_mod_unload(compiled.handle)
-    CompiledModule{path: compiled.path, handle: 0}
+pub fn is_loaded(compiled: CompiledModule) -> Bool {
+    compiled.handle > 0
 }
 
-pub fn is_loaded(compiled: CompiledModule) -> Bool { compiled.handle > 0 }
-
-pub fn path(compiled: CompiledModule) -> String { compiled.path }
-
-fn host_mod_unload(handle: Int) -[FS]> { panic("host_mod_unload") }
+pub fn path(compiled: CompiledModule) -> String {
+    compiled.path
+}
 

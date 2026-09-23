@@ -6,9 +6,10 @@ struct Holder {
     grant: Authority
 }
 
-fn run() {
+fn run() -[Exec, Time.Wait]> {
     #FX(grant: Exec, IO, Time.Wait) {
-        result :: process.run(["echo", "authority"], grant)
-        print("authority")
+        spec :: process.cmd(["echo", "authority"]).under(grant)
+        result :: process.run_spec(spec) ?? panic("authority process")
+        print(result.success)
     }
 }

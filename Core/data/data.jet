@@ -8,14 +8,12 @@ package {
         data: .Library{ entry: data }
     }
 }
-// core.data — column-oriented snapshots over text cells.
-//
-// A snapshot is an in-memory table: named columns of equal length, a schema
-// and a source identity. Codecs (`csv`, `json`) parse bytes the caller already
-// holds. `file` / `url` / `database` are loaders; `load` is the host door.
-// Joins, aggregates, and pivots are Jet. Nested `plot` owns chart types;
-// this file re-declares the same names so `core.data` matches the live export
-// table. Nested `loader` / `stream` / `arrow` / `sketch` stay their own rings.
+use core as core
+
+use core.files.[FileReader]
+use core.math as math
+use core.encoding as encoding
+use core.encoding.[EncodingError, EncodingLimits]
 module arrow
 
 module loader
@@ -26,151 +24,284 @@ module plot
 
 module sketch
 
+#Equatable
 pub enum DataFormat {
-    Csv
-    Json
-    Jsonl
+    CSV
+    JSON
+    JSONL
+    Parquet
     Arrow
-    Unknown
 }
 
+
 pub enum DataErrorKind {
-    Syntax
-    Missing
-    Type
+    Decode
     Limit
     IO
+    Empty
+    InvalidArgument
+    NonFinite
+    Overflow
+    State
+    Bridge
     Unsupported
+    DuplicateKey
+    MissingKey
+    WrongOwner
+    StaleRevision
+    InvalidValue
 }
 
 #Error
 pub struct DataError {
     pub kind: DataErrorKind
-    pub message: String
-    pub path: String
+    pub operation: String
+    pub row: ?Int
+    pub column: ?Int
+    pub index: ?Int
+    pub reason: String
+    pub cause: ?EncodingError
 }
 
-pub enum DataLoaderKind {
-    File
-    Url
-    Database
-    Value
+impl DataError {
+    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError {
+        return DataError{
+            kind: kind,
+            operation: ~path,
+            row: None,
+            column: None,
+            index: None,
+            reason: message,
+            cause: None,
+        }
+    }
+}
+fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError {
+    DataError{
+        kind: kind,
+        operation: operation,
+        row: None,
+        column: None,
+        index: None,
+        reason: message,
+        cause: None,
+    }
 }
 
-pub enum DataLoaderStatus {
-    Idle
-    Ready
-    Failed
-    Offline
+fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError {
+    DataError{
+        kind: kind,
+        operation: operation,
+        row: None,
+        column: None,
+        index: Val(index),
+        reason: message,
+        cause: None,
+    }
 }
 
-pub enum DataWatchStatus {
-    Idle
-    Armed
-    Fired
+fn nonfinite(value: Float) -> Bool {
+    if math.is_finite(value) -> return false
+    true
 }
 
-pub enum DataStatus {
-    Empty
-    Ready
-    Stale
-    Error
+
+pub struct DataLineOptions {
+    pub title: String
+    pub x_label: String
+    pub y_label: String
+    pub markers: Bool
+    pub reference: ?Float
+    pub style: String
+    pub color: String
+    pub legend: String
 }
+
 
 pub enum DataFreshness {
-    Live
-    Cached
+    Pending
+    Fresh
     Stale
+    Error
+    Offline
+    Cancelled
 }
-
+#Equatable
 pub enum DataInvalidationCause {
-    Write
-    Schema
+    NoCause
+    Loader
+    Input
+    ArchiveMember
+    Parameters
+    Credential
+    Capability
     Manual
 }
 
-pub struct DataLimits {
-    pub max_rows: Int
-    pub max_bytes: Int
+
+pub struct DataStatus {
+    pub step: String
+    pub path: String
+    pub clone_value: String
+    pub ownership: String
+    pub trust: String
+    pub fallback: String
+    pub replacement: String
 }
 
-pub struct DataLineOptions {
-    pub header: Bool
-    pub skip_blank: Bool
+
+pub struct DataLimits {
+    pub encoding: EncodingLimits
+    pub max_groups: Int
+    pub max_sort_rows: Int
+    pub max_join_rows: Int
+    pub max_output_rows: Int
 }
+
+
 
 pub struct DataAuthority {
-    pub name: String
+    pub scope: String
+    pub revision: String
 }
 
 pub struct DataSourceIdentity {
-    pub kind: String
-    pub target: String
+    pub kind: DataLoaderKind
+    pub locator: String
+    pub member: String
+    pub parameters: [String]
 }
 
 pub struct DataSnapshotIdentity {
     pub id: String
-    pub generation: Int
+    pub source: String
+    pub content: String
+    pub schema: String
+    pub format: DataFormat
 }
 
 pub struct DataProvenance {
     pub source: DataSourceIdentity
-    pub generation: Int
+    pub format: DataFormat
+    pub authority: DataAuthority
 }
 
 pub struct DataColumn {
+    pub id: String
     pub name: String
-    pub values: [String]
+    pub type_name: String
+    pub nullable: Bool
 }
 
 pub struct DataSchema {
-    pub columns: [String]
-    pub types: [String]
-}
-
-pub struct DataSnapshot {
-    pub identity: DataSnapshotIdentity
-    pub schema: DataSchema
+    pub identity: String
+    pub format: DataFormat
     pub columns: [DataColumn]
-    pub provenance: DataProvenance
-    pub status: DataStatus
+    pub projection: ?String
 }
 
-pub struct DataLoader {
-    pub kind: DataLoaderKind
-    pub target: String
+pub struct DataSnapshot<T> {
+    pub value: T
+    pub identity: DataSnapshotIdentity
+    pub provenance: DataProvenance
+    pub schema: DataSchema
+    pub status: DataLoaderStatus
+    pub content: [U8]
+}
+
+pub struct DataLoader<T> {
+    pub source: DataSourceIdentity
+    pub format: DataFormat
+    pub authority: DataAuthority
+    pub limits: DataLimits
+    pub payload: ?[U8]
+    pub last_good: ?[U8]
+    pub cancelled: Bool
+    pub offline: Bool
     pub status: DataLoaderStatus
 }
 
-pub struct DataStream {
-    pub items: [String]
+pub struct DataLoaderStatus {
+    pub identity: String
+    pub freshness: DataFreshness
+    pub invalidated_by: DataInvalidationCause
+    pub error: String
+    pub cleanup: String
+    pub buffered_bytes: Int
+    pub backpressure: Bool
+    pub last_good: Bool
+}
+
+pub struct DataWatchStatus {
+    pub mode: String
+    pub revision: Int
+    pub retained_rows: Int
+    pub recomputations: Int
+    pub active: Bool
+    pub generation: Int
+    pub dirty: Bool
+    pub error: String
+    pub freshness_ms: Int
+    pub invalidation_cause: String
+    pub refreshing: Bool
+    pub cancelled: Bool
+}
+
+pub struct DataStream<T> {
+    pub items: [T]
     pub index: Int
+    pub cancelled: Bool
 }
 
-pub struct DataTracked {
-    pub name: String
-    pub snapshot: DataSnapshot
-}
 
-pub struct DataWatch {
-    pub target: String
-    pub status: DataWatchStatus
-}
+
 
 pub struct DataPivotCell {
-    pub row: String
-    pub col: String
-    pub value: Float
-}
-
-pub struct Group {
-    pub key: String
+    pub row_key: String
+    pub column_key: String
     pub count: Int
     pub sum: Float
+    pub mean: Float
+}
+pub struct DataSummary {
+    pub count: Int
+    pub sum: Float
+    pub mean: Float
+    pub min: Float
+    pub max: Float
+    pub median: Float
+    pub variance: Float
+    pub stddev: Float
 }
 
-pub struct Query {
+pub struct DataJoin<L, R> {
+    pub left: L
+    pub right: R
+}
+
+pub struct JetDataPlot<T> {
+    pub rows: [T]
+    pub plan: JetDataPlotPlan
+}
+
+pub struct Group<K, V> {
+    pub key: K
+    pub value: V
+}
+
+pub struct Query<T> {
+    pub rows: [T]
     pub sql: String
+    pub operations: [String]
+}
+
+pub struct DataTracked<T, K> {
+    pub snapshot: DataSnapshot<[T]>
+}
+
+pub struct DataWatch<T> {
+    pub query: Query<T>
+    pub status: DataWatchStatus
 }
 
 pub enum JetDataPlotMark {
@@ -360,735 +491,617 @@ pub struct JetDataPlotPlan {
     pub labels: [String]
     pub values: [Float]
     pub layout: JetDataPlotLayout
+    pub encoding: JetDataPlotEncoding
+    pub schema: JetDataPlotSchema
 }
 
-/// Bind a tracked name. The snapshot is empty until `load` / `csv` / `json`.
-pub fn track(name: String) -> DataTracked { {name: name, snapshot: empty_snapshot(name)} }
-
-/// Empty loader pointing at a filesystem path.
-pub fn file(path: String) -> DataLoader {
-    {kind: DataLoaderKind.File, target: path, status: DataLoaderStatus.Idle}
-}
-
-/// Member inside an archive path (`zip:entry` spelling is a host concern).
-pub fn file_member(path: String, member: String) -> DataLoader {
-    {kind: DataLoaderKind.File, target: "{path}::{member}", status: DataLoaderStatus.Idle}
-}
-
-pub fn url(href: String) -> DataLoader {
-    {kind: DataLoaderKind.Url, target: href, status: DataLoaderStatus.Idle}
-}
-
-pub fn database(dsn: String) -> DataLoader {
-    {kind: DataLoaderKind.Database, target: dsn, status: DataLoaderStatus.Idle}
-}
-
-/// Parse RFC 4180-ish CSV text into a snapshot. First row is the header.
-pub fn csv(text: String) -> DataSnapshot !DataError { table_from_csv(text, "csv") }
-
-pub fn csv_reader(text: String) -> DataSnapshot !DataError { csv(text) }
-
-/// JSON array-of-arrays, array-of-objects, or JSONL objects → snapshot.
-pub fn json(text: String) -> DataSnapshot !DataError { table_from_json(text, "json") }
-
-pub fn json_reader(text: String) -> DataSnapshot !DataError { json(text) }
-
-pub fn load_default() -> DataSnapshot { empty_snapshot("default") }
-
-/// Materialize a loader. File/url/database bytes come from the host; sniffing
-/// CSV vs JSON is Jet.
-pub fn load(loader: DataLoader) -[FS, Net, DB]> DataSnapshot !DataError {
-    if loader.target.len() == 0 {
-        return Err(DataError{kind: DataErrorKind.Missing, message: "empty loader target", path: ""})
-    }
-    text := ""
-    if {
-        loader.kind == DataLoaderKind.File -> { text = host_data_read(loader.target) }
-        loader.kind == DataLoaderKind.Url -> { text = host_data_fetch(loader.target) }
-        loader.kind == DataLoaderKind.Database -> {
-            text = host_data_sql(loader.target, "SELECT *")
-        }
-        else -> { text = loader.target }
-    }
-    Ok(from_text(text, loader.target))
-}
-
-pub fn require_bridge() !DataError {
-    if host_data_bridge() -> return Ok()
-    Err(DataError{kind: DataErrorKind.Unsupported, message: "data bridge unavailable", path: ""})
-}
-
-pub fn snapshot(loader: DataLoader) -[FS, Net, DB]> DataSnapshot !DataError { load(loader) }
-
-pub fn schema(snapshot: DataSnapshot) -> DataSchema { snapshot.schema }
-
-pub fn status(snapshot: DataSnapshot) -> DataStatus { snapshot.status }
-
-pub fn describe(snapshot: DataSnapshot) -> String {
-    out := "rows={row_count(snapshot)} cols={snapshot.columns.len()}\n"
-    loop i in 0..<snapshot.columns.len() {
-        name :: snapshot.columns[i].name
-        ty :: type_at(snapshot, i)
-        out = "{out}{name}: {ty}\n"
-    }
-    out
-}
-
-pub fn show(snapshot: DataSnapshot) -> String { to_csv(snapshot) }
-
-pub fn text(snapshot: DataSnapshot) -> String { show(snapshot) }
-
-pub fn inspect(snapshot: DataSnapshot) -> String { describe(snapshot) }
-
-pub fn inspect_json(snapshot: DataSnapshot) -> String {
-    cols := ""
-    loop i in 0..<snapshot.columns.len() {
-        if i > 0 -> cols = "{cols},"
-        cols = "{cols}\"{snapshot.columns[i].name}\""
-    }
-    "{{\"rows\":{row_count(snapshot)},\"columns\":[{cols}]}}"
-}
-
-pub fn value(snapshot: DataSnapshot, row: Int, column: String) -> String !DataError {
-    col :: column_named(snapshot, column) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{column}`", path: column})
-    if row < 0 || row >= col.values.len() {
-        return Err(DataError{kind: DataErrorKind.Missing, message: "row {row} out of range", path: column})
-    }
-    Ok(col.values[row])
-}
-
-/// Tiny SQL: `SELECT *`, `SELECT COUNT(*)`, `SELECT col`, optional
-/// `WHERE col = value`. FROM clauses are ignored.
-pub fn query(snapshot: DataSnapshot, sql: String) -> DataSnapshot !DataError {
-    q :: Query{sql: trim(sql)}
-    raw :: upper(q.sql)
-    if starts(raw, "SELECT COUNT") -> return Ok(count_snapshot(snapshot))
-    filtered := snapshot
-    w :: index_of(raw, " WHERE ")
-    body := q.sql
-    if w >= 0 {
-        filtered = apply_where(snapshot, slice_str(q.sql, w + 7, q.sql.len())) ?? return Err(DataError{kind: DataErrorKind.Syntax, message: "WHERE clause", path: sql})
-        body = slice_str(q.sql, 0, w)
-    }
-    sel := strip_select(body)
-    if sel == "*" -> return Ok(filtered)
-    if sel.len() == 0 -> return Ok(filtered)
-    col :: column_named(filtered, sel) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{sel}`", path: sel})
-    Ok(snapshot_from_columns([DataColumn]{col}, filtered.provenance.source.target))
-}
-
-pub fn count(snapshot: DataSnapshot) -> Int { row_count(snapshot) }
-
-pub fn min(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 0) }
-
-pub fn max(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 1) }
-
-pub fn sum(snapshot: DataSnapshot, column: String) -> ?Float { reduce_num(snapshot, column, 2) }
-
-pub fn mean(snapshot: DataSnapshot, column: String) -> ?Float {
-    s :: sum(snapshot, column) ?? return None
-    n :: numeric_count(snapshot, column)
-    if n == 0 -> return None
-    Val(s / (Float{n}))
-}
-
-pub fn variance(snapshot: DataSnapshot, column: String) -> ?Float {
-    m :: mean(snapshot, column) ?? return None
-    col :: column_named(snapshot, column) ?? return None
-    acc := 0.0
-    n := 0
-    loop v in col.values {
-        x :: Float.parse(v) ?? next
-        d :: x - m
-        acc = acc + d * d
-        n = n + 1
-    }
-    if n < 2 -> return None
-    Val(acc / (Float{n - 1}))
-}
-
-pub fn stddev(snapshot: DataSnapshot, column: String) -> ?Float {
-    v :: variance(snapshot, column) ?? return None
-    Val(sqrt_f(v))
-}
-
-pub fn median(snapshot: DataSnapshot, column: String) -> ?Float {
-    xs :: sorted_nums(snapshot, column)
-    if xs.len() == 0 -> return None
-    mid :: xs.len() / 2
-    if xs.len() % 2 == 1 -> return Val(xs[mid])
-    Val((xs[mid - 1] + xs[mid]) / 2.0)
-}
-
-pub fn quantile(snapshot: DataSnapshot, column: String, q: Float) -> ?Float {
-    xs :: sorted_nums(snapshot, column)
-    if xs.len() == 0 -> return None
-    p := q
-    if p < 0.0 -> p = 0.0
-    if p > 1.0 -> p = 1.0
-    idx := (Float{xs.len() - 1}) * p
-    lo := 0
-    loop {
-        if (Float{lo + 1}) > idx -> break
-        lo = lo + 1
-        if lo >= xs.len() - 1 -> break
-    }
-    hi := lo + 1
-    if hi >= xs.len() -> return Val(xs[lo])
-    frac :: idx - (Float{lo})
-    Val(xs[lo] * (1.0 - frac) + xs[hi] * frac)
-}
-
-pub fn rolling_mean(snapshot: DataSnapshot, column: String, window: Int) -> DataSnapshot !DataError {
-    w := window
-    if w < 1 {
-        return Err(DataError{kind: DataErrorKind.Limit, message: "window must be ≥ 1", path: column})
-    }
-    col :: column_named(snapshot, column) ?? return Err(DataError{kind: DataErrorKind.Missing, message: "no column `{column}`", path: column})
-    out := [String]{}
-    loop i in 0..<col.values.len() {
-        start := i - w + 1
-        if start < 0 -> start = 0
-        acc := 0.0
-        n := 0
-        loop j in start..<(i + 1) {
-            x :: Float.parse(col.values[j]) ?? next
-            acc = acc + x
-            n = n + 1
-        }
-        if n == 0 -> out.push("") else -> out.push("{acc / Float{n}}")
-    }
-    Ok(snapshot_from_columns([DataColumn]{DataColumn{name: "{column}_rmean", values: out}}, snapshot.provenance.source.target))
-}
-
-pub fn inner_join(left: DataSnapshot, right: DataSnapshot, on: String) -> DataSnapshot !DataError {
-    join_on(left, right, on, false)
-}
-
-pub fn left_join(left: DataSnapshot, right: DataSnapshot, on: String) -> DataSnapshot !DataError {
-    join_on(left, right, on, true)
-}
-
-/// Pivot: group `rows` × `cols`, summing `values`.
-pub fn pivot_sum(snapshot: DataSnapshot, rows: String, cols: String, values: String) -> DataSnapshot !DataError {
-    rcol :: column_named(snapshot, rows) ?? return Err(missing(rows))
-    ccol :: column_named(snapshot, cols) ?? return Err(missing(cols))
-    vcol :: column_named(snapshot, values) ?? return Err(missing(values))
-    n :: rcol.values.len()
-    row_keys := [String]{}
-    col_keys := [String]{}
-    loop i in 0..<n {
-        if !contains_str(row_keys, rcol.values[i]) {
-            row_keys.push(rcol.values[i])
-            if !contains_str(col_keys, ccol.values[i]) -> col_keys.push(ccol.values[i])
+// Typed data declarations and provider-backed boundaries.
+impl DataLimits {
+    pub fn safe() -> DataLimits {
+        DataLimits{
+            encoding: encoding.EncodingLimits.safe(),
+            max_groups: 100000,
+            max_sort_rows: 1000000,
+            max_join_rows: 1000000,
+            max_output_rows: 1000000,
         }
     }
-    names := [String]{rows}
-    loop c in col_keys -> names.push(c)
-    cols_out := [DataColumn]{}
-    loop name in names -> cols_out.push(DataColumn{name: name, values: [String]{}})
-    loop r in row_keys {
-        cols_out[0].values.push(r)
-        loop j in 0..<col_keys.len() {
-            acc := 0.0
-            loop i in 0..<n {
-                if rcol.values[i] == r && ccol.values[i] == col_keys[j] {
-                    acc = acc + (Float.parse(vcol.values[i]) ?? 0.0)
-                }
+}
+
+pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> !DataError {
+    Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
+}
+
+pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "", limits)
+}
+
+pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "", limits)
+}
+
+pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
+}
+
+pub fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
+}
+
+pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> !DataError {
+    core.data.value<T>(value, limits)
+}
+
+pub fn load_default<T>(locator: String) -> DataLoader<T> !DataError {
+    core.data.load_default<T>(locator)
+}
+
+pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> !DataError {
+    core.data.load<T>(locator, limits)
+}
+
+pub fn csv<T: Decode>(text: String) -> [T] !DataError {
+    rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
+    Ok(rows)
+}
+
+pub fn json<T: Decode>(text: String) -> [T] !DataError {
+    rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
+    Ok(rows)
+}
+
+pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> !DataError {
+    core.data.csv_reader<T>(^reader, limits)
+}
+
+pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> !DataError {
+    core.data.json_reader<T>(^reader, limits)
+}
+pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> !DataError {
+    if loader.cancelled {
+        return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
+    }
+    core.data.snapshot<T>(&loader)
+}
+
+pub fn schema<T>(rows: [T]) -> [DataColumn] { core.data.schema(rows) }
+
+pub fn count<T>(rows: [T]) -> Int { rows.len() }
+
+pub fn describe(values: [Float]) -> DataSummary !DataError {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
+    total :: compensated_sum(values, "describe") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while describing data", "describe"))
+    mean_value := total / Float{values.len()}
+    if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
+    minimum :: min(values) ?? return Err(data_error(DataErrorKind.NonFinite, "minimum failed while describing data", "describe"))
+    maximum :: max(values) ?? return Err(data_error(DataErrorKind.NonFinite, "maximum failed while describing data", "describe"))
+    middle :: median(values) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    spread :: variance(values) ?? return Err(data_error(DataErrorKind.Overflow, "variance failed while describing data", "describe"))
+    deviation := math.sqrt(spread)
+    if nonfinite(deviation) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "describe"))
+    Ok(DataSummary{
+        count: values.len(),
+        sum: total,
+        mean: normalize_zero(mean_value),
+        min: normalize_zero(minimum),
+        max: normalize_zero(maximum),
+        median: normalize_zero(middle),
+        variance: normalize_zero(spread),
+        stddev: normalize_zero(deviation),
+    })
+}
+
+pub fn sum(values: [Float]) -> Float !DataError {
+    compensated_sum(values, "sum")
+}
+
+pub fn mean(values: [Float]) -> Float !DataError {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
+    total :: compensated_sum(values, "mean") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while computing mean", "mean"))
+    mean_value := total / Float{values.len()}
+    if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "mean"))
+    Ok(normalize_zero(mean_value))
+}
+
+pub fn min(values: [Float]) -> Float !DataError {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
+    first :: values[0]
+    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "min"))
+    out := first
+    loop value in values {
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "min"))
+        if value < out -> out = value
+    }
+    Ok(normalize_zero(out))
+}
+
+
+pub fn max(values: [Float]) -> Float !DataError {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
+    first :: values[0]
+    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "max"))
+    out := first
+    loop value in values {
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "max"))
+        if value > out -> out = value
+    }
+    Ok(normalize_zero(out))
+}
+
+pub fn variance(values: [Float]) -> Float !DataError {
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
+    mean_value := Float{0.0}
+    m2 := Float{0.0}
+    n := Float{0.0}
+    loop value in values {
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "variance"))
+        n = n + Float{1.0}
+        delta := value - mean_value
+        mean_value = mean_value + delta / n
+        delta2 := value - mean_value
+        m2 = m2 + delta * delta2
+        if nonfinite(mean_value) || nonfinite(m2) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+    }
+    if m2 < (Float{0.0}) -> m2 = Float{0.0}
+    result := m2 / n
+    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing variance", "variance"))
+    Ok(normalize_zero(result))
+}
+
+pub fn stddev(values: [Float]) -> Float !DataError {
+    value :: variance(values) ?? return Err(data_error(DataErrorKind.Overflow, "variance failed while computing standard deviation", "stddev"))
+    result := math.sqrt(value)
+    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "stddev"))
+    Ok(normalize_zero(result))
+}
+
+pub fn median(values: [Float]) -> Float !DataError {
+    quantile(values, Float{0.5})
+}
+
+pub fn quantile(values: [Float], q: Float) -> Float !DataError {
+    if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
+        return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be in 0.0 through 1.0", "quantile"))
+    }
+    if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "quantile of empty data is undefined", "quantile"))
+    limits := DataLimits.safe()
+    if values.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows exceeded", "quantile"))
+    loop value in values {
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "quantile"))
+    }
+    sorted := sort_floats(values)
+    pos := q * Float{sorted.len() - 1}
+    lo := Int{pos}
+    hi := lo
+    if (Float{lo}) < pos -> hi = lo + 1
+    if hi >= sorted.len() -> hi = sorted.len() - 1
+    if lo == hi -> return Ok(normalize_zero(sorted[lo]))
+    frac := pos - Float{lo}
+    result := sorted[lo] * (Float{1.0} - frac) + sorted[hi] * frac
+    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
+    Ok(normalize_zero(result))
+}
+
+pub fn rolling_mean(values: [Float], window: Int) -> [Float] !DataError {
+    if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
+    limits := DataLimits.safe()
+    if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
+    out := [Float]{}
+    loop i in 0..<values.len() {
+        start := i - window + 1
+        total :: compensated_sum_range(values, start, i + 1, "rolling_mean") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while computing rolling mean", "rolling_mean"))
+        n := i + 1 - start
+        mean_value := total / Float{n}
+        if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
+        out.push(normalize_zero(mean_value))
+    }
+    Ok(out)
+}
+
+pub fn query<T>(rows: [T]) -> Query<T> {
+    Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
+}
+
+pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] !DataError {
+    limits := DataLimits.safe()
+    left_keys := [String]{}
+    right_keys := [String]{}
+    loop row in left {
+        key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
+        left_keys.push(key)
+    }
+    loop row in right {
+        key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
+        right_keys.push(key)
+    }
+    out := [DataJoin<T, U>]{}
+    loop left_index in 0..<left.len() {
+        loop right_index in 0..<right.len() {
+            if text_compare(~left_keys[left_index], ~right_keys[right_index]) != 0 -> next
+            if out.len() >= limits.max_join_rows {
+                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
             }
-            cols_out[j + 1].values.push("{acc}")
+            out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index]})
         }
     }
-    Ok(snapshot_from_columns(cols_out, snapshot.provenance.source.target))
-}
-
-pub fn plot(snapshot: DataSnapshot, labels: String, values: String) -> JetDataPlotPlan !DataError {
-    lcol :: column_named(snapshot, labels) ?? return Err(missing(labels))
-    vcol :: column_named(snapshot, values) ?? return Err(missing(values))
-    ys := [Float]{}
-    loop v in vcol.values -> ys.push(Float.parse(v) ?? 0.0)
-    Ok(JetDataPlotPlan{mark: JetDataPlotMark.Bar, labels: lcol.values, values: ys, layout: JetDataPlotLayout{width: 320, height: 24 * lcol.values.len() + 16}})
-}
-
-pub fn bar_text(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
-    p :: plot(snapshot, labels, values)
-    Ok(render_bar_text(p.labels, p.values))
-}
-
-pub fn bar_svg(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
-    p :: plot(snapshot, labels, values)
-    Ok(render_bar_svg(p.labels, p.values))
-}
-
-pub fn line_text(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
-    p :: plot(snapshot, labels, values)
-    Ok(render_line_text(p.labels, p.values))
-}
-
-pub fn line_svg(snapshot: DataSnapshot, labels: String, values: String) -> String !DataError {
-    p :: plot(snapshot, labels, values)
-    Ok(render_line_svg(p.labels, p.values))
-}
-
-pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender {
-    {format: JetDataPlotRenderFormat.Svg, body: render_bar_svg(plan.labels, plan.values)}
-}
-
-pub fn svg(plan: JetDataPlotPlan) -> String { render_bar_svg(plan.labels, plan.values) }
-
-fn empty_snapshot(id: String) -> DataSnapshot {
-    ident :: DataSourceIdentity{kind: "empty", target: id}
-    {
-        identity: DataSnapshotIdentity{id: id, generation: 0},
-        schema: DataSchema{columns: [String]{}, types: [String]{}},
-        columns: [DataColumn]{},
-        provenance: DataProvenance{source: ident, generation: 0},
-        status: DataStatus.Empty,
+    if out.len() > limits.max_output_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "inner_join"))
     }
+    Ok(out)
 }
 
-fn snapshot_from_columns(columns: [DataColumn], target: String) -> DataSnapshot {
-    names := [String]{}
-    types := [String]{}
-    loop c in columns {
-        names.push(c.name)
-        types.push(guess_type(c))
+pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, ?U>] !DataError {
+    limits := DataLimits.safe()
+    left_keys := [String]{}
+    right_keys := [String]{}
+    loop row in left {
+        key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
+        left_keys.push(key)
     }
-    status := DataStatus.Ready
-    if columns.len() == 0 -> status = DataStatus.Empty
-    ident :: DataSourceIdentity{kind: "table", target: target}
-    {
-        identity: DataSnapshotIdentity{id: target, generation: 1},
-        schema: DataSchema{columns: names, types: types},
-        columns: columns,
-        provenance: DataProvenance{source: ident, generation: 1},
-        status: status,
+    loop row in right {
+        key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
+        right_keys.push(key)
     }
-}
-
-fn from_text(text: String, target: String) -> DataSnapshot !DataError {
-    t :: trim(text)
-    if t.len() == 0 -> return Ok(empty_snapshot(target))
-    b :: t.bytes()[0]
-    if b == (U8{91}) || b == (U8{123}) -> return table_from_json(t, target)
-    table_from_csv(t, target)
-}
-
-fn table_from_csv(text: String, target: String) -> DataSnapshot !DataError {
-    rows :: split_csv(text)
-    if rows.len() == 0 -> return Ok(empty_snapshot(target))
-    header :: rows[0]
-    cols := [DataColumn]{}
-    loop h in header -> cols.push(DataColumn{name: h, values: [String]{}})
-    loop r in 1..<rows.len() {
-        row :: rows[r]
-        loop c in 0..<cols.len() {
-            v := ""
-            if c < row.len() -> v = row[c]
-            cols[c].values.push(v)
-        }
-    }
-    Ok(snapshot_from_columns(cols, target))
-}
-
-fn table_from_json(text: String, target: String) -> DataSnapshot !DataError {
-    t :: trim(text)
-    if t.len() == 0 -> return Ok(empty_snapshot(target))
-    b :: t.bytes()[0]
-    if b == (U8{91}) -> return table_from_json_array(t, target)
-    table_from_jsonl(t, target)
-}
-
-fn table_from_jsonl(text: String, target: String) -> DataSnapshot !DataError {
-    lines :: split_lines(text)
-    keys := [String]{}
-    records := [[String:String]]{}
-    loop line in lines {
-        s :: trim(line)
-        if s.len() == 0 -> next
-        rec :: parse_object_strings(s) ?? return Err(DataError{kind: DataErrorKind.Syntax, message: "jsonl object", path: target})
-        loop pair in rec {
-            if !contains_str(keys, pair.key) -> keys.push(pair.key)
-        }
-        records.push(rec)
-    }
-    cols := [DataColumn]{}
-    loop k in keys -> cols.push(DataColumn{name: k, values: [String]{}})
-    loop rec in records {
-        loop i in 0..<keys.len() {
-            v :: rec.get(keys[i]) ?? ""
-            cols[i].values.push(v)
-        }
-    }
-    Ok(snapshot_from_columns(cols, target))
-}
-
-fn table_from_json_array(text: String, target: String) -> DataSnapshot !DataError {
-    // Array of arrays of strings/numbers, or array of objects.
-    inner :: trim(strip_brackets(text))
-    if inner.len() == 0 -> return Ok(empty_snapshot(target))
-    if trim(inner).bytes()[0] == (U8{123}) {
-        return table_from_jsonl(objects_to_jsonl(inner), target)
-    }
-    rows := [[String]]{}
-    cur := [String]{}
-    field := [U8]{}
-    in_str := false
-    escape := false
-    loop b in inner.bytes() {
-        n :: b
-        if in_str {
-            if escape {
-                field.push(b)
-                escape = false
-                next
-            }
-            if n == 92 {
-                escape = true
-                next
-            }
-            if n == 34 {
-                in_str = false
-                next
-            }
-            field.push(b)
-            next
-        }
-        if n == 34 {
-            in_str = true
-            next
-        }
-        if n == 91 {
-            cur = [String]{}
-            next
-        }
-        if n == 93 || n == 44 {
-            if field.len() > 0 || n == 93 {
-                cur.push(trim(String.from_bytes(field) ?? ""))
-                field = [U8]{}
-            }
-            if n == 93 && cur.len() > 0 {
-                rows.push(cur)
-                cur = [String]{}
-            }
-            next
-        }
-        if n == 32 || n == 10 || n == 13 || n == 9 -> next
-        field.push(b)
-    }
-    if rows.len() == 0 -> return Ok(empty_snapshot(target))
-    header := [String]{}
-    start := 0
-    all_num := true
-    loop cell in rows[0] {
-        if Float.parse(cell) == .None -> all_num = false
-    }
-    if {
-        all_num -> {
-            loop i in 0..<rows[0].len() -> header.push("c{i}")
-        }
-        else -> {
-            header = rows[0]
-            start = 1
-        }
-    }
-    cols := [DataColumn]{}
-    loop h in header -> cols.push(DataColumn{name: h, values: [String]{}})
-    loop r in start..<rows.len() {
-        row :: rows[r]
-        loop c in 0..<cols.len() {
-            v := ""
-            if c < row.len() -> v = row[c]
-            cols[c].values.push(v)
-        }
-    }
-    Ok(snapshot_from_columns(cols, target))
-}
-
-fn objects_to_jsonl(inner: String) -> String {
-    // Split top-level `{...}` objects on commas between them.
-    out := ""
-    depth := 0
-    start := 0
-    raw :: inner.bytes()
-    i := 0
-    loop i < raw.len() {
-        n :: raw[i]
-        if n == 123 -> depth = depth + 1
-        if n == 125 {
-            depth = depth - 1
-            if depth == 0 {
-                chunk :: String.from_bytes(raw[start..i]) ?? ""
-                if out.len() > 0 -> out = "{out}\n"
-                out = "{out}{chunk}"
-                start = i + 1
-            }
-        }
-        i = i + 1
-    }
-    out
-}
-
-fn split_csv(text: String) -> [[String]] {
-    rows := [[String]]{}
-    fields := [String]{}
-    field := [U8]{}
-    in_quotes := false
-    raw :: text.bytes()
-    i := 0
-    loop i < raw.len() {
-        n :: raw[i]
-        if in_quotes {
-            if n == 34 {
-                if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
-                    field.push(U8{34})
-                    i = i + 2
-                    next
-                }
-                in_quotes = false
-                i = i + 1
-                next
-            }
-            field.push(raw[i])
-            i = i + 1
-            next
-        }
-        if n == 34 {
-            in_quotes = true
-            i = i + 1
-            next
-        }
-        if n == 44 {
-            fields.push(String.from_bytes(field) ?? "")
-            field = [U8]{}
-            i = i + 1
-            next
-        }
-        if n == 10 {
-            fields.push(String.from_bytes(field) ?? "")
-            field = [U8]{}
-            if fields.len() > 1 || fields[0].len() > 0 -> rows.push(fields)
-            fields = [String]{}
-            i = i + 1
-            next
-        }
-        if n == 13 {
-            i = i + 1
-            next
-        }
-        field.push(raw[i])
-        i = i + 1
-    }
-    fields.push(String.from_bytes(field) ?? "")
-    if fields.len() > 1 || fields[0].len() > 0 -> rows.push(fields)
-    rows
-}
-
-fn to_csv(snapshot: DataSnapshot) -> String {
-    out := ""
-    loop i in 0..<snapshot.columns.len() {
-        if i > 0 -> out = "{out},"
-        out = "{out}{snapshot.columns[i].name}"
-    }
-    out = "{out}\n"
-    n :: row_count(snapshot)
-    loop r in 0..<n {
-        loop c in 0..<snapshot.columns.len() {
-            if c > 0 -> out = "{out},"
-            out = "{out}{snapshot.columns[c].values[r]}"
-        }
-        out = "{out}\n"
-    }
-    out
-}
-
-fn column_named(snapshot: DataSnapshot, name: String) -> ?DataColumn {
-    loop c in snapshot.columns {
-        if c.name == name -> return Val(c)
-    }
-    None
-}
-
-fn row_count(snapshot: DataSnapshot) -> Int {
-    if snapshot.columns.len() == 0 -> return 0
-    snapshot.columns[0].values.len()
-}
-
-fn type_at(snapshot: DataSnapshot, i: Int) -> String {
-    if i >= snapshot.schema.types.len() -> return "text"
-    snapshot.schema.types[i]
-}
-
-fn guess_type(col: DataColumn) -> String {
-    saw := false
-    loop v in col.values {
-        if v.len() == 0 -> next
-        if Float.parse(v) == .None -> return "text"
-        saw = true
-    }
-    if saw -> "number"
-    "text"
-}
-
-fn count_snapshot(snapshot: DataSnapshot) -> DataSnapshot {
-    n :: row_count(snapshot)
-    col :: DataColumn{name: "count", values: [String]{"{n}"}}
-    snapshot_from_columns([DataColumn]{col}, snapshot.provenance.source.target)
-}
-
-fn apply_where(snapshot: DataSnapshot, clause: String) -> ?DataSnapshot {
-    c :: trim(clause)
-    eq :: index_of(c, "=")
-    if eq <= 0 -> return None
-    col_name :: trim(slice_str(c, 0, eq))
-    raw_val :: trim(slice_str(c, eq + 1, c.len()))
-    want :: trim_quotes(raw_val)
-    col :: column_named(snapshot, col_name) ?? return None
-    keep := [Int]{}
-    loop i in 0..<col.values.len() {
-        if col.values[i] == want -> keep.push(i)
-    }
-    cols := [DataColumn]{}
-    loop src in snapshot.columns {
-        vals := [String]{}
-        loop i in keep -> vals.push(src.values[i])
-        cols.push(DataColumn{name: src.name, values: vals})
-    }
-    Val(snapshot_from_columns(cols, snapshot.provenance.source.target))
-}
-
-fn join_on(left: DataSnapshot, right: DataSnapshot, on: String, left_outer: Bool) -> DataSnapshot !DataError {
-    lcol :: column_named(left, on) ?? return Err(missing(on))
-    rcol :: column_named(right, on) ?? return Err(missing(on))
-    names := [String]{}
-    loop c in left.columns -> names.push(c.name)
-    loop c in right.columns {
-        if c.name == on -> next
-        names.push("{c.name}_r")
-    }
-    cols := [DataColumn]{}
-    loop n in names -> cols.push(DataColumn{name: n, values: [String]{}})
-    loop i in 0..<lcol.values.len() {
+    out := [DataJoin<T, ?U>]{}
+    loop left_index in 0..<left.len() {
         matched := false
-        loop j in 0..<rcol.values.len() {
-            if lcol.values[i] != rcol.values[j] -> next
+        loop right_index in 0..<right.len() {
+            if text_compare(~left_keys[left_index], ~right_keys[right_index]) != 0 -> next
             matched = true
-            push_join_row(&cols, left, right, i, j, on)
+            if out.len() >= limits.max_join_rows {
+                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
+            }
+            out.push(DataJoin<T, ?U>{left: left[left_index], right: Val(right[right_index])})
         }
-        if !matched && left_outer -> push_join_row(&cols, left, right, i, -1, on)
-    }
-    Ok(snapshot_from_columns(cols, left.provenance.source.target))
-}
-
-fn push_join_row(cols: [DataColumn], left: DataSnapshot, right: DataSnapshot, i: Int, j: Int, on: String) {
-    k := 0
-    loop c in left.columns {
-        cols[k].values.push(c.values[i])
-        k = k + 1
-    }
-    loop c in right.columns {
-        if c.name == on -> next
-        if j < 0 -> cols[k].values.push("") else -> cols[k].values.push(c.values[j])
-        k = k + 1
-    }
-}
-
-fn reduce_num(snapshot: DataSnapshot, column: String, op: Int) -> ?Float {
-    col :: column_named(snapshot, column) ?? return None
-    acc := 0.0
-    any := false
-    loop v in col.values {
-        x :: Float.parse(v) ?? next
-        if {
-            !any -> {
-                acc = x
-                any = true
+        if !matched {
+            if out.len() >= limits.max_join_rows {
+                return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "left_join"))
             }
-            op == 0 -> {
-                if x < acc -> acc = x
-            }
-            op == 1 -> {
-                if x > acc -> acc = x
-            }
-            else -> { acc = acc + x }
+            out.push(DataJoin<T, ?U>{left: left[left_index], right: None})
         }
     }
-    if !any -> return None
-    Val(acc)
+    if out.len() > limits.max_output_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "left_join"))
+    }
+    Ok(out)
 }
 
-fn numeric_count(snapshot: DataSnapshot, column: String) -> Int {
-    col :: column_named(snapshot, column) ?? return 0
-    n := 0
-    loop v in col.values {
-        if Float.parse(v) != None -> n = n + 1
+pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] !DataError {
+    limits := DataLimits.safe()
+    cells := [DataPivotCell]{}
+    loop index in 0..<rows.len() {
+        row := rows[index]
+        row_name :: row_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot row key failed", "pivot_sum"))
+        column_name :: column_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot column key failed", "pivot_sum"))
+        amount :: value_fn(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot value failed", "pivot_sum"))
+        if nonfinite(amount) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "pivot values must be finite", "pivot_sum", index))
+        }
+        found := -1
+        loop cell_index in 0..<cells.len() {
+            if text_compare(~cells[cell_index].row_key, ~row_name) == 0 && text_compare(~cells[cell_index].column_key, ~column_name) == 0 {
+                found = cell_index
+                break
+            }
+        }
+        if found < 0 {
+            if cells.len() >= limits.max_groups {
+                return Err(data_error(DataErrorKind.Limit, "max_groups exceeded", "pivot_sum"))
+            }
+            cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: ~amount, mean: amount})
+            next
+        }
+        cell := cells[found]
+        cell.count = cell.count + 1
+        cell.sum = cell.sum + amount
+        if nonfinite(cell.sum) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
+        }
+        cells[found] = cell
     }
-    n
+    if cells.len() > limits.max_output_rows {
+        return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "pivot_sum"))
+    }
+    loop index in 0..<cells.len() {
+        cell := cells[index]
+        cell.mean = cell.sum / Float{cell.count}
+        if nonfinite(cell.mean) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while pivoting", "pivot_sum"))
+        cell.sum = normalize_zero(cell.sum)
+        cell.mean = normalize_zero(cell.mean)
+        cells[index] = cell
+    }
+    _ :: sort_pivot_cells(&cells)
+    Ok(cells)
 }
 
-fn sorted_nums(snapshot: DataSnapshot, column: String) -> [Float] {
-    col :: column_named(snapshot, column) ?? return [Float]{}
-    xs := [Float]{}
-    loop v in col.values {
-        x :: Float.parse(v) ?? next
-        xs.push(x)
+pub fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> !DataError {
+    core.data.plot<T>(rows)
+}
+
+pub fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection !DataError {
+    plan :: normalize_plot_plan(plot.plan)
+    Ok(JetDataPlotInspection{text: plot_inspection_text(plan, plot.rows.len())})
+}
+
+pub fn inspect_json<T>(plot: JetDataPlot<T>) -> String !DataError {
+    plan :: normalize_plot_plan(plot.plan)
+    Ok(plot_plan_json(plan))
+}
+
+pub fn text<T>(plot: JetDataPlot<T>) -> String !DataError {
+    plan :: normalize_plot_plan(plot.plan)
+    Ok(render_plot_text(plan))
+}
+
+pub fn svg<T>(plot: JetDataPlot<T>) -> String !DataError {
+    plan :: normalize_plot_plan(plot.plan)
+    Ok(render_plot_svg(plan))
+}
+
+pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender !DataError {
+    render<T>(plot, JetDataPlotBackend.Svg)
+}
+
+pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender !DataError {
+    plan :: normalize_plot_plan(plot.plan)
+    if backend == JetDataPlotBackend.Text {
+        return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
-    loop i in 0..<xs.len() {
-        loop j in (i + 1)..<xs.len() {
-            if xs[j] < xs[i] {
-                t :: xs[i]
-                xs[i] = xs[j]
-                xs[j] = t
+    Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Svg, body: render_plot_svg(plan)})
+}
+
+pub fn bar_text(groups: [Group<String, Int>]) -> String !DataError {
+    labels := [String]{}
+    values := [Float]{}
+    loop index in 0..<groups.len() {
+        group :: groups[index]
+        if group.value < 0 {
+            return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_text", index))
+        }
+        labels.push(group.key)
+        values.push(Float{group.value})
+    }
+    Ok(render_bar_text(labels, values))
+}
+
+pub fn bar_svg(groups: [Group<String, Int>]) -> String !DataError {
+    labels := [String]{}
+    values := [Float]{}
+    loop index in 0..<groups.len() {
+        group :: groups[index]
+        if group.value < 0 {
+            return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_svg", index))
+        }
+        labels.push(group.key)
+        values.push(Float{group.value})
+    }
+    Ok(render_bar_svg(labels, values))
+}
+
+pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String !DataError {
+    _ :: validate_line_options(options, "line_text")
+    labels := [String]{}
+    values := [Float]{}
+    loop index in 0..<groups.len() {
+        group :: groups[index]
+        if nonfinite(group.value) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_text", index))
+        }
+        labels.push(group.key)
+        values.push(group.value)
+    }
+    Ok(render_line_options_text(labels, values, options))
+}
+
+pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String !DataError {
+    _ :: validate_line_options(options, "line_svg")
+    labels := [String]{}
+    values := [Float]{}
+    loop index in 0..<groups.len() {
+        group :: groups[index]
+        if nonfinite(group.value) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_svg", index))
+        }
+        labels.push(group.key)
+        values.push(group.value)
+    }
+    Ok(render_line_options_svg(labels, values, options))
+}
+
+pub fn status() -> [DataStatus] { core.data.status() }
+
+pub fn require_bridge(provider: String) !DataError {
+    core.data.require_bridge(provider)
+}
+
+fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
+        return Err(data_error(DataErrorKind.Limit, "data limits must be positive", "data.loader"))
+    }
+    format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
+    source := DataSourceIdentity{kind: kind, locator: ~locator, member: member, parameters: parameters}
+    authority := DataAuthority{scope: ~authority_name, revision: ""}
+    status := DataLoaderStatus{
+        identity: locator,
+        freshness: DataFreshness.Pending,
+        invalidated_by: .NoCause,
+        error: "",
+        cleanup: "",
+        buffered_bytes: 0,
+        backpressure: false,
+        last_good: false,
+    }
+    Ok(DataLoader<T>{
+        source: source,
+        format: format,
+        authority: authority,
+        limits: limits,
+        payload: None,
+        last_good: None,
+        cancelled: false,
+        offline: false,
+        status: status,
+    })
+}
+
+fn parse_format(name: String) -> ?DataFormat {
+    normalized := upper(trim(name))
+    if normalized == {
+        "CSV" -> Val(DataFormat.CSV)
+        "JSON" -> Val(DataFormat.JSON)
+        "JSONL" -> Val(DataFormat.JSONL)
+        "PARQUET" -> Val(DataFormat.Parquet)
+        "ARROW" -> Val(DataFormat.Arrow)
+        else -> None
+    }
+}
+
+
+fn normalize_zero(value: Float) -> Float {
+    if value == (Float{0.0}) -> return Float{0.0}
+    value
+}
+
+fn compensated_sum(values: [Float], operation: String) -> Float !DataError {
+    compensated_sum_range(values, 0, values.len(), operation)
+}
+
+fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: String) -> Float !DataError {
+    total := Float{0.0}
+    correction := Float{0.0}
+    loop index in start..<end {
+        value :: values[index]
+        if nonfinite(value) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "value is not finite", operation, index))
+        }
+        correction_term := value - correction
+        next_total := total + correction_term
+        correction = (next_total - total) - correction_term
+        total = next_total
+        if nonfinite(total) || nonfinite(correction) {
+            return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
+        }
+    }
+    result := total + correction
+    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
+    Ok(normalize_zero(result))
+}
+fn sort_pivot_cells(cells: &[DataPivotCell]) {
+    loop i in 1..<cells.len() {
+        j := i
+        loop j > 0 {
+            if !pivot_before(cells[j], cells[j - 1]) -> break
+            current := cells[j]
+            cells[j] = cells[j - 1]
+            cells[j - 1] = current
+            j = j - 1
+        }
+    }
+}
+
+fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool {
+    row_order := text_compare(left.row_key, right.row_key)
+    if row_order < 0 -> return true
+    if row_order > 0 -> return false
+    text_compare(left.column_key, right.column_key) < 0
+}
+
+fn text_compare(left: String, right: String) -> Int {
+    a :: left.bytes()
+    b :: right.bytes()
+    n := a.len()
+    if b.len() < n -> n = b.len()
+    loop i in 0..<n {
+        if a[i] < b[i] -> return -1
+        if a[i] > b[i] -> return 1
+    }
+    if a.len() < b.len() -> return -1
+    if a.len() > b.len() -> return 1
+    0
+}
+
+
+fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> {
+    source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
+    authority := DataAuthority{scope: "local", revision: ""}
+    return DataSnapshot<[T]>{
+        value: rows,
+        identity: DataSnapshotIdentity{id: "rows", source: "rows", content: "", schema: "", format: DataFormat.JSON},
+        provenance: DataProvenance{source: source, format: DataFormat.JSON, authority: authority},
+        schema: DataSchema{identity: "rows", format: DataFormat.JSON, columns: [DataColumn]{}, projection: None},
+        status: DataLoaderStatus{identity: "rows", freshness: DataFreshness.Fresh, invalidated_by: .NoCause, error: "", cleanup: "", buffered_bytes: 0, backpressure: false, last_good: true},
+        content: [U8]{},
+    }
+}
+
+fn sort_floats(values: [Float]) -> [Float] {
+    out := [Float]{}
+    loop value in values -> out.push(value)
+    loop i in 0..<out.len() {
+        loop j in (i + 1)..<out.len() {
+            if out[j] < out[i] {
+                value := out[i]
+                out[i] = out[j]
+                out[j] = value
             }
         }
     }
-    xs
+    out
 }
-
 fn render_bar_text(labels: [String], values: [Float]) -> String {
+    bounds :: value_bounds(values)
+    minimum :: bounds.min
+    maximum :: bounds.max
+    baseline := scale_between(Float{0.0}, minimum, maximum, 20)
     out := ""
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        w := 0
-        if max > 0.0 -> w = (Int{v * 20.0 / max})
+        v := values[i]
         bar := ""
-        loop _ in 0..<w -> bar = "{bar}#"
+        if v >= (Float{0.0}) {
+            width := 0
+            if maximum > (Float{0.0}) -> width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            loop _ in 0..<baseline -> bar = "{bar} "
+            loop _ in 0..<width -> bar = "{bar}#"
+        } else {
+            width := 0
+            if minimum < (Float{0.0}) -> width = scale_between(v, minimum, Float{0.0}, baseline)
+            loop _ in 0..<width -> bar = "{bar}<"
+        }
         out = "{out}{labels[i]} | {bar} {v}\n"
     }
     out
 }
 
 fn render_bar_svg(labels: [String], values: [Float]) -> String {
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
+    bounds :: value_bounds(values)
+    minimum :: bounds.min
+    maximum :: bounds.max
+    baseline := 100
+    if maximum > minimum -> baseline = scale_between(Float{0.0}, minimum, maximum, 200)
     w := 320
     h := 24 * labels.len() + 16
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        bw := 0
-        if max > 0.0 -> bw = (Int{v * 200.0 / max})
+        v := values[i]
         y := 8 + i * 24
-        out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{labels[i]}</text>"
-        out = "{out}<rect x=\"80\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
+        x := 80 + baseline
+        bw := 0
+        if v >= (Float{0.0}) {
+            if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
+        } else {
+            if minimum < (Float{0.0}) -> bw = scale_between(v, minimum, Float{0.0}, baseline)
+            x = x - bw
+        }
+        out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{xml_escape(labels[i])}</text>"
+        out = "{out}<rect x=\"{x}\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
     }
-    "{out}</svg>"
+    "{out}<line x1=\"{80 + baseline}\" y1=\"0\" x2=\"{80 + baseline}\" y2=\"{h}\" stroke=\"#777\" stroke-width=\"1\"/></svg>"
 }
 
 fn render_line_text(labels: [String], values: [Float]) -> String {
     out := ""
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        out = "{out}{labels[i]}={v}\n"
+        out = "{out}{labels[i]}={values[i]}\n"
     }
     out
 }
@@ -1097,94 +1110,230 @@ fn render_line_svg(labels: [String], values: [Float]) -> String {
     n :: labels.len()
     w := 320
     h := 120
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
+    bounds :: value_bounds(values)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
     loop i in 0..<n {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        x := 0
-        if n > 1 -> x = i * (w - 16) / (n - 1) + 8
-        y := h - 8
-        if max > 0.0 -> y = h - 8 - (Int{v * (Float{h - 16}) / max})
+        x := 8
+        if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
+        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         if i > 0 -> out = "{out} "
         out = "{out}{x},{y}"
     }
     "{out}\"/></svg>"
 }
 
-fn missing(name: String) -> DataError {
-    {kind: DataErrorKind.Missing, message: "no column `{name}`", path: name}
+fn render_point_svg(labels: [String], values: [Float]) -> String {
+    n :: labels.len()
+    w := 320
+    h := 120
+    bounds :: value_bounds(values)
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
+    loop i in 0..<n {
+        x := 8
+        if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
+        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
+        out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"3\" fill=\"#4a90d9\"/>"
+        out = "{out}<text x=\"{x}\" y=\"{h - 1}\" font-size=\"10\">{xml_escape(labels[i])}</text>"
+    }
+    "{out}</svg>"
 }
 
-fn parse_object_strings(text: String) -> ?[String:String] {
-    rec := [String:String]{}
-    raw :: text.bytes()
-    i := 0
-    key := ""
-    loop i < raw.len() {
-        if raw[i] != (U8{34}) {
-            i = i + 1
-            next
+fn value_bounds(values: [Float]) -> (min: Float, max: Float) {
+    minimum := Float{0.0}
+    maximum := Float{0.0}
+    loop value in values {
+        if value < minimum -> minimum = value
+        if value > maximum -> maximum = value
+    }
+    if minimum == maximum {
+        minimum = minimum - (Float{1.0})
+        maximum = maximum + (Float{1.0})
+    }
+    (min: minimum, max: maximum)
+}
+
+fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int {
+    if extent <= 0 || maximum <= minimum -> return 0
+    ratio := (value - minimum) / (maximum - minimum)
+    if ratio <= (Float{0.0}) -> return 0
+    if ratio >= (Float{1.0}) -> return extent
+    Int{ratio * Float{extent}}
+}
+
+
+fn validate_line_options(options: DataLineOptions, operation: String) !DataError {
+    if options.reference != None {
+        reference :: options.reference ?? Float{0.0}
+        if nonfinite(reference) -> return Err(data_error(DataErrorKind.NonFinite, "reference line must be finite", operation))
+    }
+    if options.style != "solid" && options.style != "dashed" && options.style != "dotted" {
+        return Err(data_error(DataErrorKind.InvalidArgument, "line style must be solid, dashed, or dotted", operation))
+    }
+    if options.color.len() == 0 -> return Err(data_error(DataErrorKind.InvalidArgument, "line color must not be empty", operation))
+    return Ok()
+}
+
+fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan !DataError {
+    values := [Float]{}
+    loop i in 0..<plan.labels.len() {
+        value := Float{0.0}
+        if i < plan.values.len() -> value = plan.values[i]
+        if nonfinite(value) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "plot", i))
         }
-        i = i + 1
-        start :: i
-        loop i < raw.len() && raw[i] != (U8{34}) -> i = i + 1
-        token :: String.from_bytes(raw[start..(i - 1)]) ?? ""
-        i = i + 1
-        if key.len() == 0 -> key = token else {
-            rec.add(key, token)
-            key = ""
+        values.push(value)
+    }
+    height := 24 * plan.labels.len() + 16
+    if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> height = 120
+    if height < 16 -> height = 16
+    Ok(JetDataPlotPlan{
+        mark: plan.mark,
+        labels: plan.labels,
+        values: values,
+        layout: JetDataPlotLayout{width: 320, height: height},
+        encoding: plan.encoding,
+        schema: plan.schema,
+    })
+}
+
+fn plot_mark_name(mark: JetDataPlotMark) -> String {
+    if mark == JetDataPlotMark.Line -> return "line"
+    if mark == JetDataPlotMark.Point -> return "point"
+    "bar"
+}
+
+fn plot_plan_json(plan: JetDataPlotPlan) -> String {
+    "{{\"mark\":\"{plot_mark_name(plan.mark)}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
+}
+
+fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String {
+    "plot mark={plot_mark_name(plan.mark)} rows={rows} labels={plan.labels.len()} width={plan.layout.width} height={plan.layout.height}"
+}
+
+fn render_plot_text(plan: JetDataPlotPlan) -> String {
+    if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
+    if plan.mark == JetDataPlotMark.Point {
+        out := ""
+        loop i in 0..<plan.labels.len() -> out = "{out}{plan.labels[i]}: {plan.values[i]}\n"
+        return out
+    }
+    render_bar_text(plan.labels, plan.values)
+}
+
+fn render_plot_svg(plan: JetDataPlotPlan) -> String {
+    if plan.mark == JetDataPlotMark.Line -> return render_line_svg(plan.labels, plan.values)
+    if plan.mark == JetDataPlotMark.Point -> return render_point_svg(plan.labels, plan.values)
+    render_bar_svg(plan.labels, plan.values)
+}
+
+fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String {
+    points := ""
+    loop i in 0..<values.len() {
+        if i > 0 -> points = "{points} -> "
+        points = "{points}{values[i]}"
+    }
+    label_text := ""
+    loop i in 0..<labels.len() {
+        if i > 0 -> label_text = "{label_text} | "
+        label_text = "{label_text}{labels[i]}"
+    }
+    out := ""
+    if options.title.len() > 0 -> out = "{out}{options.title}\n"
+    out = "{out}{options.x_label}: {label_text}\n{options.y_label}: {points}\n"
+    markers := "off"
+    if options.markers -> markers = "on"
+    out = "{out}line: style={options.style} color={options.color} markers={markers}"
+    if options.reference != None {
+        reference :: options.reference ?? Float{0.0}
+        out = "{out}\nreference: {reference}"
+    }
+    if options.legend.len() > 0 -> out = "{out}\nlegend: {options.legend}"
+    out
+}
+
+fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String {
+    n := labels.len()
+    w := 640
+    h := 360
+    left := 64
+    right := 24
+    top := 44
+    bottom := 52
+    plot_w := w - left - right
+    plot_h := h - top - bottom
+    minimum := Float{0.0}
+    maximum := Float{0.0}
+    loop value in values {
+        if value < minimum -> minimum = value
+        if value > maximum -> maximum = value
+    }
+    if options.reference != None {
+        reference :: options.reference ?? Float{0.0}
+        if reference < minimum -> minimum = reference
+        if reference > maximum -> maximum = reference
+    }
+    if minimum == maximum {
+        minimum = minimum - Float{1.0}
+        maximum = maximum + Float{1.0}
+    }
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><title>{xml_escape(options.title)}</title><rect width=\"{w}\" height=\"{h}\" fill=\"white\"/>"
+    points := ""
+    loop i in 0..<n {
+        x := left + plot_w /% 2
+        if n > 1 -> x = left + plot_w * i /% (n - 1)
+        y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+        if i > 0 -> points = "{points} "
+        points = "{points}{x},{y}"
+    }
+    dash := ""
+    if options.style == "dashed" -> dash = " stroke-dasharray=\"8 5\""
+    if options.style == "dotted" -> dash = " stroke-dasharray=\"2 5\""
+    out = "{out}<polyline fill=\"none\" stroke=\"{xml_escape(options.color)}\" stroke-width=\"2\"{dash} points=\"{points}\"/>"
+    if options.markers {
+        loop i in 0..<n {
+            x := left + plot_w /% 2
+            if n > 1 -> x = left + plot_w * i /% (n - 1)
+            y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+            out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"4\" fill=\"{xml_escape(options.color)}\"/>"
         }
     }
-    Val(rec)
-}
-
-fn strip_select(sql: String) -> String {
-    t :: trim(sql)
-    u :: upper(t)
-    if !starts(u, "SELECT ") -> return "*"
-    rest :: trim(slice_str(t, 7, t.len()))
-    sp :: index_of(upper(rest), " FROM")
-    if sp >= 0 -> return trim(slice_str(rest, 0, sp))
-    trim(rest)
-}
-
-fn strip_brackets(text: String) -> String {
-    raw :: trim(text).bytes()
-    if raw.len() < 2 -> return text
-    if raw[0] == (U8{91}) && raw[raw.len() - 1] == (U8{93}) {
-        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
+    if options.reference != None {
+        reference :: options.reference ?? Float{0.0}
+        y := top + Int{(maximum - reference) * Float{plot_h} / (maximum - minimum)}
+        out = "{out}<line x1=\"{left}\" y1=\"{y}\" x2=\"{w - right}\" y2=\"{y}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
     }
-    text
+    loop i in 0..<n {
+        x := left + plot_w /% 2
+        if n > 1 -> x = left + plot_w * i /% (n - 1)
+        out = "{out}<text x=\"{x}\" y=\"{h - bottom + 18}\" font-size=\"11\" text-anchor=\"middle\">{xml_escape(labels[i])}</text>"
+    }
+    out = "{out}<text x=\"{w /% 2}\" y=\"24\" text-anchor=\"middle\" font-size=\"16\">{xml_escape(options.title)}</text>"
+    out = "{out}<text x=\"{w /% 2}\" y=\"{h - 10}\" text-anchor=\"middle\" font-size=\"12\">{xml_escape(options.x_label)}</text>"
+    out = "{out}<text x=\"16\" y=\"{h /% 2}\" text-anchor=\"middle\" font-size=\"12\">{xml_escape(options.y_label)}</text>"
+    if options.legend.len() > 0 -> out = "{out}<text x=\"{w - right - 120}\" y=\"{top - 12}\" fill=\"{xml_escape(options.color)}\">{xml_escape(options.legend)}</text>"
+    "{out}</svg>"
 }
 
-fn trim_quotes(text: String) -> String {
-    raw :: text.bytes()
-    if raw.len() >= 2 && raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39}) {
-        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
-    }
-    if raw.len() >= 2 && raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34}) {
-        return String.from_bytes(raw[1..(raw.len() - 2)]) ?? text
-    }
-    text
-}
-
-fn split_lines(text: String) -> [String] {
-    out := [String]{}
-    cur := [U8]{}
-    loop b in text.bytes() {
-        if {
-            b == (U8{10}) -> {
-                out.push(String.from_bytes(cur) ?? "")
-                cur = [U8]{}
-            }
-            b != (U8{13}) -> { cur.push(b) }
+fn xml_escape(text: String) -> String {
+    out := ""
+    chunk := [U8]{}
+    loop byte in text.bytes() {
+        entity := ""
+        if byte == (U8{38}) -> entity = "&amp;"
+        else if byte == (U8{60}) -> entity = "&lt;"
+        else if byte == (U8{62}) -> entity = "&gt;"
+        else if byte == (U8{34}) -> entity = "&quot;"
+        else if byte == (U8{39}) -> entity = "&apos;"
+        if entity.len() > 0 {
+            chunk_text :: String.from_bytes(chunk) ?? ""
+            out = "{out}{chunk_text}{entity}"
+            chunk = [U8]{}
+        } else {
+            chunk.push(byte)
         }
     }
-    if cur.len() > 0 -> out.push(String.from_bytes(cur) ?? "")
+    tail :: String.from_bytes(chunk) ?? ""
+    out = "{out}{tail}"
     out
 }
 
@@ -1200,7 +1349,7 @@ fn trim(text: String) -> String {
         n :: raw[e - 1]
         if n == 32 || n == 9 || n == 10 || n == 13 -> e = e - 1 else { break }
     }
-    if s == 0 && e == raw.len() -> return text
+    if s == 0 && e == raw.len() -> return String.from_bytes(raw) ?? ""
     if e <= s -> return ""
     String.from_bytes(raw[s..(e - 1)]) ?? ""
 }
@@ -1211,62 +1360,5 @@ fn upper(text: String) -> String {
         n :: b
         if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
-    String.from_bytes(out) ?? text
+    String.from_bytes(out) ?? ""
 }
-
-fn starts(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
-    if b.len() > a.len() -> return false
-    loop i in 0..<b.len() {
-        if a[i] != b[i] -> return false
-    }
-    true
-}
-
-fn index_of(text: String, needle: String) -> Int {
-    hay :: text.bytes()
-    nd :: needle.bytes()
-    if nd.len() == 0 -> return 0
-    if nd.len() > hay.len() -> return -1
-    loop i in 0..<(hay.len() - nd.len() + 1) {
-        ok := true
-        loop j in 0..<nd.len() {
-            if hay[i + j] != nd[j] -> ok = false
-        }
-        if ok -> return i
-    }
-    -1
-}
-
-fn slice_str(text: String, start: Int, end: Int) -> String {
-    raw :: text.bytes()
-    s := start
-    e := end
-    if s < 0 -> s = 0
-    if e > raw.len() -> e = raw.len()
-    if e <= s -> return ""
-    String.from_bytes(raw[s..(e - 1)]) ?? ""
-}
-
-fn contains_str(xs: [String], want: String) -> Bool {
-    loop x in xs {
-        if x == want -> return true
-    }
-    false
-}
-
-fn sqrt_f(x: Float) -> Float {
-    if x <= 0.0 -> return 0.0
-    g := x
-    loop _ in 0..<24 -> g = 0.5 * (g + x / g)
-    g
-}
-
-fn host_data_read(path: String) -[FS]> String !DataError { panic("host_data_read") }
-
-fn host_data_fetch(url: String) -[Net]> String !DataError { panic("host_data_fetch") }
-
-fn host_data_sql(dsn: String, sql: String) -[DB]> String !DataError { panic("host_data_sql") }
-
-fn host_data_bridge() -[Env]> Bool { panic("host_data_bridge") }

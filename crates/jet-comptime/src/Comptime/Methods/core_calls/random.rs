@@ -69,6 +69,10 @@ pub(super) mod ambient_random_kernel {
         jet_std_random_seed(seed);
     }
 
+    pub(crate) fn getrandbits(bits: i64) -> i64 {
+        jet_std_random_getrandbits(bits)
+    }
+
     pub(crate) fn int(low: i64, high: i64) -> i64 {
         jet_std_random_int(low, high)
     }

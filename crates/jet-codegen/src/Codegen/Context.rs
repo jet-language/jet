@@ -144,8 +144,11 @@ pub(crate) struct Cx {
     /// expression its total result `Type` without re-inferring in codegen.
     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
     pub(crate) consts: HashMap<String, String>,
-    /// D-PERSIST-DEVSTATE1=A: source-level types for the one writable module
-    /// storage class. TIR turns these names into persistent slots before any
+    /// Source-level types for every module binding, including immutable
+    /// runtime globals whose value is represented by a MIR global operation.
+    pub(crate) const_types: HashMap<String, Type>,
+    /// D-MODULE-STORAGE1: source-level types for writable module bindings and
+    /// `#Persist` storage. TIR turns these names into owned static slots before
     /// engine-specific lowering runs.
     pub(crate) persist_types: HashMap<String, Type>,
     /// The evaluated value behind each comptime const, so lowering can hand a
@@ -249,7 +252,8 @@ pub(crate) struct Cx {
     /// TIR/MIR module reference is keyed by; `module_alias` is only a
     /// Rust-name projection and can collide across packages.
     pub(crate) module_identity: String,
-    pub(crate) core_archive_source: bool,
+    /// Source-owned Core module -> private emitted module alias.
+    pub(crate) core_source_modules: HashMap<String, String>,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
     /// Generated C-module functions whose wrappers return their declared C
@@ -552,6 +556,11 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TuiBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
+        // D-AUTH1=A: authentication carriers are Prelude-root values.
+        "Session" => Some("JetAuthSession"),
+        "Auth" => Some("JetAuthApp"),
+        // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
+        "RowPolicy" => Some("JetRowPolicy"),
         // D-APPROX1=A: native sketch carriers are Prelude-root values.
         "HyperLogLog" => Some("JetHyperLogLog"),
         "TDigest" => Some("JetTDigest"),
@@ -877,8 +886,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "CSVRow" => Some("CSVRow"),
         "XMLReader" => Some("XMLReader"),
         "XMLWriter" => Some("XMLWriter"),
-        "CBORReader" => Some("CBORReader"),
-        "CBORWriter" => Some("CBORWriter"),
+        // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
+        // Sync/Core prelude and is re-exported from the generated crate root.
+        "RowPolicy" => Some("JetRowPolicy"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -971,7 +981,19 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
-    match name {
+    let leaf = match name
+        .rsplit_once("::")
+        .or_else(|| name.rsplit_once('.'))
+    {
+        Some((prefix, leaf))
+            if matches!(prefix, "crypto" | "core.crypto" | "core::crypto") =>
+        {
+            leaf
+        }
+        Some(_) => return None,
+        None => name,
+    };
+    match leaf {
         "Secret" => Some("Secret"),
         "SigningKey" => Some("SigningKey"),
         "VerifyKey" => Some("VerifyKey"),
@@ -1185,10 +1207,10 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HTTPVersion" => Some("JetHTTPVersion"),
         "HTTPHeaderName" => Some("JetHTTPHeaderName"),
         "HTTPHeaderValue" => Some("JetHTTPHeaderValue"),
-        "HTTPBody" => Some("JetHTTPBody"),
+        "Body" => Some("JetHTTPBody"),
         "HTTPError" => Some("JetHTTPError"),
         "HTTPOperation" => Some("JetHTTPOperation"),
-        "HTTPHeaders" => Some("JetHTTPHeaders"),
+        "Headers" => Some("JetHTTPHeaders"),
         "HTTPMux" => Some("JetHTTPMux"),
         "HTTPHandler" => Some("JetHTTPHandler"),
         "HTTPServer" => Some("JetHTTPServer"),
@@ -1221,13 +1243,18 @@ impl Cx {
 
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
-            crate::Codegen::TIR::TLocal::persistent(
-                name,
+            let module = if self.module_identity.is_empty() {
                 if self.module_alias.is_empty() {
                     "main"
                 } else {
                     self.module_alias.as_str()
-                },
+                }
+            } else {
+                self.module_identity.as_str()
+            };
+            crate::Codegen::TIR::TLocal::persistent(
+                name,
+                module,
                 self.persist_types
                     .get(name)
                     .cloned()
@@ -1285,6 +1312,21 @@ impl Cx {
     /// reuse its registered static method signatures rather than recovering an
     /// owner from a lowered receiver value.
     pub(crate) fn string_distinct_has_registered_method(&self, name: &str, method: &str) -> bool {
+        let trait_key = (name.to_string(), method.to_string());
+        if self
+            .trait_method_traits
+            .get(&trait_key)
+            .is_some_and(|trait_name| trait_name == crate::Generics::CHECKED_TEXT)
+        {
+            return true;
+        }
+        let encode_key = (name.to_string(), "encode_hole".to_string());
+        let has_checked_text_encoder = self
+            .method_sigs
+            .contains_key(&encode_key);
+        if has_checked_text_encoder && matches!(method, "check" | "encode_hole") {
+            return true;
+        }
         let Some(identity) = self.distinct_type_identity(name) else {
             return false;
         };
@@ -2492,7 +2534,7 @@ impl Cx {
             Type::Named(name) if name == "SyncList" && !self.type_names.contains(name) => {
                 format!("{}JetSyncList", self.root_prefix)
             }
-            Type::Named(name) if name == "RowPolicy" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "RowPolicy" => {
                 format!("{}JetRowPolicy", self.root_prefix)
             }
             Type::Named(name) if name == "Hasher" && !self.type_names.contains(name) => {
@@ -4128,10 +4170,14 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         .iter()
         .map(|fact| fact.jet_name.clone())
         .collect();
-    cx.core_archive_source = bundle
+    cx.core_source_modules = bundle
         .modules
         .iter()
-        .any(|module| module.alias == "core_archive");
+        .filter_map(|module| {
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
+                .map(|source| (source.module.to_string(), source.alias.to_string()))
+        })
+        .collect();
     cx.foreign_types = foreign_type_map(bundle, module_idx);
     crate::Codegen::TIR::register_imported_struct_shapes(cx, bundle, module_idx);
     update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
@@ -4637,7 +4683,7 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         .values()
         .any(|module| module == "core.data")
     {
-        let variants = ["File", "Url", "Database", "Value"]
+        let variants = ["File", "URL", "Database", "Value"]
             .into_iter()
             .map(|variant| (variant.to_string(), VariantPayload::Unit))
             .collect::<Vec<_>>();
@@ -4990,6 +5036,7 @@ pub(crate) fn build_cx_items(
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
+        const_types: HashMap::new(),
         persist_types: HashMap::new(),
         const_values: HashMap::new(),
         type_names: HashSet::new(),
@@ -5025,7 +5072,7 @@ pub(crate) fn build_cx_items(
         file: file.to_string(),
         module_alias: String::new(),
         module_identity: String::new(),
-        core_archive_source: false,
+        core_source_modules: HashMap::new(),
         import_mods: HashMap::new(),
         trait_method_traits: HashMap::new(),
         operator_methods: HashMap::new(),
@@ -5642,20 +5689,21 @@ pub(crate) fn build_cx_items(
                 }
             }
             Item::Const(c) => {
-                if c.is_persist {
-                    let ty = c.ty.clone().or_else(|| {
-                        c.ct.as_ref().map(CtValue::jet_type).or_else(|| match &c.value {
-                            Expr::Int(..) => Some(Type::Int),
-                            Expr::Bool(..) => Some(Type::Bool),
-                            Expr::Char(..) => Some(Type::Char),
-                            Expr::Float(_, _, is_f32, _) => {
-                                Some(if *is_f32 { Type::Float32 } else { Type::Float })
-                            }
-                            Expr::Str(..) => Some(Type::String),
-                            _ => None,
-                        })
-                    });
-                    if let Some(ty) = ty {
+                let ty = c.ty.clone().or_else(|| {
+                    c.ct.as_ref().map(CtValue::jet_type).or_else(|| match &c.value {
+                        Expr::Int(..) => Some(Type::Int),
+                        Expr::Bool(..) => Some(Type::Bool),
+                        Expr::Char(..) => Some(Type::Char),
+                        Expr::Float(_, _, is_f32, _) => {
+                            Some(if *is_f32 { Type::Float32 } else { Type::Float })
+                        }
+                        Expr::Str(..) => Some(Type::String),
+                        _ => None,
+                    })
+                });
+                if let Some(ty) = ty {
+                    cx.const_types.insert(c.name.clone(), ty.clone());
+                    if c.is_persist || c.mutable {
                         cx.persist_types.insert(c.name.clone(), ty);
                     }
                 }

@@ -1,0 +1,37 @@
+enum CryptoError { Length }
+fn pbkdf2_block_salt(salt: [U8], index: Int) -> [U8] {
+    out := ~salt
+    out.push(to_u8(index >> 24))
+    out.push(to_u8(index >> 16))
+    out.push(to_u8(index >> 8))
+    out.push(to_u8(index))
+    out
+}
+fn hmac_sha256_raw(password: [U8], data: [U8]) -> [U8] { password }
+fn to_u8(n: Int) -> U8 { U8{n & 255} }
+fn copy_bytes(bytes: [U8]) -> [U8] { bytes }
+pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] !CryptoError {
+    if iterations < 1 || key_len < 1 -> return Err(CryptoError.Length)
+    blocks :: (key_len + 31) /% 32
+    out := [U8]{}
+    block_index := 0
+    loop block_index < blocks {
+        i :: block_index + 1
+        block_salt :: pbkdf2_block_salt(salt, i)
+        u := hmac_sha256_raw(password, block_salt)
+        acc := [U8]{}
+        loop byte in u -> acc.push(byte)
+        repetition := 1
+        loop repetition < iterations {
+            u = hmac_sha256_raw(password, u)
+            loop j in 0..<32 -> acc[j] = (U8{acc[j] ~| u[j]})
+            repetition += 1
+        }
+        loop b in acc {
+            if out.len() >= key_len -> break
+            out.push(b)
+        }
+        block_index += 1
+    }
+    Ok(out)
+}

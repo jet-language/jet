@@ -1,5 +1,9 @@
 // Count-min sketch. Width 256, depth 4. Update and query are Jet.
-
+//
+// A CountMin value is immutable at the API boundary: add/increment/merge
+// return a fresh table, so two callers never race through a shared counter
+// array.  Hashing and merge order are fixed, which keeps estimates stable
+// across execution tiers.
 pub struct CountMin {
     pub depth: Int
     pub width: Int
@@ -13,10 +17,10 @@ pub fn new() -> CountMin {
 }
 
 pub fn add(sketch: CountMin, key: String, n: Int) -> CountMin {
-    table := [Int]{}
-    loop x in sketch.table -> table.push(x)
+    if !shape_ok(sketch) -> return ~sketch
+    table := copy_table(sketch.table)
     loop d in 0..<sketch.depth {
-        h :: (hashd(key, d) % sketch.width + sketch.width) % sketch.width
+        h :: bucket(key, d, sketch.width)
         idx :: d * sketch.width + h
         table[idx] = table[idx] + n
     }
@@ -24,9 +28,10 @@ pub fn add(sketch: CountMin, key: String, n: Int) -> CountMin {
 }
 
 pub fn estimate(sketch: CountMin, key: String) -> Int {
+    if !shape_ok(sketch) -> return 0
     min := 9223372036854775807
     loop d in 0..<sketch.depth {
-        h :: (hashd(key, d) % sketch.width + sketch.width) % sketch.width
+        h :: bucket(key, d, sketch.width)
         v :: sketch.table[d * sketch.width + h]
         if v < min -> min = v
     }
@@ -37,12 +42,31 @@ pub fn estimate(sketch: CountMin, key: String) -> Int {
 fn hashd(key: String, d: Int) -> Int {
     h := 2166136261 + d * 16777619
     loop b in key.bytes() {
-        h = (h ~| (b & 255)) * 16777619
+        // Keep the accumulator in a positive 31-bit domain after every
+        // multiply; this avoids target-dependent signed overflow.
+        h = ((h ~| (b & 255)) * 16777619) & 2147483647
     }
-    h & 2147483647
+    h
+}
+
+fn bucket(key: String, d: Int, width: Int) -> Int {
+    if width <= 0 -> return 0
+    (hashd(key, d) % width + width) % width
 }
 
 pub fn merge(a: CountMin, b: CountMin) -> CountMin {
+    // A malformed public value cannot contribute a trustworthy counter.
+    // Preserve the valid side instead of fabricating an empty success.
+    if !shape_ok(a) {
+        if shape_ok(b) -> return ~b
+        return new()
+    }
+    if !shape_ok(b) -> return ~a
+
+    // Matching shapes are the normal path and have exact CMS semantics.
+    // For legacy values with different dimensions, retain the deterministic
+    // overlapping prefix and report the canonical smaller shape through the
+    // returned carrier; callers can keep a fixed shape by using new().
     depth := a.depth
     if b.depth < depth -> depth = b.depth
     width := a.width
@@ -52,16 +76,9 @@ pub fn merge(a: CountMin, b: CountMin) -> CountMin {
     loop d < depth {
         i := 0
         loop i < width {
-            av := 0
-            bv := 0
-            ai := d * a.width + i
-            bi := d * b.width + i
-            if ai < a.table.len() -> av = a.table[ai]
-            if bi < b.table.len() -> bv = b.table[bi]
-            if {
-                av > bv -> table.push(av)
-                else -> table.push(bv)
-            }
+            av :: a.table[d * a.width + i]
+            bv :: b.table[d * b.width + i]
+            table.push(av + bv)
             i = i + 1
         }
         d = d + 1
@@ -70,3 +87,15 @@ pub fn merge(a: CountMin, b: CountMin) -> CountMin {
 }
 
 pub fn increment(sketch: CountMin, key: String) -> CountMin { add(sketch, key, 1) }
+
+fn copy_table(table: [Int]) -> [Int] {
+    out := [Int]{}
+    loop value in table -> out.push(value)
+    out
+}
+
+fn shape_ok(sketch: CountMin) -> Bool {
+    if sketch.depth <= 0 || sketch.width <= 0 -> return false
+    if sketch.depth > sketch.table.len() /% sketch.width -> return false
+    sketch.depth * sketch.width == sketch.table.len()
+}

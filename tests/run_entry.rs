@@ -18,48 +18,46 @@ fn script_top_level_recovery_always_consumes_a_token() {
 }
 
 #[test]
-fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
-    let source = "message :: \"script entry\"\nprint(message)\nprint(helper())\nfn helper() Int { return 42 }\n";
-    let output =
-        jet::compile(source).expect("script statements should lower through the normal entry path");
+fn loose_top_level_statements_require_explicit_run() {
+    let source = "limit :: 2\nprint(limit)\n";
+    let diagnostics =
+        jet::compile(source).expect_err("ordinary files must not invent an implicit run");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0621")
+        .expect("explicit-run diagnostic");
     assert!(
-        output
-            .rust
-            .contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
-        "implicit script entry must use the fallible unit boundary:\n{}",
-        output.rust
-    );
-    assert!(
-        output.rust.contains("script entry"),
-        "script body must reach generated code:\n{}",
-        output.rust
-    );
-    assert!(
-        output.rust.contains("__jet_helper"),
-        "ordinary declarations must remain legal in a script:\n{}",
-        output.rust
+        diagnostic.edit.is_none(),
+        "the diagnostic must not offer an implicit-run rewrite: {diagnostic:?}"
     );
 }
 
 #[test]
-fn script_helper_below_call_and_mutual_recursion_keep_statement_order() {
+fn module_globals_and_explicit_run_keep_statement_order() {
     let source = r#"
-print("start")
 limit :: 2
-print(limit)
-print(even(limit + 2))
-print("end")
+label :: "start"
+my_var := 3
 
-fn even(n: Int) Bool {
+fn run() {
+    print(label)
+    print(limit)
+    my_var += limit
+    print(my_var)
+    print(even(limit + 2))
+    print("end")
+}
+
+fn even(n: Int) -> Bool {
     return if n == 0 -> true else -> odd(n - 1)
 }
 
-fn odd(n: Int) Bool {
+fn odd(n: Int) -> Bool {
     return if n == 0 -> false else -> even(n - 1)
 }
 "#;
-    let expected = "start\n2\ntrue\nend\n";
-    let dir = common::unique_tmp("jet_script_order");
+    let expected = "start\n2\n5\ntrue\nend\n";
+    let dir = common::unique_tmp("jet_module_globals");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
     std::fs::write(&file, source).unwrap();
@@ -87,7 +85,7 @@ fn odd(n: Int) Bool {
             exit_code,
         } = outcome
         else {
-            panic!("{tier} did not run the script: {outcome:?}");
+            panic!("{tier} did not run the module-global program: {outcome:?}");
         };
         assert_eq!(stdout, expected, "{tier} stdout");
         assert!(stderr.is_empty(), "{tier} stderr: {stderr}");
@@ -99,16 +97,16 @@ fn odd(n: Int) Bool {
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
-        .expect("jet run should execute the single script entry");
+        .expect("jet run should execute the explicit run entry");
     assert!(
         cli.status.success(),
-        "jet run rejected the script:\n{}",
+        "jet run rejected module globals:\n{}",
         String::from_utf8_lossy(&cli.stderr)
     );
     assert_eq!(
         String::from_utf8_lossy(&cli.stdout),
         expected,
-        "jet run must preserve script statement order"
+        "jet run must preserve explicit-run statement order"
     );
     assert!(
         cli.stderr.is_empty(),
@@ -118,7 +116,7 @@ fn odd(n: Int) Bool {
     let _ = std::fs::remove_dir_all(&dir);
 
     if common::have_rustc() {
-        let (code, stdout, stderr) = common::build_and_run("jet_script_order_aot", "main", source);
+        let (code, stdout, stderr) = common::build_and_run("jet_module_globals_aot", "main", source);
         assert_eq!(code, 0, "AOT exit code: {stderr}");
         assert_eq!(stdout, expected, "AOT stdout");
         assert!(stderr.is_empty(), "AOT stderr: {stderr}");
@@ -126,26 +124,20 @@ fn odd(n: Int) Bool {
 }
 
 #[test]
-fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
-    let before_binding = "print(later)\nlater :: 1\n";
-    let diagnostics = jet::compile(before_binding)
-        .expect_err("a loose binding must not be visible before its statement");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0107"),
-        "expected an unknown-name diagnostic before the binding, got {diagnostics:?}"
-    );
+fn module_globals_are_file_wide_declarations() {
+    let source = r#"
+limit :: 2
+my_var := 3
 
-    let inside_declaration = "later :: 1\nfn helper() Int { return later }\n";
-    let diagnostics = jet::compile(inside_declaration)
-        .expect_err("a loose binding must stay local to the implicit run body");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0107"),
-        "expected an unknown-name diagnostic inside the helper, got {diagnostics:?}"
-    );
+fn helper() Int {
+    return my_var + limit
+}
+
+fn run() {
+    print(helper())
+}
+"#;
+    jet::compile(source).expect("module globals must be visible in every function");
 }
 
 #[test]
@@ -219,19 +211,19 @@ fn script_entry_uses_the_same_front_end_for_check_and_build() {
     let dir = common::unique_tmp("jet_script_check_build");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
-    std::fs::write(&file, "print(\"script entry\")\n").unwrap();
+    std::fs::write(&file, "fn run() { print(\"script entry\") }\n").unwrap();
     let path = file.to_str().unwrap();
 
     let diagnostics = jet::check_with_path(path);
     assert!(
         diagnostics.is_empty(),
-        "check rejected the script: {diagnostics:?}"
+        "check rejected the explicit run: {diagnostics:?}"
     );
     let output = jet::compile_programmable_build(path, &[])
-        .expect("build should use the same implicit run entry");
+        .expect("build should use the explicit run entry");
     assert!(
         output.rust.contains("script entry"),
-        "build dropped the script body:\n{}",
+        "build dropped the explicit run body:\n{}",
         output.rust
     );
 
@@ -239,30 +231,27 @@ fn script_entry_uses_the_same_front_end_for_check_and_build() {
 }
 
 #[test]
-fn explicit_run_conflict_has_a_compilable_auto_wrap_fix() {
+fn loose_statements_are_rejected_even_with_explicit_run() {
     let source = "print(\"before\")\nfn run() { print(\"middle\") }\nprint(\"after\")\n";
     let diagnostics =
-        jet::compile(source).expect_err("loose statements and explicit run must conflict");
+        jet::compile(source).expect_err("loose statements must be rejected outright");
     let diagnostic = diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0621")
-        .expect("script conflict diagnostic");
-    let edit = diagnostic.edit.as_ref().expect("script conflict auto-fix");
-    let fixed = edit.new_text.clone();
+        .expect("explicit-run diagnostic");
     assert!(
-        !fixed.contains("print(\"before\")\nfn run"),
-        "loose statement stayed outside run:\n{fixed}"
+        diagnostic.edit.is_none(),
+        "implicit-run auto-fix must be removed: {diagnostic:?}"
     );
-    jet::compile(&fixed).expect("the explicit-run auto-wrap must compile");
 }
 
 #[test]
-fn script_entry_matches_default_jit_and_forced_interpreter() {
-    let dir = std::env::temp_dir().join(format!("jet_script_entry_{}", std::process::id()));
+fn explicit_run_matches_default_jit_and_forced_interpreter() {
+    let dir = std::env::temp_dir().join(format!("jet_explicit_run_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
-    std::fs::write(&file, "print(\"script entry\")\n").unwrap();
+    std::fs::write(&file, "fn run() { print(\"script entry\") }\n").unwrap();
     let path = file.to_str().unwrap();
     let jit = jet::Interpreter::run_jit_once(path);
     let interpreter = jet::Interpreter::run_interpreter_once_with_args(path, &[]);
@@ -281,7 +270,7 @@ fn script_entry_matches_default_jit_and_forced_interpreter() {
             exit_code,
         } = outcome
         else {
-            panic!("{tier} did not run the script: {outcome:?}");
+            panic!("{tier} did not run the explicit entry: {outcome:?}");
         };
         assert_eq!(stdout, "script entry\n", "{tier} stdout");
         assert!(stderr.is_empty(), "{tier} stderr: {stderr}");
@@ -289,13 +278,14 @@ fn script_entry_matches_default_jit_and_forced_interpreter() {
     }
 }
 
+
 #[test]
-fn script_dev_verb_uses_the_single_file_implicit_run_entry() {
+fn script_dev_verb_runs_only_explicit_run() {
     let dir = common::unique_tmp("jet_script_dev_verb");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.jet"),
-        "print(helper())\nfn helper() String { return \"dev script\" }\n",
+        "fn helper() String { return \"dev script\" }\nfn run() { print(helper()) }\n",
     )
     .unwrap();
 
@@ -304,18 +294,18 @@ fn script_dev_verb_uses_the_single_file_implicit_run_entry() {
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
-        .expect("jet dev should run a single script file");
+        .expect("jet dev should run a single explicit entry");
     let _ = std::fs::remove_dir_all(&dir);
 
     assert!(
         output.status.success(),
-        "jet dev rejected the script:\n{}",
+        "jet dev rejected the explicit run:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "dev script\n",
-        "jet dev must execute the implicit run body exactly once"
+        "jet dev must execute the explicit run body exactly once"
     );
 }
 
@@ -327,7 +317,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "print(\"script body\")\n#Test(\"script test\") { assert(helper()) }\nfn helper() Bool { return true }\n",
+        "fn run() { print(\"script body\") }\n#Test(\"script test\") { assert(helper()) }\nfn helper() Bool { return true }\n",
     )
     .unwrap();
     let path = file.to_str().unwrap();
@@ -356,26 +346,18 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
 }
 
 #[test]
-fn script_dev_entry_can_select_declared_dev_without_running_implicit_run() {
-    let dir = std::env::temp_dir().join(format!("jet_script_dev_entry_{}", std::process::id()));
+fn explicit_dev_entry_can_select_declared_dev_without_loose_code() {
+    let dir = std::env::temp_dir().join(format!("jet_explicit_dev_entry_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
-    std::fs::write(
-        &file,
-        "print(\"script body\")\nfn dev() { print(\"dev body\") }\n",
-    )
-    .unwrap();
+    std::fs::write(&file, "fn dev() { print(\"dev body\") }\n").unwrap();
     let output = jet::compile_with_entry(file.to_str().unwrap(), "dev")
-        .expect("jet dev entry swap should accept scripts");
+        .expect("jet dev entry swap should accept an explicit entry");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         output.rust.contains("dev body"),
         "dev body missing from AOT output"
-    );
-    assert!(
-        output.rust.contains("script body"),
-        "implicit run should remain a normal function"
     );
 }
 
@@ -387,7 +369,7 @@ fn imported_scripts_are_rejected_before_their_body_can_run() {
     let tools = dir.join("tools.jet");
     let entry = dir.join("main.jet");
     std::fs::write(&tools, "print(\"must not run\")\n").unwrap();
-    std::fs::write(&entry, "use \"./tools\"\nprint(\"entry\")\n").unwrap();
+    std::fs::write(&entry, "use \"./tools\"\nfn run() { print(\"entry\") }\n").unwrap();
     let diagnostics = jet::compile_with_path("", entry.to_str().unwrap())
         .expect_err("imported scripts must be rejected");
     let _ = std::fs::remove_dir_all(&dir);

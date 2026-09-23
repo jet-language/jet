@@ -50,6 +50,24 @@ fn core_call_is_known(module: &str, name: &str) -> bool {
         || super::core_param_contract(module, name).is_some()
         || Syntax::core_marker_application(module, name).is_some()
 }
+
+/// Transparent source-owned HTTP provider leaves retain their native carrier
+/// instead of acquiring the ordinary imported-function default `Err`.
+fn source_owned_http_carrier(module: &str, name: &str) -> bool {
+    matches!(
+        (module, name),
+        ("core.http.client", "request") | ("core.http.server", "response")
+    )
+}
+
+/// These public math wrappers are direct aliases to fixed Core primitives.
+/// Keep their source-declared value signatures at cross-module call sites;
+/// routing through an ordinary imported function adds the default `Err`
+/// carrier to operations that are infallible at the primitive boundary.
+fn source_owned_math_primitive(module: &str, name: &str) -> bool {
+    module == "core.math"
+        && matches!(name, "cmp" | "cos" | "exp" | "fabs" | "is_finite" | "ln" | "sin" | "sqrt")
+}
 fn unit_callback_type() -> Type {
     Type::Fn {
         params: Vec::new(),
@@ -920,7 +938,7 @@ fn resolved_core_fixed_sig(
             // return type or fall through to E1004.
             core_fixed_sig_for_row(row).or_else(|| {
                 (module == "core.time" && name == "now")
-                    .then(|| (Vec::new(), Some(Type::Int)))
+                    .then(|| (Vec::new(), Some(Type::Named("DateTime".to_string()))))
             })?
         }
         None => core_fixed_sig(module, name)?,
@@ -1310,13 +1328,7 @@ fn web_callback(param: Type, ret: Type) -> Type {
 fn web_result(ok: Type) -> Type {
     Type::Result {
         ok: Box::new(ok),
-        err: Box::new(Type::String),
-    }
-}
-fn web_callback_result(ok: Type) -> Type {
-    Type::Result {
-        ok: Box::new(ok),
-        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+        err: Box::new(Type::Named("WebTableError".to_string())),
     }
 }
 
@@ -1612,7 +1624,7 @@ impl<'a> Checker<'a> {
         macro_rules! web_list_element {
             ($ty:expr) => {{
                 match $ty {
-                    Type::List(inner) => *inner,
+                    Type::List(inner) => Some(*inner),
                     other => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -1621,7 +1633,7 @@ impl<'a> Checker<'a> {
                             "pass a `[T]` value".to_string(),
                             Some(span),
                         ));
-                        other
+                        None
                     }
                 }
             }};
@@ -1636,7 +1648,8 @@ impl<'a> Checker<'a> {
         }
         macro_rules! web_handle_element {
             ($index:expr, $handle:literal) => {{
-                args.get_mut($index)
+                let Some(element) = args
+                    .get_mut($index)
                     .and_then(|arg| self.infer(&mut arg.expr))
                     .and_then(|ty| match ty {
                         Type::Apply { name, args } if name == $handle && args.len() == 1 => {
@@ -1645,37 +1658,37 @@ impl<'a> Checker<'a> {
                         _ => None,
                     })
                     .or_else(|| hinted.clone())
-                    .unwrap_or(Type::Int)
+                else {
+                    return None;
+                };
+                element
             }};
         }
         match (module, name) {
             ("core.web.table", "new") => {
                 web_expect!(0, Type::String);
-                let row = hinted.unwrap_or_else(|| {
+                let row = hinted.or_else(|| {
                     args.get_mut(1)
                         .and_then(|arg| self.infer(&mut arg.expr))
                         .and_then(|ty| match ty {
                             Type::List(inner) => Some(*inner),
                             _ => None,
                         })
-                        .unwrap_or(Type::Int)
-                });
+                })?;
                 web_expect!(1, Type::List(Box::new(row.clone())));
                 Some(web_apply("WebTable", row))
             }
             ("core.web.table", "column") => {
                 web_expect!(0, Type::String);
                 web_expect!(1, Type::String);
-                let row = hinted
-                    .or_else(|| {
-                        args.get_mut(2)
-                            .and_then(|arg| self.infer(&mut arg.expr))
-                            .and_then(|ty| match ty {
-                                Type::Fn { params, .. } => params.first().cloned(),
-                                _ => None,
-                            })
-                    })
-                    .unwrap_or(Type::Int);
+                let row = hinted.or_else(|| {
+                    args.get_mut(2)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .and_then(|ty| match ty {
+                            Type::Fn { params, .. } => params.first().cloned(),
+                            _ => None,
+                        })
+                })?;
                 if let Some(column_name) = args.get(0).and_then(|arg| literal_string_value(&arg.expr)) {
                     let mut schema = &row;
                     while let Type::Tagged { inner, .. } = schema {
@@ -1760,7 +1773,7 @@ impl<'a> Checker<'a> {
                 let Some(row) = hinted.or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
-                        .map(|ty| web_list_element!(ty))
+                        .and_then(|ty| web_list_element!(ty))
                 }) else {
                     return None;
                 };
@@ -1773,7 +1786,7 @@ impl<'a> Checker<'a> {
                 let Some(row) = hinted.or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
-                        .map(|ty| web_list_element!(ty))
+                        .and_then(|ty| web_list_element!(ty))
                 }) else {
                     return None;
                 };
@@ -1785,7 +1798,7 @@ impl<'a> Checker<'a> {
                 let Some(row) = hinted.or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
-                        .map(|ty| web_list_element!(ty))
+                        .and_then(|ty| web_list_element!(ty))
                 }) else {
                     return None;
                 };
@@ -1803,7 +1816,7 @@ impl<'a> Checker<'a> {
                             Type::List(inner) => Some(*inner),
                             _ => None,
                         })
-                }).unwrap_or(Type::Int);
+                })?;
                 web_expect!(1, Type::List(Box::new(row.clone())));
                 web_expect!(2, web_callback(row.clone(), Type::String));
                 Some(web_apply("WebTable", row))
@@ -1819,7 +1832,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebTable", row.clone()));
                 web_expect!(1, web_callback(
                     Type::Named("WebTableState".to_string()),
-                    web_callback_result(web_apply("WebTablePage", row.clone())),
+                    web_apply("WebTablePage", row.clone()),
                 ));
                 Some(web_apply("WebTable", row))
             }
@@ -1931,7 +1944,7 @@ impl<'a> Checker<'a> {
                 let Some(row) = hinted.or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
-                        .map(|ty| web_list_element!(ty))
+                        .and_then(|ty| web_list_element!(ty))
                 }) else {
                     return None;
                 };
@@ -1992,7 +2005,7 @@ impl<'a> Checker<'a> {
                 let Some(row) = hinted.clone().or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
-                        .map(|ty| web_list_element!(ty))
+                        .and_then(|ty| web_list_element!(ty))
                 }) else {
                     return None;
                 };
@@ -2035,27 +2048,23 @@ impl<'a> Checker<'a> {
             }
             ("core.web.store", "new") => {
                 web_expect!(0, Type::String);
-                let value = hinted.unwrap_or_else(|| {
-                    args.get_mut(1)
-                        .and_then(|arg| self.infer(&mut arg.expr))
-                        .unwrap_or(Type::Int)
-                });
+                let value = hinted.or_else(|| {
+                    args.get_mut(1).and_then(|arg| self.infer(&mut arg.expr))
+                })?;
                 web_expect!(1, value.clone());
                 Some(web_apply("WebStore", value))
             }
             ("core.web.store", "with_history") => {
                 web_expect!(0, Type::String);
-                let value = hinted.unwrap_or_else(|| {
-                    args.get_mut(1)
-                        .and_then(|arg| self.infer(&mut arg.expr))
-                        .unwrap_or(Type::Int)
-                });
+                let value = hinted.or_else(|| {
+                    args.get_mut(1).and_then(|arg| self.infer(&mut arg.expr))
+                })?;
                 web_expect!(1, value.clone());
                 web_expect!(2, Type::Int);
                 Some(web_apply("WebStore", value))
             }
             ("core.web.store", "transaction") => {
-                let value = hinted.unwrap_or_else(|| {
+                let value = hinted.or_else(|| {
                     args.get_mut(0)
                         .and_then(|arg| self.infer(&mut arg.expr))
                         .and_then(|ty| match ty {
@@ -2066,8 +2075,7 @@ impl<'a> Checker<'a> {
                             }
                             _ => None,
                         })
-                        .unwrap_or(Type::Int)
-                });
+                })?;
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, Type::String);
                 web_expect!(2, Type::List(Box::new(Type::String)));
@@ -2117,7 +2125,7 @@ impl<'a> Checker<'a> {
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 Some(match name {
                     "value" => value,
-                    "signal" | "state_signal" => web_apply("Signal", value),
+                    "signal" | "state_signal" => Type::String,
                     "back" | "forward" => Type::Option(Box::new(value)),
                     "history" => Type::List(Box::new(web_apply("WebStoreTransaction", value))),
                     "events" => Type::List(Box::new(Type::Named("WebStoreEvent".to_string()))),
@@ -2163,8 +2171,7 @@ impl<'a> Checker<'a> {
                             ..
                         } if params.len() == 1 => Some(*ret),
                         _ => None,
-                    })
-                    .unwrap_or(Type::Int);
+                    })?;
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, web_callback(value, selected.clone()));
                 web_expect!(2, web_callback(selected, unit_ty()));
@@ -2190,8 +2197,7 @@ impl<'a> Checker<'a> {
                             ..
                         } if params.len() == 1 => Some(*ret),
                         _ => None,
-                    })
-                    .unwrap_or(Type::Int);
+                    })?;
                 web_expect!(0, web_apply("WebStore", value.clone()));
                 web_expect!(1, web_callback(value, selected.clone()));
                 Some(web_apply("Derived", selected))
@@ -2654,6 +2660,41 @@ impl<'a> Checker<'a> {
         }
         let fixed_sig =
             resolved_core_fixed_sig(module, name, type_args, span, &mut self.diags);
+        // Source-owned Core members are ordinary checked Jet functions.  The
+        // source module itself keeps the fixed signature so its `core.<same
+        // module>` provider calls do not recurse back into the wrapper.  Leaves
+        // owned by the native provider must stay on the fixed-signature path;
+        // routing those through a source wrapper would add the default `Err`
+        // carrier to direct HTTP/native carriers such as `HTTPRequest`.
+        if let Some(source) =
+            jet_foundation::CoreModuleExports::core_source_module(module)
+        {
+            if jet_foundation::CoreModuleExports::core_source_owns(module, name)
+                && !source_owned_http_carrier(module, name)
+                && !source_owned_math_primitive(module, name)
+                && source.path != self.module_path
+                && !source.path.ends_with(&format!("/{path}", path = self.module_path))
+            {
+                let source_idx = self.modules.and_then(|modules| {
+                    modules
+                        .iter()
+                        .position(|candidate| candidate.module_alias == source.alias)
+                });
+                if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
+                    let mut resolved_ret = None;
+                    return self.infer_import_call(
+                        alias,
+                        source_idx,
+                        name,
+                        alias_span,
+                        span,
+                        type_args,
+                        args,
+                        &mut resolved_ret,
+                    );
+                }
+            }
+        }
         if module == "core.web" && name == "form" {
             return self.infer_web_form_core_call(span, args);
         }
@@ -2701,7 +2742,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(core_compiler_return(name));
             }
-            if !matches!(args.len(), 1 | 2) {
+            if args.len() != 1 {
                 self.diags.push(wrong_core_arity(name, 1, args.len(), span));
             }
             if let Some(arg) = args.get_mut(0) {
@@ -2847,7 +2888,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(wrong_core_arity(name, 2, args.len(), span));
             }
             let row = match args.get_mut(0).and_then(|arg| self.infer(&mut arg.expr)) {
-                Some(Type::List(inner)) => *inner,
+                Some(Type::List(inner)) => inner.as_ref().clone(),
                 Some(other) => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -2856,14 +2897,16 @@ impl<'a> Checker<'a> {
                         "pass a `[Row]` value and a key callback".to_string(),
                         Some(span),
                     ));
-                    Type::Int
+                    return None;
                 }
-                None => Type::Int,
+                None => return None,
             };
-            let key = args
+            let Some(key) = args
                 .get_mut(1)
                 .and_then(|callback| self.infer_query_callback(name, &row, callback))
-                .unwrap_or(Type::Int);
+            else {
+                return None;
+            };
             return Some(result_ty(
                 Type::Apply {
                     name: "DataTracked".to_string(),
@@ -2895,9 +2938,9 @@ impl<'a> Checker<'a> {
                         "pass a `[Row]` value or `DataStream<Row>`".to_string(),
                         Some(span),
                     ));
-                    Type::Int
+                    return None;
                 }
-                None => Type::Int,
+                None => return None,
             };
             return Some(Type::Apply {
                 name: "Query".to_string(),
@@ -2907,23 +2950,71 @@ impl<'a> Checker<'a> {
         // D-DATAFLOW1=A: typed stream consumers preserve the DataStream<T>
         // row shape while keeping collection fallible and one-shot.
         if module == "core.data.stream" {
+            if !matches!(
+                name,
+                "from_items" | "next" | "collect" | "cancel" | "skip" | "take_n" | "len" | "is_empty"
+            ) {
+                self.diags.push(unknown_core_item(module, name, span));
+                return None;
+            }
+            let from_items = name == "from_items";
+            if from_items {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let hinted = if type_args.is_empty() {
+                    None
+                } else {
+                    exactly_one_type_arg(self, name, type_args, span)
+                };
+                let row = hinted.or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .and_then(|ty| match ty {
+                            Type::List(inner) => Some(*inner),
+                            other => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("`{name}` expects a typed row list, got {}", other.show()),
+                                    "stream construction preserves one element type".to_string(),
+                                    "pass a `[T]` value".to_string(),
+                                    Some(span),
+                                ));
+                                None
+                            }
+                        })
+                });
+                let Some(row) = row else {
+                    return None;
+                };
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &Type::List(Box::new(row.clone())), arg);
+                }
+                return Some(Type::Apply {
+                    name: "DataStream".to_string(),
+                    args: vec![row],
+                });
+            }
             if !type_args.is_empty() {
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!("`{name}` does not take an explicit type argument"),
                     "stream operations read their row type from the DataStream<T> value"
                         .to_string(),
-                    "remove the type argument and pass a concrete DataStream<T>".to_string(),
+                    "remove the type argument and pass a concrete DataStream<T> handle".to_string(),
                     Some(span),
                 ));
             }
-            let expected = 1;
+            let expected = match name {
+                "skip" | "take_n" => 2,
+                _ => 1,
+            };
             if args.len() != expected {
                 self.diags.push(wrong_core_arity(name, expected, args.len(), span));
             }
             let row = match args.get_mut(0).and_then(|arg| self.infer(&mut arg.expr)) {
                 Some(Type::Apply { name, args }) if name == "DataStream" && args.len() == 1 => {
-                    args.into_iter().next().unwrap_or(Type::Named("Unknown".to_string()))
+                    args.into_iter().next()
                 }
                 Some(other) => {
                     self.diags.push(Diagnostic::error(
@@ -2933,12 +3024,17 @@ impl<'a> Checker<'a> {
                         "pass a `DataStream<T>` value as the first argument".to_string(),
                         Some(span),
                     ));
-                    Type::Named("Unknown".to_string())
+                    None
                 }
-                None => Type::Named("Unknown".to_string()),
+                None => None,
             };
-            for arg in args.iter_mut().skip(1) {
-                self.infer(&mut arg.expr);
+            let Some(row) = row else {
+                return None;
+            };
+            if expected == 2 {
+                if let Some(arg) = args.get_mut(1) {
+                    self.expect_core_arg(name, 1, &Type::Int, arg);
+                }
             }
             return Some(match name {
                 "next" => result_ty(
@@ -2949,12 +3045,15 @@ impl<'a> Checker<'a> {
                     Type::List(Box::new(row)),
                     Type::Named("DataError".to_string()),
                 ),
-                "cancel" => unit_ty(),
-                _ => {
-                    self.diags.push(unknown_core_item(module, name, span));
-                    unit_ty()
-                }
-            });
+                "take_n" => result_ty(
+                    Type::List(Box::new(row)),
+                    Type::Named("DataError".to_string()),
+                ),
+                "cancel" | "skip" => unit_ty(),
+                "len" => Type::Int,
+                "is_empty" => Type::Bool,
+                _ => unreachable!(),
+            })
         }
         // D-EFF1: record the effect this Core call contributes to the enclosing
         // function's inferred set (erased in codegen; purely a sema fact).
@@ -3050,7 +3149,6 @@ impl<'a> Checker<'a> {
                     | "getpriority"
                     | "setpriority"
                     | "utime"
-                    | "atexit"
                     | "stop"
             )
             && !self.in_unsafe
@@ -3238,32 +3336,21 @@ impl<'a> Checker<'a> {
                     Type::Named("AuthError".to_string()),
                 )),
             ))
-        } else if module == "core.net.tls" && name == "client" && args.len() == 4 {
+        } else if module == "core.net.tls"
+            && name == "client"
+            && args.len() == 2
+            && args
+                .first()
+                .is_some_and(|arg| arg.convention == AccessConvention::Move)
+        {
             Some((
                 vec![
-                    (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                    (AccessConvention::Move, Type::Named("TCPStream".to_string())),
                     (AccessConvention::Read, Type::String),
-                    (
-                        AccessConvention::Read,
-                        Type::Named("TLSClientConfig".to_string()),
-                    ),
-                    (AccessConvention::Read, Type::Named("Duration".to_string())),
                 ],
                 Some(result_ty(
                     Type::Named("TLSStream".to_string()),
-                    Type::Named("NetError".to_string()),
-                )),
-            ))
-        } else if module == "core.net.tls" && name == "client" && args.len() == 3 {
-            Some((
-                vec![
-                    (AccessConvention::Move, Type::Named("TcpStream".to_string())),
-                    (AccessConvention::Read, Type::String),
-                    (AccessConvention::Read, Type::Named("Duration".to_string())),
-                ],
-                Some(result_ty(
-                    Type::Named("TLSStream".to_string()),
-                    Type::Named("NetError".to_string()),
+                    Type::Named("IOError".to_string()),
                 )),
             ))
         } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
@@ -3428,8 +3515,9 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let key_ty =
-                    self.resolve_type(type_args.first().cloned().or(inferred_key).unwrap());
+                let key_ty = crate::Sema::Diagnostics::core_crypto_nominal(
+                    self.resolve_type(type_args.first().cloned().or(inferred_key).unwrap()),
+                );
                 let key_leaf = match &key_ty {
                     Type::Named(leaf) => Some(leaf.as_str()),
                     Type::Tagged { inner, .. } => match inner.as_ref() {
@@ -3438,7 +3526,16 @@ impl<'a> Checker<'a> {
                     },
                     _ => None,
                 };
-                if !key_leaf.is_some_and(|leaf| matches!(leaf, "SigningKey" | "X25519SecretKey")) {
+                let key_is_concrete = key_leaf
+                    .is_some_and(|leaf| matches!(leaf, "SigningKey" | "X25519SecretKey"));
+                // Generic bodies defer sealed-key bound enforcement to monomorphization;
+                // this is not a compatibility shim, and concrete call sites stay checked.
+                let key_is_generic = key_leaf.is_some_and(|leaf| {
+                    self.type_param_scope
+                        .iter()
+                        .any(|param| param.name == leaf)
+                });
+                if !key_is_generic && !key_is_concrete {
                     self.diags.push(Diagnostic::error(
                         "E0905",
                         format!("`{}` is not a persistent vault key type", key_ty.show()),
@@ -3563,6 +3660,11 @@ impl<'a> Checker<'a> {
                         Type::Named("Unit".into()),
                     ),
                 };
+                let params: Vec<(AccessConvention, Type)> = params
+                    .into_iter()
+                    .map(|(convention, ty)| (convention, self.resolve_type(ty)))
+                    .collect();
+                let ok = self.resolve_type(ok);
                 if args.len() != params.len() {
                     self.diags
                         .push(wrong_core_arity(name, params.len(), args.len(), span));
@@ -3590,7 +3692,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "VaultError"
                 };
-                return Some(result_ty(ok, Type::Named(err.into())));
+                return Some(result_ty(ok, self.resolve_type(Type::Named(err.into()))));
             }
             ("core.encoding.cbor", "parse") => {
                 if !(1..=2).contains(&args.len()) {
@@ -4120,30 +4222,6 @@ impl<'a> Checker<'a> {
                 }
                 return Some(result_ty(json_ty(), encoding_error_ty()));
             }
-            ("core.sys", "decode") if !type_args.is_empty() => {
-                if args.len() > 3 {
-                    self.diags.push(wrong_core_arity(name, 3, args.len(), span));
-                }
-                for (index, arg) in args.iter_mut().enumerate() {
-                    match index {
-                        0 | 1 => self.expect_core_arg(name, index, &Type::String, arg),
-                        2 => self.expect_core_arg(
-                            name,
-                            index,
-                            &Type::List(Box::new(Type::String)),
-                            arg,
-                        ),
-                        _ => {
-                            self.infer(&mut arg.expr);
-                        }
-                    }
-                }
-                let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-                    return None;
-                };
-                self.check_decodable(&t, span);
-                return Some(result_ty(t, decode_error_ty()));
-            }
             // D-SHAPE-ONE1=A: decode one existing DB row through the same
             // typed DataTree decoder used by the wire formats. The explicit
             // row remains the authoritative table/transaction carrier.
@@ -4273,7 +4351,7 @@ impl<'a> Checker<'a> {
                 }
                 let mutating = matches!(
                     name,
-                    "bind" | "bind_text" | "cancel" | "invalidate" | "offline" | "stream"
+                    "bind" | "bind_text" | "cancel" | "invalidate" | "offline"
                 );
                 let loader_ty = args.get_mut(0).and_then(|arg| {
                     if mutating && arg.convention != AccessConvention::Write {
@@ -4327,6 +4405,9 @@ impl<'a> Checker<'a> {
                         self.infer(&mut arg.expr);
                     }
                 }
+                let Some(row) = row else {
+                    return None;
+                };
                 let result = match name {
                     "bind" | "bind_text" => {
                         result_ty(unit_ty(), Type::Named("DataError".to_string()))
@@ -4336,24 +4417,13 @@ impl<'a> Checker<'a> {
                     "status" => Type::Named("DataLoaderStatus".to_string()),
                     "source_identity" => Type::Named("DataSourceIdentity".to_string()),
                     "authority" => Type::Named("DataAuthority".to_string()),
-                    "stream" => {
-                        // A loader stores its complete payload shape (`DataLoader<[T]>`)
-                        // for snapshots, while streams pull one row at a time.
-                        // Preserve that distinction at the checked boundary.
-                        let stream_row = row.map(|row| match row {
-                            Type::List(inner) | Type::FixedList { elem: inner, .. } => *inner,
-                            other => other,
-                        });
-                        result_ty(
-                            stream_row
-                                .map(|row| Type::Apply {
-                                    name: "DataStream".to_string(),
-                                    args: vec![row],
-                                })
-                                .unwrap_or_else(|| Type::Named("DataStream".to_string())),
-                            Type::Named("DataError".to_string()),
-                        )
-                    }
+                    "stream" => result_ty(
+                        Type::Apply {
+                            name: "DataStream".to_string(),
+                            args: vec![row],
+                        },
+                        Type::Named("DataError".to_string()),
+                    ),
                     _ => unreachable!(),
                 };
                 return Some(result);
@@ -4538,7 +4608,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::Int);
+                    return None;
                 };
                 let ty = self.infer(&mut arg.expr)?;
                 if !matches!(ty, Type::List(_)) {
@@ -4557,7 +4627,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
+                    return None;
                 };
                 let ty = self.infer(&mut arg.expr)?;
                 if !matches!(ty, Type::List(_)) {
@@ -4594,9 +4664,9 @@ impl<'a> Checker<'a> {
                                 Some(arg.expr.span()),
                             ));
                         }
-                        Type::Int
+                        return None;
                     }
-                    None => Type::Int,
+                    None => return None,
                 };
                 let right_row = match right_ty {
                     Some(Type::List(inner)) => *inner,
@@ -4614,9 +4684,9 @@ impl<'a> Checker<'a> {
                                 Some(arg.expr.span()),
                             ));
                         }
-                        Type::Int
+                        return None;
                     }
-                    None => Type::Int,
+                    None => return None,
                 };
                 if let Some(left_key) = args.get_mut(2) {
                     let key_fn = Type::Fn {
@@ -4656,7 +4726,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 4, args.len(), span));
                 }
                 let Some(rows_arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Named("DataPivotCell".to_string()))));
+                    return None;
                 };
                 let rows_ty = self.infer(&mut rows_arg.expr);
                 let row_ty = match rows_ty {
@@ -4669,9 +4739,9 @@ impl<'a> Checker<'a> {
                             "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
                             Some(rows_arg.expr.span()),
                         ));
-                        Type::Int
+                        return None;
                     }
-                    None => Type::Int,
+                    None => return None,
                 };
                 for idx in [1usize, 2usize] {
                     if let Some(arg) = args.get_mut(idx) {
@@ -5612,7 +5682,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::Option(Box::new(Type::Int)));
+                    return None;
                 };
                 let ty = self.infer(&mut arg.expr)?;
                 if let Type::List(inner) = ty {
@@ -5635,7 +5705,7 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    return Some(Type::List(Box::new(Type::Int)));
+                    return None;
                 };
                 let arg_span = arg.expr.span();
                 let ty = self.infer(&mut arg.expr)?;
@@ -5671,7 +5741,7 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    return Some(Type::Option(Box::new(Type::Int)));
+                    return None;
                 };
                 let items_span = items_arg.expr.span();
                 let items_ty = self.infer(&mut items_arg.expr)?;
@@ -6142,7 +6212,9 @@ impl<'a> Checker<'a> {
                 }
                 let init_ty = self.infer(&mut args[0].expr);
                 self.expected_type = saved;
-                let elem = init_ty.unwrap_or(Type::Int);
+                let Some(elem) = init_ty else {
+                    return None;
+                };
                 if !self.reactive_value_ok(&elem, args[0].expr.span(), "signal") {
                     return None;
                 }
@@ -6772,7 +6844,7 @@ impl<'a> Checker<'a> {
                 "core.sys",
                 "fork" | "setuid" | "setgid" | "setpgid" | "setpgrp" | "setsid" | "initgroups"
                 | "kill" | "wait" | "waitpid" | "pipe" | "close_fd" | "mkfifo" | "umask"
-                | "getpriority" | "setpriority" | "utime" | "atexit" | "stop",
+                | "getpriority" | "setpriority" | "utime" | "stop",
             ) => {
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
@@ -7124,7 +7196,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg(
                     "serve_once_listener",
                     0,
-                    &Type::Named("TcpListener".to_string()),
+                    &Type::Named("TCPListener".to_string()),
                     &mut args[0],
                 );
                 self.infer(&mut args[1].expr);
@@ -7473,7 +7545,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
                 return Some(Type::Result {
                     ok: Box::new(Type::Named("LocalDate".to_string())),
-                    err: Box::new(Type::String),
+                    err: Box::new(Type::Named("TimeError".to_string())),
                 });
             }
             ("core.time", "from_timestamp") => {
@@ -7622,56 +7694,6 @@ impl<'a> Checker<'a> {
             _ => {}
         }
 
-        // D-FFI-SH1=A / D-UNIFYLIT1=A: `process.run` accepts `Sh` (from
-        // `Sh.{"…"}` / `Sh.raw`) or an explicit `[String]` argv list.
-        // Bare `"…"` is `String` and E0149 — no silent typed-text rewrite.
-        if module == "core.process" && name == "run" {
-            let Some((_, ret)) = sig else { unreachable!() };
-            if !matches!(args.len(), 1 | 2) {
-                self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-            }
-            if let Some(arg) = args.get_mut(0) {
-                let got = self.infer(&mut arg.expr);
-                if let Some(got) = got {
-                    let explicit_argv = matches!(
-                        got,
-                        Type::List(ref elem) | Type::FixedList { ref elem, .. }
-                            if **elem == Type::String
-                    );
-                    if got != Type::Named(Syntax::TYPE_SH.to_string()) && !explicit_argv {
-                        if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
-                            &Type::Named(Syntax::TYPE_SH.to_string()),
-                            &got,
-                            arg.expr.span(),
-                        ) {
-                            self.diags.push(diag);
-                        } else {
-                            self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!("`run` needs Sh, but this is {}", got.show()),
-                                    "process.run executes a checked argv command without a shell".to_string(),
-                                    "pass a Sh literal, or build an explicit argv command with process.cmd(argv).run()".to_string(),
-                                    Some(arg.expr.span()),
-                                ));
-                        }
-                    }
-                }
-            }
-            if args.len() == 2 {
-                self.expect_core_arg(
-                    name,
-                    1,
-                    &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
-                    &mut args[1],
-                );
-                crate::Sema::Effects::check_authority_boundary_scope(self, &args[1].expr);
-                args[1].flags.authority_boundary = true;
-            }
-            for arg in args.iter_mut().skip(2) {
-                self.infer(&mut arg.expr);
-            }
-            return ret;
-        }
 
         // D-PLUGIN-AUTHORITY1: plugin loading has one exact ABI. The path and
         // tightened Authority are both required; omitted authority is never
@@ -7739,34 +7761,6 @@ impl<'a> Checker<'a> {
             let _ = alias_span;
             return None;
         };
-        if module == "core.sys" && name == "on_interrupt" {
-            // D-OSINTERRUPT1/I3: this is the one fixed callback crossing.
-            // Keep the callback expectation tied to the complete one-slot
-            // signature. Do not silently type-check only `params.first()`
-            // if the registry row ever drifts to another shape.
-            debug_assert_eq!(params.len(), 1);
-            if args.len() != params.len() {
-                self.diags
-                    .push(wrong_core_arity(name, params.len(), args.len(), span));
-            }
-            if params.len() == 1 {
-                let (conv, param_ty) = &params[0];
-                if let Some(arg) = args.get_mut(0) {
-                    debug_assert_eq!(*conv, AccessConvention::Read);
-                    let saved_lambda_escapes = self.lambda_escapes;
-                    let saved_callback_depth = self.interrupt_callback_depth;
-                    self.lambda_escapes = true;
-                    self.interrupt_callback_depth += 1;
-                    self.expect_core_arg(name, 0, param_ty, arg);
-                    self.interrupt_callback_depth = saved_callback_depth;
-                    self.lambda_escapes = saved_lambda_escapes;
-                }
-            }
-            for arg in args.iter_mut().skip(params.len()) {
-                self.infer(&mut arg.expr);
-            }
-            return ret;
-        }
         // D-COMPUTE-RAW1/I1: a raw kernel contract is an expert escape
         // hatch, not a safe compute constructor. Keep the fixed signature
         // and normal type checking, but require the same lexical audit

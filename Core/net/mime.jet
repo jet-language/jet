@@ -4,12 +4,17 @@
 // subtype, and parameter names are folded to lowercase. The extension
 // table is the same one CoreLib uses for static HTTP files; unknown
 // extensions are absent, never `application/octet-stream`.
-pub struct Mime {
+#Error
+pub enum MIMEError {
+    Syntax
+}
+
+pub struct MIME {
     pub top: String
     pub sub: String
 }
 
-pub fn parse(text: String) -> Mime {
+pub fn parse(text: String) -> MIME !MIMEError {
     raw :: trim_ascii(text)
     slash := -1
     i := 0
@@ -22,7 +27,7 @@ pub fn parse(text: String) -> Mime {
         }
         i = i + 1
     }
-    if slash <= 0 -> return Err("Mime type needs `type/subtype`")
+    if slash <= 0 -> return Err(MIMEError.Syntax)
     semi := bytes.len()
     j := slash + 1
     loop {
@@ -35,8 +40,8 @@ pub fn parse(text: String) -> Mime {
     }
     top :: ascii_lower(slice(bytes, 0, slash))
     sub :: ascii_lower(trim_ascii(slice(bytes, slash + 1, semi)))
-    if top.bytes().len() == 0 || sub.bytes().len() == 0 -> return Err("invalid Mime type")
-    Ok({top: top, sub: sub})
+    if top.bytes().len() == 0 || sub.bytes().len() == 0 -> return Err(MIMEError.Syntax)
+    Ok(MIME{top: top, sub: sub})
 }
 
 pub fn from_extension(ext: String) -> ?String {
@@ -95,13 +100,13 @@ pub fn extension(mime: String) -> ?String {
 }
 
 fn trim_dot(ext: String) -> String {
-    raw :: ext.bytes()
+    raw :: (~ext).bytes()
     if raw.len() > 0 && raw[0] == (U8{46}) -> return slice(raw, 1, raw.len())
-    ext
+    return ~ext
 }
 
 fn trim_params(mime: String) -> String {
-    raw :: mime.bytes()
+    raw :: (~mime).bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
     }

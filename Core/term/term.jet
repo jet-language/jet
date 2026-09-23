@@ -8,11 +8,12 @@ package {
         term: .Library{ entry: term }
     }
 }
+use core as core
 // core.term — the connected terminal.
 //
 // `print` / `eprint` write UTF-8. `input` / `readline` / `read_until` read
 // lines. `input_secret` disables echo. `style` is a no-op when stdout is not
-// a TTY unless `style_force` is used. Width and height are 0 when unknown.
+// a TTY unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
 pub struct Reader {
@@ -46,148 +47,72 @@ pub enum Key {
     Right
     Unknown
 }
-
-pub fn print(text: String) -[IO]> { host_write_fd(1, text.bytes()) }
-
-pub fn eprint(text: String) -[IO]> { host_write_fd(2, text.bytes()) }
-
-pub fn input() -[IO]> ?String {
-    line :: host_read_line(0)
-    if line.len() == 0 && host_eof(0) -> return None
-    Val(chomp(line))
+pub fn print(text: String) -[IO, Time.Wait]> {
+    out :: core.term.stdout()
+    out.write_line(text).drop("stdout write")
 }
 
-pub fn input_secret(prompt: String) -[IO]> String !IOError {
-    host_write_fd(2, prompt.bytes())
-    host_set_echo(0, false)
-    line :: host_read_line(0)
-    host_set_echo(0, true)
-    host_write_fd(2, [U8]{10})
-    Ok(chomp(line))
+pub fn eprint(text: String) -[IO]> { core.term.eprint(text) }
+
+pub fn input(prompt: String{""}) -[IO, Time.Wait]> String !IOError {
+    core.term.input(prompt)
 }
 
-pub fn read_all_input() -[IO]> String !IOError {
-    out := [U8]{}
-    loop {
-        chunk :: host_read_fd(0, 4096)
-        if chunk.len() == 0 -> return Ok(String.from_bytes(out) ?? "")
-        loop b in chunk -> out.push(b)
-    }
+pub fn input_secret(prompt: String) -[IO, Time.Wait]> String !IOError {
+    core.term.input_secret(prompt)
 }
 
-pub fn readline() -[IO]> String !IOError { Ok(chomp(host_read_line(0))) }
+pub fn read_all_input() -[IO, Time.Wait]> String !IOError { core.term.read_all_input() }
 
-pub fn read_until(delimiter: String) -[IO]> String !IOError {
-    if delimiter.bytes().len() == 0 -> return read_all_input()
-    out := [U8]{}
-    needle :: delimiter.bytes()
-    loop {
-        b :: host_read_fd(0, 1)
-        if b.len() == 0 -> return Ok(String.from_bytes(out) ?? "")
-        out.push(b[0])
-        if ends_with_bytes(out, needle) {
-            cut := out.len() - needle.len()
-            return Ok(slice_bytes(out, 0, cut))
-        }
-    }
+pub fn readline() -[IO, Time.Wait]> String !IOError { core.term.readline() }
+
+pub fn read_until(delimiter: String) -[IO, Time.Wait]> String !IOError {
+    core.term.read_until(delimiter)
 }
 
-pub fn binread(n: Int) -[IO]> [U8] !IOError { Ok(host_read_fd(0, n)) }
-
-pub fn binwrite(handle: Writer, bytes: [U8]) !IOError {
-    host_write_fd(handle.fd, bytes)
-    Ok()
+pub fn binread(path: String) -[IO, Time.Wait]> [U8] !IOError {
+    core.term.binread(path)
 }
 
-pub fn confirm(prompt: String) -[IO]> Bool {
-    host_write_fd(1, "{prompt} [y/N] ".bytes())
-    line :: ascii_lower(chomp(host_read_line(0)))
-    line == "y" || line == "yes"
+pub fn binwrite(path: String, bytes: [U8]) !IOError -[IO, Time.Wait]> {
+    core.term.binwrite(path, bytes)
 }
 
-pub fn choose(prompt: String, options: [String]) -[IO]> String !IOError {
-    if options.len() == 0 {
-        return Err(IOError{operation: "choose", message: "no options", path: "", os_code: None})
-    }
-    host_write_fd(1, "{prompt}\n".bytes())
-    loop i in 0..<options.len() { host_write_fd(1, "  {i + 1}) {options[i]}\n".bytes()) }
-    line :: chomp(host_read_line(0))
-    n :: parse_int(line) ?? 0
-    if n >= 1 && n <= options.len() -> return Ok(options[n - 1])
-    loop o in options {
-        if o == line -> return Ok(o)
-    }
-    Ok(options[0])
+pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool { core.term.confirm(prompt) }
+
+pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String !IOError {
+    core.term.choose(prompt, options)
 }
 
-pub fn stdin() -> StdinHandle { {fd: 0} }
+pub fn stdin() -> StdinHandle { core.term.stdin() }
 
-pub fn stdout() -> Stdout { {fd: 1} }
+pub fn stdout() -> Stdout { core.term.stdout() }
 
-pub fn stderr() -> Stderr { {fd: 2} }
+pub fn stderr() -> Stderr { core.term.stderr() }
 
-pub fn buffered() -> StdinHandle { {fd: 0} }
+pub fn buffered() -> StdinHandle { core.term.buffered() }
 
-pub fn terminal_width() -[IO]> Int {
-    s :: host_winsize()
-    s.w
-}
+pub fn terminal_width() -[IO]> Int { core.term.terminal_width() }
 
-pub fn terminal_height() -[IO]> Int {
-    s :: host_winsize()
-    s.h
-}
+pub fn terminal_height() -[IO]> Int { core.term.terminal_height() }
 
-pub fn style(text: String, spec: String) -[IO]> String {
-    if !host_isatty(1) -> return text
-    style_force(text, spec)
-}
+pub fn style(style: String, text: String) -[IO]> String { core.term.style(style, text) }
 
-pub fn style_force(text: String, spec: String) -> String {
-    codes :: sgr(spec)
-    if codes.len() == 0 -> return text
+pub fn style_force(style: String, text: String) -> String {
+    codes :: sgr(style)
+    if codes.len() == 0 -> return ~text
     esc :: String.from_bytes([U8]{27}) ?? ""
-    "{esc}[{codes}m{text}{esc}[0m"
+    return "{esc}[{codes}m{text}{esc}[0m"
 }
 
-pub fn progress(label: String) -[IO]> {
-    cr :: String.from_bytes([U8]{13}) ?? "\n"
-    host_write_fd(2, "{cr}{label}".bytes())
-    host_flush_fd(2)
-}
 
-pub fn read_key() -[IO]> Key {
-    b :: host_read_fd(0, 1)
-    if b.len() == 0 -> return Key.Unknown
-    n :: b[0]
-    if n == {
-        10 | 13 -> return Key.Enter
-        9 -> return Key.Tab
-        127 | 8 -> return Key.Backspace
-        else -> { _ := 0 }
-    }
-    if n == 27 {
-        rest :: host_read_fd(0, 2)
-        if rest.len() >= 2 && rest[0] == (U8{91}) {
-            c :: rest[1]
-            if c == {
-                65 -> return Key.Up
-                66 -> return Key.Down
-                67 -> return Key.Right
-                68 -> return Key.Left
-                else -> { _ := 0 }
-            }
-        }
-        return Key.Escape
-    }
-    Key.Char(String.from_bytes([U8]{b[0]}) ?? "")
-}
+pub fn read_key() -[IO, Time.Wait]> Key { core.term.read_key() }
 
 pub struct WinSize {
     pub w: Int
     pub h: Int
 }
-
+pub fn progress(label: String) -[IO, Time.Wait]> { core.term.progress(label) }
 fn sgr(spec: String) -> String {
     parts := [String]{}
     cur := [U8]{}
@@ -211,6 +136,8 @@ fn sgr(spec: String) -> String {
 }
 
 fn token_code(token: String) -> String {
+    numeric :: parse_int(token) ?? -1
+    if numeric >= 0 && numeric <= 109 -> return "{numeric}"
     if token == {
         "bold" -> "1"
         "dim" -> "2"
@@ -288,18 +215,3 @@ fn parse_int(text: String) -> ?Int {
     Val(n)
 }
 
-fn host_write_fd(fd: Int, bytes: [U8]) -[IO]> { panic("host_write_fd") }
-
-fn host_read_fd(fd: Int, n: Int) -[IO]> [U8] { panic("host_read_fd") }
-
-fn host_read_line(fd: Int) -[IO]> String { panic("host_read_line") }
-
-fn host_eof(fd: Int) -[IO]> Bool { panic("host_eof") }
-
-fn host_set_echo(fd: Int, on: Bool) -[IO]> { panic("host_set_echo") }
-
-fn host_isatty(fd: Int) -[IO]> Bool { panic("host_isatty") }
-
-fn host_winsize() -[IO]> WinSize { panic("host_winsize") }
-
-fn host_flush_fd(fd: Int) -[IO]> { panic("host_flush_fd") }

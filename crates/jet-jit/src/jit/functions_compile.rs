@@ -2086,8 +2086,12 @@ fn view_callback_thunk_specs(
                             .iter()
                             .find(|row| row.id == *call)
                             .ok_or_else(|| format!("MIR collection route {call:?} is missing"))?;
-                        preserve_result = row.module == "core.event"
-                            && matches!(row.member.as_str(), "on" | "once" | "on_priority");
+                        preserve_result = (row.module == "core.event"
+                            && matches!(row.member.as_str(), "on" | "once" | "on_priority"))
+                            || matches!(
+                                row.member.as_str(),
+                                "each_ref" | "filter_map" | "try_map" | "try_filter"
+                            );
                         if let Some((pair, index, count)) =
                             view_callback_shape(row).or_else(|| plot_callback_shape(row))
                         {
@@ -4340,7 +4344,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 Some(self.result_value(builder, false, self.value(*value)?, expected)?)
             }
             MirOperation::Call { callee, args, .. } => {
-                Some(self.call_callee(builder, callee, args, expected)?)
+                Some(self.call_callee(builder, callee, args, instruction.ty.as_ref(), expected)?)
             }
             MirOperation::CoreCall {
                 call,
@@ -4359,7 +4363,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 expected,
             )?),
             MirOperation::IndirectCall { callee, args, .. } => {
-                Some(self.indirect_call(builder, *callee, args, expected)?)
+                Some(self.indirect_call(builder, *callee, args, instruction.ty.as_ref(), expected)?)
             }
             MirOperation::Closure {
                 function,
@@ -4490,10 +4494,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 } else if name == "stm" {
                     let _ = self.call_host(builder, self.host.memory.shared_txn_begin, &[])?;
                     Some(builder.ins().iconst(types::I64, 0))
+                } else if let Some(constant) = self
+                    .program
+                    .constants
+                    .iter()
+                    .find(|constant| {
+                        constant.key.as_str() == name.as_str()
+                            || constant.name.as_str() == name.as_str()
+                    })
+                    .map(|constant| constant.value.clone())
+                {
+                    Some(self.constant(builder, &constant, expected)?)
                 } else {
-                    // No tier carries run-provided globals: the interpreter refuses
-                    // the op at runtime ("not provided by the run") and this backend
-                    // reports unsupported MIR at its execution boundary.
                     return Err(format!(
                         "MIR global `{name}` is not provided by the resident run"
                     ));
@@ -11503,6 +11515,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         callee: MirValueId,
         args: &[MirCallArg],
+        result_type: Option<&MirType>,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
         let callee_type = self.mir_value_type(callee)?;
@@ -11543,6 +11556,21 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let values = self.lower_call_args(builder, args, &signature)?;
         let handle = self.cast(builder, self.value(callee)?, types::I64)?;
         let result = self.call_callable_values(builder, handle, signature, values, return_type)?;
+        let failure = ret.and_then(|ret| match ret.kind() {
+            MirTypeKind::Result { ok, err } => Some(MirFailureCarrier::Result {
+                success: (**ok).clone(),
+                error: (**err).clone(),
+            }),
+            MirTypeKind::Option(value) => Some(MirFailureCarrier::Optional {
+                value: (**value).clone(),
+            }),
+            _ => None,
+        });
+        if let Some(failure) = failure.as_ref() {
+            if Self::call_result_matches_failure(result_type, failure) {
+                return self.unwrap_call_result(builder, result, expected, failure);
+            }
+        }
         expected.map_or(Ok(result), |target| self.cast(builder, result, target))
     }
 
@@ -12807,12 +12835,20 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         id: MirFunctionId,
         args: &[MirCallArg],
+        result_type: Option<&MirType>,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
         let target = *self
             .function_ids
             .get(&id)
             .ok_or_else(|| format!("MIR user function {:?} is missing", id))?;
+        let failure = self
+            .program
+            .functions
+            .iter()
+            .find(|function| function.id == id)
+            .map(|function| function.failure.clone())
+            .ok_or_else(|| format!("MIR user function {:?} has no metadata", id))?;
         let signature = self
             .module
             .declarations()
@@ -12827,8 +12863,88 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "MIR user call returned no value".to_string())?;
-                expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                if Self::call_result_matches_failure(result_type, &failure) {
+                    self.unwrap_call_result(builder, value, expected, &failure)
+                } else {
+                    expected.map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                }
             })
+    }
+
+    fn call_result_matches_failure(
+        result_type: Option<&MirType>,
+        failure: &MirFailureCarrier,
+    ) -> bool {
+        match failure {
+            MirFailureCarrier::Result { success, .. } => {
+                result_type.is_some_and(|ty| ty.same_checked_type(success))
+            }
+            MirFailureCarrier::Optional { value } => {
+                result_type.is_some_and(|ty| ty.same_checked_type(value))
+            }
+            MirFailureCarrier::Infallible | MirFailureCarrier::Diverges { .. } => false,
+        }
+    }
+
+    fn unwrap_call_result(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        raw: Value,
+        expected: Option<types::Type>,
+        failure: &MirFailureCarrier,
+    ) -> Result<Value, String> {
+        let raw_result = self.cast(builder, raw, types::I64)?;
+        let ok = self
+            .call_host(builder, self.host.result_is_ok, &[raw_result])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR user call result discriminator returned no value".to_string())?;
+        let payload_type = expected.unwrap_or(types::I64);
+        let success_block = builder.create_block();
+        let failure_block = builder.create_block();
+        let merge_block = builder.create_block();
+        builder.append_block_param(merge_block, payload_type);
+        builder
+            .ins()
+            .brif(ok, success_block, &[], failure_block, &[]);
+
+        builder.switch_to_block(failure_block);
+        let compatible = match (failure, &self.function.failure) {
+            (
+                MirFailureCarrier::Result { error: source, .. },
+                MirFailureCarrier::Result { error: target, .. },
+            ) => source.same_checked_type(target),
+            (MirFailureCarrier::Optional { .. }, MirFailureCarrier::Optional { .. }) => true,
+            _ => false,
+        };
+        if !compatible {
+            return Err(format!(
+                "MIR call failure cannot propagate through `{}`",
+                self.function.key
+            ));
+        }
+        let return_type = clif_ty_from_mir(&self.function.return_type).ok_or_else(|| {
+            format!(
+                "MIR call failure target `{}` has no Cranelift return carrier",
+                self.function.key
+            )
+        })?;
+        let return_value = self.cast(builder, raw_result, return_type)?;
+        self.emit_cell_frame_leave(builder, Some(return_value))?;
+        self.emit_sentry_function_exit(builder)?;
+        self.emit_stack_leave(builder)?;
+        builder.ins().return_(&[return_value]);
+
+        builder.switch_to_block(success_block);
+        let payload = self.result_value_get_raw(builder, raw_result, Some(payload_type))?;
+        builder.ins().jump(merge_block, &[payload]);
+        builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+        builder
+            .block_params(merge_block)
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR user call result merge has no payload".to_string())
     }
 
     fn call_foreign(
@@ -13090,6 +13206,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         method_id: jet_foundation::MIR::MirTraitMethodId,
         trait_ref: &jet_foundation::MIR::MirTraitRef,
         args: &[MirCallArg],
+        result_type: Option<&MirType>,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
         let trait_def = self
@@ -13151,7 +13268,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     method.name
                 )
             })?;
-            return self.call_user(builder, function, args, expected);
+            return self.call_user(builder, function, args, result_type, expected);
         }
         let first = args
             .first()
@@ -13172,9 +13289,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR trait object type lookup returned no value".to_string())?;
-        let result_type = expected.unwrap_or(types::I64);
+        let result_abi = expected.unwrap_or(types::I64);
         let merge = builder.create_block();
-        builder.append_block_param(merge, result_type);
+        builder.append_block_param(merge, result_abi);
         let mut test = builder.create_block();
         builder.ins().jump(test, &[]);
         for (index, (type_id, function)) in targets.iter().enumerate() {
@@ -13192,18 +13309,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             };
             builder.ins().brif(condition, matched, &[], fallback, &[]);
             builder.switch_to_block(matched);
-            let result = self.call_user(builder, *function, args, expected)?;
-            let result = self.cast(builder, result, result_type)?;
+            let result = self.call_user(builder, *function, args, result_type, expected)?;
+            let result = self.cast(builder, result, result_abi)?;
             builder.ins().jump(merge, &[result]);
             if index + 1 == targets.len() {
                 builder.switch_to_block(fallback);
                 if let Some(default) = default {
-                    let result = self.call_user(builder, default, args, expected)?;
-                    let result = self.cast(builder, result, result_type)?;
+                    let result = self.call_user(builder, default, args, result_type, expected)?;
+                    let result = self.cast(builder, result, result_abi)?;
                     builder.ins().jump(merge, &[result]);
                 } else {
                     let result = self.trap(builder)?;
-                    let result = self.cast(builder, result, result_type)?;
+                    let result = self.cast(builder, result, result_abi)?;
                     builder.ins().jump(merge, &[result]);
                 }
             }
@@ -13222,24 +13339,27 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         builder: &mut FunctionBuilder<'_>,
         callee: &MirCallee,
         args: &[MirCallArg],
+        result_type: Option<&MirType>,
         expected: Option<types::Type>,
     ) -> Result<Value, String> {
         match callee {
-            MirCallee::User(id) => self.call_user(builder, *id, args, expected),
+            MirCallee::User(id) => self.call_user(builder, *id, args, result_type, expected),
             MirCallee::Associated { function, owner } | MirCallee::Method { function, owner } => {
                 self.validate_associated_owner(owner)?;
                 if self.is_model_embed_method(*function, owner) {
                     self.call_model_embed(builder, args, expected)
                 } else {
-                    self.call_user(builder, *function, args, expected)
+                    self.call_user(builder, *function, args, result_type, expected)
                 }
             }
             MirCallee::TraitMethod {
                 method, trait_ref, ..
-            } => self.call_trait_method(builder, *method, trait_ref, args, expected),
+            } => self.call_trait_method(builder, *method, trait_ref, args, result_type, expected),
             MirCallee::Prelude(id) => self.call_prelude_args(builder, *id, args, expected),
             MirCallee::Foreign(id) => self.call_foreign(builder, *id, args, expected),
-            MirCallee::Indirect(value) => self.indirect_call(builder, *value, args, expected),
+            MirCallee::Indirect(value) => {
+                self.indirect_call(builder, *value, args, result_type, expected)
+            }
             MirCallee::Core(id) => self.call_core(builder, *id, None, &[], args, None, expected),
         }
     }
@@ -13676,7 +13796,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             match (row.module.as_str(), row.member.as_str()) {
                 ("core.args", "decode") => Some("jet_jit_args_decode"),
                 ("core.args", "merge") => Some("jet_jit_args_merge"),
-                ("core.sys", "decode") => Some("jet_jit_env_decode"),
                 ("core.encoding.json", "decode") => Some("jet_jit_json_decode_typed"),
                 ("core.encoding.toml", "decode") => Some("jet_jit_toml_decode_typed"),
                 ("core.encoding.yaml", "decode") => Some("jet_jit_yaml_decode_typed"),
@@ -13808,7 +13927,6 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     (row.module.as_str(), row.member.as_str()),
                     ("core.args", "decode")
                         | ("core.args", "merge")
-                        | ("core.sys", "decode")
                         | ("core.encoding.json", "decode")
                         | ("core.encoding.toml", "decode")
                         | ("core.encoding.yaml", "decode")
@@ -14172,14 +14290,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     ) -> Result<Value, String> {
         let values = args
             .iter()
-            .map(|arg| {
-                if arg.access == MirAccess::Write {
-                    return Err(format!(
-                        "MIR service call `{module}`.{member} cannot pass a write argument"
-                    ));
-                }
-                self.value(arg.value)
-            })
+            .map(|arg| self.value(arg.value))
             .collect::<Result<Vec<_>, _>>()?;
         let results =
             self.call_service_values(builder, module, member, values, expected == Some(types::I8))?;
@@ -18168,7 +18279,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 interrupt: policy,
                 values,
             } => self
-                .indirect_call(builder, *policy, &self.dynamic_call_args(values), expected)
+                .indirect_call(
+                    builder,
+                    *policy,
+                    &self.dynamic_call_args(values),
+                    None,
+                    expected,
+                )
                 .map(Some),
             MirSemanticOp::NumericMethod { call, receiver } => self
                 .call_prelude(builder, *call, vec![self.value(*receiver)?], expected)

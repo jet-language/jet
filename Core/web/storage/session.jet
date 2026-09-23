@@ -1,22 +1,14 @@
+use core as core
+
 // core.web.storage.session — tab-scoped key/value store.
-pub fn get(key: String) -> ?String { host_storage_get("session", key) }
+pub fn get(key: String) -> ?String { core.web.storage.session.get(key) }
 
-pub fn set(key: String, value: String) { host_storage_set("session", key, value) }
+pub fn set(key: String, value: String) { core.web.storage.session.set(key, value) }
 
-pub fn remove(key: String) { host_storage_remove("session", key) }
+pub fn remove(key: String) { core.web.storage.session.remove(key) }
 
-pub fn clear() { host_storage_clear("session") }
+pub fn clear() { core.web.storage.session.clear() }
 
-fn host_storage_get(ns: String, key: String) -> ?String { panic("host_storage_get") }
+pub fn get_or(key: String, fallback: String) -> String { get(key) ?? fallback }
 
-fn host_storage_set(ns: String, key: String, value: String) { panic("host_storage_set") }
-
-fn host_storage_remove(ns: String, key: String) { panic("host_storage_remove") }
-
-fn host_storage_clear(ns: String) { panic("host_storage_clear") }
-
-pub fn get_or(key: String, fallback: String) -> String {
-    host_storage_get("session", key) ?? fallback
-}
-
-pub fn has(key: String) -> Bool { host_storage_get("session", key) != None }
+pub fn has(key: String) -> Bool { get(key) != None }

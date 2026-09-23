@@ -676,6 +676,8 @@ pub(crate) fn resolve_builtin_op(
         ("last_index_of", 1) if is_string => TBuiltinOp::StringMethod {
             method: "last_index_of".to_string(),
         },
+        // D-ITERTOOLS1: List methods cross into the canonical iterator
+        // kernel; method lowering wraps the receiver as `Iter<T>`.
         ("last_index_of", 1) => TBuiltinOp::IterLastIndexOf,
         ("average", 0) => TBuiltinOp::IterAverage {
             float: is_float_sequence,
@@ -684,6 +686,8 @@ pub(crate) fn resolve_builtin_op(
             method: "compare".to_string(),
         },
         ("compare", 1) => TBuiltinOp::IterCompare,
+        ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
+        ("shuffle", 0) => TBuiltinOp::IterShuffle,
         ("to_set", 0) if is_set => TBuiltinOp::SetCopy,
         ("to_set", 0) => TBuiltinOp::SetFrom,
         ("sum", 0) => TBuiltinOp::Sum {

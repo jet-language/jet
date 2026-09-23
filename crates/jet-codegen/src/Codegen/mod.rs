@@ -1923,17 +1923,16 @@ fn is_internal_core_usage(usage: &str) -> bool {
     usage.starts_with(CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
 }
 
-fn is_core_package_source_usage(usage: &str) -> bool {
+fn core_source_usage_matches(usage: &str, module: &str) -> bool {
     let usage = usage
         .strip_prefix(CORE_SOURCE_MARKER_PREFIX)
         .unwrap_or(usage);
-    usage == "core.archive" || usage.starts_with("core.archive::")
+    usage == module || usage.starts_with(&format!("{module}::"))
 }
 
+
 fn is_archive_core_usage(usage: &str) -> bool {
-    is_core_package_source_usage(usage)
-        || usage == "core.archive"
-        || usage.starts_with("core.archive::")
+    core_source_usage_matches(usage, "core.archive")
 }
 
 fn core_needs_embedded_runtime(used_core: &std::collections::HashSet<String>) -> bool {
@@ -1955,10 +1954,19 @@ fn core_source_closure_fingerprint(used_core: &std::collections::HashSet<String>
     for usage in usages {
         append_identity_field(&mut bytes, usage.as_bytes());
     }
-    if used_core
-        .iter()
-        .any(|usage| is_core_package_source_usage(usage))
-    {
+    for source_module in jet_foundation::CoreModuleExports::core_source_modules() {
+        if source_module.module == "core.archive"
+            || !used_core
+                .iter()
+                .any(|usage| core_source_usage_matches(usage, source_module.module))
+        {
+            continue;
+        }
+        append_identity_field(&mut bytes, source_module.module.as_bytes());
+        append_identity_field(&mut bytes, source_module.path.as_bytes());
+        append_identity_field(&mut bytes, source_module.source.as_bytes());
+    }
+    if used_core.iter().any(|usage| is_archive_core_usage(usage)) {
         for (label, source) in CORE_ARCHIVE_SOURCE_PARTS {
             append_identity_field(&mut bytes, label.as_bytes());
             append_identity_field(&mut bytes, source.as_bytes());
@@ -2037,9 +2045,6 @@ pub(crate) fn runtime_parts_for_used_core(
         "core.http.client",
         "core.http.server",
         "core.web.devserver",
-        "core.db",
-        "core.sync",
-        "core.net.ws",
         "core.web.browser",
     ]) {
         parts.insert(Part::Apps);
@@ -3271,12 +3276,19 @@ fn push_runtime_devtools_panel_preludes(
 }
 
 fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntimePartId>) {
+    // Sync publishes transport events through the shared live lifecycle even
+    // when the program does not construct an App. Keep that dependency in the
+    // cached Core closure without dragging the HTTP/App templates into DB and
+    // sync-only artifacts.
+    if runtime_parts.contains(&MirRuntimePartId::Sync)
+        || runtime_parts.contains(&MirRuntimePartId::Apps)
+    {
+        out.push_str(LIVEQUERY_PRELUDE);
+    }
     if !runtime_parts.contains(&MirRuntimePartId::Apps) {
         return;
     }
     push_app_middleware_prelude(out);
-    out.push_str(APP_PRELUDE);
-    out.push_str(LIVEQUERY_PRELUDE);
     out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_ROUTER_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
@@ -4084,8 +4096,11 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
         ],
     );
     let needs_web_suite = core_usage_matches(used_core, &["core.web"]);
+    // WebServerFn can arrive through the cached Core closure even when this
+    // program's direct Core-use labels do not request the web suite. Keep its
+    // shared middleware vocabulary available in every generated program.
+    push_app_middleware_prelude(out);
     if needs_app_runtime {
-        push_app_middleware_prelude(out);
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(APP_PRELUDE);
     }

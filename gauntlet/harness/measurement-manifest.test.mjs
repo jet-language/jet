@@ -331,6 +331,7 @@ test("web comparisons require artifact bytes and bind them to the AOT tier", () 
     ["warm_build_seconds", 1],
     ["binary_bytes", 1],
     ["artifact_bytes", 1],
+    ["wasm_bytes", 1],
     ["loc", 1],
     ["source_bytes", 1],
     ["tokens", 1],
@@ -342,7 +343,7 @@ test("web comparisons require artifact bytes and bind them to the AOT tier", () 
   };
   const tiers = {
     aot: { status: "ok", metrics },
-    run: { status: "ok", metrics: { ...metrics, artifact_bytes: null } },
+    run: { status: "ok", metrics: { ...metrics, artifact_bytes: null, wasm_bytes: null } },
     dev: { status: "unavailable", metrics: {} },
   };
   const result = comparisons(entry, Object.keys(rows), rows, tiers);
@@ -643,6 +644,8 @@ test("publication rejects peer sample identity mismatch", () => {
 test("web-app results omit undeclared Jet tiers", () => {
   const fixture = scoreboardFixture();
   fixture.result.entry.mode = "web-app";
+  for (const row of Object.values(fixture.result.rows)) row.metrics.wasm_bytes = 1;
+  fixture.result.jet_tiers.aot.metrics.wasm_bytes = 1;
   delete fixture.result.jet_tiers.run;
   delete fixture.result.jet_tiers.dev;
   fixture.result.comparisons = comparisons(
@@ -671,7 +674,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     not_applicable: "explicit_structural_reason",
     missing: "unmeasured_and_publication_blocked",
   });
-  assert.deepEqual(manifest.report_contract.aot_only_metrics, ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes"]);
+  assert.deepEqual(manifest.report_contract.aot_only_metrics, ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"]);
   assert.ok(manifest.integrated_gate.required_metrics_by_mode.web.includes("artifact_bytes"));
   assert.ok(manifest.integrated_gate.required_metrics_by_mode["web-app"].includes("artifact_bytes"));
   assert.deepEqual(manifest.performance_surface_pairs.pair_measurement, {

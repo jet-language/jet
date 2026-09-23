@@ -169,6 +169,12 @@ pub(crate) fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
             | ("resume", 0)
             | ("cancel", 0)
             | ("receive", 0)
+            | ("try_receive", 0)
+            | ("is_timer", 0)
+            | ("is_interval", 0)
+            | ("is_cancelled", 0)
+            | ("is_ready", 0)
+            | ("delay_ms", 0)
             | ("send", 1)
             | ("close", 0)
     )
@@ -246,7 +252,7 @@ pub(crate) fn is_process_handle_method_name(
     match recv_type {
         Some("ProcessSpec") => matches!(
             (method, nargs),
-            ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1)
+            ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr" | "arg" | "args_extend", 1)
                 | ("env", 2)
                 // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: beginner and
                 // expert terminal opt-in plus the keyed host report.
@@ -365,8 +371,8 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
             "HTTPRequest"
                 | "HTTPClient"
                 | "HTTPResponse"
-                | "HTTPHeaders"
-                | "HTTPBody"
+                | "Headers"
+                | "Body"
                 | "HTTPMux"
                 | "HTTPHandler"
                 | "HTTPServer"
@@ -449,8 +455,8 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "retries"
                 | "send"
         ),
-        Some("HTTPHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
-        Some("HTTPBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
+        Some("Headers") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
+        Some("Body") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
         Some("HTTPMux") => matches!(
             method,
             "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"

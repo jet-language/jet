@@ -1,244 +1,264 @@
+
 package {
     name: "core.process"
     version: "0.1.0"
     edition: "2026"
-    description: "Child processes, argv, and signals."
+    description: "Process builders and receipt helpers."
     license: "MIT"
     outputs: {
         process: .Library{ entry: process }
     }
 }
+use core as core
+use core.files as files
 
-// core.process — this program's argv and the children it launches.
-//
-// `cmd` builds a `ProcessSpec` from argv; `pipeline` takes specs, not raw
-// string lists. `run` waits and returns a receipt. `exit` does not return.
-// Signal subscription (`on_signal`) is process-global.
-//
-// Spawn, wait, and signal delivery are host. Pipeline wiring (stdin of
-// step n+1 is stdout of step n) is described here and handed to one host
-// pipeline cell so fds do not leak into Jet.
 
-pub enum ProcessSignal {
-    Interrupt
-    Terminate
-    Hangup
-    Child
-    User1
-    User2
-}
+pub fn args() -[Exec]> [String] { core.process.args() }
 
-pub struct ProcessSpec {
-    pub argv: [String]
-    pub cwd: String
-    pub env: [String]
-}
+pub fn argv() -[Exec]> [String] { core.process.argv() }
 
-pub struct ProcessReceipt {
-    pub status: Int
-    pub stdout: String
-    pub stderr: String
-}
-
-/// This process's argv, including argv[0].
-pub fn args() -[Env]> [String] { host_argv() }
-
-pub fn argv() -[Env]> [String] { args() }
-
-pub fn cmd(argv: [String]) -> ProcessSpec { ProcessSpec{argv: argv, cwd: "", env: [String]{}} }
-
-pub fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec { ProcessSpec{argv: spec.argv, cwd: path, env: spec.env} }
-
-pub fn env(spec: ProcessSpec, pairs: [String]) -> ProcessSpec { ProcessSpec{argv: spec.argv, cwd: spec.cwd, env: pairs} }
-
-/// Run a shell-form command. `Sh` is the prelude command type; this
-/// specialisation accepts a spec built by `cmd`.
-pub fn run(command: Sh) -> ProcessReceipt !IOError { host_run_sh(command) }
-
-pub fn run_spec(spec: ProcessSpec) -> ProcessReceipt !IOError {
-    if spec.argv.len() == 0 -> return Err(IOError{operation: "run", message: "empty argv", path: "", os_code: None})
-    host_spawn(spec.argv, spec.cwd, spec.env, "")
-}
-
-pub fn pipeline(steps: [ProcessSpec]) -> ProcessReceipt !IOError {
-    if steps.len() == 0 -> return Err(IOError{operation: "pipeline", message: "empty pipeline", path: "", os_code: None})
-    if steps.len() == 1 -> return run_spec(steps[0])
-    argvs := [[String]]{}
-    loop s in steps -> argvs.push(s.argv)
-    host_pipeline(argvs)
-}
-
-pub fn on_signal(signal: ProcessSignal)  {
-    n := 0
+pub fn check(receipt: ProcessReceipt) !IOError {
+    if receipt.success -> return Ok()
+    limit_hit :: receipt.limit_hit
+    if limit_hit == {
+        .None -> { _ := 0 }
+        .Val(limit) -> return Err(IOError.ResourceLimit(limit))
+        else -> { _ := 0 }
+    }
+    if receipt.timed_out {
+        return Err(IOError.TimedOut(IOContext{
+            operation: .Resolve,
+            resource: Val(receipt.executable_identity),
+            os_code: None,
+            cause: Val("process timed out"),
+        }))
+    }
+    cause := "process exited unsuccessfully: code={receipt.code}"
+    signal :: ~receipt.signal
     if signal == {
-        .Interrupt -> n = 2
-        .Terminate -> n = 15
-        .Hangup -> n = 1
-        .Child -> n = 17
-        .User1 -> n = 10
-        .User2 -> n = 12
+        .None -> { _ := 0 }
+        .Val(number) -> cause = "{cause}; signal={number}"
     }
-    host_on_signal(n)
+    return Err(IOError.Other(IOContext{
+        operation: .Resolve,
+        resource: Val(receipt.executable_identity),
+        os_code: None,
+        cause: Val(cause),
+    }))
 }
 
-pub fn exit(code: Int) -> Never { host_exit(code) }
 
-fn host_argv() -[Env]> [String] { panic("host_argv") }
-fn host_spawn(argv: [String], cwd: String, env: [String], stdin: String) -> ProcessReceipt !IOError { panic("host_spawn") }
-fn host_run_sh(command: Sh) -> ProcessReceipt !IOError { panic("host_run_sh") }
-fn host_pipeline(steps: [[String]]) -> ProcessReceipt !IOError { panic("host_pipeline") }
-fn host_on_signal(signal: Int) { panic("host_on_signal") }
-fn host_exit(code: Int) -> Never { panic("host_exit") }
-
-
-pub fn stdin_text(spec: ProcessSpec, text: String) -> ProcessReceipt !IOError {
-    if spec.argv.len() == 0 -> return Err(IOError{operation: "run", message: "empty argv", path: "", os_code: None})
-    host_spawn(spec.argv, spec.cwd, spec.env, text)
+pub fn stdin_text(spec: ProcessSpec, text: String) !IOError -[Exec, Time.Wait]> {
+    child :: spec.stdin(.Stream).spawn()
+    _ :: child.stdin.write(text)
+    child.stdin.close()
+    _ :: child.wait()
+    return Ok()
 }
 
-pub fn status_ok(receipt: ProcessReceipt) -> Bool { receipt.status == 0 }
-
-pub fn check(receipt: ProcessReceipt) -> ProcessReceipt !IOError {
-    if receipt.status != 0 {
-        return Err(IOError{operation: "check", message: "exit {receipt.status}", path: "", os_code: Val(receipt.status)})
-    }
-    Ok(receipt)
+pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
+    receipt :: spec.run()
+    receipt.output
 }
 
-pub fn which(name: String) -[FS, Env]> ?String { host_which(name) }
-
-pub fn env_get(name: String) -[Env]> ?String { host_getenv(name) }
-
-pub fn current_pid() -> Int { host_getpid() }
-
-fn host_which(name: String) -[FS, Env]> ?String { panic("host_which") }
-fn host_getenv(name: String) -[Env]> ?String { panic("host_getenv") }
-fn host_getpid() -> Int { panic("host_getpid") }
-
-pub struct Completed {
-    pub spec: ProcessSpec
-    pub receipt: ProcessReceipt
+pub fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) !IOError {
+    receipt :: spec.run()
+    (status: receipt.code, output: combined_output(receipt))
 }
 
-pub fn capture(spec: ProcessSpec) -> ProcessReceipt !IOError { run_spec(spec) }
-
-pub fn check_call(spec: ProcessSpec) -> ProcessReceipt !IOError {
-    rec :: run_spec(spec)
-    check(rec)
-}
-
-pub fn check_output(spec: ProcessSpec) -> String !IOError {
-    rec :: check_call(spec)
-    Ok(rec.stdout)
-}
-
-pub fn getoutput(spec: ProcessSpec) -> String !IOError {
-    rec :: run_spec(spec)
-    Ok(rec.stdout)
-}
-
-pub fn getstatusoutput(spec: ProcessSpec) -> (status: Int, output: String) !IOError {
-    rec :: run_spec(spec)
-    Ok((status: rec.status, output: rec.stdout))
-}
-
-pub fn call(spec: ProcessSpec) -> Int !IOError {
-    rec :: run_spec(spec)
-    Ok(rec.status)
-}
-
-pub fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec {
-    pairs := spec.env
-    pairs.push("{key}={value}")
-    ProcessSpec{argv: spec.argv, cwd: spec.cwd, env: pairs}
+pub fn shell(line: String) -[Exec, Env]> ProcessSpec {
+    if core.sys.family() == "windows" -> return cmd([String]{"cmd", "/C", line})
+    cmd([String]{"sh", "-c", line})
 }
 
 pub fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec {
-    argv := spec.argv
-    argv.push(extra)
-    ProcessSpec{argv: argv, cwd: spec.cwd, env: spec.env}
+    spec.arg(extra)
 }
 
 pub fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec {
-    argv := spec.argv
-    loop a in extra -> argv.push(a)
-    ProcessSpec{argv: argv, cwd: spec.cwd, env: spec.env}
+    spec.args_extend(extra)
 }
 
-pub fn shell(line: String) -> ProcessSpec { cmd([String]{"sh", "-c", line}) }
 
-pub fn list2cmdline(argv: [String]) -> String {
-    s := ""
-    i := 0
-    loop i < argv.len() {
-        piece := quote_arg(argv[i])
-        if i == 0 {
-            s = piece
-        } else {
-            s = "{s} {piece}"
-        }
-        i = i + 1
+pub fn cmd(argv: [String]) -[Exec]> ProcessSpec { core.process.cmd(argv) }
+
+pub fn current_pid() -[Env]> Int { core.sys.getpid() }
+
+pub fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec { spec.cwd(path) }
+
+pub fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec {
+    spec.env(key, value)
+}
+
+pub fn env_get(name: String) -[Env]> ?String { core.sys.get(name) }
+
+pub fn exit(code: Int) -[Exec]> Never {
+    core.process.exit(code)
+    loop {}
+}
+
+pub fn on_signal(signal: ProcessSignal) -[Exec]> { core.process.on_signal(signal) }
+
+pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+    core.process.pipeline(steps)
+}
+
+pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+    spec.run()
+}
+
+pub fn status_ok(receipt: ProcessReceipt) -> Bool {
+    receipt.success
+}
+
+
+pub fn which(name: String) -[FS, Env]> ?String {
+    if name.len() == 0 -> return None
+    if contains_path_separator(name) || path_is_absolute(name) {
+        if path_is_file(name) -> return Val(name)
+        return None
     }
-    s
+    path :: core.sys.get("PATH") ?? return None
+    separator :: path_separator_for_platform(core.sys.family())
+    loop directory in path_parts(path, separator) {
+        candidate :: path_join(directory, name)
+        if path_is_file(candidate) -> return Val(candidate)
+    }
+    None
+}
+fn path_is_absolute(path: String) -> Bool {
+    raw :: path.bytes()
+    if raw.len() == 0 -> return false
+    if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
+    raw.len() >= 3 &&
+        ((raw[0] >= (U8{65}) && raw[0] <= (U8{90})) ||
+            (raw[0] >= (U8{97}) && raw[0] <= (U8{122}))) &&
+        raw[1] == (U8{58}) &&
+        (raw[2] == (U8{47}) || raw[2] == (U8{92}))
 }
 
-pub fn failed(receipt: ProcessReceipt) -> Bool { receipt.status != 0 }
+fn path_is_file(path: String) -[FS]> Bool {
+    stat :: core.files.stat(path) ?? return false
+    stat.is_file
+}
 
-pub fn stdout_lines(receipt: ProcessReceipt) -> [String] { split_nl(receipt.stdout) }
+fn path_join(base: String, name: String) -> String {
+    if name.len() == 0 -> return ~base
+    if path_is_absolute(name) || base.len() == 0 -> return ~name
+    last :: base.bytes()[base.bytes().len() - 1]
+    if last == (U8{47}) || last == (U8{92}) -> return "{base}{name}"
+    "{base}/{name}"
+}
 
-pub fn stderr_lines(receipt: ProcessReceipt) -> [String] { split_nl(receipt.stderr) }
+fn path_separator_for_platform(family: String) -> U8 {
+    if family == "windows" -> return U8{59}
+    U8{58}
+}
+
+
+
+
+pub fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int !IOError {
+    receipt :: spec.run()
+    receipt.code
+}
+
+pub fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+    spec.run()
+}
+
+pub fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt !IOError {
+    spec.run_checked()
+}
+
+pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
+    receipt :: check_call(spec)
+    receipt.output
+}
+
 
 pub fn combined_output(receipt: ProcessReceipt) -> String {
-    if receipt.stderr.bytes().len() == 0 -> return receipt.stdout
-    if receipt.stdout.bytes().len() == 0 -> return receipt.stderr
-    "{receipt.stdout}\n{receipt.stderr}"
+    if receipt.output.len() == 0 -> return receipt.errors
+    if receipt.errors.len() == 0 -> return receipt.output
+    "{receipt.output}\n{receipt.errors}"
 }
 
 pub fn env_get_or(name: String, fallback: String) -[Env]> String {
-    v :: host_getenv(name) ?? return fallback
-    v
+    core.sys.get(name) ?? return fallback
+}
+
+pub fn env_keys() -[Env]> [String] !EnvError { core.sys.vars() }
+
+pub fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec {
+    spec.env(key, value)
 }
 
 pub fn env_truthy(name: String) -[Env]> Bool {
-    v :: host_getenv(name) ?? return false
-    if v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on" -> return true
-    false
+    value :: core.sys.get(name) ?? return false
+    lowered :: core.text.lower(value)
+    lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on"
+}
+
+pub fn failed(receipt: ProcessReceipt) -> Bool { !receipt.success }
+
+
+pub fn list2cmdline(argv: [String]) -> String {
+    out := ""
+    first := true
+    loop item in argv {
+        if !first -> out = "{out} "
+        out = "{out}{quote_arg(item)}"
+        first = false
+    }
+    out
 }
 
 pub fn signal_number(signal: ProcessSignal) -> Int {
     if signal == {
-        .Interrupt -> return 2
-        .Terminate -> return 15
-        .Hangup -> return 1
-        .Child -> return 17
-        .User1 -> return 10
-        .User2 -> return 12
+        .Interrupt -> 2
+        .Terminate -> 15
+        .Hangup -> 1
+        .Child -> 17
+        .User1 -> 10
+        .User2 -> 12
+        else -> 0
     }
-    0
 }
 
-fn quote_arg(text: String) -> String {
-    needs := false
-    loop b in text.bytes() {
-        n :: b
-        if n == 32 || n == 9 || n == 34 -> needs = true
-    }
-    if !needs -> return text
-    "\"{text}\""
+pub fn stderr_lines(receipt: ProcessReceipt) -> [String] {
+    split_lines(receipt.errors)
 }
 
-fn split_nl(text: String) -> [String] {
-    raw :: text.bytes()
+pub fn stdout_lines(receipt: ProcessReceipt) -> [String] {
+    split_lines(receipt.output)
+}
+
+pub fn exited(receipt: ProcessReceipt) -> Bool {
+    receipt.signal == None && !receipt.timed_out
+}
+fn contains_path_separator(value: String) -> Bool {
+    loop byte in value.bytes() {
+        if byte == (U8{47}) || byte == (U8{92}) -> return true
+    }
+    false
+}
+
+fn path_separator(value: String) -> U8 {
+    raw :: value.bytes()
+    if raw.len() > 0 -> return raw[0]
+    U8{58}
+}
+
+fn path_parts(value: String, separator: U8) -> [String] {
+    raw :: value.bytes()
     out := [String]{}
     start := 0
     i := 0
     loop i <= raw.len() {
-        hit := i == raw.len()
-        if i < raw.len() && raw[i] == (U8{10}) -> hit = true
-        if hit {
-            end := i
-            if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
-            if i != raw.len() || start < raw.len() -> out.push(String.from_bytes(slice_u8(raw, start, end)) ?? "")
+        if i == raw.len() || raw[i] == separator {
+            if i == start -> out.push(".") else {
+                out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            }
             start = i + 1
         }
         i = i + 1
@@ -246,20 +266,83 @@ fn split_nl(text: String) -> [String] {
     out
 }
 
+fn split_lines(value: String) -> [String] {
+    raw :: value.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
+            out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) {
+                i = i + 2
+            } else {
+                i = i + 1
+            }
+            start = i
+        } else {
+            i = i + 1
+        }
+    }
+    if start < raw.len() -> out.push(String.from_bytes(slice_u8(raw, start, raw.len())) ?? "")
+    out
+}
+
+fn quote_arg(value: String) -> String {
+    raw :: value.bytes()
+    needs_quote := raw.len() == 0
+    loop byte in raw {
+        if byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) || byte == (U8{32}) {
+            needs_quote = true
+        }
+    }
+    out := [U8]{}
+    if needs_quote -> out.push(U8{34})
+    backslashes := 0
+    loop byte in raw {
+        if byte == (U8{92}) {
+            backslashes = backslashes + 1
+            next
+        }
+        if byte == (U8{34}) {
+            count := backslashes * 2 + 1
+            loop count > 0 {
+                out.push(U8{92})
+                count = count - 1
+            }
+            out.push(U8{34})
+        } else {
+            loop backslashes > 0 {
+                out.push(U8{92})
+                backslashes = backslashes - 1
+            }
+            out.push(byte)
+        }
+        backslashes = 0
+    }
+    if needs_quote {
+        loop backslashes > 0 {
+            out.push(U8{92})
+            out.push(U8{92})
+            backslashes = backslashes - 1
+        }
+        out.push(U8{34})
+    } else {
+        loop backslashes > 0 {
+            out.push(U8{92})
+            backslashes = backslashes - 1
+        }
+    }
+    String.from_bytes(out) ?? ~value
+}
+
 fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
-    loop {
-        if i >= end || i >= raw.len() -> return out
+    loop i < end {
         out.push(raw[i])
         i = i + 1
     }
+    out
 }
 
-fn host_env_keys() -[Env]> [String] { panic("host_env_keys") }
-
-pub fn env_keys() -[Env]> [String] { host_env_keys() }
-pub fn exited(receipt: ProcessReceipt) -> Bool {
-    _ :: receipt
-    true
-}

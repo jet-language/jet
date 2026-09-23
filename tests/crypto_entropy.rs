@@ -739,7 +739,7 @@ mod auth_session_regression {
         let byte = NEXT_BYTE.fetch_add(1, Ordering::Relaxed);
         Ok(vec![byte; count])
     }
-
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
     #[test]

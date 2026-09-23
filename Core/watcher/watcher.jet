@@ -9,85 +9,184 @@ package {
     }
 }
 
+use core as core
+use core.files as files
+
 pub struct WatchHandle { pub kind: String, pub target: String }
 pub struct WatchSet { pub handles: [WatchHandle] }
+
 pub fn files(path: String) -[FS]> WatchHandle !IOError {
-    if path.len() == 0 -> return Err(IOError{operation: "watch", message: "empty path", path: path, os_code: None})
-    host_watch_path(path)
-    Ok(WatchHandle{kind: "fs", target: path})
-}
-
-pub fn process_pid(pid: Int) -> WatchHandle { WatchHandle{kind: "pid", target: "{pid}"} }
-
-pub fn port(host: String, port: Int) -[Net]> WatchHandle { WatchHandle{kind: "port", target: "{host}:{port}"} }
-
-pub fn set() -> WatchSet { WatchSet{handles: [WatchHandle]{}} }
-
-fn host_watch_path(path: String) !IOError { panic("host_watch_path") }
-
-
-pub fn add(set: WatchSet, handle: WatchHandle) -> WatchSet {
-    handles := set.handles
-    handles.push(handle)
-    WatchSet{handles: handles}
-}
-
-pub fn remove(set: WatchSet, target: String) -> WatchSet {
-    handles := [WatchHandle]{}
-    loop h in set.handles {
-        if h.target != target -> handles.push(h)
+    if path.bytes().len() == 0 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve,
+            resource: Val(path),
+            os_code: None,
+            cause: Val("empty path"),
+        }))
     }
-    WatchSet{handles: handles}
+    core.watcher.files(path)
 }
 
-pub fn contains(set: WatchSet, target: String) -> Bool {
-    loop h in set.handles {
-        if h.target == target -> return true
+pub fn process_pid(pid: Int) -> WatchHandle {
+    core.watcher.process_pid(pid)
+}
+
+pub fn port(host: String, port: Int) -[Net]> WatchHandle {
+    core.watcher.port(host, port)
+}
+
+pub fn set() -> WatchSet { core.watcher.set() }
+
+
+pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet {
+    set.add(handle)
+    ~set
+}
+
+pub fn remove(set: WatchSet, target: String) -> WatchSet !IOError {
+    if target.len() == 0 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve,
+            resource: Val(target),
+            os_code: None,
+            cause: Val("empty target"),
+        }))
     }
-    false
+    Err(IOError.Other(IOContext{
+        operation: .Resolve,
+        resource: Val(target),
+        os_code: None,
+        cause: Val("watch sets do not support removal"),
+    }))
 }
 
-pub fn len(set: WatchSet) -> Int { set.handles.len() }
+pub fn contains(set: WatchSet, target: String) -> Bool !IOError {
+    if target.len() == 0 -> return Ok(false)
+    Err(IOError.Other(IOContext{
+        operation: .Resolve,
+        resource: Val(target),
+        os_code: None,
+        cause: Val("watch sets do not expose target lookup"),
+    }))
+}
 
-pub fn kind(handle: WatchHandle) -> String { handle.kind }
+pub fn len(set: WatchSet) -> Int {
+    summary_count(set.summary())
+}
 
-pub fn target(handle: WatchHandle) -> String { handle.target }
+pub fn kind(handle: WatchHandle) -> String {
+    summary_kind(handle.summary())
+}
 
+pub fn target(handle: WatchHandle) -> String {
+    summary_target(handle.summary())
+}
+
+
+pub enum WatchDomain {
+    File
+    Process
+    Port
+}
 
 pub enum WatchEventKind {
-    Create
-    Modify
-    Delete
-    Overflow
+    Created
+    Modified
+    Removed
+    Error
+    Exited
+    Ready
 }
 
 pub struct WatchEvent {
+    pub domain: WatchDomain
     pub kind: WatchEventKind
     pub path: String
-    pub is_dir: Bool
+    pub detail: String
+    pub pid: Int
+    pub port: Int
 }
 
 pub fn recursive(path: String) -[FS]> WatchHandle !IOError {
-    h :: files(path)
-    Ok(WatchHandle{kind: "fs-recursive", target: path})
+    // The host file watcher already snapshots directories recursively.
+    files(path)
 }
 
-pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle {
-    _ :: ms
-    handle
-}
-
-pub fn poll(handle: WatchHandle) -[FS]> [WatchEvent] {
-    host_watch_poll(handle.target)
-    [WatchEvent]{}
-}
-
-pub fn drain(set: WatchSet) -[FS]> [WatchEvent] {
-    out := [WatchEvent]{}
-    loop h in set.handles {
-        loop ev in poll(h) -> out.push(ev)
+pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle !IOError {
+    if ms < 0 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve,
+            resource: Val(target(handle)),
+            os_code: None,
+            cause: Val("negative debounce interval"),
+        }))
     }
-    out
+    Err(IOError.Other(IOContext{
+        operation: .Resolve,
+        resource: Val(target(handle)),
+        os_code: None,
+        cause: Val("debounce is not supported by the host watcher"),
+    }))
 }
 
-fn host_watch_poll(path: String) -[FS]> panic("host_watch_poll")
+pub fn poll(handle: WatchHandle) -[IO]> [WatchEvent] { handle.poll() }
+
+pub fn events(handle: WatchHandle) -[IO]> [WatchEvent] { handle.events() }
+
+pub fn cancel(handle: WatchHandle) -[IO]> { handle.cancel() }
+
+pub fn is_active(handle: WatchHandle) -> Bool { handle.is_active() }
+
+pub fn summary(handle: WatchHandle) -> String { handle.summary() }
+
+pub fn drain(set: WatchSet) -[IO]> [WatchEvent] { set.poll() }
+
+fn summary_kind(text: String) -> String {
+    if has_prefix(text, "watch file ") -> return "file"
+    if has_prefix(text, "watch process ") -> return "process"
+    if has_prefix(text, "watch port ") -> return "port"
+    "watch"
+}
+
+fn summary_target(text: String) -> String {
+    if has_prefix(text, "watch file ") -> return suffix(text, 11)
+    if has_prefix(text, "watch process ") -> return suffix(text, 14)
+    if has_prefix(text, "watch port ") -> return suffix(text, 11)
+    ""
+}
+
+fn summary_count(text: String) -> Int {
+    seen := false
+    n := 0
+    loop b in text.bytes() {
+        if seen {
+            if b < 48 || b > 57 -> return n
+            n = n * 10 + (b - 48)
+        } else if b == 61 {
+            seen = true
+        }
+    }
+    n
+}
+
+fn has_prefix(text: String, prefix: String) -> Bool {
+    raw := text.bytes()
+    want := prefix.bytes()
+    if want.len() > raw.len() -> return false
+    loop i in 0..<want.len() {
+        if raw[i] != want[i] -> return false
+    }
+    true
+}
+
+fn suffix(text: String, start: Int) -> String {
+    raw := text.bytes()
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= raw.len() -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
+}
+

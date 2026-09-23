@@ -1,41 +1,60 @@
-// Reservoir sample (Algorithm R). Fixed k, uniform over the stream so far.
+// Reservoir sample (Algorithm R).
+//
+// `add` is intentionally pure and takes one caller-supplied deterministic
+// draw.  The draw is interpreted as an unsigned 63-bit word, so replaying a
+// stream with the same draws produces the same sample on every tier.  Native
+// receiver samplers may keep an equivalent seeded generator behind the
+// opaque carrier; they must follow the same replacement rule.
+@c_default_k :: 32
+@c_mask63 :: 9223372036854775807
+@c_int_max :: 9223372036854775807
+
 pub struct Reservoir {
     pub k: Int
     pub seen: Int
     pub items: [String]
 }
 
-pub fn new() -> Reservoir { {k: 32, seen: 0, items: [String]{}} }
+pub fn new() -> Reservoir { Reservoir{k: @c_default_k, seen: 0, items: [String]{}} }
 
 pub fn new_k(k: Int) -> Reservoir {
-    n := k
-    if n < 1 -> n = 1
-    {k: n, seen: 0, items: [String]{}}
+    capacity := k
+    if capacity < 1 -> capacity = 1
+    Reservoir{k: capacity, seen: 0, items: [String]{}}
 }
 
 pub fn add(res: Reservoir, item: String, rand: Int) -> Reservoir {
-    seen := res.seen + 1
+    capacity := res.k
+    if capacity < 1 -> capacity = 1
+    limit := res.items.len()
+    if limit > capacity -> limit = capacity
     items := [String]{}
-    loop x in res.items -> items.push(x)
-    if items.len() < res.k {
+    loop i in 0..<limit -> items.push(res.items[i])
+
+    seen := res.seen
+    if seen < limit -> seen = limit
+    if seen < 0 -> seen = 0
+    if seen < @c_int_max -> seen = seen + 1
+
+    if items.len() < capacity {
         items.push(item)
-        return {k: res.k, seen: seen, items: items}
+        return Reservoir{k: capacity, seen: seen, items: items}
     }
-    // replace j uniformly in 0..seen-1 if j < k
+
     span := seen
     if span < 1 -> span = 1
-    j :: (abs_pos(rand) % span)
-    if j < res.k -> items[j] = item
-    {k: res.k, seen: seen, items: items}
+    draw :: rand & @c_mask63
+    index :: draw %% span
+    if index < capacity -> items[index] = item
+    Reservoir{k: capacity, seen: seen, items: items}
 }
 
 pub fn sample(res: Reservoir) -> [String] {
+    capacity := res.k
+    if capacity < 1 -> capacity = 1
+    limit := res.items.len()
+    if limit > capacity -> limit = capacity
     out := [String]{}
-    loop x in res.items -> out.push(x)
+    loop i in 0..<limit -> out.push(res.items[i])
     out
-}
-
-fn abs_pos(n: Int) -> Int {
-    if n < 0 -> return 0 - n
-    n
 }

@@ -1,4 +1,4 @@
-use super::{CFfi, ComptimeInput, Expr, Func, Item, Marker, Stmt, Type};
+use super::{CFfi, ComptimeInput, Expr, Item, Marker, Stmt, Type};
 use crate::{
     Diagnostics::{Diagnostic, Span},
     Syntax,
@@ -10,8 +10,8 @@ pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
-    /// D-ENTRY-SCRIPT1=B: top-level statements remain separate until the
-    /// package seam materializes the entry file's implicit `fn run`.
+    /// D-ENTRY-SCRIPT1=C: top-level executable statements remain separate so
+    /// sema can reject them outside an explicit `fn run`.
     pub script_body: Vec<Stmt>,
     /// Parser-owned inner boundaries for statement blocks. Each span starts
     /// immediately after `{` and ends immediately before `}`.
@@ -735,38 +735,6 @@ impl ProgramBundle {
     }
 }
 
-impl ProgramBundle {
-    /// Materialize loose statements in the direct entry module as its implicit `fn run`.
-    ///
-    /// Invalid script shapes remain in `script_body` for sema to diagnose. In particular, an
-    /// explicit `fn run` is never wrapped or replaced.
-    pub fn materialize_script_entries(&mut self) {
-        let entry = self.entry;
-        for (module_idx, module) in self.modules.iter_mut().enumerate() {
-            if module_idx != entry || module.script_body.is_empty() {
-                continue;
-            }
-
-            let has_explicit_run = module
-                .items
-                .iter()
-                .any(|item| matches!(item, Item::Func(func) if func.name == "run"));
-            if has_explicit_run {
-                continue;
-            }
-
-            let body = std::mem::take(&mut module.script_body);
-            let span = Span::new(
-                body.first().map_or(0, |stmt| stmt.span().start),
-                body.last().map_or(0, |stmt| stmt.span().end),
-            );
-            module
-                .items
-                .push(Item::Func(Func::implicit_run(body, span)));
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
@@ -777,11 +745,10 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
-    /// D-ENTRY-SCRIPT1=B: raw top-level statements from a script file. The
-    /// package seam materializes a valid direct-entry body; sema consumes any
-    /// remaining body to diagnose imported scripts or an explicit `fn run` conflict.
+    /// D-ENTRY-SCRIPT1=C: raw top-level statements from a script file. The
+    /// sema entry check rejects them; notebook and REPL paths materialize their
+    /// own explicit `fn run` separately.
     pub script_body: Vec<Stmt>,
-    /// Checked parser-owned inner boundaries for statement blocks.
     pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,

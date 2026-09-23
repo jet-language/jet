@@ -12,58 +12,132 @@ package {
 pub struct EventScope { pub name: String, pub hooks: [String] }
 pub struct Hook { pub name: String }
 pub struct Policy { pub sync: Bool }
-pub fn new() -> EventScope { EventScope{name: "root", hooks: [String]{}} }
+pub fn new() -> EventScope { scope("root") }
 pub fn scope(name: String) -> EventScope { EventScope{name: name, hooks: [String]{}} }
-pub fn hook(name: String) -> Hook { Hook{name: name} }
 pub fn decision_hook(name: String) -> Hook { Hook{name: "decision:{name}"} }
 pub fn policy_sync() -> Policy { Policy{sync: true} }
-pub fn with_policy(scope: EventScope, policy: Policy) -> EventScope { scope }
-pub fn async_result(ok: Bool) -> String {
-    if ok -> "ok"
+pub fn with_policy(scope: EventScope, policy: Policy) -> EventScope {
+    hooks := [String]{}
+    loop h in ~scope.hooks {
+        if !is_policy_marker(h) -> hooks.push(h)
+    }
+    if !policy.sync -> hooks.push("@policy:async")
+    EventScope{name: scope.name, hooks: hooks}
+}
+pub fn policy_of(scope: EventScope) -> Policy {
+    loop h in ~scope.hooks {
+        if h == "@policy:async" -> return Policy{sync: false}
+    }
+    Policy{sync: true}
+}
+pub fn async_result(ok: Bool{false}) -> String {
+    if ok -> return "ok"
     "err"
 }
 
 
 pub fn emit(scope: EventScope, hook: String) -> EventScope {
-    hooks := scope.hooks
+    if is_cancelled(scope) || hook.len() == 0 || is_reserved(hook) -> return ~scope
+    hooks := ~scope.hooks
     hooks.push(hook)
     EventScope{name: scope.name, hooks: hooks}
 }
 
 pub fn listen(scope: EventScope, hook: String) -> EventScope { emit(scope, hook) }
 
-pub fn once(scope: EventScope, hook: String) -> EventScope { emit(scope, "once:{hook}") }
+pub fn once(scope: EventScope, hook: String) -> EventScope {
+    if is_cancelled(scope) || hook.len() == 0 || is_reserved(hook) || once_pending(scope, hook) -> return ~scope
+    append_once(scope, "once:{hook}")
+}
+
+fn append_once(scope: EventScope, marker: String) -> EventScope {
+    if is_cancelled(scope) -> return ~scope
+    hooks := ~scope.hooks
+    hooks.push(marker)
+    EventScope{name: scope.name, hooks: hooks}
+}
 
 pub fn off(scope: EventScope, hook: String) -> EventScope {
     hooks := [String]{}
-    loop h in scope.hooks {
-        if h != hook -> hooks.push(h)
+    loop h in ~scope.hooks {
+        if is_policy_marker(h) || h == "@cancelled" {
+            hooks.push(h)
+            next
+        }
+        if h == hook || h == "once:{hook}" -> next
+        hooks.push(h)
     }
     EventScope{name: scope.name, hooks: hooks}
 }
 
-pub fn clear(scope: EventScope) -> EventScope { EventScope{name: scope.name, hooks: [String]{}} }
+pub fn clear(scope: EventScope) -> EventScope {
+    hooks := [String]{}
+    loop h in ~scope.hooks {
+        if is_policy_marker(h) || h == "@cancelled" -> hooks.push(h)
+    }
+    EventScope{name: scope.name, hooks: hooks}
+}
 
-pub fn names(scope: EventScope) -> [String] { scope.hooks }
+pub fn cancel(scope: EventScope) -> EventScope {
+    if is_cancelled(scope) -> return ~scope
+    hooks := clear(scope).hooks
+    hooks.push("@cancelled")
+    EventScope{name: scope.name, hooks: hooks}
+}
 
-pub fn contains(scope: EventScope, hook: String) -> Bool {
-    loop h in scope.hooks {
-        if h == hook -> return true
+
+pub fn reopen(scope: EventScope) -> EventScope {
+    hooks := [String]{}
+    loop h in ~scope.hooks {
+        if h != "@cancelled" -> hooks.push(h)
+    }
+    EventScope{name: scope.name, hooks: hooks}
+}
+
+pub fn is_cancelled(scope: EventScope) -> Bool {
+    loop h in ~scope.hooks {
+        if h == "@cancelled" -> return true
     }
     false
 }
+
+pub fn names(scope: EventScope) -> [String] {
+    out := [String]{}
+    loop h in ~scope.hooks {
+        if is_policy_marker(h) || h == "@cancelled" -> next
+        if is_once_marker(h) -> out.push(strip_once(h)) else -> out.push(h)
+    }
+    out
+}
+
+pub fn active_count(scope: EventScope) -> Int { names(scope).len() }
+
+pub fn contains(scope: EventScope, hook: String) -> Bool {
+    if hook.len() == 0 || is_cancelled(scope) -> return false
+    loop h in ~scope.hooks {
+        if h == hook || h == "once:{hook}" -> return true
+    }
+    false
+}
+
 
 pub fn policy_async() -> Policy { Policy{sync: false} }
 
 pub fn is_sync(policy: Policy) -> Bool { policy.sync }
 
+pub fn len(scope: EventScope) -> Int { names(scope).len() }
 
+pub fn is_empty(scope: EventScope) -> Bool { len(scope) == 0 }
 
-pub fn len(scope: EventScope) -> Int { scope.hooks.len() }
-
-pub fn is_empty(scope: EventScope) -> Bool { scope.hooks.len() == 0 }
-
-pub fn once_pending(scope: EventScope, hook: String) -> Bool { contains(scope, "once:{hook}") }
+pub fn once_pending(scope: EventScope, name: String) -> Bool {
+    if name.len() == 0 || is_cancelled(scope) -> return false
+    marker := "once:"
+    marker = "{marker}{name}"
+    loop h in ~scope.hooks {
+        if h == marker -> return true
+    }
+    false
+}
 
 pub fn emit_all(scope: EventScope, hooks: [String]) -> EventScope {
     out := scope
@@ -74,19 +148,45 @@ pub fn emit_all(scope: EventScope, hooks: [String]) -> EventScope {
 pub fn drain_once(scope: EventScope, hook: String) -> EventScope { off(scope, "once:{hook}") }
 
 pub fn count(scope: EventScope, hook: String) -> Int {
+    if hook.len() == 0 || is_cancelled(scope) -> return 0
     n := 0
-    loop h in scope.hooks {
-        if h == hook -> n = n + 1
+    loop h in ~scope.hooks {
+        if h == hook || h == "once:{hook}" -> n += 1
     }
     n
 }
-
-pub fn rename(scope: EventScope, name: String) -> EventScope { EventScope{name: name, hooks: scope.hooks} }
+pub fn rename(scope: EventScope, name: String) -> EventScope { EventScope{name: name, hooks: ~scope.hooks} }
 
 pub fn merge(a: EventScope, b: EventScope) -> EventScope {
     out := a
-    loop h in b.hooks {
+    loop h in ~b.hooks {
+        if is_policy_marker(h) || h == "@cancelled" -> next
+        if is_once_marker(h) {
+            name :: strip_once(h)
+            if !once_pending(out, name) -> out = append_once(out, h)
+            next
+        }
         if !contains(out, h) -> out = emit(out, h)
     }
     out
+}
+
+fn is_policy_marker(value: String) -> Bool {
+    value == "@policy:sync" || value == "@policy:async"
+}
+fn is_once_marker(value: String) -> Bool {
+    value.starts_with("once:")
+}
+
+fn strip_once(value: String) -> String {
+    if !is_once_marker(value) -> return ~value
+    raw :: value.bytes()
+    if raw.len() <= 5 -> return ""
+    out := [U8]{}
+    loop i in 5..<raw.len() -> out.push(raw[i])
+    String.from_bytes(out) ?? ""
+}
+
+fn is_reserved(value: String) -> Bool {
+    value == "@cancelled" || is_policy_marker(value) || is_once_marker(value)
 }

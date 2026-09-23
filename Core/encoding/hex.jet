@@ -1,3 +1,12 @@
+#Error
+pub struct HexError {
+    pub reason: String
+}
+
+impl HexError {
+    pub fn new(reason: String) -> HexError { HexError{reason: reason} }
+}
+
 // core.encoding.hex — RFC 4648 §8 hexadecimal alphabet.
 //
 // `encode` always emits lowercase `0-9a-f` with no whitespace, no `0x` prefix
@@ -5,8 +14,10 @@
 // including whitespace and an odd number of digits. There is no ignore-whitespace
 // mode; strip input first if a wire format wrapped the hex.
 //
+
 // Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
 fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+
 
 /// Encode `data` as lowercase hexadecimal text.
 pub fn encode(data: [U8]) -> String {
@@ -21,17 +32,19 @@ pub fn encode(data: [U8]) -> String {
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
-pub fn decode(text: String) -> [U8] {
+pub fn decode(text: String) -> [U8] !HexError {
     raw :: text.bytes()
-    if raw.len() % 2 != 0 {
-        return Err("odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    if raw.len() %% 2 != 0 {
+        return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
     }
     out := [U8]{}
-    loop i in 0..<raw.len(), 2 {
-        hi :: digit(raw[i]) ?? return Err("invalid hex digit; expected 0-9, a-f, or A-F")
-        lo :: digit(raw[i + 1]) ?? return Err("invalid hex digit; expected 0-9, a-f, or A-F")
+    i := 0
+    loop i < raw.len() {
+        hi :: digit(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
+        lo :: digit(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         value :: hi * 16 + lo
         out.push(U8{value})
+        i = i + 2
     }
     Ok(out)
 }
@@ -63,7 +76,7 @@ pub fn encode_prefixed(data: [U8]) -> String { "0x{encode(data)}" }
 
 pub fn is_hex(text: String) -> Bool {
     raw :: text.bytes()
-    if raw.len() == 0 || raw.len() % 2 != 0 -> return false
+    if raw.len() == 0 || raw.len() %% 2 != 0 -> return false
     loop b in raw {
         if digit(b) == .None -> return false
     }
@@ -79,11 +92,15 @@ fn nibble_upper(n: Int) -> U8 {
 pub fn hexlify(data: [U8]) -> String { encode(data) }
 
 /// Python `binascii.unhexlify`.
-pub fn unhexlify(text: String) -> [U8] { decode(text) }
+pub fn unhexlify(text: String) -> [U8] !HexError { decode(text) }
 
 pub fn b2a_hex(data: [U8]) -> String { encode(data) }
 
-pub fn a2b_hex(text: String) -> [U8] { decode(text) }
+pub fn a2b_hex(text: String) -> [U8] !HexError { decode(text) }
+
+pub fn b2a_base64(data: [U8]) -> String { "{base64_encode(data)}\n" }
+
+pub fn a2b_base64(text: String) -> [U8] !HexError { base64_decodebytes(text) }
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
 pub fn crc_hqx(data: [U8], value: Int) -> Int {
@@ -267,10 +284,117 @@ fn hex_pad(n: Int, width: Int) -> String {
     }
     loop digits.len() < width -> digits.push(U8{48})
     out := [U8]{}
+
     i := digits.len()
     loop i > 0 {
         i = i - 1
         out.push(digits[i])
     }
     String.from_bytes(out) ?? "0"
+}
+@base64_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+fn base64_encode(data: [U8]) -> String {
+    ab :: @base64_alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop i + 3 <= data.len() {
+        n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8) | u8_int(data[i + 2])
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        out.push(ab[(n >> 6) & 63])
+        out.push(ab[n & 63])
+        i += 3
+    }
+    rest :: data.len() - i
+    if rest == 1 {
+        n :: u8_int(data[i]) << 16
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        out.push(U8{61})
+        out.push(U8{61})
+    }
+    if rest == 2 {
+        n :: (u8_int(data[i]) << 16) | (u8_int(data[i + 1]) << 8)
+        out.push(ab[(n >> 18) & 63])
+        out.push(ab[(n >> 12) & 63])
+        out.push(ab[(n >> 6) & 63])
+        out.push(U8{61})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn base64_decodebytes(text: String) -> [U8] !HexError {
+    raw := [U8]{}
+    loop b in text.bytes() {
+        n :: u8_int(b)
+        if n == 9 || n == 10 || n == 11 || n == 12 || n == 13 || n == 32 -> next
+        raw.push(b)
+    }
+    base64_decode(String.from_bytes(raw) ?? "")
+}
+
+fn base64_decode(text: String) -> [U8] !HexError {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return Ok([U8]{})
+    table :: base64_decode_table()
+    pad := 0
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) {
+        pad += 1
+        end -= 1
+    }
+    if pad > 2 -> return Err(HexError{reason: "invalid Base64 padding; at most two '=' characters may trail the alphabet"})
+    loop i in 0..<end {
+        if raw[i] == (U8{61}) -> return Err(HexError{reason: "invalid Base64 padding; '=' may appear only at the end"})
+        if table[u8_int(raw[i])] < 0 -> return Err(HexError{reason: "invalid Base64 character; expected the standard RFC 4648 alphabet"})
+    }
+    rem :: end %% 4
+    if rem == 1 -> return Err(HexError{reason: "invalid Base64 length; encoded length cannot represent whole bytes"})
+    expected := 0
+    if rem == 2 -> expected = 2
+    if rem == 3 -> expected = 1
+    if pad != expected -> return Err(HexError{reason: "invalid Base64 padding; expected the RFC 4648 padding for the final quantum"})
+    if rem == 2 {
+        last :: table[u8_int(raw[end - 1])]
+        if (last & 15) != 0 -> return Err(HexError{reason: "invalid Base64 encoding; non-zero unused bits"})
+    }
+    if rem == 3 {
+        last :: table[u8_int(raw[end - 1])]
+        if (last & 3) != 0 -> return Err(HexError{reason: "invalid Base64 encoding; non-zero unused bits"})
+    }
+    out := [U8]{}
+    i := 0
+    loop i + 4 <= end {
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        c :: table[u8_int(raw[i + 2])]
+        d :: table[u8_int(raw[i + 3])]
+        n :: (a << 18) | (b << 12) | (c << 6) | d
+        out.push(U8{(n >> 16) & 255})
+        out.push(U8{(n >> 8) & 255})
+        out.push(U8{n & 255})
+        i += 4
+    }
+    if rem == 2 {
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        out.push(U8{((a << 2) | (b >> 4)) & 255})
+    }
+    if rem == 3 {
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        c :: table[u8_int(raw[i + 2])]
+        out.push(U8{((a << 2) | (b >> 4)) & 255})
+        out.push(U8{((b << 4) | (c >> 2)) & 255})
+    }
+    Ok(out)
+}
+
+fn base64_decode_table() -> [Int] {
+    table := [Int]{}
+    loop _ in 0..<256 -> table.push(-1)
+    ab :: @base64_alphabet.bytes()
+    loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
+    table
 }

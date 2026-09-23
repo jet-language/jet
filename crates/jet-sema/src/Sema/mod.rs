@@ -2764,6 +2764,17 @@ impl<'a> Checker<'a> {
                         && fact.dimension.as_ref() == Some(&actual_dimension)
                 });
         }
+        if bound == crate::Generics::DECODE {
+            if let Type::Named(name) = ty {
+                return self.type_param_scope.iter().any(|param| {
+                    param.name == *name
+                        && param
+                            .bounds
+                            .iter()
+                            .any(|candidate| candidate == bound)
+                });
+            }
+        }
         self.trait_reg.type_implements_trait(ty, bound)
     }
 

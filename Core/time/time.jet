@@ -8,6 +8,8 @@ package {
         time: .Library{ entry: time }
     }
 }
+use core as core
+
 
 // core.time — Gregorian civil time in Jet, OS clocks on two host cells.
 //
@@ -18,9 +20,16 @@ package {
 //
 // `now`, `sleep`, and friends read `host_unix_ns` / `host_sleep_ns`. Everything
 // else is pure.
+#Error
+pub struct TimeError {
+    pub reason: String
+}
 
-module expiring
-module calendar
+impl TimeError {
+    pub fn new(reason: String) -> TimeError { TimeError{reason: reason} }
+}
+
+
 
 pub struct LocalDate {
     pub year: Int
@@ -59,9 +68,6 @@ pub struct Instant {
     pub unix_ns: Int
 }
 
-pub struct Duration {
-    pub ns: Int
-}
 
 pub struct Stopwatch {
     pub start_ns: Int
@@ -77,6 +83,7 @@ pub struct Period {
     pub months: Int
     pub days: Int
 }
+
 
 /// Gregorian leap year. Divisible by 4, except centuries not divisible by 400.
 pub fn is_leap_year(year: Int) -> Bool {
@@ -106,12 +113,13 @@ pub fn period_years(years: Int) -> Period { period(years, 0, 0) }
 
 pub fn utc() -> Zone { Zone{name: "UTC", offset_s: 0} }
 
-pub fn zone(name: String) -> Zone {
+pub fn zone(name: String) -> Zone !TimeError {
     n :: ascii_upper(name)
     if n == "UTC" || n == "GMT" || n == "Z" -> return Ok(utc())
-    parsed :: parse_offset(name)
+    parsed :: parse_offset(name) ?? return Err(TimeError{reason: "invalid zone offset"})
     Ok(Zone{name: name, offset_s: parsed})
 }
+
 pub fn utcoffset(zone: Zone) -> Int { zone.offset_s }
 
 pub fn gmtime(seconds: Int) -> DateTime { from_unix_seconds(seconds) }
@@ -122,27 +130,44 @@ pub fn asctime(dt: DateTime) -> String {
     days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     months :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     date :: LocalDate{year: dt.year, month: dt.month, day: dt.day}
-    day :: (weekday(date) + 1) %% 7
-    "{days[day]} {months[dt.month - 1]} {pad2(dt.day, 2)} {pad2(dt.hour, 2)}:{pad2(dt.minute, 2)}:{pad2(dt.second, 2)} {dt.year}"
+    day :: weekday(date)
+    month := dt.month
+    if month < 1 -> month = 1
+    if month > 12 -> month = 12
+    "{days[day]} {months[month - 1]} {pad2(dt.day, 2)} {pad2(dt.hour, 2)}:{pad2(dt.minute, 2)}:{pad2(dt.second, 2)} {dt.year}"
 }
 
 
-pub fn time(hour: Int, minute: Int, second: Int) -> LocalTime { LocalTime{hour: hour, minute: minute, second: second, nano: 0} }
+pub fn time(hour: Int, minute: Int, second: Int) -> LocalTime {
+    h := hour
+    mi := minute
+    s := second
+    if h < 0 -> h = 0
+    if h > 23 -> h = 23
+    if mi < 0 -> mi = 0
+    if mi > 59 -> mi = 59
+    if s < 0 -> s = 0
+    if s > 60 -> s = 60
+    LocalTime{hour: h, minute: mi, second: s, nano: 0}
+}
 
 pub fn local_time(hour: Int, minute: Int, second: Int) -> LocalTime { time(hour, minute, second) }
 
-pub fn new(year: Int, month: Int, day: Int) -> LocalDate { LocalDate{year: year, month: month, day: day} }
+pub fn new(year: Int, month: Int, day: Int) -> LocalDate {
+    m := month
+    if m < 1 -> m = 1
+    if m > 12 -> m = 12
+    d := day
+    max_day :: days_in_month(year, m)
+    if d < 1 -> d = 1
+    if d > max_day -> d = max_day
+    LocalDate{year: year, month: m, day: d}
+}
 
 pub fn datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> DateTime {
-    DateTime{
-    year: year,
-    month: month,
-    day: day,
-    hour: hour,
-    minute: minute,
-    second: second,
-    nano: 0,
-    }
+    date :: new(year, month, day)
+    tm :: time(hour, minute, second)
+    DateTime{year: date.year, month: date.month, day: date.day, hour: tm.hour, minute: tm.minute, second: tm.second, nano: 0}
 }
 
 pub fn from_timestamp(seconds: Int) -> DateTime { from_unix_ns(seconds * 1000000000) }
@@ -155,79 +180,83 @@ pub fn from_unix_microseconds(us: Int) -> DateTime { from_unix_ns(us * 1000) }
 
 pub fn from_unix_nanoseconds(ns: Int) -> DateTime { from_unix_ns(ns) }
 
-pub fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate {
-    if week < 1 || week > 53 -> return Err("ISO week must be 1..=53")
-    if weekday < 1 || weekday > 7 -> return Err("ISO weekday must be 1..=7 (Monday=1)")
+pub fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate !TimeError {
+    if week < 1 || week > 53 -> return Err(TimeError{reason: "ISO week must be 1..=53"})
+    if weekday < 1 || weekday > 7 -> return Err(TimeError{reason: "ISO weekday must be 1..=7 (Monday=1)"})
     jan4 :: days_from_civil(year, 1, 4)
     monday :: jan4 - iso_weekday(year, 1, 4) + 1
     day :: monday + (week - 1) * 7 + (weekday - 1)
-    Ok(civil_from_days(day))
+    candidate :: civil_from_days(day)
+    if iso_week_year(candidate) != year || iso_week_number(candidate) != week {
+        return Err(TimeError{reason: "ISO week is not present in this year"})
+    }
+    Ok(candidate)
 }
 
-pub fn parse(text: String) -> LocalDate {
+pub fn parse(text: String) -> LocalDate !TimeError {
     parts :: split_char(text, 45)
-    if parts.len() != 3 -> return Err("LocalDate needs YYYY-MM-DD")
-    y :: parse_int(parts[0]) ?? return Err("invalid year")
-    m :: parse_int(parts[1]) ?? return Err("invalid month")
-    d :: parse_int(parts[2]) ?? return Err("invalid day")
-    if m < 1 || m > 12 -> return Err("month out of range")
-    if d < 1 || d > days_in_month(y, m) -> return Err("day out of range")
+    if parts.len() != 3 -> return Err(TimeError{reason: "LocalDate needs YYYY-MM-DD"})
+    y :: parse_int(parts[0]) ?? return Err(TimeError{reason: "invalid year"})
+    m :: parse_int(parts[1]) ?? return Err(TimeError{reason: "invalid month"})
+    d :: parse_int(parts[2]) ?? return Err(TimeError{reason: "invalid day"})
+    if m < 1 || m > 12 -> return Err(TimeError{reason: "month out of range"})
+    if d < 1 || d > days_in_month(y, m) -> return Err(TimeError{reason: "day out of range"})
     Ok(LocalDate{year: y, month: m, day: d})
 }
 
-pub fn parse_time(text: String) -> LocalTime {
-    raw :: text
+pub fn parse_time(text: String) -> LocalTime !TimeError {
+    raw :: ~text
     nano := 0
-    body := raw
+    body := ~raw
     loop i in 0..<raw.bytes().len() {
         if raw.bytes()[i] == (U8{46}) {
             body = slice(raw.bytes(), 0, i)
             frac :: slice(raw.bytes(), i + 1, raw.bytes().len())
-            nano = parse_frac_nano(frac)
+            nano = parse_frac_nano(frac) ?? return Err(TimeError{reason: "invalid fractional second"})
             break
         }
     }
     parts :: split_char(body, 58)
-    if parts.len() < 2 || parts.len() > 3 -> return Err("LocalTime needs HH:MM or HH:MM:SS")
-    h :: parse_int(parts[0]) ?? return Err("invalid hour")
-    mi :: parse_int(parts[1]) ?? return Err("invalid minute")
+    if parts.len() < 2 || parts.len() > 3 -> return Err(TimeError{reason: "LocalTime needs HH:MM or HH:MM:SS"})
+    h :: parse_int(parts[0]) ?? return Err(TimeError{reason: "invalid hour"})
+    mi :: parse_int(parts[1]) ?? return Err(TimeError{reason: "invalid minute"})
     s := 0
-    if parts.len() == 3 -> s = parse_int(parts[2]) ?? return Err("invalid second")
-    if h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 60 -> return Err("time fields out of range")
+    if parts.len() == 3 -> s = parse_int(parts[2]) ?? return Err(TimeError{reason: "invalid second"})
+    if h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 60 -> return Err(TimeError{reason: "time fields out of range"})
+    if s == 60 && (h != 23 || mi != 59) -> return Err(TimeError{reason: "leap second must be 23:59:60"})
     Ok(LocalTime{hour: h, minute: mi, second: s, nano: nano})
 }
 
-pub fn parse_rfc3339(text: String) -> DateTime {
-    zoned :: parse_zoned(text)
+pub fn parse_rfc3339(text: String) -> DateTime !TimeError {
+    zoned :: parse_zoned(text) ?? return Err(TimeError{reason: "invalid RFC 3339 datetime"})
     Ok(zoned.instant)
 }
 
-pub fn parse_iso_week_date(text: String) -> LocalDate {
+pub fn parse_iso_week_date(text: String) -> LocalDate !TimeError {
     // YYYY-Www-D
     raw :: text.bytes()
-    if raw.len() < 8 -> return Err("ISO week date needs YYYY-Www-D")
-    y :: parse_int(slice(raw, 0, 4)) ?? return Err("invalid ISO week year")
-    if raw[4] != (U8{45}) || raw[5] != (U8{87}) -> return Err("expected -Www")
-    w :: parse_int(slice(raw, 6, 8)) ?? return Err("invalid ISO week")
-    wd := 1
-    if raw.len() >= 10 && raw[8] == (U8{45}) {
-        wd = parse_int(slice(raw, 9, 10)) ?? return Err("invalid ISO weekday")
+    if raw.len() != 10 -> return Err(TimeError{reason: "ISO week date needs YYYY-Www-D"})
+    y :: parse_int(slice(raw, 0, 4)) ?? return Err(TimeError{reason: "invalid ISO week year"})
+    if raw[4] != (U8{45}) || raw[5] != (U8{87}) || raw[8] != (U8{45}) {
+        return Err(TimeError{reason: "expected -Www-D"})
     }
+    w :: parse_int(slice(raw, 6, 8)) ?? return Err(TimeError{reason: "invalid ISO week"})
+    wd :: parse_int(slice(raw, 9, 10)) ?? return Err(TimeError{reason: "invalid ISO weekday"})
     from_iso_week(y, w, wd)
 }
 
-pub fn parse_zoned(text: String) -> ZonedDateTime {
+pub fn parse_zoned(text: String) -> ZonedDateTime !TimeError {
     raw :: text.bytes()
     sep := -1
     loop i in 0..<raw.len() {
         n :: raw[i]
-        if n == 84 || n == 116 || n == 32 {
+        if n == 84 || n == 116 {
             sep = i
             break
         }
     }
-    if sep < 0 -> return Err("RFC 3339 needs a date/time separator T")
-    date :: parse(slice(raw, 0, sep))
+    if sep < 0 -> return Err(TimeError{reason: "RFC 3339 needs a date/time separator T"})
+    date :: parse(slice(raw, 0, sep)) ?? return Err(TimeError{reason: "invalid RFC 3339 date"})
     rest :: slice(raw, sep + 1, raw.len())
     rb :: rest.bytes()
     off_at := -1
@@ -239,36 +268,54 @@ pub fn parse_zoned(text: String) -> ZonedDateTime {
             zulu = true
             break
         }
-        if n == 43 || (n == 45 && i >= 8) {
+        if n == 43 || n == 45 {
             off_at = i
             break
         }
     }
-    time_txt := rest
-    zone_txt := "Z"
-    if off_at >= 0 {
-        time_txt = slice(rb, 0, off_at)
-        if !zulu -> zone_txt = slice(rb, off_at, rb.len())
+    if off_at < 0 -> return Err(TimeError{reason: "RFC 3339 needs a UTC offset"})
+    time_txt :: slice(rb, 0, off_at)
+    suffix :: slice(rb, off_at, rb.len())
+    zone_txt := ~suffix
+    bracket := -1
+    loop i in 0..<suffix.bytes().len() {
+        if suffix.bytes()[i] == (U8{91}) {
+            bracket = i
+            break
+        }
     }
-    tm :: parse_time(time_txt)
-    zn := utc()
-    if !zulu && off_at >= 0 -> zn = zone(zone_txt)
+    if bracket >= 0 {
+        if suffix.bytes().len() < bracket + 3 || suffix.bytes()[suffix.bytes().len() - 1] != (U8{93}) {
+            return Err(TimeError{reason: "invalid bracketed zone"})
+        }
+        zone_txt = slice(suffix.bytes(), 0, bracket)
+        label :: slice(suffix.bytes(), bracket + 1, suffix.bytes().len() - 1)
+        if zulu || zone_txt.bytes().len() == 0 -> return Err(TimeError{reason: "bracketed zone needs a numeric offset"})
+        numeric :: parse_offset(zone_txt) ?? return Err(TimeError{reason: "invalid numeric offset"})
+        named :: zone(label) ?? return Err(TimeError{reason: "unsupported zone"})
+        if named.offset_s != numeric -> return Err(TimeError{reason: "zone offset does not match numeric offset"})
+        zone_txt = label
+    }
+    tm :: parse_time(time_txt) ?? return Err(TimeError{reason: "invalid RFC 3339 time"})
+    zn :: zone(zone_txt) ?? return Err(TimeError{reason: "unsupported zone"})
     dt :: DateTime{year: date.year, month: date.month, day: date.day, hour: tm.hour, minute: tm.minute, second: tm.second, nano: tm.nano}
     shifted :: add_seconds(dt, -zn.offset_s)
     Ok(ZonedDateTime{instant: shifted, zone: zn})
 }
 
-pub fn zoned(when: DateTime, zone: Zone) -> ZonedDateTime { ZonedDateTime{instant: when, zone: zone} }
-
-pub fn zoned_local(date: LocalDate, time: LocalTime, zone: Zone, offset: String) -> ZonedDateTime {
-    zn := zone
-    parsed := parse_offset(offset) ?? zone.offset_s
-    if offset.bytes().len() > 0 {
+pub fn zoned_local(date: LocalDate, time: LocalTime, zone: Zone, offset: String) -> ZonedDateTime !TimeError {
+    zn := ~zone
+    mode :: ascii_upper(offset)
+    if offset.bytes().len() > 0 && mode != "COMPATIBLE" && mode != "EARLIER" && mode != "LATER" {
+        parsed :: parse_offset(offset) ?? return Err(TimeError{reason: "invalid zone offset"})
         zn = Zone{name: zone.name, offset_s: parsed}
     }
     dt :: DateTime{year: date.year, month: date.month, day: date.day, hour: time.hour, minute: time.minute, second: time.second, nano: time.nano}
-    ZonedDateTime{instant: dt, zone: zn}
+    shifted :: add_seconds(dt, -zn.offset_s)
+    Ok(ZonedDateTime{instant: shifted, zone: zn})
 }
+
+
 
 pub fn now() -[Time]> DateTime { from_unix_ns(host_unix_ns()) }
 
@@ -292,27 +339,19 @@ pub fn sleep_until(deadline: Instant) -[Time]> {
     if deadline.unix_ns > now_ns -> host_sleep_ns(deadline.unix_ns - now_ns)
 }
 
-fn host_unix_ns() -[Time]> Int { panic("host_unix_ns") }
-fn host_sleep_ns(ns: Int) -[Time]> panic("host_sleep_ns")
+fn host_unix_ns() -[Time]> Int { core.time.instant().unix_ns }
+
+fn host_sleep_ns(ns: Int) -[Time]> { core.time.sleep(Duration{ns: ns}) }
 
 fn from_unix_ns(ns: Int) -> DateTime {
     secs :: floor_div(ns, 1000000000)
-    rem :: ns - secs * 1000000000
-    if rem < 0 {
-        // borrow handled by floor_div
-    }
-    nano := rem
-    if nano < 0 -> nano = nano + 1000000000
-    date :: civil_from_days(secs / 86400)
-    tod :: secs % 86400
-    if tod < 0 {
-        // floor_div already for days; tod may be negative
-    }
-    sod := tod
-    if sod < 0 -> sod = sod + 86400
-    h :: sod / 3600
-    mi :: (sod % 3600) / 60
-    s :: sod % 60
+    nano :: ns - secs * 1000000000
+    days :: floor_div(secs, 86400)
+    sod :: secs - days * 86400
+    date :: civil_from_days(days)
+    h :: sod /% 3600
+    mi :: (sod %% 3600) /% 60
+    s :: sod %% 60
     DateTime{year: date.year, month: date.month, day: date.day, hour: h, minute: mi, second: s, nano: nano}
 }
 
@@ -327,8 +366,8 @@ fn days_from_civil(y: Int, m: Int, d: Int) -> Int {
     }
     era :: floor_div(yy, 400)
     yoe :: yy - era * 400
-    doy :: (153 * mm + 2) / 5 + d - 1
-    doe :: yoe * 365 + yoe / 4 - yoe / 100 + doy
+    doy :: (153 * mm + 2) /% 5 + d - 1
+    doe :: yoe * 365 + yoe /% 4 - yoe /% 100 + doy
     era * 146097 + doe - 719468
 }
 
@@ -336,11 +375,11 @@ fn civil_from_days(z: Int) -> LocalDate {
     zz :: z + 719468
     era :: floor_div(zz, 146097)
     doe :: zz - era * 146097
-    yoe :: (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    yoe :: (doe - doe /% 1460 + doe /% 36524 - doe /% 146096) /% 365
     y :: yoe + era * 400
-    doy :: doe - (365 * yoe + yoe / 4 - yoe / 100)
-    mp :: (5 * doy + 2) / 153
-    d :: doy - (153 * mp + 2) / 5 + 1
+    doy :: doe - (365 * yoe + yoe /% 4 - yoe /% 100)
+    mp :: (5 * doy + 2) /% 153
+    d :: doy - (153 * mp + 2) /% 5 + 1
     m := mp + 3
     if m > 12 {
         m = m - 12
@@ -351,63 +390,88 @@ fn civil_from_days(z: Int) -> LocalDate {
 
 fn iso_weekday(year: Int, month: Int, day: Int) -> Int {
     z :: days_from_civil(year, month, day)
-    w :: (z + 3) % 7
-    if w < 0 -> return w + 8
-    w + 1
+    value := (z + 3) %% 7
+    if value < 0 -> value = value + 7
+    value + 1
 }
 
-fn add_seconds(dt: DateTime, secs: Int) -> DateTime {
-    ns :: datetime_to_ns(dt) + secs * 1000000000
-    from_unix_ns(ns)
+fn iso_week_year(date: LocalDate) -> Int {
+    shifted :: civil_from_days(days_from_civil(date.year, date.month, date.day) + 4 - iso_weekday(date.year, date.month, date.day))
+    shifted.year
 }
+
+fn iso_week_number(date: LocalDate) -> Int {
+    year :: iso_week_year(date)
+    jan4 :: days_from_civil(year, 1, 4)
+    monday :: jan4 - iso_weekday(year, 1, 4) + 1
+    current :: days_from_civil(date.year, date.month, date.day)
+    (current - monday) /% 7 + 1
+}
+
 
 fn datetime_to_ns(dt: DateTime) -> Int {
     days :: days_from_civil(dt.year, dt.month, dt.day)
     sod :: dt.hour * 3600 + dt.minute * 60 + dt.second
     days * 86400 * 1000000000 + sod * 1000000000 + dt.nano
 }
+fn time_int_min() -> Int { -9223372036854775808 }
+
+fn time_int_max() -> Int { 9223372036854775807 }
+
+fn saturating_add_ns(a: Int, b: Int) -> Int {
+    if b > 0 && a > time_int_max() - b -> return time_int_max()
+    if b < 0 && a < time_int_min() - b -> return time_int_min()
+    a + b
+}
+
+fn saturating_sub_ns(a: Int, b: Int) -> Int {
+    if b > 0 && a < time_int_min() + b -> return time_int_min()
+    if b < 0 && a > time_int_max() + b -> return time_int_max()
+    a - b
+}
+
+fn saturating_scale_ns(value: Int, scale: Int) -> Int {
+    if value == 0 -> return 0
+    if value > 0 && value > time_int_max() /% scale -> return time_int_max()
+    if value < 0 && value < time_int_min() /% scale -> return time_int_min()
+    value * scale
+}
+
 
 fn floor_div(a: Int, b: Int) -> Int {
-    q :: a / b
-    r :: a % b
-    if r != 0 && ((a < 0) != (b < 0)) -> return q - 1
+    q := a /% b
+    r :: a %% b
+    if r != 0 && ((r < 0) != (b < 0)) -> q = q - 1
     q
 }
 
-fn parse_offset(text: String) -> Int {
+fn parse_offset(text: String) -> Int !TimeError {
     raw :: text.bytes()
-    if raw.len() == 0 -> return Err("empty offset")
+    if raw.len() == 1 && (raw[0] == (U8{90}) || raw[0] == (U8{122})) -> return Ok(0)
+    if raw.len() != 6 -> return Err(TimeError{reason: "offset needs +HH:MM or -HH:MM"})
     sign := 1
-    i := 0
-    if raw[0] == (U8{43}) {
-        i = 1
-    } else if raw[0] == (U8{45}) {
+    if raw[0] == (U8{45}) {
         sign = -1
-        i = 1
-    } else {
-        return Err("offset needs +HH:MM or -HH:MM")
+    } else if raw[0] != (U8{43}) {
+        return Err(TimeError{reason: "offset needs +HH:MM or -HH:MM"})
     }
-    rest :: slice(raw, i, raw.len())
-    parts :: split_char(rest, 58)
-    if parts.len() < 1 -> return Err("invalid offset")
-    h :: parse_int(parts[0]) ?? return Err("invalid offset hour")
-    m := 0
-    if parts.len() > 1 -> m = parse_int(parts[1]) ?? return Err("invalid offset minute")
-    Ok(sign * (h * 3600 + m * 60))
+    if raw[3] != (U8{58}) -> return Err(TimeError{reason: "offset needs +HH:MM or -HH:MM"})
+    hours :: parse_int(slice(raw, 1, 3)) ?? return Err(TimeError{reason: "invalid offset hour"})
+    minutes :: parse_int(slice(raw, 4, 6)) ?? return Err(TimeError{reason: "invalid offset minute"})
+    if hours > 23 || minutes > 59 -> return Err(TimeError{reason: "offset out of range"})
+    Ok(sign * (hours * 3600 + minutes * 60))
 }
 
-fn parse_frac_nano(text: String) -> Int {
-    n := parse_int(text) ?? 0
+fn parse_frac_nano(text: String) -> ?Int {
     digits := text.bytes().len()
+    if digits < 1 || digits > 9 -> return None
+    n :: parse_int(text) ?? return None
+    value := n
     loop digits < 9 {
-        n = n * 10
+        value = value * 10
         digits = digits + 1
     }
-    loop digits > 9 {
-        n = n / 10
-        digits = digits - 1
-    }
-    n
+    Val(value)
 }
 
 fn parse_int(text: String) -> ?Int {
@@ -472,20 +536,27 @@ fn ascii_upper(text: String) -> String {
 }
 
 
-pub fn weekday(date: LocalDate) -> Int { iso_weekday(date.year, date.month, date.day) }
+pub fn weekday(date: LocalDate) -> Int { iso_weekday(date.year, date.month, date.day) %% 7 }
 
 pub fn isoformat_date(date: LocalDate) -> String { "{pad2(date.year, 4)}-{pad2(date.month, 2)}-{pad2(date.day, 2)}" }
 
-pub fn isoformat_time(t: LocalTime) -> String { "{pad2(t.hour, 2)}:{pad2(t.minute, 2)}:{pad2(t.second, 2)}" }
+pub fn isoformat_time(t: LocalTime) -> String {
+    base :: "{pad2(t.hour, 2)}:{pad2(t.minute, 2)}:{pad2(t.second, 2)}"
+    if t.nano == 0 -> return base
+    "{base}.{pad9(t.nano)}"
+}
 
 pub fn isoformat(dt: DateTime) -> String { "{isoformat_date(LocalDate{year: dt.year, month: dt.month, day: dt.day})}T{isoformat_time(LocalTime{hour: dt.hour, minute: dt.minute, second: dt.second, nano: dt.nano})}" }
 pub fn strftime(format: String, dt: DateTime) -> String {
     days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    days_long :: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     months_short :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     months_long :: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-    date :: LocalDate{year: dt.year, month: dt.month, day: dt.day}
-    day :: (weekday(date) + 1) %% 7
+    date :: new(dt.year, dt.month, dt.day)
+    day :: weekday(date)
     day_of_year :: days_between(new(dt.year, 1, 1), date) + 1
+    jan1_sun0 :: weekday(new(dt.year, 1, 1))
+    jan1_mon0 :: (jan1_sun0 + 6) %% 7
     raw :: format.bytes()
     out := ""
     i := 0
@@ -502,10 +573,10 @@ pub fn strftime(format: String, dt: DateTime) -> String {
         code :: raw[i + 1]
         piece :: if code == {
             37 -> "%"
-            65 -> days[day]
+            65 -> days_long[day]
             97 -> days[day]
-            98 -> months_short[dt.month - 1]
-            66 -> months_long[dt.month - 1]
+            98 -> months_short[date.month - 1]
+            66 -> months_long[date.month - 1]
             99 -> asctime(dt)
             100 -> pad2(dt.day, 2)
             102 -> pad2(dt.nano /% 1000, 6)
@@ -514,11 +585,9 @@ pub fn strftime(format: String, dt: DateTime) -> String {
             106 -> pad2(day_of_year, 3)
             109 -> pad2(dt.month, 2)
             77 -> pad2(dt.minute, 2)
-            112 -> if dt.hour < 12 -> "AM" else -> "PM"
-            83 -> pad2(dt.second, 2)
-            85 -> pad2((day_of_year + 6) /% 7, 2)
+            85 -> pad2((day_of_year - 1 + jan1_sun0) /% 7, 2)
+            87 -> pad2((day_of_year - 1 + jan1_mon0) /% 7, 2)
             119 -> "{day}"
-            120 -> isoformat_time(LocalTime{hour: dt.hour, minute: dt.minute, second: dt.second, nano: dt.nano})
             121 -> pad2(dt.year %% 100, 2)
             89 -> "{dt.year}"
             90 -> "UTC"
@@ -531,25 +600,31 @@ pub fn strftime(format: String, dt: DateTime) -> String {
 }
 
 
-pub fn unix_seconds(dt: DateTime) -> Int { datetime_to_ns(dt) / 1000000000 }
+pub fn unix_seconds(dt: DateTime) -> Int { floor_div(datetime_to_ns(dt), 1000000000) }
 
-pub fn unix_ms(dt: DateTime) -> Int { datetime_to_ns(dt) / 1000000 }
+pub fn unix_ms(dt: DateTime) -> Int { floor_div(datetime_to_ns(dt), 1000000) }
 
 pub fn add_days(date: LocalDate, days: Int) -> LocalDate { civil_from_days(days_from_civil(date.year, date.month, date.day) + days) }
 
-pub fn add_duration(dt: DateTime, duration: Duration) -> DateTime { from_unix_ns(datetime_to_ns(dt) + duration.ns) }
+pub fn add_duration(dt: DateTime, duration: Duration) -> DateTime {
+    from_unix_ns(saturating_add_ns(datetime_to_ns(dt), duration.ns))
+}
 
-pub fn since(later: DateTime, earlier: DateTime) -> Duration { Duration{ns: datetime_to_ns(later) - datetime_to_ns(earlier)} }
+pub fn since(later: DateTime, earlier: DateTime) -> Duration {
+    Duration{ns: saturating_sub_ns(datetime_to_ns(later), datetime_to_ns(earlier))}
+}
 
-pub fn duration_seconds(seconds: Int) -> Duration { Duration{ns: seconds * 1000000000} }
+pub fn duration_seconds(seconds: Int) -> Duration { Duration{ns: saturating_scale_ns(seconds, 1000000000)} }
 
-pub fn duration_ms(ms: Int) -> Duration { Duration{ns: ms * 1000000} }
+pub fn duration_ms(ms: Int) -> Duration { Duration{ns: saturating_scale_ns(ms, 1000000)} }
 
 pub fn duration_ns(ns: Int) -> Duration { Duration{ns: ns} }
 
-pub fn duration_as_seconds(d: Duration) -> Int { d.ns / 1000000000 }
+pub fn duration_as_seconds(d: Duration) -> Int { d.ns /% 1000000000 }
 
-pub fn elapsed(watch: Stopwatch) -[Time]> Duration { Duration{ns: host_unix_ns() - watch.start_ns} }
+pub fn elapsed(watch: Stopwatch) -[Time]> Duration {
+    Duration{ns: saturating_sub_ns(host_unix_ns(), watch.start_ns)}
+}
 
 pub fn compare_date(a: LocalDate, b: LocalDate) -> Int {
     da :: days_from_civil(a.year, a.month, a.day)
@@ -565,6 +640,9 @@ fn pad2(n: Int, width: Int) -> String {
     s := "{n}"
     loop s.bytes().len() < width -> s = "0{s}"
     s
+}
+fn pad9(n: Int) -> String {
+    pad2(n, 9)
 }
 
 pub fn combine(date: LocalDate, t: LocalTime) -> DateTime {
@@ -587,21 +665,21 @@ pub fn replace_date(dt: DateTime, date: LocalDate) -> DateTime { combine(date, t
 
 pub fn replace_time(dt: DateTime, t: LocalTime) -> DateTime { combine(date_of(dt), t) }
 
-pub fn isoweekday(date: LocalDate) -> Int { weekday(date) }
+pub fn isoweekday(date: LocalDate) -> Int { iso_weekday(date.year, date.month, date.day) }
 
-pub fn weekday_sun0(date: LocalDate) -> Int { weekday(date) %% 7 }
+pub fn weekday_sun0(date: LocalDate) -> Int { weekday(date) }
 
-pub fn duration_minutes(minutes: Int) -> Duration { Duration{ns: minutes * 60000000000} }
+pub fn duration_minutes(minutes: Int) -> Duration { Duration{ns: saturating_scale_ns(minutes, 60000000000)} }
 
-pub fn duration_hours(hours: Int) -> Duration { Duration{ns: hours * 3600000000000} }
+pub fn duration_hours(hours: Int) -> Duration { Duration{ns: saturating_scale_ns(hours, 3600000000000)} }
 
-pub fn duration_days(days: Int) -> Duration { Duration{ns: days * 86400000000000} }
+pub fn duration_days(days: Int) -> Duration { Duration{ns: saturating_scale_ns(days, 86400000000000)} }
 
-pub fn duration_as_ms(d: Duration) -> Int { d.ns / 1000000 }
+pub fn duration_as_ms(d: Duration) -> Int { d.ns /% 1000000 }
 
-pub fn duration_as_minutes(d: Duration) -> Int { d.ns / 60000000000 }
+pub fn duration_as_minutes(d: Duration) -> Int { d.ns /% 60000000000 }
 
-pub fn duration_as_hours(d: Duration) -> Int { d.ns / 3600000000000 }
+pub fn duration_as_hours(d: Duration) -> Int { d.ns /% 3600000000000 }
 
 pub fn add_seconds(dt: DateTime, seconds: Int) -> DateTime { add_duration(dt, duration_seconds(seconds)) }
 
@@ -628,8 +706,10 @@ pub fn date_before(a: LocalDate, b: LocalDate) -> Bool { compare_date(a, b) < 0 
 pub fn date_after(a: LocalDate, b: LocalDate) -> Bool { compare_date(a, b) > 0 }
 
 pub fn between(dt: DateTime, start: DateTime, end: DateTime) -> Bool {
-    n :: unix_seconds(dt)
-    n >= unix_seconds(start) && n <= unix_seconds(end)
+    n :: datetime_to_ns(dt)
+    lo :: datetime_to_ns(start)
+    hi :: datetime_to_ns(end)
+    n >= lo && n <= hi
 }
 
 pub fn duration_zero() -> Duration { Duration{ns: 0} }
@@ -637,27 +717,31 @@ pub fn duration_zero() -> Duration { Duration{ns: 0} }
 pub fn duration_is_zero(d: Duration) -> Bool { d.ns == 0 }
 
 pub fn duration_abs(d: Duration) -> Duration {
-    if d.ns < 0 -> return (Duration{ns: 0 - d.ns})
-    d
+    if d.ns == time_int_min() -> return Duration{ns: time_int_max()}
+    if d.ns < 0 -> return Duration{ns: 0 - d.ns}
+    ~d
 }
 
-pub fn duration_add(a: Duration, b: Duration) -> Duration { Duration{ns: a.ns + b.ns} }
+pub fn duration_add(a: Duration, b: Duration) -> Duration {
+    Duration{ns: saturating_add_ns(a.ns, b.ns)}
+}
 
-pub fn duration_sub(a: Duration, b: Duration) -> Duration { Duration{ns: a.ns - b.ns} }
+pub fn duration_sub(a: Duration, b: Duration) -> Duration {
+    Duration{ns: saturating_sub_ns(a.ns, b.ns)}
+}
 
 pub fn min_date(a: LocalDate, b: LocalDate) -> LocalDate {
-    if compare_date(a, b) <= 0 -> return a
-    b
+    if compare_date(a, b) <= 0 -> return ~a
+    ~b
 }
 
 pub fn max_date(a: LocalDate, b: LocalDate) -> LocalDate {
-    if compare_date(a, b) >= 0 -> return a
-    b
+    if compare_date(a, b) >= 0 -> return ~a
+    ~b
 }
 
 pub fn days_between(a: LocalDate, b: LocalDate) -> Int {
-    // reuse add_days inversion via unix on start-of-day
-    unix_seconds(start_of_day(b)) / 86400 - unix_seconds(start_of_day(a)) / 86400
+    days_from_civil(b.year, b.month, b.day) - days_from_civil(a.year, a.month, a.day)
 }
 // Compatibility spellings shared by Python-style date/time surfaces.
 pub fn fromhours(hours: Int) -> Duration { duration_hours(hours) }

@@ -2219,9 +2219,15 @@ fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<O
     let t = args.first().cloned().unwrap_or(Type::Int);
     match (method, nargs) {
         ("receive", 0) => Some(Some(Type::Result {
-            ok: Box::new(t),
+            ok: Box::new(t.clone()),
             err: Box::new(Type::Named("Closed".to_string())),
         })),
+        ("try_receive", 0) => Some(Some(Type::Option(Box::new(t)))),
+        ("is_timer", 0)
+        | ("is_interval", 0)
+        | ("is_cancelled", 0)
+        | ("is_ready", 0) => Some(Some(Type::Bool)),
+        ("delay_ms", 0) => Some(Some(Type::Int)),
         ("close", 0) => Some(None),
         _ => None,
     }

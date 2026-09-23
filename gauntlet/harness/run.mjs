@@ -587,6 +587,12 @@ function median(values) {
   const middle = Math.floor(numbers.length / 2);
   return numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
 }
+function percentile(values, quantile) {
+  const numbers = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!numbers.length) return null;
+  const index = Math.min(numbers.length - 1, Math.max(0, Math.ceil(quantile * numbers.length) - 1));
+  return numbers[index];
+}
 function finiteValues(samples, field) {
   return (Array.isArray(samples) ? samples : [])
     .map((sample) => sample?.[field])

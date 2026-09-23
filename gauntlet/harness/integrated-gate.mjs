@@ -193,6 +193,7 @@ function expectedPairVerdict(peer, ratio, policy) {
   return "loss";
 }
 const verdictRank = Object.freeze({ loss: 0, unmeasured: 1, not_applicable: 2, parity: 3, win: 4 });
+const resultStatuses = new Set(["measured", "unmeasured", "not_applicable"]);
 function worstVerdict(values) {
   const known = values.filter((value) => Object.hasOwn(verdictRank, value));
   return known.length === 0 ? "unmeasured" : known.reduce((worst, value) => verdictRank[value] < verdictRank[worst] ? value : worst, known[0]);
@@ -810,7 +811,7 @@ function evaluateGate(inputs, options = {}) {
           if (!nonEmpty(sourceFile)) add("missing-evidence", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: evidence, cause: "measured tier has no exact evidence file" });
           else if (!awaitableExists(inputs, sourceFile)) add("missing-evidence", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile, cause: "exact evidence file does not exist" });
           const stamp = checkFresh(`gauntlet ${cellId}/${peer}/${tier}/${metric}`, tierValue, null, sourceFile ?? evidence, true, { cell: cellId, entry: expectedEntry, peer, tier, metric });
-          tierResult.measured_iso = tierResult.measured_iso ?? (stamp?.value === null ? null : new Date(stamp.value).toISOString());
+          tierResult.measured_iso = tierResult.measured_iso ?? (stamp === null ? null : new Date(stamp.value).toISOString());
           const verification = firstValue(tierValue.output_verification, tierValue.verification, tierValue.output_verified, tierValue.output_ok, record.output_verification, record.output_verified);
           const verificationState = isObject(verification) ? firstValue(verification.status, verification.kind, verification.verdict) : verification;
           const outputVerified = isObject(verification) ? firstValue(verification.byte_identical, verification.byte_exact, verification.verified) : verification;

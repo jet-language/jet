@@ -1,6 +1,7 @@
 //! D-WEBAPP1 / c-devserver / D-FLAGSHIP-WEBAPI1: resident-JIT web host.
 //! Thin opaque-handle adapters over Prelude/App.rs + DevServer.rs.
-//! `core.web.on` / `core.web.value` are native no-ops (match AOT emit).
+//! Source-owned `core.web` behavior stays in CoreLib; this module only carries
+//! real host boundaries.
 
 // This module includes shared Prelude source that several hosts compile,
 // each using a different subset, so dead-code reports here are about the
@@ -105,7 +106,9 @@ pub(crate) mod web_rt {
     // the resident host marshals these entries directly. `jet_web_page` is a
     // canonical Core row and reaches every host through the App.rs root.
     pub(crate) use jet_app_impl::{
-        jet_web_storage_clear, jet_web_storage_get, jet_web_storage_remove, jet_web_storage_set,
+        jet_web_storage_local_clear, jet_web_storage_local_get, jet_web_storage_local_remove,
+        jet_web_storage_local_set, jet_web_storage_session_clear, jet_web_storage_session_get,
+        jet_web_storage_session_remove, jet_web_storage_session_set,
     };
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -198,13 +201,6 @@ where
     Concurrency::with_runtime_mut(|rt| Some(f(rt))).expect("Web host requires an active JIT runtime")
 }
 
-fn jet_jit_web_on(_sel: i64, _ev: i64, _fn: i64) {
-    // Native no-op — real registration is JS/Wasm only (emit/core_calls.rs).
-}
-
-fn jet_jit_web_value(_selector: i64) -> i64 {
-    with_rt(|rt| rt.heap.alloc_string(String::new()))
-}
 
 fn jet_jit_web_app() -> i64 {
     with_rt(|rt| {
@@ -712,30 +708,62 @@ fn jet_jit_devserver_serve(server: i64) {
     let _ = server;
 }
 
-fn jet_jit_web_storage_get(key: i64) -> i64 {
+fn jit_web_storage_get(
+    key: i64,
+    get: fn(&String) -> Option<String>,
+) -> i64 {
     let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
-    match web_rt::jet_web_storage_get(&key) {
-        Some(value) => with_rt(|rt| rt.heap.alloc_string(value)),
+    match get(&key) {
+        Some(value) => with_rt(|rt| rt.heap.alloc_string(value).wrapping_add(1)),
         None => 0,
     }
 }
 
-fn jet_jit_web_storage_remove(key: i64) {
+fn jit_web_storage_remove(key: i64, remove: fn(&String)) {
     let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
-    web_rt::jet_web_storage_remove(&key);
+    remove(&key);
 }
-fn jet_jit_web_storage_set(key: i64, value: i64) {
+
+fn jit_web_storage_set(key: i64, value: i64, set: fn(&String, &String)) {
     let (key, value) = with_rt(|rt| {
         (
             rt.heap.clone_string(key).unwrap_or_default(),
             rt.heap.clone_string(value).unwrap_or_default(),
         )
     });
-    web_rt::jet_web_storage_set(&key, &value);
+    set(&key, &value);
 }
 
-fn jet_jit_web_storage_clear() {
-    web_rt::jet_web_storage_clear();
+fn jet_jit_web_storage_local_get(key: i64) -> i64 {
+    jit_web_storage_get(key, web_rt::jet_web_storage_local_get)
+}
+
+fn jet_jit_web_storage_local_remove(key: i64) {
+    jit_web_storage_remove(key, web_rt::jet_web_storage_local_remove);
+}
+
+fn jet_jit_web_storage_local_set(key: i64, value: i64) {
+    jit_web_storage_set(key, value, web_rt::jet_web_storage_local_set);
+}
+
+fn jet_jit_web_storage_local_clear() {
+    web_rt::jet_web_storage_local_clear();
+}
+
+fn jet_jit_web_storage_session_get(key: i64) -> i64 {
+    jit_web_storage_get(key, web_rt::jet_web_storage_session_get)
+}
+
+fn jet_jit_web_storage_session_remove(key: i64) {
+    jit_web_storage_remove(key, web_rt::jet_web_storage_session_remove);
+}
+
+fn jet_jit_web_storage_session_set(key: i64, value: i64) {
+    jit_web_storage_set(key, value, web_rt::jet_web_storage_session_set);
+}
+
+fn jet_jit_web_storage_session_clear() {
+    web_rt::jet_web_storage_session_clear();
 }
 
 fn web_int_value(rt: &crate::runtime_host::JitRuntime, value: i64) -> i64 {
@@ -3263,18 +3291,20 @@ host_fns! {
         route_stringify.returns.push(AbiParam::new(types::I64));
 
     }
-    on: "jet_jit_web_on" => jet_jit_web_on: ternary_void;
-    value: "jet_jit_web_value" => jet_jit_web_value: unary;
     app: "jet_jit_web_app" => jet_jit_web_app: nullary;
     page: "jet_jit_web_page" => jet_jit_web_page: binary;
     app_method: "jet_jit_web_app_method" => jet_jit_web_app_method: app_method;
     route_decode_tree: "jet_jit_web_route_decode_tree" => jet_jit_web_route_decode_tree: route_decode;
     route_encode_result: "jet_jit_web_route_encode_result" => jet_jit_web_route_encode_result: route_encode;
     route_stringify_error: "jet_jit_web_route_stringify_error" => jet_jit_web_route_stringify_error: route_stringify;
-    storage_get: "jet_jit_web_storage_get" => jet_jit_web_storage_get: unary;
-    storage_remove: "jet_jit_web_storage_remove" => jet_jit_web_storage_remove: unary_void;
-    storage_set: "jet_jit_web_storage_set" => jet_jit_web_storage_set: binary_void;
-    storage_clear: "jet_jit_web_storage_clear" => jet_jit_web_storage_clear: nullary_void;
+    storage_local_get: "jet_jit_web_storage_local_get" => jet_jit_web_storage_local_get: unary;
+    storage_local_remove: "jet_jit_web_storage_local_remove" => jet_jit_web_storage_local_remove: unary_void;
+    storage_local_set: "jet_jit_web_storage_local_set" => jet_jit_web_storage_local_set: binary_void;
+    storage_local_clear: "jet_jit_web_storage_local_clear" => jet_jit_web_storage_local_clear: nullary_void;
+    storage_session_get: "jet_jit_web_storage_session_get" => jet_jit_web_storage_session_get: unary;
+    storage_session_remove: "jet_jit_web_storage_session_remove" => jet_jit_web_storage_session_remove: unary_void;
+    storage_session_set: "jet_jit_web_storage_session_set" => jet_jit_web_storage_session_set: binary_void;
+    storage_session_clear: "jet_jit_web_storage_session_clear" => jet_jit_web_storage_session_clear: nullary_void;
     devserver_app: "jet_jit_devserver_app" => jet_jit_devserver_app: nullary;
     devserver_for_app: "jet_jit_devserver_for_app" => jet_jit_devserver_for_app: unary;
     devserver_html: "jet_jit_devserver_html" => jet_jit_devserver_html: binary;
@@ -3287,8 +3317,6 @@ host_fns! {
     row_app: "jet_app" => jet_jit_web_app: nullary;
     app_sync: "jet_app_sync" => jet_jit_app_sync: binary;
     row_page: "jet_web_page" => jet_jit_web_page: binary;
-    row_storage_get: "jet_web_storage_get" => jet_jit_web_storage_get: unary;
-    row_storage_remove: "jet_web_storage_remove" => jet_jit_web_storage_remove: unary_void;
     row_devserver_app: "jet_devserver_app" => jet_jit_devserver_app: nullary;
     row_devserver_for_app: "jet_devserver_for_app" => jet_jit_devserver_for_app: unary;
     web_router_new: "jet_web_router_new" => jet_jit_web_router_new: nullary;

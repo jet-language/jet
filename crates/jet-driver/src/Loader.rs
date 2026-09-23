@@ -2588,23 +2588,36 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    if bundle.modules.iter().any(|module| {
-        module
-            .imports
-            .iter()
-            .any(|import| core_module_path(import).as_deref() == Some("core.archive"))
-    }) {
-        let source =
-            include_str!("../../../corelib/core.archive/pkgs/archive/archive.jet").to_string();
-        let display = "corelib/core.archive/pkgs/archive/archive.jet".to_string();
-        let (tokens, lex_diags) = Lexer::lex_generated(&source);
+    let core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
+        .iter()
+        .copied()
+        .filter(|source_module| {
+            bundle.modules.iter().any(|module| {
+                module.imports.iter().any(|import| {
+                    core_module_path(import).as_deref() == Some(source_module.module)
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    for source_module in core_source_modules {
+        let source = source_module.source.to_string();
+        let display = source_module.path.to_string();
+        let source_for_parse = crate::Package::mask_inline_package_source(&source)
+            .map_err(|error| {
+                record_loader_error(
+                    &mut sink,
+                    LoaderError::at(&display, &source, vec![error.diagnostic()]),
+                )
+            })?
+            .0;
+        let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
         if !lex_diags.is_empty() {
             return Err(record_loader_error(
                 &mut sink,
                 LoaderError::at(&display, &source, lex_diags),
             ));
         }
-        let (mut program, teaching) = match Parser::parse_for_check_with_source(&tokens, &source) {
+        let (mut program, teaching) = match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
             Ok(parsed) => parsed,
             Err(diags) => {
                 return Err(record_loader_error(
@@ -2613,8 +2626,19 @@ fn load_entry_with_overlays_mode_on_stack(
                 ));
             }
         };
+        // Source metadata selects the public members that have crossed the
+        // Core cutover. Keep private helpers and declarations needed by those
+        // members, but do not compile legacy public wrappers that still use
+        // their compiler-owned routes.
+        program.items.retain(|item| match item {
+            Item::Func(function) if function.is_pub => source_module
+                .owned_members
+                .iter()
+                .any(|member| *member == function.name),
+            _ => true,
+        });
         bundle.parse_teaching.extend(teaching);
-        let alias = "core_archive".to_string();
+        let alias = source_module.alias.to_string();
         if bundle.modules.iter().any(|module| module.alias == alias) {
             return Err(record_loader_error(
                 &mut sink,
@@ -2626,14 +2650,14 @@ fn load_entry_with_overlays_mode_on_stack(
                         "the reserved Core source module alias is already in use".to_string(),
                         "Core source packages use a private module namespace during emission"
                             .to_string(),
-                        "rename the imported file module that uses `core_archive`".to_string(),
+                        format!("rename the imported file module that uses `{alias}`"),
                         None,
                     )],
                 ),
             ));
         }
         bundle.modules.push(LoadedModule {
-            path: PathBuf::from("<corelib>/core.archive/pkgs/archive/archive.jet"),
+            path: PathBuf::from(format!("<corelib>/{display}")),
             display,
             source,
             alias,
@@ -2694,8 +2718,11 @@ fn load_entry_with_overlays_mode_on_stack(
             ));
         }
     }
-    project_package_outputs(&mut bundle, &package_output_declarations, &package_defaults);
-    bundle.materialize_script_entries();
+    project_package_outputs(
+        &mut bundle,
+        &package_output_declarations,
+        &package_defaults,
+    );
     Ok(bundle)
 }
 
@@ -3052,11 +3079,14 @@ pub fn find_inline_package_root_checked(start: &Path) -> Result<Option<PathBuf>,
 
 /// Find the one canonical project root for generated artifacts.
 ///
-/// A declared workspace owns its members; otherwise the nearest checked
-/// package owns the source. Standalone sources stay at their canonical parent
-/// directory. Repository markers alone never claim generated output.
+/// A declared workspace owns its members; otherwise the enclosing repository
+/// owns the source. Without a repository, the nearest checked package owns the
+/// source. Standalone sources stay at their canonical parent directory.
 pub fn selected_project_root(start: &Path) -> Result<PathBuf, Diagnostic> {
     if let Some(root) = find_workspace_root_checked(start)? {
+        return Ok(root);
+    }
+    if let Some(root) = find_repository_root(start) {
         return Ok(root);
     }
     if let Some(root) = find_package_root_checked(start)? {
@@ -5035,17 +5065,119 @@ pub fn is_physically_within(root: &Path, path: &Path) -> bool {
 mod stale_manifest_name_tests {
     use super::*;
 
+    /// Keep fixtures outside enclosing project roots; system temp can itself
+    /// live inside a repository, workspace, or package.
     fn tempdir(tag: &str) -> PathBuf {
+        let mut base = std::env::temp_dir();
+        loop {
+            let has_repository = find_repository_root(&base).is_some();
+            let has_workspace = find_workspace_root_checked(&base)
+                .map(|root| root.is_some())
+                .unwrap_or(true);
+            let has_package = find_package_root_checked(&base)
+                .map(|root| root.is_some())
+                .unwrap_or(true);
+            if !has_repository && !has_workspace && !has_package {
+                break;
+            }
+            let Some(parent) = base.parent() else {
+                panic!("could not find an authority-free temp directory for loader tests");
+            };
+            base = parent.to_path_buf();
+        }
+
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let p = std::env::temp_dir().join(format!(
+        let p = base.join(format!(
             "loader-stale-manifest-{tag}-{nanos}-{:?}",
             std::thread::current().id()
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn selected_project_root_prefers_repository_over_nested_package() {
+        let repository = tempdir("selected-repository");
+        let source = repository.join("packages/app/src");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir(repository.join(".git")).unwrap();
+        fs::write(
+            repository.join("packages/app").join(Syntax::PACKAGE_FILE),
+            "name: \"app\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_project_root(&source).unwrap(),
+            fs::canonicalize(&repository).unwrap(),
+        );
+        let _ = fs::remove_dir_all(repository);
+    }
+
+    #[test]
+    fn selected_project_root_preserves_nested_workspace_precedence() {
+        let repository = tempdir("selected-workspace");
+        let workspace = repository.join("nested");
+        let source = workspace.join("packages/app/src");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir(repository.join(".git")).unwrap();
+        fs::write(
+            repository.join(Syntax::PACKAGE_FILE),
+            "name: \"repository\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("workspace.jet"),
+            "module workspace { members: [\"./packages/app\"] }\n",
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("packages/app").join(Syntax::PACKAGE_FILE),
+            "name: \"app\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_project_root(&source).unwrap(),
+            fs::canonicalize(&workspace).unwrap(),
+        );
+        let _ = fs::remove_dir_all(repository);
+    }
+
+    #[test]
+    fn selected_project_root_uses_checked_package_without_repository() {
+        let root = tempdir("selected-package");
+        let package = root.join("package");
+        let source = package.join("src");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            package.join(Syntax::PACKAGE_FILE),
+            "name: \"package\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_project_root(&source).unwrap(),
+            fs::canonicalize(&package).unwrap(),
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn selected_project_root_uses_canonical_standalone_parent() {
+        let root = tempdir("selected-standalone");
+        let standalone = root.join("standalone");
+        fs::create_dir_all(&standalone).unwrap();
+        fs::write(standalone.join(Syntax::DEFAULT_ENTRY_FILE), "fn run() {}\n").unwrap();
+
+        assert_eq!(
+            selected_project_root(&standalone).unwrap(),
+            fs::canonicalize(&standalone).unwrap(),
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

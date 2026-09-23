@@ -1,0 +1,516 @@
+use core.encoding as encoding
+
+// core.encoding.xml — well-formed XML 1.0 without DTDs.
+//
+// The Jet codec parses elements, attributes, text, comments, and empty tags
+// into a `DataTree` object `{ name, attrs, children }`. DTDs, parameter
+// entities, XInclude, and namespace rewriting are rejected. Hostile entity
+// expansion cannot occur because this parser never defines named entities;
+// only the five XML predefined names and numeric character references decode.
+//
+// Canonicalization, encoding declarations, and namespace rewriting are
+// intentionally outside this small source codec. `parse` remains the
+// portable, bounded door and rejects unsupported constructs explicitly.
+pub enum XMLReason {
+    Syntax
+    Truncated
+    ForbiddenDtd
+    UnknownEntity
+}
+
+#Error
+pub struct XMLError {
+    pub reason: XMLReason
+    pub byte_offset: Int
+    pub message: String
+}
+
+pub struct XMLLimits {
+    pub max_depth: Int
+    pub max_bytes: Int
+}
+
+pub enum XMLCanonicalMode {
+    Inclusive
+    Exclusive
+}
+
+pub enum XMLEncoding {
+    Utf8
+    Utf16
+}
+
+pub enum XMLEntityPolicy {
+    PredefinedOnly
+    Reject
+}
+
+pub struct XMLCanonical {
+    pub mode: XMLCanonicalMode
+    pub comments: Bool
+}
+
+pub struct XMLLexicalPolicy {
+    pub keep_whitespace: Bool
+}
+
+pub struct XMLParseOptions {
+    pub limits: XMLLimits
+    pub entities: XMLEntityPolicy
+    pub lexical: XMLLexicalPolicy
+}
+
+pub struct XMLRenderOptions {
+    pub pretty: Bool
+    pub encoding: XMLEncoding
+}
+
+pub struct XMLReader {
+    pub root: encoding.DataTree
+    pub yielded: Bool
+}
+
+impl XMLReader {
+    pub fn next(&self) -> ?encoding.DataTree {
+        if self.yielded -> return None
+        self.yielded = true
+        Val(self.root)
+    }
+}
+
+pub fn parse(text: String) -> encoding.DataTree !encoding.EncodingError { parse_xml(text) }
+
+pub fn decode(text: String) -> encoding.DataTree !encoding.EncodingError { parse_xml(text) }
+
+pub fn parse_bytes(bytes: [U8]) -> encoding.DataTree !encoding.EncodingError {
+    text :: String.from_bytes(bytes) ?? return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, 0, 1, 1, "", "XML input is not valid UTF-8"))
+    parse_xml(text)
+}
+
+pub fn decode_bytes(bytes: [U8]) -> encoding.DataTree !encoding.EncodingError { parse_bytes(bytes) }
+
+pub fn to_string(value: encoding.DataTree) -> String { render_xml(value) }
+
+pub fn to_bytes(value: encoding.DataTree) -> [U8] { to_string(value).bytes() }
+
+pub fn parse_with(text: String, limits: XMLLimits) -> encoding.DataTree !encoding.EncodingError {
+    if text.bytes().len() > limits.max_bytes {
+        return Err(encoding.EncodingError.unsupported(encoding.EncodingFormat.XML, 0, "XML document exceeds XMLLimits.max_bytes"))
+    }
+    parse_xml_limited(text, limits.max_depth)
+}
+
+pub fn canonical(text: String) -> String !encoding.EncodingError { to_string(parse_xml(text)) }
+
+pub fn reader(text: String) -> XMLReader !encoding.EncodingError {
+    root :: parse_xml(text)
+    Ok(XMLReader{root: root, yielded: false})
+}
+
+pub fn attribute(name: String, value: String) -> encoding.DataTree {
+    encoding.DataTree.Object(["name": encoding.DataTree.Text(~name), "value": encoding.DataTree.Text(~value)])
+}
+
+pub fn content(text: String) -> encoding.DataTree { encoding.DataTree.Text(~text) }
+
+pub fn expanded_name(name: String) -> String { name }
+
+pub fn root(value: encoding.DataTree) -> encoding.DataTree { ~value }
+
+
+pub struct XMLWriter {
+    pub parts: [U8]
+}
+impl XMLWriter {
+    pub fn write(&self, value: encoding.DataTree) {
+        chunk :: render_xml(value).bytes()
+        loop b in chunk -> self.parts.push(b)
+    }
+
+    pub fn to_string(self) -> String { String.from_bytes(self.parts) ?? "" }
+
+    pub fn flush(&self) {}
+
+    pub fn finish(&self) {}
+}
+
+fn parse_xml(text: String) -> encoding.DataTree !encoding.EncodingError {
+    parse_xml_limited(text, encoding.EncodingLimits.safe().max_depth)
+}
+
+fn parse_xml_limited(text: String, max_depth: Int) -> encoding.DataTree !encoding.EncodingError {
+    p := XmlParser{bytes: text.bytes(), index: 0, line: 1, column: 1, depth: 0, max_depth: max_depth}
+    _ :: p.skip_misc()
+    node :: p.parse_element()
+    _ :: p.skip_misc()
+    if !p.eof() -> return Err(p.fail("unexpected trailing data after the root element"))
+    Ok(node)
+}
+
+fn element_tree(name: String, attrs: [encoding.DataTree], children: [encoding.DataTree]) -> encoding.DataTree {
+    entries := [String:encoding.DataTree]{}
+    _ :: entries.add("name", encoding.DataTree.Text(name))
+    _ :: entries.add("attrs", encoding.DataTree.Array(attrs))
+    _ :: entries.add("children", encoding.DataTree.Array(children))
+    encoding.DataTree.Object(entries)
+}
+
+struct XmlParser {
+    bytes: [U8]
+    index: Int
+    line: Int
+    column: Int
+    depth: Int
+    max_depth: Int
+}
+
+impl XmlParser {
+    fn eof(self) -> Bool { self.index >= self.bytes.len() }
+
+    fn peek(self) -> ?U8 {
+        if self.eof() -> return None
+        Val(self.bytes[self.index])
+    }
+
+    fn bump(&self) -> ?U8 {
+        b :: self.peek() ?? return None
+        self.index += 1
+        if b == (U8{10}) {
+            self.line += 1
+            self.column = 1
+        } else { self.column += 1 }
+        Val(b)
+    }
+
+    fn fail(self, reason: String) -> encoding.EncodingError {
+        return encoding.EncodingError.syntax(
+        encoding.EncodingFormat.XML,
+        self.index,
+        self.line,
+        self.column,
+        "",
+        reason,
+        )
+    }
+    fn skip_ws(&self) {
+        loop {
+            b :: self.peek() ?? return
+            n :: b
+            if n == 32 || n == 9 || n == 10 || n == 13 -> _ :: self.bump() else {
+                return
+            }
+        }
+    }
+
+    fn skip_misc(&self) !encoding.EncodingError {
+        loop {
+            self.skip_ws()
+            b :: self.peek() ?? return Ok()
+            if b != (U8{60}) -> return Ok()
+            if self.starts_with("<?") {
+                _ :: self.skip_until("?>")
+                next
+            }
+            if self.starts_with("<!--") {
+                _ :: self.skip_until("-->")
+                next
+            }
+            if self.starts_with("<!DOCTYPE") {
+                return Err(self.fail("DTDs are forbidden in Core XML; pass a well-formed fragment without a DOCTYPE"))
+            }
+            return Ok()
+        }
+    }
+    fn starts_with(self, token: String) -> Bool {
+        raw :: token.bytes()
+        if self.index + raw.len() > self.bytes.len() -> return false
+        loop i in 0..<raw.len() {
+            if self.bytes[self.index + i] != raw[i] -> return false
+        }
+        true
+    }
+
+    fn skip_until(&self, token: String) !encoding.EncodingError {
+        raw :: token.bytes()
+        loop {
+            if self.starts_with(token) {
+                loop _ in 0..<raw.len() -> _ :: self.bump()
+                return Ok()
+            }
+            _ :: self.bump() ?? return Err(self.fail("input ended while scanning for `{token}`"))
+        }
+    }
+    fn parse_name(&self) -> String !encoding.EncodingError {
+        out := [U8]{}
+        loop {
+            b :: self.peek() ?? break
+            n :: b
+            ok :: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45 || n == 58 || n == 46
+            if ok == false -> break
+            out.push(b)
+            _ :: self.bump()
+        }
+        if out.len() == 0 -> return Err(self.fail("expected an element or attribute name"))
+        Ok(String.from_bytes(out) ?? "")
+    }
+    fn parse_element(&self) -> encoding.DataTree !encoding.EncodingError {
+        self.depth += 1
+        if self.depth > self.max_depth {
+            return Err(encoding.EncodingError.unsupported(encoding.EncodingFormat.XML, self.index, "XML nesting exceeds XMLLimits.max_depth"))
+        }
+        lt :: self.bump() ?? return Err(self.fail("expected '<'"))
+        if lt != (U8{60}) -> return Err(self.fail("expected '<'"))
+        name :: self.parse_name()
+        attrs := [encoding.DataTree]{}
+        loop {
+            self.skip_ws()
+            b :: self.peek() ?? return Err(self.fail("unterminated start tag"))
+            if b == (U8{62}) {
+                _ :: self.bump()
+                break
+            }
+            if b == (U8{47}) {
+                _ :: self.bump()
+                _ :: self.expect(U8{62}, "'>' to close an empty tag")
+                self.depth -= 1
+                return Ok(element_tree(name, attrs, [encoding.DataTree]{}))
+            }
+            attr_name :: self.parse_name()
+            self.skip_ws()
+            _ :: self.expect(U8{61}, "'=' in an attribute")
+            self.skip_ws()
+            attr_value :: self.parse_quoted()
+            loop prior in attrs {
+                prior_name :: prior.field("name") ?? encoding.DataTree.Text("")
+                if (prior_name.text() ?? "") == attr_name {
+                    return Err(self.fail("duplicate XML attribute `{attr_name}`"))
+                }
+            }
+            attrs.push(attribute(attr_name, attr_value))
+        children := [encoding.DataTree]{}
+        loop {
+            if self.starts_with("</") {
+                loop _ in 0..<2 -> _ :: self.bump()
+                end_name :: self.parse_name()
+                self.skip_ws()
+                _ :: self.expect(U8{62}, "'>' of an end tag")
+                if end_name != name {
+                    return Err(self.fail("end tag `{end_name}` does not match `{name}`"))
+                }
+                self.depth -= 1
+                return Ok(element_tree(name, attrs, children))
+            }
+            if self.starts_with("<!--") {
+                _ :: self.skip_until("-->")
+                next
+            }
+            if self.peek() ?? (U8{0}) == (U8{60}) {
+                child :: self.parse_element()
+                children.push(child)
+                next
+            }
+            text :: self.parse_text()
+            if text.len() > 0 -> children.push(encoding.DataTree.Text(text))
+            if self.eof() -> return Err(self.fail("unterminated element `{name}`"))
+        }
+    }
+    fn parse_quoted(&self) -> String !encoding.EncodingError {
+        q :: self.bump() ?? return Err(self.fail("expected a quoted attribute"))
+        if q != (U8{34}) && q != (U8{39}) {
+            return Err(self.fail("attribute values must be quoted"))
+        }
+        out := [U8]{}
+        loop {
+            b :: self.bump() ?? return Err(self.fail("unterminated attribute value"))
+            if b == q {
+                raw :: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in attribute value"))
+                return decode_entities(raw)
+            }
+            out.push(b)
+        }
+    }
+
+    fn parse_text(&self) -> String !encoding.EncodingError {
+        out := [U8]{}
+        loop {
+            b :: self.peek() ?? break
+            if b == (U8{60}) -> break
+            out.push(b)
+            _ :: self.bump()
+        }
+        raw :: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in element text"))
+        decode_entities(raw)
+    }
+
+    fn expect(&self, want: U8, what: String) !encoding.EncodingError {
+        b :: self.bump() ?? return Err(self.fail("input ended while reading {what}"))
+        if b != want -> return Err(self.fail("expected {what}"))
+        Ok()
+    }
+}
+
+fn decode_entities(text: String) -> String !encoding.EncodingError {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        if raw[i] != (U8{38}) {
+            out.push(raw[i])
+            i += 1
+            next
+        }
+        j := i + 1
+        loop j < raw.len() && raw[j] != (U8{59}) -> j += 1
+        if j >= raw.len() -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "unterminated XML entity reference"))
+        name :: String.from_bytes(raw[i + 1..j - 1]) ?? return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "invalid XML entity name"))
+        if name == {
+            "lt" -> out.push(U8{60})
+            "gt" -> out.push(U8{62})
+            "amp" -> out.push(U8{38})
+            "apos" -> out.push(U8{39})
+            "quot" -> out.push(U8{34})
+            else -> {
+                n := 0
+                digit_base := 10
+                start := 0
+                bytes :: name.bytes()
+                if bytes.len() > 1 && bytes[0] == (U8{35}) {
+                    start = 1
+                    if bytes.len() > 2 && (bytes[1] == (U8{120}) || bytes[1] == (U8{88})) {
+                        digit_base = 16
+                        start = 2
+                    }
+                    if start >= bytes.len() -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "empty XML character reference"))
+                    k := start
+                    loop k < bytes.len() {
+                        d := xml_entity_digit(bytes[k], digit_base)
+                        if d < 0 -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "invalid XML character reference"))
+                        n = n * digit_base + d
+                        k += 1
+                    }
+                    if n == 0 || n > 1114111 || (n >= 55296 && n <= 57343) || (n < 32 && n != 9 && n != 10 && n != 13) {
+                        return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "XML character reference is outside XML 1.0"))
+                    }
+                    push_xml_utf8(&out, n)
+                } else {
+                    return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.XML, i, 1, i + 1, "", "unknown XML entity reference"))
+                }
+            }
+        }
+        i = j + 1
+    }
+    Ok(String.from_bytes(out) ?? ~text)
+}
+
+fn xml_entity_digit(b: U8, base: Int) -> Int {
+    n :: Int.from_u8(b)
+    if n >= 48 && n <= 57 {
+        d := n - 48
+        if d < base -> return d
+    }
+    if base == 16 {
+        if n >= 65 && n <= 70 -> return n - 55
+        if n >= 97 && n <= 102 -> return n - 87
+    }
+    -1
+}
+
+fn push_xml_utf8(out: &[U8], cp: Int) {
+    if cp < 128 -> out.push(U8{cp})
+    else if cp < 2048 {
+        out.push(U8{192 | (cp >> 6)})
+        out.push(U8{128 | (cp & 63)})
+    } else if cp < 65536 {
+        out.push(U8{224 | (cp >> 12)})
+        out.push(U8{128 | ((cp >> 6) & 63)})
+        out.push(U8{128 | (cp & 63)})
+    } else {
+        out.push(U8{240 | (cp >> 18)})
+        out.push(U8{128 | ((cp >> 12) & 63)})
+        out.push(U8{128 | ((cp >> 6) & 63)})
+        out.push(U8{128 | (cp & 63)})
+    }
+}
+
+fn render_xml(value: encoding.DataTree) -> String {
+    name_tree :: value.field("name") ?? encoding.DataTree.Text("root")
+    name :: name_tree.text() ?? "root"
+    out := "<{name}"
+    attrs :: value.field("attrs")
+    if attrs == {
+        .Val(tree) -> out = "{out}{render_xml_attrs(tree)}"
+        else -> { _ := 0 }
+    }
+    out = "{out}>"
+    children :: value.field("children")
+    if children == {
+        .Val(tree) -> out = "{out}{render_xml_children(tree)}"
+        else -> { _ := 0 }
+    }
+    "{out}</{name}>"
+}
+
+fn render_xml_attrs(tree: encoding.DataTree) -> String {
+    if tree == {
+        .Array(items) -> {
+            out := ""
+            loop item in items {
+                attr_name :: item.field("name") ?? encoding.DataTree.Text("")
+                attr_value :: item.field("value") ?? encoding.DataTree.Text("")
+                name :: attr_name.text() ?? ""
+                value :: attr_value.text() ?? ""
+                if name.len() > 0 -> out = "{out} {name}=\"{escape_xml_attr(value)}\""
+            }
+            return out
+        }
+        else -> return ""
+    }
+}
+
+fn render_xml_children(tree: encoding.DataTree) -> String {
+    if tree == {
+        .Array(items) -> return render_xml_array(items)
+        else -> return ""
+    }
+}
+
+fn render_xml_array(items: [encoding.DataTree]) -> String {
+    out := ""
+    loop item in items {
+        if item == {
+            .Text(s) -> out = "{out}{escape_xml(s)}"
+            else -> out = "{out}{render_xml(item)}"
+        }
+    }
+    out
+}
+
+fn escape_xml(text: String) -> String {
+    out := ""
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 60 -> out = "{out}&lt;"
+            n == 62 -> out = "{out}&gt;"
+            n == 38 -> out = "{out}&amp;"
+            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        }
+    }
+    out
+}
+
+fn escape_xml_attr(text: String) -> String {
+    out := ""
+    loop b in text.bytes() {
+        n :: b
+        if {
+            n == 60 -> out = "{out}&lt;"
+            n == 62 -> out = "{out}&gt;"
+            n == 38 -> out = "{out}&amp;"
+            n == 34 -> out = "{out}&quot;"
+            n == 39 -> out = "{out}&apos;"
+            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        }
+    }
+    out
+}

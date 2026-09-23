@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
     /// `name (:: | :=) expr`. The sigil chooses mutability.
     /// Typed forms `name: Type :: expr` / `name: Type := expr` are retired —
     /// ordinary parse error, no teaching window.
-    pub(super) fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
+    pub(in crate::Parser) fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
         if let Some(pattern) = self.try_bind_pattern()? {
@@ -224,7 +224,7 @@ impl<'a> Parser<'a> {
     /// parse error (no teaching window).
     /// Used by the statement dispatcher to tell a binding apart from an
     /// expression/assignment that also starts with a name.
-    pub(super) fn looks_like_sigil_binding(&self) -> bool {
+    pub(in crate::Parser) fn looks_like_sigil_binding(&self) -> bool {
         match &self.peek().kind {
             // `name :: e` / `name := e`
             TokKind::Ident(_) | TokKind::KwSelf

@@ -8,22 +8,21 @@ package {
         tasks: .Library{ entry: tasks }
     }
 }
+use core as core
+use core.time as time
+
 
 // core.tasks — cooperative tasks on the Jet scheduler.
 //
-// `after` is a one-shot timer channel: after `ms` milliseconds it yields
+// `after` is a one-shot timer channel: after the supplied duration it yields
 // `value`. `interval` yields 1, 2, 3, … on the period. `yield_now` returns
 // control without sleeping. The live builtins are generic; this source
-// records the `Int` specialisation.
+// records the `Int` specialisation used by the convenience wrappers below.
 //
-// Timer bookkeeping is Jet. The actual park/wake is a host scheduler cell.
+// Timer creation and channel parking are host scheduler cells; the stateful
+// TaskState helpers remain pure Jet.
 
-pub struct Receiver {
-    pub kind: String
-    pub delay_ms: Int
-    pub value: Int
-    pub period_ns: Int
-}
+
 
 pub struct TaskState {
     pub values: [Int]
@@ -49,15 +48,23 @@ pub fn put(state: TaskState, value: Int) -> TaskState {
     if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
     values := ~state.values
     values.push(value)
-    TaskState{values: values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation}
+    TaskState{
+        values: values,
+        capacity: state.capacity,
+        closed: state.closed,
+        locked: state.locked,
+        generation: state.generation + 1,
+    }
 }
 
 pub fn clear(state: TaskState) -> TaskState {
-    TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation}
+    if state.values.len() == 0 -> return ~state
+    TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
 pub fn shutdown(state: TaskState) -> TaskState {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation}
+    if state.closed -> return ~state
+    TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
 }
 
 pub fn stop(state: TaskState) -> TaskState { shutdown(state) }
@@ -69,11 +76,13 @@ pub fn reset(state: TaskState) -> TaskState {
 pub fn lock() -> TaskState { channel(1) }
 
 pub fn acquire(state: TaskState) -> TaskState {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation}
+    if state.closed || state.locked -> return ~state
+    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
 }
 
 pub fn release(state: TaskState) -> TaskState {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation}
+    if !state.locked -> return ~state
+    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
 }
 
 pub fn notify(state: TaskState) -> TaskState {
@@ -82,84 +91,100 @@ pub fn notify(state: TaskState) -> TaskState {
 
 pub fn exception(message: String) -> TaskFailure { TaskFailure{message: message, raised: true} }
 
-pub fn start(rx: Receiver) -> Receiver { ~rx }
+pub fn start(rx: Receiver<Int>) -> Receiver<Int> { ~rx }
 
 pub fn run() -[Time]> {
     yield_now()
 }
 
-pub fn waitall(receivers: [Receiver]) -[Time]> [Int] {
+pub fn waitall(receivers: [Receiver<Int>]) -[Time]> [Int] {
     out := [Int]{}
     loop rx in receivers -> out.push(wait(rx))
     out
 }
 
-pub fn waitany(receivers: [Receiver]) -[Time]> Int {
+pub fn waitany(receivers: [Receiver<Int>]) -[Time]> Int {
     if receivers.len() == 0 -> return -1
-    first := receivers[0]
-    wait(first)
+    // Receiver readiness is owned by the scheduler's opaque handle. This
+    // convenience rail keeps the deterministic first-arm selection; callers
+    // needing a true race should use the host select surface.
+    wait(receivers[0])
 }
 
-pub fn after(ms: Int, value: Int) -[Time]> Receiver {
-    delay := ms
-    if delay < 0 -> delay = 0
-    host_sleep_ms(delay)
-    Receiver{kind: "after", delay_ms: delay, value: value, period_ns: 0}
+pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> {
+    core.tasks.after(delay, value)
 }
 
-pub fn interval(period: Duration) -[Time]> Receiver {
-    ns := period.in(.Nanoseconds) ?? 0
-    if ns < 1 -> ns = 1
-    Receiver{kind: "interval", delay_ms: 0, value: 1, period_ns: ns}
+pub fn interval(period: time.Duration) -[Time]> Receiver<Int> {
+    core.tasks.interval(period)
 }
 
 pub fn yield_now() -[Time]> host_yield()
 
 pub fn current_task() -> String { host_task_id() }
 
-/// Take the next interval tick. Sleeps `period_ns` and returns the tick number.
-pub fn recv(rx: Receiver) -[Time]> Int {
-    if rx.kind == "after" -> return rx.value
-    host_sleep_ns(rx.period_ns)
-    rx.value
+/// Receive from the host scheduler channel. A closed channel maps to the
+/// existing integer sentinel because this convenience rail is non-fallible.
+pub fn recv(rx: Receiver<Int>) -[Time]> Int {
+    value :: rx.receive() ?? return -1
+    value
 }
+
 /// Blocking receive spellings used by queue/future adapters.
-pub fn get(rx: Receiver) -[Time]> Int { recv(rx) }
+pub fn get(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
 
-pub fn result(rx: Receiver) -[Time]> Int { recv(rx) }
+pub fn result(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
 
-pub fn wait(rx: Receiver) -[Time]> Int { recv(rx) }
-
-
-fn host_sleep_ms(ms: Int) -[Time]> panic("host_sleep_ms")
-fn host_sleep_ns(ns: Int) -[Time]> panic("host_sleep_ns")
-fn host_yield() -[Time]> panic("host_yield")
-fn host_task_id() -> String { panic("host_task_id") }
+pub fn wait(rx: Receiver<Int>) -[Time]> Int { recv(rx) }
 
 
-pub fn is_timer(rx: Receiver) -> Bool { rx.kind == "after" }
-pub fn is_interval(rx: Receiver) -> Bool { rx.kind == "interval" }
-pub fn delay_ms(rx: Receiver) -> Int { rx.delay_ms }
+fn host_sleep_ms(ms: Int) -[Time]> {
+    _ :: recv(core.tasks.after(Duration{ns: ms * 1000000}, 0))
+}
 
 
-pub fn timeout(ms: Int) -[Time]> Receiver { after(ms, 0) }
+fn host_yield() -[Time]> { core.tasks.yield_now() }
+
+fn host_task_id() -> String { core.tasks.current_task() }
+
+/// Receiver metadata is owned by the scheduler's typed handle.
+pub fn is_timer(rx: Receiver<Int>) -> Bool { rx.is_timer() }
+
+pub fn is_interval(rx: Receiver<Int>) -> Bool { rx.is_interval() }
+
+pub fn is_cancelled(rx: Receiver<Int>) -> Bool { rx.is_cancelled() }
+
+pub fn is_ready(rx: Receiver<Int>) -> Bool { rx.is_ready() }
+
+pub fn delay_ms(rx: Receiver<Int>) -> Int { rx.delay_ms() }
+
+pub fn timeout(delay: time.Duration) -[Time]> {
+    _ :: recv(core.tasks.after(delay, 0))
+}
 
 pub fn sleep(ms: Int) -[Time]> {
-    _ :: after(ms, 0)
+    delay := ms
+    if delay < 0 -> delay = 0
+    host_sleep_ms(delay)
 }
 
-pub fn try_recv(rx: Receiver) -> ?Int {
-    if rx.kind == "after" -> return Val(rx.value)
-    None
+pub fn try_recv(rx: Receiver<Int>) -> ?Int { rx.try_receive() }
+
+/// Closing the receiver wakes blocked consumers and is the host cancellation
+/// operation. The returned handle remains usable for identity/ownership.
+pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> {
+    rx.close()
+    ~rx
 }
 
-pub fn cancel(rx: Receiver) -> Receiver { Receiver{kind: "cancelled", delay_ms: rx.delay_ms, value: rx.value, period_ns: 0} }
-
-pub fn is_cancelled(rx: Receiver) -> Bool { rx.kind == "cancelled" }
+pub fn is_closed(state: TaskState) -> Bool { state.closed }
+pub fn is_locked(state: TaskState) -> Bool { state.locked }
+pub fn size(state: TaskState) -> Int { state.values.len() }
+pub fn capacity(state: TaskState) -> Int { state.capacity }
+pub fn generation(state: TaskState) -> Int { state.generation }
 
 pub fn spawn_name(name: String) -> String {
-    _ :: ~name
-    host_task_id()
+    ~name
 }
 
 

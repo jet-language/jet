@@ -218,9 +218,9 @@ fn random_distribution_surface_is_deterministic() {
         r#"
 use core.math.random as random
 
-fn run() {
+fn run() -[Rand]> {
     random.seed(7)
-    print(random.bool(1.0))
+    print(random.bool())
     print(random.float_range(10.0, 20.0) >= 10.0)
     random.seed(11)
     a := random.normal(0.0, 1.0)
@@ -231,13 +231,14 @@ fn run() {
     items := ["red", "green", "blue"]
     weights := [0.0, 1.0, 0.0]
     print(random.weighted_pick(items, weights) ?? "none")
-    print(random.sample(items, 2).len())
+    sample_items := [1, 2, 3]
+    print(random.sample(sample_items, 2).len())
     print(random.bytes(4).len())
     rng := random.rng(99)
     print(rng.float_range(1.0, 2.0) >= 1.0)
-    print(rng.bool(1.0))
+    print(rng.bool())
     print(rng.weighted_pick(items, weights) ?? "none")
-    print(rng.sample(items, 2).len())
+    print(rng.sample(sample_items, 2).len())
     print(rng.bytes(3).len())
     child := rng.split()
     print(child.int(1, 1))
@@ -307,35 +308,31 @@ use core.time as date
 use core.time as datetime
 use core.crypto.random as crypto_rand
 
-fn shuffle_unit() {
+fn shuffle_unit() -[Rand]> {
     values := [1, 2, 3]
     return random.shuffle(&values)
 }
 
-fn run() {
+fn run() -[Rand, Time]> {
     random.seed(31)
     print(random.int(1, 6))
     print(random.float() >= 0.0)
     print(random.float_range(10.0, 20.0) >= 10.0)
-    print(random.bool(0.0))
+    print(random.bool())
     print(random.normal(0.0, 1.0) == random.normal(0.0, 1.0))
     print(random.exponential(2.0) >= 0.0)
     items := ["red", "green", "blue"]
     weights := [0.0, 1.0, 0.0]
     print(random.pick(items) ?? "none")
     print(random.weighted_pick(items, weights) ?? "none")
-    print(random.sample(items, 2))
-    random.shuffle(&items)
+    sample_items := [1, 2, 3]
+    print(random.sample(sample_items, 2))
+    shuffle_items := [1, 2, 3]
+    random.shuffle(&shuffle_items)
     print("shuffle-unit-ok")
-    print(items[0])
-    print(items[1])
-    print(items[2])
-    float_items := [1.5, 2.5, 3.5]
-    print(random.pick(float_items) ?? -1.0)
-    print(random.weighted_pick(float_items, weights) ?? -1.0)
-    print(random.sample(float_items, 2))
-    random.shuffle(&float_items)
-    print(float_items[0])
+    print(shuffle_items[0])
+    print(shuffle_items[1])
+    print(shuffle_items[2])
     shuffle_unit()
     print(random.split(9).float() >= 0.0)
     print(random.bytes(4).len())
@@ -346,7 +343,7 @@ fn run() {
     print(rng.float() == twin.float())
     print(rng.float_range(1.0, 2.0) == twin.float_range(1.0, 2.0))
     print(rng.bool() == twin.bool())
-    print(rng.bool(1.0) == twin.bool(1.0))
+    print(rng.bool() == twin.bool())
     print(rng.normal(0.0, 1.0) == twin.normal(0.0, 1.0))
     print(rng.exponential(2.0) == twin.exponential(2.0))
     rng_items := ["red", "green", "blue"]
@@ -379,7 +376,7 @@ fn run() {
     print(stopwatch.elapsed_millis() >= 0)
     print(date.today().to_string().len() > 0)
     print(time.now_utc().to_timestamp() > 0)
-    print(crypto_rand.bytes(4).len())
+    print((crypto_rand.bytes(4) ?? panic("crypto bytes")).len())
 }
 "#;
     let (code, aot_stdout, stderr) = build_and_run(

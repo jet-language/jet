@@ -8,12 +8,14 @@ package {
         ui: .Library{ entry: ui }
     }
 }
+use core as core
+use core.text as text
 
-// core.ui — a tree of layout nodes plus preview/playground facts.
+// core.ui — one portable tree consumed by every backend.
 //
-// Nodes are values. Backends (`null`, `tui`, `gtk`) interpret them. This
-// file does not open a window.
-
+// Geometry and node values are deliberately backend-neutral.  Opening a
+// window, painting, and event delivery remain provider operations; these
+// constructors only build values that can be measured and rendered.
 module host
 
 pub enum UiPreviewDevice {
@@ -40,144 +42,205 @@ pub enum UiAriaRole {
     Unset
 }
 
-pub struct UiPoint {
-    pub x: Int
-    pub y: Int
+pub enum UiNodeKind {
+    Custom
+    Text
+    Box
+    Button
+    TextInput
 }
 
-pub struct UiSize {
-    pub w: Int
-    pub h: Int
+pub struct Point {
+    pub x: Float
+    pub y: Float
 }
 
-pub struct UiRect {
-    pub x: Int
-    pub y: Int
-    pub w: Int
-    pub h: Int
+pub struct Size {
+    pub width: Float
+    pub height: Float
 }
 
-pub struct UiConstraint {
-    pub min_w: Int
-    pub min_h: Int
-    pub max_w: Int
-    pub max_h: Int
+pub struct Rect {
+    pub x: Float
+    pub y: Float
+    pub width: Float
+    pub height: Float
+}
+
+pub struct SizeConstraint {
+    pub min_width: Float
+    pub min_height: Float
+    pub max_width: Float
+    pub max_height: Float
+}
+
+
+pub struct UiPreviewViewport {
+    pub device: UiPreviewDevice
+    pub width: Float
+    pub height: Float
 }
 
 pub struct UiNode {
-    pub kind: String
-    pub text: String
+    pub label: String
+    pub width: Float
+    pub height: Float
+    pub role: ?UiAriaRole
+    pub accessibility: ?UiAccessibility
+    pub ime: ?UiImeMode
+    pub color: ?String
+    pub kind: UiNodeKind
     pub children: [UiNode]
-    pub role: UiAriaRole
-    pub fg: String
-    pub bg: String
-    pub shortcut: String
-    pub bounds: UiRect
-}
-
-pub struct UiBackend {
-    pub name: String
+    pub shortcut: ?UiShortcut
 }
 
 pub struct UiPreview {
     pub name: String
     pub node: UiNode
-    pub device: UiPreviewDevice
+    pub viewport: UiPreviewViewport
     pub kind: UiPreviewKind
 }
 
 pub struct UiPlayground {
     pub name: String
     pub node: UiNode
-    pub device: UiPreviewDevice
+    pub viewport: UiPreviewViewport
+}
+pub enum InputEvent {
+    Key(code: String)
+    Resize(size: Size)
 }
 
-pub struct UiKeyEvent {
-    pub code: String
+
+
+// These are portable model handles.  The runtime's Null/TUI/GTK backends
+// expose richer methods for mount/event routing; the source values retain
+// enough state for deterministic source-level composition.
+pub struct NullBackend {
+    pub commands: [String]
+    pub focused: String
 }
 
-pub struct UiResizeEvent {
-    pub w: Int
-    pub h: Int
+pub struct TuiBackend {
+    pub commands: [String]
+    pub focused: String
+    pub renders: Int
 }
 
-pub struct UiMount {
-    pub backend: UiBackend
-    pub root: UiNode
+pub struct GtkBackend {
+    pub commands: [String]
+    pub focused: String
 }
 
-pub fn point(x: Int, y: Int) -> UiPoint { UiPoint{x: x, y: y} }
-pub fn size(w: Int, h: Int) -> UiSize { UiSize{w: w, h: h} }
-pub fn rect(x: Int, y: Int, w: Int, h: Int) -> UiRect { UiRect{x: x, y: y, w: w, h: h} }
-pub fn constraint(min_w: Int, min_h: Int, max_w: Int, max_h: Int) -> UiConstraint {
-    UiConstraint{min_w: min_w, min_h: min_h, max_w: max_w, max_h: max_h}
+pub fn point(x: Float, y: Float) -> Point { core.ui.point(x, y) }
+pub fn size(width: Float, height: Float) -> Size {
+    core.ui.size(width, height)
+}
+pub fn rect(x: Float, y: Float, width: Float, height: Float) -> Rect {
+    core.ui.rect(x, y, width, height)
+}
+pub fn constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint {
+    core.ui.constraint(min_width, min_height, max_width, max_height)
 }
 
-pub fn node(kind: String, text: String) -> UiNode {
-    UiNode{kind: kind, text: text, children: [UiNode]{}, role: UiAriaRole.Unset, fg: "", bg: "", shortcut: "", bounds: UiRect{x: 0, y: 0, w: 0, h: 0}}
+pub fn node(label: String, width: Float, height: Float) -> UiNode {
+    core.ui.node(label, width, height)
 }
 
 pub fn box(children: [UiNode]) -> UiNode {
-    n := node("box", "")
-    n = UiNode{kind: "box", text: "", children: children, role: UiAriaRole.Container, fg: "", bg: "", shortcut: "", bounds: n.bounds}
-    n
+    core.ui.box(children)
 }
 
 pub fn text(value: String) -> UiNode {
-    n := node("text", value)
-    UiNode{kind: "text", text: value, children: [UiNode]{}, role: UiAriaRole.Label, fg: n.fg, bg: n.bg, shortcut: n.shortcut, bounds: n.bounds}
+    core.ui.text(value)
 }
 
 pub fn button(label: String) -> UiNode {
-    UiNode{kind: "button", text: label, children: [UiNode]{}, role: UiAriaRole.Button, fg: "", bg: "", shortcut: "", bounds: UiRect{x: 0, y: 0, w: 0, h: 0}}
+    core.ui.button(label)
 }
 
-pub fn text_input(value: String) -> UiNode {
-    UiNode{kind: "text_input", text: value, children: [UiNode]{}, role: UiAriaRole.TextInput, fg: "", bg: "", shortcut: "", bounds: UiRect{x: 0, y: 0, w: 0, h: 0}}
+pub fn text_input(value: String, mode: UiImeMode) -> UiNode {
+    core.ui.text_input(value, mode)
 }
 
-pub fn mount(backend: UiBackend, root: UiNode) -> UiMount { UiMount{backend: backend, root: root} }
-
-pub fn preview(name: String, root: UiNode) -> UiPreview {
-    UiPreview{name: name, node: root, device: UiPreviewDevice.Desktop, kind: UiPreviewKind.Preview}
+trait UiBackend {
+    fn mount(self, root: UiNode, bounds: SizeConstraint)
 }
 
-pub fn previews(items: [UiPreview]) -> [UiPreview] { items }
-
-pub fn playground(name: String, root: UiNode) -> UiPlayground {
-    UiPlayground{name: name, node: root, device: UiPreviewDevice.Desktop}
+impl NullBackend.UiBackend {
+    fn mount(self, root: UiNode, bounds: SizeConstraint) {
+        core.ui.mount(self, root, bounds)
+    }
 }
 
-pub fn playgrounds(items: [UiPlayground]) -> [UiPlayground] { items }
-
-pub fn desktop() -> UiPreviewDevice { UiPreviewDevice.Desktop }
-pub fn phone() -> UiPreviewDevice { UiPreviewDevice.Phone }
-pub fn tablet() -> UiPreviewDevice { UiPreviewDevice.Tablet }
-
-pub fn key_event(code: String) -> UiKeyEvent { UiKeyEvent{code: code} }
-pub fn resize_event(w: Int, h: Int) -> UiResizeEvent { UiResizeEvent{w: w, h: h} }
-
-pub fn reactive_render(root: UiNode) -> UiNode { root }
-
-pub fn gtk_backend() -> UiBackend { UiBackend{name: "gtk"} }
-pub fn tui_backend() -> UiBackend { UiBackend{name: "tui"} }
-pub fn null_backend() -> UiBackend { UiBackend{name: "null"} }
-
-pub fn aria_role_button() -> UiAriaRole { UiAriaRole.Button }
-pub fn aria_role_container() -> UiAriaRole { UiAriaRole.Container }
-pub fn aria_role_label() -> UiAriaRole { UiAriaRole.Label }
-pub fn aria_role_text_input() -> UiAriaRole { UiAriaRole.TextInput }
-
-pub fn node_accessibility(n: UiNode, role: UiAriaRole) -> UiNode {
-    UiNode{kind: n.kind, text: n.text, children: n.children, role: role, fg: n.fg, bg: n.bg, shortcut: n.shortcut, bounds: n.bounds}
+impl TuiBackend.UiBackend {
+    fn mount(self, root: UiNode, bounds: SizeConstraint) {
+        core.ui.mount(self, root, bounds)
+    }
 }
 
-pub fn node_color(n: UiNode, fg: String, bg: String) -> UiNode {
-    UiNode{kind: n.kind, text: n.text, children: n.children, role: n.role, fg: fg, bg: bg, shortcut: n.shortcut, bounds: n.bounds}
+impl GtkBackend.UiBackend {
+    fn mount(self, root: UiNode, bounds: SizeConstraint) {
+        core.ui.mount(self, root, bounds)
+    }
 }
 
-pub fn node_role(n: UiNode, role: UiAriaRole) -> UiNode { node_accessibility(n, role) }
-
-pub fn node_shortcut(n: UiNode, shortcut: String) -> UiNode {
-    UiNode{kind: n.kind, text: n.text, children: n.children, role: n.role, fg: n.fg, bg: n.bg, shortcut: shortcut, bounds: n.bounds}
+// The checked Core call accepts either two or three arguments and routes the
+// concrete backend through the runtime. This source declaration is the
+// explicit three-value form used by source-level tooling.
+pub fn mount<T: UiBackend>(backend: T, root: UiNode, bounds: SizeConstraint) {
+    backend.mount(root, bounds)
 }
+
+pub fn preview(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
+    selected := viewport ?? desktop()
+    UiPreview{name: name, node: body(), viewport: selected, kind: UiPreviewKind.Preview}
+}
+
+pub fn previews(items: [UiPreview]) -> [UiPreview] { ~items }
+
+pub fn playground(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
+    selected := viewport ?? desktop()
+    UiPreview{name: name, node: body(), viewport: selected, kind: UiPreviewKind.Playground}
+}
+
+pub fn playgrounds(items: [UiPreview]) -> [UiPreview] { ~items }
+
+pub fn desktop() -> UiPreviewViewport { core.ui.desktop() }
+pub fn phone() -> UiPreviewViewport { core.ui.phone() }
+pub fn tablet() -> UiPreviewViewport { core.ui.tablet() }
+
+pub fn key_event(code: String) -> InputEvent { core.ui.key_event(code) }
+pub fn resize_event(width: Float, height: Float) -> InputEvent {
+    core.ui.resize_event(width, height)
+}
+
+pub fn reactive_render(body: fn()) {
+    body()
+}
+
+pub fn gtk_backend() -> GtkBackend { core.ui.gtk_backend() }
+pub fn tui_backend() -> TuiBackend { core.ui.tui_backend() }
+pub fn null_backend() -> NullBackend { core.ui.null_backend() }
+
+pub fn aria_role_button() -> UiAriaRole { core.ui.aria_role_button() }
+pub fn aria_role_container() -> UiAriaRole { core.ui.aria_role_container() }
+pub fn aria_role_label() -> UiAriaRole { core.ui.aria_role_label() }
+pub fn aria_role_text_input() -> UiAriaRole { core.ui.aria_role_text_input() }
+
+pub fn node_accessibility(n: UiNode, metadata: UiAccessibility) -> UiNode {
+    core.ui.node_accessibility(n, metadata)
+}
+
+pub fn node_color(label: String, width: Float, height: Float, color: String) -> UiNode {
+    core.ui.node_color(label, width, height, color)
+}
+
+pub fn node_role(label: String, width: Float, height: Float, role: UiAriaRole) -> UiNode {
+    core.ui.node_role(label, width, height, role)
+}
+
+pub fn node_shortcut(n: UiNode, shortcut: UiShortcut) -> UiNode {
+    core.ui.node_shortcut(n, shortcut)
+}
+

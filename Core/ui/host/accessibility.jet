@@ -1,23 +1,12 @@
-// core.ui.host.accessibility — project a node tree to a platform tree.
-pub struct UiA11yNode {
-    pub role: String
-    pub label: String
-    pub children: [UiA11yNode]
+use core as core
+use core.ui.[UiNode]
+use core.ui.host.[UiAccessibility, UiAccessibilityProjection, UiHostError, UiNodeId]
+
+// core.ui.host.accessibility — route canonical node metadata through the host.
+pub fn attach(node: UiNode, metadata: UiAccessibility) !UiHostError -[IO]> {
+    core.ui.host.accessibility.attach(node, metadata)
 }
 
-/// Attach an accessibility tree to the host. Handle 0 means headless.
-pub fn attach(tree: UiA11yNode) -> Int { host_a11y_attach(tree.role, tree.label) }
-
-/// Flatten `tree` to `role:label` lines for tests and headless hosts.
-pub fn project(tree: UiA11yNode) -> [String] {
-    out := [String]{}
-    walk(tree, &out)
-    out
+pub fn project(node: UiNode, node_id: UiNodeId) -[IO]> ?UiAccessibilityProjection !UiHostError {
+    core.ui.host.accessibility.project(node, node_id)
 }
-
-fn walk(tree: UiA11yNode, out: [String]) {
-    out.push("{tree.role}:{tree.label}")
-    loop c in tree.children -> walk(c, out)
-}
-
-fn host_a11y_attach(role: String, label: String) -> Int { panic("host_a11y_attach") }

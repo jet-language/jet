@@ -464,6 +464,20 @@ impl<'a> Fmt<'a> {
         let table_op = Self::cmp_op_before_brace(rest)?;
         match cond.as_ref() {
             Expr::Binary(op, lhs, _, _) if *op == table_op => Some((lhs.as_ref(), table_op)),
+            // A table arm may start with `"a" | "b"`. Parsing lowers that
+            // head to an Or of comparisons; retain the table surface only
+            // when every alternative compares the same subject.
+            Expr::Binary(BinOp::Or, ..) => {
+                let mut first = cond.as_ref();
+                while let Expr::Binary(BinOp::Or, lhs, ..) = first {
+                    first = lhs;
+                }
+                let Expr::Binary(op, subject, ..) = first else {
+                    return None;
+                };
+                (*op == table_op && self.is_all_value_alts(subject, table_op, cond))
+                    .then_some((subject.as_ref(), table_op))
+            }
             // Card #1440: a pattern-headed value table (`if d == { .North -> … }`)
             // desugars its first arm to a PatternTest; the table subject is the
             // test's subject. Pattern heads are `==`-only (E0366).

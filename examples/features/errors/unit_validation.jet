@@ -1,0 +1,25 @@
+// Fallible Unit checks run directly as statements: failure still propagates.
+#Error
+enum ValidationError {
+    Invalid
+}
+
+fn validate(value: Int) !ValidationError {
+    if value < 0 -> return Err(ValidationError.Invalid)
+}
+
+fn checked_next(value: Int) -> Int !ValidationError {
+    validate(value)
+    Ok(value + 1)
+}
+
+fn run() {
+    if checked_next(2) == {
+        .Ok(value) -> { print(value) }
+        .Err(error) -> print(error)
+    }
+    if checked_next(-1) == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+}

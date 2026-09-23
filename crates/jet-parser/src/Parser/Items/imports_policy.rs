@@ -1499,6 +1499,12 @@ impl<'a> Parser<'a> {
                     self.distinct_def(is_pub, is_package_pub)
                         .map(Item::Distinct)
                 }
+                // D-MODULE-BIND1: ordinary module globals are declarations.
+                // Executable top-level statements remain in `script_body` and
+                // are rejected unless they are inside an explicit `fn run`.
+                TokKind::Ident(_) if self.looks_like_sigil_binding() => {
+                    self.module_binding_def().map(Item::Const)
+                }
                 TokKind::Ident(name) if false && name == Syntax::FOREIGN_CLASS => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(

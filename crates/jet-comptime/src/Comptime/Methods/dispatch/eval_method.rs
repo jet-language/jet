@@ -135,6 +135,11 @@ impl<'a> Interp<'a> {
                 if type_name == "EncodingLimits" {
                     return Ok(super::super::super::EncodingLite::encoding_limits_safe_value());
                 }
+                if type_name == "DataLimits" {
+                    return Ok(
+                        super::super::super::DataPipeline::data_limits_safe_value(),
+                    );
+                }
             }
             if let Expr::Field(base, type_name, _) = receiver {
                 if let Expr::Ident(alias, _) = base.as_ref() {
@@ -156,6 +161,13 @@ impl<'a> Interp<'a> {
                         && type_name == "Limits"
                     {
                         return Ok(super::super::super::EmailAdapter::limits_safe_value());
+                    }
+                    if self.core_imports.get(alias).map(String::as_str) == Some("core.data")
+                        && type_name == "DataLimits"
+                    {
+                        return Ok(
+                            super::super::super::DataPipeline::data_limits_safe_value(),
+                        );
                     }
                 }
             }

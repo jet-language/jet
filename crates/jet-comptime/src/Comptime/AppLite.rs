@@ -474,7 +474,7 @@ mod http_kernel {
         } = response;
         let body = body.bytes(usize::MAX)?;
         let headers_to_ct = |headers: JetHTTPHeaders| CtValue::Struct {
-            type_name: "HTTPHeaders".to_string(),
+            type_name: "Headers".to_string(),
             fields: headers
                 .entries
                 .into_iter()
@@ -493,7 +493,7 @@ mod http_kernel {
                 (
                     "body".to_string(),
                     CtValue::Struct {
-                        type_name: "HTTPBody".to_string(),
+                        type_name: "Body".to_string(),
                         fields: vec![("bytes".to_string(), CtValue::Bytes(body))],
                     },
                 ),

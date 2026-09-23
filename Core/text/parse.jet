@@ -8,6 +8,8 @@ package {
         parse: .Library{ entry: parse }
     }
 }
+use core.text as unicode
+
 // core.text.parse — scanning, splitting, and number parsers.
 //
 // These sit beside Unicode segmentation in `core.text`. Python's `str.split`
@@ -44,6 +46,7 @@ pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] {
         i = i + 1
     }
     out := [String]{head}
+    i = keep
     loop i < parts.len() {
         out.push(parts[i])
         i = i + 1
@@ -110,7 +113,7 @@ pub fn count(text: String, needle: String) -> Int {
 }
 
 pub fn replace(text: String, old: String, new: String, count: Int) -> String {
-    if old.bytes().len() == 0 -> return text
+    if old.bytes().len() == 0 -> return ~text
     out := ""
     i := 0
     done := 0
@@ -147,14 +150,14 @@ pub fn ends_with(text: String, suffix: String) -> Bool {
 
 pub fn strip_prefix(text: String, prefix: String) -> String {
     if starts_with(text, prefix) -> return slice_str(text, prefix.bytes().len(), text.bytes().len())
-    text
+    return ~text
 }
 
 pub fn strip_suffix(text: String, suffix: String) -> String {
     if ends_with(text, suffix) {
         return slice_str(text, 0, text.bytes().len() - suffix.bytes().len())
     }
-    text
+    return ~text
 }
 
 pub fn parse_int(text: String) -> ?Int { parse_int_base(text, 10) }
@@ -192,36 +195,36 @@ pub fn parse_int_base(text: String, base: Int) -> ?Int {
 pub fn parse_float(text: String) -> ?Float {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
-    sign := 1.0
+    sign := Float{1}
     i := 0
     if {
         raw[0] == (U8{45}) -> {
-            sign = -1.0
+            sign = Float{-1}
             i = 1
         }
         raw[0] == (U8{43}) -> { i = 1 }
     }
-    acc := 0.0
+    acc := Float{0}
     seen := false
     loop i < raw.len() {
         n :: raw[i]
         if n == 46 -> break
         d :: n
         if d < 48 || d > 57 -> return None
-        acc = acc * 10.0 + (Float{d - 48})
+        acc = acc * Float{10} + Float{d - 48}
         seen = true
         i = i + 1
     }
     if i < raw.len() && raw[i] == (U8{46}) {
         i = i + 1
-        place := 0.1
+        place := Float{1} / Float{10}
         loop i < raw.len() {
             n :: raw[i]
             if n == 101 || n == 69 -> break
             d :: n
             if d < 48 || d > 57 -> return None
-            acc = acc + (Float{d - 48}) * place
-            place = place / 10.0
+            acc = acc + Float{d - 48} * place
+            place = place / Float{10}
             seen = true
             i = i + 1
         }
@@ -242,12 +245,13 @@ pub fn parse_float(text: String) -> ?Float {
             d :: raw[i]
             if d < 48 || d > 57 -> return None
             exp = exp * 10 + (d - 48)
+            if exp > 10000 -> return None
             i = i + 1
         }
-        pow := 1.0
+        pow := Float{1}
         k := 0
         loop k < exp {
-            pow = pow * 10.0
+            pow = pow * Float{10}
             k = k + 1
         }
         if exp_sign < 0 -> acc = acc / pow else -> acc = acc * pow
@@ -276,11 +280,8 @@ pub fn is_alnum(text: String) -> Bool {
     true
 }
 
-fn chars(text: String) -> [String] {
-    out := [String]{}
-    loop b in text.bytes() -> out.push(String.from_bytes([U8]{b}) ?? "")
-    out
-}
+fn chars(text: String) -> [String] { unicode.scalars(text) }
+
 
 fn match_at(raw: [U8], i: Int, needle: [U8]) -> Bool {
     loop j in 0..<needle.len() {
@@ -305,7 +306,8 @@ fn digit_value(b: U8) -> Int {
     n :: b
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 90 -> return n - 55
-    if n >= 97 && n <= 122 -> return n - 87 - 1
+    if n >= 97 && n <= 122 -> return n - 87
+    -1
 }
 
 pub fn join(parts: [String], sep: String) -> String {
@@ -369,22 +371,22 @@ pub fn strip(text: String) -> String { lstrip(rstrip(text)) }
 pub fn ljust(text: String, width: Int, fill: String) -> String {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return text
+    if n <= 0 -> return ~text
     "{text}{repeat_char(pad, n)}"
 }
 
 pub fn rjust(text: String, width: Int, fill: String) -> String {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return text
+    if n <= 0 -> return ~text
     "{repeat_char(pad, n)}{text}"
 }
 
 pub fn center(text: String, width: Int, fill: String) -> String {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return text
-    left :: n / 2
+    if n <= 0 -> return ~text
+    left :: n /% 2
     "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
 }
 
@@ -397,13 +399,13 @@ pub fn zfill(text: String, width: Int) -> String {
         rest = slice_b(raw, 1, raw.len())
     }
     n := width - text.bytes().len()
-    if n <= 0 -> return text
+    if n <= 0 -> return ~text
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
 pub fn capitalize(text: String) -> String {
     raw :: text.bytes()
-    if raw.len() == 0 -> return text
+    if raw.len() == 0 -> return ~text
     first :: ascii_case(raw[0], true)
     out := [U8]{first}
     i := 1

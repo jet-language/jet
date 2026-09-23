@@ -702,6 +702,29 @@ fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
     decimal_binary(a, b, CtDecimal::mul)
 }
 
+fn jet_jit_decimal_div(a: i64, b: i64) -> i64 {
+    let fraction = Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .decimal_values
+            .get(a.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref())
+            .cloned();
+        let right = rt
+            .decimal_values
+            .get(b.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref())
+            .cloned();
+        left.zip(right).and_then(|(left, right)| left.div(&right))
+    });
+    match fraction {
+        Some(value) => push_fraction(value),
+        None => {
+            trap_fraction("divided by zero");
+            0
+        }
+    }
+}
+
 fn jet_jit_decimal_equal(a: i64, b: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let left = rt
@@ -1328,6 +1351,7 @@ host_fns! {
     row_decimal_add: "jet_decimal_add" => jet_jit_decimal_add: sig_binary;
     row_decimal_sub: "jet_decimal_sub" => jet_jit_decimal_sub: sig_binary;
     row_decimal_mul: "jet_decimal_mul" => jet_jit_decimal_mul: sig_binary;
+    row_decimal_div: "jet_decimal_div" => jet_jit_decimal_div: sig_binary;
     row_decimal_equal: "jet_decimal_equal" => jet_jit_decimal_equal: sig_compare;
     row_decimal_compare: "jet_decimal_compare" => jet_jit_decimal_compare: sig_binary;
     row_decimal_to_string: "jet_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
@@ -1394,6 +1418,7 @@ host_fns! {
     decimal_add: "jet_jit_decimal_add" => jet_jit_decimal_add: sig_binary;
     decimal_sub: "jet_jit_decimal_sub" => jet_jit_decimal_sub: sig_binary;
     decimal_mul: "jet_jit_decimal_mul" => jet_jit_decimal_mul: sig_binary;
+    decimal_div: "jet_jit_decimal_div" => jet_jit_decimal_div: sig_binary;
     decimal_equal: "jet_jit_decimal_equal" => jet_jit_decimal_equal: sig_compare;
     decimal_compare: "jet_jit_decimal_compare" => jet_jit_decimal_compare: sig_binary;
     decimal_to_string: "jet_jit_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;

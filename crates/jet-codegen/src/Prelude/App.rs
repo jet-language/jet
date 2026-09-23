@@ -6,7 +6,8 @@
 
 mod jet_app_impl {
     use std::any::type_name;
-    use std::sync::{Arc, Mutex};
+    use std::collections::HashMap;
+    use std::sync::{Arc, LazyLock, Mutex};
     use super::jet_std;
 
     /// One checked page handler: typed route inputs come from the router's
@@ -1777,17 +1778,68 @@ source.onmessage = () => location.reload();
         }
     }
 
-    // Native resident runs have no browser storage. Keep the same explicit
-    // no-op contract as the AOT core.web.storage surface.
-    pub fn jet_web_storage_get(_key: &String) -> Option<String> {
-        None
+    static JET_WEB_LOCAL_STORAGE: LazyLock<Mutex<HashMap<String, String>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    static JET_WEB_SESSION_STORAGE: LazyLock<Mutex<HashMap<String, String>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    pub fn jet_web_storage_local_get(key: &String) -> Option<String> {
+        JET_WEB_LOCAL_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(key)
+            .cloned()
     }
 
-    pub fn jet_web_storage_remove(_key: &String) {}
+    pub fn jet_web_storage_local_remove(key: &String) {
+        JET_WEB_LOCAL_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(key);
+    }
 
-    pub fn jet_web_storage_set(_key: &String, _value: &String) {}
+    pub fn jet_web_storage_local_set(key: &String, value: &String) {
+        JET_WEB_LOCAL_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key.clone(), value.clone());
+    }
 
-    pub fn jet_web_storage_clear() {}
+    pub fn jet_web_storage_local_clear() {
+        JET_WEB_LOCAL_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+
+    pub fn jet_web_storage_session_get(key: &String) -> Option<String> {
+        JET_WEB_SESSION_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(key)
+            .cloned()
+    }
+
+    pub fn jet_web_storage_session_remove(key: &String) {
+        JET_WEB_SESSION_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(key);
+    }
+
+    pub fn jet_web_storage_session_set(key: &String, value: &String) {
+        JET_WEB_SESSION_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key.clone(), value.clone());
+    }
+
+    pub fn jet_web_storage_session_clear() {
+        JET_WEB_SESSION_STORAGE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
 
     pub fn jet_app_route<F, R>(app: &JetApp, path: String, handler: F, binding: String) -> JetApp
     where

@@ -8,6 +8,8 @@ package {
         perf: .Library{ entry: perf }
     }
 }
+use core as core
+
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
 // Values outside the unit interval are rejected. The cell is host; clamp
 // and defaulting are Jet.
@@ -19,20 +21,20 @@ pub fn fidelity() -[Env]> Float { host_fidelity() }
 
 pub fn default_fidelity() -> Float { 1.0 }
 
-pub fn override_fidelity(value: Float) {
-    if value < 0.0 || value > 1.0 -> return Err("fidelity must be in 0.0..=1.0")
+pub fn override_fidelity(value: Float) -[Env]> {
+    if core.math.is_nan(value) || value < 0.0 || value > 1.0 -> return Err("fidelity must be finite and in 0.0..=1.0")
     host_set_fidelity(value)
-    Ok()
 }
 
 pub fn reset_fidelity() -[Env]> { host_set_fidelity(1.0) }
 
-fn host_fidelity() -[Env]> Float { panic("host_fidelity") }
+fn host_fidelity() -[Env]> Float { core.perf.fidelity() }
 
-fn host_set_fidelity(value: Float) -[Env]> { panic("host_set_fidelity") }
+fn host_set_fidelity(value: Float) -[Env]> { core.perf.override_fidelity(value) }
 
 pub fn of(fidelity: Float) -> Perf {
     v := fidelity
+    if core.math.is_nan(v) -> v = 1.0
     if v < 0.0 -> v = 0.0
     if v > 1.0 -> v = 1.0
     {fidelity: v}

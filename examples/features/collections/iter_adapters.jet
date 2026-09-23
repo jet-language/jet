@@ -11,21 +11,21 @@ fn run() {
     print(lazy_hot)
 
     // take / skip
-    first3 :: nums.take(3).to_list()
+    first3 :: nums.lazy().take(3).to_list()
     print(first3)
-    after2 :: nums.skip(2).to_list()
+    after2 :: nums.lazy().skip(2).to_list()
     print(after2)
     // positional pick: skip(n).first() is the one Iter path; n is zero-based.
-    third :: nums.skip(2).first()
+    third :: nums.lazy().skip(2).first()
     print(third)
-    missing :: nums.skip(99).first()
+    missing :: nums.lazy().skip(99).first()
     print(missing ?? 0)
     // step_by
-    odds :: nums.step_by(2).to_list()
+    odds :: nums.lazy().step_by(2).to_list()
     print(odds)
     // dedup
     duped :: [1, 1, 2, 2, 3, 1, 1]
-    print(duped.dedup().to_list())
+    print(duped.lazy().dedup().to_list())
     // take_while / skip_while
     small :: nums.take_while((n: Int) -> (n < 5)).to_list()
     print(small)
@@ -51,10 +51,10 @@ fn run() {
     // #1479: remaining Iter ledger surface
     // repeat / cycle — repeat(n) loops the whole sequence n times; cycle(n)
     // produces exactly n items (not necessarily a clean multiple).
-    print(nums.repeat(2).to_list())
-    print(nums.cycle(13).to_list())
+    print(nums.lazy().repeat(2).to_list())
+    print(nums.lazy().cycle(13).to_list())
     // drop_last
-    print(nums.drop_last(3).to_list())
+    print(nums.lazy().drop_last(3).to_list())
     // is_sorted / is_sorted_by
     print(nums.is_sorted())
     unsorted :: [3, 1, 2]
@@ -62,7 +62,7 @@ fn run() {
     print(unsorted.is_sorted_by((n: Int) -> -n))
     // dedup_by — collapses consecutive items sharing a key
     parities :: [2, 4, 6, 1, 3, 8, 10]
-    print(parities.dedup_by((n: Int) -> (n % 2)).to_list())
+    print(parities.lazy().dedup_by((n: Int) -> (n % 2)).to_list())
     // last_index_of
     repeats :: [5, 3, 1, 3, 9]
     print(repeats.last_index_of(3))
@@ -75,10 +75,10 @@ fn run() {
     print(parts.left)
     print(parts.right)
     // shuffle — deterministic seeded order, stable across runs
-    print(nums.shuffle().to_list())
+    print(nums.lazy().shuffle().to_list())
     // chunk_while — groups runs where the predicate holds between neighbors
     jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
-    print(jagged.chunk_while((a: Int, b: Int) -> (b == a + 1)).to_list())
+    print(jagged.lazy().chunk_while((a: Int, b: Int) -> (b == a + 1)).to_list())
     // to_set — length only; set element order is not print-stable
     print(nums.to_set().len())
 }

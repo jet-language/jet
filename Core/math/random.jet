@@ -1,98 +1,181 @@
 // core.math.random — deterministic, seedable RNG for simulations and tests.
 //
 // This is not a CSPRNG. `core.crypto.random` is the fail-closed OS generator.
-// Seeding makes a run reproducible. `split` returns an independent stream
-// from the same parent seed so parallel workers do not share a cursor.
-//
-// Algorithm: xorshift64* (Marsaglia / Vigna). The process cell is two host
-// words (`host_rng_get` / `host_rng_set`); every draw, split, and distribution
-// is Jet. Default seed is SplitMix64 of 0x9E3779B97F4A7C15 so an unseeded
-// stream is still well-mixed, never all-zero.
+// Every ambient draw carries `Rand`; seeding the same stream and replaying the
+// same calls produces the same values on every tier. Invalid scalar parameters
+// retain the existing infallible API contract: bounded draws return their
+// lower bound and distributions return their documented degenerate value.
+// Empty collections return `None` (or an empty collection) without advancing
+// the stream.
 use core.math as math
-
-@c_mask64 :: 18446744073709551615
-
-@c_float53 :: Float{9007199254740992}
-
-/// Install `value` as the stream. Zero is mixed so the xorshift state cannot
-/// collapse.
-pub fn seed(value: Int) {
-    s :: mix64(value)
-    if s == 0 -> host_rng_set(0x9E3779B97F4A7C15) else -> host_rng_set(s)
+use core as core
+fn nonfinite(value: Float) -> Bool {
+    if math.is_finite(value) -> return false
+    true
 }
 
-/// Draw one raw 64-bit word and leave the stream advanced. Useful when a
-/// caller wants to snapshot a child by mixing.
-pub fn rng() -> Int { next_u64() }
 
-/// Independent child stream. The parent advances once; the child is the
-/// SplitMix64 of that word so the two sequences do not share a cursor.
-pub fn split() -> Int {
-    child :: mix64(next_u64())
-    child
+@c_mask32 :: 4294967295
+@c_base32 :: 4294967296
+@c_mask63 :: 9223372036854775807
+@c_base63 :: @c_mask63 + 1
+@c_base63_float :: Float{9223372036854775808}
+
+// Draw one non-negative 63-bit word from the shared deterministic provider.
+// The provider's getrandbits(63) is the only host boundary; all composition,
+// rejection, and distribution logic below is Jet-owned.
+fn next_bits63() -[Rand]> Int { core.math.random.getrandbits(63) }
+
+fn unit() -[Rand]> Float {
+    Float{next_bits63()} / @c_base63_float
 }
 
-/// Inclusive integer range. Empty range (`lo > hi`) returns `lo`.
-pub fn int(lo: Int, hi: Int) -> Int {
+fn unit_open() -[Rand]> Float {
+    u :: unit()
+    if u <= (Float{0.0}) -> return (Float{1.0}) / @c_base63_float
+    u
+}
+
+fn full_word64() -[Rand]> Int {
+    hi :: next_bits63() & @c_mask32
+    lo :: next_bits63() & @c_mask32
+    (hi * @c_base32) + lo
+}
+
+// Unbiased offset in 0..<span. Rejection over base-2^63 digits covers every
+// representable range without modulo bias.
+fn bounded(span: Int) -[Rand]> Int {
+    if span <= 1 -> return 0
+    if span <= @c_base63 {
+        limit :: @c_base63 - (@c_base63 %% span)
+        loop {
+            draw :: next_bits63()
+            if draw < limit -> return draw %% span
+        }
+    }
+    space := @c_base63
+    loop space < span -> space = space * @c_base63
+    limit :: space - (space %% span)
+    loop {
+        draw := 0
+        factor := 1
+        loop factor < space {
+            draw = draw + next_bits63() * factor
+            factor = factor * @c_base63
+        }
+        if draw < limit -> return draw %% span
+    }
+}
+fn normalize_angle(angle: Float) -> Float {
+    tau :: math.tau()
+    reduced := math.fmod(angle, tau)
+    if reduced < (Float{0.0}) -> return reduced + tau
+    reduced
+}
+
+
+/// Install `value` as the deterministic stream seed.
+pub fn seed(value: Int) -[Rand]> {
+    core.math.random.seed(value)
+}
+
+/// Construct a deterministic, caller-owned RNG capability.
+pub fn rng(seed_value: Int) -> Rng {
+    core.math.random.rng(seed_value)
+}
+
+/// Construct a deterministic child capability from `seed_value` while mixing
+/// one word from the ambient stream. The explicit effect documents that mix.
+pub fn split(seed_value: Int) -[Rand]> Rng {
+    core.math.random.split(seed_value)
+}
+
+/// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does
+/// not consume the stream.
+pub fn int(lo: Int, hi: Int) -[Rand]> Int {
     if lo >= hi -> return lo
     span :: hi - lo + 1
-    lo + (abs_u64(next_u64()) % span)
+    if span <= 0 {
+        // The only overflowing inclusive width is the complete signed domain.
+        return lo + full_word64()
+    }
+    lo + bounded(span)
 }
 
-/// Uniform in `[0, 1)`. Uses the top 53 bits so every double binade is hit.
-pub fn float() -> Float {
-    bits :: abs_u64(next_u64()) >> 11
-    (Float{bits}) / @c_float53
+/// Uniform in `[0, 1)`, using the full precision available from 63 source bits.
+pub fn float() -[Rand]> Float { unit() }
+
+/// Uniform in `[lo, hi)`. Invalid or reversed bounds return `lo` without a draw.
+pub fn float_range(lo: Float, hi: Float) -[Rand]> Float {
+    if nonfinite(lo) || nonfinite(hi) || hi <= lo -> return lo
+    u :: unit()
+    if lo >= (Float{0.0}) || hi <= (Float{0.0}) -> return lo + (hi - lo) * u
+    negative := -lo
+    positive := hi
+    if positive >= negative {
+        probability :: (Float{1.0}) / ((Float{1.0}) + negative / positive)
+        if u < probability -> return positive * (u / probability)
+        return lo * ((u - probability) / ((Float{1.0}) - probability))
+    }
+    ratio :: positive / negative
+    probability :: ratio / ((Float{1.0}) + ratio)
+    if u < probability -> return positive * (u / probability)
+    lo * ((u - probability) / ((Float{1.0}) - probability))
 }
 
-pub fn float_range(lo: Float, hi: Float) -> Float { lo + (hi - lo) * float() }
+pub fn bool() -[Rand]> Bool { (next_bits63() % 2) == 1 }
 
-pub fn bool() -> Bool { (next_u64() & 1) == 1 }
-
-pub fn bytes(n: Int) -> [U8] {
+/// Seeded pseudo-random bytes. Negative lengths are an empty request.
+pub fn bytes(n: Int) -[Rand]> [U8] {
     out := [U8]{}
     if n <= 0 -> return ~out
     loop {
         if out.len() >= n -> return ~out
-        w :: next_u64()
+        word :: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return ~out
-            out.push(U8{(w >> (k * 8)) & 255})
+            out.push(U8{(word >> (k * 8)) & 255})
         }
     }
 }
 
-pub fn pick(items: [String]) -> ?String {
+pub fn pick(items: [String]) -[Rand]> ?String {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)])
 }
 
-/// Weights must be the same length as `items` and non-negative. A total of
-/// zero is absent, not a panic.
-pub fn weighted_pick(items: [String], weights: [Int]) -> ?String {
+/// Weighted selection. Length mismatches, negative/non-finite weights, and a
+/// zero total are absent. Zero weights remain valid and are never selected.
+pub fn weighted_pick(items: [String], weights: [Float]) -[Rand]> ?String {
     if items.len() == 0 || items.len() != weights.len() -> return None
-    total := 0
+    maximum := Float{0.0}
     loop w in weights {
-        if w > 0 -> total = total + w
+        if nonfinite(w) || w < (Float{0.0}) -> return None
+        if w > maximum -> maximum = w
     }
-    if total <= 0 -> return None
-    draw :: int(0, total - 1)
-    acc := 0
+    if maximum <= (Float{0.0}) -> return None
+    total := Float{0.0}
+    loop w in weights -> total = total + w / maximum
+    if nonfinite(total) || total <= (Float{0.0}) -> return None
+    draw :: unit() * total
+    acc := Float{0.0}
+    last := -1
     loop i in 0..<items.len() {
         w :: weights[i]
-        if w <= 0 -> next
-        acc = acc + w
+        if w <= (Float{0.0}) -> next
+        scaled :: w / maximum
+        acc = acc + scaled
+        last = i
         if draw < acc -> return Val(items[i])
     }
-    Val(items[items.len() - 1])
+    if last < 0 -> return None
+    Val(items[last])
 }
 
 /// Fisher–Yates. Mutates `items` in place.
-pub fn shuffle(items: &[Int]) {
+pub fn shuffle(items: &[Int]) -[Rand]> {
     n :: items.len()
-    if n < 2 {
-        return
-    }
+    if n < 2 -> return
     i := n - 1
     loop i > 0 {
         j :: int(0, i)
@@ -103,123 +186,114 @@ pub fn shuffle(items: &[Int]) {
     }
 }
 
-pub fn sample(items: [Int], n: Int) -> [Int] {
-    clone_items := [Int]{}
-    loop x in items -> clone_items.push(x)
-    shuffle(&clone_items)
+/// Uniform sample without replacement. The source is copied once and only the
+/// requested prefix is shuffled, so asking for a small sample is O(n) memory
+/// and O(k) draws.
+pub fn sample(items: [Int], n: Int) -[Rand]> [Int] {
     out := [Int]{}
-    chunk_len := n
-    if chunk_len > clone_items.len() -> chunk_len = clone_items.len()
-    if chunk_len < 0 -> chunk_len = 0
-    loop i in 0..<chunk_len -> out.push(clone_items[i])
+    if n <= 0 || items.len() == 0 -> return out
+    pool := [Int]{}
+    loop x in items -> pool.push(x)
+    want := n
+    if want > pool.len() -> want = pool.len()
+    i := 0
+    loop i < want {
+        j :: int(i, pool.len() - 1)
+        tmp :: Int{pool[i]}
+        pool[i] = pool[j]
+        pool[j] = tmp
+        out.push(pool[i])
+        i = i + 1
+    }
     out
 }
 
-/// Box–Muller. `stddev <= 0` returns `mean`.
-pub fn normal(mean: Float, stddev: Float) -> Float {
-    if stddev <= 0.0 -> return mean
-    u1 := float()
-    if u1 <= 0.0 {
-        u1 = 1e-16
-    }
-    mean + stddev * math.sqrt(Float{-2} * math.ln(u1)) * math.cos(math.tau * float())
+/// Box–Muller normal draw. Invalid parameters return a finite degenerate value.
+pub fn normal(mean: Float, stddev: Float) -[Rand]> Float {
+    if nonfinite(mean) -> return (Float{0.0})
+    if nonfinite(stddev) || stddev <= (Float{0.0}) -> return mean
+    u1 :: unit_open()
+    u2 :: unit()
+    mean + stddev * math.sqrt((Float{-2.0}) * math.ln(u1)) * math.cos(math.tau() * u2)
 }
 
-pub fn exponential(lambda: Float) -> Float {
-    if lambda <= 0.0 -> return 0.0
-    u := float()
-    if u <= 0.0 {
-        u = 1e-16
-    }
-    -math.ln(u) / lambda
+pub fn exponential(lambda: Float) -[Rand]> Float {
+    if nonfinite(lambda) || lambda <= (Float{0.0}) -> return (Float{0.0})
+    -math.ln(unit_open()) / lambda
 }
 
-fn next_u64() -> Int {
-    s := host_rng_get()
-    if s == 0 -> s = 0x9E3779B97F4A7C15
-    s = (s ~| (s >> 12)) & @c_mask64
-    s = (s ~| (s << 25)) & @c_mask64
-    s = (s ~| (s >> 27)) & @c_mask64
-    host_rng_set(s)
-    (s * 0x2545F4914F6CDD1D) & @c_mask64
-}
-
-fn mix64(z: Int) -> Int {
-    x := (z + 0x9E3779B97F4A7C15) & @c_mask64
-    x = ((x ~| (x >> 30)) * 0xBF58476D1CE4E5B9) & @c_mask64
-    x = ((x ~| (x >> 27)) * 0x94D049BB133111EB) & @c_mask64
-    (x ~| (x >> 31)) & @c_mask64
-}
-
-fn abs_u64(n: Int) -> Int {
-    if n < 0 -> return -n
-    n
-}
-
-/// Process RNG cell. The live compiler will bind these; until cutover they
-/// are the only Random-effect host door.
-fn host_rng_get() -> Int { panic("host_rng_get") }
-
-fn host_rng_set(state: Int) { panic("host_rng_set") }
 /// Python `random` spellings over the same deterministic stream.
-pub fn random() -> Float { float() }
-pub fn randint(lo: Int, hi: Int) -> Int { int(lo, hi) }
-pub fn uniform(lo: Float, hi: Float) -> Float { float_range(lo, hi) }
-pub fn normalvariate(mean: Float, stddev: Float) -> Float { normal(mean, stddev) }
-pub fn gauss(mean: Float, stddev: Float) -> Float { normal(mean, stddev) }
-pub fn expovariate(lambda: Float) -> Float { exponential(lambda) }
-pub fn randbytes(n: Int) -> [U8] { bytes(n) }
+pub fn random() -[Rand]> Float { float() }
+pub fn randint(lo: Int, hi: Int) -[Rand]> Int { int(lo, hi) }
+pub fn uniform(lo: Float, hi: Float) -[Rand]> Float { float_range(lo, hi) }
+pub fn normalvariate(mean: Float, stddev: Float) -[Rand]> Float { normal(mean, stddev) }
+pub fn gauss(mean: Float, stddev: Float) -[Rand]> Float { normal(mean, stddev) }
+pub fn expovariate(lambda: Float) -[Rand]> Float { exponential(lambda) }
+pub fn randbytes(n: Int) -[Rand]> [U8] { bytes(n) }
 
-
-/// Python-compatible deterministic integer aliases over the same stream.
-pub fn getrandbits(k: Int) -> Int {
+/// Draw `k` low-order random bits. Non-positive widths return zero.
+pub fn getrandbits(k: Int) -[Rand]> Int {
     if k <= 0 -> return 0
-    if k >= 63 -> return rng()
-    rng() & ((1 << k) - 1)
+    out := 0
+    remaining := k
+    loop remaining > 0 {
+        chunk := remaining
+        if chunk > 63 -> chunk = 63
+        out = (out << chunk) ~| (next_bits63() & ((1 << chunk) - 1))
+        remaining = remaining - chunk
+    }
+    out
 }
 
-pub fn randrange(start: Int, stop: Int) -> Int {
+pub fn randrange(start: Int, stop: Int) -[Rand]> Int {
     if stop <= start -> return start
     int(start, stop - 1)
 }
 
-pub fn choice(items: [Int]) -> ?Int {
+pub fn choice(items: [Int]) -[Rand]> ?Int {
     if items.len() == 0 -> return None
     Val(items[int(0, items.len() - 1)])
 }
 
-pub fn choices(items: [Int], n: Int) -> [Int] {
+pub fn choices(items: [Int], n: Int) -[Rand]> [Int] {
     out := [Int]{}
-    if items.len() == 0 -> return out
-    count := n
-    if count < 0 -> count = 0
-    loop _ in 0..<count {
-        out.push(choice(items) ?? 0)
+    if items.len() == 0 || n <= 0 -> return out
+    loop _ in 0..<n {
+        value :: choice(items) ?? return out
+        out.push(value)
     }
     out
 }
 
-pub fn triangular(low: Float, high: Float, mode: Float) -> Float {
+pub fn triangular(low: Float, high: Float, mode: Float) -[Rand]> Float {
+    if nonfinite(low) || nonfinite(high) -> return (Float{0.0})
     if high <= low -> return low
     peak := mode
+    if peak != peak || nonfinite(peak) -> peak = low / (Float{2.0}) + high / (Float{2.0})
     if peak < low -> peak = low
     if peak > high -> peak = high
-    u :: float()
-    if u <= ((peak - low) / (high - low)) -> return low + math.sqrt(u * (high - low) * (peak - low))
-    high - math.sqrt(((math.tau / math.tau) - u) * (high - low) * (high - peak))
+    scale := math.fabs(low)
+    if math.fabs(high) > scale -> scale = math.fabs(high)
+    if scale <= (Float{0.0}) -> return low
+    lower :: low / scale
+    upper :: high / scale
+    apex :: peak / scale
+    u :: unit()
+    cut :: (apex - lower) / (upper - lower)
+    if u <= cut -> return (lower + math.sqrt(u * (upper - lower) * (apex - lower))) * scale
+    (upper - math.sqrt(((Float{1.0}) - u) * (upper - lower) * (upper - apex))) * scale
 }
 
-pub fn gammavariate(alpha: Float, beta: Float) -> Float {
-    one :: math.tau / math.tau
-    zero :: one - one
-    two :: one + one
-    three :: two + one
-    nine :: three * three
-    half :: one / two
-    epsilon :: one / (three * three * three)
-    if alpha <= zero || beta <= zero -> return zero
+pub fn gammavariate(alpha: Float, beta: Float) -[Rand]> Float {
+    one :: Float{1.0}
+    three :: Float{3.0}
+    zero :: Float{0.0}
+    nine :: Float{9.0}
+    half :: Float{0.5}
+    epsilon :: Float{0.0331}
+    if nonfinite(alpha) || nonfinite(beta) || alpha <= zero || beta <= zero -> return zero
     if alpha < one {
-        return gammavariate(alpha + one, beta) * math.exp(math.ln(float()) / alpha)
+        return gammavariate(alpha + one, beta) * math.exp(math.ln(unit_open()) / alpha)
     }
     d :: alpha - one / three
     c :: one / math.sqrt(nine * d)
@@ -228,55 +302,73 @@ pub fn gammavariate(alpha: Float, beta: Float) -> Float {
         v0 :: one + c * x
         if v0 <= zero -> next
         sample_scale :: v0 * v0 * v0
-        u :: float()
+        u :: unit_open()
         if u < one - epsilon * x * x * x * x -> return beta * d * sample_scale
-        if math.ln(u) < half * x * x + d * (one - sample_scale + math.ln(sample_scale)) -> return beta * d * sample_scale
+        if math.ln(u) < half * x * x + d * (one - sample_scale + math.ln(sample_scale)) {
+            return beta * d * sample_scale
+        }
     }
 }
 
-pub fn betavariate(alpha: Float, beta: Float) -> Float {
-    one :: math.tau / math.tau
-    zero :: one - one
-    if alpha <= zero || beta <= zero -> return zero
-    a :: gammavariate(alpha, one)
-    b :: gammavariate(beta, one)
-    if a + b <= zero -> return zero
-    a / (a + b)
+pub fn betavariate(alpha: Float, beta: Float) -[Rand]> Float {
+    if nonfinite(alpha) || nonfinite(beta) || alpha <= (Float{0.0}) || beta <= (Float{0.0}) {
+        return (Float{0.0})
+    }
+    a :: gammavariate(alpha, (Float{1.0}))
+    b :: gammavariate(beta, (Float{1.0}))
+    scale := a
+    if b > scale -> scale = b
+    if scale <= (Float{0.0}) || nonfinite(scale) -> return (Float{0.0})
+    an :: a / scale
+    bn :: b / scale
+    if an + bn <= (Float{0.0}) -> return (Float{0.0})
+    an / (an + bn)
 }
 
-pub fn lognormvariate(mean: Float, sigma: Float) -> Float {
+pub fn lognormvariate(mean: Float, sigma: Float) -[Rand]> Float {
+    if nonfinite(mean) || nonfinite(sigma) -> return (Float{0.0})
     math.exp(normal(mean, sigma))
 }
 
-pub fn paretovariate(alpha: Float) -> Float {
-    one :: math.tau / math.tau
-    zero :: one - one
-    if alpha <= zero -> return zero
-    math.exp(-math.ln(float()) / alpha)
+pub fn paretovariate(alpha: Float) -[Rand]> Float {
+    if nonfinite(alpha) || alpha <= (Float{0.0}) -> return (Float{0.0})
+    math.exp(-math.ln(unit_open()) / alpha)
 }
 
-pub fn weibullvariate(alpha: Float, beta: Float) -> Float {
-    one :: math.tau / math.tau
-    zero :: one - one
-    if alpha <= zero || beta <= zero -> return zero
-    alpha * math.exp(math.ln(-math.ln(float())) / beta)
+pub fn weibullvariate(alpha: Float, beta: Float) -[Rand]> Float {
+    if nonfinite(alpha) || nonfinite(beta) || alpha <= (Float{0.0}) || beta <= (Float{0.0}) {
+        return (Float{0.0})
+    }
+    alpha * math.exp(math.ln(-math.ln(unit_open())) / beta)
 }
 
-pub fn vonmisesvariate(mu: Float, kappa: Float) -> Float {
-    one :: math.tau / math.tau
-    zero :: one - one
-    if kappa <= zero -> return math.tau * float()
-    mu + normal(zero, one / math.sqrt(kappa))
+pub fn vonmisesvariate(mu: Float, kappa: Float) -[Rand]> Float {
+    if mu != mu || nonfinite(mu) -> return (Float{0.0})
+    if kappa != kappa || nonfinite(kappa) || kappa < (Float{0.0}) -> return normalize_angle(mu)
+    if kappa <= (Float{0.00000001}) {
+        return normalize_angle(mu + math.tau() * ((Float{2.0}) * unit() - (Float{1.0})))
+    }
+    s :: (Float{0.5}) / kappa
+    r :: s + math.sqrt((Float{1.0}) + s * s)
+    loop {
+        u1 :: unit()
+        z :: math.cos(math.pi() * u1)
+        f :: ((Float{1.0}) + r * z) / (r + z)
+        c :: kappa * (r - f)
+        u2 :: unit()
+        if u2 >= c * ((Float{2.0}) - c) && u2 > c * math.exp((Float{1.0}) - c) -> next
+        angle := mu
+        if unit() > (Float{0.5}) -> angle = angle + math.acos(f) else -> angle = angle - math.acos(f)
+        return normalize_angle(angle)
+    }
 }
 
-pub fn binomialvariate(n: Int, p: Float) -> Int {
-    one :: math.tau / math.tau
-    zero :: one - one
-    if n <= 0 || p <= zero -> return 0
-    if p >= one -> return n
+pub fn binomialvariate(n: Int, p: Float) -[Rand]> Int {
+    if n <= 0 || nonfinite(p) || p <= (Float{0.0}) -> return 0
+    if p >= (Float{1.0}) -> return n
     successes := 0
     loop _ in 0..<n {
-        if float() < p -> successes += 1
+        if unit() < p -> successes += 1
     }
     successes
 }

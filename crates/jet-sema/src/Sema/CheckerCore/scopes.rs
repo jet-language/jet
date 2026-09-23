@@ -194,15 +194,15 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `#Persist` module bindings are the one module-level write target.
+    /// Module-level mutable bindings are the one module-level write target.
     /// Keep the permission fact on the declaration; do not create a second
     /// mutable-binding table beside `consts`.
-    pub(crate) fn is_persist_binding(&self, name: &str) -> bool {
+    pub(crate) fn is_global_mutable_binding(&self, name: &str) -> bool {
         self.items.iter().any(|item| {
             matches!(
                 item,
                 crate::AST::Item::Const(c)
-                    if c.name == name && c.is_persist && c.mutable
+                    if c.name == name && c.mutable && !c.is_comptime
             )
         })
     }

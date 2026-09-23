@@ -483,6 +483,14 @@ pub(crate) mod process_prelude {
     pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
         jet_std_process_cmd_owned(cmd)
     }
+    pub(crate) fn spec_arg(spec: ProcessSpec, extra: &String) -> ProcessSpec {
+        jet_process_spec_arg(spec, extra)
+    }
+
+    pub(crate) fn spec_args_extend(spec: ProcessSpec, extra: &Vec<String>) -> ProcessSpec {
+        jet_process_spec_args_extend(spec, extra)
+    }
+
 
     pub(crate) fn spec_cwd(spec: ProcessSpec, cwd: &String) -> ProcessSpec {
         jet_process_spec_cwd(spec, cwd)

@@ -13,7 +13,9 @@ fn run() {
     equal_left :: Decimal("1.0")
     equal_right :: Decimal("1.00")
     print(equal_left == equal_right)
-    print(Decimal("0.00") == Decimal("-0.0"))
+    zero_left :: Decimal("0.00")
+    zero_right :: Decimal("-0.0")
+    print(zero_left == zero_right)
 
     print(Decimal("12.00").div(Decimal("4.00")))
     print(Decimal("1.00").div(Decimal("8.00")))
@@ -22,7 +24,9 @@ fn run() {
     print(big + Decimal("1"))
     print(big * Decimal("2"))
     print(Decimal("12345678901234567890123456789012345678901234567890.00"))
-    print(Decimal("12345678901234567890123456789012345678901234567890.00") == Decimal("12345678901234567890123456789012345678901234567890.0"))
+    big_scale_left :: Decimal("12345678901234567890123456789012345678901234567890.00")
+    big_scale_right :: Decimal("12345678901234567890123456789012345678901234567890.0")
+    print(big_scale_left == big_scale_right)
 }
 "#;
 

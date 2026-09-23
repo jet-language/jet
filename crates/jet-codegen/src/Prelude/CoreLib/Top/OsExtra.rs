@@ -633,17 +633,6 @@ pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<
         Err(jet_os_unsupported("utime"))
     }
 }
-pub(crate) fn jet_std_os_success(status: i64) -> bool {
-    #[cfg(unix)]
-    {
-        let s = status as i32;
-        return (s & 0x7f) == 0 && ((s >> 8) & 0xff) == 0;
-    }
-    #[cfg(not(unix))]
-    {
-        status == 0
-    }
-}
 pub(crate) fn jet_std_os_exitcode(status: i64) -> i64 {
     #[cfg(unix)]
     {

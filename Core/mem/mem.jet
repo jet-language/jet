@@ -9,7 +9,8 @@ package {
     }
 }
 module scope
-
+use core as core
+use core.mem as mem
 #Error
 pub enum AllocError {
     Exhausted
@@ -18,47 +19,35 @@ pub enum AllocError {
 }
 
 // Allocator and pointer values are compiler-owned nominal surfaces. Their
-// constructors and methods are lowered by the memory CoreLib; the source twin
-// keeps only the portable carrier shapes.
-pub struct Arena {
-    pub cap: Int
-    pub used: Int
+// constructors and methods are lowered by the memory CoreLib; source keeps
+// only the canonical type arities, never a fake runtime state carrier.
+pub struct Arena {}
+
+pub struct Bump {}
+
+pub struct Fixed {}
+
+pub struct Pool<T> {}
+
+pub struct Pin<T> {}
+
+
+pub fn address_of<T>(value: T) -> Int { core.mem.address_of<T>(value) }
+
+pub fn from_addr<T>(addr: Int) -> *T {
+    #Unsafe("raw address is an audited typed pointer boundary") {
+        return mem.Ptr<T>.from_addr(addr)
+    }
 }
 
-pub struct Bump {
-    pub cap: Int
-    pub used: Int
+pub fn volatile_read<T>(pointer: *T) -> T {
+    #Unsafe("volatile access requires an audited typed pointer") {
+        return core.mem.volatile_read<T>(pointer)
+    }
 }
 
-pub struct Fixed {
-    pub cap: Int
-    pub used: Int
-}
-
-pub struct Pool {
-    pub slot: Int
-    pub free: [Int]
-}
-
-pub struct Pin {
-    pub id: Int
-    pub value: Int
-}
-
-pub struct Atomic {
-    pub value: Int
-}
-
-pub fn pin(value: Int) -> Pin { {id: value, value: value} }
-
-pub fn address_of(value: Int) -> Int { value }
-
-pub fn from_addr(addr: Int) -> Int { addr }
-
-pub fn volatile_read(addr: Int) -> Int { addr }
-
-pub fn volatile_write(addr: Int, value: Int) {
-    if addr == -1 || value == -1 {
-        return
+pub fn volatile_write<T>(pointer: *T, value: T) {
+    #Unsafe("volatile access requires an audited typed pointer") {
+        core.mem.volatile_write<T>(pointer, value)
     }
 }

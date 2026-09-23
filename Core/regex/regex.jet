@@ -12,11 +12,18 @@ package {
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
 // `r"..."` literals are a compiler feature. `compile` is for patterns that
-// arrive at run time. This file is a backtracking NFA over UTF-8 bytes:
-// concatenation, `|`, `()` , `*` `+` `?` `{n,m}`, `.`, `^`, `$`, `[]`/`[^]`
-// and the usual `\d\w\s` classes. Flags: `ignore_case` (ASCII), `multiline`
-// `dot_matches_newline`. Nested backtracking is bounded by the input length;
-// a pattern that does not compile fails with a reason string, never a panic.
+// arrive at run time. This file is a bounded backtracking NFA over UTF-8
+// bytes: concatenation, `|`, `()` , `*` `+` `?` `{n,m}`, `.`, `^`, `$`,
+// `[]`/`[^]` and the usual `\d\w\s` classes. Flags: `ignore_case` (ASCII),
+// `multiline`, and `dot_matches_newline`. Every execution consumes an
+// explicit finite budget, so hostile nested quantifiers terminate; a pattern
+// that does not compile fails with RegexError, never a panic.
+
+#Error
+pub enum RegexError {
+    Syntax
+    Cache
+}
 
 pub struct RegexFlags {
     pub ignore_case: Bool
@@ -75,12 +82,12 @@ pub fn escape(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-pub fn compile(pattern: String) -> Regex { compile_with(pattern, flags(false, false, false)) }
+pub fn compile(pattern: String) -> Regex !RegexError { compile_with(pattern, flags(false, false, false)) }
 
-pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex {
+pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex !RegexError {
     p := Parser{bytes: pattern.bytes(), i: 0, flags: flags, nodes: [Node]{}}
     root :: p.parse_alt()
-    if p.i != p.bytes.len() -> return Err("trailing characters in regex")
+    if p.i != p.bytes.len() -> return Err(RegexError.Syntax)
     Ok(Regex{pattern: pattern, flags: flags, nodes: p.nodes, root: root})
 }
 
@@ -91,15 +98,19 @@ pub fn is_match(pattern: Regex, text: String) -> Bool {
 
 pub fn full_match(pattern: Regex, text: String) -> Bool {
     raw :: text.bytes()
-    caps := [Group]{}
-    if exec(pattern, raw, 0, pattern.root, caps) != raw.len() -> return false
+    caps := [CaptureSpan]{}
+    if run_exec(pattern, raw, 0, pattern.root, &caps) != raw.len() -> return false
     true
 }
 
 pub fn match(pattern: Regex, text: String) -> ?Match { find_match(pattern, text) }
 pub fn finditer(pattern: Regex, text: String) -> [Match] { matches(pattern, text) }
 
-pub fn purge() {}
+/// The source-owned engine has no process-global cache to mutate. Report that
+/// capability explicitly instead of pretending a purge happened.
+pub fn purge() !RegexError {
+    return Err(RegexError.Cache)
+}
 
 pub fn find(pattern: Regex, text: String) -> ?String {
     m :: find_match(pattern, text) ?? return None
@@ -117,17 +128,17 @@ pub fn matches(pattern: Regex, text: String) -> [Match] {
     out := [Match]{}
     i := 0
     loop i <= raw.len() {
-        caps := [Group]{}
-        end :: exec(pattern, raw, i, pattern.root, caps)
+        caps := [CaptureSpan]{}
+        end :: run_exec(pattern, raw, i, pattern.root, &caps)
         if end >= i && (end > i || empty_ok(pattern)) {
             out.push(make_match(raw, i, end, caps))
             if end == i {
-                i = i + 1
+                i = i + scalar_width(raw, i)
             } else {
                 i = end
             }
         } else {
-            i = i + 1
+            i = i + scalar_width(raw, i)
         }
         if out.len() > raw.len() + 1 -> break
     }
@@ -155,24 +166,25 @@ pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] {
 pub fn replace(pattern: Regex, text: String, replacement: String) -> String { replace_n(pattern, text, replacement, false) }
 
 /// Expand numbered capture references in a replacement template.
-/// Supported forms are `\1` through `\9`, `\g<1>`, and `\\`.
+/// Supported forms are `\1` through `\9`, `\g<1>`, `$1`, `${1}`, and `\\`.
 pub fn expand(m: Match, template: String) -> String {
     raw :: template.bytes()
     out := [U8]{}
     i := 0
     loop i < raw.len() {
-        if raw[i] != (U8{92}) {
-            out.push(raw[i])
+        marker :: raw[i]
+        if marker != (U8{92}) && marker != (U8{36}) {
+            out.push(marker)
             i = i + 1
             next
         }
         i = i + 1
         if i >= raw.len() {
-            out.push(U8{92})
+            out.push(marker)
             break
         }
         n :: raw[i]
-        if n >= 49 && n <= 57 {
+        if (marker == (U8{92}) || marker == (U8{36})) && n >= 49 && n <= 57 {
             index := n - 49
             if index < m.groups.len() {
                 loop b in m.groups[index].bytes() -> out.push(b)
@@ -180,7 +192,27 @@ pub fn expand(m: Match, template: String) -> String {
             i = i + 1
             next
         }
-        if n == 103 && i + 1 < raw.len() && raw[i + 1] == (U8{60}) {
+        if marker == (U8{36}) && n == (U8{123}) {
+            j := i + 1
+            index := 0
+            found := false
+            loop j < raw.len() {
+                d :: raw[j]
+                if d == (U8{125}) {
+                    found = true
+                    break
+                }
+                if d < 48 || d > 57 -> break
+                index = index * 10 + d - 48
+                j = j + 1
+            }
+            if found && index > 0 && index - 1 < m.groups.len() {
+                loop b in m.groups[index - 1].bytes() -> out.push(b)
+                i = j + 1
+                next
+            }
+        }
+        if marker == (U8{92}) && n == (U8{103}) && i + 1 < raw.len() && raw[i + 1] == (U8{60}) {
             j := i + 2
             index := 0
             found := false
@@ -200,6 +232,7 @@ pub fn expand(m: Match, template: String) -> String {
                 next
             }
         }
+        out.push(marker)
         out.push(n)
         i = i + 1
     }
@@ -215,7 +248,8 @@ fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool
     cur := 0
     loop m in ms {
         loop b in slice(raw, cur, m.start).bytes() -> out.push(b)
-        loop b in replacement.bytes() -> out.push(b)
+        expanded :: expand(m, replacement)
+        loop b in expanded.bytes() -> out.push(b)
         cur = m.end
         if first_only -> break
     }
@@ -230,21 +264,22 @@ struct Parser {
     nodes: [Node]
 }
 
-struct Group {
+struct CaptureSpan {
     start: Int
     end: Int
 }
 
 impl Parser {
-    fn parse_alt(&self) -> Int {
+    fn parse_alt(&self) -> Int !RegexError {
         left :: self.parse_seq()
-        if self.peek() ?? (U8{0}) != (U8{124}) -> return Ok(left)
+        next_byte :: self.peek() ?? (U8{0})
+        if next_byte != (U8{124}) -> return Ok(left)
         _ :: self.bump()
         right :: self.parse_alt()
         Ok(self.emit("alt", "", 0, 0, left, right, false))
     }
 
-    fn parse_seq(&self) -> Int {
+    fn parse_seq(&self) -> Int !RegexError {
         ids := [Int]{}
         loop {
             b :: self.peek() ?? break
@@ -261,7 +296,7 @@ impl Parser {
         Ok(acc)
     }
 
-    fn parse_atom(&self) -> Int {
+    fn parse_atom(&self) -> Int !RegexError {
         id :: self.parse_piece()
         b :: self.peek() ?? return Ok(id)
         n :: b
@@ -281,23 +316,27 @@ impl Parser {
             _ :: self.bump()
             lo :: self.num()
             hi := lo
-            if self.peek() ?? (U8{0}) == (U8{44}) {
+            comma :: self.peek() ?? (U8{0})
+            if comma == (U8{44}) {
                 _ :: self.bump()
-                if self.peek() ?? (U8{0}) == (U8{125}) {
+                quant_close :: self.peek() ?? (U8{0})
+                if quant_close == (U8{125}) {
                     hi = -1
                 } else {
                     hi = self.num()
                 }
             }
-            if self.peek() ?? (U8{0}) != (U8{125}) -> return Err("unclosed `{{` quantifier")
+            if hi >= 0 && hi < lo -> return Err(RegexError.Syntax)
+            quant_end :: self.peek() ?? (U8{0})
+            if quant_end != (U8{125}) -> return Err(RegexError.Syntax)
             _ :: self.bump()
             return Ok(self.emit("rep", "", lo, hi, id, -1, false))
         }
         Ok(id)
     }
 
-    fn parse_piece(&self) -> Int {
-        b :: self.bump() ?? return Err("unexpected end of regex")
+    fn parse_piece(&self) -> Int !RegexError {
+        b :: self.bump() ?? return Err(RegexError.Syntax)
         n :: b
         if n == {
             46 -> return Ok(self.emit("dot", "", 0, 0, -1, -1, false))
@@ -307,20 +346,21 @@ impl Parser {
         }
         if n == 40 {
             inner :: self.parse_alt()
-            if self.peek() ?? (U8{0}) != (U8{41}) -> return Err("unclosed group")
+            group_close :: self.peek() ?? (U8{0})
+            if group_close != (U8{41}) -> return Err(RegexError.Syntax)
             _ :: self.bump()
             return Ok(self.emit("group", "", 0, 0, inner, -1, false))
         }
-        if n == {
-            91 -> self.parse_class()
-            92 -> self.parse_escape()
-            41 | 124 | 42 | 43 | 63 | 123 -> Err("dangling metacharacter")
-            else -> Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
+        if n == 91 -> return self.parse_class()
+        if n == 92 -> return self.parse_escape()
+        if n == 41 || n == 124 || n == 42 || n == 43 || n == 63 || n == 123 {
+            return Err(RegexError.Syntax)
         }
+        Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
     }
 
-    fn parse_escape(&self) -> Int {
-        b :: self.bump() ?? return Err("dangling backslash")
+    fn parse_escape(&self) -> Int !RegexError {
+        b :: self.bump() ?? return Err(RegexError.Syntax)
         n :: b
         if n == {
             100 -> return Ok(self.emit("class", "0-9", 0, 0, -1, -1, false))
@@ -336,18 +376,20 @@ impl Parser {
         Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
     }
 
-    fn parse_class(&self) -> Int {
+    fn parse_class(&self) -> Int !RegexError {
         neg := false
-        if self.peek() ?? (U8{0}) == (U8{94}) {
+        class_first :: self.peek() ?? (U8{0})
+        if class_first == (U8{94}) {
             neg = true
             _ :: self.bump()
         }
         body := [U8]{}
         loop {
-            b :: self.bump() ?? return Err("unclosed character class")
+            b :: self.bump() ?? return Err(RegexError.Syntax)
             if b == (U8{93}) -> break
             body.push(b)
         }
+        if body.len() == 0 -> return Err(RegexError.Syntax)
         Ok(self.emit("class", String.from_bytes(body) ?? "", 0, 0, -1, -1, neg))
     }
 
@@ -356,7 +398,7 @@ impl Parser {
         self.nodes.len() - 1
     }
 
-    fn num(&self) -> Int {
+    fn num(&self) -> Int !RegexError {
         n := 0
         got := false
         loop {
@@ -365,9 +407,10 @@ impl Parser {
             if d < 48 || d > 57 -> break
             _ :: self.bump()
             n = n * 10 + (d - 48)
+            if n > 4096 -> return Err(RegexError.Syntax)
             got = true
         }
-        if !got -> return Err("expected a number in `{{n,m}}`")
+        if !got -> return Err(RegexError.Syntax)
         Ok(n)
     }
 
@@ -384,8 +427,124 @@ impl Parser {
     }
 }
 
-fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: [Group]) -> Int {
-    if i < 0 || node < 0 -> return -1
+struct MatchBudget {
+    remaining: Int
+}
+
+fn budget_limit(re: Regex, text: [U8]) -> Int {
+    nodes := re.nodes.len()
+    bytes := text.len()
+    n := nodes
+    if n > 4096 -> n = 4096
+    m := bytes
+    if m > 4096 -> m = 4096
+    limit := (n + 1) * (m + 1) * 32
+    if limit < 4096 -> return 4096
+    if limit > 1000000 -> return 1000000
+    limit
+}
+
+fn scalar_width(raw: [U8], i: Int) -> Int {
+    if i < 0 || i >= raw.len() -> return 1
+    n :: raw[i]
+    if n < 128 -> return 1
+    need := 0
+    if n >= 194 && n <= 223 {
+        need = 1
+    } else if n >= 224 && n <= 239 {
+        need = 2
+    } else if n >= 240 && n <= 244 {
+        need = 3
+    } else {
+        return 1
+    }
+    if i + need >= raw.len() -> return 1
+    loop k in 1..<(need + 1) {
+        c :: raw[i + k]
+        if c < 128 || c > 191 -> return 1
+    }
+    need + 1
+}
+
+fn trim_caps(caps: &[CaptureSpan], keep: Int) {
+    loop caps.len() > keep -> _ :: caps.pop()
+}
+
+fn run_exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan]) -> Int {
+    budget := MatchBudget{remaining: budget_limit(re, text)}
+    exec(re, text, i, node, &caps, &budget)
+}
+
+fn flatten_seq(re: Regex, node: Int, parts: &[Int]) {
+    if node < 0 || node >= re.nodes.len() -> return
+    n :: re.nodes[node]
+    if n.kind == "seq" {
+        flatten_seq(re, n.left, &parts)
+        flatten_seq(re, n.right, &parts)
+        return
+    }
+    parts.push(node)
+}
+
+fn exec_sequence(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+    parts := [Int]{}
+    flatten_seq(re, node, &parts)
+    exec_parts(re, text, i, parts, 0, &caps, budget)
+}
+
+fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+    if index >= parts.len() -> return pos
+    n :: re.nodes[parts[index]]
+    if n.kind == "rep" -> return exec_rep_tail(re, text, pos, n, parts, index + 1, &caps, budget, 0)
+    if n.kind == "alt" -> return exec_alt_tail(re, text, pos, n, parts, index + 1, &caps, budget)
+    end :: exec(re, text, pos, parts[index], &caps, budget)
+    if end < 0 -> return -1
+    exec_parts(re, text, end, parts, index + 1, &caps, budget)
+}
+
+fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+    saved := caps.len()
+    left :: exec(re, text, pos, n.left, &caps, budget)
+    if left >= 0 {
+        end :: exec_parts(re, text, left, parts, next, &caps, budget)
+        if end >= 0 -> return end
+    }
+    trim_caps(&caps, saved)
+    right :: exec(re, text, pos, n.right, &caps, budget)
+    if right < 0 -> return -1
+    exec_parts(re, text, right, parts, next, &caps, budget)
+}
+
+fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget, count: Int) -> Int {
+    if n.b >= 0 && count >= n.b -> return exec_parts(re, text, pos, parts, next, &caps, budget)
+    if count >= n.a {
+        saved := caps.len()
+        nxt :: exec(re, text, pos, n.left, &caps, budget)
+        if nxt >= 0 && nxt != pos {
+            deeper :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, budget, count + 1)
+            if deeper >= 0 -> return deeper
+            trim_caps(&caps, saved)
+        } else {
+            trim_caps(&caps, saved)
+        }
+        return exec_parts(re, text, pos, parts, next, &caps, budget)
+    }
+    saved := caps.len()
+    nxt :: exec(re, text, pos, n.left, &caps, budget)
+    if nxt < 0 || nxt == pos {
+        trim_caps(&caps, saved)
+        return -1
+    }
+    end :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, budget, count + 1)
+    if end < 0 -> trim_caps(&caps, saved)
+    end
+}
+
+fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int {
+    saved := caps.len()
+    if budget.remaining <= 0 -> return -1
+    budget.remaining = budget.remaining - 1
+    if i < 0 || node < 0 || node >= re.nodes.len() -> return -1
     n :: re.nodes[node]
     if n.kind == "empty" -> return i
     if n.kind == "lit" {
@@ -401,7 +560,7 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: [Group]) -> Int {
     if n.kind == "dot" {
         if i >= text.len() -> return -1
         if text[i] == (U8{10}) && !re.flags.dot_matches_newline -> return -1
-        return i + 1
+        return i + scalar_width(text, i)
     }
     if n.kind == "start" {
         if i == 0 -> return i
@@ -414,54 +573,78 @@ fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: [Group]) -> Int {
         return -1
     }
     if n.kind == "seq" {
-        mid :: exec(re, text, i, n.left, caps)
-        if mid < 0 -> return -1
-        return exec(re, text, mid, n.right, caps)
+        end :: exec_sequence(re, text, i, node, &caps, budget)
+        if end < 0 -> trim_caps(&caps, saved)
+        return end
     }
     if n.kind == "alt" {
-        a :: exec(re, text, i, n.left, caps)
+        left_saved := caps.len()
+        a :: exec(re, text, i, n.left, &caps, budget)
         if a >= 0 -> return a
-        return exec(re, text, i, n.right, caps)
+        trim_caps(&caps, left_saved)
+        return exec(re, text, i, n.right, &caps, budget)
     }
     if n.kind == "group" {
-        end :: exec(re, text, i, n.left, caps)
-        if end >= 0 -> caps.push(Group{start: i, end: end})
-        return end
+        slot := caps.len()
+        caps.push(CaptureSpan{start: i, end: -1})
+        end :: exec(re, text, i, n.left, &caps, budget)
+        if end >= 0 {
+            caps[slot] = CaptureSpan{start: i, end: end}
+            return end
+        }
+        trim_caps(&caps, saved)
+        return -1
     }
     if n.kind == "class" {
         if i >= text.len() -> return -1
+        width :: scalar_width(text, i)
+        if text[i] > (U8{127}) && !n.neg -> return -1
         ok :: class_hit(n.s, text[i], re.flags.ignore_case)
         if n.neg {
             if ok -> return -1
-            return i + 1
+            return i + width
         }
-        if ok -> return i + 1
+        if ok -> return i + width
         return -1
     }
     if n.kind == "rep" {
-        return exec_rep(re, text, i, n, caps, 0)
+        end :: exec_rep(re, text, i, n, &caps, 0, budget)
+        if end < 0 -> trim_caps(&caps, saved)
+        return end
     }
     -1
 }
 
-fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: [Group], count: Int) -> Int {
+fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int {
     if n.b >= 0 && count == n.b -> return i
     if count >= n.a {
-        rest :: exec_rep_more(re, text, i, n, caps, count)
+        rest :: exec_rep_more(re, text, i, n, &caps, count, budget)
         if rest >= 0 -> return rest
         return i
     }
-    nxt :: exec(re, text, i, n.left, caps)
-    if nxt < 0 || nxt == i && n.b != 0 -> return -1
-    exec_rep(re, text, nxt, n, caps, count + 1)
+    saved := caps.len()
+    nxt :: exec(re, text, i, n.left, &caps, budget)
+    if nxt < 0 || (nxt == i && n.b != 0) {
+        trim_caps(&caps, saved)
+        return -1
+    }
+    end :: exec_rep(re, text, nxt, n, &caps, count + 1, budget)
+    if end < 0 -> trim_caps(&caps, saved)
+    end
 }
 
-fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: [Group], count: Int) -> Int {
+fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int {
     if n.b >= 0 && count >= n.b -> return -1
-    nxt :: exec(re, text, i, n.left, caps)
-    if nxt < 0 || nxt == i -> return -1
-    deeper :: exec_rep_more(re, text, nxt, n, caps, count + 1)
+    saved := caps.len()
+    nxt :: exec(re, text, i, n.left, &caps, budget)
+    if nxt < 0 || nxt == i {
+        trim_caps(&caps, saved)
+        return -1
+    }
+    after_child := caps.len()
+    deeper :: exec_rep_more(re, text, nxt, n, &caps, count + 1, budget)
     if deeper >= 0 -> return deeper
+    trim_caps(&caps, after_child)
     nxt
 }
 
@@ -493,17 +676,17 @@ fn find_match(pattern: Regex, text: String) -> ?Match {
     raw :: text.bytes()
     i := 0
     loop i <= raw.len() {
-        caps := [Group]{}
-        end :: exec(pattern, raw, i, pattern.root, caps)
+        caps := [CaptureSpan]{}
+        end :: run_exec(pattern, raw, i, pattern.root, &caps)
         if end >= i {
             return Val(make_match(raw, i, end, caps))
         }
-        i = i + 1
+        i = i + scalar_width(raw, i)
     }
     None
 }
 
-fn make_match(raw: [U8], start: Int, end: Int, caps: [Group]) -> Match {
+fn make_match(raw: [U8], start: Int, end: Int, caps: [CaptureSpan]) -> Match {
     groups := [String]{}
     loop g in caps -> groups.push(slice(raw, g.start, g.end))
     Match{start: start, end: end, text: slice(raw, start, end), groups: groups}
@@ -526,7 +709,7 @@ fn is_meta(b: U8) -> Bool {
     n == 92 || n == 46 || n == 94 || n == 36 || n == 42 || n == 43 || n == 63 || n == 40 || n == 41 || n == 91 || n == 93 || n == 123 || n == 125 || n == 124
 }
 /// Python-style constructor spelling for a runtime pattern.
-pub fn regex(pattern: String) -> Regex { compile(pattern) }
+pub fn regex(pattern: String) -> Regex !RegexError { compile(pattern) }
 
 /// Return the canonical source pattern represented by a compiled regex.
 pub fn join(pattern: Regex) -> String { pattern.pattern }
@@ -538,5 +721,6 @@ pub fn sub(pattern: Regex, text: String, replacement: String) -> String {
     replace(pattern, text, replacement)
 }
 pub fn subn(pattern: Regex, text: String, replacement: String) -> (text: String, count: Int) {
-    (text: replace(pattern, text, replacement), count: matches(pattern, text).len())
+    ms :: matches(pattern, text)
+    (text: replace(pattern, text, replacement), count: ms.len())
 }

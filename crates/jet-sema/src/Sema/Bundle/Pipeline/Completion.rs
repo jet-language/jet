@@ -113,7 +113,8 @@ pub(super) fn complete_bundle_check(
         }
         for item in &mut module.items {
             if let Item::Const(c) = item {
-                let force_static = c.is_persist || c.attrs.contains(&ConstAttr::ForceStatic);
+                let force_static =
+                    c.is_persist || c.mutable || c.attrs.contains(&ConstAttr::ForceStatic);
                 c.rust_kind = if force_static || address_taken.contains(&c.name) {
                     RustConstKind::Static
                 } else {

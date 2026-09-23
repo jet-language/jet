@@ -42,6 +42,43 @@
     },
     "unknown_policy": "An absent executable, unpinned rolling page, or unobserved API difference is unavailable/unknown, never a feature-absence claim."
   },
+  "local_toolchain_probe": {
+    "retrieved_on": "2026-09-22",
+    "scope": "PATH lookup and version banners only in the current shell; no installation, compilation, or peer program execution.",
+    "availability_command": "command -v gcc clang g++ clang++ rustc cargo odin zig swift tsc node python3 go java dotnet",
+    "available": [
+      {
+        "comparator": "TypeScript runtime only",
+        "command": "node --version",
+        "path": "/etc/profiles/per-user/nate/bin/node",
+        "version": "v24.15.0",
+        "limit": "The TypeScript compiler `tsc` is unavailable; Node availability is not a TypeScript compiler receipt."
+      },
+      {
+        "comparator": "Python",
+        "command": "python3 --version",
+        "path": "/etc/profiles/per-user/nate/bin/python3",
+        "version": "Python 3.13.13",
+        "limit": "This environment version differs from the Python 3.14.7 documentation pin; no enum program was run."
+      }
+    ],
+    "unavailable_on_path": [
+      {"comparator": "C", "attempt": "command -v gcc clang", "result": "neither executable found"},
+      {"comparator": "C++", "attempt": "command -v g++ clang++", "result": "neither executable found"},
+      {"comparator": "Rust", "attempt": "command -v rustc", "result": "executable not found"},
+      {"comparator": "Cargo", "attempt": "command -v cargo", "result": "executable not found"},
+      {"comparator": "Odin", "attempt": "command -v odin", "result": "executable not found"},
+      {"comparator": "Zig", "attempt": "command -v zig", "result": "executable not found"},
+      {"comparator": "Swift", "attempt": "command -v swift", "result": "executable not found"},
+      {"comparator": "TypeScript compiler", "attempt": "command -v tsc", "result": "executable not found"},
+      {"comparator": "Go", "attempt": "command -v go", "result": "executable not found"},
+      {"comparator": "Java", "attempt": "command -v java", "result": "executable not found"},
+      {"comparator": ".NET/C#", "attempt": "command -v dotnet", "result": "executable not found"},
+      {"comparator": "Serde + serde_json", "attempt": "no Rust compiler/Cargo executable found on PATH", "result": "library program could not be compiled or run"},
+      {"comparator": "Glaze", "attempt": "no C++ compiler executable found on PATH", "result": "library program could not be compiled or run"}
+    ],
+    "interpretation": "These are retrieval attempts, not execution receipts. Compiler/library execution versions used by the retained peer proofs remain unavailable because no peer program was run."
+  },
   "scoped_jet_receipts": {
     "status": "historical_only",
     "binary_sha256": "e841150f5a02f14a7b6b19003a7b8dd32d1fd95b4aa8d7bb4d34e30d376bee3e",
@@ -121,6 +158,7 @@
       "language": "Rust",
       "historical_identity": {
         "reference_commit": "e24eecf97b0c9a6dbac67191098204dc8a190aaa",
+        "reference_source_url": "https://github.com/rust-lang/reference/tree/e24eecf97b0c9a6dbac67191098204dc8a190aaa",
         "reference_urls": [
           "https://doc.rust-lang.org/reference/items/enumerations.html",
           "https://doc.rust-lang.org/reference/types/function-item.html",
@@ -212,6 +250,7 @@
       "historical_identity": {
         "enum_handbook_commit": "67283836dfd4f9808dedc911ecdadec9b6a430de",
         "narrowing_commit": "c7a552ecf9b9da0395d4db6e1cb134f65cfc81a",
+        "narrowing_source_url": "https://github.com/microsoft/TypeScript-Website/blob/c7a552ecf9b9da0395d4db6e1cb134f65cfc81a/packages/documentation/copy/en/handbook-v2/Narrowing.md",
         "urls": [
           "https://github.com/microsoft/TypeScript-Website/blob/67283836dfd4f9808dedc911ecdadec9b6a430de/packages/documentation/copy/en/reference/Enums.md"
         ]
@@ -333,8 +372,17 @@
       },
       "source_identity": {
         "url": "https://docs.rs/serde/1.0.219/serde/",
+        "serde_json_url": "https://docs.rs/crate/serde_json/1.0.140",
         "retrieval_date": "2026-09-11",
-        "evidence_kind": "versioned official API documentation"
+        "evidence_kind": "version-specific published crate documentation"
+      },
+      "current_observation_source": {
+        "urls": [
+          "https://docs.rs/crate/serde/1.0.229",
+          "https://docs.rs/crate/serde_json/1.0.151"
+        ],
+        "observed_on": "2026-09-21",
+        "evidence_kind": "version-specific published crate records; observation only, no execution or behavior diff"
       },
       "unknown_routes": ["EN-C31", "ENUM-F04-canonical-wire-evolution", "ENUM-F25-untagged-ambiguity"],
       "execution": "not_run"
@@ -348,9 +396,15 @@
       },
       "source_identity": {
         "url": "https://github.com/stephenberry/glaze/tree/565edc989cd4bd4310028cc007e2912455a1c91c/docs",
+        "historical_release_url": "https://github.com/stephenberry/glaze/tree/v5.0.0",
         "locators": ["json.md", "enum-reflection.md", "variant-handling.md"],
         "retrieval_date": "2026-09-11",
-        "evidence_kind": "pinned documentation commit"
+        "evidence_kind": "pinned documentation commit and version-tag locator"
+      },
+      "current_observation_source": {
+        "url": "https://github.com/stephenberry/glaze/tree/v8.3.0",
+        "observed_on": "2026-09-21",
+        "evidence_kind": "official version tag; source identity only, no runtime proof"
       },
       "version_limit": "Current rendered pages linking to main are not asserted byte-identical to v8.3.0; no runtime version receipt was retained.",
       "unknown_routes": ["EN-C32", "ENUM-F22-adjacent-wire-tags", "ENUM-F23-unknown-wire-preservation", "ENUM-F25-untagged-ambiguity"],
@@ -383,6 +437,7 @@
   "non_claims": [
     "This manifest does not claim peer runtime support, Jet parity, feature absence, performance, or a current language ranking.",
     "The historical Jet receipts are not current-tree proof and do not establish peer execution.",
-    "No tests, builds, formatters, installations, peer commands, or Tower writes were run for this manifest."
+    "No peer programs were built or run. The PATH and version-banner probes above are retrieval attempts only.",
+    "This manifest records no Tower-status change or feature-absence claim."
   ]
 }

@@ -9,22 +9,28 @@ package {
     }
 }
 
-// core.compute — dense and CSR tensors on a named device.
+// core.compute — checked dense and CSR tensors with a deterministic CPU oracle.
 //
-// Storage, shape math, and the CPU kernels are Jet. Device selection and
-// GPU launch stay host cells (`host_has_*`, `host_stream_sync`). Autodiff
-// is reverse-mode for MSE against a dense prediction; `jvp` is the
-// matching directional product on the same residual.
+// The native tier may attach real providers to the same contracts.  This source
+// tier deliberately never claims an accelerator is available: explicit provider
+// requests return a typed capability error, while Auto selects the CPU oracle.
+use core.math as math
+use core as core
+use core.text.fmt as fmt
 
-module solve
 
 #Error
 pub enum ComputeError {
     Shape
+    RankMismatch
+    OutOfBounds
     Device
+    Unsupported
+    Arithmetic
     Singular
     Index
     Parse
+    Serialization
 }
 
 pub struct ComputeDevice {
@@ -36,6 +42,7 @@ pub struct Tensor {
     pub shape: [Int]
     pub data: [Float]
     pub device: String
+    pub numeric_profile: String
 }
 
 pub struct ComputeStream {
@@ -51,148 +58,166 @@ pub struct SparseTensor {
     pub row_ptr: [Int]
 }
 
+// The source-tier transform is the eager dense MSE contract.  Higher-order
+// transforms (arbitrary loss closures, pullbacks, and wrt records) are owned by
+// the native dispatcher; this record remains useful and honest for source use.
 pub struct VjpRun {
-    pub primal: Tensor
-    pub bar: Tensor
+    pub value: Tensor
+    pub gradient: Tensor
 }
 
-pub fn device_cpu() -> ComputeDevice { ComputeDevice{kind: "cpu", index: 0} }
+@c_max_tensor_elements :: 16777216
+@c_f32_max :: Float{3.4028234663852886e38}
+@c_pivot_tolerance :: Float{0.000000000000001}
+@c_two_pi :: Float{6.283185307179586}
+@c_profile_f64 :: "F64Strict+Reproducible"
+@c_profile_f32 :: "F32Strict+Reproducible"
+@c_profile_f32_receipt :: "backend=cpu-oracle;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;dispatch=scalar;vector_width=1;tail=scalar;cache=none"
+@c_abilities_f64 :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"reproducible-reduction\", \"differential-oracle\"]"
+@c_abilities_f32 :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
+@c_mask64 :: 18446744073709551615
 
-pub fn device(kind: String) -[Env]> ComputeDevice {
-    if kind == {
-        "cuda" -> device_cuda()
-        "metal" -> device_metal()
-        "vulkan" -> device_vulkan()
-        "webgpu" -> device_webgpu()
-        "auto" -> device_auto()
-        else -> device_cpu()
-    }
+pub fn device_cpu() -> ComputeDevice { ComputeDevice{kind: "CPU", index: 0} }
+pub fn device_auto() -> ComputeDevice { ComputeDevice{kind: "Auto", index: 0} }
+pub fn device_cuda() -> ComputeDevice { ComputeDevice{kind: "CUDA", index: 0} }
+pub fn device_metal() -> ComputeDevice { ComputeDevice{kind: "Metal", index: 0} }
+pub fn device_vulkan() -> ComputeDevice { ComputeDevice{kind: "Vulkan", index: 0} }
+pub fn device_webgpu() -> ComputeDevice { ComputeDevice{kind: "WebGPU", index: 0} }
+
+// Device is an accessor, not a string-to-device constructor.  Unknown device
+// strings are rejected when a tensor is validated rather than silently mapped.
+pub fn device(tensor: Tensor) -> String {
+    tensor_device_name(tensor.device)
 }
 
-pub fn device_auto() -[Env]> ComputeDevice {
-    if host_has_cuda() -> return (ComputeDevice{kind: "cuda", index: 0})
-    if host_has_metal() -> return (ComputeDevice{kind: "metal", index: 0})
-    if host_has_vulkan() -> return (ComputeDevice{kind: "vulkan", index: 0})
-    if host_has_webgpu() -> return (ComputeDevice{kind: "webgpu", index: 0})
-    device_cpu()
-}
+pub fn zeros(shape: [Int]) -> Tensor !ComputeError { filled(shape, Float{0.0}) }
+pub fn ones(shape: [Int]) -> Tensor !ComputeError { filled(shape, Float{1.0}) }
+pub fn full(shape: [Int], value: Float) -> Tensor !ComputeError { filled(shape, value) }
 
-pub fn device_cuda() -[Env]> ComputeDevice { ComputeDevice{kind: "cuda", index: 0} }
-pub fn device_metal() -[Env]> ComputeDevice { ComputeDevice{kind: "metal", index: 0} }
-pub fn device_vulkan() -[Env]> ComputeDevice { ComputeDevice{kind: "vulkan", index: 0} }
-pub fn device_webgpu() -[Env]> ComputeDevice { ComputeDevice{kind: "webgpu", index: 0} }
-
-pub fn zeros(shape: [Int]) -> Tensor { filled(shape, 0.0) }
-pub fn ones(shape: [Int]) -> Tensor { filled(shape, 1.0) }
-pub fn full(shape: [Int], value: Float) -> Tensor { filled(shape, value) }
-
-pub fn eye(n: Int) -> Tensor {
-    dim := n
-    if dim < 0 -> dim = 0
+pub fn eye(n: Int) -> Tensor !ComputeError {
+    if n < 0 -> return Err(ComputeError.Shape)
+    shape :: [Int]{n, n}
+    _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
     data := [Float]{}
-    loop i in 0..<dim {
-        loop j in 0..<dim {
+    loop i in 0..<n {
+        loop j in 0..<n {
             if i == j {
-                data.push(1.0)
+                data.push(Float{1.0})
             } else {
-                data.push(0.0)
+                data.push(Float{0.0})
             }
         }
     }
-    Tensor{shape: [Int]{dim, dim}, data: data, device: "cpu"}
+    Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn from_list(values: [Float]) -> Tensor { Tensor{shape: [Int]{values.len()}, data: copy_f(values), device: "cpu"} }
+pub fn from_list(values: [Float]) -> Tensor !ComputeError {
+    loop value in values {
+        _ :: finite_or_error(value)
+    }
+    shape :: [Int]{values.len()}
+    _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
+    Ok(make_tensor(shape, copy_f(values), "CPU", c_profile_f64()))
+}
 
-pub fn vec(values: [Float]) -> Tensor { from_list(values) }
+pub fn vec(length: Int, value: Float) -> Tensor !ComputeError {
+    if length < 0 -> return Err(ComputeError.Shape)
+    _ :: finite_or_error(value)
+    shape :: [Int]{length}
+    _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
+    data := [Float]{}
+    loop _ in 0..<length -> data.push(value)
+    Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
+}
 
-pub fn matrix(rows: Int, cols: Int, values: [Float]) -> Tensor !ComputeError {
+pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor !ComputeError {
     if rows < 0 || cols < 0 -> return Err(ComputeError.Shape)
-    if values.len() != rows * cols -> return Err(ComputeError.Shape)
-    Ok(Tensor{shape: [Int]{rows, cols}, data: copy_f(values), device: "cpu"})
+    _ :: finite_or_error(value)
+    shape :: [Int]{rows, cols}
+    n :: checked_numel(shape) ?? return Err(ComputeError.Shape)
+    data := [Float]{}
+    loop _ in 0..<n -> data.push(value)
+    Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
 pub fn to_list(tensor: Tensor) -> [Float] { copy_f(tensor.data) }
-
 pub fn shape(tensor: Tensor) -> [Int] { copy_i(tensor.shape) }
-
 pub fn rank(tensor: Tensor) -> Int { tensor.shape.len() }
-
 pub fn numel(tensor: Tensor) -> Int { tensor.data.len() }
 
-pub fn placement(tensor: Tensor) -> String { tensor.device }
-
-pub fn on_device(tensor: Tensor, device: ComputeDevice) -[Env]> Tensor {
-    t :: with_device(tensor, device.kind)
-    if device.kind != "cpu" -> host_transfer(device.kind, t.data.len())
-    t
+pub fn placement(tensor: Tensor) -> String {
+    profile_placement(tensor_device_name(tensor.device), tensor_profile(tensor))
 }
 
-pub fn transfer(tensor: Tensor, device: ComputeDevice) -[Env]> Tensor { on_device(tensor, device) }
+pub fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor !ComputeError {
+    _ :: validate_tensor(tensor)
+    selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
+    if selected != "CPU" -> return Err(ComputeError.Unsupported)
+    Ok(make_tensor(copy_i(tensor.shape), copy_f(tensor.data), selected, tensor_profile(tensor)))
+}
 
-pub fn transfer_show(tensor: Tensor) -> String { "{tensor.device}:{tensor.data.len()}" }
+pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor !ComputeError {
+    on_device(tensor, target)
+}
 
-pub fn profile_f32_strict() -> Bool { true }
+pub fn transfer_show(tensor: Tensor) -> String {
+    name :: tensor_device_name(tensor.device)
+    "Transfer(from={name}, to={name}, bytes=0, fallback=none)"
+}
 
-pub fn profile_show() -> String { "f32-strict" }
+pub fn profile_f32_strict() -> String { c_profile_f32_receipt() }
+pub fn profile_show() -> String { c_profile_f32_receipt() }
 
-pub fn kernel_bounds_ok(tensor: Tensor, index: [Int]) -> Bool { offset_of(tensor.shape, index) != None }
+pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool !ComputeError {
+    _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
+    Ok(offset_of(shape, index) != None)
+}
 
 pub fn get(tensor: Tensor, index: [Int]) -> Float !ComputeError {
-    o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.Index)
+    _ :: validate_tensor(tensor)
+    o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.OutOfBounds)
     Ok(tensor.data[o])
 }
 
-pub fn set(tensor: Tensor, index: [Int], value: Float) -> Tensor !ComputeError {
-    o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.Index)
-    data := copy_f(tensor.data)
-    data[o] = value
-    Ok(Tensor{shape: copy_i(tensor.shape), data: data, device: tensor.device})
+pub fn set(tensor: &Tensor, index: [Int], value: Float) !ComputeError {
+    _ :: validate_tensor_ref(tensor)
+    _ :: finite_or_error(value)
+    if tensor.numeric_profile == c_profile_f32() && !f32_value_ok(value) -> return Err(ComputeError.Arithmetic)
+    o_opt :: offset_of(tensor.shape, index)
+    if o_opt == None -> return Err(ComputeError.OutOfBounds)
+    o :: o_opt
+    tensor.data[o] = value
+    return
+
 }
 
-pub fn reshape(tensor: Tensor, shape: [Int]) -> Tensor !ComputeError {
-    n := 1
-    loop d in shape {
-        if d < 0 -> return Err(ComputeError.Shape)
-        n = n * d
-    }
+pub fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor !ComputeError {
+    _ :: validate_tensor(tensor)
+    n :: checked_numel(new_shape)
     if n != tensor.data.len() -> return Err(ComputeError.Shape)
-    Ok(Tensor{shape: copy_i(shape), data: copy_f(tensor.data), device: tensor.device})
+    Ok(make_tensor(copy_i(new_shape), copy_f(tensor.data), tensor.device, tensor_profile(tensor)))
 }
 
-pub fn broadcast_to(tensor: Tensor, shape: [Int]) -> Tensor !ComputeError {
-    n := 1
-    loop d in shape {
-        if d < 0 -> return Err(ComputeError.Shape)
-        n = n * d
-    }
-    if tensor.data.len() == n -> return reshape(tensor, shape)
-    if tensor.data.len() == 1 {
-        data := [Float]{}
-        v :: tensor.data[0]
-        loop _ in 0..<n -> data.push(v)
-        return Ok(Tensor{shape: copy_i(shape), data: data, device: tensor.device})
-    }
-    if tensor.shape.len() > 0 && last(shape) == last(tensor.shape) && n % tensor.data.len() == 0 {
-        data := [Float]{}
-        reps :: n / tensor.data.len()
-        loop _ in 0..<reps {
-            loop x in tensor.data -> data.push(x)
-        }
-        return Ok(Tensor{shape: copy_i(shape), data: data, device: tensor.device})
-    }
-    Err(ComputeError.Shape)
+pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor !ComputeError {
+    _ :: validate_tensor(tensor)
+    _ :: checked_numel(new_shape)
+    if new_shape.len() < tensor.shape.len() -> return Err(ComputeError.RankMismatch)
+    expanded :: broadcast_shape(tensor.shape, new_shape)
+    if expanded != new_shape -> return Err(ComputeError.Shape)
+    data :: materialize_broadcast(tensor, new_shape)
+    Ok(make_tensor(copy_i(new_shape), data, tensor.device, tensor_profile(tensor)))
 }
 
 pub fn transpose(tensor: Tensor) -> Tensor !ComputeError {
-    if tensor.shape.len() != 2 -> return Err(ComputeError.Shape)
+    _ :: validate_tensor(tensor)
+    if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     m :: tensor.shape[0]
     n :: tensor.shape[1]
     data := [Float]{}
     loop j in 0..<n {
         loop i in 0..<m -> data.push(tensor.data[i * n + j])
     }
-    Ok(Tensor{shape: [Int]{n, m}, data: data, device: tensor.device})
+    Ok(make_tensor([Int]{n, m}, data, tensor.device, tensor_profile(tensor)))
 }
 
 pub fn add(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 0) }
@@ -202,212 +227,362 @@ pub fn div(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 3) }
 pub fn maximum(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 4) }
 pub fn minimum(a: Tensor, b: Tensor) -> Tensor !ComputeError { binop(a, b, 5) }
 
-pub fn abs(tensor: Tensor) -> Tensor { unary(tensor, 0) }
-pub fn negate(tensor: Tensor) -> Tensor { unary(tensor, 1) }
-pub fn exp(tensor: Tensor) -> Tensor { unary(tensor, 2) }
-pub fn log(tensor: Tensor) -> Tensor { unary(tensor, 3) }
-pub fn sqrt(tensor: Tensor) -> Tensor { unary(tensor, 4) }
+pub fn abs(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 0) }
+pub fn negate(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 1) }
+pub fn exp(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 2) }
+pub fn log(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 3) }
+pub fn sqrt(tensor: Tensor) -> Tensor !ComputeError { unary(tensor, 4) }
 
 pub fn matmul(a: Tensor, b: Tensor) -> Tensor !ComputeError {
-    if a.shape.len() != 2 -> return Err(ComputeError.Shape)
-    matmul_tile(a, b, a.shape[1])
+    _ :: validate_matmul_inputs(a, b)
+    matmul_blocked(a, b, 8, tensor_profile(a))
 }
-pub fn matmul_f32_tile(a: Tensor, b: Tensor, tile: Int) -> Tensor !ComputeError { matmul_tile(a, b, tile) }
+
+// The tile is fixed by the F32Strict profile.  Exposing a tile argument would
+// make the source contract diverge from the native dispatcher.
+pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor !ComputeError {
+    _ :: validate_matmul_inputs(a, b)
+    loop value in a.data -> _ :: profile_value_or_error(value, c_profile_f32())
+    loop value in b.data -> _ :: profile_value_or_error(value, c_profile_f32())
+    matmul_blocked(a, b, 8, c_profile_f32())
+}
 
 pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
-    if tensor.shape.len() == 0 -> return Err(ComputeError.Shape)
-    if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.Index)
-    if tensor.shape.len() == 1 {
-        s := 0.0
-        loop x in tensor.data -> s = s + x
-        return Ok(Tensor{shape: [Int]{1}, data: [Float]{s}, device: tensor.device})
+    _ :: validate_tensor(tensor)
+    if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.OutOfBounds)
+    out_shape := [Int]{}
+    loop i in 0..<tensor.shape.len() {
+        if i != axis -> out_shape.push(tensor.shape[i])
     }
-    if tensor.shape.len() != 2 -> return Err(ComputeError.Shape)
-    m :: tensor.shape[0]
-    n :: tensor.shape[1]
-    if axis == 0 {
-        data := [Float]{}
-        loop j in 0..<n {
-            s := 0.0
-            loop i in 0..<m -> s = s + tensor.data[i * n + j]
-            data.push(s)
+    if out_shape.len() == 0 -> out_shape.push(1)
+    out_n :: checked_numel(out_shape)
+    axis_len :: tensor.shape[axis]
+    out := [Float]{}
+    loop flat in 0..<out_n {
+        if axis_len == 0 {
+            out.push(Float{0.0})
+            next
         }
-        return Ok(Tensor{shape: [Int]{n}, data: data, device: tensor.device})
+        coords :: decode_index(flat, out_shape)
+        src_index := [Int]{}
+        oi := 0
+        loop si in 0..<tensor.shape.len() {
+            if si == axis {
+                src_index.push(0)
+            } else {
+                src_index.push(coords[oi])
+                oi = oi + 1
+            }
+        }
+        total := Float{0.0}
+        loop k in 0..<axis_len {
+            src_index[axis] = k
+            o :: offset_of(tensor.shape, src_index) ?? return Err(ComputeError.OutOfBounds)
+            total = float_add(total, tensor.data[o])
+            _ :: profile_value_or_error(total, tensor_profile(tensor))
+        }
+        out.push(total)
     }
-    data := [Float]{}
-    loop i in 0..<m {
-        s := 0.0
-        loop j in 0..<n -> s = s + tensor.data[i * n + j]
-        data.push(s)
-    }
-    Ok(Tensor{shape: [Int]{m}, data: data, device: tensor.device})
+    Ok(make_tensor(out_shape, out, tensor.device, tensor_profile(tensor)))
 }
 
 pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
-    if pred.data.len() != target.data.len() -> return Err(ComputeError.Shape)
-    n :: pred.data.len()
-    if n == 0 -> return Err(ComputeError.Shape)
-    s := 0.0
-    loop i in 0..<n {
-        d :: pred.data[i] - target.data[i]
-        s = s + d * d
+    _ :: validate_same_tensor_inputs(pred, target)
+    if pred.data.len() == 0 -> return Err(ComputeError.Shape)
+    total := Float{0.0}
+    loop i in 0..<pred.data.len() {
+        d :: float_sub(pred.data[i], target.data[i])
+        total = float_add(total, float_mul(d, d))
+        _ :: profile_value_or_error(total, tensor_profile(pred))
     }
-    Ok(Tensor{shape: [Int]{1}, data: [Float]{s / (Float{n})}, device: pred.device})
+    value :: float_div(total, Float{pred.data.len()})
+    _ :: profile_value_or_error(value, tensor_profile(pred))
+    Ok(make_tensor([Int]{1}, [Float]{value}, pred.device, tensor_profile(pred)))
 }
 
 pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor !ComputeError {
-    if weights.data.len() != grad.data.len() -> return Err(ComputeError.Shape)
+    _ :: validate_same_tensor_inputs(weights, grad)
+    _ :: finite_or_error(lr)
+    _ :: profile_value_or_error(lr, tensor_profile(weights))
+    ordering :: core.math.cmp(lr, Float{0.0})
+    if ordering < 0 -> return Err(ComputeError.Arithmetic)
     data := [Float]{}
-    loop i in 0..<weights.data.len() -> data.push(weights.data[i] - lr * grad.data[i])
-    Ok(Tensor{shape: copy_i(weights.shape), data: data, device: weights.device})
+    loop i in 0..<weights.data.len() {
+        value :: float_sub(weights.data[i], float_mul(lr, grad.data[i]))
+        _ :: profile_value_or_error(value, tensor_profile(weights))
+        data.push(value)
+    }
+    Ok(make_tensor(copy_i(weights.shape), data, weights.device, tensor_profile(weights)))
 }
 
 pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun !ComputeError {
     loss :: mse_loss(pred, target)
+    _ :: validate_same_tensor_inputs(pred, target)
     n :: pred.data.len()
-    bar := [Float]{}
-    scale :: 2.0 / (Float{n})
-    loop i in 0..<n -> bar.push((pred.data[i] - target.data[i]) * scale)
-    Ok(VjpRun{primal: loss, bar: Tensor{shape: copy_i(pred.shape), data: bar, device: pred.device}})
+    if n == 0 -> return Err(ComputeError.Shape)
+    scale :: Float{2.0} / Float{n}
+    data := [Float]{}
+    loop i in 0..<n {
+        value :: float_mul(float_sub(pred.data[i], target.data[i]), scale)
+        _ :: profile_value_or_error(value, tensor_profile(pred))
+        data.push(value)
+    }
+    gradient :: make_tensor(copy_i(pred.shape), data, pred.device, tensor_profile(pred))
+    Ok(VjpRun{value: loss, gradient: gradient})
 }
 
 pub fn vjp(pred: Tensor, target: Tensor) -> VjpRun !ComputeError { value_and_gradient(pred, target) }
 
 pub fn gradient(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
     run :: value_and_gradient(pred, target)
-    Ok(run.bar)
+    Ok(run.gradient)
 }
 
 pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor !ComputeError {
-    if pred.data.len() != tangent.data.len() || pred.data.len() != target.data.len() -> return Err(ComputeError.Shape)
-    n :: pred.data.len()
-    s := 0.0
-    scale :: 2.0 / (Float{n})
-    loop i in 0..<n {
-        s = s + scale * (pred.data[i] - target.data[i]) * tangent.data[i]
+    _ :: validate_same_tensor_inputs(pred, target)
+    _ :: validate_tensor(tangent)
+    if tangent.shape != pred.shape || tensor_device_name(tangent.device) != tensor_device_name(pred.device) || tensor_profile(tangent) != tensor_profile(pred) -> return Err(ComputeError.Shape)
+    if pred.data.len() == 0 -> return Err(ComputeError.Shape)
+    scale :: Float{2.0} / Float{pred.data.len()}
+    total := Float{0.0}
+    loop i in 0..<pred.data.len() {
+        total = float_add(total, float_mul(float_mul(scale, float_sub(pred.data[i], target.data[i])), tangent.data[i]))
+        _ :: profile_value_or_error(total, tensor_profile(pred))
     }
-    Ok(Tensor{shape: [Int]{1}, data: [Float]{s}, device: pred.device})
+    Ok(make_tensor([Int]{1}, [Float]{total}, pred.device, tensor_profile(pred)))
 }
 
-/// Product of pivots from Gaussian elimination with partial pivoting.
-pub fn det(tensor: Tensor) -> Tensor !ComputeError {
-    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.Shape)
+pub fn det(tensor: Tensor) -> Float !ComputeError {
+    _ :: validate_square(tensor)
     n :: tensor.shape[0]
-    m := copy_f(tensor.data)
-    sign := 1.0
+    work := copy_f(tensor.data)
+    sign := Float{1.0}
+    magnitude := Float{1.0}
     loop k in 0..<n {
         pivot := k
-        best := abs_f(m[k * n + k])
+        best := float_abs(work[k * n + k])
         loop i in (k + 1)..<n {
-            v :: abs_f(m[i * n + k])
-            if v > best {
-                best = v
+            value :: float_abs(work[i * n + k])
+            ordering :: float_cmp(value, best)
+            if ordering > 0 {
+                best = value
                 pivot = i
             }
         }
-        if best == 0.0 -> return Ok(Tensor{shape: [Int]{1}, data: [Float]{0.0}, device: tensor.device})
+        ordering :: float_cmp(best, c_pivot_tolerance())
+        if ordering < 0 -> return Ok(Float{0.0})
         if pivot != k {
-            sign = 0.0 - sign
+            sign = float_sub(Float{0.0}, sign)
             loop j in 0..<n {
-                tmp :: m[k * n + j]
-                m[k * n + j] = m[pivot * n + j]
-                m[pivot * n + j] = tmp
+                tmp := work[k * n + j]
+                work[k * n + j] = work[pivot * n + j]
+                work[pivot * n + j] = tmp
             }
         }
-        diag :: m[k * n + k]
+        diagonal := work[k * n + k]
+        magnitude = float_mul(magnitude, diagonal)
+        _ :: finite_or_error(magnitude)
         loop i in (k + 1)..<n {
-            f :: m[i * n + k] / diag
-            loop j in k..<n -> m[i * n + j] = m[i * n + j] - f * m[k * n + j]
+            factor := float_div(work[i * n + k], diagonal)
+            _ :: finite_or_error(factor)
+            work[i * n + k] = Float{0.0}
+            loop j in (k + 1)..<n {
+                value := float_sub(work[i * n + j], float_mul(factor, work[k * n + j]))
+                _ :: finite_or_error(value)
+                work[i * n + j] = value
+            }
         }
     }
-    d := sign
-    loop i in 0..<n -> d = d * m[i * n + i]
-    Ok(Tensor{shape: [Int]{1}, data: [Float]{d}, device: tensor.device})
+    value := float_mul(sign, magnitude)
+    _ :: finite_or_error(value)
+    Ok(value)
 }
 
-/// Gauss–Jordan inverse of a square matrix.
 pub fn inv(tensor: Tensor) -> Tensor !ComputeError {
-    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.Shape)
+    _ :: validate_square(tensor)
     n :: tensor.shape[0]
-    w :: n * 2
-    m := [Float]{}
+    width :: n * 2
+    profile :: tensor_profile(tensor)
+    work := [Float]{}
     loop i in 0..<n {
-        loop j in 0..<n -> m.push(tensor.data[i * n + j])
+        loop j in 0..<n -> work.push(tensor.data[i * n + j])
         loop j in 0..<n {
             if i == j {
-                m.push(1.0)
+                work.push(Float{1.0})
             } else {
-                m.push(0.0)
+                work.push(Float{0.0})
             }
         }
     }
     loop k in 0..<n {
         pivot := k
-        best := abs_f(m[k * w + k])
+        best := float_abs(work[k * width + k])
         loop i in (k + 1)..<n {
-            v :: abs_f(m[i * w + k])
-            if v > best {
-                best = v
+            value :: float_abs(work[i * width + k])
+            ordering :: float_cmp(value, best)
+            if ordering > 0 {
+                best = value
                 pivot = i
             }
         }
-        if best == 0.0 -> return Err(ComputeError.Singular)
+        ordering :: float_cmp(best, c_pivot_tolerance())
+        if ordering < 0 -> return Err(ComputeError.Singular)
         if pivot != k {
-            loop j in 0..<w {
-                tmp :: m[k * w + j]
-                m[k * w + j] = m[pivot * w + j]
-                m[pivot * w + j] = tmp
+            loop j in 0..<width {
+                tmp := work[k * width + j]
+                work[k * width + j] = work[pivot * width + j]
+                work[pivot * width + j] = tmp
             }
         }
-        diag :: m[k * w + k]
-        loop j in 0..<w -> m[k * w + j] = m[k * w + j] / diag
+        diagonal := work[k * width + k]
+        loop j in 0..<width {
+            value := float_div(work[k * width + j], diagonal)
+            _ :: profile_value_or_error(value, profile)
+            work[k * width + j] = value
+        }
         loop i in 0..<n {
             if i == k -> next
-            f :: m[i * w + k]
-            loop j in 0..<w -> m[i * w + j] = m[i * w + j] - f * m[k * w + j]
+            factor := work[i * width + k]
+            loop j in 0..<width {
+                value := float_sub(work[i * width + j], float_mul(factor, work[k * width + j]))
+                _ :: profile_value_or_error(value, profile)
+                work[i * width + j] = value
+            }
         }
     }
     data := [Float]{}
     loop i in 0..<n {
-        loop j in 0..<n -> data.push(m[i * w + n + j])
+        loop j in 0..<n {
+            value := work[i * width + n + j]
+            _ :: profile_value_or_error(value, profile)
+            data.push(value)
+        }
     }
-    Ok(Tensor{shape: [Int]{n, n}, data: data, device: tensor.device})
+    Ok(make_tensor([Int]{n, n}, data, tensor.device, profile))
 }
 
 pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
-    x :: inv(a)
+    _ :: validate_square(a)
+    _ :: validate_tensor(b)
+    a_name :: tensor_device_name(a.device)
+    b_name :: tensor_device_name(b.device)
+    if a_name != b_name || tensor_profile(a) != tensor_profile(b) -> return Err(ComputeError.Device)
+    if b.shape.len() != 1 && b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    n :: a.shape[0]
     if b.shape.len() == 1 {
-        col :: Tensor{shape: [Int]{b.data.len(), 1}, data: copy_f(b.data), device: b.device}
-        y :: matmul(x, col)
-        return Ok(Tensor{shape: [Int]{y.data.len()}, data: y.data, device: a.device})
+        if b.shape[0] != n -> return Err(ComputeError.RankMismatch)
+    } else if b.shape[0] != n {
+        return Err(ComputeError.RankMismatch)
     }
-    matmul(x, b)
-}
-
-/// Real DFT. Output shape is `[n, 2]` (real, imag). `n` is capped at 4096.
-pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
-    xs :: tensor.data
-    n :: xs.len()
-    if n == 0 -> return Err(ComputeError.Shape)
-    if n > 4096 -> return Err(ComputeError.Shape)
-    two_pi :: 6.283185307179586
-    out := [Float]{}
-    loop k in 0..<n {
-        re := 0.0
-        im := 0.0
-        loop t in 0..<n {
-            ang :: 0.0 - two_pi * (Float{k}) * (Float{t}) / (Float{n})
-            re = re + xs[t] * cos_f(ang)
-            im = im + xs[t] * sin_f(ang)
+    rhs_cols := 1
+    if b.shape.len() == 2 -> rhs_cols = b.shape[1]
+    width :: n + rhs_cols
+    _ :: checked_numel([Int]{n, width})
+    profile :: tensor_profile(a)
+    augmented := [Float]{}
+    loop i in 0..<n {
+        loop j in 0..<n -> augmented.push(a.data[i * n + j])
+        loop j in 0..<rhs_cols {
+            if b.shape.len() == 1 {
+                augmented.push(b.data[i])
+            } else {
+                augmented.push(b.data[i * rhs_cols + j])
+            }
         }
-        out.push(re)
-        out.push(im)
     }
-    Ok(Tensor{shape: [Int]{n, 2}, data: out, device: tensor.device})
+    loop k in 0..<n {
+        pivot := k
+        best := float_abs(augmented[k * width + k])
+        loop i in (k + 1)..<n {
+            value :: float_abs(augmented[i * width + k])
+            ordering :: float_cmp(value, best)
+            if ordering > 0 {
+                best = value
+                pivot = i
+            }
+        }
+        ordering :: float_cmp(best, c_pivot_tolerance())
+        if ordering < 0 -> return Err(ComputeError.Singular)
+        if pivot != k {
+            loop j in 0..<width {
+                tmp := augmented[k * width + j]
+                augmented[k * width + j] = augmented[pivot * width + j]
+                augmented[pivot * width + j] = tmp
+            }
+        }
+        diagonal := augmented[k * width + k]
+        loop j in k..<width {
+            value := float_div(augmented[k * width + j], diagonal)
+            _ :: profile_value_or_error(value, profile)
+            augmented[k * width + j] = value
+        }
+        loop i in 0..<n {
+            if i == k -> next
+            factor := augmented[i * width + k]
+            loop j in k..<width {
+                value := float_sub(augmented[i * width + j], float_mul(factor, augmented[k * width + j]))
+                _ :: profile_value_or_error(value, profile)
+                augmented[i * width + j] = value
+            }
+        }
+    }
+    data := [Float]{}
+    if b.shape.len() == 1 {
+        loop i in 0..<n {
+            value :: augmented[i * width + n]
+            _ :: profile_value_or_error(value, profile)
+            data.push(value)
+        }
+    } else {
+        loop i in 0..<n {
+            loop j in 0..<rhs_cols {
+                value := augmented[i * width + n + j]
+                _ :: profile_value_or_error(value, profile)
+                data.push(value)
+            }
+        }
+    }
+    Ok(make_tensor(copy_i(b.shape), data, a_name, profile))
+}
+// FFT output is interleaved [re0, im0, re1, im1, ...], matching the native
+// wire shape [2*n].  Radix-2 inputs use the iterative CPU kernel; other lengths
+// use a bounded DFT rather than returning a fabricated zero spectrum.
+pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
+    _ :: validate_tensor(tensor)
+    if tensor.shape.len() != 1 -> return Err(ComputeError.RankMismatch)
+    n :: tensor.shape[0]
+    if n == 0 -> return Ok(make_tensor([Int]{0}, [Float]{}, tensor.device, tensor_profile(tensor)))
+    if n > 8388608 -> return Err(ComputeError.Shape)
+    if is_power_two(n) {
+        data :: fft_radix2(tensor.data)
+        loop value in data {
+            _ :: profile_value_or_error(value, tensor_profile(tensor))
+        }
+        return Ok(make_tensor([Int]{n * 2}, data, tensor.device, tensor_profile(tensor)))
+    }
+    if n > 4096 -> return Err(ComputeError.Unsupported)
+    data := [Float]{}
+    loop k in 0..<n {
+        re := Float{0.0}
+        im := Float{0.0}
+        loop t in 0..<n {
+            angle :: float_sub(Float{0.0}, float_div(float_mul(float_mul(c_two_pi(), Float{k}), Float{t}), Float{n}))
+            cosine :: float_cos(angle) ?? return Err(ComputeError.Arithmetic)
+            sine :: float_sin(angle) ?? return Err(ComputeError.Arithmetic)
+            re = float_add(re, float_mul(tensor.data[t], cosine))
+            im = float_add(im, float_mul(tensor.data[t], sine))
+        }
+        _ :: profile_value_or_error(re, tensor_profile(tensor))
+        _ :: profile_value_or_error(im, tensor_profile(tensor))
+        data.push(re)
+        data.push(im)
+    }
+    Ok(make_tensor([Int]{n * 2}, data, tensor.device, tensor_profile(tensor)))
 }
 
 pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
-    if tensor.shape.len() != 2 -> return Err(ComputeError.Shape)
+    _ :: validate_tensor(tensor)
+    if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
     m :: tensor.shape[0]
     n :: tensor.shape[1]
     values := [Float]{}
@@ -415,9 +590,10 @@ pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
     row_ptr := [Int]{0}
     loop i in 0..<m {
         loop j in 0..<n {
-            v :: tensor.data[i * n + j]
-            if v != 0.0 {
-                values.push(v)
+            value := tensor.data[i * n + j]
+            ordering :: float_cmp(value, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
+            if ordering != 0 {
+                values.push(value)
                 col_idx.push(j)
             }
         }
@@ -428,320 +604,702 @@ pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
 
 pub fn sparse_nnz(sp: SparseTensor) -> Int { sp.values.len() }
 
-pub fn sparse_show(sp: SparseTensor) -> String { "csr {sp.rows}x{sp.cols} nnz={sp.values.len()}" }
-
-pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor !ComputeError {
-    if x.data.len() != sp.cols -> return Err(ComputeError.Shape)
-    y := [Float]{}
-    loop i in 0..<sp.rows {
-        s := 0.0
-        start :: sp.row_ptr[i]
-        end :: sp.row_ptr[i + 1]
-        loop p in start..<end -> s = s + sp.values[p] * x.data[sp.col_idx[p]]
-        y.push(s)
-    }
-    Ok(Tensor{shape: [Int]{sp.rows}, data: y, device: x.device})
+pub fn sparse_show(sp: SparseTensor) -> String {
+    "SparseCsr({sp.rows}x{sp.cols}, nnz={sp.values.len()})"
 }
 
-pub fn serialize(tensor: Tensor) -> String {
-    sh := ""
+pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor !ComputeError {
+    _ :: validate_sparse(sp)
+    _ :: validate_tensor(x)
+    if tensor_device_name(x.device) != "CPU" -> return Err(ComputeError.Unsupported)
+    if x.shape.len() != 1 || x.shape[0] != sp.cols -> return Err(ComputeError.RankMismatch)
+    out := [Float]{}
+    loop i in 0..<sp.rows {
+        total := Float{0.0}
+        start :: sp.row_ptr[i]
+        finish :: sp.row_ptr[i + 1]
+        loop p in start..<finish {
+            total = float_add(total, float_mul(sp.values[p], x.data[sp.col_idx[p]]))
+            _ :: profile_value_or_error(total, tensor_profile(x))
+        }
+        out.push(total)
+    }
+    Ok(make_tensor([Int]{sp.rows}, out, "CPU", tensor_profile(x)))
+}
+
+pub fn serialize(tensor: Tensor) -> String !ComputeError {
+    _ :: validate_tensor(tensor)
+    profile :: tensor_profile(tensor)
+    if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
+    shape_text := ""
     loop i in 0..<tensor.shape.len() {
-        if i > 0 -> sh = "{sh}x"
-        sh = "{sh}{tensor.shape[i]}"
+        if i > 0 {
+            shape_text = "{shape_text},{tensor.shape[i]}"
+        } else {
+            shape_text = "{shape_text}{tensor.shape[i]}"
+        }
     }
-    body := ""
+    data_text := ""
     loop i in 0..<tensor.data.len() {
-        if i > 0 -> body = "{body},"
-        body = "{body}{tensor.data[i]}"
+        if i > 0 {
+            data_text = "{data_text},{tensor.data[i]}"
+        } else {
+            data_text = "{data_text}{tensor.data[i]}"
+        }
     }
-    "F32|{sh}|{tensor.device}|{body}"
+    body :: "shape={shape_text};data={data_text};profile={profile}"
+    "{body};checksum={wire_checksum(body)}"
 }
 
 pub fn deserialize(text: String) -> Tensor !ComputeError {
-    parts :: split_bar(text)
-    if parts.len() != 4 -> return Err(ComputeError.Parse)
-    if parts[0] != "F32" -> return Err(ComputeError.Parse)
-    sh := [Int]{}
-    loop piece in split_x(parts[1]) {
-        n :: parse_int(piece) ?? return Err(ComputeError.Parse)
-        sh.push(n)
-    }
-    data := [Float]{}
-    if parts[3].len() > 0 {
-        loop piece in split_comma(parts[3]) {
-            f :: Float.parse(piece) ?? return Err(ComputeError.Parse)
-            data.push(f)
+    fields :: split_byte(text, 59) ?? return Err(ComputeError.Parse)
+    if fields.len() != 4 -> return Err(ComputeError.Parse)
+    shape_text := ""
+    data_text := ""
+    profile := ""
+    checksum := ""
+    saw_shape := false
+    saw_data := false
+    saw_profile := false
+    saw_checksum := false
+    loop field in fields {
+        pair :: split_once_byte(field, 61) ?? return Err(ComputeError.Parse)
+        _ :: require_found(pair.found)
+        key :: pair.left
+        value :: pair.right
+        if key == "shape" {
+            if saw_shape -> return Err(ComputeError.Parse)
+            saw_shape = true
+            shape_text = value
+        } else if key == "data" {
+            if saw_data -> return Err(ComputeError.Parse)
+            saw_data = true
+            data_text = value
+        } else if key == "profile" {
+            if saw_profile -> return Err(ComputeError.Parse)
+            saw_profile = true
+            profile = value
+        } else if key == "checksum" {
+            if saw_checksum -> return Err(ComputeError.Parse)
+            saw_checksum = true
+            checksum = value
+        } else {
+            return Err(ComputeError.Parse)
         }
     }
-    n := 1
-    loop d in sh -> n = n * d
-    if n != data.len() -> return Err(ComputeError.Shape)
-    Ok(Tensor{shape: sh, data: data, device: parts[2]})
+    _ :: require_fields(saw_shape, saw_data, saw_profile, saw_checksum)
+    if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
+    if checksum.bytes().len() != 16 -> return Err(ComputeError.Serialization)
+    loop byte in checksum.bytes() {
+        _ :: require_hex_byte(byte)
+    }
+    body :: "shape={shape_text};data={data_text};profile={profile}"
+    if checksum != wire_checksum(body) -> return Err(ComputeError.Serialization)
+    shape := [Int]{}
+    shape_parts :: split_byte(shape_text, 44) ?? return Err(ComputeError.Parse)
+    if shape_parts.len() == 0 -> return Err(ComputeError.Shape)
+    loop piece in shape_parts {
+        dim :: parse_int(piece) ?? return Err(ComputeError.Parse)
+        if "{dim}" != piece -> return Err(ComputeError.Serialization)
+        shape.push(dim)
+    }
+    expected :: checked_numel(shape) ?? return Err(ComputeError.Shape)
+    data := [Float]{}
+    if data_text != "" {
+        data_parts :: split_byte(data_text, 44) ?? return Err(ComputeError.Parse)
+        loop piece in data_parts {
+            value :: Float.parse(piece) ?? return Err(ComputeError.Parse)
+            _ :: profile_value_or_error(value, profile)
+            if "{value}" != piece -> return Err(ComputeError.Serialization)
+            data.push(value)
+        }
+    }
+    if expected != data.len() -> return Err(ComputeError.Shape)
+    Ok(make_tensor(shape, data, "CPU", profile))
 }
 
-pub fn stream_new() -> ComputeStream { ComputeStream{id: 1, device: "cpu"} }
+pub fn stream_new() -> ComputeStream { ComputeStream{id: 1, device: "CPU"} }
 
-pub fn stream_new_on(device: ComputeDevice) -> ComputeStream { ComputeStream{id: 1, device: device.kind} }
-
-pub fn stream_show(stream: ComputeStream) -> String { "{stream.device}#{stream.id}" }
-
-pub fn stream_sync(stream: ComputeStream) -[Env]> ComputeStream {
-    host_stream_sync(stream.id)
-    stream
+pub fn stream_new_on(target: ComputeDevice) -> ComputeStream !ComputeError {
+    selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
+    if selected != "CPU" -> return Err(ComputeError.Unsupported)
+    Ok(ComputeStream{id: 1, device: selected})
 }
 
-fn matmul_tile(a: Tensor, b: Tensor, tile: Int) -> Tensor !ComputeError {
-    if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.Shape)
+pub fn stream_show(stream: ComputeStream) -> String {
+    "ComputeStream(device={tensor_device_name(stream.device)})"
+}
+
+pub fn stream_sync(stream: ComputeStream) !ComputeError {
+    if stream.id <= 0 -> return Err(ComputeError.Device)
+    if tensor_device_name(stream.device) != "CPU" -> return Err(ComputeError.Unsupported)
+    return
+}
+
+fn c_profile_f64() -> String { @c_profile_f64 }
+fn c_profile_f32() -> String { @c_profile_f32 }
+fn c_profile_f32_receipt() -> String { @c_profile_f32_receipt }
+fn c_abilities_f64() -> String { @c_abilities_f64 }
+fn c_abilities_f32() -> String { @c_abilities_f32 }
+fn c_max_elements() -> Int { @c_max_tensor_elements }
+fn c_pivot_tolerance() -> Float { @c_pivot_tolerance }
+fn c_two_pi() -> Float { @c_two_pi }
+
+fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor {
+    Tensor{shape: shape, data: data, device: tensor_device_name(device), numeric_profile: profile}
+}
+
+fn tensor_profile(tensor: Tensor) -> String {
+    if tensor.numeric_profile == "" -> return c_profile_f64()
+    tensor.numeric_profile
+}
+
+fn tensor_device_name(device: String) -> String {
+    if device == "cpu" || device == "CPU" -> return "CPU"
+    if device == "auto" || device == "Auto" -> return "Auto"
+    if device == "cuda" || device == "CUDA" -> return "CUDA"
+    if device == "metal" || device == "Metal" -> return "Metal"
+    if device == "vulkan" || device == "Vulkan" -> return "Vulkan"
+    if device == "webgpu" || device == "WebGPU" -> return "WebGPU"
+    return ~device
+}
+
+fn select_device(kind: String) -> ?String {
+    name :: tensor_device_name(kind)
+    if name == "CPU" || name == "Auto" -> return Val("CPU")
+    if name == "CUDA" || name == "Metal" || name == "Vulkan" || name == "WebGPU" -> return Val(name)
+    None
+}
+
+fn profile_placement(device: String, profile: String) -> String {
+    requested :: tensor_device_name(device)
+    requested_f32 := ~requested
+    requested_default := ~requested
+    requested_unavailable := ~requested
+    selected := requested
+    if selected == "Auto" -> selected = "CPU"
+    if selected != "CPU" -> return "Placement(requested={requested_unavailable}, selected={selected}, backend=unavailable, version=none, profile={profile}, cache=none, abilities=[], reason=provider=unavailable)"
+    if profile == c_profile_f32() {
+        return "Placement(requested={requested_f32}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f32()}, reason=algorithm=blocked-matmul; tile=8; arithmetic=f32; reduction=ordered; dispatch=scalar; vector_width=1; tail=scalar)"
+    }
+    "Placement(requested={requested_default}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f64()}, reason=policy=auto; selected=cpu; ability=cpu-oracle.f64)"
+}
+
+fn validate_tensor_ref(tensor: &Tensor) -> Bool !ComputeError {
+    expected :: checked_numel(tensor.shape)
+    if expected != tensor.data.len() -> return Err(ComputeError.Shape)
+    name :: tensor_device_name(tensor.device)
+    if name != "CPU" -> return Err(ComputeError.Unsupported)
+    profile :: tensor_profile(tensor)
+    if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
+    loop value in tensor.data {
+        _ :: profile_value_or_error(value, profile)
+    }
+    Ok(true)
+}
+
+fn validate_tensor(tensor: Tensor) -> Bool !ComputeError {
+    expected :: checked_numel(tensor.shape)
+    if expected != tensor.data.len() -> return Err(ComputeError.Shape)
+    name :: tensor_device_name(tensor.device)
+    if name != "CPU" -> return Err(ComputeError.Unsupported)
+    profile :: tensor_profile(tensor)
+    if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
+    loop value in tensor.data {
+        _ :: profile_value_or_error(value, profile)
+    }
+    Ok(true)
+}
+
+fn validate_same_tensor_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
+    _ :: validate_tensor(a)
+    _ :: validate_tensor(b)
+    if a.shape != b.shape -> return Err(ComputeError.RankMismatch)
+    if tensor_device_name(a.device) != tensor_device_name(b.device) -> return Err(ComputeError.Device)
+    if tensor_profile(a) != tensor_profile(b) -> return Err(ComputeError.Device)
+    Ok(true)
+}
+
+fn validate_square(tensor: Tensor) -> Bool !ComputeError {
+    _ :: validate_tensor(tensor)
+    if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
+    if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    if tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
+    Ok(true)
+}
+fn validate_matmul_inputs(a: Tensor, b: Tensor) -> Bool !ComputeError {
+    if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    _ :: validate_tensor(a)
+    _ :: validate_tensor(b)
+    if tensor_device_name(a.device) != tensor_device_name(b.device) -> return Err(ComputeError.Device)
+    if tensor_profile(a) != tensor_profile(b) -> return Err(ComputeError.Device)
+    if a.shape[1] != b.shape[0] -> return Err(ComputeError.RankMismatch)
+    _ :: checked_numel([Int]{a.shape[0], b.shape[1]})
+    Ok(true)
+}
+
+fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor !ComputeError {
     m :: a.shape[0]
     k :: a.shape[1]
-    if b.shape[0] != k -> return Err(ComputeError.Shape)
     n :: b.shape[1]
+    out := [Float]{}
+    loop _ in 0..<(m * n) -> out.push(Float{0.0})
     ts := tile
     if ts < 1 -> ts = 1
-    if ts > k -> ts = k
-    out := [Float]{}
-    loop _ in 0..<(m * n) -> out.push(0.0)
     i0 := 0
     loop i0 < m {
         j0 := 0
         loop j0 < n {
-            t0 := 0
-            loop t0 < k {
-                i_max := i0 + ts
-                if i_max > m -> i_max = m
-                j_max := j0 + ts
-                if j_max > n -> j_max = n
-                t_max := t0 + ts
-                if t_max > k -> t_max = k
-                loop i in i0..<i_max {
-                    loop j in j0..<j_max {
-                        s := out[i * n + j]
-                        loop t in t0..<t_max -> s = s + a.data[i * k + t] * b.data[t * n + j]
-                        out[i * n + j] = s
+            k0 := 0
+            loop k0 < k {
+                i_end :: min_int(i0 + ts, m)
+                j_end :: min_int(j0 + ts, n)
+                k_end :: min_int(k0 + ts, k)
+                loop i in i0..<i_end {
+                    loop j in j0..<j_end {
+                        total := out[i * n + j]
+                        loop q in k0..<k_end -> total = float_add(total, float_mul(a.data[i * k + q], b.data[q * n + j]))
+                        _ :: profile_value_or_error(total, profile)
+                        out[i * n + j] = total
                     }
                 }
-                t0 = t0 + ts
+                k0 = k0 + ts
             }
             j0 = j0 + ts
         }
         i0 = i0 + ts
     }
-    Ok(Tensor{shape: [Int]{m, n}, data: out, device: "cpu"})
+    Ok(make_tensor([Int]{m, n}, out, tensor_device_name(a.device), profile))
 }
 
 fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor !ComputeError {
-    if a.data.len() != b.data.len() -> return Err(ComputeError.Shape)
+    _ :: validate_tensor(a)
+    _ :: validate_tensor(b)
+    if tensor_device_name(a.device) != tensor_device_name(b.device) -> return Err(ComputeError.Device)
+    if tensor_profile(a) != tensor_profile(b) -> return Err(ComputeError.Device)
+    out_shape :: broadcast_shape(a.shape, b.shape)
+    out_n :: checked_numel(out_shape)
+    av :: materialize_broadcast(a, out_shape)
+    bv :: materialize_broadcast(b, out_shape)
     out := [Float]{}
-    loop i in 0..<a.data.len() {
-        x :: a.data[i]
-        y :: b.data[i]
-        if op == 0 -> out.push(x + y)
-        if op == 1 -> out.push(x - y)
-        if op == 2 -> out.push(x * y)
-        if op == 3 -> out.push(x / y)
+    loop i in 0..<out_n {
+        x :: av[i]
+        y :: bv[i]
+        ordering := float_cmp(y, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
+        if op == 3 && ordering == 0 -> return Err(ComputeError.Arithmetic)
+        value := float_add(x, y)
+        if op == 1 -> value = float_sub(x, y)
+        if op == 2 -> value = float_mul(x, y)
+        if op == 3 -> value = float_div(x, y)
         if op == 4 {
-            if x > y {
-                out.push(x)
+            ordering = float_cmp(x, y) ?? return Err(ComputeError.Arithmetic)
+            if ordering > 0 {
+                value = x
             } else {
-                out.push(y)
+                value = y
             }
         }
         if op == 5 {
-            if x < y {
-                out.push(x)
+            ordering = float_cmp(x, y) ?? return Err(ComputeError.Arithmetic)
+            if ordering < 0 {
+                value = x
             } else {
-                out.push(y)
+                value = y
             }
         }
+        _ :: profile_value_or_error(value, tensor_profile(a))
+        out.push(value)
     }
-    Ok(Tensor{shape: copy_i(a.shape), data: out, device: a.device})
+    Ok(make_tensor(out_shape, out, a.device, tensor_profile(a)))
 }
 
-fn unary(tensor: Tensor, op: Int) -> Tensor {
+fn unary(tensor: Tensor, op: Int) -> Tensor !ComputeError {
+    _ :: validate_tensor(tensor)
     out := [Float]{}
     loop x in tensor.data {
-        if op == 0 -> out.push(abs_f(x))
-        if op == 1 -> out.push(0.0 - x)
-        if op == 2 -> out.push(exp_f(x))
-        if op == 3 -> out.push(ln_f(x))
-        if op == 4 -> out.push(sqrt_f(x))
+        ordering :: float_cmp(x, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
+        if op == 3 && ordering <= 0 -> return Err(ComputeError.Arithmetic)
+        if op == 4 && ordering < 0 -> return Err(ComputeError.Arithmetic)
+        value := float_abs(x) ?? return Err(ComputeError.Arithmetic)
+        if op == 1 -> value = float_sub(Float{0.0}, x)
+        if op == 2 -> value = float_exp(x) ?? return Err(ComputeError.Arithmetic)
+        if op == 3 -> value = float_ln(x) ?? return Err(ComputeError.Arithmetic)
+        if op == 4 -> value = float_sqrt(x) ?? return Err(ComputeError.Arithmetic)
+        _ :: profile_value_or_error(value, tensor_profile(tensor))
+        out.push(value)
     }
-    Tensor{shape: copy_i(tensor.shape), data: out, device: tensor.device}
+    Ok(make_tensor(copy_i(tensor.shape), out, tensor.device, tensor_profile(tensor)))
 }
 
-fn filled(shape: [Int], value: Float) -> Tensor {
-    n := 1
-    loop d in shape {
-        if d < 0 -> n = 0
-        n = n * d
-    }
+fn filled(shape: [Int], value: Float) -> Tensor !ComputeError {
+    _ :: finite_or_error(value)
+    n :: checked_numel(shape)
     data := [Float]{}
     loop _ in 0..<n -> data.push(value)
-    Tensor{shape: copy_i(shape), data: data, device: "cpu"}
+    Ok(make_tensor(copy_i(shape), data, "CPU", c_profile_f64()))
 }
 
-fn with_device(tensor: Tensor, device: String) -> Tensor {
-    Tensor{shape: copy_i(tensor.shape), data: copy_f(tensor.data), device: device}
+fn checked_numel(shape: [Int]) -> Int !ComputeError {
+    if shape.len() == 0 -> return Err(ComputeError.Shape)
+    n := 1
+    loop dim in shape {
+        if dim < 0 || dim > c_max_elements() -> return Err(ComputeError.Shape)
+        if dim == 0 {
+            n = 0
+            next
+        }
+        if n > c_max_elements() /% dim -> return Err(ComputeError.Shape)
+        n = n * dim
+    }
+    Ok(n)
+}
+
+fn broadcast_shape(a: [Int], b: [Int]) -> [Int] !ComputeError {
+    _ :: checked_numel(a)
+    _ :: checked_numel(b)
+    rank := a.len()
+    if b.len() > rank -> rank = b.len()
+    out := [Int]{}
+    loop i in 0..<rank {
+        ai := 1
+        bi := 1
+        if i >= rank - a.len() -> ai = a[i - (rank - a.len())]
+        if i >= rank - b.len() -> bi = b[i - (rank - b.len())]
+        if ai != bi && ai != 1 && bi != 1 -> return Err(ComputeError.RankMismatch)
+        if ai == 0 || bi == 0 {
+            if ai != 0 && ai != 1 || bi != 0 && bi != 1 -> return Err(ComputeError.RankMismatch)
+            out.push(0)
+        } else if ai == 1 {
+            out.push(bi)
+        } else {
+            out.push(ai)
+        }
+    }
+    Ok(out)
+}
+
+fn materialize_broadcast(tensor: Tensor, target: [Int]) -> [Float] !ComputeError {
+    _ :: checked_numel(target)
+    if target.len() < tensor.shape.len() -> return Err(ComputeError.RankMismatch)
+    expanded :: broadcast_shape(tensor.shape, target)
+    if expanded != target -> return Err(ComputeError.Shape)
+    n :: checked_numel(target)
+    out := [Float]{}
+    loop flat in 0..<n {
+        coords :: decode_index(flat, target)
+        source_index := [Int]{}
+        offset := target.len() - tensor.shape.len()
+        loop si in 0..<tensor.shape.len() {
+            dim :: tensor.shape[si]
+            coordinate :: coords[offset + si]
+            if dim == 1 {
+                source_index.push(0)
+            } else {
+                source_index.push(coordinate)
+            }
+        }
+        o :: offset_of(tensor.shape, source_index) ?? return Err(ComputeError.OutOfBounds)
+        out.push(tensor.data[o])
+    }
+    Ok(out)
+}
+
+fn decode_index(flat: Int, shape: [Int]) -> [Int] {
+    out := [Int]{}
+    remainder := flat
+    i := shape.len()
+    loop i > 0 {
+        i = i - 1
+        dim :: shape[i]
+        if dim <= 0 {
+            out.push(0)
+        } else {
+            out.push(remainder %% dim)
+            remainder = remainder /% dim
+        }
+    }
+    reverse_i(&out)
+    out
 }
 
 fn offset_of(shape: [Int], index: [Int]) -> ?Int {
     if shape.len() != index.len() -> return None
-    o := 0
+    offset := 0
     loop i in 0..<shape.len() {
-        if index[i] < 0 || index[i] >= shape[i] -> return None
-        o = o * shape[i] + index[i]
+        if shape[i] <= 0 || index[i] < 0 || index[i] >= shape[i] -> return None
+        offset = offset * shape[i] + index[i]
     }
-    Val(o)
+    Val(offset)
 }
 
-fn last(xs: [Int]) -> Int {
-    if xs.len() == 0 -> return 0
-    xs[xs.len() - 1]
+fn reverse_i(values: &[Int]) {
+    i := 0
+    j := values.len() - 1
+    loop i < j {
+        tmp := values[i]
+        values[i] = values[j]
+        values[j] = tmp
+        i = i + 1
+        j = j - 1
+    }
+}
+
+fn min_int(a: Int, b: Int) -> Int {
+    if a < b {
+        return a
+    }
+    b
+}
+
+fn is_power_two(n: Int) -> Bool { n > 0 && (n & (n - 1)) == 0 }
+
+fn fft_radix2(input: [Float]) -> [Float] {
+    n :: input.len()
+    out := [Float]{}
+    loop x in input {
+        out.push(x)
+        out.push(Float{0.0})
+    }
+    j := 0
+    loop i in 1..<n {
+        bit := n /% 2
+        loop j >= bit {
+            j = j - bit
+            bit = bit /% 2
+            if bit == 0 -> break
+        }
+        j = j + bit
+        if i < j {
+            tmp_re := out[2 * i]
+            tmp_im := out[2 * i + 1]
+            out[2 * i] = out[2 * j]
+            out[2 * i + 1] = out[2 * j + 1]
+            out[2 * j] = tmp_re
+            out[2 * j + 1] = tmp_im
+        }
+    }
+    length := 2
+    loop length <= n {
+        angle :: float_sub(Float{0.0}, float_div(c_two_pi(), Float{length}))
+        wlen_re :: math.cos(angle)
+        wlen_im :: math.sin(angle)
+        start := 0
+        half :: length /% 2
+        loop start < n {
+            w_re := Float{1.0}
+            w_im := Float{0.0}
+            loop k in 0..<half {
+                left :: 2 * (start + k)
+                right :: 2 * (start + k + half)
+                vr :: float_sub(float_mul(out[right], w_re), float_mul(out[right + 1], w_im))
+                vi :: float_add(float_mul(out[right], w_im), float_mul(out[right + 1], w_re))
+                ur := out[left]
+                ui := out[left + 1]
+                out[left] = float_add(ur, vr)
+                out[left + 1] = float_add(ui, vi)
+                out[right] = float_sub(ur, vr)
+                out[right + 1] = float_sub(ui, vi)
+                next_re :: float_sub(float_mul(w_re, wlen_re), float_mul(w_im, wlen_im))
+                w_im = float_add(float_mul(w_re, wlen_im), float_mul(w_im, wlen_re))
+                w_re = next_re
+            }
+            start = start + length
+        }
+        length = length * 2
+    }
+    out
+}
+
+fn validate_sparse(sp: SparseTensor) -> Bool !ComputeError {
+    if sp.rows < 0 || sp.cols < 0 -> return Err(ComputeError.Shape)
+    if sp.rows > c_max_elements() || sp.cols > c_max_elements() -> return Err(ComputeError.Shape)
+    if sp.row_ptr.len() > c_max_elements() || sp.col_idx.len() > c_max_elements() || sp.values.len() > c_max_elements() -> return Err(ComputeError.Shape)
+    if sp.row_ptr.len() != sp.rows + 1 -> return Err(ComputeError.Shape)
+    if sp.col_idx.len() != sp.values.len() -> return Err(ComputeError.Shape)
+    if sp.row_ptr.len() == 0 || sp.row_ptr[0] != 0 -> return Err(ComputeError.Shape)
+    loop i in 0..<sp.values.len() {
+        _ :: finite_or_error(sp.values[i])
+        if sp.col_idx[i] < 0 || sp.col_idx[i] >= sp.cols -> return Err(ComputeError.OutOfBounds)
+    }
+    loop i in 0..<sp.rows {
+        if sp.row_ptr[i] < 0 || sp.row_ptr[i] > sp.row_ptr[i + 1] -> return Err(ComputeError.Shape)
+        if sp.row_ptr[i] > sp.values.len() -> return Err(ComputeError.Shape)
+    }
+    if sp.row_ptr[sp.rows] != sp.values.len() -> return Err(ComputeError.Shape)
+    Ok(true)
+}
+
+fn split_byte(text: String, sep: Int) -> [String] !ComputeError {
+    out := [String]{}
+    current := [U8]{}
+    loop byte in text.bytes() {
+        if byte == (U8{sep}) {
+            piece :: String.from_bytes(current) ?? return Err(ComputeError.Parse)
+            out.push(piece)
+            current = [U8]{}
+        } else {
+            current.push(byte)
+        }
+    }
+    piece :: String.from_bytes(current) ?? return Err(ComputeError.Parse)
+    out.push(piece)
+    Ok(out)
+}
+
+fn split_once_byte(text: String, sep: Int) -> (left: String, right: String, found: Bool) !ComputeError {
+    raw :: text.bytes()
+    position := -1
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{sep}) {
+            position = i
+            break
+        }
+    }
+    if position < 0 -> return Ok((left: text, right: "", found: false))
+    left_bytes := [U8]{}
+    right_bytes := [U8]{}
+    loop i in 0..<position -> left_bytes.push(raw[i])
+    loop i in (position + 1)..<raw.len() -> right_bytes.push(raw[i])
+    left :: String.from_bytes(left_bytes) ?? return Err(ComputeError.Parse)
+    right :: String.from_bytes(right_bytes) ?? return Err(ComputeError.Parse)
+    Ok((left: left, right: right, found: true))
+}
+
+fn parse_int(text: String) -> ?Int {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    negative := false
+    start := 0
+    if raw[0] == 45 {
+        negative = true
+        start = 1
+    }
+    if start == raw.len() -> return None
+    if text == "-9223372036854775808" -> return Val(c_min_int())
+    limit :: c_max_int()
+    value := 0
+    loop i in start..<raw.len() {
+        digit :: raw[i]
+        if digit < 48 || digit > 57 -> return None
+        d :: digit - 48
+        if value > limit /% 10 || (value == limit /% 10 && d > limit %% 10) -> return None
+        value = value * 10 + d
+    }
+    if negative -> return Val(0 - value)
+    Val(value)
+}
+
+fn c_max_int() -> Int { 9223372036854775807 }
+fn c_min_int() -> Int { -9223372036854775807 - 1 }
+
+fn wire_checksum(body: String) -> String {
+    hash := 14695981039346656037
+    loop byte in body.bytes() {
+        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & @c_mask64
+    }
+    fmt.hex(hash, 16)
+}
+fn finite_or_error(value: Float) -> Bool !ComputeError {
+    finite :: core.math.is_finite(value)
+    if finite -> return Ok(true)
+    Err(ComputeError.Arithmetic)
+}
+
+fn f32_value_ok(value: Float) -> Bool {
+    if value > @c_f32_max || value < (Float{0.0} - @c_f32_max) -> return false
+    true
+}
+
+fn profile_value_or_error(value: Float, profile: String) -> Bool !ComputeError {
+    _ :: finite_or_error(value)
+    if profile == c_profile_f32() && !f32_value_ok(value) -> return Err(ComputeError.Arithmetic)
+    Ok(true)
+}
+fn float_abs(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.fabs(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+
+fn float_cmp(a: Float, b: Float) -> Int !ComputeError {
+    _ :: finite_or_error(a)
+    _ :: finite_or_error(b)
+    Ok(core.math.cmp(a, b))
+}
+
+fn float_cos(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.cos(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+
+fn float_sin(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.sin(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+
+fn float_exp(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.exp(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+
+fn float_ln(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.ln(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+
+fn float_sqrt(value: Float) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    result := core.math.sqrt(value)
+    _ :: finite_or_error(result)
+    Ok(result)
+}
+fn require_found(found: Bool) -> Bool !ComputeError {
+    if found -> return Ok(true)
+    Err(ComputeError.Parse)
+}
+
+fn require_fields(shape: Bool, data: Bool, profile: Bool, checksum: Bool) -> Bool !ComputeError {
+    if shape && data && profile && checksum -> return Ok(true)
+    Err(ComputeError.Parse)
+}
+
+fn require_hex_byte(byte: U8) -> Bool !ComputeError {
+    if (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102})) -> return Ok(true)
+    Err(ComputeError.Serialization)
+}
+fn float_add(a: Float, b: Float) -> Float {
+    core.math.fma(Float{1.0}, a, b)
+}
+
+fn float_sub(a: Float, b: Float) -> Float {
+    core.math.fma(Float{1.0}, a, core.math.fma(Float{-1.0}, b, Float{0.0}))
+}
+
+fn float_mul(a: Float, b: Float) -> Float {
+    core.math.fma(a, b, Float{0.0})
+}
+
+fn float_div(a: Float, b: Float) -> Float {
+    core.math.fma(a, core.math.inv(b), Float{0.0})
 }
 
 fn copy_f(xs: [Float]) -> [Float] {
     out := [Float]{}
-    loop x in xs -> out.push(x)
+    loop value in xs -> out.push(value)
     out
 }
 
 fn copy_i(xs: [Int]) -> [Int] {
     out := [Int]{}
-    loop x in xs -> out.push(x)
+    loop value in xs -> out.push(value)
     out
 }
-
-fn abs_f(x: Float) -> Float {
-    if x < 0.0 -> return 0.0 - x
-    x
-}
-
-fn sqrt_f(x: Float) -> Float {
-    if x <= 0.0 -> return 0.0
-    g := x
-    loop _ in 0..<24 -> g = 0.5 * (g + x / g)
-    g
-}
-
-fn exp_f(x: Float) -> Float {
-    if x > 88.0 -> return 1.0 / 0.0
-    if x < -88.0 -> return 0.0
-    ln2 :: 0.6931471805599453
-    k := 0
-    r := x
-    loop r > ln2 {
-        r = r - ln2
-        k = k + 1
-        if k > 200 -> break
-    }
-    loop r < 0.0 - ln2 {
-        r = r + ln2
-        k = k - 1
-        if k < -200 -> break
-    }
-    p :: 1.0 + r + r * r * (0.5 + r * (0.16666666666666666 + r * 0.041666666666666664))
-    out := p
-    loop _ in 0..<k -> out = out * 2.0
-    nk := 0 - k
-    loop _ in 0..<nk -> out = out * 0.5
-    out
-}
-
-fn ln_f(x: Float) -> Float {
-    if x <= 0.0 -> return 0.0 - 1.0 / 0.0
-    e := 0
-    f := x
-    loop f >= 2.0 {
-        f = f * 0.5
-        e = e + 1
-        if e > 2000 -> break
-    }
-    loop f < 1.0 {
-        f = f * 2.0
-        e = e - 1
-        if e < -2000 -> break
-    }
-    y :: (f - 1.0) / (f + 1.0)
-    y2 :: y * y
-    s := y
-    t := y
-    loop i in 1..<8 {
-        t = t * y2
-        s = s + t / (Float{2 * i + 1})
-    }
-    (Float{e}) * 0.6931471805599453 + 2.0 * s
-}
-
-fn sin_f(x: Float) -> Float {
-    z :: wrap_pi(x)
-    z2 :: z * z
-    z * (1.0 - z2 * (0.16666666666666666 - z2 * 0.008333333333333333))
-}
-
-fn cos_f(x: Float) -> Float {
-    z :: wrap_pi(x)
-    z2 :: z * z
-    1.0 - z2 * (0.5 - z2 * 0.041666666666666664)
-}
-
-fn wrap_pi(x: Float) -> Float {
-    pi :: 3.141592653589793
-    two :: 6.283185307179586
-    z := x
-    n := 0
-    loop z > pi {
-        z = z - two
-        n = n + 1
-        if n > 100000 -> break
-    }
-    loop z < 0.0 - pi {
-        z = z + two
-        n = n + 1
-        if n > 100000 -> break
-    }
-    z
-}
-
-fn split_bar(text: String) -> [String] { split_byte(text, 124) }
-fn split_comma(text: String) -> [String] { split_byte(text, 44) }
-fn split_x(text: String) -> [String] { split_byte(text, 120) }
-
-fn split_byte(text: String, sep: Int) -> [String] {
-    out := [String]{}
-    cur := [U8]{}
-    loop b in text.bytes() {
-        if b == (U8{sep}) {
-            out.push(String.from_bytes(cur) ?? "")
-            cur = [U8]{}
-        } else {
-            cur.push(b)
-        }
-    }
-    out.push(String.from_bytes(cur) ?? "")
-    out
-}
-
-fn parse_int(text: String) -> ?Int {
-    n := 0
-    any := false
-    sig := 1
-    loop b in text.bytes() {
-        d :: b
-        if !any && d == 45 {
-            sig = 0 - 1
-            next
-        }
-        if d < 48 || d > 57 -> return None
-        n = n * 10 + (d - 48)
-        any = true
-    }
-    if !any -> return None
-    Val(n * sig)
-}
-
-fn host_has_cuda() -[Env]> Bool { panic("host_has_cuda") }
-fn host_has_metal() -[Env]> Bool { panic("host_has_metal") }
-fn host_has_vulkan() -[Env]> Bool { panic("host_has_vulkan") }
-fn host_has_webgpu() -[Env]> Bool { panic("host_has_webgpu") }
-fn host_transfer(device: String, n: Int) -[Env]> panic("host_transfer")
-fn host_stream_sync(id: Int) -[Env]> panic("host_stream_sync")

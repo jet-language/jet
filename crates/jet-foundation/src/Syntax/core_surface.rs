@@ -529,12 +529,9 @@ impl TypedHeadKind {
         }
     }
 
-    /// `URL` is the canonical source spelling for the existing `Url` nominal.
+    /// `URL` is the canonical source spelling and nominal identity.
     pub const fn internal_type_name(self) -> &'static str {
-        match self {
-            Self::URL => "Url",
-            _ => self.source_name(),
-        }
+        self.source_name()
     }
 
     pub const fn is_typed_text(self) -> bool {

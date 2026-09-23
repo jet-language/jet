@@ -327,6 +327,8 @@ pub(super) struct TirConstantDef {
     /// Compile-time bindings are folded at use sites and have no runtime
     /// representation in the target artifact.
     pub is_comptime: bool,
+    /// Mutable and persisted module bindings need owning runtime storage.
+    pub is_storage: bool,
     pub value: CtValue,
 }
 
@@ -963,8 +965,52 @@ fn lower_mir_field_for_owner(
     }
 }
 
-fn lower_type_cli_entry(entry: &super::artifact_plan::TirCliEntry) -> MirCliEntry {
-    MirCliEntry {
+fn resolve_function_id(
+    registry: &super::mir::FunctionRegistry,
+    key: &str,
+    module: &str,
+    span: Span,
+) -> Result<MirFunctionId, super::LowerError> {
+    registry.resolve(key, module, span)
+}
+
+fn lower_type_cli_entry(
+    entry: &super::artifact_plan::TirCliEntry,
+    registry: &super::mir::FunctionRegistry,
+) -> Result<MirCliEntry, super::LowerError> {
+    let commands = entry
+        .commands
+        .iter()
+        .filter_map(|command| {
+            command
+                .function
+                .as_ref()
+                .map(|function| (command, function))
+        })
+        .map(|(command, function)| {
+            Ok(MirCliCommand {
+                name: command.name.clone(),
+                description: command.description.clone(),
+                function: resolve_function_id(
+                    registry,
+                    &function.key,
+                    &function.module,
+                    function.span,
+                )?,
+                receiver: command
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| MirTypeId(stable_id("mir-type", receiver))),
+                inputs: command
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, input)| super::mir::lower_cli_input(input, ordinal, None))
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>, super::LowerError>>()?;
+    Ok(MirCliEntry {
         record_inputs: entry.record_inputs,
         description: entry.description.clone(),
         inputs: entry
@@ -973,35 +1019,15 @@ fn lower_type_cli_entry(entry: &super::artifact_plan::TirCliEntry) -> MirCliEntr
             .enumerate()
             .map(|(ordinal, input)| super::mir::lower_cli_input(input, ordinal, None))
             .collect(),
-        commands: entry
-            .commands
-            .iter()
-            .filter_map(|command| {
-                let function = command.function.as_ref()?;
-                Some(MirCliCommand {
-                    name: command.name.clone(),
-                    description: command.description.clone(),
-                    function: MirFunctionId(stable_id("mir-function", &function.key)),
-                    receiver: command
-                        .receiver
-                        .as_ref()
-                        .map(|receiver| MirTypeId(stable_id("mir-type", receiver))),
-                    inputs: command
-                        .inputs
-                        .iter()
-                        .enumerate()
-                        .map(|(ordinal, input)| super::mir::lower_cli_input(input, ordinal, None))
-                        .collect(),
-                })
-            })
-            .collect(),
+        commands,
         standard: entry.standard,
         version: entry.version.clone(),
-    }
+    })
 }
 
 pub(super) fn lower_type_defs(
     definitions: &[TirTypeDef],
+    registry: &super::mir::FunctionRegistry,
 ) -> Result<Vec<MirTypeDef>, super::LowerError> {
     let mut seen = std::collections::HashSet::with_capacity(definitions.len());
     let mut rows = Vec::with_capacity(definitions.len());
@@ -1012,13 +1038,16 @@ pub(super) fn lower_type_defs(
                 format!("duplicate checked type definition `{}`", definition.key),
             ));
         }
-        rows.push(definition.to_mir()?);
+        rows.push(definition.to_mir(registry)?);
     }
     Ok(rows)
 }
 
 impl TirTypeDef {
-    pub(super) fn to_mir(&self) -> Result<MirTypeDef, super::LowerError> {
+    pub(super) fn to_mir(
+        &self,
+        registry: &super::mir::FunctionRegistry,
+    ) -> Result<MirTypeDef, super::LowerError> {
         let kind = match &self.kind {
             TirTypeDefKind::Struct { fields, methods } => MirTypeDefKind::Struct {
                 fields: fields
@@ -1027,8 +1056,8 @@ impl TirTypeDef {
                     .collect(),
                 methods: methods
                     .iter()
-                    .map(|key| MirFunctionId(stable_id("mir-function", key)))
-                    .collect(),
+                    .map(|key| resolve_function_id(registry, key, &self.module, self.span))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             TirTypeDefKind::Enum { variants, methods } => MirTypeDefKind::Enum {
                 variants: variants
@@ -1061,8 +1090,8 @@ impl TirTypeDef {
                     .collect(),
                 methods: methods
                     .iter()
-                    .map(|key| MirFunctionId(stable_id("mir-function", key)))
-                    .collect(),
+                    .map(|key| resolve_function_id(registry, key, &self.module, self.span))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             TirTypeDefKind::Distinct { base, range } => MirTypeDefKind::Distinct {
                 base: lower_type(base),
@@ -1136,14 +1165,25 @@ impl TirTypeDef {
             cli_bindings: self
                 .cli_bindings
                 .iter()
-                .map(|binding| MirCliBinding {
-                    name: binding.name.clone(),
-                    function: MirFunctionId(stable_id("mir-function", &binding.function_key)),
-                    span: binding.span,
-                    markers: binding.markers.clone(),
+                .map(|binding| {
+                    Ok::<_, super::LowerError>(MirCliBinding {
+                        name: binding.name.clone(),
+                        function: resolve_function_id(
+                            registry,
+                            &binding.function_key,
+                            &self.module,
+                            binding.span,
+                        )?,
+                        span: binding.span,
+                        markers: binding.markers.clone(),
+                    })
                 })
-                .collect(),
-            cli: self.cli.as_ref().map(lower_type_cli_entry),
+                .collect::<Result<Vec<_>, _>>()?,
+            cli: self
+                .cli
+                .as_ref()
+                .map(|entry| lower_type_cli_entry(entry, registry))
+                .transpose()?,
             ownership: ownership_mode(self.ownership),
             boxed_edges: self.boxed_edges.clone(),
             kind,
@@ -1849,19 +1889,23 @@ fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
 }
 
 fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
+    let value = super::source_constant_value(definition).unwrap_or(CtValue::Unit);
+    let ty = definition
+        .ty
+        .clone()
+        .or_else(|| definition.ct.as_ref().map(crate::AST::CtValue::jet_type))
+        .or_else(|| (!matches!(value, CtValue::Unit)).then(|| value.jet_type()))
+        .unwrap_or(Type::Named("Unit".into()));
     TirConstantDef {
         module: module.to_string(),
         key: qualified_key(module, &definition.name),
         name: definition.name.clone(),
         span: definition.span,
         visibility: TirVisibility::Public,
-        ty: definition
-            .ty
-            .clone()
-            .or_else(|| definition.ct.as_ref().map(|value| value.jet_type()))
-            .unwrap_or(Type::Named("Unit".into())),
+        ty,
         is_comptime: definition.is_comptime,
-        value: definition.ct.clone().unwrap_or(CtValue::Unit),
+        is_storage: !definition.is_comptime && (definition.is_persist || definition.mutable),
+        value,
     }
 }
 
@@ -1963,7 +2007,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("WebFormControl", &["Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden"]),
     // D-DX-LOADERS1: the native Prelude carrier still needs a checked MIR
     // owner row so tag-only `DataLoaderKind` patterns lower on every tier.
-    ("DataLoaderKind", &["File", "Url", "Database", "Value"]),
+    ("DataLoaderKind", &["File", "URL", "Database", "Value"]),
     // D-DX-LOADERS1: the source-facing data records carry these closed native
     // enums; keep their checked tag rows beside DataLoaderKind.
     (
@@ -1978,6 +2022,12 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Overflow",
             "State",
             "Bridge",
+            "Unsupported",
+            "DuplicateKey",
+            "MissingKey",
+            "WrongOwner",
+            "StaleRevision",
+            "InvalidValue",
         ],
     ),
     ("DataFormat", &["CSV", "JSON", "JSONL", "Parquet", "Arrow"]),
@@ -1988,7 +2038,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     (
         "DataInvalidationCause",
         &[
-            "None",
+            "NoCause",
             "Loader",
             "Input",
             "ArchiveMember",
@@ -2316,7 +2366,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         &[
             "step",
             "path",
-            "copy",
+            "clone_value",
             "ownership",
             "trust",
             "fallback",
@@ -2598,6 +2648,7 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
             .iter()
             .any(|(owned, _, _)| *owned == name)
         || crate::Codegen::core_email_rust_type_name(name).is_some()
+        || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
         || matches!(
             name,
@@ -3279,6 +3330,21 @@ fn compiler_owned_type_defs(
                             .expect("canonical Rotation field"),
                     )
                 }),
+            );
+            row.generic_params = vec![super::TGenericParam {
+                name: "T".to_string(),
+                bounds: Vec::new(),
+            }];
+            row
+        }))
+        .chain(std::iter::once({
+            let mut row = compiler_owned_record(
+                module,
+                crate::Syntax::TYPE_MEASUREMENT,
+                [
+                    ("value", Type::Named("T".to_string())),
+                    ("uncertainty", Type::Named("T".to_string())),
+                ],
             );
             row.generic_params = vec![super::TGenericParam {
                 name: "T".to_string(),

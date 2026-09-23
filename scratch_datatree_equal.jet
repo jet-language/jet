@@ -1,0 +1,33 @@
+enum DataTree { Null Bool(Bool) Int(Int) Float(Float) Text(String) Array([DataTree]) Object([String:DataTree]) }
+impl DataTree { pub fn equal_unordered(self, other: DataTree) -> Bool { tree_equal(self, other) } }
+fn tree_equal(left: DataTree, right: DataTree) -> Bool {
+    if left == {
+        .Null -> {
+            if right == {
+                .Null -> return true
+                else -> return false
+            }
+        }
+        .Bool(a) -> {
+            if right == {
+                .Bool(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Array(xs) -> {
+            if right == {
+                .Array(ys) -> {
+                    if xs.len() != ys.len() -> return false
+                    same_array := true
+                    loop i in 0..<xs.len() {
+                        same_array = false
+                    }
+                    return same_array
+                }
+                else -> return false
+            }
+        }
+        else -> return false
+    }
+    false
+}

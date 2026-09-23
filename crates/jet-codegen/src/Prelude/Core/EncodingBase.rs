@@ -237,6 +237,38 @@ pub(crate) fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
     }
     out
 }
+/// Encode a packed integer list without materializing an intermediate byte
+/// vector. JIT `[U8]` literals use the dense `i64` carrier.
+pub(crate) fn jet_std_b64_encode_ints(values: &[i64]) -> String {
+    let mut out = String::with_capacity((values.len() + 2) / 3 * 4);
+    for chunk in values.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as u32
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as u32
+        } else {
+            0
+        };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(JET_B64_CHARS[(n >> 18) as usize] as char);
+        out.push(JET_B64_CHARS[((n >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            JET_B64_CHARS[((n >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            JET_B64_CHARS[(n & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
 
 pub(crate) fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
     jet_std_b64_encode(bytes)

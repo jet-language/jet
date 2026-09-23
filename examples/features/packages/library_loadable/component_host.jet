@@ -1,13 +1,14 @@
-// D-EMBED1=E: the same pub export surface built as a sandbox Component.
-// The canonical backend spelling is `--target=sandbox`; this host carries the
-// Component runtime and gets the sandbox boundary.
+// D-EMBED1=E / D-EMBED2=C: the same pub export surface built as a
+// sandbox Component. A Component host uses one narrowed Authority for module
+// loading and preflights every declared typed import before guest execution.
+// Native hosts use the same named export surface but remain trusted in-process.
 use core.plugin as plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])
     library :: plugin.load("build/library.wasm", policy)
-    tick :: library.call_int("on-tick", [41]) ?? -1
-    enabled :: library.call_bool("is-enabled", [true]) ?? false
-    greeting :: library.call_text("greet", ["Ada"]) ?? "component call failed"
+    tick :: library.on_tick(41) ?? panic("on_tick failed")
+    enabled :: library.is_enabled(true) ?? panic("is_enabled failed")
+    greeting :: library.greet("Ada") ?? panic("greet failed")
     print("{tick}|{enabled}|{greeting}")
 }

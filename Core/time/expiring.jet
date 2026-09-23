@@ -1,14 +1,23 @@
-// core.time.expiring — clock-bound helpers without a crypto dependency.
+// core.time.expiring — pure deadline comparison for clock-bound values.
 //
-// Vault leases (`ExpiringSecret`) live in `core.crypto.vault`. This module is
-// the time-side comparison so callers can ask "has this millisecond deadline
-// passed?" without importing the vault.
-/// True when `now_ms` is at or after `expires_at_ms`. Equal counts as expired
-/// so a lease that ends on a tick is not usable on that tick.
-pub fn expired(expires_at_ms: Int, now_ms: Int) -> Bool { now_ms >= expires_at_ms }
+// The caller owns the absolute millisecond deadline.  A TTL is applied before
+// calling these helpers (`deadline_ms = start_ms + ttl_ms`); this module does
+// not own a clock or mutate the value, so refresh is an explicit new deadline.
+//
+// Expiry is an open boundary: the value is valid at its deadline and expires
+// only on a later tick.  A zero TTL is therefore valid at its starting tick;
+// a negative TTL is already expired there.  The same rule makes every
+// non-positive remaining interval return zero.
+/// True only when `now_ms` is strictly after `expires_at_ms`.
+pub fn expired(expires_at_ms: Int, now_ms: Int) -> Bool { now_ms > expires_at_ms }
 
-/// Remaining milliseconds, clamped at 0.
+/// Remaining milliseconds, clamped at zero and saturated at `Int`'s maximum.
 pub fn remaining_ms(expires_at_ms: Int, now_ms: Int) -> Int {
-    if expires_at_ms <= now_ms -> return 0
+    if now_ms >= expires_at_ms -> return 0
+    // When `now_ms` is negative, subtraction can exceed the positive Int
+    // range even though the interval is valid.  Saturate instead of wrapping.
+    if now_ms < 0 && expires_at_ms > 9223372036854775807 + now_ms {
+        return 9223372036854775807
+    }
     expires_at_ms - now_ms
 }

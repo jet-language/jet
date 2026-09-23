@@ -2625,11 +2625,14 @@ where
 {
     xs.iter().flat_map(f).collect()
 }
-fn jet_list_filter_map<T, U, E, F>(xs: Vec<T>, mut f: F) -> Vec<U>
+fn jet_list_filter_map_iter<T: 'static, U: 'static, E: 'static, F: 'static>(
+    xs: Vec<T>,
+    f: F,
+) -> JetIter<U>
 where
     F: FnMut(&T) -> Result<U, E>,
 {
-    xs.iter().filter_map(|x| f(x).ok()).collect()
+    jet_iter_filter_map(jet_iter_from_vec(xs), f)
 }
 fn jet_list_try_collect<T, E, I>(xs: I) -> Result<Vec<T>, E>
 where
@@ -3709,7 +3712,6 @@ pub(crate) fn jet_coll_set_remove(
 pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &String) -> bool {
     set.items.iter().any(|value| value == item)
 }
-
 pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {
     set.items.len() as i64
 }
@@ -3717,6 +3719,7 @@ pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {
 pub(crate) fn jet_coll_set_is_empty(set: &JetStringSet) -> bool {
     set.items.is_empty()
 }
+
 
 pub(crate) fn jet_coll_set_items(set: &JetStringSet) -> Vec<String> {
     set.items.clone()

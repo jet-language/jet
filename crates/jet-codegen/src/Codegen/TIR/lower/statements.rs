@@ -1236,6 +1236,12 @@ pub(crate) fn force_thread_callback_value(mut init: TExpr, _cx: &Cx) -> TExpr {
     if let TExprKind::Lambda(lam) = &mut init.kind {
         lam.arc = true;
         lam.rc = false;
+        let moved = lam.capture_facts.moved.clone();
+        for (source, _, _) in &lam.captures {
+            if !moved.contains(source) {
+                lam.capture_facts.cloned.insert(source.clone());
+            }
+        }
     } else if let Some(name) = match &init.kind {
         TExprKind::FnValue {
             kind: TFnValueKind::NamedFn {

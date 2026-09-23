@@ -205,9 +205,45 @@ impl FunctionRegistry {
             return_types: HashMap::new(),
             receiver_access: HashMap::new(),
         };
+        // Resolve stable-ID hash collisions from a canonical identity order.
+        // Normal rows retain their historical IDs; only a real collision gets
+        // a deterministic salted identity, so allocation order is irrelevant.
+        let mut ordered = functions
+            .iter()
+            .map(|function| (registry_function_identity(function), function))
+            .collect::<Vec<_>>();
+        ordered.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let mut assigned = HashMap::<String, MirFunctionId>::new();
+        let mut owners = HashMap::<MirFunctionId, String>::new();
+        for (identity, function) in ordered {
+            if assigned.contains_key(&identity) {
+                return Err(LowerError::new(
+                    function.source_span,
+                    format!("duplicate checked function identity `{identity}`"),
+                ));
+            }
+            let mut salt = 0u64;
+            let id = loop {
+                let candidate_identity = if salt == 0 {
+                    identity.clone()
+                } else {
+                    format!("{identity}|collision:{salt}")
+                };
+                let candidate = MirFunctionId(stable_id("mir-function", &candidate_identity));
+                match owners.get(&candidate) {
+                    None => {
+                        owners.insert(candidate, identity.clone());
+                        break candidate;
+                    }
+                    Some(owner) if owner == &identity => break candidate,
+                    Some(_) => salt += 1,
+                }
+            };
+            assigned.insert(identity, id);
+        }
         for function in functions {
-            let identity = function_identity(function);
-            let id = MirFunctionId(stable_id("mir-function", &identity));
+            let identity = registry_function_identity(function);
+            let id = assigned[&identity];
             let receiver = match &function.kind {
                 TFuncKind::Method { self_conv, .. } | TFuncKind::TraitMethod { self_conv, .. } => {
                     *self_conv
@@ -219,12 +255,7 @@ impl FunctionRegistry {
                     .receiver_access
                     .insert(id, lower_mir_convention(access));
             }
-            if registry.by_identity.insert(identity.clone(), id).is_some() {
-                return Err(LowerError::new(
-                    function.source_span,
-                    format!("duplicate checked function identity `{identity}`"),
-                ));
-            }
+            registry.by_identity.insert(identity, id);
             registry.return_types.insert(id, function.ret.clone());
             registry
                 .by_key
@@ -277,13 +308,20 @@ impl FunctionRegistry {
     }
 
     fn id_for(&self, function: &TFunc) -> Result<MirFunctionId, LowerError> {
-        let identity = function_identity(function);
-        self.by_identity.get(&identity).copied().ok_or_else(|| {
-            LowerError::new(
-                function.source_span,
-                format!("missing checked function `{identity}`"),
-            )
-        })
+        let identity = registry_function_identity(function);
+        if let Some(id) = self.by_identity.get(&identity).copied() {
+            return Ok(id);
+        }
+        // Nested synthetic helpers are created during lowering after the
+        // top-level registry is built.  They still use this exact canonical
+        // identity, so every emitted row and reference shares one ID.
+        if function.synthetic {
+            return Ok(MirFunctionId(stable_id("mir-function", &identity)));
+        }
+        Err(LowerError::new(
+            function.source_span,
+            format!("missing checked function `{identity}`"),
+        ))
     }
     pub(super) fn return_type_for(&self, id: MirFunctionId) -> Option<Type> {
         self.return_types.get(&id).cloned().flatten()
@@ -348,10 +386,46 @@ impl FunctionRegistry {
             return Vec::new();
         };
         let owner_method = canonical_target_type(current_module, raw_prefix);
+        // Static generic calls carry the full applied owner (`Box<Int>::new`)
+        // while the checked method target is indexed by owner + method. Resolve
+        // that exact owner before interpreting an inner `::` as a trait
+        // separator; canonical nominal identities themselves contain `::`.
+        let direct_owner = self
+            .by_owner_method
+            .iter()
+            .filter(|((_, owner, candidate_method), _)| {
+                rhs.is_none() && owner == &owner_method && candidate_method == method
+            })
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect::<Vec<_>>();
+        if !direct_owner.is_empty() {
+            return direct_owner;
+        }
         if let Some((raw_owner, trait_name)) = raw_prefix.rsplit_once("::") {
             let candidates =
                 self.typed_target_candidates(raw_owner, trait_name, method, rhs, current_module);
             if rhs.is_some() || !candidates.is_empty() {
+                return candidates;
+            }
+            // A bounded generic receiver can reach MIR with no concrete owner
+            // spelling. Keep the lookup checked and deterministic: a lone
+            // implementation of this trait method is usable; several remain
+            // ambiguous rather than guessing.
+            if raw_owner.is_empty() {
+                let candidates = self
+                    .by_target
+                    .iter()
+                    .filter(|(target, _)| {
+                        target.module == current_module
+                            && target.trait_name.as_deref() == Some(trait_name)
+                            && target.method == method
+                            && match rhs {
+                                Some(rhs) => target.rhs.as_deref() == Some(rhs),
+                                None => target.rhs.is_none(),
+                            }
+                    })
+                    .flat_map(|(_, ids)| ids.iter().copied())
+                    .collect();
                 return candidates;
             }
         }
@@ -410,7 +484,7 @@ impl FunctionRegistry {
         }
     }
 
-    fn resolve(
+    pub(super) fn resolve(
         &self,
         name: &str,
         current_module: &str,
@@ -535,7 +609,8 @@ fn method_leaf(name: &str) -> &str {
 fn function_operator_rhs(function: &TFunc) -> Option<&str> {
     let separator = top_level_last_separator(&function.key)?;
     let method_part = &function.key[separator + 2..];
-    split_method_rhs(method_part).and_then(|(_, rhs)| rhs)
+    let (_, rhs) = split_method_rhs(method_part)?;
+    rhs
 }
 
 fn function_target_key(function: &TFunc) -> Option<FunctionTargetKey> {
@@ -570,6 +645,23 @@ fn function_identity(function: &TFunc) -> String {
         "{}|{}|{}|{}",
         function.key, function.source_file, function.source_span.start, function.source_span.end
     )
+}
+
+fn synthetic_function_identity(function: &TFunc) -> String {
+    format!(
+        "{}|synthetic|{}|{}",
+        function_identity(function),
+        function.module,
+        function.name
+    )
+}
+
+fn registry_function_identity(function: &TFunc) -> String {
+    if function.synthetic {
+        synthetic_function_identity(function)
+    } else {
+        function_identity(function)
+    }
 }
 
 fn anonymous_union_shape_matches(left: &[MirVariant], right: &[MirVariant]) -> bool {
@@ -772,7 +864,7 @@ fn lower_anonymous_union_type_defs(
 
 pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> {
     let function_registry = FunctionRegistry::build(&program.funcs)?;
-    let mut types = lower_type_defs(&program.declarations.type_defs)?;
+    let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
     // trait rows historically did not enter the projection map, so preserve
@@ -1729,9 +1821,10 @@ fn lower_impl_rows(
         for method_key in &row.methods {
             let mut candidates = Vec::new();
             if let Some(id) = resolve_function_key(method_key, &row.module, registry) {
-                if let Some(function) = functions.iter().find(|function| {
-                    MirFunctionId(stable_id("mir-function", &function_identity(function))) == id
-                }) {
+                if let Some(function) = functions
+                    .iter()
+                    .find(|function| registry.id_for(function).ok() == Some(id))
+                {
                     candidates.push((id, function));
                 }
             }
@@ -1739,7 +1832,7 @@ fn lower_impl_rows(
                 .iter()
                 .filter(|function| impl_method_matches(function, row, method_key))
             {
-                let id = MirFunctionId(stable_id("mir-function", &function_identity(function)));
+                let id = registry.id_for(function)?;
                 if !candidates
                     .iter()
                     .any(|(candidate, _)| *candidate == id)
@@ -1852,12 +1945,7 @@ fn lower_impl_rows(
     result.retain(|row| {
         row.methods.iter().all(|id| {
             functions.iter().any(|function| {
-                function_identity(function)
-                    .as_bytes()
-                    .iter()
-                    .fold(0u64, |acc, byte| acc.wrapping_add(*byte as u64))
-                    != 0
-                    && MirFunctionId(stable_id("mir-function", &function_identity(function))) == *id
+                registry.id_for(function).ok() == Some(*id)
             })
         })
     });
@@ -2029,6 +2117,7 @@ fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<
                 span: row.span,
                 visibility: lower_decl_visibility(row.visibility),
                 ty: lower_type(&row.ty),
+                is_storage: row.is_storage,
                 value: lower_constant_value(&row.value)?,
             })
         })
@@ -2253,13 +2342,14 @@ fn function_block_id(
     reference: &TirFunctionRef,
     block: Option<&str>,
     functions: &[TFunc],
+    registry: &FunctionRegistry,
 ) -> Option<(MirFunctionId, MirBlockId)> {
     let function = functions.iter().find(|function| {
         function.source_span == reference.span
             && (function.key == reference.key
                 || (function.module == reference.module && function.name == reference.name))
     })?;
-    let function_id = MirFunctionId(stable_id("mir-function", &function_identity(function)));
+    let function_id = registry.id_for(function).ok()?;
     let role = block.unwrap_or("entry");
     let identity = construct_identity(function, "block", reference.span, role, "");
     Some((function_id, MirBlockId(stable_id("mir-block", &identity))))
@@ -2303,7 +2393,12 @@ fn lower_harness_rows(
                 .iter()
                 .filter_map(|point| {
                     let (function, block) =
-                        function_block_id(&point.function, point.block.as_deref(), functions)?;
+                        function_block_id(
+                            &point.function,
+                            point.block.as_deref(),
+                            functions,
+                            registry,
+                        )?;
                     Some(MirCoveragePoint {
                         id: jet_foundation::MIR::MirCoveragePointId(stable_id(
                             "mir-coverage",
@@ -3346,7 +3441,10 @@ fn lower_trait_ref(ctx: &LowerCtx<'_>, name: &str) -> Result<MirTraitRef, LowerE
         .get(name)
         .cloned()
         .or_else(|| {
-            if name.contains("::") || super::tir_to_mir_types::is_compiler_owned_trait(name) {
+            if name.contains("::")
+                || super::tir_to_mir_types::is_compiler_owned_trait(name)
+                || name == crate::Generics::CHECKED_TEXT
+            {
                 Some(name.to_string())
             } else {
                 None
@@ -5411,12 +5509,6 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn function_id(&self) -> Result<MirFunctionId, LowerError> {
-        if self.function.synthetic {
-            return Ok(MirFunctionId(stable_id(
-                "mir-function",
-                &function_identity(self.function),
-            )));
-        }
         self.function_registry.id_for(self.function)
     }
 
@@ -7644,16 +7736,8 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn function_id_for(&self, name: &str) -> Result<MirFunctionId, LowerError> {
-        let result = self
-            .function_registry
-            .resolve(name, &self.function.module, self.span());
-        if result.is_err() && name.contains("encode_hole") {
-            eprintln!(
-                "generic resolve debug: module={} function={} name={name}",
-                self.function.module, self.function.name
-            );
-        }
-        result
+        self.function_registry
+            .resolve(name, &self.function.module, self.span())
     }
     pub(super) fn resolve_function_id(&self, name: &str) -> Result<MirFunctionId, LowerError> {
         self.function_id_for(name)
@@ -8339,17 +8423,11 @@ impl<'a> LowerCtx<'a> {
                 } else {
                     MirAccess::Read
                 };
-                let place = match &place.kind {
-                    TExprKind::Local(local) => Some(self.place_for_local(local, access)?),
-                    _ if *mutable => {
-                        return Err(self.error(
-                            self.span(),
-                            "mutable Core argument is not backed by a checked local place",
-                        ));
-                    }
-                    _ => None,
-                };
-                (access, place)
+                let place = self.lower_place(
+                    &TPlace::Expr(Box::new((**place).clone())),
+                    access,
+                )?;
+                (access, Some(place))
             }
             TExprKind::Clone(_)
             | TExprKind::ExplicitCopy(_)

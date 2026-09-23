@@ -1,7 +1,7 @@
 use super::alloc_ptrs::{e3101, ptr_type};
 use super::serde_diags::unknown_core_item;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Checker;
+use crate::Sema::{json_ty, Checker};
 use crate::Syntax;
 use crate::AST::{Expr, Type};
 impl<'a> Checker<'a> {
@@ -13,6 +13,45 @@ impl<'a> Checker<'a> {
         alias_span: Span,
         span: Span,
     ) -> Option<Type> {
+        // Direct type imports (`use core.encoding.[DataTree, DataEvent]`)
+        // bind the type name as an alias to the owning Core module. Resolve
+        // its constructors here instead of treating `DataTree.Text` as a
+        // module item lookup.
+        if module == "core.encoding"
+            && alias == "DataTree"
+            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object")
+        {
+            self.record_import_alias_reference(alias, alias_span);
+            return Some(json_ty());
+        }
+        if module == "core.encoding"
+            && matches!(alias, "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
+            && self
+                .resolve_enum_variants_cloned(alias)
+                .is_some_and(|variants| variants.contains_key(name))
+        {
+            self.record_import_alias_reference(alias, alias_span);
+            return Some(Type::Named(alias.to_string()));
+        }
+        // Canonical Core enum imports (`use core.compute.[ComputeError]`,
+        // etc.) keep the imported item alongside its module alias. Resolve
+        // dotted variants through the generated leaf-kind/variant tables
+        // rather than treating the variant as a module member.
+        if let Some(item) = self.core_item_imports.get(alias).cloned() {
+            let is_core_enum = matches!(
+                jet_foundation::CoreModuleExports::core_leaf_kind(module, &item),
+                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+            );
+            if is_core_enum
+                && self
+                    .resolve_enum_variants_cloned(&item)
+                    .is_some_and(|variants| variants.contains_key(name))
+            {
+                self.record_import_alias_reference(alias, alias_span);
+                return Some(Type::Named(item));
+            }
+        }
+
         let result = match (module, name) {
             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,

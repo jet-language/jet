@@ -262,12 +262,6 @@ pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-// Archive behavior is owned by the same source included by the package build,
-// AOT bridge, JIT host, and resident interpreter. Keep these names as the
-// comptime call seam while avoiding a second interpreter implementation.
-pub(super) fn zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
-    jet_foundation::CoreArchive::jet_archive_zip_compress(name, data)
-}
 
 pub(super) fn zip_decompress(data: &[u8]) -> Vec<u8> {
     jet_foundation::CoreArchive::jet_archive_zip_decompress(data)
@@ -686,11 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_zip_and_tar_round_trip() {
-        let zip = zip_compress("hello.txt", b"hello");
-        assert_eq!(&zip[..4], b"PK\x03\x04");
-        assert_eq!(zip_decompress(&zip), b"hello");
-
+    fn stored_tar_round_trip() {
         let tar = tar_add(&[], "hello.txt", b"hello");
         assert_eq!(&tar[257..263], b"ustar\0");
         assert_eq!(tar_get(&tar, "hello.txt"), b"hello");

@@ -388,13 +388,21 @@ where
     results
 }
 
-fn jet_list_para_map<T, U, F>(xs: Vec<T>, f: F, limit: i64) -> Vec<U>
+fn jet_list_para_map<T, U, F>(
+    xs: Vec<T>,
+    f: F,
+    limit: jet_foundation::Numeric::JetInt,
+) -> Vec<U>
 where
     T: Sync,
     U: Send,
     F: Fn(&T) -> U + Sync,
 {
-    let worker_limit = usize::try_from(limit).unwrap_or(usize::MAX).max(1);
+    let worker_limit = jet_std::jet_int_owned_to_i64(&limit)
+        .ok()
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(usize::MAX)
+        .max(1);
     jet_list_para_chunks(xs.len(), worker_limit, |range| {
         let mut out = Vec::with_capacity(range.len());
         for index in range {

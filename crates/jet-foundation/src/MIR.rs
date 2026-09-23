@@ -1764,6 +1764,7 @@ pub struct MirConstantDef {
     pub span: Span,
     pub visibility: MirVisibility,
     pub ty: MirType,
+    pub is_storage: bool,
     pub value: MirConstant,
 }
 

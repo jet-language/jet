@@ -1,9 +1,16 @@
-// Bare statements are the implicit fn run body. Declarations stay file-wide.
-print("script entry")
+// Ordinary files run only their explicit `fn run` body. Module declarations
+// remain available to every function in the file.
 limit :: 2
-print(limit)
-print(even(limit + 2))
-print(helper())
+counter := 0
+
+fn run() {
+    print("script entry")
+    print(limit)
+    counter += limit
+    print(counter)
+    print(even(limit + 2))
+    print(helper())
+}
 
 fn helper() -> String { "declaration" }
 

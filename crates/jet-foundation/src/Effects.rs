@@ -243,6 +243,12 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
 /// Fallback for special calls that do not yet have a plain Core-call row.
 /// Plain rows never reach this resolver; their effect is stored on the row.
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
+    if matches!(
+        (module, method),
+        ("core.sys", "success") | ("core.process", "status_ok")
+    ) {
+        return None;
+    }
     // #1691 retired the jet.* internal module keys: callers always pass the
     // canonical `core.*` name, so no normalization step remains.
     // D-DET1: the deterministic input constructors carry NO ambient effect —

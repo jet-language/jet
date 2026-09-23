@@ -2396,9 +2396,14 @@ pub(super) fn lower_expr(
                 (MirCallee::TraitMethod { method: method_id, trait_ref, receiver: owner }, access)
             } else {
                 let function = ctx.function_id_for(&instance_method_lookup(method, &recv.ty))?;
-                let access = ctx.function_registry.receiver_access.get(&function).copied().ok_or_else(|| {
-                    ctx.error(ctx.span(), "checked instance method has no receiver convention")
-                })?;
+                let access = ctx
+                    .function_registry
+                    .receiver_access
+                    .get(&function)
+                    .copied()
+                    .ok_or_else(|| {
+                        ctx.error(ctx.span(), "checked instance method has no receiver convention")
+                    })?;
                 (MirCallee::Method { function, owner }, access)
             };
             let receiver = if access == MirAccess::Read {
@@ -2529,6 +2534,34 @@ pub(super) fn lower_expr(
                     })?;
                     return ctx.emit(
                         "encoding-limits-safe",
+                        Some(expr.ty.clone()),
+                        MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                            call,
+                            args,
+                            owner_type_args,
+                            type_args,
+                        }),
+                    );
+                }
+                if *rooted && path == "jet_std::DataLimits" && member == "safe" {
+                    let call = ctx.intern_prelude_route(super::TPreludeRoute {
+                        family: MirPreludeFamily::StaticPrelude,
+                        module: "core.data".to_string(),
+                        member: "limits_safe".to_string(),
+                        symbol: MirSymbol::Prelude("jet_std::DataLimits::safe".to_string()),
+                        signature: MirCallSignature {
+                            arity: 0,
+                            max_arity: 0,
+                            borrow_mask: Vec::new(),
+                        },
+                        effect: None,
+                        fallibility: carrier.clone(),
+                        abi: MirPreludeAbi::Value,
+                        authority: None,
+                        db_metadata: None,
+                    })?;
+                    return ctx.emit(
+                        "data-limits-safe",
                         Some(expr.ty.clone()),
                         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
                             call,
@@ -3835,9 +3868,46 @@ pub(super) fn lower_expr(
                         | THandleOp::FakeEmail
                         | THandleOp::FakeHost
                         | THandleOp::FakeAddress
+                        | THandleOp::TcpStreamRead
+                        | THandleOp::TcpStreamWrite
+                        | THandleOp::TcpStreamClose
+                        | THandleOp::TcpStreamReadBytes
+                        | THandleOp::TcpStreamReadBytesDeadline
+                        | THandleOp::TcpStreamReadText
+                        | THandleOp::TcpStreamReadTextDeadline
+                        | THandleOp::TcpStreamWriteBytes
+                        | THandleOp::TcpStreamWriteBytesDeadline
+                        | THandleOp::TcpStreamWriteAllBytes
+                        | THandleOp::TcpStreamWriteAllBytesDeadline
+                        | THandleOp::TcpStreamWriteText
+                        | THandleOp::TcpStreamWriteTextDeadline
+                        | THandleOp::TcpStreamShutdown
+                        | THandleOp::TcpStreamReady
+                        | THandleOp::UnixStreamReadDeadline
+                        | THandleOp::UnixStreamWriteAllDeadline
+                        | THandleOp::UnixStreamClose
+                        | THandleOp::UnixStreamSetTimeout
+                        | THandleOp::TLSStreamReadDeadline
+                        | THandleOp::TLSStreamWriteAllDeadline
+                        | THandleOp::TLSStreamClose
+                        | THandleOp::TLSStreamCloseWrite
                 ),
             )?;
-            let mut args = lower_handle_method_args(ctx, args)?;
+            let source_args = args;
+            let mut args = lower_handle_method_args(ctx, source_args)?;
+            if matches!(
+                op,
+                THandleOp::TcpStreamReadBytes
+                    | THandleOp::TcpStreamReadBytesDeadline
+                    | THandleOp::TcpStreamReadText
+                    | THandleOp::TcpStreamReadTextDeadline
+                    | THandleOp::UdpSocketReceiveDeadline
+                    | THandleOp::UnixStreamReadDeadline
+                    | THandleOp::TLSStreamReadDeadline
+            ) {
+                args[0] = lower_builtin_native_int(ctx, args[0], &source_args[0].ty)?;
+            }
+
             if let THandleOp::DurationNew { unit, .. } = op {
                 let type_id = ctx.type_id_for(crate::Syntax::DURATION_UNIT_TYPE)?;
                 args.push(ctx.emit(
@@ -7554,7 +7624,7 @@ fn http_text_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "HTTPBody" => Some("HTTPBody"),
+        Type::Named(name) if name == "Body" => Some("Body"),
         _ => None,
     }
 }
@@ -7580,8 +7650,8 @@ fn lower_http_text_method(
     }
     let with_limit = match (receiver, args.len()) {
         ("HTTPRequest" | "HTTPResponse", 0) => false,
-        ("HTTPRequest" | "HTTPResponse", 1) | ("HTTPBody", 1) => true,
-        ("HTTPBody", _) => {
+        ("HTTPRequest" | "HTTPResponse", 1) | ("Body", 1) => true,
+        ("Body", _) => {
             return Err(ctx.error(
                 ctx.span(),
                 format!(
@@ -7683,7 +7753,7 @@ fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "HTTPBody" => Some("HTTPBody"),
+        Type::Named(name) if name == "Body" => Some("Body"),
         _ => None,
     }
 }
@@ -7694,7 +7764,7 @@ fn http_text_route(receiver: &str, with_limit: bool) -> TPreludeRoute {
         ("HTTPRequest", true) => ("request_text_with_limit", "jet_http_request_text_with_limit"),
         ("HTTPResponse", false) => ("response_text", "jet_http_response_text"),
         ("HTTPResponse", true) => ("response_text_with_limit", "jet_http_response_text_with_limit"),
-        ("HTTPBody", true) => ("body_text", "jet_http_body_text"),
+        ("Body", true) => ("body_text", "jet_http_body_text"),
         _ => unreachable!("checked HTTP JSON receiver has no text route"),
     };
     let arity = if with_limit { 2 } else { 1 };
@@ -7760,7 +7830,7 @@ fn lower_http_json_method(
     let target = ok.as_ref().clone();
     let with_limit = match (receiver, args.len()) {
         ("HTTPRequest" | "HTTPResponse", 0) => false,
-        ("HTTPResponse" | "HTTPBody", 1) => true,
+        ("HTTPResponse" | "Body", 1) => true,
         ("HTTPRequest", _) => {
             return Err(ctx.error(
                 ctx.span(),
@@ -7770,7 +7840,7 @@ fn lower_http_json_method(
                 ),
             ));
         }
-        ("HTTPBody", _) => {
+        ("Body", _) => {
             return Err(ctx.error(
                 ctx.span(),
                 format!(
@@ -7952,8 +8022,21 @@ fn lower_direct_string_format(
         _ => return unsupported_expr(ctx, "direct string format for non-display form"),
     };
     let function_name = format!("{}::{trait_name}::{suffix}", value_ty.name());
-    match ctx.function_id_for(&function_name) {
-        Ok(function) => ctx.emit(
+    let direct_function = match ctx.function_id_for(&function_name) {
+        Ok(function)
+            if ctx
+                .function_registry
+                .receiver_access
+                .contains_key(&function) =>
+        {
+            Some(function)
+        }
+        Ok(_) => None,
+        Err(error) if error.message.starts_with("missing checked function target") => None,
+        Err(error) => return Err(error),
+    };
+    if let Some(function) = direct_function {
+        return ctx.emit(
             "string-format-user-call",
             Some(result.clone()),
             MirOperation::Call {
@@ -7961,23 +8044,20 @@ fn lower_direct_string_format(
                 args: vec![mir_value_arg(ctx, value)],
                 type_args: Vec::new(),
             },
-        ),
-        Err(error) if error.message.starts_with("missing checked function target") => {
-            let route =
-                super::string_format_route(format, value_ty, result, &super::TFailureCarrier::Infallible)?;
-            let call = ctx.intern_prelude_route(route)?;
-            ctx.emit(
-                "string-format-prelude-call",
-                Some(result.clone()),
-                MirOperation::Call {
-                    callee: MirCallee::Prelude(call),
-                    args: vec![mir_value_arg(ctx, value)],
-                    type_args: Vec::new(),
-                },
-            )
-        }
-        Err(error) => Err(error),
+        );
     }
+    let route =
+        super::string_format_route(format, value_ty, result, &super::TFailureCarrier::Infallible)?;
+    let call = ctx.intern_prelude_route(route)?;
+    ctx.emit(
+        "string-format-prelude-call",
+        Some(result.clone()),
+        MirOperation::Call {
+            callee: MirCallee::Prelude(call),
+            args: vec![mir_value_arg(ctx, value)],
+            type_args: Vec::new(),
+        },
+    )
 }
 
 fn mir_value_arg_with_access(
@@ -8564,12 +8644,12 @@ fn datatree_access_route(
         THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => {
             ("equal_unordered", "jet_datatree_equal_unordered", 2, vec![true, true])
         }
-        THandleOp::DBValueInt => ("int", "jet_jit_dbvalue_int", 1, vec![true]),
-        THandleOp::DBValueFloat => ("float", "jet_jit_dbvalue_float", 1, vec![true]),
-        THandleOp::DBValueText => ("text", "jet_jit_dbvalue_text", 1, vec![true]),
-        THandleOp::DBValueBool => ("bool", "jet_jit_dbvalue_bool", 1, vec![true]),
-        THandleOp::DBValueBlob => ("blob", "jet_jit_dbvalue_blob", 1, vec![true]),
-        THandleOp::DBValueIsNull => ("is_null", "jet_jit_dbvalue_is_null", 1, vec![true]),
+        THandleOp::DBValueInt => ("int", "jet_std::DBValue::int", 1, vec![true]),
+        THandleOp::DBValueFloat => ("float", "jet_std::DBValue::float", 1, vec![true]),
+        THandleOp::DBValueText => ("text", "jet_std::DBValue::text", 1, vec![true]),
+        THandleOp::DBValueBool => ("bool", "jet_std::DBValue::bool", 1, vec![true]),
+        THandleOp::DBValueBlob => ("blob", "jet_std::DBValue::blob", 1, vec![true]),
+        THandleOp::DBValueIsNull => ("is_null", "jet_std::DBValue::is_null", 1, vec![true]),
         _ => return None,
     };
     Some(TPreludeRoute {

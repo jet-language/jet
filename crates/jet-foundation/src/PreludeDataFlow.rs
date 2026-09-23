@@ -11,7 +11,7 @@ pub const MAX_STATUS_TEXT: usize = 1024;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LoaderKind {
     File,
-    Url,
+    URL,
     Database,
     Value,
 }
@@ -20,14 +20,14 @@ impl LoaderKind {
     pub const fn debug_name(self) -> &'static str {
         match self {
             Self::File => "File",
-            Self::Url => "Url",
+            Self::URL => "URL",
             Self::Database => "Database",
             Self::Value => "Value",
         }
     }
 
     pub const fn is_provider(self) -> bool {
-        matches!(self, Self::Url | Self::Database)
+        matches!(self, Self::URL | Self::Database)
     }
 }
 
@@ -43,7 +43,7 @@ pub enum Freshness {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum InvalidationCause {
-    None,
+    NoCause,
     Loader,
     Input,
     ArchiveMember,
@@ -129,7 +129,7 @@ impl Status {
         Self {
             identity: String::new(),
             freshness: Freshness::Pending,
-            invalidated_by: InvalidationCause::None,
+            invalidated_by: InvalidationCause::NoCause,
             error: String::new(),
             cleanup: "none".to_string(),
             buffered_bytes: 0,
@@ -585,7 +585,7 @@ pub fn set_offline(state: &mut LoaderState, enabled: bool) {
         state.status.freshness = if state.payload.is_some() {
             Freshness::Pending
         } else if state.last_good.is_some()
-            && state.status.invalidated_by == InvalidationCause::None
+            && state.status.invalidated_by == InvalidationCause::NoCause
         {
             Freshness::Fresh
         } else if state.last_good.is_some() {
@@ -715,7 +715,7 @@ pub fn commit_snapshot(
         invalidated_by: if offline {
             state.status.invalidated_by
         } else {
-            InvalidationCause::None
+            InvalidationCause::NoCause
         },
         error: String::new(),
         cleanup: "retained".to_string(),

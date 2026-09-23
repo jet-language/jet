@@ -284,37 +284,10 @@ fn coll_alloc_chain(
     record
 }
 
-fn coll_read_string_set(
-    rt: &mut crate::runtime_host::JitRuntime,
-    handle: i64,
-) -> Option<collection_rt::JetStringSet> {
-    let items = rt.heap.record_get_int(handle, 0)?;
-    Some(collection_rt::JetStringSet {
-        items: coll_read_string_list(rt, items)?,
-    })
-}
-
-fn coll_alloc_string_set(
-    rt: &mut crate::runtime_host::JitRuntime,
-    set: &collection_rt::JetStringSet,
-) -> i64 {
-    let items = coll_alloc_string_list(rt, &set.items);
-    let record = rt.heap.alloc_record(1);
-    let _ = rt.heap.record_set_int(record, 0, items);
-    record
-}
 
 fn coll_option_string(rt: &mut crate::runtime_host::JitRuntime, value: Option<String>) -> i64 {
     value
         .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
-        .unwrap_or(0)
-}
-fn coll_option_string_set(
-    rt: &mut crate::runtime_host::JitRuntime,
-    value: Option<collection_rt::JetStringSet>,
-) -> i64 {
-    value
-        .map(|value| coll_alloc_string_set(rt, &value).wrapping_add(1))
         .unwrap_or(0)
 }
 
@@ -858,151 +831,6 @@ fn jet_jit_coll_chain_contains(chain: i64, key: i64) -> i8 {
     })
 }
 
-fn jet_jit_coll_set() -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set())
-    })
-}
-
-fn jet_jit_coll_set_from_list(items: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let items = coll_read_string_list(rt, items).unwrap_or_default();
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_from_list(&items))
-    })
-}
-
-fn jet_jit_coll_set_add(set: i64, item: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        let item = coll_string(rt, item);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_add(&set, &item))
-    })
-}
-
-fn jet_jit_coll_set_discard(set: i64, item: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        let item = coll_string(rt, item);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_discard(&set, &item))
-    })
-}
-
-fn jet_jit_coll_set_remove(set: i64, item: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        let item = coll_string(rt, item);
-        coll_option_string_set(rt, collection_rt::jet_coll_set_remove(&set, &item))
-    })
-}
-
-fn jet_jit_coll_set_contains(set: i64, item: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        let item = coll_string(rt, item);
-        i8::from(collection_rt::jet_coll_set_contains(&set, &item))
-    })
-}
-
-fn jet_jit_coll_set_len(set: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        collection_rt::jet_coll_set_len(&set)
-    })
-}
-
-fn jet_jit_coll_set_is_empty(set: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        i8::from(collection_rt::jet_coll_set_is_empty(&set))
-    })
-}
-
-fn jet_jit_coll_set_items(set: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_list(rt, &collection_rt::jet_coll_set_items(&set))
-    })
-}
-
-fn jet_jit_coll_set_clear(set: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_clear(&set))
-    })
-}
-
-fn jet_jit_coll_set_union(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_union(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_intersection(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_intersection(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_difference(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_difference(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_symmetric_difference(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(
-            rt,
-            &collection_rt::jet_coll_set_symmetric_difference(&left, &right),
-        )
-    })
-}
-
-fn jet_jit_coll_set_issubset(left: i64, right: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        i8::from(collection_rt::jet_coll_set_issubset(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_issuperset(left: i64, right: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        i8::from(collection_rt::jet_coll_set_issuperset(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_isdisjoint(left: i64, right: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        let left = coll_read_string_set(rt, left).unwrap_or_else(collection_rt::jet_coll_set);
-        let right =
-            coll_read_string_set(rt, right).unwrap_or_else(collection_rt::jet_coll_set);
-        i8::from(collection_rt::jet_coll_set_isdisjoint(&left, &right))
-    })
-}
-
-fn jet_jit_coll_set_clone(set: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let set = coll_read_string_set(rt, set).unwrap_or_else(collection_rt::jet_coll_set);
-        coll_alloc_string_set(rt, &collection_rt::jet_coll_set_clone(&set))
-    })
-}
 
 fn alloc_f64_list(values: &[f64]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -1769,24 +1597,6 @@ host_fns! {
     coll_chain_push: "jet_jit_coll_chain_push" => jet_jit_coll_chain_push: i64_i64_i64_handle;
     coll_chain_get: "jet_jit_coll_chain_get" => jet_jit_coll_chain_get: i64_i64_handle;
     coll_chain_contains: "jet_jit_coll_chain_contains" => jet_jit_coll_chain_contains: i64_i64_i8;
-    coll_set: "jet_jit_coll_set" => jet_jit_coll_set: zero_i64;
-    coll_set_from_list: "jet_jit_coll_set_from_list" => jet_jit_coll_set_from_list: list_handle;
-    coll_set_add: "jet_jit_coll_set_add" => jet_jit_coll_set_add: i64_i64_handle;
-    coll_set_discard: "jet_jit_coll_set_discard" => jet_jit_coll_set_discard: i64_i64_handle;
-    coll_set_remove: "jet_jit_coll_set_remove" => jet_jit_coll_set_remove: i64_i64_handle;
-    coll_set_contains: "jet_jit_coll_set_contains" => jet_jit_coll_set_contains: i64_i64_i8;
-    coll_set_len: "jet_jit_coll_set_len" => jet_jit_coll_set_len: i64_i64;
-    coll_set_is_empty: "jet_jit_coll_set_is_empty" => jet_jit_coll_set_is_empty: i64_i8;
-    coll_set_items: "jet_jit_coll_set_items" => jet_jit_coll_set_items: i64_i64;
-    coll_set_clear: "jet_jit_coll_set_clear" => jet_jit_coll_set_clear: i64_i64;
-    coll_set_union: "jet_jit_coll_set_union" => jet_jit_coll_set_union: i64_i64_handle;
-    coll_set_intersection: "jet_jit_coll_set_intersection" => jet_jit_coll_set_intersection: i64_i64_handle;
-    coll_set_difference: "jet_jit_coll_set_difference" => jet_jit_coll_set_difference: i64_i64_handle;
-    coll_set_symmetric_difference: "jet_jit_coll_set_symmetric_difference" => jet_jit_coll_set_symmetric_difference: i64_i64_handle;
-    coll_set_issubset: "jet_jit_coll_set_issubset" => jet_jit_coll_set_issubset: i64_i64_i8;
-    coll_set_issuperset: "jet_jit_coll_set_issuperset" => jet_jit_coll_set_issuperset: i64_i64_i8;
-    coll_set_isdisjoint: "jet_jit_coll_set_isdisjoint" => jet_jit_coll_set_isdisjoint: i64_i64_i8;
-    coll_set_clone: "jet_jit_coll_set_clone" => jet_jit_coll_set_clone: i64_i64;
     is_even: "jet_jit_math_is_even" => jet_jit_math_is_even: i64_i8;
     is_odd: "jet_jit_math_is_odd" => jet_jit_math_is_odd: i64_i8;
     checked_abs: "jet_jit_math_checked_abs" => jet_jit_math_checked_abs: i64_i64;

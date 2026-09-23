@@ -550,31 +550,6 @@ fn process_ambient_diag(message: impl Into<String>, span: Span) -> Diagnostic {
     )
 }
 
-/// The forced interpreter reaches plain process constructors through the typed
-/// ambient Core-call seam. Keep workspace authority construction on the
-/// shared authority carrier rather than inventing a process-only value.
-fn ct_process_string_list(
-    value: &CtValue,
-    operation: &str,
-    span: Span,
-) -> Result<Vec<String>, Diagnostic> {
-    let CtValue::List(values) = value else {
-        return Err(process_ambient_diag(
-            format!("{operation} expects a List<String>"),
-            span,
-        ));
-    };
-    values
-        .iter()
-        .map(|value| match value {
-            CtValue::Str(value) => Ok(value.clone()),
-            _ => Err(process_ambient_diag(
-                format!("{operation} expects every command word to be a String"),
-                span,
-            )),
-        })
-        .collect()
-}
 fn ct_process_spec_list(
     value: &CtValue,
     operation: &str,
@@ -637,60 +612,6 @@ fn ct_process_pipeline(args: &[CtValue], span: Span) -> Result<CtValue, Diagnost
 }
 
 
-fn ct_process_authority_wire(value: &CtValue, operation: &str, span: Span) -> Result<String, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return Err(process_ambient_diag(
-            format!("{operation} expects an Authority"),
-            span,
-        ));
-    };
-    if type_name != "Authority" {
-        return Err(process_ambient_diag(
-            format!("{operation} received {type_name}, expected Authority"),
-            span,
-        ));
-    }
-    let Some((_, CtValue::List(rights))) = fields.iter().find(|(name, _)| name == "rights") else {
-        return Err(process_ambient_diag(
-            format!("{operation} received an Authority without `rights`"),
-            span,
-        ));
-    };
-    rights
-        .iter()
-        .map(|right| match right {
-            CtValue::Str(right) => Ok(right.clone()),
-            _ => Err(process_ambient_diag(
-                format!("{operation} expects Authority.rights to be a List<String>"),
-                span,
-            )),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|rights| rights.join("\n"))
-}
-
-fn ct_process_run(
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    if !matches!(args.len(), 1 | 2) {
-        return Err(process_ambient_diag(
-            "core.process.run expects one command list and an optional Authority",
-            span,
-        ));
-    }
-    let command = ct_process_string_list(&args[0], "core.process.run", span)?;
-    let mut spec = process_prelude::spec_new(command);
-    if let Some(authority) = args.get(1) {
-        let wire = ct_process_authority_wire(authority, "core.process.run", span)?;
-        spec = process_prelude::spec_under_wire(spec, &wire);
-    }
-    let value = match process_prelude::spec_run(&spec) {
-        Ok(receipt) => MirRuntimeValue::Present(Box::new(mir_process_receipt(receipt))),
-        Err(error) => MirRuntimeValue::FailedTold(Box::new(mir_io_error(error))),
-    };
-    jet_codegen::Comptime::MirBridge::mir_to_ct_value(value, span)
-}
 
 pub(crate) fn ambient_core_call(
     module: &str,
@@ -704,24 +625,7 @@ pub(crate) fn ambient_core_call(
         return None;
     }
     match method {
-        "workspace" => {
-            if !args.is_empty() {
-                return Some(Err(process_ambient_diag(
-                    "core.process.workspace expects no arguments",
-                    span,
-                )));
-            }
-            let rights = crate::Collections::authority_semantics::jet_authority_workspace_rights()
-                .into_iter()
-                .map(CtValue::Str)
-                .collect();
-            Some(Ok(CtValue::Struct {
-                type_name: "Authority".to_string(),
-                fields: vec![("rights".to_string(), CtValue::List(rights))],
-            }))
-        }
         "pipeline" => Some(ct_process_pipeline(&args, span)),
-        "run" | "run_with_authority" => Some(ct_process_run(&args, span)),
         _ => None,
     }
 }
@@ -905,11 +809,13 @@ fn mir_process_receipt(receipt: process_prelude::ProcessReceipt) -> MirRuntimeVa
 
 fn mir_process_string_list(
     value: &MirRuntimeValue,
+    operation: &str,
+    item_description: &str,
     span: Span,
 ) -> Result<Vec<String>, Diagnostic> {
     let MirRuntimeValue::List(values) = value else {
         return Err(process_ambient_diag(
-            "core.process.cmd() expects a List<String>",
+            format!("{operation} expects a List<String>"),
             span,
         ));
     };
@@ -918,7 +824,7 @@ fn mir_process_string_list(
         .map(|value| match value {
             MirRuntimeValue::String(value) => Ok(value.clone()),
             _ => Err(process_ambient_diag(
-                "core.process.cmd() expects every command word to be a String",
+                format!("{operation} expects every {item_description} to be a String"),
                 span,
             )),
         })
@@ -1222,12 +1128,58 @@ pub(crate) fn ambient_mir_handle(
                     span,
                 )));
             }
-            let command = match mir_process_string_list(&args[0], span) {
+            let command = match mir_process_string_list(
+                &args[0],
+                "core.process.cmd()",
+                "command word",
+                span,
+            ) {
                 Ok(command) => command,
                 Err(error) => return Some(Err(error)),
             };
             let spec = process_prelude::spec_new(command);
             Some(Ok(AmbientMirHandleResult::Handle(push_ambient_spec(spec))))
+        }
+        "process.spec.arg" => {
+            let [extra] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.arg() expects one String argument",
+                    span,
+                )));
+            };
+            let extra = match mir_process_string(extra, "ProcessSpec.arg()", span) {
+                Ok(extra) => extra,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.arg()",
+                handle,
+                span,
+                |spec| process_prelude::spec_arg(spec, &extra),
+            ))
+        }
+        "process.spec.args_extend" => {
+            let [extra] = args.as_slice() else {
+                return Some(Err(process_ambient_diag(
+                    "ProcessSpec.args_extend() expects one List<String> argument",
+                    span,
+                )));
+            };
+            let extra = match mir_process_string_list(
+                extra,
+                "ProcessSpec.args_extend()",
+                "argument",
+                span,
+            ) {
+                Ok(extra) => extra,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(process_ambient_spec_update(
+                "ProcessSpec.args_extend()",
+                handle,
+                span,
+                |spec| process_prelude::spec_args_extend(spec, &extra),
+            ))
         }
         "process.spec.cwd" => {
             let [cwd] = args.as_slice() else {
@@ -1837,25 +1789,17 @@ fn process_duration(ns: i64) -> process_prelude::Duration {
 fn jet_jit_process_cmd(cmd_list: i64) -> i64 {
     push_spec(process_prelude::spec_new(clone_string_list(cmd_list)))
 }
-
-fn jet_jit_process_run(cmd_list: i64) -> i64 {
-    let spec = process_prelude::spec_new(clone_string_list(cmd_list));
-    match process_prelude::spec_run(&spec) {
-        Ok(result) => outcome_to_result(result),
-        Err(error) => process_io_error_result(error),
-    }
+fn jet_jit_process_spec_arg(spec: i64, extra: i64) -> i64 {
+    let extra = clone_string(extra);
+    update_spec(spec, |spec| process_prelude::spec_arg(spec, &extra))
 }
 
-fn jet_jit_process_run_with_authority(cmd_list: i64, _authority: i64) -> i64 {
-    let spec = process_prelude::spec_new(clone_string_list(cmd_list));
-    let authority_wire =
-        Concurrency::with_runtime_mut(|rt| crate::Collections::authority_wire(rt, _authority));
-    let spec = process_prelude::spec_under_wire(spec, &authority_wire);
-    match process_prelude::spec_run(&spec) {
-        Ok(result) => outcome_to_result(result),
-        Err(error) => process_io_error_result(error),
-    }
+fn jet_jit_process_spec_args_extend(spec: i64, extra: i64) -> i64 {
+    let extra = clone_string_list(extra);
+    update_spec(spec, |spec| process_prelude::spec_args_extend(spec, &extra))
 }
+
+
 
 fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
     let Some(specs) = clone_specs_from_list(spec_list) else {
@@ -2278,9 +2222,8 @@ host_fns! {
     error_show: "jet_jit_process_error_show" => jet_jit_process_error_show: sig_unary;
     on_signal: "jet_jit_process_on_signal" => jet_jit_process_on_signal: sig_unary;
     cmd: "jet_jit_process_cmd" => jet_jit_process_cmd: sig_unary;
-    run: "jet_jit_process_run" => jet_jit_process_run: sig_unary;
-    run_with_authority: "jet_jit_process_run_with_authority" => jet_jit_process_run_with_authority: sig_binary;
-    run_with_authority_shared: "jet_std_process_run_with_authority" => jet_jit_process_run_with_authority: sig_binary;
+    spec_arg: "jet_jit_process_spec_arg" => jet_jit_process_spec_arg: sig_binary;
+    spec_args_extend: "jet_jit_process_spec_args_extend" => jet_jit_process_spec_args_extend: sig_binary;
     pipeline: "jet_jit_process_pipeline" => jet_jit_process_pipeline: sig_unary;
     spec_stdout: "jet_jit_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
     spec_stderr: "jet_jit_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;
@@ -2299,7 +2242,6 @@ host_fns! {
     spec_terminal_with_policy: "jet_jit_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
     spec_abilities: "jet_jit_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
     spec_under: "jet_jit_process_spec_under" => jet_jit_process_spec_under: sig_binary;
-    spec_under_shared: "jet_std_process_spec_under" => jet_jit_process_spec_under: sig_binary;
     spec_run: "jet_jit_process_spec_run" => jet_jit_process_spec_run: sig_unary;
     spec_run_checked: "jet_jit_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
     spec_spawn: "jet_jit_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;
@@ -2314,35 +2256,4 @@ host_fns! {
     stream_lines: "jet_jit_process_stream_lines" => jet_jit_process_stream_lines: sig_binary;
     stdin_write: "jet_jit_process_stdin_write" => jet_jit_process_stdin_write: sig_binary;
     stdin_close: "jet_jit_process_stdin_close" => jet_jit_process_stdin_close: sig_unary;
-    spec_stdin_shared: "jet_process_spec_stdin" => jet_jit_process_spec_stdin: sig_binary;
-    spec_spawn_shared: "jet_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;
-    child_wait_shared: "jet_process_child_wait" => jet_jit_process_child_wait: sig_unary;
-    stdin_write_shared: "jet_process_stdin_write" => jet_jit_process_stdin_write: sig_binary;
-    stdin_close_shared: "jet_process_stdin_close" => jet_jit_process_stdin_close: sig_unary;
-    spec_stdout_shared: "jet_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
-    spec_stderr_shared: "jet_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;
-    spec_timeout_shared: "jet_process_spec_timeout" => jet_jit_process_spec_timeout: sig_binary;
-    spec_output_limit_shared: "jet_process_spec_output_limit" => jet_jit_process_spec_output_limit: sig_binary;
-    spec_cpu_time_limit_shared: "jet_process_spec_cpu_time_limit" => jet_jit_process_spec_cpu_time_limit: sig_binary;
-    spec_memory_limit_shared: "jet_process_spec_memory_limit" => jet_jit_process_spec_memory_limit: sig_binary;
-    spec_open_file_limit_shared: "jet_process_spec_open_file_limit" => jet_jit_process_spec_open_file_limit: sig_binary;
-    spec_cwd_shared: "jet_process_spec_cwd" => jet_jit_process_spec_cwd: sig_binary;
-    spec_env_shared: "jet_process_spec_env" => jet_jit_process_spec_env: sig_ternary;
-    spec_env_remove_shared: "jet_process_spec_env_remove" => jet_jit_process_spec_env_remove: sig_binary;
-    spec_env_clear_shared: "jet_process_spec_env_clear" => jet_jit_process_spec_env_clear: sig_unary;
-    spec_detached_shared: "jet_process_spec_detached" => jet_jit_process_spec_detached: sig_unary;
-    spec_terminal_shared: "jet_process_spec_terminal" => jet_jit_process_spec_terminal: sig_unary;
-    spec_terminal_with_policy_shared: "jet_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
-    spec_abilities_shared: "jet_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
-    spec_plan_shared: "jet_process_spec_plan" => jet_jit_process_spec_plan: sig_unary;
-    spec_run_shared: "jet_process_spec_run" => jet_jit_process_spec_run: sig_unary;
-    spec_run_checked_shared: "jet_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
-    process_cmd_shared: "jet_std_process_cmd" => jet_jit_process_cmd: sig_unary;
-    process_run_shared: "jet_std_process_run" => jet_jit_process_run: sig_unary;
-    process_pipeline_shared: "jet_std_process_pipeline" => jet_jit_process_pipeline: sig_unary;
-    child_id_shared: "jet_process_child_id" => jet_jit_process_child_id: sig_unary;
-    child_exited_shared: "jet_process_child_exited" => jet_jit_process_child_exited: sig_unary;
-    child_kill_shared: "jet_process_child_kill" => jet_jit_process_child_kill: sig_unary;
-    child_terminate_shared: "jet_process_child_terminate" => jet_jit_process_child_terminate: sig_unary;
-    child_interrupt_shared: "jet_process_child_interrupt" => jet_jit_process_child_interrupt: sig_unary;
 }

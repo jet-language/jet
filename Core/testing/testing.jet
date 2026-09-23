@@ -8,9 +8,12 @@ package {
         testing: .Library{ entry: testing }
     }
 }
-// core.testing — deterministic tests.
+use core as core
+
+// core.testing — deterministic tests and comparison records.
 //
-// `
+// Fixture, golden, and world state remain host-owned; callback comparison and
+// bounded history generation stay portable Jet code.
 pub struct TestSuite {
     pub name: String
     pub passed: Int
@@ -30,66 +33,114 @@ pub struct Rng {
     pub state: Int
 }
 
-pub fn assert_equal(left: String, right: String) -> Bool { left == right }
+pub fn assert_equal(comparison: TestComparison) -> Bool {
+    // The typed provider also requires recorded samples; the source twin can
+    // validate only the scalar proof fields exposed by the declaration.
+    comparison.status == "matched" && !comparison.universal_proof && comparison.first_difference < 0
+}
 
-pub fn compare(left: String, right: String) -> TestComparison {
-    {
-        equal: left == right,
-        left: left,
-        right: right,
+pub fn compare(cases: [DataTree], reference: fn(DataTree) -> DataTree, candidate: fn(DataTree) -> DataTree, relation: String) -> TestComparison {
+    normalized := relation
+    if normalized.len() == 0 -> normalized = "typed_equality"
+    if normalized == "ordered_effects" || normalized == "typed_failure" {
+        return terminal_comparison(normalized, "relation requires recorded observations")
+    }
+    if cases.len() == 0 -> return terminal_comparison(normalized, "comparison needs at least one case")
+    inputs := [DataTree]{}
+    reference_values := [DataTree]{}
+    candidate_values := [DataTree]{}
+    case_ids := [String]{}
+    first_difference := -1
+    loop i in 0..<cases.len() {
+        input :: cases[i]
+        expected :: reference(input)
+        actual :: candidate(input)
+        inputs.push(input)
+        reference_values.push(expected)
+        candidate_values.push(actual)
+        case_ids.push("case-{i}")
+        if first_difference < 0 && !expected.equal_unordered(actual) -> first_difference = i
+    }
+    status := "matched"
+    reason := "comparison matched all cases"
+    if first_difference >= 0 {
+        status = "mismatch"
+        reason = "reference and candidate differ at case-{first_difference}"
+    }
+    TestComparison{
+        status: status,
+        relation: normalized,
+        source: "core.testing",
+        tool: "jet",
+        target: "embedded-prelude",
+        seed: None,
+        case_ids: case_ids,
+        inputs: inputs,
+        reference: reference_values,
+        candidate: candidate_values,
+        first_difference: first_difference,
+        reason: reason,
+        universal_proof: false,
     }
 }
 
-/// Snapshot under `testdata/{name}.snap`. Creates the file when missing.
-pub fn snap(name: String, value: String) -[FS]> Bool { golden_at("testdata/{name}.snap", value) }
+fn terminal_comparison(relation: String, reason: String) -> TestComparison {
+    TestComparison{
+        status: "unavailable",
+        relation: relation,
+        source: "core.testing",
+        tool: "jet",
+        target: "embedded-prelude",
+        seed: None,
+        case_ids: [String]{},
+        inputs: [DataTree]{},
+        reference: [DataTree]{},
+        candidate: [DataTree]{},
+        first_difference: -1,
+        reason: reason,
+        universal_proof: false,
+    }
+}
+
+/// Compare or create a host-managed snapshot for `name`.
+pub fn snap(name: String, value: String) -[FS]> Bool { core.testing.snap(name, value) }
 
 pub fn golden(name: String, value: String) -[FS]> Bool {
-    golden_at("testdata/golden/{name}", value)
+    core.testing.golden(name, value)
 }
 
-fn golden_at(path: String, value: String) -[FS]> Bool {
-    existing := host_read_text(path)
-    if existing == .None {
-        host_write_text(path, value)
-        return true
-    }
-    (existing ?? "") == value
-}
+pub fn fixture(name: String) -[FS]> String { core.testing.fixture(name) }
 
-pub fn fixture(name: String) -[FS]> String { host_read_text("testdata/fixtures/{name}") ?? "" }
+pub fn temp_dir(prefix: String) -[FS]> String { core.testing.temp_dir(prefix) }
 
-pub fn temp_dir(prefix: String) -[FS]> String { host_temp_dir(prefix) }
-
-pub fn corpus(glob: String) -[FS]> [String] { host_glob(glob) }
+pub fn corpus(glob: String) -[FS]> [String] { core.testing.corpus(glob) }
 
 pub fn fake_clock(unix_ms: Int) -> Clock { {unix_ms: unix_ms, fake: true} }
 
 pub fn fake_rng(seed: Int) -> Rng {
-    s := seed
-    if s == 0 -> s = 0x9E3779B97F4A7C15
-    {state: s}
+    // Keep the source twin bit-for-bit aligned with the provider constructor.
+    {state: seed}
 }
 
 pub fn fake_data(seed: Int) -> Fake { {seed: seed} }
 
 pub fn test_suite() -> TestSuite { {name: "default", passed: 0, failed: 0} }
 
-pub fn world(body: Int) {}
+pub fn world(body: fn(DeterministicWorld)) { core.testing.world(body) }
 
 /// Exhaustive interleavings of `ops` labelled operations. The count is
 /// `ops!` for ops <= 8; larger requests cap at 40320 recorded histories
 /// (the 8! bound) so a test cannot explode memory.
 pub fn histories(ops: Int) -> [String] {
     if ops <= 0 -> return [String]{}
-    labels := [String]{}
-    loop i in 0..<ops -> labels.push("{i}")
-    if ops == 1 -> return [String]{"0"}
     n := ops
     if n > 8 -> n = 8
-    permute_join(labels[0..n - 1])
+    labels := [String]{}
+    loop i in 0..<n -> labels.push("{i}")
+    permute_join(labels)
 }
 
-pub fn status() -> String { "ok" }
+pub fn status(comparison: TestComparison) -> String { comparison.status }
 
 fn permute_join(items: [String]) -> [String] {
     if items.len() == 0 -> return [String]{""}
@@ -108,10 +159,3 @@ fn permute_join(items: [String]) -> [String] {
     out
 }
 
-fn host_read_text(path: String) -[FS]> ?String { panic("host_read_text") }
-
-fn host_write_text(path: String, value: String) -[FS]> { panic("host_write_text") }
-
-fn host_temp_dir(prefix: String) -[FS]> String { panic("host_temp_dir") }
-
-fn host_glob(pattern: String) -[FS]> [String] { panic("host_glob") }

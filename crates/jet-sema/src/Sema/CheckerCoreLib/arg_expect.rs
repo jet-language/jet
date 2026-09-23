@@ -125,19 +125,19 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = true;
         let got = self.infer(&mut arg.expr);
         if let Some(got) = got {
-            if matches!(got, Type::String) || matches!(got, Type::Named(ref n) if n == "Url") {
+            if matches!(got, Type::String) || matches!(got, Type::Named(ref n) if n == "URL") {
                 return;
             }
             self.diags.push(Diagnostic::error(
                 "E0112",
                 format!(
-                    "`{}` wants String or Url for argument {}, but this is {}",
+                    "`{}` wants String or URL for argument {}, but this is {}",
                     call_name,
                     idx + 1,
                     got.show()
                 ),
-                "HTTP client calls accept raw strings or typed Url values".to_string(),
-                "pass a String, or build a Url with core.net.url.parse".to_string(),
+                "HTTP client calls accept raw strings or typed URL values".to_string(),
+                "pass a String, or build a URL with core.net.url.parse".to_string(),
                 Some(arg.expr.span()),
             ));
         }

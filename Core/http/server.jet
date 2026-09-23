@@ -1,255 +1,91 @@
-// core.http.server — mux, static files, CORS, TLS, SSE.
+use core as core
+use core.http.[HTTPError, HTTPRequest, HTTPResponse]
+use core.http.server as provider
+
+// core.http.server — typed HTTP server provider boundary.
 //
-// `serve` blocks. `serve_once` is the Jet request codec used by tests and
-// by the accept loop. Static routes store a path; the file bytes are read
-// on each request (`-[FS]>`).
+// The native leaf owns sockets, request dispatch, and response construction.
+// Keep this module as the canonical source-facing contract instead of
+// rebuilding HTTP carriers or transport framing here.
 
 pub fn mux() -> HTTPMux {
-    HTTPMux{
-    routes: [HTTPRoute]{},
-    cors: CorsPolicy{origins: "", methods: "", headers: "", credentials: false, max_age: 86400},
-    access_log: false,
-    request_id: false,
-    }
+    provider.mux()
 }
 
-pub fn bind(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, timeout: ?Duration) !HTTPError { serve(addr, mux, tls, timeout) }
-
-pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, timeout: ?Duration) !HTTPError {
-    fd :: host_listen(addr) ?? Err(HTTPError.Transport)
-    loop {
-        cfd :: host_accept(fd) ?? return Err(HTTPError.Transport)
-        raw :: host_read_all(cfd) ?? [U8]{}
-        req :: String.from_bytes(raw) ?? ""
-        resp :: serve_once(mux, req)
-        wire :: serialize(resp)
-        _ :: host_write_all(cfd, wire.bytes())
-        host_close(cfd)
+pub fn bind(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) -[Net, Time.Wait]> HTTPServer !HTTPError {
+    if tls == None {
+        if deadline == None -> return provider.bind(addr, mux)
+        return provider.bind(addr, mux, deadline: deadline)
     }
+    if deadline == None -> return provider.bind(addr, mux, tls: tls)
+    provider.bind(addr, mux, tls: tls, deadline: deadline)
 }
 
-pub fn serve_once(mux: HTTPMux, request: String) -[Net]> HTTPResponse !HTTPError {
-    line :: first_line(request)
-    parts :: split_space(line)
-    method := "GET"
-    path := "/"
-    if parts.len() > 0 -> method = parts[0]
-    if parts.len() > 1 -> path = parts[1]
-    loop r in mux.routes {
-        if r.path == path || (r.kind == "prefix" && starts(path, r.path)) {
-            if r.kind == "static_file" || r.kind == "static_file_range" {
-                bytes := host_read_file(r.payload) ?? [U8]{}
-                if r.kind == "static_file_range" {
-                    rng :: header_line(request, "Range")
-                    bytes = apply_range(bytes, rng)
-                }
-                body :: String.from_bytes(bytes) ?? ""
-                return Ok(ok_response(path, body, "application/octet-stream"))
-            }
-            if r.kind == "sse" {
-                return Ok(ok_response(path, "event: ping\ndata: {{}}\n\n", "text/event-stream"))
-            }
-            return Ok(ok_response(path, r.payload, "text/plain; charset=utf-8"))
+pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) !HTTPError -[Net, Time.Wait]> {
+    if tls == None {
+        if deadline == None {
+            provider.serve(addr, mux) ?? return
+            return
         }
+        provider.serve(addr, mux, deadline: deadline) ?? return
+        return
     }
-    Ok(not_found_response(path, "not found"))
+    if deadline == None {
+        provider.serve(addr, mux, tls: tls) ?? return
+        return
+    }
+    provider.serve(addr, mux, tls: tls, deadline: deadline) ?? return
 }
 
-pub fn serve_once_listener(mux: HTTPMux, listener: TcpListener) !HTTPError {
-    cfd :: host_accept(listener.fd) ?? return Err(HTTPError.Transport)
-    raw :: host_read_all(cfd) ?? [U8]{}
-    resp :: serve_once(mux, String.from_bytes(raw) ?? "")
-    _ :: host_write_all(cfd, serialize(resp).bytes())
-    host_close(cfd)
-    Ok()
+pub fn serve_once(addr: String, mux: HTTPMux) !HTTPError -[Net, Time.Wait]> {
+    provider.serve_once(addr, mux) ?? return
+}
+
+
+pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) !HTTPError -[Net, Time.Wait]> {
+    provider.serve_once_listener(listener, mux) ?? return
 }
 
 pub fn response(status: Int, body: String) -> HTTPResponse {
-    HTTPResponse{
-        status: http.status(status),
-        version: Version.Http11,
-        headers: http.headers(),
-        body: http.body_text(body),
-        url: "",
-    }
+    provider.response(status, body)
 }
 
 pub fn json(status: Int, body: String) -> HTTPResponse {
-    h :: http.headers_set(http.headers(), "Content-Type", "application/json")
-    HTTPResponse{
-        status: http.status(status),
-        version: Version.Http11,
-        headers: h,
-        body: http.body_text(body),
-        url: "",
-    }
+    provider.json(status, body)
 }
 
-pub fn static_file(mux: HTTPMux, url_path: String) -[FS, Net]> {
-    mux.routes.push(HTTPRoute{method: "GET", path: url_path, kind: "static_file", payload: url_path})
+pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse !HTTPError {
+    provider.static_file(path, content_type)
 }
 
-pub fn static_file_range(mux: HTTPMux, url_path: String) -[FS, Net]> {
-    mux.routes.push(HTTPRoute{method: "GET", path: url_path, kind: "static_file_range", payload: url_path})
+pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse !HTTPError {
+    provider.static_file_range(request, path, content_type)
 }
 
-pub fn static_files(mux: HTTPMux, root: String) -[FS, Net]> {
-    mux.routes.push(HTTPRoute{method: "GET", path: "/", kind: "prefix", payload: root})
+pub fn static_files(mux: HTTPMux, prefix: String, root: String) {
+    provider.static_files(mux, prefix, root)
 }
 
-pub fn tls(cert: String, key: String) -[FS]> HTTPServerTls { HTTPServerTls{cert: cert, key: key} }
-
-pub fn sse(path: String) -[Net]> {
-    _ :: path
+pub fn tls(cert: String, key: String) -> HTTPServerTls {
+    provider.tls(cert, key)
 }
 
-pub fn cors(mux: HTTPMux, policy: CorsPolicy) {
-    mux.cors = policy
+pub fn sse(body: String) -> HTTPResponse {
+    provider.sse(body)
 }
 
-pub fn cors_policy(origins: String, methods: String, headers: String, credentials: Bool) -> CorsPolicy {
-    CorsPolicy{
-    origins: origins,
-    methods: methods,
-    headers: headers,
-    credentials: credentials,
-    max_age: 86400,
-    }
+pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy !HTTPError {
+    provider.cors_policy(origins)
 }
 
-pub fn access_log(mux: HTTPMux, enabled: Bool) {
-    mux.access_log = enabled
+pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) {
+    provider.cors(mux, policy)
+}
+
+pub fn access_log(request: HTTPRequest, status: Int) -> String {
+    provider.access_log(request, status)
 }
 
 pub fn request_id(mux: HTTPMux) {
-    mux.request_id = true
+    provider.request_id(mux)
 }
-
-fn serialize(resp: HTTPResponse) -> String {
-    body :: http.body_as_text(resp.body)
-    crlf :: String.from_bytes([U8]{13, 10}) ?? "\n"
-    h := "{http.version_text(resp.version)} {resp.status.code} {resp.status.reason}{crlf}Content-Length: {body.bytes().len()}{crlf}"
-    loop line in http.headers_encode(resp.headers) -> h = "{h}{line}{crlf}"
-    "{h}{crlf}{body}"
-}
-
-fn ok_response(path: String, body: String, content_type: String) -> HTTPResponse {
-    h := http.headers()
-    if content_type.bytes().len() > 0 -> h = http.headers_set(h, "Content-Type", content_type)
-    HTTPResponse{status: http.status_ok(), version: Version.Http11, headers: h, body: http.body_text(body), url: path}
-}
-
-fn not_found_response(path: String, body: String) -> HTTPResponse {
-    HTTPResponse{
-        status: http.status_not_found(),
-        version: Version.Http11,
-        headers: http.headers(),
-        body: http.body_text(body),
-        url: path,
-    }
-}
-
-fn first_line(request: String) -> String {
-    raw :: request.bytes()
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{10}) {
-            end := i
-            if end > 0 && raw[end - 1] == (U8{13}) -> end = end - 1
-            return String.from_bytes(raw[0..end - 1]) ?? ""
-        }
-    }
-    request
-}
-
-fn split_space(text: String) -> [String] {
-    raw :: text.bytes()
-    out := [String]{}
-    start := 0
-    i := 0
-    loop i < raw.len() {
-        if raw[i] == (U8{32}) {
-            out.push(String.from_bytes(raw[start..i - 1]) ?? "")
-            start = i + 1
-        }
-        i = i + 1
-    }
-    out.push(String.from_bytes(raw[start..raw.len() - 1]) ?? "")
-    out
-}
-
-fn starts(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
-    if b.len() > a.len() -> return false
-    loop i in 0..<b.len() {
-        if a[i] != b[i] -> return false
-    }
-    true
-}
-
-fn header_line(request: String, name: String) -> String {
-    want :: name
-    _ :: split_space(request)
-    raw :: request.bytes()
-    start := 0
-    i := 0
-    loop i <= raw.len() {
-        if i == raw.len() || raw[i] == (U8{10}) {
-            line := String.from_bytes(raw[start..i - 1]) ?? ""
-            if starts(line, "{want}:") -> return line
-            start = i + 1
-        }
-        i = i + 1
-    }
-    ""
-}
-
-fn apply_range(bytes: [U8], header: String) -> [U8] {
-    // Range: bytes=start-end
-    start := 0
-    end := bytes.len()
-    raw :: header.bytes()
-    eq := -1
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{61}) {
-            eq = i
-            break
-        }
-    }
-    if eq < 0 -> return bytes
-    dash := -1
-    loop i in eq..<raw.len() {
-        if raw[i] == (U8{45}) {
-            dash = i
-            break
-        }
-    }
-    if dash < 0 -> return bytes
-    start = atoi(String.from_bytes(raw[eq + 1..dash - 1]) ?? "0")
-    if dash + 1 < raw.len() -> end = atoi(String.from_bytes(raw[dash + 1..raw.len() - 1]) ?? "0") + 1
-    if start < 0 -> start = 0
-    if end > bytes.len() -> end = bytes.len()
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end -> return out
-        out.push(bytes[i])
-        i = i + 1
-    }
-}
-
-fn atoi(text: String) -> Int {
-    n := 0
-    loop b in text.bytes() {
-        d :: b
-        if d >= 48 && d <= 57 -> n = n * 10 + (d - 48)
-    }
-    n
-}
-
-fn host_listen(addr: String) -[Net]> Int !HTTPError { panic("host_listen") }
-fn host_accept(fd: Int) -[Net]> Int !HTTPError { panic("host_accept") }
-fn host_read_all(fd: Int) -[Net]> [U8] !HTTPError { panic("host_read_all") }
-fn host_write_all(fd: Int, bytes: [U8]) !HTTPError { panic("host_write_all") }
-fn host_close(fd: Int) -[Net]> { panic("host_close") }
-fn host_read_file(path: String) -[FS]> [U8] !HTTPError { panic("host_read_file") }

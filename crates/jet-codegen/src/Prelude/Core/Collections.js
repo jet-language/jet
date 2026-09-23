@@ -273,6 +273,17 @@ function jet_list_try_map(xs, f) {
   return { tag: "Ok", values: [out] };
 }
 
+function jet_list_filter_map_iter(xs, f) {
+  const values = xs && xs.__jet_iter ? xs.to_list() : xs;
+  const out = [];
+  for (const value of values) {
+    const result = f(value);
+    if (result && result.tag === "Err") continue;
+    out.push(result && result.tag === "Ok" ? result.values[0] : result);
+  }
+  return jet_iter_from_vec(out);
+}
+
 function jet_list_try_filter(xs, f) {
   const values = xs && xs.__jet_iter ? xs.to_list() : xs;
   const out = [];

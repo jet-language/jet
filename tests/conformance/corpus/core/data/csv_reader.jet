@@ -1,5 +1,6 @@
 // core-conformance: core.data.csv_reader
 use core.data as data
+use core.data.stream as stream
 use core.files as files
 
 #Codable
@@ -11,5 +12,6 @@ fn run() {
     input :: files.open("/dev/null") ?? panic("open")
     limits := data.DataLimits.safe()
     reader :: data.csv_reader<Record>(^input, limits) ?? panic("reader")
-    print((reader.next() ?? panic("next")) == None)
+    first :: stream.next(&reader) ?? panic("next")
+    print(first == None)
 }

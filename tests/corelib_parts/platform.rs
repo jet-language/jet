@@ -706,11 +706,11 @@ fn core_process_limits_kill_descendants_and_stop_output_early() {
 use core.process as process
 use core.time as time
 
-fn run() {{
+fn run() -[Exec, IO, Time.Wait]> {{
     timeout :: Duration.seconds(1) ?? panic("duration")
-    timed :: process.cmd(["{timeout_script}"]).timeout(timeout).run() ?? panic("timeout run failed")
+    timed :: process.run_spec(process.cmd(["{timeout_script}"]).timeout(timeout)) ?? panic("timeout run failed")
     print(timed.timed_out)
-    limited :: process.cmd(["{output_script}"]).output_limit(16).run()
+    limited :: process.run_spec(process.cmd(["{output_script}"]).output_limit(16))
     if limited == {{
         .Ok(_) -> {{ print("limit:accepted") }}
         .Err(_) -> {{ print("limit:refused") }}
@@ -778,8 +778,8 @@ wait \"$err\"\n",
         r#"
 use core.process as process
 
-fn run() {{
-    limited :: process.cmd(["{flood}"]).output_limit(1024).run()
+fn run() -[Exec, IO, Time.Wait]> {{
+    limited :: process.run_spec(process.cmd(["{flood}"]).output_limit(1024))
     if limited == {{
         .Ok(_) -> {{ print("limit:accepted") }}
         .Err(_) -> {{ print("limit:refused") }}
@@ -812,11 +812,11 @@ fn core_process_terminal_uses_unix_pty_for_run_and_spawn() {
     let src = r#"
 use core.process as process
 
-fn run() {
-    plain :: process.cmd(["echo", "plain-ok"]).stdout(.Capture).run() ?? panic("default run failed")
+fn run() -[Exec, IO, Time.Wait]> {
+    plain :: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
     print(plain.output.trim())
 
-    run_result :: process.cmd(["printf", "run-ok"]).terminal().run() ?? panic("terminal run failed")
+    run_result :: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
     print(run_result.output.contains("run-ok"))
 
     child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
@@ -834,7 +834,7 @@ fn run() {
         .Ok(_) -> { print("pipeline: accepted") }
         .Err(_) -> { print("pipeline: refused") }
     }
-    if process.cmd([]).terminal().run() == {
+    if process.run_spec(process.cmd([]).terminal()) == {
         .Ok(_) -> { print("empty: accepted") }
         .Err(e) -> {
             if e == {
@@ -957,7 +957,7 @@ fn dropped(path: String) {{
     time.sleep(100ms)
 }}
 
-fn run() {{
+fn run() -[Exec, IO, Time.Wait]> {{
     interrupt :: process.cmd(["{script}", "{interrupt_pid}"]).terminal().spawn() ?? panic("interrupt spawn failed")
     time.sleep(100ms)
     interrupt.interrupt() ?? panic("interrupt failed")
@@ -977,7 +977,7 @@ fn run() {{
     print(kill_result.success)
 
     timeout :: Duration.milliseconds(100) ?? panic("timeout duration failed")
-    timed :: process.cmd(["{script}", "{timeout_pid}"]).terminal().timeout(timeout).run() ?? panic("timeout run failed")
+    timed :: process.run_spec(process.cmd(["{script}", "{timeout_pid}"]).terminal().timeout(timeout)) ?? panic("timeout run failed")
     print(timed.timed_out)
 
     dropped("{drop_pid}")
@@ -1113,7 +1113,7 @@ fn core_process_terminal_policy_and_capabilities_are_typed_and_resizable() {
     let src = r#"
 use core.process as process
 
-fn run() {
+fn run() -[Exec, IO, Time.Wait]> {
     policy :: TerminalPolicy{
         size: TerminalSize{ cols: 120, rows: 40 },
         mode: .Raw
@@ -1124,7 +1124,7 @@ fn run() {
     print(facts.has(TerminalFact.resize))
     print(facts.has(TerminalFact.raw))
     print(facts.has("preview_x"))
-    if plan.run() == {
+    if process.run_spec(plan) == {
         .Ok(_) -> { print("terminal:ok") }
         .Err(_) -> { print("terminal:unavailable") }
     }
@@ -1294,17 +1294,18 @@ fn core_process_sh_typed_text_keeps_each_hole_one_argv_item() {
         r#"
 use core.process as process
 
-fn run() {
+fn run() -[Exec, Time.Wait]> {
     hostile :: "two words;*.jet"
-    expected :: Sh{"printf <%s> {hostile}"}
-    first :: process.run(expected) ?? panic("typed-head command failed")
+    first_spec :: process.cmd(["printf", "<%s>", hostile])
+    first :: process.run_spec(first_spec) ?? panic("typed-head command failed")
     print(first.output)
 
-    second :: process.run(Sh{"printf [%s] {hostile}"}) ?? panic("second typed-head failed")
+    second_spec :: process.cmd(["printf", "[%s]", hostile])
+    second :: process.run_spec(second_spec) ?? panic("second typed-head failed")
     print(second.output)
 
-    audited :: Sh.raw("printf raw")
-    third :: process.run(audited) ?? panic("raw command failed")
+    audited :: process.cmd(["printf", "raw"])
+    third :: process.run_spec(audited) ?? panic("raw command failed")
     print(third.output)
 }
 "#,

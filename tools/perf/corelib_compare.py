@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -32,6 +33,7 @@ import time
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[2]
+JET_BIN = ROOT / "target" / "debug" / "jet"
 JET_ENV = ROOT / "scripts/agent/jet-env"
 SCRATCH_ROOT = Path.home() / ".cache" / "jet-luna" / "corelib-compare"
 JET_WORKLOAD = r'''fn to_u8(n: Int) -> U8 { (U8{n & 255}) }
@@ -84,7 +86,7 @@ fn main() {
 
 
 
-def run(command: list[str], *, cwd: Path = ROOT, timeout: int = 900) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, cwd: Path = ROOT, timeout: int = 900, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=cwd,
@@ -92,11 +94,15 @@ def run(command: list[str], *, cwd: Path = ROOT, timeout: int = 900) -> subproce
         text=True,
         timeout=timeout,
         check=False,
+        env=env,
     )
 
 
 def build_jet(entry: Path, cwd: Path) -> tuple[Path | None, dict[str, object]]:
-    completed = run([str(JET_ENV), "jet", "build", str(entry), "--release"], cwd=cwd)
+    env = os.environ.copy()
+    env["JET_ROOT"] = str(cwd)
+    env["PWD"] = str(cwd)
+    completed = run([str(JET_BIN), "build", str(entry), "--release"], cwd=cwd, env=env)
     artifact = entry.parent / ".jet" / "build" / entry.stem
     return (
         artifact if completed.returncode == 0 and artifact.is_file() else None,
@@ -144,6 +150,11 @@ def main() -> int:
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".corelib-compare-", dir=SCRATCH_ROOT) as raw_dir:
         scratch = Path(raw_dir)
+        package_file = scratch / "package.jet"
+        package_file.write_text(
+            (ROOT / "tools" / "perf" / "package.jet").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
         source_file = scratch / "source.jet"
         source_file.write_text(
             "use core.encoding.base64 as builtin_b64\n"
@@ -152,28 +163,14 @@ def main() -> int:
         )
         rust_entry = scratch / "rust_builtin.jet"
         rust_entry.write_text(
-            f'''package {{
-    name: "corelib_compare_rust"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}
-    outputs: {{ app: .Executable{{ entry: run }} }}
-}}
-use core.encoding.base64 as b64
+            f'''use core.encoding.base64 as b64
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",
         )
         source_entry = scratch / "jet_source.jet"
         source_entry.write_text(
-            f'''package {{
-    name: "corelib_compare_source"
-    version: "0.1.0"
-    edition: "2026"
-    authority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}
-    outputs: {{ app: .Executable{{ entry: run }} }}
-}}
-use source as b64
+            f'''use source as b64
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",

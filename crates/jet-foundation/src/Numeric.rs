@@ -2648,6 +2648,33 @@ impl CtDecimal {
         })
     }
 }
+
+impl std::ops::Add for CtDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        CtDecimal::add(&self, &rhs)
+    }
+}
+
+impl std::ops::Sub for CtDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        CtDecimal::sub(&self, &rhs)
+    }
+}
+
+impl std::ops::Mul for CtDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        CtDecimal::mul(&self, &rhs)
+    }
+}
 // ── JetInt: owned one-word exact integer carrier ────────────────────────────
 //
 // Inline values remain their signed 63-bit payload. A spilled value is an

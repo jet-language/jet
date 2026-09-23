@@ -1892,8 +1892,8 @@ function jetUiVariant(value) {
 }
 
 function jetUiOptionValue(value) {
-  if (value == null || value.tag === "None") return undefined;
-  return value.tag === "Some" ? value.values?.[0] : value;
+  if (value == null || value.tag === "None" || value.tag === "Err") return undefined;
+  return value.tag === "Some" || value.tag === "Ok" ? value.values?.[0] : value;
 }
 function jetUiImeEnabled(mode) {
   // A role-only textbox has no explicit mode and keeps the native default.

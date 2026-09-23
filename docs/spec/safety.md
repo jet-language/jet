@@ -33,14 +33,14 @@ baseline is refreshed.
   "regions": [
     {
       "package": "docs",
-      "file": "docs/reference/syntax-surface.jet",
+      "file": "docs/spec/reference/syntax-surface.jet",
       "line": 529,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be live and valid"
     },
     {
       "package": "docs",
-      "file": "docs/reference/syntax-surface.jet",
+      "file": "docs/spec/reference/syntax-surface.jet",
       "line": 532,
       "column": 5,
       "reason": "addr is the address of a live Int on this frame"
@@ -524,8 +524,8 @@ baseline is refreshed.
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| docs | docs/reference/syntax-surface.jet | 529:1 | "reads through a raw pointer; addr must be live and valid" |
-| docs | docs/reference/syntax-surface.jet | 532:5 | "addr is the address of a live Int on this frame" |
+| docs | docs/spec/reference/syntax-surface.jet | 529:1 | "reads through a raw pointer; addr must be live and valid" |
+| docs | docs/spec/reference/syntax-surface.jet | 532:5 | "addr is the address of a live Int on this frame" |
 | examples | examples/features/crypto/crypto_migration.jet | 26:5 | "AES-256-GCM protocol interoperability" |
 | examples | examples/features/crypto/random_api_split.jet | 28:5 | "compare the typed and raw HKDF rungs" |
 | examples | examples/features/crypto/vault_keys.jet | 36:5 | "restore audited raw signing-key material" |

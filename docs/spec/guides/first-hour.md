@@ -153,29 +153,31 @@ program when you want its normal output:
 jet run
 ```
 
-## 7. Lesson 5: `fix`
+## 7. Lesson 5: explicit entry
 
 Use your editor to make the source invalid in a recoverable way:
 
 ```jet
 print("before")
-fn run() { print("middle") }
-print("after")
 ```
 
-`jet check run.jet` reports E0621 because loose script statements already form
-the entry body and the file also declares `fn run`. Apply the safe automatic
-fix, then check the result:
+`jet check run.jet` reports E0621 because ordinary files execute only an
+explicit `fn run`. Move the statement into the entry function, then check and
+run the result:
+
+```jet
+fn run() {
+    print("before")
+}
+```
 
 ```bash
-jet fix run.jet
 jet check run.jet
 jet run
 ```
 
-The fix moves the loose statements into the one `fn run` body. Read the change
-in your editor before continuing. `jet fix` is a recovery tool for registered
-safe fixes; it is not a replacement for checking ordinary typing mistakes.
+There is no implicit-run auto-fix: the source author chooses the execution
+boundary. `jet fix` remains a recovery tool for other registered safe fixes.
 
 ## 8. Lesson 6: `explain`
 

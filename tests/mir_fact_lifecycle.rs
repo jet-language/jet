@@ -48,7 +48,7 @@ fn function<'a>(
 #[test]
 fn changed_mir_recomputes_facts_and_rejects_stale_passes() {
     let source = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i] * 2.0
@@ -56,7 +56,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
     return output
 }
 
-fn scalar_sum(values: [Float#4]) Float -> {
+fn scalar_sum(values: [Float#4]) -> Float {
     total := Float{0.0}
     loop i in 0..<4 { total += values[i] }
     return total
@@ -320,7 +320,7 @@ fn run() {}
 #[test]
 fn erased_loop_facts_do_not_make_the_function_vectorizable() {
     let source = r#"
-fn erased(values: [Float#4]) [Float#4] -> {
+fn erased(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     #Off {
         loop i in 0..<4 {
@@ -330,7 +330,7 @@ fn erased(values: [Float#4]) [Float#4] -> {
     return output
 }
 
-fn active(values: [Float#4]) [Float#4] -> {
+fn active(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i] * 2.0
@@ -361,7 +361,7 @@ fn run() {}
 #[test]
 fn elementwise_list_writes_keep_copy_cost_outside_the_loop() {
     let source = r#"
-fn bare(values: [Float#4]) [Float#4] -> {
+fn bare(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = values[i] * 2.0
@@ -369,7 +369,7 @@ fn bare(values: [Float#4]) [Float#4] -> {
     return output
 }
 
-fn explicit(values: [Float#4]) [Float#4] -> {
+fn explicit(values: [Float#4]) -> [Float#4] {
     output := ~values
     loop i in 0..<4 {
         output[i] = values[i] * 2.0
@@ -428,7 +428,7 @@ fn run() {}
 #[test]
 fn checked_vector_proof_conflicts_cannot_repromote_a_loop() {
     let source = r#"
-fn auto(values: [Float#4]) [Float#4] -> {
+fn auto(values: [Float#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 { output[i] = values[i] * 2.0 }
     return output
@@ -598,7 +598,7 @@ struct Particle {
     mass: Float
 }
 
-fn energy(ps: [Particle#4]) [Float#4] -> {
+fn energy(ps: [Particle#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 {
         output[i] = ps[i].x * ps[i].y + ps[i].mass

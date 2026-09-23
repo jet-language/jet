@@ -1852,6 +1852,26 @@ impl<'a> Checker<'a> {
                         b.name_span,
                     ));
             }
+            // An ordinary fallible call already propagates its failure in
+            // statement position. Its Unit success has nothing to bind.
+            if !init_has_error
+                && !b.is_comptime
+                && matches!(&final_ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                && matches!(
+                    b.init.without_parens(),
+                    Expr::Try(inner, ..)
+                        if matches!(
+                            inner.without_parens(),
+                            Expr::Call(..) | Expr::MethodCall { .. }
+                        )
+                )
+            {
+                self.diags.push(Diagnostic::from_row(
+                    "L0531",
+                    &[],
+                    Some(b.name_span),
+                ));
+            }
             self.current_binding_name = prev_binding_name;
             return;
         }

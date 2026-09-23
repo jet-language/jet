@@ -4,7 +4,7 @@
 
 Source: Verse `decides` failure contexts and the Logan Smith video series,
 mined 2026-07-24. The source report is
-`docs/archive/2026-07-24-verse-video-mining.md`. Jet's current disposition is
+`docs/audits/2026-07-24-verse-video-mining.md`. Jet's current disposition is
 **watch**: ordinary `?` propagation never implies rollback.
 
 This document is a paper design only. It does not change parser, sema, TIR,

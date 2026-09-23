@@ -1,209 +1,30 @@
+use core.data.[
+    JetDataPlotMark, JetDataPlotValue, JetDataPlotField, JetDataPlotSchema,
+    JetDataPlotEncoding, JetDataPlotLayout, JetDataPlotPlan, JetDataPlotRender
+]
 // core.data.plot — text and SVG charts from labelled series.
 //
 // A plan is a mark plus aligned `labels` / `values`. Rendering never talks to
 // a GPU: `svg` / `bar_svg` / `line_svg` emit XML, `text` / `bar_text` /
 // `line_text` emit a fixed-width sparkline. `inspect_json` is a compact
 // schema fact for tests.
-pub enum JetDataPlotMark {
-    Bar
-    Line
-    Point
-}
 
-pub enum JetDataPlotChannel {
-    X
-    Y
-    Color
-    Size
-}
-
-pub enum JetDataPlotAggregate {
-    Sum
-    Mean
-    Count
-    Min
-    Max
-}
-
-pub enum JetDataPlotFilterOp {
-    Eq
-    Ne
-    Lt
-    Le
-    Gt
-    Ge
-}
-
-pub enum JetDataPlotValue {
-    Number
-    Text
-    Bool
-}
-
-pub enum JetDataPlotTransform {
-    Identity
-    Filter
-    Aggregate
-}
-
-pub enum JetDataPlotScaleKind {
-    Linear
-    Log
-    Band
-}
-
-pub enum JetDataPlotDomain {
-    Auto
-    Explicit
-}
-
-pub enum JetDataPlotLegendPosition {
-    Top
-    Bottom
-    Left
-    Right
-}
-
-pub enum JetDataPlotFacetKind {
-    Wrap
-    Grid
-}
-
-pub enum JetDataPlotInteraction {
-    Hover
-    Select
-    Pan
-}
-
-pub enum JetDataPlotBackend {
-    Svg
-    Text
-}
-
-pub enum JetDataPlotSupport {
-    Full
-    Partial
-    Unsupported
-}
-
-pub enum JetDataPlotErrorKind {
-    Schema
-    Encoding
-    Render
-}
-
-pub enum JetDataPlotRenderFormat {
-    Svg
-    Text
-    Json
-}
-
-pub struct JetDataPlotField {
-    pub name: String
-    pub kind: JetDataPlotValue
-}
-
-pub struct JetDataPlotSchema {
-    pub fields: [JetDataPlotField]
-}
-
-pub struct JetDataPlotSourceFacts {
-    pub rows: Int
-    pub columns: Int
-}
-
-pub struct JetDataPlotEncoding {
-    pub x: String
-    pub y: String
-    pub mark: JetDataPlotMark
-}
-
-pub struct JetDataPlotScale {
-    pub kind: JetDataPlotScaleKind
-    pub field: String
-}
-
-pub struct JetDataPlotAxis {
-    pub field: String
-    pub title: String
-}
-
-pub struct JetDataPlotLegend {
-    pub position: JetDataPlotLegendPosition
-}
-
-pub struct JetDataPlotFacet {
-    pub kind: JetDataPlotFacetKind
-    pub field: String
-}
-
-pub struct JetDataPlotLayer {
-    pub mark: JetDataPlotMark
-    pub encoding: JetDataPlotEncoding
-}
-
-pub struct JetDataPlotAccessibility {
-    pub title: String
-    pub summary: String
-}
-
-pub struct JetDataPlotLayout {
-    pub width: Int
-    pub height: Int
-}
-
-pub struct JetDataPlotCapability {
-    pub backend: JetDataPlotBackend
-    pub support: JetDataPlotSupport
-}
-
-#Error
-pub struct JetDataPlotError {
-    pub kind: JetDataPlotErrorKind
-    pub message: String
-}
-
-pub struct JetDataPlotColumn {
-    pub name: String
-    pub values: [String]
-}
-
-pub struct JetDataPlotSelectedRow {
-    pub index: Int
-}
-
-pub struct JetDataPlotInspection {
-    pub text: String
-}
-
-pub struct JetDataPlotRender {
-    pub format: JetDataPlotRenderFormat
-    pub body: String
-}
-
-pub struct JetDataPlotProjection {
-    pub start: Int
-    pub end: Int
-}
-
-pub struct JetDataPlotPlan {
-    pub mark: JetDataPlotMark
-    pub labels: [String]
-    pub values: [Float]
-    pub layout: JetDataPlotLayout
-    pub encoding: JetDataPlotEncoding
-    pub schema: JetDataPlotSchema
-}
-
-/// Build a chart plan. Values shorter than labels read as 0.
+/// Build a chart plan. Values shorter than labels are explicit zero-valued
+/// observations; excess values are not silently rendered without an x label.
 pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan {
-    h := 24 * labels.len() + 16
+    xs := [String]{}
+    loop label in labels -> xs.push(~label)
+    ys := [Float]{}
+    loop i in 0..<labels.len() {
+        if i < values.len() -> ys.push(values[i]) else -> ys.push(Float{0.0})
+    }
+    h := 24 * xs.len() + 16
     if mark == JetDataPlotMark.Line || mark == JetDataPlotMark.Point -> h = 120
     fields := [JetDataPlotField]{JetDataPlotField{name: "x", kind: JetDataPlotValue.Text}, JetDataPlotField{name: "y", kind: JetDataPlotValue.Number}}
     {
         mark: mark,
-        labels: labels,
-        values: values,
+        labels: xs,
+        values: ys,
         layout: JetDataPlotLayout{width: 320, height: h},
         encoding: JetDataPlotEncoding{x: "x", y: "y", mark: mark},
         schema: JetDataPlotSchema{fields: fields},
@@ -213,25 +34,25 @@ pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetData
 pub fn bar_text(labels: [String], values: [Int]) -> String {
     ys := [Float]{}
     loop v in values -> ys.push(Float{v})
-    render_bar_text(labels, ys)
+    render_bar_text(labels, align_values(labels, ys))
 }
 
 pub fn bar_svg(labels: [String], values: [Int]) -> String {
     ys := [Float]{}
     loop v in values -> ys.push(Float{v})
-    render_bar_svg(labels, ys)
+    render_bar_svg(labels, align_values(labels, ys))
 }
 
 pub fn line_text(labels: [String], values: [Int]) -> String {
     ys := [Float]{}
     loop v in values -> ys.push(Float{v})
-    render_line_text(labels, ys)
+    render_line_text(labels, align_values(labels, ys))
 }
 
 pub fn line_svg(labels: [String], values: [Int]) -> String {
     ys := [Float]{}
     loop v in values -> ys.push(Float{v})
-    render_line_svg(labels, ys)
+    render_line_svg(labels, align_values(labels, ys))
 }
 
 pub fn inspect(labels: [String], values: [Int]) -> String { bar_text(labels, values) }
@@ -244,68 +65,113 @@ pub fn inspect_json(plan: JetDataPlotPlan) -> String {
 }
 
 pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender {
-    if plan.mark == JetDataPlotMark.Line {
-        return {format: JetDataPlotRenderFormat.Svg, body: render_line_svg(plan.labels, plan.values)}
+    normalized :: normalize_plan(plan)
+    if normalized.mark == JetDataPlotMark.Line {
+        return {format: .Svg, body: render_line_svg(normalized.labels, normalized.values)}
     }
-    if plan.mark == JetDataPlotMark.Point {
-        return {format: JetDataPlotRenderFormat.Svg, body: render_point_svg(plan.labels, plan.values)}
+    if normalized.mark == JetDataPlotMark.Point {
+        return {format: .Svg, body: render_point_svg(normalized.labels, normalized.values)}
     }
-    {format: JetDataPlotRenderFormat.Svg, body: render_bar_svg(plan.labels, plan.values)}
+    {format: .Svg, body: render_bar_svg(normalized.labels, normalized.values)}
 }
 
 pub fn svg(plan: JetDataPlotPlan) -> String { render(plan).body }
 
 pub fn text(plan: JetDataPlotPlan) -> String {
-    if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
-    render_bar_text(plan.labels, plan.values)
+    normalized :: normalize_plan(plan)
+    if normalized.mark == JetDataPlotMark.Line -> return render_line_text(normalized.labels, normalized.values)
+    if normalized.mark == JetDataPlotMark.Point -> return render_point_text(normalized.labels, normalized.values)
+    render_bar_text(normalized.labels, normalized.values)
 }
 
 pub fn show(plan: JetDataPlotPlan) -> String { text(plan) }
 
-fn render_bar_text(labels: [String], values: [Float]) -> String {
-    out := ""
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
+fn normalize_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan {
+    ys := [Float]{}
+    loop i in 0..<plan.labels.len() {
+        if i < plan.values.len() -> ys.push(plan.values[i]) else -> ys.push(Float{0.0})
     }
+    h := plan.layout.height
+    if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> h = 120
+    if h < 16 -> h = 16
+    JetDataPlotPlan{
+        mark: plan.mark,
+        labels: plan.labels,
+        values: ys,
+        layout: JetDataPlotLayout{width: 320, height: h},
+        encoding: plan.encoding,
+        schema: plan.schema,
+    }
+}
+fn align_values(labels: [String], values: [Float]) -> [Float] {
+    out := [Float]{}
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        w := 0
-        if max > 0.0 -> w = (Int{v * 20.0 / max})
+        if i < values.len() -> out.push(values[i]) else -> out.push(Float{0.0})
+    }
+    out
+}
+fn render_bar_text(labels: [String], values: [Float]) -> String {
+    bounds :: value_bounds(values)
+    minimum :: bounds.min
+    maximum :: bounds.max
+    baseline := scale_between(Float{0.0}, minimum, maximum, 20)
+    out := ""
+    loop i in 0..<labels.len() {
+        v := values[i]
         bar := ""
-        loop _ in 0..<w -> bar = "{bar}#"
+        if v >= (Float{0.0}) {
+            width := 0
+            if maximum > (Float{0.0}) -> width = scale_between(v, Float{0.0}, maximum, 20 - baseline)
+            loop _ in 0..<baseline -> bar = "{bar} "
+            loop _ in 0..<width -> bar = "{bar}#"
+        } else {
+            width := 0
+            if minimum < (Float{0.0}) -> width = scale_between(v, minimum, Float{0.0}, baseline)
+            loop _ in 0..<width -> bar = "{bar}<"
+        }
         out = "{out}{labels[i]} | {bar} {v}\n"
     }
     out
 }
 
 fn render_bar_svg(labels: [String], values: [Float]) -> String {
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
+    bounds :: value_bounds(values)
+    minimum :: bounds.min
+    maximum :: bounds.max
+    baseline := 100
+    if maximum > minimum -> baseline = scale_between(Float{0.0}, minimum, maximum, 200)
     w := 320
     h := 24 * labels.len() + 16
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        bw := 0
-        if max > 0.0 -> bw = (Int{v * 200.0 / max})
+        v := values[i]
         y := 8 + i * 24
-        out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{labels[i]}</text>"
-        out = "{out}<rect x=\"80\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
+        x := 80 + baseline
+        bw := 0
+        if v >= (Float{0.0}) {
+            if maximum > (Float{0.0}) -> bw = scale_between(v, Float{0.0}, maximum, 200 - baseline)
+        } else {
+            if minimum < (Float{0.0}) -> bw = scale_between(v, minimum, Float{0.0}, baseline)
+            x = x - bw
+        }
+        out = "{out}<text x=\"4\" y=\"{y + 12}\" font-size=\"12\">{xml_escape(labels[i])}</text>"
+        out = "{out}<rect x=\"{x}\" y=\"{y}\" width=\"{bw}\" height=\"16\" fill=\"#4a90d9\"/>"
     }
-    "{out}</svg>"
+    "{out}<line x1=\"{80 + baseline}\" y1=\"0\" x2=\"{80 + baseline}\" y2=\"{h}\" stroke=\"#777\" stroke-width=\"1\"/></svg>"
 }
 
 fn render_line_text(labels: [String], values: [Float]) -> String {
     out := ""
     loop i in 0..<labels.len() {
-        v := 0.0
-        if i < values.len() -> v = values[i]
-        out = "{out}{labels[i]}={v}\n"
+        out = "{out}{labels[i]}={values[i]}\n"
+    }
+    out
+}
+
+fn render_point_text(labels: [String], values: [Float]) -> String {
+    out := ""
+    loop i in 0..<labels.len() {
+        out = "{out}{labels[i]}: {values[i]}\n"
     }
     out
 }
@@ -314,18 +180,12 @@ fn render_line_svg(labels: [String], values: [Float]) -> String {
     n :: labels.len()
     w := 320
     h := 120
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
+    bounds :: value_bounds(values)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
     loop i in 0..<n {
-        v := 0.0
-        if i < values.len() -> v = values[i]
         x := 8
-        if n > 1 -> x = i * (w - 16) / (n - 1) + 8
-        y := h - 8
-        if max > 0.0 -> y = h - 8 - (Int{v * (Float{h - 16}) / max})
+        if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
+        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         if i > 0 -> out = "{out} "
         out = "{out}{x},{y}"
     }
@@ -336,19 +196,59 @@ fn render_point_svg(labels: [String], values: [Float]) -> String {
     n :: labels.len()
     w := 320
     h := 120
-    max := 1.0
-    loop v in values {
-        if v > max -> max = v
-    }
+    bounds :: value_bounds(values)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<n {
-        v := 0.0
-        if i < values.len() -> v = values[i]
         x := 8
-        if n > 1 -> x = i * (w - 16) / (n - 1) + 8
-        y := h - 8
-        if max > 0.0 -> y = h - 8 - (Int{v * (Float{h - 16}) / max})
+        if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
+        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"3\" fill=\"#4a90d9\"/>"
+        out = "{out}<text x=\"{x}\" y=\"{h - 1}\" font-size=\"10\">{xml_escape(labels[i])}</text>"
     }
     "{out}</svg>"
+}
+
+fn value_bounds(values: [Float]) -> (min: Float, max: Float) {
+    minimum := Float{0.0}
+    maximum := Float{0.0}
+    loop value in values {
+        if value < minimum -> minimum = value
+        if value > maximum -> maximum = value
+    }
+    if minimum == maximum {
+        minimum = minimum - (Float{1.0})
+        maximum = maximum + (Float{1.0})
+    }
+    (min: minimum, max: maximum)
+}
+
+fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int {
+    if extent <= 0 || maximum <= minimum -> return 0
+    ratio := (value - minimum) / (maximum - minimum)
+    if ratio <= (Float{0.0}) -> return 0
+    if ratio >= (Float{1.0}) -> return extent
+    Int{ratio * (Float{extent})}
+}
+
+fn xml_escape(text: String) -> String {
+    out := ""
+    chunk := [U8]{}
+    loop b in text.bytes() {
+        entity := ""
+        if b == (U8{38}) -> entity = "&amp;"
+        else if b == (U8{60}) -> entity = "&lt;"
+        else if b == (U8{62}) -> entity = "&gt;"
+        else if b == (U8{34}) -> entity = "&quot;"
+        else if b == (U8{39}) -> entity = "&apos;"
+        if entity.len() > 0 {
+            chunk_text :: String.from_bytes(chunk) ?? panic("plot XML label encoding failed")
+            out = "{out}{chunk_text}{entity}"
+            chunk = [U8]{}
+        } else {
+            chunk.push(b)
+        }
+    }
+    tail :: String.from_bytes(chunk) ?? panic("plot XML label encoding failed")
+    out = "{out}{tail}"
+    out
 }

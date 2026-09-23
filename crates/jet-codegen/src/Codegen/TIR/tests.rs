@@ -408,8 +408,8 @@ fn default_parameter_call_sites_are_tir_covered() {
 }
 
 #[test]
-fn script_body_is_lowered_as_the_canonical_run_function() {
-    let source = "print(\"script\")\nfn helper() {}\n";
+fn explicit_run_is_lowered_as_the_canonical_run_function() {
+    let source = "fn run() { print(\"script\") }\nfn helper() {}\n";
     let bundle = checked_bundle(source);
     let module = &bundle.modules[bundle.entry];
     assert!(module.script_body.is_empty());
@@ -424,12 +424,12 @@ fn script_body_is_lowered_as_the_canonical_run_function() {
     assert_eq!(
         runs.len(),
         1,
-        "sema must materialize exactly one ordinary run"
+        "the explicit run must be the sole ordinary run"
     );
     let run = runs[0];
     assert!(
         run.params.is_empty(),
-        "implicit run must have no parameters"
+        "run must have no parameters"
     );
     assert!(!run.is_job && !run.is_unsafe && !run.is_reactive);
     assert!(matches!(
@@ -444,7 +444,7 @@ fn script_body_is_lowered_as_the_canonical_run_function() {
             .filter(|stmt| matches!(stmt, Stmt::Expr(Expr::Call(call)) if call.name == "print"))
             .count(),
         1,
-        "the script operation must enter run exactly once"
+        "the explicit run operation must enter run exactly once"
     );
 
     let helpers = module
@@ -478,7 +478,7 @@ fn script_body_is_lowered_as_the_canonical_run_function() {
             .filter(|stmt| matches!(stmt, TStmt::SourceSpan(_)))
             .count(),
         1,
-        "TIR must retain one source statement marker for the script operation"
+        "TIR must retain one source statement marker for the explicit run operation"
     );
     let printed = lowered
         .body
@@ -494,7 +494,7 @@ fn script_body_is_lowered_as_the_canonical_run_function() {
     assert_eq!(
         printed.len(),
         1,
-        "the script operation must lower exactly once"
+        "the explicit run operation must lower exactly once"
     );
     assert!(matches!(
         &printed[0].kind,

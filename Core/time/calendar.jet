@@ -1,13 +1,4 @@
-package {
-    name: "core.time.calendar"
-    version: "0.1.0"
-    edition: "2026"
-    description: "Gregorian calendar tables, names, and month layouts."
-    license: "MIT"
-    outputs: {
-        calendar: .Library{ entry: calendar }
-    }
-}
+use core.time as time
 // core.time.calendar — Python `calendar` without locale tables.
 //
 // Weeks start on Monday (`MONDAY = 0`) unless a function takes `firstweekday`.
@@ -26,6 +17,13 @@ package {
 @saturday :: 5
 
 @sunday :: 6
+fn floor_div(a: Int, b: Int) -> Int {
+    q := a /% b
+    r :: a %% b
+    if r != 0 && ((r < 0) != (b < 0)) -> q = q - 1
+    q
+}
+
 
 pub fn isleap(year: Int) -> Bool { time.is_leap_year(year) }
 
@@ -45,26 +43,33 @@ pub fn leapdays(y1: Int, y2: Int) -> Int {
     }
     n
 }
-
 pub fn weekday(year: Int, month: Int, day: Int) -> Int {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.
     y := year
+    m := month
+    if m < 1 -> m = 1
+    if m > 12 -> m = 12
     t := [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
-    if month < 3 -> y = y - 1
-    sun0 := (y + y / 4 - y / 100 + y / 400 + t[month - 1] + day) %% 7
+    if m < 3 -> y = y - 1
+    sun0 := (y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + t[m - 1] + day) %% 7
+    if sun0 < 0 -> sun0 = sun0 + 7
     (sun0 + 6) %% 7
-}
 
+}
 pub fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) {
     days :: time.days_in_month(year, month)
-    (weekday: weekday(year, month, 1), days: days)
+    if days == 0 -> return (days: 0, weekday: 0)
+    (days: days, weekday: weekday(year, month, 1))
 }
 
 pub fn monthcalendar(year: Int, month: Int) -> [[Int]] { monthcalendar_start(year, month, 0) }
-
 pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] {
     range :: monthrange(year, month)
-    start := (range.weekday - firstweekday) %% 7
+    if range.days == 0 -> return [[Int]]{}
+    first := firstweekday %% 7
+    if first < 0 -> first = first + 7
+    start := (range.weekday - first) %% 7
+    if start < 0 -> start = start + 7
     weeks := [[Int]]{}
     week := [Int]{}
     loop _ in 0..<start -> week.push(0)
@@ -84,6 +89,7 @@ pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] 
     weeks
 }
 
+
 pub fn yearcalendar(year: Int) -> [[[Int]]] {
     months := [[[Int]]]{}
     m := 1
@@ -95,7 +101,10 @@ pub fn yearcalendar(year: Int) -> [[[Int]]] {
 }
 
 pub fn day_name(weekday: Int) -> String {
-    if weekday == {
+    i := weekday
+    if i < 0 -> i = 0
+    if i > 6 -> i = 6
+    if i == {
         0 -> "Monday"
         1 -> "Tuesday"
         2 -> "Wednesday"
@@ -107,7 +116,10 @@ pub fn day_name(weekday: Int) -> String {
 }
 
 pub fn day_abbr(weekday: Int) -> String {
-    if weekday == {
+    i := weekday
+    if i < 0 -> i = 0
+    if i > 6 -> i = 6
+    if i == {
         0 -> "Mon"
         1 -> "Tue"
         2 -> "Wed"
@@ -119,7 +131,10 @@ pub fn day_abbr(weekday: Int) -> String {
 }
 
 pub fn month_name(month: Int) -> String {
-    if month == {
+    i := month
+    if i < 1 -> i = 1
+    if i > 12 -> i = 12
+    if i == {
         1 -> "January"
         2 -> "February"
         3 -> "March"
@@ -136,7 +151,10 @@ pub fn month_name(month: Int) -> String {
 }
 
 pub fn month_abbr(month: Int) -> String {
-    if month == {
+    i := month
+    if i < 1 -> i = 1
+    if i > 12 -> i = 12
+    if i == {
         1 -> "Jan"
         2 -> "Feb"
         3 -> "Mar"
@@ -155,10 +173,12 @@ pub fn month_abbr(month: Int) -> String {
 pub fn weekheader(width: Int, firstweekday: Int) -> [String] {
     w := width
     if w < 1 -> w = 1
+    first := firstweekday %% 7
+    if first < 0 -> first = first + 7
     out := [String]{}
     i := 0
     loop i < 7 {
-        name :: day_abbr((i + firstweekday) %% 7)
+        name :: day_abbr((i + first) %% 7)
         out.push(clip(name, w))
         i = i + 1
     }
@@ -191,9 +211,10 @@ pub fn formatyear(year: Int) -> String {
 }
 
 pub fn timegm(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int {
-    dt :: time.datetime(year, month, day, hour, minute, second, 0)
+    dt :: time.datetime(year, month, day, hour, minute, second)
     time.unix_seconds(dt)
 }
+
 
 fn clip(text: String, width: Int) -> String {
     raw :: text.bytes()
@@ -204,12 +225,12 @@ fn clip(text: String, width: Int) -> String {
         out.push(raw[i])
         i = i + 1
     }
-    String.from_bytes(out) ?? text
+    String.from_bytes(out) ?? ~text
 }
 
 fn pad(text: String, width: Int) -> String {
     raw :: text.bytes()
-    if raw.len() >= width -> return text
+    if raw.len() >= width -> return ~text
     out := text
     n := width - raw.len()
     loop n > 0 {
@@ -221,8 +242,8 @@ fn pad(text: String, width: Int) -> String {
 
 fn center(text: String, width: Int) -> String {
     raw :: text.bytes()
-    if raw.len() >= width -> return text
-    left := (width - raw.len()) / 2
+    if raw.len() >= width -> return ~text
+    left := (width - raw.len()) /% 2
     right := width - raw.len() - left
     out := ""
     loop left > 0 {
@@ -248,3 +269,4 @@ fn join_row(cells: [String], width: Int) -> String {
     }
     out
 }
+

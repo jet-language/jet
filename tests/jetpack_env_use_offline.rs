@@ -92,6 +92,7 @@ fn warm_jet_entry_execs_tool_without_wrapper_process() {
         .env("HOME", &home.path)
         .env("JETPACK_DENY_NETWORK", "1")
         .env_remove("JETPACK_FIXTURES");
+    command.stdout(std::process::Stdio::piped());
     let child = command.spawn().unwrap();
     let pid = child.id();
     let output = child.wait_with_output().unwrap();

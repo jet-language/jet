@@ -3,12 +3,25 @@
 // Implements the common document: comments, dotted keys, [tables]
 // [[arrays of tables]], strings (basic and literal), integers, floats
 // booleans, and inline tables/arrays. Datetimes stay text so this module
-// does not take a `core.time` dependency. Full TOML (offset-datetime
-// validation, dotted-key collision cases at every table boundary) remains
-// host-backed at cutover if a document fails here.
+// does not take a `core.time` dependency. Unsupported TOML constructs fail
+// closed with `EncodingError` rather than being delegated implicitly.
 //
-// `decode` is `parse`. `to_string` emits a minimal table document, not a
-// round-trip of original comments.
+// `to_string` emits a minimal table document; it does not preserve comments.
+
+use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+    {
+        format: format,
+        kind: EncodingErrorKind.Syntax,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
 pub fn parse(text: String) -> DataTree !EncodingError { parse_toml(text) }
 
 pub fn decode(text: String) -> DataTree !EncodingError { parse_toml(text) }
@@ -19,7 +32,7 @@ pub fn to_string(value: DataTree) -> String { render_toml(value) }
 
 fn parse_toml(text: String) -> DataTree !EncodingError {
     p := TomlParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
-    p.document()
+    _ :: p.document() ?? return Err(p.fail("TOML document could not be parsed"))
     Ok(DataTree.Object(p.root))
 }
 
@@ -50,7 +63,7 @@ impl TomlParser {
     }
 
     fn fail(self, reason: String) -> EncodingError {
-        return EncodingError.syntax(
+        return syntax_error(
         EncodingFormat.TOML,
         self.index,
         self.line,
@@ -60,85 +73,122 @@ impl TomlParser {
         )
     }
 
-    fn skip_ws(&self) {
+    fn skip_ws(&self) -> Bool !EncodingError {
+        if self.index < 0 -> return Err(self.fail("TOML parser index became negative"))
         loop {
-            b :: self.peek() ?? return
-            n :: b
-            if n == 32 || n == 9 {
-                _ :: self.bump()
-                next
-            }
-            if n == 35 {
-                loop {
-                    c :: self.peek() ?? return
-                    _ :: self.bump()
-                    if c == (U8{10}) {
-                        return
+            if self.peek() == {
+                .None -> return true
+                .Val(b) -> {
+                    n :: Int.from_u8(b)
+                    if n == 32 || n == 9 {
+                        self.index += 1
+                        self.column += 1
+                        next
                     }
+                    if n == 35 {
+                        loop {
+                            if self.peek() == {
+                                .None -> return true
+                                .Val(c) -> {
+                                    cn :: Int.from_u8(c)
+                                    self.index += 1
+                                    if cn == 10 {
+                                        self.line += 1
+                                        self.column = 1
+                                        return true
+                                    }
+                                    self.column += 1
+                                }
+                            }
+                        }
+                    }
+                    return true
                 }
             }
-            return
         }
+        true
     }
 
-    fn skip_space(&self) {
-        self.skip_ws()
+    fn skip_space(&self) -> Bool !EncodingError {
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop {
-            b :: self.peek() ?? return
-            if b == (U8{10}) || b == (U8{13}) {
-                _ :: self.bump()
-                self.skip_ws()
-                next
+            if self.peek() == {
+                .None -> return true
+                .Val(b) -> {
+                    n :: Int.from_u8(b)
+                    if n == 10 || n == 13 {
+                        self.index += 1
+                        self.line += 1
+                        self.column = 1
+                        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+                        next
+                    }
+                    return true
+                }
             }
-            return
         }
+        true
     }
 
-    fn document(&self) !EncodingError {
+    fn document(&self) -> Bool !EncodingError {
         current := [String]{}
-        self.skip_space()
-        loop !self.eof() {
-            self.skip_space()
-            if self.eof() -> return Ok()
-            b :: self.peek() ?? return Ok()
+        self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+        loop self.eof() == false {
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            if self.eof() -> return true
+            b :: self.peek() ?? return true
             if b == (U8{91}) {
-                current = self.parse_header()
+                header :: self.parse_header()
+                current = header
                 next
             }
-            key :: self.parse_key()
-            self.skip_ws()
+            keys :: self.parse_dotted_key()
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             got :: self.bump() ?? return Err(self.fail("expected '=' after a key"))
             if got != (U8{61}) -> return Err(self.fail("expected '=' after a key"))
-            self.skip_ws()
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             value :: self.parse_value()
-            self.assign(current, key, value)
-            self.skip_space()
+            _ :: self.assign(current, keys, value) ?? return Err(self.fail("TOML assignment failed"))
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         }
-        Ok()
+        true
     }
 
     fn parse_header(&self) -> [String] !EncodingError {
         _ :: self.bump()
         array := false
-        if self.peek() ?? (U8{0}) == (U8{91}) {
+        b0 :: self.peek() ?? (U8{0})
+        if b0 == (U8{91}) {
             array = true
             _ :: self.bump()
         }
         keys := [String]{}
-        keys.push(self.parse_key())
-        loop self.peek() ?? (U8{0}) == (U8{46}) {
+        key :: self.parse_key()
+        keys.push(key)
+        loop {
+            b :: self.peek() ?? (U8{0})
+            if b != (U8{46}) -> break
             _ :: self.bump()
-            keys.push(self.parse_key())
+            key2 :: self.parse_key()
+            keys.push(key2)
         }
-        self.skip_ws()
-        _ :: self.bump()
-        if array -> _ :: self.bump()
-        if array -> self.ensure_array_table(keys) else -> self.ensure_table(keys)
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        close :: self.bump() ?? return Err(self.fail("unterminated TOML table header"))
+        if close != (U8{93}) -> return Err(self.fail("expected ']' after a TOML table header"))
+        if array {
+            close2 :: self.bump() ?? return Err(self.fail("unterminated TOML array-of-tables header"))
+            if close2 != (U8{93}) -> return Err(self.fail("expected ']]' after a TOML array-of-tables header"))
+        }
+        if array {
+            self.root = ensure_array_path(self.root, keys, 0)
+        } else {
+            self.root = ensure_table_path(self.root, keys, 0)
+        }
         Ok(keys)
     }
 
     fn parse_key(&self) -> String !EncodingError {
-        self.skip_ws()
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b :: self.peek() ?? return Err(self.fail("expected a key"))
         if b == (U8{34}) -> return self.parse_basic_string()
         out := [U8]{}
@@ -146,7 +196,7 @@ impl TomlParser {
             c :: self.peek() ?? break
             n :: c
             bare :: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45
-            if !bare -> break
+            if bare == false -> break
             out.push(c)
             _ :: self.bump()
         }
@@ -154,17 +204,38 @@ impl TomlParser {
         Ok(String.from_bytes(out) ?? "")
     }
 
+    fn parse_dotted_key(&self) -> [String] !EncodingError {
+        keys := [String]{}
+        key :: self.parse_key()
+        keys.push(key)
+        loop {
+            b :: self.peek() ?? (U8{0})
+            if b != (U8{46}) -> break
+            _ :: self.bump()
+            next_key :: self.parse_key()
+            keys.push(next_key)
+        }
+        Ok(keys)
+    }
+
     fn parse_value(&self) -> DataTree !EncodingError {
-        self.skip_ws()
-        b :: self.peek() ?? Err(self.fail("expected a value"))
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        b :: self.peek() ?? return Err(self.fail("expected a value"))
         n :: b
+        if n == 10 || n == 13 -> return Err(self.fail("expected a value before the end of the TOML line"))
         if n == {
-            34 -> self.parse_basic_string()
-            39 -> self.parse_literal_string()
-            91 -> self.parse_array()
-            123 -> self.parse_inline_table()
-            116 -> self.parse_word("true", DataTree.Bool(true))
-            102 -> self.parse_word("false", DataTree.Bool(false))
+            34 -> {
+                s :: self.parse_basic_string()
+                return Ok(DataTree.Text(s))
+            }
+            39 -> {
+                s :: self.parse_literal_string()
+                return Ok(DataTree.Text(s))
+            }
+            91 -> return self.parse_array()
+            123 -> return self.parse_inline_table()
+            116 -> return self.parse_word("true", DataTree.Bool(true))
+            102 -> return self.parse_word("false", DataTree.Bool(false))
             else -> self.parse_number_or_text()
         }
     }
@@ -174,6 +245,11 @@ impl TomlParser {
             got :: self.bump() ?? return Err(self.fail("expected `{spelling}`"))
             if got != b -> return Err(self.fail("expected `{spelling}`"))
         }
+        next :: self.peek() ?? (U8{0})
+        n :: next
+        if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45 {
+            return Err(self.fail("TOML bare values must be delimited"))
+        }
         Ok(value)
     }
 
@@ -182,10 +258,20 @@ impl TomlParser {
         out := [U8]{}
         loop {
             b :: self.bump() ?? return Err(self.fail("unterminated TOML string"))
-            if b == (U8{34}) -> return Ok(String.from_bytes(out) ?? "")
+            if b == (U8{34}) {
+                s :: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in TOML string"))
+                return Ok(s)
+            }
+            if b == (U8{10}) || b == (U8{13}) -> return Err(self.fail("newline is not allowed in a basic TOML string"))
             if b == (U8{92}) {
                 esc :: self.bump() ?? return Err(self.fail("truncated escape"))
-                out.push(esc)
+                if esc == (U8{98}) -> out.push(U8{8})
+                else if esc == (U8{116}) -> out.push(U8{9})
+                else if esc == (U8{110}) -> out.push(U8{10})
+                else if esc == (U8{102}) -> out.push(U8{12})
+                else if esc == (U8{114}) -> out.push(U8{13})
+                else if esc == (U8{34}) || esc == (U8{92}) -> out.push(esc)
+                else -> return Err(self.fail("unknown TOML basic-string escape"))
                 next
             }
             out.push(b)
@@ -197,7 +283,10 @@ impl TomlParser {
         out := [U8]{}
         loop {
             b :: self.bump() ?? return Err(self.fail("unterminated literal string"))
-            if b == (U8{39}) -> return Ok(String.from_bytes(out) ?? "")
+            if b == (U8{39}) {
+                s :: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in TOML string"))
+                return Ok(s)
+            }
             out.push(b)
         }
     }
@@ -206,14 +295,22 @@ impl TomlParser {
         _ :: self.bump()
         items := [DataTree]{}
         loop {
-            self.skip_space()
-            if self.peek() ?? (U8{0}) == (U8{93}) {
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            b0 :: self.peek() ?? (U8{0})
+            if b0 == (U8{93}) {
                 _ :: self.bump()
                 return Ok(DataTree.Array(items))
             }
-            items.push(self.parse_value())
-            self.skip_space()
-            if self.peek() ?? (U8{0}) == (U8{44}) -> _ :: self.bump()
+            value :: self.parse_value()
+            items.push(value)
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            b :: self.peek() ?? return Err(self.fail("unterminated TOML array"))
+            if b == (U8{93}) {
+                _ :: self.bump()
+                return Ok(DataTree.Array(items))
+            }
+            if b != (U8{44}) -> return Err(self.fail("expected ',' or ']' after a TOML array value"))
+            _ :: self.bump()
         }
     }
 
@@ -221,19 +318,26 @@ impl TomlParser {
         _ :: self.bump()
         entries := [String:DataTree]{}
         loop {
-            self.skip_ws()
-            if self.peek() ?? (U8{0}) == (U8{125}) {
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            b0 :: self.peek() ?? (U8{0})
+            if b0 == (U8{125}) {
                 _ :: self.bump()
                 return Ok(DataTree.Object(entries))
             }
             key :: self.parse_key()
-            self.skip_ws()
+            if entries.has_key(key) -> return Err(self.fail("duplicate key in TOML inline table"))
             eq :: self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
             value :: self.parse_value()
             _ :: entries.add(key, value)
-            self.skip_ws()
-            if self.peek() ?? (U8{0}) == (U8{44}) -> _ :: self.bump()
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            b :: self.peek() ?? return Err(self.fail("unterminated TOML inline table"))
+            if b == (U8{125}) {
+                _ :: self.bump()
+                return Ok(DataTree.Object(entries))
+            }
+            if b != (U8{44}) -> return Err(self.fail("expected ',' or '}}' after a TOML inline-table value"))
+            _ :: self.bump()
         }
     }
 
@@ -246,66 +350,333 @@ impl TomlParser {
             if stop -> break
             _ :: self.bump()
         }
+        if self.index <= start -> return Err(self.fail("expected a TOML value"))
         token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? ""
-        if Int.parse(token) == {
+        clean :: remove_underscores(token)
+        if parse_radix_int(clean) == {
+            .Val(n) -> return Ok(DataTree.Int(n))
+            else -> { _ := 0 }
+        }
+        if Int.parse(clean) == {
             .Ok(n) -> return Ok(DataTree.Int(n))
             else -> { _ := 0 }
         }
-        if Float.parse(token) == {
+        if Float.parse(clean) == {
             .Ok(n) -> return Ok(DataTree.Float(n))
             else -> { _ := 0 }
         }
         Ok(DataTree.Text(token))
     }
 
-    fn ensure_table(&self, keys: [String]) { _ :: self.touch(keys, false) }
-
-    fn ensure_array_table(&self, keys: [String]) { _ :: self.touch(keys, true) }
-
-    fn touch(&self, keys: [String], array: Bool) {
-        // Table construction is applied at assign time; headers only record path.
-        _ :: keys
-        _ :: array
+    fn ensure_table(&self, keys: [String]) {
+        self.root = ensure_table_path(self.root, keys, 0)
     }
 
-    fn assign(&self, table: [String], key: String, value: DataTree) {
+    fn ensure_array_table(&self, keys: [String]) {
+        self.root = ensure_array_path(self.root, keys, 0)
+    }
+
+    fn assign(&self, table: [String], key: [String], value: DataTree) -> Bool !EncodingError {
         path := [String]{}
         loop k in table -> path.push(k)
-        path.push(key)
+        loop k in key -> path.push(k)
+        if has_path(self.root, path, 0) -> return Err(self.fail("duplicate TOML key"))
         self.root = put_path(self.root, path, 0, value)
+        true
+    }
+}
+
+fn remove_underscores(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        if b != (U8{95}) -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn parse_radix_int(text: String) -> ?Int {
+    raw :: text.bytes()
+    if raw.len() < 3 -> return None
+    sign := 1
+    start := 0
+    if raw[0] == (U8{43}) || raw[0] == (U8{45}) {
+        if raw[0] == (U8{45}) -> sign = -1
+        start = 1
+    }
+    if start + 2 > raw.len() || raw[start] != (U8{48}) -> return None
+    base := 0
+    if raw[start + 1] == (U8{120}) -> base = 16
+    if raw[start + 1] == (U8{111}) -> base = 8
+    if raw[start + 1] == (U8{98}) -> base = 2
+    if base == 0 -> return None
+    if start + 2 >= raw.len() -> return None
+    n := 0
+    i := start + 2
+    loop i < raw.len() {
+        d :: radix_digit(raw[i], base)
+        if d < 0 -> return None
+        n = n * base + d
+        i += 1
+    }
+    Val(sign * n)
+}
+
+fn radix_digit(b: U8, base: Int) -> Int {
+    n :: Int.from_u8(b)
+    d := -1
+    if n >= 48 && n <= 57 -> d = n - 48
+    if n >= 65 && n <= 70 -> d = n - 55
+    if n >= 97 && n <= 102 -> d = n - 87
+    if d >= base -> return -1
+    d
+}
+
+fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] {
+    if i >= path.len() -> return ~entries
+    out := ~entries
+    key :: path[i]
+    if i == path.len() - 1 {
+        if out.get(key) == .None -> _ :: out.add(key, DataTree.Object([String:DataTree]{}))
+        return out
+    }
+    child := [String:DataTree]{}
+    existing_array := false
+    array_items := [DataTree]{}
+    if out.get(key) == {
+        .Val(existing) -> {
+            if existing == {
+                .Object(obj) -> child = obj
+                .Array(items) -> {
+                    existing_array = true
+                    if items.len() > 0 {
+                        last_item :: items[items.len() - 1]
+                        if last_item == {
+                            .Object(obj) -> child = obj
+                            else -> { _ := 0 }
+                        }
+                    }
+                    array_items = ~items
+                }
+                else -> { _ := 0 }
+            }
+        }
+        else -> { _ := 0 }
+    }
+    nested :: ensure_table_path(child, path, i + 1)
+    if existing_array {
+        if array_items.len() == 0 {
+            array_items.push(DataTree.Object(nested))
+        } else {
+            array_items[array_items.len() - 1] = DataTree.Object(nested)
+        }
+        _ :: out.add(key, DataTree.Array(array_items))
+    } else {
+        _ :: out.add(key, DataTree.Object(nested))
+    }
+    out
+}
+
+fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] {
+    if i >= path.len() -> return ~entries
+    out := ~entries
+    key :: path[i]
+    if i == path.len() - 1 {
+        item := DataTree.Object([String:DataTree]{})
+        if out.get(key) == {
+            .Val(existing) -> {
+                if existing == {
+                    .Array(items) -> {
+                        mutable := ~items
+                        mutable.push(item)
+                        _ :: out.add(key, DataTree.Array(mutable))
+                    }
+                    .Object(obj) -> {
+                        _ :: out.add(key, DataTree.Array([DataTree]{DataTree.Object(obj), item}))
+                    }
+                    else -> _ :: out.add(key, DataTree.Array([DataTree]{item}))
+                }
+            }
+            else -> _ :: out.add(key, DataTree.Array([DataTree]{item}))
+        }
+        return out
+    }
+    child := [String:DataTree]{}
+    existing_array := false
+    array_items := [DataTree]{}
+    if out.get(key) == {
+        .Val(existing) -> {
+            if existing == {
+                .Object(obj) -> child = obj
+                .Array(items) -> {
+                    existing_array = true
+                    if items.len() > 0 {
+                        last_item :: items[items.len() - 1]
+                        if last_item == {
+                            .Object(obj) -> child = obj
+                            else -> { _ := 0 }
+                        }
+                    }
+                    array_items = ~items
+                }
+                else -> { _ := 0 }
+            }
+        }
+        else -> { _ := 0 }
+    }
+    nested :: ensure_array_path(child, path, i + 1)
+    if existing_array {
+        if array_items.len() == 0 {
+            array_items.push(DataTree.Object(nested))
+        } else {
+            array_items[array_items.len() - 1] = DataTree.Object(nested)
+        }
+        _ :: out.add(key, DataTree.Array(array_items))
+    } else {
+        _ :: out.add(key, DataTree.Object(nested))
+    }
+    out
+}
+
+fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool {
+    if i >= path.len() -> return false
+    key :: path[i]
+    if i == path.len() - 1 -> return entries.has_key(key)
+    child :: entries.get(key) ?? return false
+    if child == {
+        .Object(obj) -> return has_path(obj, path, i + 1)
+        .Array(items) -> {
+            if items.len() == 0 -> return false
+            last :: items[items.len() - 1]
+            if last == {
+                .Object(obj) -> return has_path(obj, path, i + 1)
+                else -> return false
+            }
+        }
+        else -> return false
     }
 }
 
 fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] {
+    out := ~entries
     key :: path[i]
     if i == path.len() - 1 {
-        _ :: entries.add(key, value)
-        return entries
+        _ :: out.add(key, value)
+        return out
     }
     child := [String:DataTree]{}
-    if entries.get(key) == {
+    if out.get(key) == {
         .Val(existing) -> {
             if existing == {
                 .Object(obj) -> child = obj
+                .Array(items) -> {
+                    if items.len() > 0 {
+                        mutable := ~items
+                        last_index := mutable.len() - 1
+                        if mutable[last_index] == {
+                            .Object(obj) -> {
+                                nested :: put_path(obj, path, i + 1, value)
+                                mutable[last_index] = DataTree.Object(nested)
+                                _ :: out.add(key, DataTree.Array(mutable))
+                                return out
+                            }
+                            else -> { _ := 0 }
+                        }
+                    }
+                }
                 else -> { _ := 0 }
             }
         }
         else -> { _ := 0 }
     }
     nested :: put_path(child, path, i + 1, value)
-    _ :: entries.add(key, DataTree.Object(nested))
-    entries
+    _ :: out.add(key, DataTree.Object(nested))
+    out
 }
 
 fn render_toml(value: DataTree) -> String {
     if value == {
-        .Object(entries) -> {
-            out := ""
-            loop pair in entries -> out = "{out}{pair.key} = {toml_leaf(pair.value)}\n"
-            return out
-        }
+        .Object(entries) -> return render_toml_table(entries, "")
         else -> return toml_leaf(value)
     }
+}
+
+fn render_toml_table(entries: [String:DataTree], prefix: String) -> String {
+    out := ""
+    loop pair in entries {
+        if pair.value == {
+            .Object(_) -> next
+            .Array(items) -> {
+                if all_objects(items) -> next
+            }
+            else -> { _ := 0 }
+        }
+        out = "{out}{toml_key(pair.key)} = {toml_leaf(pair.value)}\n"
+    }
+    loop pair in entries {
+        if pair.value == {
+            .Object(obj) -> {
+                path :: join_key(prefix, pair.key)
+                out = "{out}\n[{path}]\n{render_toml_table(obj, path)}"
+            }
+            .Array(items) -> {
+                if all_objects(items) {
+                    path :: join_key(prefix, pair.key)
+                    loop item in items {
+                        if item == {
+                            .Object(obj) -> out = "{out}\n[[{path}]]\n{render_toml_table(obj, path)}"
+                            else -> { _ := 0 }
+                        }
+                    }
+                }
+            }
+            else -> { _ := 0 }
+        }
+    }
+    out
+}
+
+fn all_objects(items: [DataTree]) -> Bool {
+    if items.len() == 0 -> return false
+    loop item in items {
+        if item == {
+            .Object(_) -> next
+            else -> return false
+        }
+    }
+    true
+}
+
+fn join_key(prefix: String, key: String) -> String {
+    if prefix.len() == 0 -> return toml_key(key)
+    "{prefix}.{toml_key(key)}"
+}
+
+fn toml_key(key: String) -> String {
+    raw :: key.bytes()
+    if raw.len() > 0 {
+        valid := true
+        loop b in raw {
+            n :: b
+            if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45) {
+                valid = false
+            }
+        }
+        if valid -> return ~key
+    }
+    toml_quote(key)
+}
+
+fn toml_quote(text: String) -> String {
+    out := "\""
+    loop b in text.bytes() {
+        if b == (U8{92}) -> out = "{out}\\\\"
+        else if b == (U8{34}) -> out = "{out}\\\""
+        else if b == (U8{10}) -> out = "{out}\\n"
+        else if b == (U8{13}) -> out = "{out}\\r"
+        else if b == (U8{9}) -> out = "{out}\\t"
+        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+    }
+    "{out}\""
 }
 
 fn toml_leaf(value: DataTree) -> String {
@@ -317,7 +688,7 @@ fn toml_leaf(value: DataTree) -> String {
         }
         .Int(n) -> return "{n}"
         .Float(n) -> return "{n}"
-        .Text(s) -> return "\"{s}\""
+        .Text(s) -> return toml_quote(s)
         .Array(items) -> {
             out := "["
             loop i in 0..<items.len() {

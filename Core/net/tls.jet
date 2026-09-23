@@ -1,115 +1,236 @@
-// core.net.tls — client TLS over the host stack.
-//
-// Certificate stores, ALPN, and identity files are host policy. Read/write
-// loops and UTF-8 conversion are Jet.
+use core as core
+use core.net as net
 
-pub struct TLSStream { pub fd: Int, pub host: String, pub port: Int }
+// core.net.tls — TLS byte streams with Jet-owned input/config semantics.
+//
+// The provider owns socket setup and the TLS state machine. Jet owns endpoint
+// validation, configuration carriers, ALPN checks, and the explicit boundary
+// where a provider cannot consume a source-level configuration.
+
 pub struct ClientConfig { pub host: String, pub alpn: [String] }
 pub struct ClientIdentity { pub cert: String, pub key: String }
 pub struct RootCertificates { pub path: String }
-pub struct TLSCertificate { pub der: [U8] }
-pub struct TLSPeerIdentity { pub name: String }
+pub struct TLSCertificate {
+    pub der: [U8]
+    pub sha256: [U8]
+    pub spki_sha256: [U8]
+    pub dns_names: [String]
+    pub valid_from_unix_ms: Int
+    pub valid_until_unix_ms: Int
+    pub subject: String
+    pub issuer: String
+}
+pub struct TLSPeerIdentity {
+    pub verified_server_name: String
+    pub leaf: TLSCertificate
+    pub certificate_chain: [TLSCertificate]
+    pub cipher_suite: String
+    pub tls_version: TLSVersion
+}
 pub enum TLSVersion {
-    TLS12
-    TLS13
+    Tls12
+    Tls13
 }
 
-pub fn client(host: String, port: Int) -[Net]> TLSStream !IOError {
-    fd :: host_tls_client(host, port)
-    Ok(TLSStream{fd: fd, host: host, port: port})
+// The two-argument native leaf consumes a connected TCPStream and a server
+// name. Do not manufacture a descriptor or call the leaf with host/port text:
+// the transport and TLS capabilities are separate typed boundaries.
+pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream !IOError {
+    if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains control whitespace"))
+    if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
+    tcp :: net.tcp_connect("{host}:{port}") ?? return Err(tls_error("client", host, "transport connect failed"))
+    core.net.tls.client(^tcp, host)
 }
 
-pub fn read(stream: TLSStream, n: Int) -[Net]> [U8] !IOError { host_tls_read(stream.fd, n) }
+pub fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] !IOError {
+    if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
+    working := stream
+    core.net.tls.read(&working, n)
+}
 
-pub fn read_text(stream: TLSStream, n: Int) -[Net]> String !IOError {
+pub fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String !IOError {
+    if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
     bytes :: read(stream, n)
-    Ok(String.from_bytes(bytes) ?? return Err(IOError{operation: "read", message: "not UTF-8", address: stream.host, name: stream.host, os_code: None}))
+    Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
 }
 
-pub fn write(stream: TLSStream, bytes: [U8]) -[Net]> Int !IOError { host_tls_write(stream.fd, bytes) }
-
-pub fn write_all(stream: TLSStream, bytes: [U8]) !IOError {
-    off := 0
-    loop off < bytes.len() {
-        chunk := [U8]{}
-        i := off
-        loop {
-            if i >= bytes.len() -> break
-            chunk.push(bytes[i])
-            i = i + 1
-        }
-        n :: write(stream, chunk)
-        if n <= 0 -> return Err(IOError{operation: "write", message: "short write", address: stream.host, name: stream.host, os_code: None})
-        off = off + n
-    }
-    Ok()
+pub fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int !IOError {
+    working := stream
+    core.net.tls.write(&working, bytes)
 }
 
-pub fn write_text(stream: TLSStream, text: String) !IOError { write_all(stream, text.bytes()) }
-
-pub fn close(stream: TLSStream) !IOError {
-    host_tls_close(stream.fd)
-    Ok()
+pub fn write_all(stream: TLSStream, bytes: [U8]) !IOError -[Net, Time.Wait]> {
+    working := stream
+    core.net.tls.write_all(&working, bytes)
 }
 
-fn host_tls_client(host: String, port: Int) -[Net]> Int !IOError { panic("host_tls_client") }
-fn host_tls_read(fd: Int, n: Int) -[Net]> [U8] !IOError { panic("host_tls_read") }
-fn host_tls_write(fd: Int, bytes: [U8]) -[Net]> Int !IOError { panic("host_tls_write") }
-fn host_tls_close(fd: Int) -[Net]> panic("host_tls_close")
+pub fn write_text(stream: TLSStream, text: String) !IOError -[Net, Time.Wait]> {
+    working := stream
+    core.net.tls.write_text(&working, text)
+}
 
+pub fn close(stream: TLSStream) !IOError -[Net, Time.Wait]> {
+    working := stream
+    working.close()
+}
 
-pub fn sni(stream: TLSStream) -> String { stream.host }
+pub fn sni(stream: TLSStream) -[Net]> String {
+    peer :: stream.peer_identity()
+    peer.verified_server_name
+}
 
-pub fn peer_port(stream: TLSStream) -> Int { stream.port }
+// TLSStream deliberately does not expose a transport socket address. Keeping
+// a source-level port field would be an invalid nominal identity for the native
+// provider, so report the missing capability instead of fabricating a value.
+pub fn peer_port(stream: TLSStream) -[Net]> Int !IOError {
+    Err(tls_error("peer_port", "", "TLS provider does not expose the peer port"))
+}
 
-pub fn unwrap(stream: TLSStream) -[Net]> TcpStream !IOError {
-    fd := stream.fd
-    host := stream.host
-    port := stream.port
-    host_tls_close(fd)
-    TcpStream{fd: fd, host: host, port: port}
-
+// A TLS stream deliberately cannot be downgraded: doing so would make the
+// caller believe plaintext bytes are protected by the old connection state.
+pub fn unwrap(stream: TLSStream) -[Net]> TCPStream !IOError {
+    Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
+}
 pub fn version_name(v: TLSVersion) -> String {
-    if v == TLSVersion.TLS12 -> "TLSv1.2"
-    "TLSv1.3"
+    if v == TLSVersion.Tls12 -> return "TLSv1.2"
+    return "TLSv1.3"
 }
 
 pub fn parse_version(name: String) -> ?TLSVersion {
-    if name == {
-        "TLSv1.2" | "1.2" | "tls12" -> Val(TLSVersion.TLS12)
-        "TLSv1.3" | "1.3" | "tls13" -> Val(TLSVersion.TLS13)
+    n := ascii_lower(trim_ascii(name))
+    if n == {
+        "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.Tls12)
+        "tlsv1.3" | "tls1.3" | "1.3" | "tls13" -> Val(TLSVersion.Tls13)
         else -> None
     }
 }
 
-pub fn is_tls13(v: TLSVersion) -> Bool { v == TLSVersion.TLS13 }
+pub fn is_tls13(v: TLSVersion) -> Bool { v == TLSVersion.Tls13 }
 
-pub fn is_tls12(v: TLSVersion) -> Bool { v == TLSVersion.TLS12 }
+pub fn is_tls12(v: TLSVersion) -> Bool { v == TLSVersion.Tls12 }
 
+// Constructors are pure carriers. Endpoint, ALPN, identity, and root policy
+// is checked at the operation boundary instead of being silently dropped.
 pub fn config(host: String) -> ClientConfig { ClientConfig{host: host, alpn: [String]{}} }
 
 pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig {
     alpn := [String]{}
     loop p in cfg.alpn -> alpn.push(p)
+    // Keep the requested value visible. connect_host validates the complete
+    // list before crossing into the provider, so invalid input cannot become a
+    // successful handshake or disappear as a no-op.
     alpn.push(proto)
     ClientConfig{host: cfg.host, alpn: alpn}
 }
 
-pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig { with_alpn(with_alpn(cfg, "h2"), "http/1.1") }
-
-pub fn identity(cert: String, key: String) -> ClientIdentity { ClientIdentity{cert: cert, key: key} }
-
-pub fn roots(path: String) -> RootCertificates { RootCertificates{path: path} }
-
-pub fn connect_host(cfg: ClientConfig, port: Int) -[Net]> TLSStream !IOError { client(cfg.host, port) }
-
-pub fn flags(cfg: ClientConfig) -> [String] {
-    cfg.alpn
+pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig {
+    with_alpn(with_alpn(cfg, "h2"), "http/1.1")
 }
+
+pub fn identity(cert: String, key: String) -> ClientIdentity {
+    ClientIdentity{cert: cert, key: key}
+}
+
+pub fn roots(path: String) -> RootCertificates {
+    RootCertificates{path: path}
+}
+
+// This legacy carrier has no native leaf that accepts the source ClientConfig
+// (ALPN, identity, and root stores). Refuse configured policy explicitly rather
+// than connecting with a silently downgraded system-only configuration.
+pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream !IOError {
+    if !valid_host(cfg.host) -> return Err(tls_error("connect_host", cfg.host, "host is empty or contains control whitespace"))
+    if port <= 0 || port > 65535 -> return Err(tls_error("connect_host", cfg.host, "port must be in 1..=65535"))
+    if !valid_alpn_list(cfg.alpn) -> return Err(tls_error("connect_host", cfg.host, "ALPN protocol must contain 1..255 non-control bytes"))
+    if cfg.alpn.len() > 0 {
+        return Err(tls_error("connect_host", cfg.host, "configured ALPN requires the native ClientConfig provider"))
+    }
+    client(cfg.host, port)
+}
+
+pub fn flags(cfg: ClientConfig) -> [String] { cfg.alpn }
 
 pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool {
     loop p in cfg.alpn {
         if p == proto -> return true
     }
     false
+}
+
+fn tls_error(operation: String, address: String, message: String) -> IOError {
+    is_unsupported := operation == "peer_port" ||
+        operation == "unwrap" ||
+        message == "configured ALPN requires the native ClientConfig provider"
+    if operation == "read" || operation == "read_text" {
+        context := IOContext{operation: .Read, resource: Val(~address), os_code: None, cause: Val(~message)}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "write" || operation == "write_all" || operation == "write_text" {
+        context := IOContext{operation: .Write, resource: Val(~address), os_code: None, cause: Val(~message)}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "close" {
+        context := IOContext{operation: .Close, resource: Val(~address), os_code: None, cause: Val(~message)}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "client" || operation == "connect_host" {
+        context := IOContext{operation: .Connect, resource: Val(~address), os_code: None, cause: Val(~message)}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    context := IOContext{operation: .Resolve, resource: Val(~address), os_code: None, cause: Val(~message)}
+    if is_unsupported -> return IOError.Other(context)
+    IOError.InvalidInput(context)
+}
+
+fn valid_host(host: String) -> Bool {
+    raw :: host.bytes()
+    if raw.len() == 0 || raw.len() > 253 -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n <= 32 || n == 127 -> return false
+    }
+    true
+}
+
+fn valid_alpn_list(protocols: [String]) -> Bool {
+    loop protocol in protocols {
+        raw :: protocol.bytes()
+        if raw.len() == 0 || raw.len() > 255 -> return false
+        loop b in raw {
+            n :: Int.from_u8(b)
+            if n <= 32 || n == 127 -> return false
+        }
+    }
+    true
+}
+
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
+    }
+    if end <= start -> return ""
+    result :: String.from_bytes(raw[start..(end - 1)]) ?? ""
+    return result
+}
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    decoded :: String.from_bytes(out)
+    if decoded == None -> return ~text
+    return decoded
 }

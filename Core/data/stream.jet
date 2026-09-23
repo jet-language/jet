@@ -1,47 +1,82 @@
-// core.data.stream — pull from a loader stream.
+use core.data.[DataError, DataErrorKind, DataStream]
 
-pub struct Stream {
-    pub items: [String]
-    pub index: Int
-    pub cancelled: Bool
-}
-
-pub fn from_items(items: [String]) -> Stream { Stream{items: items, index: 0, cancelled: false} }
-
-pub fn next(stream: Stream) -> (stream: Stream, value: ?String) {
-    if stream.cancelled || stream.index >= stream.items.len() -> return (stream: stream, value: None)
-    v :: stream.items[stream.index]
-    s :: Stream{items: stream.items, index: stream.index + 1, cancelled: false}
-    (stream: s, value: Val(v))
-}
-
-pub fn collect(stream: Stream) -> [String] {
-    out := [String]{}
-    i := stream.index
-    loop {
-        if stream.cancelled || i >= stream.items.len() -> return out
-        out.push(stream.items[i])
-        i = i + 1
+fn stream_error(kind: DataErrorKind, reason: String, operation: String) -> DataError {
+    DataError{
+        kind: kind,
+        operation: operation,
+        row: None,
+        column: None,
+        index: None,
+        reason: reason,
+        cause: None,
     }
 }
 
-pub fn cancel(stream: Stream) -> Stream { Stream{items: stream.items, index: stream.index, cancelled: true} }
+// core.data.stream — one-shot typed DataStream<T> operations.
+//
+// The cursor is owned by the DataStream handle.  Pull and collection advance
+// that same cursor; cancellation is terminal and never becomes an empty
+// success.  Provider-owned decoders must construct DataStream<T> before these
+// operations are called, so this module never coerces a String into T.
+
+pub fn from_items<T>(items: ^[T]) -> DataStream<T> {
+    DataStream<T>{items: items, index: 0, cancelled: false}
+}
+
+pub fn next<T>(stream: &DataStream<T>) -> ?T !DataError {
+    if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    if stream.index < 0 -> stream.index = 0
+    if stream.index >= stream.items.len() -> return Ok(None)
+    value :: ~stream.items[stream.index]
+    stream.index = stream.index + 1
+    Ok(Val(value))
+}
+
+pub fn collect<T>(stream: &DataStream<T>) -> [T] !DataError {
+    if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    out := [T]{}
+    if stream.index < 0 -> stream.index = 0
+    loop stream.index < stream.items.len() {
+        out.push(~stream.items[stream.index])
+        stream.index = stream.index + 1
+    }
+    Ok(out)
+}
+
+pub fn cancel<T>(stream: &DataStream<T>) {
+    stream.cancelled = true
+}
+
+pub fn skip<T>(stream: &DataStream<T>, count: Int) {
+    if stream.cancelled || count <= 0 -> return
+    if stream.index < 0 -> stream.index = 0
+    available := stream.items.len() - stream.index
+    if count >= available -> stream.index = stream.items.len() else -> stream.index = stream.index + count
+}
+
+pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] !DataError {
+    if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    if count <= 0 -> return Ok([T]{})
+    out := [T]{}
+    if stream.index < 0 -> stream.index = 0
+    remaining := count
+    available := stream.items.len() - stream.index
+    if remaining > available -> remaining = available
+    loop remaining > 0 {
+        out.push(~stream.items[stream.index])
+        stream.index = stream.index + 1
+        remaining = remaining - 1
+    }
+    Ok(out)
+}
 
 
-pub fn len(stream: Stream) -> Int {
+pub fn len<T>(stream: DataStream<T>) -> Int {
     if stream.cancelled -> return 0
-    n :: stream.items.len() - stream.index
+    if stream.index < 0 -> return stream.items.len()
+    n := stream.items.len() - stream.index
     if n < 0 -> return 0
     n
 }
 
-pub fn is_empty(stream: Stream) -> Bool { len(stream) == 0 }
-
-
-pub fn skip(stream: Stream, n: Int) -> Stream {
-    i := stream.index + n
-    if i < stream.index -> i = stream.items.len()
-    if i > stream.items.len() -> i = stream.items.len()
-    Stream{items: stream.items, index: i, cancelled: stream.cancelled}
-}
-
+pub fn is_empty<T>(stream: DataStream<T>) -> Bool { len<T>(stream) == 0 }

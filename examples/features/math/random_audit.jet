@@ -1,9 +1,9 @@
 // D-RANDOMDIST1: core.math.random owns deterministic PRNG distributions and samples.
 use core.math.random as random
 
-fn run() {
+fn run() -[Rand]> {
     random.seed(7)
-    print(random.bool(Float{1.0}))
+    print(random.bool())
     print(random.float_range(Float{10.0}, Float{20.0}) >= Float{10.0})
     random.seed(11)
     a :: random.normal(Float{0.0}, Float{1.0})
@@ -14,13 +14,14 @@ fn run() {
     items :: ["red", "green", "blue"]
     weights :: [Float]{0.0, 1.0, 0.0}
     print(random.weighted_pick(items, weights) ?? "none")
-    print(random.sample(items, 2).len())
+    sample_items :: [Int]{1, 2, 3}
+    print(random.sample(sample_items, 2).len())
     print(random.bytes(4).len())
     rng := random.rng(99)
     print(rng.float_range(Float{1.0}, Float{2.0}) >= Float{1.0})
-    print(rng.bool(Float{1.0}))
+    print(rng.bool())
     print(rng.weighted_pick(items, weights) ?? "none")
-    print(rng.sample(items, 2).len())
+    print(rng.sample(sample_items, 2).len())
     print(rng.bytes(3).len())
     child := rng.split()
     print(child.int(1, 1))

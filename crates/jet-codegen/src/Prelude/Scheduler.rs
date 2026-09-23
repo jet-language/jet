@@ -2852,12 +2852,22 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_k
 
 // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetChannelKind {
+    Channel,
+    Timer,
+    Interval,
+}
+
 struct ChannelState<T> {
     queue: VecDeque<T>,
     recv_waiters: Vec<Arc<ParkSlot>>,
     send_waiters: Vec<Arc<ParkSlot>>,
     closed: bool,
+    cancelled: bool,
     capacity: Option<usize>,
+    kind: JetChannelKind,
+    delay_ms: i64,
     sender_count: usize,
     receiver_count: usize,
 }
@@ -2923,14 +2933,30 @@ impl<T> Drop for JetSchedulerChannel<T> {
 
 impl<T: Send> JetSchedulerChannel<T> {
     pub fn new() -> Self {
-        Self::with_capacity(None)
+        Self::with_capacity(None, JetChannelKind::Channel, 0)
     }
 
     pub fn bounded(capacity: i64) -> Self {
-        Self::with_capacity(Some(capacity.max(1) as usize))
+        Self::with_capacity(
+            Some(capacity.max(1) as usize),
+            JetChannelKind::Channel,
+            0,
+        )
     }
 
-    fn with_capacity(capacity: Option<usize>) -> Self {
+    pub fn timer(delay_ms: i64) -> Self {
+        Self::with_capacity(None, JetChannelKind::Timer, delay_ms.max(0))
+    }
+
+    pub fn interval(delay_ms: i64) -> Self {
+        Self::with_capacity(None, JetChannelKind::Interval, delay_ms.max(1))
+    }
+
+    fn with_capacity(
+        capacity: Option<usize>,
+        kind: JetChannelKind,
+        delay_ms: i64,
+    ) -> Self {
         let observe_id = jet_observe_registry()
             .map(|registry| registry.next_channel.fetch_add(1, Ordering::Relaxed))
             .unwrap_or(0);
@@ -2941,7 +2967,10 @@ impl<T: Send> JetSchedulerChannel<T> {
                     recv_waiters: Vec::new(),
                     send_waiters: Vec::new(),
                     closed: false,
+                    cancelled: false,
                     capacity,
+                    kind,
+                    delay_ms,
                     sender_count: 0,
                     receiver_count: 1,
                 }),
@@ -3016,10 +3045,44 @@ impl<T: Send> JetSchedulerChannel<T> {
         out
     }
 
+    pub fn kind(&self) -> JetChannelKind {
+        self.inner.state.lock().unwrap().kind
+    }
+
+    pub fn is_timer(&self) -> bool {
+        self.kind() == JetChannelKind::Timer
+    }
+
+    pub fn is_interval(&self) -> bool {
+        self.kind() == JetChannelKind::Interval
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.state.lock().unwrap().cancelled
+    }
+
+    pub fn is_ready(&self) -> bool {
+        let state = self.inner.state.lock().unwrap();
+        !state.queue.is_empty() || state.closed
+    }
+
+    pub fn delay_ms(&self) -> i64 {
+        self.inner.state.lock().unwrap().delay_ms
+    }
+
     pub fn close(&self) {
+        self.close_inner(false);
+    }
+
+    pub fn cancel(&self) {
+        self.close_inner(true);
+    }
+
+    fn close_inner(&self, cancelled: bool) {
         let (recv_waiters, send_waiters) = {
             let mut st = self.inner.state.lock().unwrap();
             st.closed = true;
+            st.cancelled |= cancelled;
             let waiters = (
                 std::mem::take(&mut st.recv_waiters),
                 std::mem::take(&mut st.send_waiters),

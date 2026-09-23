@@ -831,6 +831,7 @@ pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
         "jet_std::XMLLimits" => Some(EncodingLite::xml_safe_limits_value()),
         "jet_std::XMLParseOptions" => Some(EncodingLite::xml_safe_options_value()),
         "jet_std::XMLRenderOptions" => Some(EncodingLite::xml_safe_render_options_value()),
+        "jet_std::DataLimits" => Some(DataPipeline::data_limits_safe_value()),
         _ => None,
     }
 }
@@ -3639,7 +3640,7 @@ pub fn evaluate_checked_text_hole<'a>(
             spread: false,
         }],
         recv_type: Some(type_name.to_string()),
-        resolved_ret: None,
+        resolved_ret: Some(crate::AST::Type::String),
         operator_rhs: None,
         checked_widen: false,
     };
@@ -3663,6 +3664,17 @@ pub fn evaluate_checked_text_hole<'a>(
     )?;
     match value {
         CtValue::Str(value) => Ok(value),
+        CtValue::Present(value) => match *value {
+            CtValue::Str(value) => Ok(value),
+            _ => Err(Diagnostic::error(
+                "E2712",
+                "this checked text type could not encode its hole".to_string(),
+                "`CheckedText.encode_hole` must return a String for every printable value"
+                    .to_string(),
+                "return a String from `encode_hole`".to_string(),
+                Some(span),
+            )),
+        },
         CtValue::Failed(_) => Err(Diagnostic::error(
             "E2712",
             "this checked text type could not encode its hole".to_string(),

@@ -18,9 +18,9 @@ use std::path::Path;
 /// The compiler's version string for E1208 toolchain checks.
 pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The package version is deliberately independent from the current release
-/// channel. A development build may carry the next SemVer while the owner
-/// keeps the 1.0 compatibility policy future-only.
+/// The package version is independent from the current release channel. A
+/// development build carries its SemVer identity while the owner keeps the
+/// 1.0 compatibility policy future-only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReleaseStatus {
     channel: &'static str,

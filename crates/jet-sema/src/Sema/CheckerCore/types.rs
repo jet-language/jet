@@ -3,6 +3,21 @@ use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+    pub(crate) fn is_core_crypto_module(&self) -> bool {
+        self.name_ledger
+            .module_alias(self.module_idx)
+            .is_some_and(|alias| {
+                alias.starts_with("core_core_crypto")
+                    || (alias == "crypto"
+                        && self.name_ledger.module_path(self.module_idx) == Some("crypto.jet")
+                        && self
+                            .name_ledger
+                            .module(self.module_idx)
+                            .is_some_and(|module| module.package == "."))
+            })
+    }
+
+
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.
@@ -150,42 +165,66 @@ impl<'a> Checker<'a> {
                         .to_string(),
                 )
             }
-            // D-LANGNS-NAME1=A: `core.compiler.lang` publishes compiler vocabulary as
+            Type::Named(n)
+                if self.is_core_crypto_module()
+                    && crate::Sema::CheckerCoreLib::core_module_type_item("core.crypto", &n) =>
+            {
+                crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+            }
             // ordinary generated enum declarations. Membership is decided by
             // the rule table, not a fixed leaf list, so it can't join the
             // generic Core-export table below.
             Type::Named(n)
-                if n.split_once('.').is_some_and(|(alias, leaf)| {
+                if self
+                    .core_item_imports
+                    .get(&n)
+                    .zip(self.core_imports.get(&n))
+                    .is_some_and(|(item, module)| {
+                        crate::Sema::CheckerCoreLib::core_module_type_item(module, item)
+                    }) =>
+            {
+                let module = self
+                    .core_imports
+                    .get(&n)
+                    .expect("Core item imports have a module alias");
+                if module == "core.crypto" {
+                    crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                } else {
+                    Type::Named(n)
+                }
+            }
+            Type::Named(n)
+                if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
                     self.core_imports.get(alias).is_some_and(|module| {
                         module == "core.compiler.lang"
                             && crate::Policy::rule_arg_declaration(leaf).is_some()
                     })
                 }) =>
             {
-                Type::Named(n.split_once('.').unwrap().1.to_string())
+                Type::Named(n.rsplit_once('.').unwrap().1.to_string())
             }
             // Every other qualified Core import (crypto, encoding, email,
             // env, ...) resolves through one table of module -> exported
             // leaves (`jet_foundation::CoreModuleExports`). Adding a Core
             // module's exported types needs a table row, not a match arm.
             Type::Named(n)
-                if n.split_once('.').is_some_and(|(alias, leaf)| {
+                if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
                     self.core_imports.get(alias).is_some_and(|module| {
                         jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some()
                     })
                 }) =>
             {
-                let (alias, leaf) = n.split_once('.').unwrap();
+                let (alias, leaf) = n.rsplit_once('.').unwrap();
                 let module = self.core_imports.get(alias).unwrap();
-                match jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf) {
-                    Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal) => {
-                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
-                    }
-                    Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
-                    | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
-                    | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
-                    | None => {
-                        Type::Named(leaf.to_string())
+                if module == "core.crypto" {
+                    crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
+                } else {
+                    match jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf) {
+                        Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
+                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
+                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+                        | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
+                        | None => Type::Named(leaf.to_string()),
                     }
                 }
             }
@@ -277,6 +316,14 @@ impl<'a> Checker<'a> {
                 param_contract,
                 call_metadata,
                 return_view_provenance,
+            },
+            Type::Tagged {
+                marker:
+                    crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+                inner,
+            } => Type::Tagged {
+                marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+                inner,
             },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker,

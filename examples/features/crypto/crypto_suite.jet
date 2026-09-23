@@ -53,8 +53,8 @@ fn run() {
     opened :: Path.from(opened_text)
     source.write_atomic(abc)
     file_recipient :: crypto.X25519SecretKey.new_random() ?? return
-    crypto.file_seal([file_recipient.public_key()], source, sealed) ?? return
-    crypto.file_open(&file_recipient, sealed, opened) ?? return
+    crypto.file_seal([file_recipient.public_key()], source: source, destination: sealed) ?? return
+    crypto.file_open(&file_recipient, source: sealed, destination: opened) ?? return
     opened_bytes :: fs.read(opened_text)
     print(opened_bytes == "abc")
     fs.remove(source_text)

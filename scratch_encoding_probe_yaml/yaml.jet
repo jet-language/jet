@@ -1,0 +1,427 @@
+use core.encoding as encoding
+use core.encoding.json as json
+
+// core.encoding.yaml — JSON-compatible YAML 1.2 plus simple block maps/lists.
+//
+// This source codec covers JSON, `key: value` maps, `- item` lists,
+// `|` / `>` folded scalars, and `#` comments. Unknown syntax fails closed
+// instead of guessing; unsupported YAML features are not silently delegated.
+pub fn parse(text: String) -> encoding.DataTree !encoding.EncodingError { parse_yaml(text) }
+
+pub fn decode(text: String) -> encoding.DataTree !encoding.EncodingError { parse_yaml(text) }
+
+fn parse_yaml(text: String) -> encoding.DataTree !encoding.EncodingError {
+    trimmed :: trim_yaml(text)
+    if trimmed.len() == 0 -> return Ok(encoding.DataTree.Null)
+    if looks_json(trimmed) -> return json.parse(trimmed)
+    parse_block(trimmed)
+}
+
+fn looks_json(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: b
+        if n == 32 || n == 9 || n == 10 || n == 13 -> next
+        return n == 123 || n == 91
+    }
+    false
+}
+
+fn parse_block(text: String) -> encoding.DataTree !encoding.EncodingError {
+    rows := [String]{}
+    buf := [U8]{}
+    loop b in text.bytes() {
+        if b == (U8{10}) {
+            rows.push(String.from_bytes(buf) ?? return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+            buf = [U8]{}
+            next
+        }
+        if b == (U8{13}) -> next
+        buf.push(b)
+    }
+    if buf.len() > 0 -> rows.push(String.from_bytes(buf) ?? return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+    if rows.len() == 0 -> return Ok(encoding.DataTree.Null)
+    first := ""
+    first_index := 0
+    loop row_index in 0..<rows.len() {
+        row :: rows[row_index]
+        if !is_blank_or_comment(row) {
+            first = row
+            first_index = row_index
+            break
+        }
+    }
+    if first.len() == 0 -> return Ok(encoding.DataTree.Null)
+    first_body :: trim_yaml(strip_inline_comment(first))
+    if first_body == "|" || first_body == ">" {
+        block :: parse_block_scalar(rows, first_index, leading_spaces(first), first_body == ">")
+        return Ok(encoding.DataTree.Text(block.value))
+    }
+    if starts_list(first) -> return parse_list(rows, leading_spaces(first))
+    if split_once(lstrip(first), 58).before == lstrip(first) -> return Ok(parse_scalar(trim_yaml(first)))
+    parse_map(rows, leading_spaces(first))
+}
+
+fn starts_list(line: String) -> Bool {
+    s :: lstrip(line)
+    bytes :: s.bytes()
+    if bytes.len() < 2 -> return false
+    bytes[0] == (U8{45}) && (bytes[1] == (U8{32}) || bytes[1] == (U8{9}))
+}
+
+fn parse_block_scalar(rows: [String], start: Int, parent_indent: Int, folded: Bool) -> (value: String, next: Int) {
+    lines := [String]{}
+    i := start + 1
+    content_indent := -1
+    loop i < rows.len() {
+        line :: rows[i]
+        if line.len() == 0 {
+            lines.push("")
+            i += 1
+            next
+        }
+        pad :: leading_spaces(line)
+        if pad <= parent_indent -> break
+        if content_indent < 0 -> content_indent = pad
+        if pad < content_indent -> break
+        lines.push(strip_indent(line, content_indent))
+        i += 1
+    }
+    out := ""
+    loop j in 0..<lines.len() {
+        if j > 0 {
+            previous :: lines[j - 1]
+            if folded && previous.len() > 0 && lines[j].len() > 0 {
+                out = "{out} "
+            } else {
+                out = "{out}\n"
+            }
+        }
+        out = "{out}{lines[j]}"
+    }
+    if lines.len() > 0 -> out = "{out}\n"
+    (value: out, next: i)
+}
+
+fn strip_indent(text: String, columns: Int) -> String {
+    raw :: text.bytes()
+    consumed := 0
+    i := 0
+    loop i < raw.len() && consumed < columns {
+        if raw[i] == (U8{32}) {
+            consumed += 1
+            i += 1
+            next
+        }
+        if raw[i] == (U8{9}) {
+            consumed += 2
+            i += 1
+            next
+        }
+        break
+    }
+    if i >= raw.len() -> return ""
+    String.from_bytes(raw[i..raw.len() - 1]) ?? ""
+}
+
+
+fn parse_map(rows: [String], indent: Int) -> encoding.DataTree !encoding.EncodingError {
+    entries := [String:encoding.DataTree]{}
+    i := 0
+    loop i < rows.len() {
+        line :: rows[i]
+        if is_blank_or_comment(line) {
+            i += 1
+            next
+        }
+        pad :: leading_spaces(line)
+        if pad < indent -> break
+        if pad > indent -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML map"))
+        body :: lstrip(line)
+        cut :: split_once(body, 58)
+        if cut.before == body -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "YAML map entry needs ':'"))
+        key :: trim_yaml(cut.before)
+        if key.len() == 0 -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
+        if entries.has_key(key) -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
+        rest :: trim_yaml(strip_inline_comment(cut.after))
+        i += 1
+        if rest == "|" || rest == ">" {
+            block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
+            _ :: entries.add(key, encoding.DataTree.Text(block.value))
+            i = block.next
+        } else if rest.len() == 0 {
+            child_rows := [String]{}
+            loop i < rows.len() {
+                child :: rows[i]
+                if is_blank_or_comment(child) {
+                    i += 1
+                    next
+                }
+                if leading_spaces(child) <= pad -> break
+                child_rows.push(child)
+                i += 1
+            }
+            _ :: entries.add(key, parse_block(join_lines(child_rows)))
+        } else {
+            _ :: entries.add(key, parse_scalar(rest))
+        }
+    }
+    Ok(encoding.DataTree.Object(entries))
+}
+
+fn parse_list(rows: [String], indent: Int) -> encoding.DataTree !encoding.EncodingError {
+    items := [encoding.DataTree]{}
+    i := 0
+    loop i < rows.len() {
+        line :: rows[i]
+        if is_blank_or_comment(line) {
+            i += 1
+            next
+        }
+        pad :: leading_spaces(line)
+        if pad < indent -> break
+        if pad > indent -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML list"))
+        body :: lstrip(line)
+        bytes :: body.bytes()
+        if bytes.len() == 0 || bytes[0] != (U8{45}) -> return Err(encoding.EncodingError.syntax(encoding.EncodingFormat.YAML, 0, 1, 1, "", "YAML list item needs '-'"))
+        rest := ""
+        if bytes.len() > 1 -> rest = trim_yaml(drop_prefix(body, 2))
+        i += 1
+        if rest == "|" || rest == ">" {
+            block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
+            items.push(encoding.DataTree.Text(block.value))
+            i = block.next
+        } else if rest.len() == 0 {
+            child_rows := [String]{}
+            loop i < rows.len() {
+                child :: rows[i]
+                if is_blank_or_comment(child) {
+                    i += 1
+                    next
+                }
+                if leading_spaces(child) <= pad -> break
+                child_rows.push(child)
+                i += 1
+            }
+            items.push(parse_block(join_lines(child_rows)))
+        } else if split_once(rest, 58).before != rest {
+            map_rows := [String]{rest}
+            loop i < rows.len() {
+                child :: rows[i]
+                if is_blank_or_comment(child) {
+                    map_rows.push("")
+                    i += 1
+                    next
+                }
+                if leading_spaces(child) <= pad -> break
+                map_rows.push(strip_indent(child, pad + 2))
+                i += 1
+            }
+            items.push(parse_map(map_rows, 0))
+        } else {
+            items.push(parse_scalar(strip_inline_comment(rest)))
+        }
+    }
+    Ok(encoding.DataTree.Array(items))
+}
+
+fn parse_scalar(text: String) -> encoding.DataTree {
+    clean :: trim_yaml(strip_inline_comment(text))
+    if clean == {
+        "null" | "~" -> return encoding.DataTree.Null
+        "true" -> return encoding.DataTree.Bool(true)
+        "false" -> return encoding.DataTree.Bool(false)
+        else -> { _ := 0 }
+    }
+    if Int.parse(clean) == {
+        .Ok(n) -> return encoding.DataTree.Int(n)
+        else -> { _ := 0 }
+    }
+    if Float.parse(clean) == {
+        .Ok(n) -> return encoding.DataTree.Float(n)
+        else -> { _ := 0 }
+    }
+    encoding.DataTree.Text(unquote(clean))
+}
+
+fn render_yaml(value: encoding.DataTree, indent: Int) -> String {
+    if value == {
+        .Null -> return "null"
+        .Bool(v) -> {
+            if v -> return "true"
+            return "false"
+        }
+        .Int(n) -> return "{n}"
+        .Float(n) -> return "{n}"
+        .Text(s) -> return yaml_scalar(s)
+        .Array(items) -> return render_yaml_array(items, indent)
+        .Object(entries) -> return render_yaml_object(entries, indent)
+    }
+}
+
+fn render_yaml_array(items: [encoding.DataTree], indent: Int) -> String {
+    out := ""
+    loop item in items -> out = "{out}{spaces(indent)}- {render_yaml(item, indent + 2)}\n"
+    out
+}
+
+fn render_yaml_object(entries: [String:encoding.DataTree], indent: Int) -> String {
+    out := ""
+    loop pair in entries -> out = "{out}{spaces(indent)}{pair.key}: {render_yaml(pair.value, indent + 2)}\n"
+    out
+}
+
+fn trim_yaml(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: raw[start]
+        if n == 32 || n == 9 || n == 10 || n == 13 {
+            start += 1
+            next
+        }
+        break
+    }
+    loop end > start {
+        n :: raw[end - 1]
+        if n == 32 || n == 9 || n == 10 || n == 13 {
+            end -= 1
+            next
+        }
+        break
+    }
+    if end <= start -> return ""
+    String.from_bytes(raw[start..end - 1]) ?? ""
+}
+
+fn strip_inline_comment(text: String) -> String {
+    raw :: text.bytes()
+    quote := 0
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if quote != 0 {
+            if n == quote -> quote = 0
+        } else if n == 34 || n == 39 {
+            quote = n
+        } else if n == 35 && (i == 0 || raw[i - 1] == 32 || raw[i - 1] == 9) {
+            return String.from_bytes(raw[0..i - 1]) ?? ""
+        }
+        i += 1
+    }
+    ~text
+}
+
+fn yaml_scalar(text: String) -> String {
+    raw :: text.bytes()
+    needs := raw.len() == 0
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 32 || n == 9 || n == 35 || n == 58 || n == 91 || n == 93 || n == 123 || n == 125 || n == 44 || n == 34 || n == 39 || n == 10 || n == 13 -> needs = true
+        i += 1
+    }
+    if !needs && text != "null" && text != "true" && text != "false" && Int.parse(text) == .Err(_) && Float.parse(text) == .Err(_) -> return ~text
+    out := "\""
+    loop b in raw {
+        if b == (U8{92}) -> out = "{out}\\\\"
+        else if b == (U8{34}) -> out = "{out}\\\""
+        else if b == (U8{10}) -> out = "{out}\\n"
+        else if b == (U8{13}) -> out = "{out}\\r"
+        else if b == (U8{9}) -> out = "{out}\\t"
+        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+    }
+    "{out}\""
+}
+
+fn lstrip(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    loop start < raw.len() {
+        n :: raw[start]
+        if n == 32 || n == 9 {
+            start += 1
+            next
+        }
+        break
+    }
+    if start >= raw.len() -> return ""
+    String.from_bytes(raw[start..raw.len() - 1]) ?? ""
+}
+
+fn leading_spaces(text: String) -> Int {
+    n := 0
+    loop b in text.bytes() {
+        if b == (U8{32}) {
+            n += 1
+            next
+        }
+        if b == (U8{9}) {
+            n += 2
+            next
+        }
+        break
+    }
+    n
+}
+
+fn is_blank_or_comment(line: String) -> Bool {
+    s :: lstrip(line)
+    if s.len() == 0 -> return true
+    s.bytes()[0] == (U8{35})
+}
+
+fn split_once(text: String, sep: U8) -> (after: String, before: String) {
+    raw :: text.bytes()
+    loop i in 0..<raw.len() {
+        if raw[i] == sep {
+            before :: String.from_bytes(raw[0..i - 1]) ?? ""
+            after :: String.from_bytes(raw[i + 1..raw.len() - 1]) ?? ""
+            return (before: before, after: after)
+        }
+    }
+    (before: ~text, after: "")
+}
+
+fn drop_prefix(text: String, n: Int) -> String {
+    raw :: text.bytes()
+    if raw.len() <= n -> return ""
+    String.from_bytes(raw[n..raw.len() - 1]) ?? ""
+}
+
+fn join_lines(rows: [String]) -> String {
+    out := ""
+    loop i in 0..<rows.len() {
+        if i > 0 -> out = "{out}\n"
+        out = "{out}{rows[i]}"
+    }
+    out
+}
+
+fn spaces(n: Int) -> String {
+    out := ""
+    loop _ in 0..<n -> out = "{out} "
+    out
+}
+
+fn unquote(text: String) -> String {
+    raw :: text.bytes()
+    if raw.len() < 2 -> return ~text
+    if (raw[0] != (U8{34}) && raw[0] != (U8{39})) || raw[raw.len() - 1] != raw[0] -> return ~text
+    out := [U8]{}
+    i := 1
+    loop i < raw.len() - 1 {
+        if raw[0] == (U8{34}) && raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
+            i += 1
+            if raw[i] == (U8{110}) -> out.push(U8{10})
+            else if raw[i] == (U8{114}) -> out.push(U8{13})
+            else if raw[i] == (U8{116}) -> out.push(U8{9})
+            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> out.push(raw[i])
+            else -> out.push(raw[i])
+        } else {
+            out.push(raw[i])
+        }
+        i += 1
+    }
+    String.from_bytes(out) ?? ~text
+}

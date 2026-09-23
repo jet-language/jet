@@ -21,6 +21,7 @@ package {
 // Predicates on the empty string are false (`is_alphabetic("")` is false).
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
 
+
 module fmt
 module parse
 module wrap
@@ -35,27 +36,18 @@ pub struct Cursor {
 }
 
 /// Cursor at the start of `text` (offset 0, line 1, column 1).
-pub fn cursor(text: String) -> Cursor {
-    _ :: text
+pub fn cursor(_text: String) -> Cursor {
     Cursor{offset: 0, line: 1, column: 1}
 }
 
 /// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
 pub fn cursor_advance(text: String, cur: Cursor) -> Cursor {
     raw :: text.bytes()
-    if cur.offset >= raw.len() -> return cur
-    n :: raw[cur.offset]
-    width := 1
-    nn :: n
-    if nn >= 240 {
-        width = 4
-    } else if nn >= 224 {
-        width = 3
-    } else if nn >= 192 {
-        width = 2
-    }
+    if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
+    if cur.offset >= raw.len() -> return ~cur
+    width :: utf8_width_at(raw, cur.offset)
     next :: cur.offset + width
-    if nn == 10 -> return (Cursor{offset: next, line: cur.line + 1, column: 1})
+    if raw[cur.offset] == (U8{10}) -> return Cursor{offset: next, line: cur.line + 1, column: 1}
     Cursor{offset: next, line: cur.line, column: cur.column + 1}
 }
 
@@ -95,8 +87,6 @@ pub fn nfkd(text: String) -> String { encode_cps(decompose(text, true)) }
 pub fn graphemes(text: String) -> [String] { split_graphemes(text) }
 pub fn words(text: String) -> [String] { split_words(text) }
 pub fn sentences(text: String) -> [String] { split_sentences(text) }
-
-/// Debug spellings `U+XXXX` for each scalar.
 pub fn inspect(text: String) -> [String] {
     out := [String]{}
     loop cp in decode_scalars(text) -> out.push(hex_cp(cp))
@@ -111,9 +101,9 @@ pub fn char_indices(text: String) -> [String] {
 }
 
 pub fn display_width(text: String) -> Int {
-    w := 0
-    loop cp in decode_scalars(text) -> w = w + east_asian_width(cp)
-    w
+    total := 0
+    loop cluster in split_graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
+    total
 }
 
 pub fn grapheme_views(text: String) -> [String] { graphemes(text) }
@@ -158,35 +148,40 @@ pub fn is_whitespace(text: String) -> Bool {
 pub fn trim(text: String) -> String { trim_end(trim_start(text)) }
 
 pub fn trim_start(text: String) -> String {
-    raw :: text.bytes()
+    pairs :: decode_indexed(text)
     i := 0
-    loop {
-        if i >= raw.len() -> return ""
-        if !ascii_space(raw[i]) -> return slice_bytes(raw, i, raw.len())
+    loop i < pairs.len() {
+        if !is_space_cp(pairs[i].cp) -> break
         i = i + 1
     }
+    if i >= pairs.len() -> return ""
+    slice_bytes(text.bytes(), pairs[i].index, text.bytes().len())
 }
 
 pub fn trim_end(text: String) -> String {
-    raw :: text.bytes()
-    i := raw.len()
-    loop {
-        if i <= 0 -> return ""
-        if !ascii_space(raw[i - 1]) -> return slice_bytes(raw, 0, i)
+    pairs :: decode_indexed(text)
+    end := text.bytes().len()
+    i := pairs.len() - 1
+    loop i >= 0 {
+        if !is_space_cp(pairs[i].cp) {
+            end = pairs[i].index + utf8_width_at(text.bytes(), pairs[i].index)
+            break
+        }
         i = i - 1
     }
+    slice_bytes(text.bytes(), 0, end)
 }
 
-/// Pad on the left until `width` bytes. Empty `fill` returns `text` unchanged.
+/// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
 pub fn pad_start(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, true) }
 
 pub fn pad_end(text: String, width: Int, fill: String) -> String { pad_side(text, width, fill, false) }
 
 pub fn center(text: String, width: Int, fill: String) -> String {
-    extra :: width - text.bytes().len()
-    if extra <= 0 || fill.bytes().len() == 0 -> return text
-    left :: extra / 2
-    pad_end(pad_start(text, text.bytes().len() + left, fill), width, fill)
+    extra :: width - scalar_count(text)
+    if extra <= 0 || scalar_count(fill) == 0 -> return ~text
+    left :: extra /% 2
+    pad_end(pad_start(text, scalar_count(text) + left, fill), width, fill)
 }
 
 pub fn starts_any(text: String, prefixes: [String]) -> Bool {
@@ -246,9 +241,14 @@ fn ascii_upper(text: String) -> String {
 
 fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
-    i := start
+    lo := start
+    hi := end
+    if lo < 0 -> lo = 0
+    if hi > raw.len() -> hi = raw.len()
+    if hi < lo -> hi = lo
+    i := lo
     loop {
-        if i >= end -> return String.from_bytes(out) ?? ""
+        if i >= hi -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
         i = i + 1
     }
@@ -276,27 +276,21 @@ fn ends_with(text: String, suffix: String) -> Bool {
 }
 
 fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
-    raw :: text.bytes()
-    pad :: fill.bytes()
-    extra :: width - raw.len()
-    if extra <= 0 || pad.len() == 0 -> return text
-    added := [U8]{}
-    loop {
-        if added.len() >= extra -> break
-        loop b in pad {
-            if added.len() >= extra -> break
-            added.push(b)
-        }
+    extra :: width - scalar_count(text)
+    units :: scalars(fill)
+    if extra <= 0 || units.len() == 0 -> return ~text
+    added := [String]{}
+    i := 0
+    loop added.len() < extra {
+        added.push(units[i])
+        i = (i + 1) % units.len()
     }
-    out := [U8]{}
-    if left {
-        loop b in added -> out.push(b)
-        loop b in raw -> out.push(b)
-    } else {
-        loop b in raw -> out.push(b)
-        loop b in added -> out.push(b)
+    prefix := ""
+    suffix := ""
+    loop part in added {
+        if left -> prefix = "{prefix}{part}" else -> suffix = "{suffix}{part}"
     }
-    String.from_bytes(out) ?? ""
+    "{prefix}{text}{suffix}"
 }
 
 fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
@@ -307,12 +301,12 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
     loop {
         if parts.len() + 1 >= n {
             parts.push(rest)
-            return parts
+            return ~parts
         }
         at :: find_sep(rest, sep, from_right)
         if at < 0 {
             parts.push(rest)
-            return parts
+            return ~parts
         }
         if from_right {
             parts.push(slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len()))
@@ -367,53 +361,81 @@ fn decode_indexed(text: String) -> [IndexedCp] {
     out := [IndexedCp]{}
     i := 0
     loop {
-        if i >= raw.len() -> return out
-        start :: i
-        n :: raw[i]
-        cp := 0
-        need := 0
-        if n < 128 {
-            cp = n
-            i = i + 1
-        } else if n >= 192 && n < 224 {
-            need = 1
-            cp = n & 31
-            i = i + 1
-        } else if n >= 224 && n < 240 {
-            need = 2
-            cp = n & 15
-            i = i + 1
-        } else if n >= 240 && n < 248 {
-            need = 3
-            cp = n & 7
-            i = i + 1
-        } else {
-            out.push(IndexedCp{index: start, cp: 65533})
+        if i >= raw.len() -> return ~out
+        start := i
+        first := Int.from_u8(raw[i])
+        width :: utf8_width_at(raw, i)
+        if width == 1 {
+            if first < 128 {
+                out.push(IndexedCp{index: start, cp: first})
+            } else {
+                out.push(IndexedCp{index: start, cp: 65533})
+            }
             i = i + 1
             next
         }
-        ok := true
-        loop k in 0..<need {
-            if i >= raw.len() {
-                ok = false
+        cp := 0
+        if width == 2 -> cp = first & 31
+        if width == 3 -> cp = first & 15
+        if width == 4 -> cp = first & 7
+        valid := true
+        k := 1
+        loop k < width {
+            byte := Int.from_u8(raw[i + k])
+            if byte < 128 || byte >= 192 {
+                valid = false
                 break
             }
-            c :: raw[i]
-            if c < 128 || c >= 192 {
-                ok = false
-                break
-            }
-            cp = (cp << 6) | (c & 63)
-            i = i + 1
+            cp = (cp << 6) | (byte & 63)
+            k = k + 1
         }
-        if !ok || cp > 1114111 || (cp >= 55296 && cp <= 57343) {
+        if !valid {
             out.push(IndexedCp{index: start, cp: 65533})
+            i = i + 1
             next
         }
         out.push(IndexedCp{index: start, cp: cp})
+        i = i + width
     }
 }
 
+fn utf8_width_at(raw: [U8], at: Int) -> Int {
+    if at < 0 || at >= raw.len() -> return 1
+    first :: raw[at]
+    if first < 128 -> return 1
+    if first >= 194 && first <= 223 {
+        if at + 1 < raw.len() {
+            second :: raw[at + 1]
+            if second >= 128 && second <= 191 -> return 2
+        }
+        return 1
+    }
+    if first >= 224 && first <= 239 {
+        if at + 2 < raw.len() {
+            second :: raw[at + 1]
+            third :: raw[at + 2]
+            if second >= 128 && second <= 191 && third >= 128 && third <= 191 {
+                if first != 224 || second >= 160 {
+                    if first != 237 || second <= 159 -> return 3
+                }
+            }
+        }
+        return 1
+    }
+    if first >= 240 && first <= 244 {
+        if at + 3 < raw.len() {
+            second :: raw[at + 1]
+            third :: raw[at + 2]
+            fourth :: raw[at + 3]
+            if second >= 128 && second <= 191 && third >= 128 && third <= 191 && fourth >= 128 && fourth <= 191 {
+                if first != 240 || second >= 144 {
+                    if first != 244 || second <= 143 -> return 4
+                }
+            }
+        }
+    }
+    1
+}
 fn encode_cp(cp: Int) -> String {
     n := cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
@@ -444,29 +466,81 @@ fn encode_cps(cps: [Int]) -> String {
 
 fn map_case(text: String, to_upper: Bool) -> String {
     out := ""
-    loop cp in decode_scalars(text) -> out = "{out}{encode_cp(case_cp(cp, to_upper))}"
+    loop cp in decode_scalars(text) -> out = "{out}{case_string(cp, to_upper)}"
     out
 }
 
-fn case_cp(cp: Int, to_upper: Bool) -> Int {
+fn case_string(cp: Int, to_upper: Bool) -> String {
     if to_upper {
-        if cp >= 97 && cp <= 122 -> return cp - 32
-        if cp >= 224 && cp <= 254 && cp != 247 -> return cp - 32
-        if cp == 255 -> return 376
-        return cp
+        if cp == 223 || cp == 7838 -> return "SS"
+        if cp >= 97 && cp <= 122 -> return encode_cp(cp - 32)
+        if cp >= 224 && cp <= 254 && cp != 247 -> return encode_cp(cp - 32)
+        if cp == 255 -> return encode_cp(376)
+        if cp >= 945 && cp <= 961 -> return encode_cp(cp - 32)
+        if cp >= 963 && cp <= 969 -> return encode_cp(cp - 32)
+        if cp >= 1072 && cp <= 1103 -> return encode_cp(cp - 32)
+        return encode_cp(cp)
     }
-    if cp >= 65 && cp <= 90 -> return cp + 32
-    if cp >= 192 && cp <= 222 && cp != 215 -> return cp + 32
-    if cp == 376 -> return 255
-    cp
+    if cp >= 65 && cp <= 90 -> return encode_cp(cp + 32)
+    if cp >= 192 && cp <= 222 && cp != 215 -> return encode_cp(cp + 32)
+    if cp == 376 -> return encode_cp(255)
+    if cp >= 913 && cp <= 929 -> return encode_cp(cp + 32)
+    if cp >= 931 && cp <= 939 -> return encode_cp(cp + 32)
+    if cp >= 1040 && cp <= 1071 -> return encode_cp(cp + 32)
+    encode_cp(cp)
+}
+
+fn fold_case(text: String) -> String {
+    out := ""
+    loop cp in decode_scalars(text) {
+        if cp == 223 || cp == 7838 {
+            out = "{out}ss"
+        } else if cp == 304 {
+            out = "{out}i{encode_cp(775)}"
+        } else if cp == 962 {
+            out = "{out}{encode_cp(963)}"
+        } else if cp == 8490 {
+            out = "{out}k"
+        } else if cp == 8491 {
+            out = "{out}{encode_cp(229)}"
+        } else {
+            out = "{out}{case_string(cp, false)}"
+        }
+    }
+    out
 }
 
 fn is_alpha_cp(cp: Int) -> Bool {
     if (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) -> return true
     if (cp >= 192 && cp <= 214) || (cp >= 216 && cp <= 246) || (cp >= 248 && cp <= 255) -> return true
-    if cp >= 256 && cp <= 383 -> return true
+    if cp >= 256 && cp <= 687 -> return true
     if cp >= 880 && cp <= 1023 -> return true
     if cp >= 1024 && cp <= 1279 -> return true
+    if cp >= 1329 && cp <= 1366 -> return true
+    if cp >= 1377 && cp <= 1415 -> return true
+    if cp >= 1424 && cp <= 1469 -> return true
+    if cp >= 1471 && cp <= 1471 -> return true
+    if cp >= 1488 && cp <= 1514 -> return true
+    if cp >= 1568 && cp <= 1747 -> return true
+    if cp >= 1810 && cp <= 1866 -> return true
+    if cp >= 1994 && cp <= 2026 -> return true
+    if cp >= 2304 && cp <= 2423 -> return true
+    if cp >= 2437 && cp <= 2444 -> return true
+    if cp >= 2561 && cp <= 2576 -> return true
+    if cp >= 3585 && cp <= 3632 -> return true
+    if cp >= 4256 && cp <= 4293 -> return true
+    if cp >= 4304 && cp <= 4346 -> return true
+    if cp >= 4352 && cp <= 4607 -> return true
+    if cp >= 7680 && cp <= 7935 -> return true
+    if cp >= 7936 && cp <= 8191 -> return true
+    if cp >= 8448 && cp <= 8521 -> return true
+    if cp >= 11264 && cp <= 11310 -> return true
+    if cp >= 11312 && cp <= 11358 -> return true
+    if cp >= 19968 && cp <= 40959 -> return true
+    if cp >= 44032 && cp <= 55203 -> return true
+    if cp >= 65313 && cp <= 65338 -> return true
+    if cp >= 65345 && cp <= 65370 -> return true
+    if cp >= 66560 && cp <= 66639 -> return true
     false
 }
 
@@ -474,17 +548,34 @@ fn is_digit_cp(cp: Int) -> Bool {
     if cp >= 48 && cp <= 57 -> return true
     if cp >= 1632 && cp <= 1641 -> return true
     if cp >= 1776 && cp <= 1785 -> return true
+    if cp >= 1984 && cp <= 1993 -> return true
     if cp >= 2406 && cp <= 2415 -> return true
+    if cp >= 2534 && cp <= 2543 -> return true
+    if cp >= 2662 && cp <= 2671 -> return true
+    if cp >= 2790 && cp <= 2799 -> return true
+    if cp >= 2918 && cp <= 2927 -> return true
+    if cp >= 3046 && cp <= 3055 -> return true
+    if cp >= 3174 && cp <= 3183 -> return true
+    if cp >= 3302 && cp <= 3311 -> return true
+    if cp >= 3430 && cp <= 3439 -> return true
+    if cp >= 3558 && cp <= 3567 -> return true
+    if cp >= 3664 && cp <= 3673 -> return true
+    if cp >= 3792 && cp <= 3801 -> return true
+    if cp >= 3872 && cp <= 3881 -> return true
+    if cp >= 4160 && cp <= 4169 -> return true
+    if cp >= 4240 && cp <= 4249 -> return true
+    if cp >= 6112 && cp <= 6121 -> return true
+    if cp >= 6470 && cp <= 6479 -> return true
     if cp >= 65296 && cp <= 65305 -> return true
     false
 }
 
 fn is_space_cp(cp: Int) -> Bool {
-    if cp == {
-        32 | 9 | 10 | 11 | 12 | 13 -> return true
-        160 | 5760 | 8239 | 8287 | 12288 -> return true
-        else -> { _ := 0 }
-    }
+    if cp >= 9 && cp <= 13 -> return true
+    if cp == 32 || cp == 133 || cp == 160 -> return true
+    if cp == 5760 || cp == 8239 || cp == 8287 || cp == 12288 -> return true
+    if cp >= 8192 && cp <= 8202 -> return true
+    if cp == 8232 || cp == 8233 -> return true
     false
 }
 
@@ -511,8 +602,8 @@ fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp 
 fn hangul_decompose(cp: Int) -> [Int] {
     sindex :: cp - @c_sbase
     if sindex < 0 || sindex >= @c_scount -> return [Int]{cp}
-    l :: @c_lbase + sindex / @c_ncount
-    v :: @c_vbase + (sindex % @c_ncount) / @c_tcount
+    l :: @c_lbase + sindex /% @c_ncount
+    v :: @c_vbase + (sindex % @c_ncount) /% @c_tcount
     t :: @c_tbase + sindex % @c_tcount
     if t == @c_tbase -> return [Int]{l, v}
     [Int]{l, v, t}
@@ -535,18 +626,84 @@ fn hangul_compose(a: Int, b: Int) -> ?Int {
 fn decompose(text: String, compat: Bool) -> [Int] {
     raw := [Int]{}
     loop cp in decode_scalars(text) {
-        if cp >= @c_sbase && cp < @c_sbase + @c_scount {
-            loop p in hangul_decompose(cp) -> raw.push(p)
-        } else {
-            // Compatibility: fullwidth ASCII to ASCII.
-            if compat && cp >= 65281 && cp <= 65374 {
-                raw.push(cp - 65248)
-            } else {
-                raw.push(cp)
-            }
-        }
+        pieces :: decompose_cp(cp, compat)
+        loop p in pieces -> raw.push(p)
     }
     canon_order(raw)
+}
+
+fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
+    if cp >= @c_sbase && cp < @c_sbase + @c_scount -> return hangul_decompose(cp)
+    if cp == 192 -> return [Int]{65, 768}
+    if cp == 193 -> return [Int]{65, 769}
+    if cp == 194 -> return [Int]{65, 770}
+    if cp == 195 -> return [Int]{65, 771}
+    if cp == 196 -> return [Int]{65, 776}
+    if cp == 197 -> return [Int]{65, 778}
+    if cp == 199 -> return [Int]{67, 807}
+    if cp == 200 -> return [Int]{69, 768}
+    if cp == 201 -> return [Int]{69, 769}
+    if cp == 202 -> return [Int]{69, 770}
+    if cp == 203 -> return [Int]{69, 776}
+    if cp == 204 -> return [Int]{73, 768}
+    if cp == 205 -> return [Int]{73, 769}
+    if cp == 206 -> return [Int]{73, 770}
+    if cp == 207 -> return [Int]{73, 776}
+    if cp == 209 -> return [Int]{78, 771}
+    if cp == 210 -> return [Int]{79, 768}
+    if cp == 211 -> return [Int]{79, 769}
+    if cp == 212 -> return [Int]{79, 770}
+    if cp == 213 -> return [Int]{79, 771}
+    if cp == 214 -> return [Int]{79, 776}
+    if cp == 217 -> return [Int]{85, 768}
+    if cp == 218 -> return [Int]{85, 769}
+    if cp == 219 -> return [Int]{85, 770}
+    if cp == 220 -> return [Int]{85, 776}
+    if cp == 221 -> return [Int]{89, 769}
+    if cp == 224 -> return [Int]{97, 768}
+    if cp == 225 -> return [Int]{97, 769}
+    if cp == 226 -> return [Int]{97, 770}
+    if cp == 227 -> return [Int]{97, 771}
+    if cp == 228 -> return [Int]{97, 776}
+    if cp == 229 -> return [Int]{97, 778}
+    if cp == 231 -> return [Int]{99, 807}
+    if cp == 232 -> return [Int]{101, 768}
+    if cp == 233 -> return [Int]{101, 769}
+    if cp == 234 -> return [Int]{101, 770}
+    if cp == 235 -> return [Int]{101, 776}
+    if cp == 236 -> return [Int]{105, 768}
+    if cp == 237 -> return [Int]{105, 769}
+    if cp == 238 -> return [Int]{105, 770}
+    if cp == 239 -> return [Int]{105, 776}
+    if cp == 241 -> return [Int]{110, 771}
+    if cp == 242 -> return [Int]{111, 768}
+    if cp == 243 -> return [Int]{111, 769}
+    if cp == 244 -> return [Int]{111, 770}
+    if cp == 245 -> return [Int]{111, 771}
+    if cp == 246 -> return [Int]{111, 776}
+    if cp == 249 -> return [Int]{117, 768}
+    if cp == 250 -> return [Int]{117, 769}
+    if cp == 251 -> return [Int]{117, 770}
+    if cp == 252 -> return [Int]{117, 776}
+    if cp == 253 -> return [Int]{121, 769}
+    if cp == 255 -> return [Int]{121, 776}
+    if cp == 304 -> return [Int]{73, 775}
+    if compat {
+        if cp >= 65281 && cp <= 65374 -> return [Int]{cp - 65248}
+        if cp == 338 -> return [Int]{79, 69}
+        if cp == 339 -> return [Int]{111, 101}
+        if cp == 64256 -> return [Int]{102, 102}
+        if cp == 64257 -> return [Int]{102, 105}
+        if cp == 64258 -> return [Int]{102, 108}
+        if cp == 64259 -> return [Int]{102, 102, 105}
+        if cp == 64260 -> return [Int]{102, 102, 108}
+        if cp == 64261 -> return [Int]{115, 116}
+        if cp == 64262 -> return [Int]{115, 116}
+        if cp == 185 -> return [Int]{49}
+        if cp == 178 -> return [Int]{50}
+        if cp == 179 -> return [Int]{51}
+    }
+    [Int]{cp}
 }
 
 fn canon_order(cps: [Int]) -> [Int] {
@@ -554,11 +711,11 @@ fn canon_order(cps: [Int]) -> [Int] {
     loop c in cps -> out.push(c)
     i := 1
     loop {
-        if i >= out.len() -> return out
+        if i >= out.len() -> return ~out
         cc :: combining_class(out[i])
         prev :: combining_class(out[i - 1])
         if cc != 0 && prev > cc {
-            tmp :: out[i]
+            tmp := out[i]
             out[i] = out[i - 1]
             out[i - 1] = tmp
             if i > 1 {
@@ -572,32 +729,101 @@ fn canon_order(cps: [Int]) -> [Int] {
 
 fn compose(cps: [Int]) -> String {
     if cps.len() == 0 -> return ""
-    starter := cps[0]
-    pending := [Int]{}
-    i := 1
-    loop {
-        if i >= cps.len() {
-            out := [Int]{starter}
-            loop p in pending -> out.push(p)
-            return encode_cps(out)
+    out := [Int]{}
+    starter := -1
+    last_class := -1
+    loop cp in cps {
+        cc :: combining_class(cp)
+        if starter >= 0 {
+            composed :: compose_pair(out[starter], cp)
+            if composed != None && last_class < cc {
+                out[starter] = composed
+                next
+            }
         }
-        c :: cps[i]
-        composed :: hangul_compose(starter, c)
-        if composed != None && pending.len() == 0 {
-            starter = composed ?? starter
-            i = i + 1
-            next
+        out.push(cp)
+        if cc == 0 {
+            starter = out.len() - 1
+            last_class = -1
+        } else {
+            last_class = cc
         }
-        if combining_class(c) == 0 {
-            acc := [Int]{starter}
-            loop p in pending -> acc.push(p)
-            rest := [Int]{c}
-            loop j in (i + 1)..<cps.len() -> rest.push(cps[j])
-            return "{encode_cps(acc)}{compose(rest)}"
-        }
-        pending.push(c)
-        i = i + 1
     }
+    encode_cps(out)
+}
+
+fn compose_pair(a: Int, b: Int) -> ?Int {
+    h :: hangul_compose(a, b)
+    if h != None -> return Val(h)
+    if b == 768 {
+        if a == 65 -> return Val(192)
+        if a == 69 -> return Val(200)
+        if a == 73 -> return Val(204)
+        if a == 79 -> return Val(210)
+        if a == 85 -> return Val(217)
+        if a == 97 -> return Val(224)
+        if a == 101 -> return Val(232)
+        if a == 105 -> return Val(236)
+        if a == 111 -> return Val(242)
+        if a == 117 -> return Val(249)
+    }
+    if b == 769 {
+        if a == 65 -> return Val(193)
+        if a == 69 -> return Val(201)
+        if a == 73 -> return Val(205)
+        if a == 79 -> return Val(211)
+        if a == 85 -> return Val(218)
+        if a == 89 -> return Val(221)
+        if a == 97 -> return Val(225)
+        if a == 101 -> return Val(233)
+        if a == 105 -> return Val(237)
+        if a == 111 -> return Val(243)
+        if a == 117 -> return Val(250)
+        if a == 121 -> return Val(253)
+    }
+    if b == 770 {
+        if a == 65 -> return Val(194)
+        if a == 69 -> return Val(202)
+        if a == 73 -> return Val(206)
+        if a == 79 -> return Val(212)
+        if a == 85 -> return Val(219)
+        if a == 97 -> return Val(226)
+        if a == 101 -> return Val(234)
+        if a == 105 -> return Val(238)
+        if a == 111 -> return Val(244)
+        if a == 117 -> return Val(251)
+    }
+    if b == 771 {
+        if a == 65 -> return Val(195)
+        if a == 78 -> return Val(209)
+        if a == 79 -> return Val(213)
+        if a == 97 -> return Val(227)
+        if a == 110 -> return Val(241)
+        if a == 111 -> return Val(245)
+    }
+    if b == 775 && a == 73 -> return Val(304)
+    if b == 776 {
+        if a == 65 -> return Val(196)
+        if a == 69 -> return Val(203)
+        if a == 73 -> return Val(207)
+        if a == 79 -> return Val(214)
+        if a == 85 -> return Val(220)
+        if a == 97 -> return Val(228)
+        if a == 101 -> return Val(235)
+        if a == 105 -> return Val(239)
+        if a == 111 -> return Val(246)
+        if a == 117 -> return Val(252)
+        if a == 121 -> return Val(255)
+    }
+    if b == 778 {
+        if a == 65 -> return Val(197)
+        if a == 97 -> return Val(229)
+    }
+    if b == 807 {
+        if a == 67 -> return Val(199)
+        if a == 99 -> return Val(231)
+    }
+    None
 }
 
 fn split_graphemes(text: String) -> [String] {
@@ -605,19 +831,24 @@ fn split_graphemes(text: String) -> [String] {
     if cps.len() == 0 -> return [String]{}
     out := [String]{}
     cluster := [Int]{cps[0]}
+    ri_run := if is_ri(cps[0]) -> 1 else -> 0
     i := 1
     loop {
         if i >= cps.len() {
             out.push(encode_cps(cluster))
-            return out
+            return ~out
         }
         prev :: cluster[cluster.len() - 1]
         cur :: cps[i]
-        if grapheme_break(prev, cur) {
+        break_here := grapheme_break(prev, cur)
+        if is_ri(prev) && is_ri(cur) && ri_run % 2 == 0 -> break_here = true
+        if break_here {
             out.push(encode_cps(cluster))
             cluster = [Int]{cur}
+            ri_run = if is_ri(cur) -> 1 else -> 0
         } else {
             cluster.push(cur)
+            if is_ri(cur) -> ri_run = ri_run + 1 else -> ri_run = 0
         }
         i = i + 1
     }
@@ -662,23 +893,18 @@ fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600
 fn split_words(text: String) -> [String] {
     out := [String]{}
     cur := [Int]{}
-    in_word := false
     loop cp in decode_scalars(text) {
-        w :: is_word_cp(cp)
-        if w {
-            if !in_word && cur.len() > 0 {
-                out.push(encode_cps(cur))
-                cur = [Int]{}
-            }
+        if is_alpha_cp(cp) || is_digit_cp(cp) || cp == 95 {
             cur.push(cp)
-            in_word = true
-        } else {
-            if in_word && cur.len() > 0 {
-                out.push(encode_cps(cur))
-                cur = [Int]{}
-            }
-            if !is_space_cp(cp) -> cur.push(cp)
-            in_word = false
+            next
+        }
+        if cp == 39 && cur.len() > 0 {
+            cur.push(cp)
+            next
+        }
+        if cur.len() > 0 {
+            out.push(encode_cps(cur))
+            cur = [Int]{}
         }
     }
     if cur.len() > 0 -> out.push(encode_cps(cur))
@@ -692,42 +918,57 @@ fn split_sentences(text: String) -> [String] {
     cur := [Int]{}
     loop cp in decode_scalars(text) {
         cur.push(cp)
-        if cp == 46 || cp == 33 || cp == 63 {
-            out.push(encode_cps(cur))
+        if cp == 46 || cp == 33 || cp == 63 || cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F {
+            sentence :: trim(encode_cps(cur))
+            if sentence.bytes().len() > 0 -> out.push(sentence)
             cur = [Int]{}
         }
     }
-    if cur.len() > 0 -> out.push(encode_cps(cur))
+    if cur.len() > 0 {
+        sentence :: trim(encode_cps(cur))
+        if sentence.bytes().len() > 0 -> out.push(sentence)
+    }
     out
 }
 
 fn split_lines(text: String) -> [String] {
-    out := [String]{}
-    cur := [U8]{}
     raw :: text.bytes()
+    if raw.len() == 0 -> return [String]{}
+    out := [String]{}
+    start := 0
     i := 0
-    loop {
-        if i >= raw.len() {
-            out.push(String.from_bytes(cur) ?? "")
-            return out
-        }
-        n :: raw[i]
-        if n == 10 {
-            out.push(String.from_bytes(cur) ?? "")
-            cur = [U8]{}
+    loop i < raw.len() {
+        if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
+            out.push(slice_bytes(raw, start, i))
+            if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i = i + 1
             i = i + 1
+            start = i
             next
         }
-        if n == 13 {
-            out.push(String.from_bytes(cur) ?? "")
-            cur = [U8]{}
-            i = i + 1
-            if i < raw.len() && raw[i] == (U8{10}) -> i = i + 1
-            next
-        }
-        cur.push(raw[i])
         i = i + 1
     }
+    if start < raw.len() -> out.push(slice_bytes(raw, start, raw.len()))
+    out
+}
+
+fn cluster_width(cps: [Int]) -> Int {
+    if cps.len() == 0 -> return 0
+    wide := false
+    pictographic := false
+    keycap := false
+    visible := false
+    variation := false
+    loop cp in cps {
+        if cp == 0x20E3 -> keycap = true
+        if cp == 0xFE0F -> variation = true
+        if is_emoji(cp) -> pictographic = true
+        w :: east_asian_width(cp)
+        if w > 1 -> wide = true
+        if w > 0 && !is_extend(cp) -> visible = true
+    }
+    if keycap || wide || pictographic || variation && visible -> return 2
+    if !visible -> return 0
+    1
 }
 
 fn east_asian_width(cp: Int) -> Int {
@@ -754,7 +995,7 @@ fn hex_cp(cp: Int) -> String {
     loop {
         if n == 0 -> break
         digits.push(hb[n % 16])
-        n = n / 16
+        n = n /% 16
     }
     // pad to 4
     loop {

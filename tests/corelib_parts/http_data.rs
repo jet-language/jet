@@ -1159,6 +1159,7 @@ fn core_data_stream_limits_and_typed_errors() {
         &format!(
             r#"
 use core.data as data
+use core.data.stream as stream
 use core.files as files
 
 #Codable
@@ -1172,9 +1173,10 @@ fn run() {{
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    first :: reader.next() ?? panic("next")
+    first :: stream.next(&reader) ?? panic("next")
     print("first:{{first.service}}")
-    if data.query(reader)
+    rows :: stream.collect(&reader) ?? panic("collect")
+    if data.query(rows)
         .group_by((e) -> e.service)
         .mean((e) -> e.latency_ms)
         .collect() == {{

@@ -199,13 +199,11 @@ pub(crate) mod host_fns_audit {
     }
 }
 
-mod Archive;
 mod ambient_interp;
 mod Args;
 mod CLI;
 mod Cell;
 mod Collections;
-mod Compress;
 mod Compute;
 mod Concurrency;
 mod CoreHost;

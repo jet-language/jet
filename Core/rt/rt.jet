@@ -1,3 +1,4 @@
+
 package {
     name: "core.rt"
     version: "0.1.0"
@@ -8,47 +9,10 @@ package {
         rt: .Library{ entry: rt }
     }
 }
+use core as core
 
-// core.rt — a period, a channel count, and a host callback id.
-//
-// Jet cannot take a native function pointer. `callback_id` is the host's
-// registered handler. `callback` records the stream; the audio/device
-// thread is `host_rt_start`.
-
-pub struct RealtimeStream {
-    pub period_ms: Int
-    pub channels: Int
-    pub callback_id: Int
-    pub running: Bool
+/// Start a fixed-rate callback stream. The callback receives one reusable
+/// sample buffer per invocation and must keep its work bounded.
+pub fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float])) -> RealtimeStream {
+    core.rt.callback(rate_hz, frames_per_buffer, callback)
 }
-
-/// Describe a periodic stream. Period is clamped to ≥1 ms; channels to ≥1.
-pub fn callback(period_ms: Int, channels: Int, callback_id: Int) -> RealtimeStream {
-    p := period_ms
-    if p < 1 -> p = 1
-    c := channels
-    if c < 1 -> c = 1
-    started :: host_rt_start(p, c, callback_id)
-    RealtimeStream{period_ms: p, channels: c, callback_id: callback_id, running: started}
-}
-
-fn host_rt_start(period_ms: Int, channels: Int, callback_id: Int) -> Bool { panic("host_rt_start") }
-
-
-pub fn start(stream: RealtimeStream) -> RealtimeStream {
-    started :: host_rt_start(stream.period_ms, stream.channels, stream.callback_id)
-    RealtimeStream{period_ms: stream.period_ms, channels: stream.channels, callback_id: stream.callback_id, running: started}
-}
-
-pub fn stop(stream: RealtimeStream) -> RealtimeStream {
-    host_rt_stop(stream.callback_id)
-    RealtimeStream{period_ms: stream.period_ms, channels: stream.channels, callback_id: stream.callback_id, running: false}
-}
-
-pub fn is_running(stream: RealtimeStream) -> Bool { stream.running }
-
-pub fn period(stream: RealtimeStream) -> Int { stream.period_ms }
-
-pub fn channels(stream: RealtimeStream) -> Int { stream.channels }
-
-fn host_rt_stop(callback_id: Int) { panic("host_rt_stop") }

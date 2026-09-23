@@ -8,6 +8,8 @@ package {
         log: .Library{ entry: log }
     }
 }
+use core as core
+
 // core.log — one structured logger for the process.
 //
 // Levels are `debug`, `info`, `warn`, `error`, `critical`, `fatal`. Fields
@@ -20,117 +22,134 @@ package {
 pub struct LogField {
     pub key: String
     pub value: String
+    pub kind: String
+    pub redacted: Bool
 }
 
-pub fn debug(message: String) -[IO]> { emit("debug", message, [LogField]{}) }
+pub fn debug(message: String) -[Log]> { emit("debug", message, [LogField]{}) }
 
-pub fn info(message: String) -[IO]> { emit("info", message, [LogField]{}) }
+pub fn info(message: String) -[Log]> { emit("info", message, [LogField]{}) }
 
-pub fn warn(message: String) -[IO]> { emit("warn", message, [LogField]{}) }
+pub fn warn(message: String) -[Log]> { emit("warn", message, [LogField]{}) }
 
-pub fn error(message: String) -[IO]> { emit("error", message, [LogField]{}) }
+pub fn error(message: String) -[Log]> { emit("error", message, [LogField]{}) }
 /// Emit a message at a caller-selected level.
-pub fn log(level: String, message: String) -[IO]> { emit(canon_level(level), message, [LogField]{}) }
+pub fn log(level: String, message: String) -[Log]> { emit(canon_level(level), message, [LogField]{}) }
 
 /// Python-compatible warning spelling.
-pub fn warning(message: String) -[IO]> { warn(message) }
+pub fn warning(message: String) -[Log]> { warn(message) }
 
 
-pub fn critical(message: String) -[IO]> { emit("critical", message, [LogField]{}) }
+pub fn critical(message: String) -[Log]> { emit("critical", message, [LogField]{}) }
 
-pub fn fatal(message: String) -[IO]> { emit("fatal", message, [LogField]{}) }
+pub fn fatal(message: String) -[Log]> { emit("fatal", message, [LogField]{}) }
 
-pub fn debug_fields(message: String, fields: [LogField]) -[IO]> { emit("debug", message, fields) }
+pub fn debug_fields(message: String, fields: [LogField]) -[Log]> { emit("debug", message, fields) }
 
-pub fn info_fields(message: String, fields: [LogField]) -[IO]> { emit("info", message, fields) }
+pub fn info_fields(message: String, fields: [LogField]) -[Log]> { emit("info", message, fields) }
 
-pub fn warn_fields(message: String, fields: [LogField]) -[IO]> { emit("warn", message, fields) }
+pub fn warn_fields(message: String, fields: [LogField]) -[Log]> { emit("warn", message, fields) }
 
-pub fn error_fields(message: String, fields: [LogField]) -[IO]> { emit("error", message, fields) }
+pub fn error_fields(message: String, fields: [LogField]) -[Log]> { emit("error", message, fields) }
 
-pub fn field(key: String, value: String) -> LogField { {key: key, value: value} }
+pub fn field(key: String, value: String) -> LogField { core.log.field(key, value) }
 
-pub fn int(key: String, value: Int) -> LogField { {key: key, value: "{value}"} }
+pub fn int(key: String, value: Int) -> LogField { core.log.int(key, value) }
 
-pub fn float(key: String, value: Float) -> LogField { {key: key, value: "{value}"} }
+pub fn float(key: String, value: Float) -> LogField { core.log.float(key, value) }
 
-pub fn bool(key: String, value: Bool) -> LogField { {key: key, value: "{value}"} }
+pub fn bool(key: String, value: Bool) -> LogField { core.log.bool(key, value) }
 
-pub fn redact(key: String) -> LogField { {key: key, value: "***"} }
+pub fn redact(key: String) -> LogField { core.log.redact(key) }
 
-pub fn span(name: String) -[IO]> { host_span_begin(name) }
+pub fn span(name: String) -[Log]> LogSpan { core.log.span(name) }
 
-pub fn enter(span: String) -[IO]> { host_span_begin(span) }
+pub fn enter(span: LogSpan) -[Log]> { core.log.enter(span) }
 
-pub fn close(span: String) -[IO]> { host_span_end(span) }
+pub fn close(span: LogSpan) -[Log]> { core.log.close(span) }
 
-pub fn set_sink(kind: String, path: String) -[IO]> { host_log_set_sink(kind, path) }
+pub fn set_sink(kind: String, path: String) -[Log]> { core.log.set_sink(kind, path) }
 
-pub fn sample_every(n: Int) -[IO]> {
-    if n < 1 -> host_log_set_sample(1) else -> host_log_set_sample(n)
-}
+pub fn sample_every(n: Int) -[Log]> { core.log.sample_every(n) }
 
-pub fn counter(name: String, value: Int) -[IO]> { host_log_counter(name, value) }
+pub fn counter(name: String, value: Int) -> LogField { core.log.counter(name, value) }
 
-pub fn otlp_file(path: String) -[IO, FS]> { host_log_set_sink("otlp-file", path) }
+pub fn otlp_file(path: String) -[Log, FS]> { core.log.otlp_file(path) }
 
-pub fn set_level(level: String) -[IO]> { host_log_set_level(canon_level(level)) }
+pub fn set_level(level: String) -[Log]> { core.log.set_level(canon_level(level)) }
 
-pub fn set_trace_id(id: String) -[IO]> { host_log_set_trace(id) }
+pub fn set_trace_id(id: String) -[Log]> { core.log.set_trace_id(id) }
 
-/// `spec` is `level=info,sink=stderr` comma pairs. Unknown keys are ignored.
-pub fn setup(spec: String) -[IO]> {
-    host_log_set_disabled(false)
-    parts :: split_csv(spec)
-    loop part in parts {
-        kv :: split_once(part, "=")
-        key :: trim(kv.left)
-        val :: trim(kv.right)
-        if key == "level" -> host_log_set_level(canon_level(val))
-        if key == "sink" -> host_log_set_sink(val, "")
-        if key == "file" -> host_log_set_sink("file", val)
-        if key == "sample" {
-            n :: parse_int(val) ?? 1
-            sample_every(n)
+/// Apply comma-separated `key=value` settings without handing the whole
+/// grammar to the host. The host owns the sink and process-global cells; Jet
+/// owns normalization and dispatch of each setting.
+pub fn setup(spec: String) -[Log]> {
+    loop raw in split_csv(spec) {
+        pair :: split_once(raw, "=")
+        key :: ascii_lower(trim(pair.left))
+        value :: trim(pair.right)
+        if {
+            key == "level" -> set_level(value)
+            key == "format" -> {
+                format :: ascii_lower(value)
+                if format == "json" || format == "text" -> core.log.setup(format)
+            }
+            key == "sink" -> {
+                sink :: ascii_lower(value)
+                if {
+                    sink == "stderr" || sink == "stdout" -> set_sink("json", "")
+                    sink.len() > 0 -> set_sink("jsonl", value)
+                }
+            }
+            key == "file" || key == "path" -> {
+                if value.len() > 0 -> set_sink("jsonl", value)
+            }
+            key == "sample" || key == "sample_every" -> {
+                n :: parse_int(value) ?? next
+                if n > 0 -> sample_every(n)
+            }
+            key == "trace_id" && value.len() > 0 -> set_trace_id(value)
         }
     }
 }
 
-pub fn disable() -[IO]> { host_log_set_disabled(true) }
+pub fn disable() -[Log]> { core.log.disable() }
 
-pub fn flush() -[IO]> { host_log_flush() }
+pub fn flush() -[Log]> { core.log.flush() }
 
-pub fn enabled(level: String) -[IO]> Bool {
-    if host_log_disabled() -> return false
-    rank(level) >= rank(host_log_get_level())
-}
+pub fn enabled(level: String) -[Log]> Bool { core.log.enabled(canon_level(level)) }
 
-fn emit(level: String, message: String, fields: [LogField]) -[IO]> {
-    if host_log_disabled() {
-        return
-    }
-    if rank(level) < rank(host_log_get_level()) {
-        return
-    }
-    every :: host_log_get_sample()
-    if every > 1 {
-        n :: host_log_tick()
-        if n % every != 0 {
-            return
+fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
+    normalized :: canon_level(level)
+    if normalized == {
+        "debug" -> {
+            if fields.len() > 0 -> return core.log.debug_fields(message, fields)
+            return core.log.debug(message)
         }
-    }
-    line := "{{\"level\":\"{escape(level)}\",\"msg\":\"{escape(message)}\""
-    tid :: host_log_get_trace()
-    if tid.len() > 0 -> line = "{line},\"trace\":\"{escape(tid)}\""
-    span :: host_span_current()
-    if span.len() > 0 -> line = "{line},\"span\":\"{escape(span)}\""
-    loop f in fields {
-        if f.value == "***" -> line = "{line},\"{escape(f.key)}\":\"***\"" else {
-            line = "{line},\"{escape(f.key)}\":\"{escape(f.value)}\""
+        "info" -> {
+            if fields.len() > 0 -> return core.log.info_fields(message, fields)
+            return core.log.info(message)
         }
+        "warn" -> {
+            if fields.len() > 0 -> return core.log.warn_fields(message, fields)
+            return core.log.warn(message)
+        }
+        "error" -> {
+            if fields.len() > 0 -> return core.log.error_fields(message, fields)
+            return core.log.error(message)
+        }
+        "critical" -> {
+            line := message
+            if fields.len() > 0 -> line = render_json(record(normalized, message, fields))
+            return core.log.critical(line)
+        }
+        "fatal" -> {
+            line := message
+            if fields.len() > 0 -> line = render_json(record(normalized, message, fields))
+            return core.log.fatal(line)
+        }
+        else -> return core.log.info(message)
     }
-    line = "{line}}}"
-    host_log_emit(level, line)
 }
 
 fn rank(level: String) -> Int {
@@ -149,10 +168,11 @@ fn rank(level: String) -> Int {
 fn canon_level(level: String) -> String {
     n :: ascii_lower(trim(level))
     if n == {
-        "warning" -> "warn"
-        "err" -> "error"
-        "crit" -> "critical"
-        else -> n
+        "warning" -> return "warn"
+        "err" -> return "error"
+        "crit" -> return "critical"
+        "debug" | "info" | "warn" | "error" | "critical" | "fatal" -> return n
+        else -> "info"
     }
 }
 
@@ -170,14 +190,25 @@ fn escape(text: String) -> String {
             out.push(U8{34})
             next
         }
-        if n == 10 {
+        if n == 8 || n == 9 || n == 10 || n == 12 || n == 13 {
             out.push(U8{92})
-            out.push(U8{110})
+            if n == {
+                8 -> out.push(U8{98})
+                9 -> out.push(U8{116})
+                10 -> out.push(U8{110})
+                12 -> out.push(U8{102})
+                13 -> out.push(U8{114})
+                else -> { _ := 0 }
+            }
             next
         }
-        if n == 13 {
+        if n < 32 {
             out.push(U8{92})
-            out.push(U8{114})
+            out.push(U8{117})
+            out.push(U8{48})
+            out.push(U8{48})
+            out.push(hex_digit(n >> 4))
+            out.push(hex_digit(n & 15))
             next
         }
         out.push(b)
@@ -185,6 +216,11 @@ fn escape(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
+fn hex_digit(value: Int) -> U8 {
+    n :: value & 15
+    if n < 10 -> return U8{48 + n}
+    U8{87 + n}
+}
 fn trim(text: String) -> String {
     raw :: text.bytes()
     a := 0
@@ -192,19 +228,19 @@ fn trim(text: String) -> String {
     loop {
         if a >= b -> return ""
         if !is_space(raw[a]) -> break
-        a = a + 1
+        a += 1
     }
     loop {
         if b <= a -> return ""
         if !is_space(raw[b - 1]) -> break
-        b = b - 1
+        b -= 1
     }
     out := [U8]{}
     i := a
     loop {
         if i >= b -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -217,10 +253,13 @@ fn split_csv(text: String) -> [String] {
     out := [String]{}
     cur := [U8]{}
     loop b in text.bytes() {
-        if b == (U8{44}) {
-            out.push(String.from_bytes(cur) ?? "")
-            cur = [U8]{}
-        } else { cur.push(b) }
+        if {
+            b == (U8{44}) -> {
+                out.push(String.from_bytes(cur) ?? "")
+                cur = [U8]{}
+            }
+            else -> cur.push(b)
+        }
     }
     out.push(String.from_bytes(cur) ?? "")
     out
@@ -250,7 +289,7 @@ pub fn record(level: String, message: String, fields: [LogField]) -> LogRecord {
 }
 
 pub fn formatter(mode: String) -> Formatter {
-    Formatter{mode: ascii_lower(mode)}
+    Formatter{mode: ascii_lower(trim(mode))}
 }
 
 pub fn handler(level: String) -> Handler {
@@ -258,18 +297,23 @@ pub fn handler(level: String) -> Handler {
 }
 
 pub fn handler_format(target: Handler, mode: String) -> Handler {
-    Handler{minimum: target.minimum, mode: ascii_lower(mode)}
+    Handler{minimum: target.minimum, mode: ascii_lower(trim(mode))}
 }
 
 pub fn format(target: Formatter, event: LogRecord) -> String {
-    if target.mode == "text" -> return render_text(event)
+    mode :: ascii_lower(trim(target.mode))
+    if mode == "text" -> return render_text(event)
     render_json(event)
 }
 
-pub fn handle(target: Handler, event: LogRecord) -[IO]> {
+pub fn handle(target: Handler, event: LogRecord) -[Log]> {
     if rank(event.level) < rank(target.minimum) -> return
     formatter :: Formatter{mode: target.mode}
-    host_log_emit(event.level, format(formatter, event))
+    if ascii_lower(trim(target.mode)) == "text" {
+        emit(event.level, format(formatter, event), [LogField]{})
+    } else {
+        emit(event.level, event.message, event.fields)
+    }
 }
 
 fn render_text(event: LogRecord) -> String {
@@ -281,7 +325,9 @@ fn render_text(event: LogRecord) -> String {
 fn render_json(event: LogRecord) -> String {
     line := "{{\"level\":\"{escape(event.level)}\",\"msg\":\"{escape(event.message)}\""
     loop field in event.fields {
-        if field.value == "***" -> line = "{line},\"{escape(field.key)}\":\"***\"" else {
+        if field.redacted {
+            line = "{line},\"{escape(field.key)}\":\"[redacted]\""
+        } else {
             line = "{line},\"{escape(field.key)}\":\"{escape(field.value)}\""
         }
     }
@@ -297,17 +343,20 @@ pub struct Pair {
 fn split_once(text: String, sep: String) -> Pair {
     hay :: text.bytes()
     nd :: sep.bytes()
-    if nd.len() == 0 -> return ({left: text, right: ""})
+    if nd.len() == 0 || nd.len() > hay.len() -> return {left: text, right: ""}
     loop i in 0..<(hay.len() - nd.len() + 1) {
-        ok := true
-        loop j in 0..<nd.len() {
-            if hay[i + j] != nd[j] -> ok = false
-        }
-        if ok {
+        if matches_at(hay, nd, i) {
             return {left: slice_ascii(hay, 0, i), right: slice_ascii(hay, i + nd.len(), hay.len())}
         }
     }
     {left: text, right: ""}
+}
+
+fn matches_at(hay: [U8], needle: [U8], offset: Int) -> Bool {
+    loop j in 0..<needle.len() {
+        if hay[offset + j] != needle[j] -> return false
+    }
+    true
 }
 
 fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
@@ -316,7 +365,7 @@ fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
         out.push(raw[i])
-        i = i + 1
+        i += 1
     }
 }
 
@@ -342,37 +391,6 @@ fn parse_int(text: String) -> ?Int {
     Val(n)
 }
 
-fn host_log_emit(level: String, line: String) -[IO]> { panic("host_log_emit") }
-
-fn host_log_get_level() -[IO]> String { panic("host_log_get_level") }
-
-fn host_log_set_level(level: String) -[IO]> { panic("host_log_set_level") }
-
-fn host_log_set_sink(kind: String, path: String) -[IO]> { panic("host_log_set_sink") }
-
-fn host_log_get_sample() -[IO]> Int { panic("host_log_get_sample") }
-
-fn host_log_set_sample(n: Int) -[IO]> { panic("host_log_set_sample") }
-
-fn host_log_tick() -[IO]> Int { panic("host_log_tick") }
-
-fn host_log_get_trace() -[IO]> String { panic("host_log_get_trace") }
-
-fn host_log_set_trace(id: String) -[IO]> { panic("host_log_set_trace") }
-
-fn host_log_disabled() -[IO]> Bool { panic("host_log_disabled") }
-
-fn host_log_set_disabled(v: Bool) -[IO]> { panic("host_log_set_disabled") }
-
-fn host_log_counter(name: String, value: Int) -[IO]> { panic("host_log_counter") }
-
-fn host_span_begin(name: String) -[IO]> { panic("host_span_begin") }
-
-fn host_span_end(name: String) -[IO]> { panic("host_span_end") }
-
-fn host_span_current() -[IO]> String { panic("host_span_current") }
-
-fn host_log_flush() -[IO]> { panic("host_log_flush") }
 pub fn add(event: LogRecord, field: LogField) -> LogRecord {
     fields := event.fields
     fields.push(field)
@@ -381,7 +399,7 @@ pub fn add(event: LogRecord, field: LogField) -> LogRecord {
 
 pub fn group(event: LogRecord, prefix: String) -> LogRecord {
     fields := [LogField]{}
-    loop field in event.fields -> fields.push(LogField{key: "{prefix}.{field.key}", value: field.value})
+    loop field in event.fields -> fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 

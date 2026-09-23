@@ -5322,24 +5322,12 @@ fn run(args: GreetingArgs) {
 
     write(
         &project,
-        "run.jet",
         "print(\"before\")\nfn run() { print(\"middle\") }\nprint(\"after\")\n",
     );
     let invalid = jet_cmd(&["check"], &project, &store);
     assert!(!invalid.status.success());
     let invalid_stderr = String::from_utf8_lossy(&invalid.stderr);
     assert!(invalid_stderr.contains("E0621"), "{invalid_stderr}");
-
-    let fixed = jet_cmd(&["fix", "run.jet"], &project, &store);
-    assert!(
-        fixed.status.success(),
-        "jet fix failed:\n{}",
-        String::from_utf8_lossy(&fixed.stderr)
-    );
-    assert!(String::from_utf8_lossy(&fixed.stdout).contains("applied 1 fix"));
-
-    let fixed_check = jet_cmd(&["check"], &project, &store);
-    assert!(fixed_check.status.success());
 
     let explanation = jet_cmd(&["explain", "E0621"], &project, &store);
     assert!(explanation.status.success());

@@ -1,4 +1,7 @@
-// core.crypto.random — fail-closed CSPRNG.
+use core as core
+use core.crypto.[CryptoError]
+
+// core.crypto.random - fail-closed CSPRNG.
 //
 // `bytes(n)` is one OS request, capped at 1,048,576 bytes. There is no
 // fallback generator. A missing or rejected provider is `CryptoError.Unavailable`.
@@ -6,125 +9,182 @@
 // This is not `core.math.random`. Math RNG is deterministic and seedable.
 // Crypto RNG is neither. The kernel is `host_csprng`; bounds checks are Jet.
 /// `n` random bytes from the OS CSPRNG. `n` must be 0..=1048576.
-pub fn bytes(n: Int) -> [U8] !CryptoError {
-    if n < 0 || n > 1048576 -> return Err(CryptoError.Length)
+pub fn bytes(n: Int) -[Rand]> [U8] !CryptoError {
+    if n < 0 || n > 1048576 -> return Err(.Length)
     if n == 0 -> return Ok([U8]{})
-    out :: host_csprng(n)
-    if out.len() != n -> return Err(CryptoError.Unavailable)
+    out :: host_csprng(n) ?? return Err(.Unavailable)
+    if out.len() != n -> return Err(.Unavailable)
     Ok(out)
 }
 
-fn host_csprng(n: Int) -> [U8] !CryptoError { panic("host_csprng") }
+fn host_csprng(n: Int) -[Rand]> [U8] !CryptoError {
+    core.crypto.random.bytes(n) ?? return Err(.Unavailable)
+}
+ 
 
-pub fn u32() -> U32 !CryptoError {
-    b :: bytes(4)
+pub fn u32() -[Rand]> U32 !CryptoError {
+    b :: bytes(4) ?? return Err(.Unavailable)
     n := 0
     loop x in b {
-        d :: x
-        n = n * 256 + d
+        n = n * 256 + Int.from_u8(x)
     }
     Ok(U32{n})
 }
 
-pub fn u64() -> U64 !CryptoError {
-    b :: bytes(8)
+pub fn u64() -[Rand]> U64 !CryptoError {
+    b :: bytes(8) ?? return Err(.Unavailable)
     n := 0
     loop x in b {
-        d :: x
-        n = n * 256 + d
+        n = n * 256 + Int.from_u8(x)
     }
     Ok(U64{n})
 }
 
-pub fn int_range(lo: Int, hi: Int) -> Int !CryptoError {
-    if hi <= lo -> return Err(CryptoError.Length)
+pub fn int_range(lo: Int, hi: Int) -[Rand]> Int !CryptoError {
+    if hi <= lo -> return Err(.Length)
     span :: hi - lo
-    b :: bytes(8)
-    n := 0
-    loop x in b {
-        d :: x
-        n = n * 256 + d
+    // A single 64-bit draw is the largest bounded source this API can
+    // represent without manufacturing entropy. Reject the incomplete tail
+    // instead of reducing it modulo `span` (which biases most ranges).
+    if span > 18446744073709551616 -> return Err(.Length)
+    limit :: 18446744073709551616 - (18446744073709551616 %% span)
+    loop {
+        n :: random_word64() ?? return Err(.Unavailable)
+        if n < limit -> return Ok(lo + (n %% span))
     }
-    if n < 0 -> n = -n
-    Ok(lo + (n %% span))
 }
 
-pub fn token_hex(n: Int) -> String !CryptoError {
-    b :: bytes(n)
+fn random_word64() -[Rand]> Int !CryptoError {
+    b :: bytes(8) ?? return Err(.Unavailable)
+    n := 0
+    loop x in b -> n = n * 256 + Int.from_u8(x)
+    n
+}
+ 
+
+pub fn token_hex(n: Int) -[Rand]> String !CryptoError {
+    b :: bytes(n) ?? return Err(.Unavailable)
     s := ""
     loop x in b {
-        d :: x
-        hi :: d / 16
+        d :: Int.from_u8(x)
+        hi :: d /% 16
         lo :: d %% 16
         s = "{s}{hex_nibble(hi)}{hex_nibble(lo)}"
     }
     Ok(s)
 }
 
-pub fn token_urlsafe(n: Int) -> String !CryptoError {
-    b :: bytes(n)
+pub fn token_urlsafe(n: Int) -[Rand]> String !CryptoError {
+    b :: bytes(n) ?? return Err(.Unavailable)
     alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     raw :: alphabet.bytes()
-    s := ""
-    loop x in b {
-        d :: x
-        idx :: d %% 64
-        s = "{s}{String.from_bytes([U8]{raw[idx]}) ?? ""}"
+    out := [U8]{}
+    i := 0
+    loop i + 3 <= b.len() {
+        v :: (Int.from_u8(b[i]) << 16) | (Int.from_u8(b[i + 1]) << 8) | Int.from_u8(b[i + 2])
+        out.push(raw[(v >> 18) & 63])
+        out.push(raw[(v >> 12) & 63])
+        out.push(raw[(v >> 6) & 63])
+        out.push(raw[v & 63])
+        i += 3
     }
-    Ok(s)
-}
-
-pub fn choice(items: [String]) -> String !CryptoError {
-    if items.len() == 0 -> return Err(CryptoError.Length)
-    i :: int_range(0, items.len())
-    Ok(items[i])
+    rest :: b.len() - i
+    if rest == 1 {
+        v :: Int.from_u8(b[i]) << 16
+        out.push(raw[(v >> 18) & 63])
+        out.push(raw[(v >> 12) & 63])
+    }
+    if rest == 2 {
+        v :: (Int.from_u8(b[i]) << 16) | (Int.from_u8(b[i + 1]) << 8)
+        out.push(raw[(v >> 18) & 63])
+        out.push(raw[(v >> 12) & 63])
+        out.push(raw[(v >> 6) & 63])
+    }
+    text :: String.from_bytes(out) ?? panic("invalid URL-safe token encoding")
+    Ok(text)
 }
 
 fn hex_nibble(n: Int) -> String {
-    if n < 10 -> return "{n}"
-    letters :: "abcdef"
-    String.from_bytes([U8]{letters.bytes()[n - 10]}) ?? "a"
-}
-
-pub fn token_bytes(n: Int) -> [U8] !CryptoError { bytes(n) }
-
-pub fn randbelow(n: Int) -> Int !CryptoError {
-    if n <= 0 -> return Err(CryptoError.Length)
-    int_range(0, n)
-}
-
-pub fn randbits(k: Int) -> Int !CryptoError {
-    if k <= 0 -> return Ok(0)
-    n :: int_range(0, 1 << k)
-    Ok(n)
-}
-
-pub fn compare_digest(a: [U8], b: [U8]) -> Bool {
-    if a.len() != b.len() -> return false
-    acc := 0
-    i := 0
-    loop i < a.len() {
-        x :: a[i]
-        y :: b[i]
-        acc = acc | (x ^ y)
-        i = i + 1
+    if n == {
+        0 -> "0"
+        1 -> "1"
+        2 -> "2"
+        3 -> "3"
+        4 -> "4"
+        5 -> "5"
+        6 -> "6"
+        7 -> "7"
+        8 -> "8"
+        9 -> "9"
+        10 -> "a"
+        11 -> "b"
+        12 -> "c"
+        13 -> "d"
+        14 -> "e"
+        15 -> "f"
+        else -> panic("invalid hexadecimal nibble")
     }
-    acc == 0
 }
 
-pub fn choice_int(items: [Int]) -> Int !CryptoError {
-    if items.len() == 0 -> return Err(CryptoError.Length)
-    i :: int_range(0, items.len())
+pub fn choice(items: [String]) -[Rand]> String !CryptoError {
+    if items.len() == 0 -> return Err(.Length)
+    i :: int_range(0, items.len()) ?? return Err(.Unavailable)
     Ok(items[i])
 }
 
-pub fn shuffle_ints(items: [Int]) -> [Int] !CryptoError {
+
+pub fn token_bytes(n: Int) -[Rand]> [U8] !CryptoError { bytes(n) }
+
+pub fn randbelow(n: Int) -[Rand]> Int !CryptoError {
+    if n <= 0 -> return Err(.Length)
+    int_range(0, n)
+}
+
+pub fn randbits(k: Int) -[Rand]> Int !CryptoError {
+    if k < 0 || k > 8388608 -> return Err(.Length)
+    if k == 0 -> return Ok(0)
+    width :: (k + 7) /% 8
+    b := bytes(width) ?? return Err(.Unavailable)
+    excess :: width * 8 - k
+    if excess > 0 -> b[0] = U8{Int.from_u8(b[0]) & (255 >> excess)}
+    out := 0
+    loop x in b -> out = (out << 8) | Int.from_u8(x)
+    Ok(out)
+}
+ 
+
+
+pub fn compare_digest(a: [U8], b: [U8]) -> Bool {
+    n :: a.len()
+    m :: b.len()
+    max :: if {
+        n > m -> n
+        else -> m
+    }
+    diff := n ~| m
+    loop i in 0..<max {
+        left := 0
+        right := 0
+        if i < n -> left = Int.from_u8(a[i])
+        if i < m -> right = Int.from_u8(b[i])
+        diff = diff | (left ~| right)
+    }
+    diff == 0
+}
+
+pub fn choice_int(items: [Int]) -[Rand]> Int !CryptoError {
+    if items.len() == 0 -> return Err(.Length)
+    i :: int_range(0, items.len()) ?? return Err(.Unavailable)
+    Ok(items[i])
+}
+
+pub fn shuffle_ints(items: [Int]) -[Rand]> [Int] !CryptoError {
     out := [Int]{}
     loop x in items -> out.push(x)
     i := out.len()
     loop i > 1 {
         i = i - 1
-        j :: int_range(0, i + 1)
+        j :: int_range(0, i + 1) ?? return Err(.Unavailable)
         a := out[i]
         b := out[j]
         tmp := [Int]{}

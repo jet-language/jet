@@ -34,6 +34,208 @@ struct JetDbConnection {
     handle: u64,
 }
 
+trait JetDbCarrier {
+    fn jet_db_handle(&self) -> u64;
+}
+
+impl JetDbCarrier for JetDbConnection {
+    fn jet_db_handle(&self) -> u64 {
+        self.handle
+    }
+}
+
+
+/// D-DBDRIVER1: keep rusqlite in the hidden FFI bridge while the generated
+/// program owns only a typed handle and the checked SQL/policy carriers.
+macro_rules! jet_db_bridge {
+    ($bridge:ident) => {
+        impl JetDbCarrier for JetDbScope {
+            fn jet_db_handle(&self) -> u64 {
+                self.handle
+            }
+        }
+
+        fn jet_db_open(path: &String) -> JetDbConnection {
+            let handle = $bridge::jet_db_open(path);
+            if handle == 0 {
+                jet_runtime_stop("E3001", "", 0, "database open failed")
+            }
+            JetDbConnection { handle }
+        }
+
+        fn jet_db_open_memory() -> JetDbConnection {
+            let handle = $bridge::jet_db_open_memory();
+            if handle == 0 {
+                jet_runtime_stop("E3001", "", 0, "in-memory database open failed")
+            }
+            JetDbConnection { handle }
+        }
+
+        fn jet_db_close<T: JetDbCarrier>(connection: T) -> bool {
+            $bridge::jet_db_close(connection.jet_db_handle())
+        }
+
+        fn jet_db_begin<T: JetDbCarrier>(connection: T) -> bool {
+            $bridge::jet_db_begin(connection.jet_db_handle())
+        }
+
+        fn jet_db_commit<T: JetDbCarrier>(connection: T) -> bool {
+            $bridge::jet_db_commit(connection.jet_db_handle())
+        }
+
+        fn jet_db_rollback<T: JetDbCarrier>(connection: T) -> bool {
+            $bridge::jet_db_rollback(connection.jet_db_handle())
+        }
+
+        struct JetAotDbBackend<'a> {
+            scope: &'a JetDbScope,
+        }
+
+        impl jet_std::JetDBBackend for JetAotDbBackend<'_> {
+            fn begin(&mut self) -> bool {
+                $bridge::jet_db_begin(self.scope.handle)
+            }
+
+            fn begin_with_lock(&mut self, lock: jet_std::JetMigrationLock) -> bool {
+                let mode = if matches!(lock, jet_std::JetMigrationLock::Exclusive) {
+                    1
+                } else {
+                    0
+                };
+                $bridge::jet_db_begin_mode(self.scope.handle, mode)
+            }
+
+            fn commit(&mut self) -> bool {
+                $bridge::jet_db_commit(self.scope.handle)
+            }
+
+            fn rollback(&mut self) {
+                let _ = $bridge::jet_db_rollback(self.scope.handle);
+            }
+
+            fn execute(
+                &mut self,
+                sql: &jet_std::SQL,
+                allow_schema: bool,
+            ) -> Result<i64, jet_std::DBError> {
+                let sql = if allow_schema {
+                    jet_std::jet_db_apply_compiled_migration_policy_with_proof(
+                        sql,
+                        &self.scope.policy.table,
+                        jet_db_policy_compiled(&self.scope.policy),
+                        &self.scope.user,
+                    )?
+                    .into_sql()?
+                } else {
+                    jet_std::jet_db_apply_compiled_policy_with_proof(
+                        sql,
+                        &self.scope.policy.table,
+                        jet_db_policy_compiled(&self.scope.policy),
+                        &self.scope.user,
+                    )?
+                    .into_sql()?
+                };
+                let params = jet_std::jet_db_encode_params(&sql.1);
+                let wire = $bridge::jet_db_execute(self.scope.handle, &sql.0, &params);
+                jet_std::jet_db_decode_execute_result(&wire)
+            }
+
+            fn query(
+                &mut self,
+                sql: &jet_std::SQL,
+                allow_schema: bool,
+            ) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
+                let sql = if allow_schema {
+                    jet_std::jet_db_apply_compiled_migration_policy_with_proof(
+                        sql,
+                        &self.scope.policy.table,
+                        jet_db_policy_compiled(&self.scope.policy),
+                        &self.scope.user,
+                    )?
+                    .into_sql()?
+                } else {
+                    jet_std::jet_db_apply_compiled_policy_with_proof(
+                        sql,
+                        &self.scope.policy.table,
+                        jet_db_policy_compiled(&self.scope.policy),
+                        &self.scope.user,
+                    )?
+                    .into_sql()?
+                };
+                let params = jet_std::jet_db_encode_params(&sql.1);
+                let wire = $bridge::jet_db_query(self.scope.handle, &sql.0, &params);
+                jet_std::jet_db_decode_query_result(&wire)
+            }
+        }
+
+        fn jet_db_scope_migrate(
+            scope: &JetDbScope,
+            name: &String,
+            steps: &Vec<jet_std::SQL>,
+        ) -> Result<i64, jet_std::DBError> {
+            let mut backend = JetAotDbBackend { scope };
+            jet_std::jet_db_migrate(&mut backend, name, steps)
+        }
+
+        fn jet_db_scope_transaction(
+            scope: &JetDbScope,
+            label: &String,
+            steps: &Vec<jet_std::SQL>,
+        ) -> Result<i64, jet_std::DBError> {
+            let mut backend = JetAotDbBackend { scope };
+            jet_std::jet_db_transaction(&mut backend, label, steps)
+        }
+
+        fn jet_db_scope_execute_with_metadata(
+            scope: &JetDbScope,
+            sql: &jet_std::SQL,
+            metadata: &String,
+        ) -> Result<i64, jet_std::DBError> {
+            let _ = metadata;
+            let mut backend = JetAotDbBackend { scope };
+            jet_std::JetDBBackend::execute(&mut backend, sql, false)
+        }
+
+        fn jet_db_scope_query_with_metadata(
+            scope: &JetDbScope,
+            sql: &jet_std::SQL,
+            metadata: &String,
+        ) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
+            let _ = metadata;
+            let mut backend = JetAotDbBackend { scope };
+            jet_std::JetDBBackend::query(&mut backend, sql, false)
+        }
+
+        fn jet_db_scope_query_one_with_metadata(
+            scope: &JetDbScope,
+            sql: &jet_std::SQL,
+            metadata: &String,
+        ) -> Result<Result<JetMap<String, jet_std::DBValue>, JetAbsent>, jet_std::DBError> {
+            let _ = metadata;
+            let rows = jet_db_scope_query_with_metadata(scope, sql, metadata)?;
+            Ok(jet_std::jet_db_first_row(rows))
+        }
+        /// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping
+        /// the policy and user on the scope prevents a caller from replacing
+        /// either one between SQL operations while retaining the connection.
+        pub(crate) fn jet_db_with_policy(
+            connection: &JetDbConnection,
+            policy: JetRowPolicy,
+            user: String,
+        ) -> JetDbScope {
+            JetDbScope {
+                handle: connection.handle,
+                policy,
+                user,
+                request_id: jet_db_current_request_id(),
+            }
+        }
+
+    };
+}
+
+
+
 // ── core.plugin sandboxed WASM handle (D-DEP-WASM1=A / D-PLUGIN1=B, c81) ─────
 // The real wasmtime `Store`/`Instance` live in the FFI bridge crate's
 // thread-local handle map (wasmtime types can't cross into this
@@ -62,6 +264,43 @@ macro_rules! jet_plugin_bridge {
                     let message = wire.strip_prefix("E:").unwrap_or("plugin load failed");
                     jet_runtime_stop("E3001", "", 0, message)
                 }
+            }
+        }
+    };
+}
+
+// The typed vault carriers live in the hidden FFI bridge.  Display remains a
+// generated-program concern so user interpolation can render opaque handles
+// without exposing their secret payloads.
+macro_rules! jet_vault_display_bridge {
+    ($bridge:ident) => {
+        impl<T> JetDisplay for $bridge::JetVaultKeyRef<T> {
+            fn jet_display(&self) -> String {
+                self.to_string()
+            }
+        }
+
+        impl JetDisplay for $bridge::JetVaultKeyStatus {
+            fn jet_display(&self) -> String {
+                format!("{self:?}")
+            }
+        }
+
+        impl JetDisplay for $bridge::JetVaultError {
+            fn jet_display(&self) -> String {
+                self.to_string()
+            }
+        }
+
+        impl<T> JetDisplay for $bridge::JetVaultWrite<T> {
+            fn jet_display(&self) -> String {
+                format!("{self:?}")
+            }
+        }
+
+        impl<T> JetDisplay for $bridge::JetVaultRotation<T> {
+            fn jet_display(&self) -> String {
+                format!("{self:?}")
             }
         }
     };

@@ -13,6 +13,7 @@ use crate::AST::{CtValue, Type};
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");

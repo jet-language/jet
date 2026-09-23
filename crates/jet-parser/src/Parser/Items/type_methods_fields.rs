@@ -1,5 +1,6 @@
 use super::super::{
-    CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Expr, Field, Func, Parser, Span, Syntax,
+    CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Expr, Field, Func, Parser, Span,
+    Syntax,
     TokKind, TraitMethodSig,
 };
 
@@ -330,6 +331,40 @@ impl<'a> Parser<'a> {
             resolved_output: None,
         })
     }
+    /// D-MODULE-BIND1: `name :: expr` / `name := expr` at file scope is a
+    /// declaration, not an executable script statement.
+    pub(in crate::Parser) fn module_binding_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let item_start = self.peek().span.start;
+        let binding = self.sigil_binding()?;
+        if binding.pattern.is_some() || binding.name.is_empty() {
+            return Err(Diagnostic::error(
+                "E0003",
+                "module globals bind one name at a time".to_string(),
+                "a module binding is a named value available to every function in the file"
+                    .to_string(),
+                "write `name :: value` or `name := value`".to_string(),
+                Some(binding.name_span),
+            ));
+        }
+        self.finish_stmt()?;
+        Ok(ConstDef {
+            span: Span::new(item_start, self.prev_end()),
+            name: binding.name,
+            name_span: binding.name_span,
+            value: binding.init,
+            meta: binding.meta,
+            attrs: Vec::new(),
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: false,
+            ct: binding.ct,
+            ty: binding.ty,
+            is_persist: false,
+            persist_span: None,
+            mutable: binding.mutable,
+            resolved_output: None,
+        })
+    }
+
 
     fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
         let mut attrs = Vec::new();

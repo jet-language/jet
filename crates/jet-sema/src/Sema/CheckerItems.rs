@@ -606,6 +606,32 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         let display_type_name = self.display_type_name(type_name, None);
+        if type_name == "Secret" && !self.registry.contains(type_name) {
+            let expected = match method {
+                "from_text" => Some(Type::String),
+                "from_bytes" => Some(Type::List(Box::new(crate::Sema::CheckerCoreLib::u8_ty()))),
+                _ => None,
+            };
+            if let Some(expected) = expected {
+                if args.len() != 1 {
+                    self.diags
+                        .push(crate::Sema::CheckerCoreLib::wrong_core_arity(
+                            &format!("Secret.{method}"),
+                            1,
+                            args.len(),
+                            span,
+                        ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                } else {
+                    self.expect_core_arg(&format!("Secret.{method}"), 0, &expected, &mut args[0]);
+                }
+                return Some(crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+                    "Secret".to_string(),
+                )));
+            }
+        }
         // D-TEXTHEAD-TYPE1=A: checked text constructors are ordinary static
         // calls backed by the CheckedText impl. `from` keeps the failure in
         // the normal Result/Error route; `raw` is the explicit unsafe escape;
@@ -1841,6 +1867,14 @@ impl<'a> Checker<'a> {
             }
         }
     }
+    fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
+        let source = jet_foundation::CoreModuleExports::core_source_modules()
+            .iter()
+            .find(|source| source.module == module)?;
+        self.modules?.iter().enumerate().find_map(|(idx, state)| {
+            (state.module_alias == source.alias && state.registry.contains(type_name)).then_some(idx)
+        })
+    }
 
     pub(crate) fn struct_owner_module(
         &self,
@@ -1849,9 +1883,23 @@ impl<'a> Checker<'a> {
     ) -> Option<usize> {
         if let Some(module) = import_ns.and_then(|namespace| self.core_imports.get(namespace)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some() {
-                // Core exports do not live in a user module registry. Their
-                // canonical identity is resolved by the export descriptor.
-                return None;
+                // Source-owned Core records use the ordinary registry for fields
+                // and visibility; fall back to the generated view only when no
+                // source owner is loaded.
+                return self.core_source_owner_module(module, type_name);
+            }
+        }
+        if import_ns.is_none() {
+            if let Some(module) = self.core_imports.get(type_name) {
+                let leaf = self
+                    .core_item_imports
+                    .get(type_name)
+                    .map_or(type_name, String::as_str);
+                if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
+                    if let Some(owner) = self.core_source_owner_module(module, leaf) {
+                        return Some(owner);
+                    }
+                }
             }
         }
         if let Some(namespace) = import_ns {
@@ -2296,6 +2344,18 @@ impl<'a> Checker<'a> {
         &self,
         enum_name: &str,
     ) -> Option<HashMap<String, (Span, VariantPayload)>> {
+        // Core encoding carriers are declared in Core.jet for export shape,
+        // while their payload-bearing variants are owned by the checker table.
+        // Resolve that canonical table before the metadata's unit-only view.
+        if let Some(v) = core_encoding_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_http_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_email_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = self.registry.enum_variants(enum_name) {
             return Some(v.clone());
         }
@@ -2377,9 +2437,7 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_net_error_variants(enum_name) {
             return Some(v);
         }
-        if let Some(v) = core_http_variants(enum_name) {
-            return Some(v);
-        }
+
         if let Some(v) = core_io_variants(enum_name) {
             return Some(v);
         }
@@ -2390,9 +2448,6 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_fact_kind_variants(enum_name) {
-            return Some(v);
-        }
-        if let Some(v) = core_email_variants(enum_name) {
             return Some(v);
         }
         if let Some(v) = core_tls_variants(enum_name) {
@@ -2887,10 +2942,34 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
-        let nominal_name = if owner_mod == self.module_idx {
+        let core_crypto_module = self.is_core_crypto_module();
+        let core_imported_type = self
+            .core_item_imports
+            .get(type_name)
+            .zip(self.core_imports.get(type_name))
+            .is_some_and(|(item, module)| {
+                crate::Sema::CheckerCoreLib::core_module_type_item(module, item)
+            })
+            || import_ns.is_some_and(|namespace| {
+                crate::Sema::CheckerCoreLib::core_module_type_item(namespace, type_name)
+                    || self
+                        .core_imports
+                        .get(namespace)
+                        .is_some_and(|module| {
+                            crate::Sema::CheckerCoreLib::core_module_type_item(module, type_name)
+                        })
+            })
+            || (core_crypto_module
+                && crate::Sema::CheckerCoreLib::core_module_type_item("core.crypto", type_name));
+        let nominal_name = if core_imported_type || owner_mod == self.module_idx {
             type_name.to_string()
         } else {
             self.canonical_nominal_name(owner_mod, type_name)
+        };
+        let nominal = if core_imported_type {
+            crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(nominal_name.clone()))
+        } else {
+            Type::Named(nominal_name.clone())
         };
         if !type_args.is_empty() {
             Type::Apply {
@@ -2919,7 +2998,7 @@ impl<'a> Checker<'a> {
                 args: params.iter().map(|p| Type::Named(p.name.clone())).collect(),
             }
         } else {
-            Type::Named(nominal_name)
+            nominal
         }
     }
 

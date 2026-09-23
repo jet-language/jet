@@ -1,6 +1,7 @@
-// Parser combinators over UTF-8 text. The cursor is a byte offset; failures
-// return `None` and never panic. Combinators are pure: they do not mutate
-// the input string.
+// Pure parser combinators over UTF-8 text. Input.pos is a byte offset, but
+// predicate scans advance only at validated scalar boundaries.
+use core.text as unicode
+
 pub struct Input {
     pub text: String
     pub pos: Int
@@ -34,9 +35,8 @@ pub fn peek(src: Input) -> ?U8 {
 
 pub fn take_n(src: Input, n: Int) -> ?Took {
     raw :: src.text.bytes()
-    if n < 0 -> return None
-    if src.pos + n > raw.len() -> return None
-    chunk :: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? ""
+    if n < 0 || src.pos < 0 || src.pos + n > raw.len() -> return None
+    chunk :: String.from_bytes(slice_range(raw, src.pos, src.pos + n)) ?? return None
     Val(Took{next: Input{text: src.text, pos: src.pos + n}, chunk: chunk})
 }
 
@@ -46,13 +46,14 @@ pub fn tag(src: Input, lit: String) -> ?Took {
     Val(got)
 }
 
-pub fn take_while(src: Input, ascii_pred: String) -> Took {
+pub fn take_while(src: Input, predicate: String) -> Took {
     raw :: src.text.bytes()
     i := src.pos
     loop i < raw.len() {
-        ch :: raw[i]
-        if !pred_byte(ascii_pred, ch) -> break
-        i = i + 1
+        width :: utf8_width(raw, i)
+        scalar :: String.from_bytes(slice_range(raw, i, i + width)) ?? break
+        if !pred_scalar(predicate, scalar) -> break
+        i = i + width
     }
     chunk :: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
     {next: Input{text: src.text, pos: i}, chunk: chunk}
@@ -64,15 +65,15 @@ pub fn digit(src: Input) -> ?Digit {
     b :: peek(src) ?? return None
     if b < 48 || b > 57 -> return None
     nxt :: take_n(src, 1) ?? return None
-    Val(Digit{next: nxt.next, n: b - 48})
+    Val(Digit{next: nxt.next, n: Int.from_u8(b) - 48})
 }
 
 pub fn int_dec(src: Input) -> ?Digit {
     cur := skip_ws(src)
     sign := 1
     b :: peek(cur) ?? return None
-    if b == 45 {
-        sign = -1
+    if b == 45 || b == 43 {
+        if b == 45 -> sign = -1
         taken :: take_n(cur, 1) ?? return None
         cur = taken.next
     }
@@ -85,24 +86,37 @@ pub fn int_dec(src: Input) -> ?Digit {
         cur = d.next
     }
     if !saw -> return None
-    Val(Digit{next: cur, n: acc * sign})
+    return Val(Digit{next: cur, n: acc * sign})
 }
 
-fn pred_byte(kind: String, b: U8) -> Bool {
-    if kind == {
-        "space" -> b == 32 || b == 9 || b == 10 || b == 13
-        "digit" -> b >= 48 && b <= 57
-        "alpha" -> (b >= 65 && b <= 90) || (b >= 97 && b <= 122)
-        "alnum" -> pred_byte("digit", b) || pred_byte("alpha", b)
-        else -> false
-    }
+fn pred_scalar(kind: String, scalar: String) -> Bool {
+    if kind == "space" -> return unicode.is_whitespace(scalar)
+    if kind == "digit" -> return unicode.is_numeric(scalar)
+    if kind == "alpha" -> return unicode.is_alphabetic(scalar)
+    if kind == "alnum" -> return unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar)
+    false
+}
+
+fn utf8_width(raw: [U8], at: Int) -> Int {
+    if at < 0 || at >= raw.len() -> return 1
+    b :: raw[at]
+    if b < 128 -> return 1
+    if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 -> return 2
+    if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 -> return 3
+    if b >= 240 && b <= 244 && at + 3 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 && raw[at + 3] >= 128 && raw[at + 3] <= 191 -> return 4
+    1
 }
 
 fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
-    i := start
+    lo := start
+    hi := end
+    if lo < 0 -> lo = 0
+    if hi > raw.len() -> hi = raw.len()
+    if hi < lo -> hi = lo
+    i := lo
     loop {
-        if i >= end || i < 0 || i >= raw.len() -> return out
+        if i >= hi -> return ~out
         out.push(raw[i])
         i = i + 1
     }

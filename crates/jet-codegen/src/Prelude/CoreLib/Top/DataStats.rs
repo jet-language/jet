@@ -517,7 +517,7 @@ pub(crate) fn jet_data_status_native(step: &str) -> jet_std::DataStatus {
     jet_std::DataStatus {
         step: step.to_string(),
         path: "native".to_string(),
-        copy: "none".to_string(),
+        clone_value: "none".to_string(),
         ownership: "jet".to_string(),
         trust: "native".to_string(),
         fallback: "none".to_string(),
@@ -556,7 +556,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
         "py.*" => jet_std::DataStatus {
             step: "py.*".to_string(),
             path: path.to_string(),
-            copy: "owned-copy".to_string(),
+            clone_value: "owned-copy".to_string(),
             ownership: "python-sidecar".to_string(),
             trust: "untrusted-foreign".to_string(),
             fallback: "none".to_string(),
@@ -565,7 +565,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
         "r.*" => jet_std::DataStatus {
             step: "r.*".to_string(),
             path: path.to_string(),
-            copy: "owned-copy".to_string(),
+            clone_value: "owned-copy".to_string(),
             ownership: "r-sidecar".to_string(),
             trust: "untrusted-foreign".to_string(),
             fallback: "none".to_string(),
@@ -574,7 +574,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
         "gpu.*" => jet_std::DataStatus {
             step: "gpu.*".to_string(),
             path: path.to_string(),
-            copy: "device-transfer".to_string(),
+            clone_value: "device-transfer".to_string(),
             ownership: "device-buffer".to_string(),
             trust: "untrusted-accelerator".to_string(),
             fallback: "none".to_string(),
@@ -583,7 +583,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
         _ => jet_std::DataStatus {
             step: step.to_string(),
             path: "unavailable".to_string(),
-            copy: "unknown".to_string(),
+            clone_value: "unknown".to_string(),
             ownership: "unknown".to_string(),
             trust: "untrusted-foreign".to_string(),
             fallback: "none".to_string(),
@@ -634,8 +634,8 @@ pub(crate) fn jet_data_require_bridge(provider: &String) -> Result<(), jet_std::
         jet_std::DataErrorKind::Bridge,
         "require_bridge",
         format!(
-            "{step} unavailable (copy={}, ownership={}, trust={}, fallback={}, replacement={})",
-            status.copy, status.ownership, status.trust, status.fallback, status.replacement
+            "{step} unavailable (clone_value={}, ownership={}, trust={}, fallback={}, replacement={})",
+            status.clone_value, status.ownership, status.trust, status.fallback, status.replacement
         ),
     ))
 }

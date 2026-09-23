@@ -8,8 +8,8 @@ use crate::Sema::CheckerCoreLib::{
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
     data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
     devserver_method_return, email_method_return, encoding_handle_method_return,
-    expiring_method_return, file_handle_method_return, http_type_method_return, is_allocator_type,
-    is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
+    expiring_method_return, file_handle_method_return, http_nominal_leaf, http_type_method_return,
+    is_allocator_type, is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
     is_layout_type, is_math_type,
     is_reflect_type_name, is_simd_lane_type, job_queue_method_return,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
@@ -83,6 +83,7 @@ impl<'a> Checker<'a> {
             self.diags.push(crate::Sema::e3403(api, Some(span)));
         }
     }
+
 
     fn method_suggestion(
         &self,
@@ -1522,9 +1523,9 @@ impl<'a> Checker<'a> {
                             "core.http" | "core.http.client" | "core.http.server"
                         ) {
                             match leaf.as_str() {
+                                "Body" | "Headers" => leaf.clone(),
                                 "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
-                                | "Headers" | "Request" | "Response" | "Body" | "Handler"
-                                | "Error" | "Proxy" => {
+                                | "Request" | "Response" | "Handler" | "Error" | "Proxy" => {
                                     format!("HTTP{leaf}")
                                 }
                                 "HTTPError" => "HTTPError".to_string(),
@@ -1534,6 +1535,22 @@ impl<'a> Checker<'a> {
                             leaf.clone()
                         };
                         **receiver = Expr::Ident(type_name.clone(), span);
+                        if ns == "core.crypto"
+                            && type_name == "Secret"
+                            && matches!(method, "from_text" | "from_bytes")
+                        {
+                            let ret = self.check_static_method(
+                                &type_name,
+                                method,
+                                span,
+                                owner_type_args,
+                                type_args,
+                                args,
+                            );
+                            *resolved_ret_out = ret.clone();
+                            return ret;
+                        }
+
                         // `core.mem` allocator fields are constructor sentinels, not
                         // ordinary static types. Preserve the checked return fact on
                         // the call node before the generic static-method fallback.
@@ -1686,10 +1703,10 @@ impl<'a> Checker<'a> {
                                 self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                                 Some(http_result(ty.clone()))
                             }
-                            ("HTTPHeaders", "new", 0) | ("HTTPBody", "empty", 0) => {
+                            ("Headers", "new", 0) | ("Body", "empty", 0) => {
                                 Some(ty.clone())
                             }
-                            ("HTTPBody", "bytes", 1) => {
+                            ("Body", "bytes", 1) => {
                                 self.expect_core_arg(
                                     "Body.bytes",
                                     0,
@@ -1698,7 +1715,7 @@ impl<'a> Checker<'a> {
                                 );
                                 Some(ty.clone())
                             }
-                            ("HTTPBody", "text", 1 | 2) => {
+                            ("Body", "text", 1 | 2) => {
                                 self.expect_core_arg("Body.text", 0, &Type::String, &mut args[0]);
                                 if args.len() == 2 {
                                     self.expect_core_arg(
@@ -1710,11 +1727,11 @@ impl<'a> Checker<'a> {
                                 }
                                 Some(ty.clone())
                             }
-                            ("HTTPBody", "json", 1) => {
+                            ("Body", "json", 1) => {
                                 self.infer(&mut args[0].expr);
                                 Some(ty.clone())
                             }
-                            ("HTTPBody", "form" | "multipart", 1) => {
+                            ("Body", "form" | "multipart", 1) => {
                                 self.expect_core_arg(
                                     method,
                                     0,
@@ -1727,7 +1744,7 @@ impl<'a> Checker<'a> {
                                 );
                                 Some(ty.clone())
                             }
-                            ("HTTPBody", "reader", 1 | 2) => {
+                            ("Body", "reader", 1 | 2) => {
                                 self.expect_core_arg_moving(
                                     "Body.reader",
                                     0,
@@ -1987,6 +2004,88 @@ impl<'a> Checker<'a> {
                         resolved_ret_out,
                     );
                 }
+            }
+        }
+        // Direct grouped imports bind a type name to its owning Core module.
+        // Resolve constructors on that alias before the module-call fallback;
+        // otherwise `use core.encoding.[DataTree]` is misread as
+        // `core.encoding.Bool`.
+        if let Expr::Ident(alias, alias_span) = &**receiver {
+            if let (Some(module), Some(item)) = (
+                self.core_imports.get(alias).cloned(),
+                self.core_item_imports.get(alias).cloned(),
+            ) {
+                if is_json_type_name(&item) {
+                    if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                }
+                if module == "core.encoding"
+                    && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
+                {
+                    let has_variant = self
+                        .resolve_enum_variants_cloned(&item)
+                        .is_some_and(|variants| variants.contains_key(method));
+                    if has_variant {
+                        let saved: Vec<Expr> = args
+                            .iter_mut()
+                            .map(|arg| {
+                                std::mem::replace(
+                                    &mut arg.expr,
+                                    Expr::Int(0, arg.span, None, None),
+                                )
+                            })
+                            .collect();
+                        let mut enum_args: Vec<EnumLitArg> =
+                            saved.into_iter().map(EnumLitArg::Positional).collect();
+                        let ty = self.check_enum_lit(
+                            &item,
+                            method,
+                            &mut enum_args,
+                            span,
+                            Some(span),
+                        );
+                        for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+                            if let EnumLitArg::Positional(expr) = enum_arg {
+                                arg.expr = expr;
+                            }
+                        }
+                        **receiver = Expr::Ident(item, span);
+                        *resolved_ret_out = Some(ty.clone());
+                        return Some(ty);
+                    }
+                }
+                if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {
+                    let ret = self.check_static_method(
+                        &item,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args,
+                    );
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+                if module == "core.crypto"
+                    && item == "Secret"
+                    && matches!(method, "from_text" | "from_bytes")
+                {
+                    self.record_import_alias_reference(alias, *alias_span);
+                    **receiver = Expr::Ident(item.clone(), span);
+                    let ret = self.check_static_method(
+                        &item,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args,
+                    );
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+                let _ = alias_span;
             }
         }
         if let Some((module, alias, alias_span)) = self.core_module_path_from_receiver(receiver) {
@@ -3366,6 +3465,14 @@ impl<'a> Checker<'a> {
                 Type::Tagged { marker, inner }
             }
             Type::Tagged { inner, .. } => *inner,
+            other => other,
+        };
+        // Core HTTP carriers may retain their import alias until receiver
+        // inference. Normalize only the closed HTTP nominal family so method
+        // lookup, field metadata, and return construction share one identity.
+        let recv_ty = match recv_ty {
+            Type::Named(name) => http_nominal_leaf(&name)
+                .map_or(Type::Named(name.clone()), |leaf| Type::Named(leaf.to_string())),
             other => other,
         };
         // D-REALTIME1: typed Core handles contribute the same precise wait leaf
@@ -4895,7 +5002,7 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg_moving(
                             "Response.trailers",
                             0,
-                            &Type::Named("HTTPHeaders".to_string()),
+                            &Type::Named("Headers".to_string()),
                             arg,
                         );
                         arg.convention = AccessConvention::Move;
@@ -5076,7 +5183,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
-        if matches!(&recv_ty, Type::Named(name) if name == "HTTPBody") {
+        if matches!(&recv_ty, Type::Named(name) if name == "Body") {
             let error = Type::Named("HTTPError".to_string());
             let result = |ok| Type::Result {
                 ok: Box::new(ok),
@@ -5122,7 +5229,7 @@ impl<'a> Checker<'a> {
                     None
                 }
                 ("chunks", 0) => {
-                    *recv_type_out = Some("HTTPBody".to_string());
+                    *recv_type_out = Some("Body".to_string());
                     return Some(Type::Named("HTTPBodyChunks".to_string()));
                 }
                 ("chunks", 1) => {
@@ -5132,7 +5239,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(ret) = special {
-                *recv_type_out = Some("HTTPBody".to_string());
+                *recv_type_out = Some("Body".to_string());
                 return Some(ret);
             }
         }
@@ -5312,10 +5419,10 @@ impl<'a> Checker<'a> {
                 _ => "",
             };
             match (recv_name, method, args.len()) {
-                ("Url", "join", 1) | ("Mime", "param", 1) => {
+                ("URL", "join", 1) | ("Mime", "param", 1) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
-                ("Url", "set_query" | "add_query", 2) => {
+                ("URL", "set_query" | "add_query", 2) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                 }
@@ -5327,7 +5434,7 @@ impl<'a> Checker<'a> {
             }
             *recv_type_out = Some(match &recv_ty {
                 Type::Named(n) => n.clone(),
-                _ => "Url".to_string(),
+                _ => "URL".to_string(),
             });
             return ret;
         }
@@ -5949,8 +6056,16 @@ impl<'a> Checker<'a> {
                     }
                     let stream_mode_ty = Type::Named("ProcessStreamMode".to_string());
                     match method {
-                        "cwd" | "env_remove" if args.len() == 1 => {
+                        "cwd" | "env_remove" | "arg" if args.len() == 1 => {
                             self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                        }
+                        "args_extend" if args.len() == 1 => {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::List(Box::new(Type::String)),
+                                &mut args[0],
+                            );
                         }
                         "stdin" | "stdout" | "stderr" if args.len() == 1 => {
                             self.expect_core_arg(method, 0, &stream_mode_ty, &mut args[0]);

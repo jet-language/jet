@@ -36,13 +36,13 @@ fn run() {
         loop byte in box -> v1.push(byte)
         historical = expert.open_v1(key, v1) ?? return
         source.write_atomic(v1)
-        expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? return
+        expert.migrate_v1(key, source: source, recipients: [recipient.public_key()], destination: migrated) ?? return
         raw_secret :: expert.x25519_raw(alice, bob) ?? return
         shared_raw = expert.secret_bytes(raw_secret)
     }
     print("expert AES ok: {plain == msg}")
     print("expert JETC v1 ok: {historical == msg}")
-    crypto.file_open(&recipient, migrated, restored) ?? return
+    crypto.file_open(&recipient, source: migrated, destination: restored) ?? return
     restored_bytes :: fs.read(restored_text)
     restored_ok :: restored_bytes == "abc"
     print("expert JETC v1 migrated: {restored_ok}")

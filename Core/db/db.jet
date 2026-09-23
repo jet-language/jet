@@ -9,218 +9,59 @@ package {
     }
 }
 
-// core.db — one SQL surface. Drivers are host kernels. `open_memory` is an
-// in-process table store implemented in Jet (named tables of DataTree rows).
-// `decode` / `row_*` project a JSON-object row without a SQL parser.
+use core as core
 
-pub struct DbHandle {
-    pub url: String
-    pub memory: Bool
+// core.db keeps the checked SQL and policy model in Jet's core call layer. The
+// provider owns connection state and executes only the typed operations exposed
+// here; this source module is the stable facade used by applications.
+
+pub fn open(url: String) -[DB]> { core.db.open(url) }
+
+pub fn open_memory() -[DB]> { core.db.open_memory() }
+
+pub fn pool(url: String, max: Int) -[DB]> {
+    core.db.pool(url, max: max)
 }
 
-pub struct Pool {
-    pub url: String
-    pub size: Int
+pub fn policy(table: String, expression: String) -[DB]> {
+    core.db.policy(table, expression)
 }
 
-pub struct Tx {
-    pub open: Bool
+pub fn policy_audit(scope: DBScope) -[DB]> {
+    core.db.policy_audit(scope)
 }
 
-pub struct Policy {
-    pub name: String
+pub fn row_value(row: [String: DBValue], column: String) -[DB]> {
+    core.db.row_value(row, column)
 }
 
-pub fn open(url: String) -[Net, FS]> DbHandle !IOError {
-    if starts(url, "memory:") -> return Ok(open_memory())
-    host_sql_open(url)
-    Ok(DbHandle{url: url, memory: false})
+pub fn row_int(row: [String: DBValue], column: String) -[DB]> {
+    core.db.row_int(row, column)
 }
 
-pub fn open_memory() -> DbHandle {
-    host_memdb_reset()
-    DbHandle{url: "memory://", memory: true}
+pub fn row_float(row: [String: DBValue], column: String) -[DB]> {
+    core.db.row_float(row, column)
 }
 
-pub fn pool(url: String) -[Net, FS]> Pool !IOError {
-    host_sql_open(url)
-    Ok(Pool{url: url, size: 4})
+pub fn row_text(row: [String: DBValue], column: String) -[DB]> {
+    core.db.row_text(row, column)
 }
 
-pub fn transaction() -> Tx { Tx{open: true} }
-
-pub fn migrate(dir: String) !IOError {
-    files :: host_list_sql(dir)
-    loop f in files -> host_sql_exec_file(f)
-    Ok()
+pub fn row_bool(row: [String: DBValue], column: String) -[DB]> {
+    core.db.row_bool(row, column)
 }
 
-pub fn policy() -> Policy { Policy{name: "default"} }
-
-pub fn policy_audit(p: Policy) -> String { p.name }
-
-/// `row` is a JSON object `{"col": value, ...}` or `col=value` pairs.
-pub fn decode(row: String) -> DataTree {
-    if starts(row, "{{") {
-        return parse_objectish(row)
-    }
-    entries := [String: DataTree]{}
-    loop part in split_csv(row) {
-        kv :: split_once(part, "=")
-        if kv.right.len() == 0 {
-            entries = entries.add(trim(kv.left), DataTree.Text(trim(kv.left)))
-        } else {
-            entries = entries.add(trim(kv.left), atom(trim(kv.right)))
-        }
-    }
-    Ok(DataTree.Object(entries))
+// Typed row projection is a compiler lowering. Keeping the call routed through
+// core.db.decode preserves checked field names and the provider's DBValue
+// conversion instead of introducing a second parser in Jet source.
+pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T ![FieldError] {
+    return core.db.decode<T>(row)
 }
 
-pub fn row_text(row: String, column: String) -> ?String {
-    tree :: decode(row) ?? return None
-    v :: tree.field(column) ?? return None
-    v.to_text()
+pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> {
+    core.db.transaction(scope, name, steps)
 }
 
-pub fn row_int(row: String, column: String) -> ?Int {
-    tree :: decode(row) ?? return None
-    v :: tree.field(column) ?? return None
-    v.int()
+pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> {
+    core.db.migrate(scope, name, steps)
 }
-
-pub fn row_float(row: String, column: String) -> ?Float {
-    tree :: decode(row) ?? return None
-    v :: tree.field(column) ?? return None
-    v.float()
-}
-
-pub fn row_bool(row: String, column: String) -> ?Bool {
-    tree :: decode(row) ?? return None
-    v :: tree.field(column) ?? return None
-    v.bool()
-}
-
-pub fn row_value(row: String, column: String) -> ?DataTree {
-    tree :: decode(row) ?? return None
-    tree.field(column)
-}
-
-pub struct Pair { pub left: String, pub right: String }
-fn parse_objectish(row: String) -> DataTree {
-    inner :: trim(slice_str(row, 1, row.bytes().len() - 1))
-    entries := [String: DataTree]{}
-    if inner.len() == 0 -> return Ok(DataTree.Object(entries))
-    loop part in split_csv(inner) {
-        kv :: split_once(part, ":")
-        key :: trim(strip_quotes(kv.left))
-        entries = entries.add(key, atom(trim(kv.right)))
-    }
-    Ok(DataTree.Object(entries))
-}
-
-fn atom(text: String) -> DataTree {
-    t :: strip_quotes(text)
-    if t == {
-        "true" -> return DataTree.Bool(true)
-        "false" -> return DataTree.Bool(false)
-        "null" -> return DataTree.Null
-        else -> { _ := 0 }
-    }
-    n := 0
-    sign := 1
-    i := 0
-    raw :: t.bytes()
-    if raw.len() > 0 && raw[0] == (U8{45}) {
-        sign = -1
-        i = 1
-    }
-    if i >= raw.len() -> DataTree.Text(t)
-    loop {
-        if i >= raw.len() -> return DataTree.Int(sign * n)
-        d :: raw[i]
-        if d < 48 || d > 57 -> return DataTree.Text(t)
-        n = n * 10 + (d - 48)
-        i = i + 1
-    }
-}
-
-fn starts(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
-    if b.len() > a.len() -> return false
-    loop i in 0..<b.len() {
-        if a[i] != b[i] -> return false
-    }
-    true
-}
-
-fn trim(text: String) -> String {
-    raw :: text.bytes()
-    a := 0
-    b := raw.len()
-    loop {
-        if a >= b -> return ""
-        n :: raw[a]
-        if n != 32 && n != 9 && n != 10 && n != 13 -> break
-        a = a + 1
-    }
-    loop {
-        if b <= a -> return ""
-        n :: raw[b - 1]
-        if n != 32 && n != 9 && n != 10 && n != 13 -> break
-        b = b - 1
-    }
-    slice_str(text, a, b)
-}
-
-fn slice_str(text: String, start: Int, end: Int) -> String {
-    raw :: text.bytes()
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        out.push(raw[i])
-        i = i + 1
-    }
-}
-
-fn strip_quotes(text: String) -> String {
-    raw :: text.bytes()
-    if raw.len() >= 2 && raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34}) {
-        return slice_str(text, 1, raw.len() - 1)
-    }
-    text
-}
-
-fn split_csv(text: String) -> [String] {
-    out := [String]{}
-    cur := [U8]{}
-    loop b in text.bytes() {
-        if b == (U8{44}) {
-            out.push(String.from_bytes(cur) ?? "")
-            cur = [U8]{}
-        } else {
-            cur.push(b)
-        }
-    }
-    out.push(String.from_bytes(cur) ?? "")
-    out
-}
-
-fn split_once(text: String, sep: String) -> Pair {
-    hay :: text.bytes()
-    nd :: sep.bytes()
-    loop i in 0..<(hay.len() - nd.len() + 1) {
-        ok := true
-        loop j in 0..<nd.len() {
-            if hay[i + j] != nd[j] -> ok = false
-        }
-        if ok -> return (Pair{left: slice_str(text, 0, i), right: slice_str(text, i + nd.len(), hay.len())})
-    }
-    Pair{left: text, right: ""}
-}
-
-fn host_sql_open(url: String) !IOError { panic("host_sql_open") }
-fn host_memdb_reset() { panic("host_memdb_reset") }
-fn host_list_sql(dir: String) -[FS]> [String] { panic("host_list_sql") }
-fn host_sql_exec_file(path: String) !IOError { panic("host_sql_exec_file") }

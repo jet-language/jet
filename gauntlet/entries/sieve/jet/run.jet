@@ -1,4 +1,3 @@
-use core.math as math
 
 #CLI
 struct Args {
@@ -16,6 +15,9 @@ fn run(args: Args) {
         p += 2
     }
     count :: odd_prime.count(1)
-    largest :: if n > 2 -> math.max(2, (odd_prime.last_index_of(1) ?? 0) * 2 + 1) else -> 0
+    largest :: if n > 2 -> {
+        candidate :: (odd_prime.last_index_of(1) ?? 0) * 2 + 1
+        if candidate > 2 -> candidate else -> 2
+    } else -> 0
     print("count {count}\nlargest {largest}")
 }

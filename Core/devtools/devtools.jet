@@ -1,3 +1,4 @@
+
 package {
     name: "core.devtools"
     version: "0.1.0"
@@ -8,12 +9,11 @@ package {
         devtools: .Library{ entry: devtools }
     }
 }
-// core.devtools — a one-way event bus for the inspector.
+// core.devtools — the typed inspector publication boundary.
 //
-// `publish` forwards a JSON-ish line to the host relay. Missing relay is
-// not an error; the host no-ops.
-/// Publish one inspector event. The host may drop it when no session is
-/// attached.
-pub fn publish(event: String) { host_devtools_publish(event) }
-
-fn host_devtools_publish(event: String) { panic("host_devtools_publish") }
+// The checked `field:`/`value:` form is lowered with package, module, and
+// panel identity into the host's canonical `jet.devtools.v1` event. The
+// provider validates and constructs that event before fanning it out to every
+// installed sink. This unit-returning API does not claim durable delivery:
+// when no sink is installed, observation is explicitly unavailable rather
+// than reported as a successful persisted write.

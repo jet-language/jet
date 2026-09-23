@@ -128,9 +128,10 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.reflect" && method == "of" {
         return true;
     }
-    // D-TYPE2-UNCERT1=A: internal route for canonical `measurement(value,
-    // uncertainty: u)` lowering; it is not a Core source surface.
-    if module == "core.units" && method == "from" {
+    // Source-owned Core members are ordinary Jet module calls in TIR. Their
+    // checked fixed signature remains sema's type contract; the source
+    // package owns the implementation and no CoreCall registry row is needed.
+    if jet_foundation::CoreModuleExports::core_source_owns(module, method) {
         return true;
     }
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.

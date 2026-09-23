@@ -1,36 +1,16 @@
-// core.ui.host.shortcuts — chord → action table.
+use core as core
+use core.ui.host.[UiHostError, UiShortcut, UiShortcutBinding, UiShortcutDispatch]
 
-pub struct UiBinding {
-    pub chord: String
-    pub action: String
+// core.ui.host.shortcuts — provider-backed shortcut registration/dispatch.
+pub fn binding(shortcut: UiShortcut, action: String) -> UiShortcutBinding !UiHostError {
+    if action.trim() == "" -> return Err(UiHostError.InvalidRequest)
+    core.ui.host.shortcuts.binding(shortcut, action)
 }
 
-pub struct UiShortcutMap {
-    pub bindings: [UiBinding]
+pub fn register(binding: UiShortcutBinding) -[IO]> UiShortcutBinding !UiHostError {
+    core.ui.host.shortcuts.register(binding)
 }
 
-pub fn binding(chord: String, action: String) -> UiBinding { UiBinding{chord: chord, action: action} }
-
-pub fn register(map: UiShortcutMap, b: UiBinding) -> UiShortcutMap {
-    out := [UiBinding]{}
-    replaced := false
-    loop x in map.bindings {
-        if {
-            x.chord == b.chord -> {
-                out.push(b)
-                replaced = true
-            }
-            else -> out.push(x)
-        }
-    }
-    if !replaced -> out.push(b)
-    UiShortcutMap{bindings: out}
-}
-
-/// Resolve `chord` to an action name. Empty string if unbound.
-pub fn dispatch(map: UiShortcutMap, chord: String) -> String {
-    loop b in map.bindings {
-        if b.chord == chord -> return b.action
-    }
-    ""
+pub fn dispatch(shortcut: UiShortcut) -[IO]> UiShortcutDispatch !UiHostError {
+    core.ui.host.shortcuts.dispatch(shortcut)
 }

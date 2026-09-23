@@ -48,35 +48,75 @@ pub struct Chain {
     pub layers: [Layer]
 }
 
+fn copy_strings(xs: [String]) -> [String] {
+    out := [String]{}
+    loop x in xs -> out.push(~x)
+    out
+}
+
+fn copy_ints(xs: [Int]) -> [Int] {
+    out := [Int]{}
+    loop x in xs -> out.push(x)
+    out
+}
+
+fn counter_entries(c: Counter) -> Int {
+    n := c.keys.len()
+    if c.counts.len() < n -> n = c.counts.len()
+    n
+}
+
 pub fn counter() -> Counter { Counter{keys: [String]{}, counts: [Int]{}} }
 
 pub fn counter_from(keys: [String]) -> Counter {
-    c := counter()
-    loop k in keys -> c = add(c, k, 1)
-    c
+    out_keys := [String]{}
+    out_counts := [Int]{}
+    loop key in keys {
+        i := 0
+        loop i < out_keys.len() {
+            if out_keys[i] == key {
+                out_counts[i] = out_counts[i] + 1
+                break
+            }
+            i = i + 1
+        }
+        if i == out_keys.len() {
+            out_keys.push(~key)
+            out_counts.push(1)
+        }
+    }
+    Counter{keys: out_keys, counts: out_counts}
 }
 
 pub fn add(c: Counter, key: String, n: Int) -> Counter {
+    entries := counter_entries(c)
+    target_count := n
+    first_target := -1
+    i := 0
+    loop i < entries {
+        if c.keys[i] == key {
+            target_count = target_count + c.counts[i]
+            if first_target < 0 -> first_target = i
+        }
+        i = i + 1
+    }
     keys := [String]{}
     counts := [Int]{}
-    found := false
-    i := 0
-    loop i < c.keys.len() {
+    i = 0
+    loop i < entries {
         if c.keys[i] == key {
-            next_n := c.counts[i] + n
-            if next_n != 0 {
-                keys.push(key)
-                counts.push(next_n)
+            if i == first_target && target_count != 0 {
+                keys.push(~c.keys[i])
+                counts.push(target_count)
             }
-            found = true
         } else {
-            keys.push(c.keys[i])
+            keys.push(~c.keys[i])
             counts.push(c.counts[i])
         }
         i = i + 1
     }
-    if !found && n != 0 {
-        keys.push(key)
+    if first_target < 0 && n != 0 {
+        keys.push(~key)
         counts.push(n)
     }
     Counter{keys: keys, counts: counts}
@@ -87,11 +127,18 @@ pub fn inc(c: Counter, key: String) -> Counter { add(c, key, 1) }
 pub fn dec(c: Counter, key: String) -> Counter { add(c, key, -1) }
 
 pub fn get(c: Counter, key: String) -> Int {
+    acc := 0
+    found := false
     i := 0
-    loop i < c.keys.len() {
-        if c.keys[i] == key -> return c.counts[i]
+    entries := counter_entries(c)
+    loop i < entries {
+        if c.keys[i] == key {
+            acc = acc + c.counts[i]
+            found = true
+        }
         i = i + 1
     }
+    if found -> return acc
     0
 }
 
@@ -102,19 +149,34 @@ pub fn set_count(c: Counter, key: String, n: Int) -> Counter {
 
 pub fn total(c: Counter) -> Int {
     acc := 0
-    loop n in c.counts -> acc = acc + n
+    entries := counter_entries(c)
+    i := 0
+    loop i < entries {
+        acc = acc + c.counts[i]
+        i = i + 1
+    }
     acc
 }
 
-pub fn names(c: Counter) -> [String] { c.keys }
+pub fn names(c: Counter) -> [String] {
+    out := [String]{}
+    entries := counter_entries(c)
+    i := 0
+    loop i < entries {
+        out.push(~c.keys[i])
+        i = i + 1
+    }
+    out
+}
 
 pub fn elements(c: Counter) -> [String] {
     out := [String]{}
     i := 0
-    loop i < c.keys.len() {
+    entries := counter_entries(c)
+    loop i < entries {
         n := c.counts[i]
         loop n > 0 {
-            out.push(c.keys[i])
+            out.push(~c.keys[i])
             n = n - 1
         }
         i = i + 1
@@ -124,177 +186,228 @@ pub fn elements(c: Counter) -> [String] {
 
 /// Highest counts first. Ties keep insertion order.
 pub fn most_common(c: Counter, k: Int) -> Counter {
+    entries := counter_entries(c)
+    if k == 0 -> return Counter{keys: [String]{}, counts: [Int]{}}
     limit := k
-    if limit < 0 || limit > c.keys.len() -> limit = c.keys.len()
+    if k < 0 || limit > entries -> limit = entries
     used := [Bool]{}
-    loop _ in 0..<c.keys.len() -> used.push(false)
+    loop _ in 0..<entries -> used.push(false)
     keys := [String]{}
     counts := [Int]{}
     pick := 0
     loop pick < limit {
         best := -1
         i := 0
-        loop i < c.keys.len() {
+        loop i < entries {
             if !used[i] {
                 if best < 0 || c.counts[i] > c.counts[best] -> best = i
             }
             i = i + 1
         }
         if best < 0 -> break
-        used = mark(used, best)
-        keys.push(c.keys[best])
+        used[best] = true
+        keys.push(~c.keys[best])
         counts.push(c.counts[best])
         pick = pick + 1
     }
     Counter{keys: keys, counts: counts}
 }
 
-fn mark(flags: [Bool], index: Int) -> [Bool] {
-    out := [Bool]{}
+fn remove_counter_at(keys: &[String], counts: &[Int], index: Int) {
+    i := index
+    loop i + 1 < keys.len() {
+        keys[i] = keys[i + 1]
+        counts[i] = counts[i + 1]
+        i = i + 1
+    }
+    _ :: keys.pop()
+    _ :: counts.pop()
+}
+
+fn apply_counter_delta(keys: &[String], counts: &[Int], key: String, delta: Int) {
     i := 0
-    loop i < flags.len() {
-        if i == index {
-            out.push(true)
-        } else {
-            out.push(flags[i])
+    loop i < keys.len() {
+        if keys[i] == key {
+            next := counts[i] + delta
+            if next == 0 {
+                remove_counter_at(&keys, &counts, i)
+            } else {
+                counts[i] = next
+            }
+            return
         }
         i = i + 1
     }
-    out
+    if delta != 0 {
+        keys.push(~key)
+        counts.push(delta)
+    }
 }
-pub fn subtract(a: Counter, b: Counter) -> Counter {
-    c := a
+
+fn counter_copy(c: Counter) -> Counter {
+    entries := counter_entries(c)
+    keys := [String]{}
+    counts := [Int]{}
     i := 0
-    loop i < b.keys.len() {
-        c = add(c, b.keys[i], -b.counts[i])
+    loop i < entries {
+        keys.push(~c.keys[i])
+        counts.push(c.counts[i])
         i = i + 1
     }
-    c
+    Counter{keys: keys, counts: counts}
+}
+
+pub fn subtract(a: Counter, b: Counter) -> Counter {
+    out := counter_copy(a)
+    keys := out.keys
+    counts := out.counts
+    i := 0
+    entries := counter_entries(b)
+    loop i < entries {
+        apply_counter_delta(&keys, &counts, b.keys[i], -b.counts[i])
+        i = i + 1
+    }
+    Counter{keys: keys, counts: counts}
 }
 
 pub fn merge_add(a: Counter, b: Counter) -> Counter {
-    c := a
+    out := counter_copy(a)
+    keys := out.keys
+    counts := out.counts
     i := 0
-    loop i < b.keys.len() {
-        c = add(c, b.keys[i], b.counts[i])
+    entries := counter_entries(b)
+    loop i < entries {
+        apply_counter_delta(&keys, &counts, b.keys[i], b.counts[i])
         i = i + 1
     }
-    c
+    Counter{keys: keys, counts: counts}
 }
 
-pub fn clear_counter(c: Counter) -> Counter {
-    _ :: c
-    counter()
+pub fn clear_counter(_c: Counter) -> Counter { counter() }
+
+fn deque_start(d: Deque) -> Int {
+    if d.head <= 0 -> return 0
+    if d.head >= d.items.len() -> return d.items.len()
+    d.head
 }
+
+fn deque_live_len(d: Deque) -> Int { d.items.len() - deque_start(d) }
 
 pub fn deque() -> Deque { Deque{items: [String]{}, head: 0} }
 
 pub fn deque_from(items: [String]) -> Deque {
-    xs := [String]{}
-    loop x in items -> xs.push(x)
-    Deque{items: xs, head: 0}
+    Deque{items: copy_strings(items), head: 0}
 }
 
-fn live_len(d: Deque) -> Int {
-    n := d.items.len() - d.head
-    if n < 0 -> return 0
-    n
-}
+pub fn deque_len(d: Deque) -> Int { deque_live_len(d) }
 
-pub fn deque_len(d: Deque) -> Int { live_len(d) }
-
-pub fn deque_is_empty(d: Deque) -> Bool { live_len(d) == 0 }
+pub fn deque_is_empty(d: Deque) -> Bool { deque_live_len(d) == 0 }
 
 fn compact(d: Deque) -> Deque {
-    if d.head <= 0 -> return d
+    start := deque_start(d)
+    if start <= 0 -> return Deque{items: copy_strings(d.items), head: d.head}
+    if start >= d.items.len() -> return Deque{items: [String]{}, head: 0}
     xs := [String]{}
-    i := d.head
+    i := start
     loop i < d.items.len() {
-        xs.push(d.items[i])
+        xs.push(~d.items[i])
         i = i + 1
     }
     Deque{items: xs, head: 0}
 }
 
 fn maybe_compact(d: Deque) -> Deque {
-    if d.head >= 32 && d.head * 2 >= d.items.len() -> return compact(d)
-    d
+    start := deque_start(d)
+    if start >= 32 && start * 2 >= d.items.len() -> return compact(d)
+    Deque{items: copy_strings(d.items), head: d.head}
 }
 
 pub fn append(d: Deque, value: String) -> Deque {
-    xs := d.items
-    xs.push(value)
+    xs := copy_strings(d.items)
+    xs.push(~value)
     Deque{items: xs, head: d.head}
 }
 
 pub fn appendleft(d: Deque, value: String) -> Deque {
     d2 :: compact(d)
-    xs := [String]{value}
-    loop x in d2.items -> xs.push(x)
+    xs := [String]{~value}
+    loop x in d2.items -> xs.push(~x)
     Deque{items: xs, head: 0}
 }
 
 pub fn pop(d: Deque) -> (deque: Deque, value: ?String) {
-    if live_len(d) == 0 -> return (deque: d, value: None)
-    last := d.items[d.items.len() - 1]
+    if deque_live_len(d) == 0 {
+        return (deque: Deque{items: copy_strings(d.items), head: d.head}, value: None)
+    }
+    start := deque_start(d)
+    last := d.items.len() - 1
+    value :: ~d.items[last]
     xs := [String]{}
-    i := d.head
-    loop i < d.items.len() - 1 {
-        xs.push(d.items[i])
+    i := start
+    loop i < last {
+        xs.push(~d.items[i])
         i = i + 1
     }
-    (deque: Deque{items: xs, head: 0}, value: Val(last))
+    (deque: Deque{items: xs, head: 0}, value: Val(value))
 }
 
 pub fn popleft(d: Deque) -> (deque: Deque, value: ?String) {
-    if live_len(d) == 0 -> return (deque: d, value: None)
-    value :: d.items[d.head]
-    (deque: maybe_compact(Deque{items: d.items, head: d.head + 1}), value: Val(value))
+    if deque_live_len(d) == 0 {
+        return (deque: Deque{items: copy_strings(d.items), head: d.head}, value: None)
+    }
+    start := deque_start(d)
+    value :: ~d.items[start]
+    next := Deque{items: copy_strings(d.items), head: d.head + 1}
+    (deque: maybe_compact(next), value: Val(value))
 }
 
 pub fn peek(d: Deque) -> ?String {
-    if live_len(d) == 0 -> return None
-    Val(d.items[d.items.len() - 1])
+    if deque_live_len(d) == 0 -> return None
+    Val(~d.items[d.items.len() - 1])
 }
 
 pub fn peekleft(d: Deque) -> ?String {
-    if live_len(d) == 0 -> return None
-    Val(d.items[d.head])
+    if deque_live_len(d) == 0 -> return None
+    Val(~d.items[deque_start(d)])
 }
 
 pub fn extend(d: Deque, values: [String]) -> Deque {
-    out := d
-    loop v in values -> out = append(out, v)
+    out := Deque{items: copy_strings(d.items), head: d.head}
+    loop v in values -> out.items.push(~v)
     out
 }
 
 pub fn extendleft(d: Deque, values: [String]) -> Deque {
-    out := d
+    out := Deque{items: copy_strings(d.items), head: d.head}
     i := values.len()
     loop i > 0 {
         i = i - 1
-        out = appendleft(out, values[i])
+        out = appendleft(out, ~values[i])
     }
     out
 }
 
 pub fn rotate(d: Deque, n: Int) -> Deque {
-    if live_len(d) == 0 -> return d
-    steps := n
-    out := d
-    loop steps > 0 {
-        pair :: pop(out)
-        v :: pair.value ?? return out
-        out = appendleft(pair.deque, v)
-        steps = steps - 1
+    len := deque_live_len(d)
+    if len == 0 -> return Deque{items: copy_strings(d.items), head: d.head}
+    steps := n % len
+    if steps == 0 -> return Deque{items: copy_strings(d.items), head: d.head}
+    d2 :: compact(d)
+    right := steps
+    if right < 0 -> right = right + len
+    split := len - right
+    out := [String]{}
+    i := split
+    loop i < len {
+        out.push(~d2.items[i])
+        i = i + 1
     }
-    loop steps < 0 {
-        pair :: popleft(out)
-        v :: pair.value ?? return out
-        out = append(pair.deque, v)
-        steps = steps + 1
+    i = 0
+    loop i < split {
+        out.push(~d2.items[i])
+        i = i + 1
     }
-    out
+    Deque{items: out, head: 0}
 }
 
 pub fn deque_items(d: Deque) -> [String] {
@@ -302,69 +415,57 @@ pub fn deque_items(d: Deque) -> [String] {
     d2.items
 }
 
-pub fn heapify(xs: [Int]) -> [Int] {
-    out := [Int]{}
-    loop x in xs -> out.push(x)
-    n :: out.len()
-    i := n / 2
-    loop i >= 0 {
-        out = sift_down(out, i, n)
-        if i == 0 -> break
-        i = i - 1
-    }
-    out
-}
-
-fn swap_int(xs: [Int], i: Int, j: Int) -> [Int] {
-    if i == j -> return xs
-    out := [Int]{}
-    k := 0
-    loop k < xs.len() {
-        if k == i {
-            out.push(xs[j])
-        } else if k == j {
-            out.push(xs[i])
-        } else {
-            out.push(xs[k])
-        }
-        k = k + 1
-    }
-    out
-}
-
-fn sift_down(xs: [Int], start: Int, end: Int) -> [Int] {
+fn sift_down(xs: &[Int], start: Int, end: Int) {
     i := start
-    cur := xs
     loop {
         left := i * 2 + 1
-        if left >= end -> return cur
+        if left >= end -> return
         smallest := i
-        if cur[left] < cur[smallest] -> smallest = left
+        if xs[left] < xs[smallest] -> smallest = left
         right := left + 1
-        if right < end && cur[right] < cur[smallest] -> smallest = right
-        if smallest == i -> return cur
-        cur = swap_int(cur, i, smallest)
+        if right < end && xs[right] < xs[smallest] -> smallest = right
+        if smallest == i -> return
+        current := xs[i]
+        child := xs[smallest]
+        xs[i] = child
+        xs[smallest] = current
         i = smallest
     }
 }
 
-fn sift_up(xs: [Int], start: Int) -> [Int] {
+fn sift_up(xs: &[Int], start: Int) {
     i := start
-    cur := xs
     loop i > 0 {
-        parent := (i - 1) / 2
-        if cur[i] >= cur[parent] -> return cur
-        cur = swap_int(cur, i, parent)
+        parent := (i - 1) /% 2
+        if xs[i] >= xs[parent] -> return
+        current := xs[i]
+        ancestor := xs[parent]
+        xs[i] = ancestor
+        xs[parent] = current
         i = parent
     }
-    cur
+}
+
+pub fn heapify(xs: [Int]) -> [Int] {
+    out := copy_ints(xs)
+    n := out.len()
+    if n > 1 {
+        i := n /% 2
+        loop {
+            sift_down(&out, i, n)
+            if i == 0 -> break
+            i = i - 1
+        }
+    }
+    out
 }
 
 pub fn heappush(xs: [Int], value: Int) -> [Int] {
-    out := [Int]{}
-    loop x in xs -> out.push(x)
+    out := copy_ints(xs)
     out.push(value)
-    sift_up(out, out.len() - 1)
+    last := out.len() - 1
+    sift_up(&out, last)
+    out
 }
 
 pub fn heappop(xs: [Int]) -> (heap: [Int], value: ?Int) {
@@ -377,11 +478,13 @@ pub fn heappop(xs: [Int]) -> (heap: [Int], value: ?Int) {
         rest.push(xs[i])
         i = i + 1
     }
-    (heap: sift_down(rest, 0, rest.len()), value: Val(xs[0]))
+    rest_len := rest.len()
+    sift_down(&rest, 0, rest_len)
+    (heap: rest, value: Val(xs[0]))
 }
 
 pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) {
-    if xs.len() == 0 || value <= xs[0] -> return (heap: xs, value: value)
+    if xs.len() == 0 || value <= xs[0] -> return (heap: copy_ints(xs), value: value)
     popped := xs[0]
     rest := [Int]{value}
     i := 1
@@ -389,7 +492,9 @@ pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) {
         rest.push(xs[i])
         i = i + 1
     }
-    (heap: sift_down(rest, 0, rest.len()), value: popped)
+    rest_len := rest.len()
+    sift_down(&rest, 0, rest_len)
+    (heap: rest, value: popped)
 }
 
 pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: ?Int) {
@@ -401,7 +506,72 @@ pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: ?Int) {
         rest.push(xs[i])
         i = i + 1
     }
-    (heap: sift_down(rest, 0, rest.len()), value: Val(popped))
+    rest_len := rest.len()
+    sift_down(&rest, 0, rest_len)
+    (heap: rest, value: Val(popped))
+}
+
+fn max_sift_down(xs: &[Int], start: Int, end: Int) {
+    i := start
+    loop {
+        left := i * 2 + 1
+        if left >= end -> return
+        largest := i
+        if xs[left] > xs[largest] -> largest = left
+        right := left + 1
+        if right < end && xs[right] > xs[largest] -> largest = right
+        if largest == i -> return
+        current := xs[i]
+        child := xs[largest]
+        xs[i] = child
+        xs[largest] = current
+        i = largest
+    }
+}
+
+fn max_sift_up(xs: &[Int], start: Int) {
+    i := start
+    loop i > 0 {
+        parent := (i - 1) /% 2
+        if xs[i] <= xs[parent] -> return
+        current := xs[i]
+        ancestor := xs[parent]
+        xs[i] = ancestor
+        xs[parent] = current
+        i = parent
+    }
+}
+
+fn max_heappush(xs: [Int], value: Int) -> [Int] {
+    out := copy_ints(xs)
+    out.push(value)
+    last := out.len() - 1
+    max_sift_up(&out, last)
+    out
+}
+
+fn max_heapreplace(xs: [Int], value: Int) -> [Int] {
+    out := copy_ints(xs)
+    out[0] = value
+    out_len := out.len()
+    max_sift_down(&out, 0, out_len)
+    out
+}
+
+fn max_heappop(xs: [Int]) -> (heap: [Int], value: ?Int) {
+    if xs.len() == 0 -> return (heap: [Int]{}, value: None)
+    if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
+    popped := xs[0]
+    last := xs[xs.len() - 1]
+    rest := [Int]{last}
+    i := 1
+    loop i < xs.len() - 1 {
+        rest.push(xs[i])
+        i = i + 1
+    }
+    rest_len := rest.len()
+    max_sift_down(&rest, 0, rest_len)
+    (heap: rest, value: Val(popped))
 }
 
 pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
@@ -409,17 +579,16 @@ pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
     h := [Int]{}
     loop x in xs {
         if h.len() < n {
-            h = heappush(h, -x)
-        } else if h.len() > 0 && -h[0] > x {
-            pair :: heapreplace(h, -x)
-            h = pair.heap
+            h = max_heappush(h, x)
+        } else if h.len() > 0 && x < h[0] {
+            h = max_heapreplace(h, x)
         }
     }
     out := [Int]{}
     loop _ in 0..<h.len() {
-        pair :: heappop(h)
+        pair :: max_heappop(h)
         v :: pair.value ?? break
-        out.push(-v)
+        out.push(v)
         h = pair.heap
     }
     i := 0
@@ -436,11 +605,31 @@ pub fn nsmallest(n: Int, xs: [Int]) -> [Int] {
 
 pub fn nlargest(n: Int, xs: [Int]) -> [Int] {
     if n <= 0 -> return [Int]{}
-    negated := [Int]{}
-    loop x in xs -> negated.push(-x)
-    small :: nsmallest(n, negated)
+    h := [Int]{}
+    loop x in xs {
+        if h.len() < n {
+            h = heappush(h, x)
+        } else if h.len() > 0 && x > h[0] {
+            pair :: heapreplace(h, x)
+            h = pair.heap
+        }
+    }
     out := [Int]{}
-    loop x in small -> out.push(-x)
+    loop _ in 0..<h.len() {
+        pair :: heappop(h)
+        v :: pair.value ?? break
+        out.push(v)
+        h = pair.heap
+    }
+    i := 0
+    j := out.len() - 1
+    loop i < j {
+        tmp := out[i]
+        out[i] = out[j]
+        out[j] = tmp
+        i = i + 1
+        j = j - 1
+    }
     out
 }
 
@@ -472,7 +661,7 @@ pub fn bisect_left(xs: [Int], value: Int) -> Int {
     lo := 0
     hi := xs.len()
     loop lo < hi {
-        mid := lo + (hi - lo) / 2
+        mid := lo + (hi - lo) /% 2
         if xs[mid] < value {
             lo = mid + 1
         } else {
@@ -486,7 +675,7 @@ pub fn bisect_right(xs: [Int], value: Int) -> Int {
     lo := 0
     hi := xs.len()
     loop lo < hi {
-        mid := lo + (hi - lo) / 2
+        mid := lo + (hi - lo) /% 2
         if xs[mid] <= value {
             lo = mid + 1
         } else {
@@ -528,13 +717,44 @@ pub fn insort_right(xs: [Int], value: Int) -> [Int] {
     out
 }
 
+fn map_entries(m: OrderedMap) -> Int {
+    n := m.keys.len()
+    if m.values.len() < n -> n = m.values.len()
+    n
+}
+
+fn string_index(xs: [String], key: String) -> Int {
+    i := 0
+    loop i < xs.len() {
+        if xs[i] == key -> return i
+        i = i + 1
+    }
+    -1
+}
+
+fn layer_from(keys: [String], values: [String]) -> Layer {
+    n := keys.len()
+    if values.len() < n -> n = values.len()
+    out_keys := [String]{}
+    out_values := [String]{}
+    i := 0
+    loop i < n {
+        if string_index(out_keys, keys[i]) < 0 {
+            out_keys.push(~keys[i])
+            out_values.push(~values[i])
+        }
+        i = i + 1
+    }
+    Layer{keys: out_keys, values: out_values}
+}
+
 pub fn ordered_map() -> OrderedMap { OrderedMap{keys: [String]{}, values: [String]{}} }
 
 pub fn map_get(m: OrderedMap, key: String) -> ?String {
     i := 0
-    loop i < m.keys.len() {
-        if m.keys[i] == key -> return Val(m.values[i])
-        i = i + 1
+    entries := map_entries(m)
+    loop i < entries {
+        if m.keys[i] == key -> return Val(~m.values[i])
     }
     None
 }
@@ -544,20 +764,23 @@ pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap {
     values := [String]{}
     found := false
     i := 0
-    loop i < m.keys.len() {
+    entries := map_entries(m)
+    loop i < entries {
         if m.keys[i] == key {
-            keys.push(key)
-            values.push(value)
-            found = true
+            if !found {
+                keys.push(~m.keys[i])
+                values.push(~value)
+                found = true
+            }
         } else {
-            keys.push(m.keys[i])
-            values.push(m.values[i])
+            keys.push(~m.keys[i])
+            values.push(~m.values[i])
         }
         i = i + 1
     }
     if !found {
-        keys.push(key)
-        values.push(value)
+        keys.push(~key)
+        values.push(~value)
     }
     OrderedMap{keys: keys, values: values}
 }
@@ -566,37 +789,58 @@ pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap {
     keys := [String]{}
     values := [String]{}
     i := 0
-    loop i < m.keys.len() {
+    entries := map_entries(m)
+    loop i < entries {
         if m.keys[i] != key {
-            keys.push(m.keys[i])
-            values.push(m.values[i])
+            keys.push(~m.keys[i])
+            values.push(~m.values[i])
         }
         i = i + 1
     }
     OrderedMap{keys: keys, values: values}
 }
 
-pub fn map_keys(m: OrderedMap) -> [String] { m.keys }
+pub fn map_keys(m: OrderedMap) -> [String] {
+    out := [String]{}
+    i := 0
+    entries := map_entries(m)
+    loop i < entries {
+        out.push(~m.keys[i])
+        i = i + 1
+    }
+    out
+}
 
-pub fn map_values(m: OrderedMap) -> [String] { m.values }
+pub fn map_values(m: OrderedMap) -> [String] {
+    out := [String]{}
+    i := 0
+    entries := map_entries(m)
+    loop i < entries {
+        out.push(~m.values[i])
+        i = i + 1
+    }
+    out
+}
 
 pub fn map_contains(m: OrderedMap, key: String) -> Bool { map_get(m, key) != None }
 
-pub fn map_len(m: OrderedMap) -> Int { m.keys.len() }
+pub fn map_len(m: OrderedMap) -> Int { map_entries(m) }
 
 pub fn chain() -> Chain { Chain{layers: [Layer]{}} }
 
 pub fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain {
-    layers := [Layer]{Layer{keys: keys, values: values}}
-    loop layer in c.layers -> layers.push(layer)
+    layers := [Layer]{layer_from(keys, values)}
+    loop layer in c.layers -> layers.push(layer_from(layer.keys, layer.values))
     Chain{layers: layers}
 }
 
 pub fn chain_get(c: Chain, key: String) -> ?String {
     loop layer in c.layers {
         i := 0
-        loop i < layer.keys.len() {
-            if layer.keys[i] == key -> return Val(layer.values[i])
+        entries := layer.keys.len()
+        if layer.values.len() < entries -> entries = layer.values.len()
+        loop i < entries {
+            if layer.keys[i] == key -> return Val(~layer.values[i])
             i = i + 1
         }
     }

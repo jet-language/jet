@@ -1,5 +1,96 @@
-// core.data.sketch — streaming sketches. Nested algorithms own the state.
-// Algorithm implementations are package siblings and can be checked directly.
-pub fn empty() -> String { "" }
+// core.data.sketch — deterministic, mergeable sketch-state framing.
+//
+// The root API carries opaque shard payloads as a versioned, length-delimited
+// String.  `empty` is the identity frame; `merge` preserves shard order and
+// treats malformed or legacy input as one opaque payload instead of dropping
+// it.  Lengths are byte lengths, so delimiters inside arbitrary UTF-8 payloads
+// cannot change the frame boundary.
+pub fn empty() -> String { "jet-sketch:v1;0;" }
 
-pub fn merge(left: String, right: String) -> String { "{left}{right}" }
+pub fn merge(left: String, right: String) -> String {
+    values := [String]{}
+    append_state(left, &values)
+    append_state(right, &values)
+    encode(values)
+}
+
+fn append_state(text: String, out: &[String]) {
+    if text.bytes().len() == 0 -> return
+    values :: decode(text)
+    if values != None {
+        decoded :: values
+        loop value in decoded -> out.push(value)
+        return
+    }
+    out.push(text)
+}
+
+fn encode(values: [String]) -> String {
+    out := "jet-sketch:v1;{values.len()};"
+    loop value in values -> out = "{out}{value.bytes().len()}:{value}"
+    return out
+}
+
+fn decode(text: String) -> ?[String] {
+    raw :: text.bytes()
+    prefix :: "jet-sketch:v1;".bytes()
+    if raw.len() < prefix.len() -> return None
+    loop i in 0..<prefix.len() {
+        if raw[i] != prefix[i] -> return None
+    }
+    count_end :: find_byte(raw, prefix.len(), U8{59})
+    if count_end < 0 -> return None
+    count_text :: slice_bytes(raw, prefix.len(), count_end) ?? return None
+    count :: decimal(count_text) ?? return None
+    pos := count_end + 1
+    if count < 0 || count > raw.len() - pos -> return None
+    values := [String]{}
+    loop _ in 0..<count {
+        colon :: find_byte(raw, pos, U8{58})
+        if colon < 0 -> return None
+        length_text :: slice_bytes(raw, pos, colon) ?? return None
+        length :: decimal(length_text) ?? return None
+        pos = colon + 1
+        if length < 0 || length > raw.len() - pos -> return None
+        value :: slice_bytes(raw, pos, pos + length) ?? return None
+        values.push(value)
+        pos = pos + length
+    }
+    if pos != raw.len() -> return None
+    return Val(values)
+}
+
+fn decimal(text: String) -> ?Int {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    n := 0
+    loop byte in raw {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+        digit := Int.from_u8(byte) - 48
+        if n > (c_int_max() - digit) /% 10 -> return None
+        n = n * 10 + digit
+    }
+    return Val(n)
+}
+
+fn find_byte(raw: [U8], start: Int, needle: U8) -> Int {
+    i := start
+    loop i < raw.len() {
+        if raw[i] == needle -> return i
+        i = i + 1
+    }
+    return -1
+}
+
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> ?String {
+    out := [U8]{}
+    i := start
+    loop i < end {
+        out.push(raw[i])
+        i = i + 1
+    }
+    decoded :: String.from_bytes(out) ?? return None
+    return Val(decoded)
+}
+ 
+fn c_int_max() -> Int { 9223372036854775807 }

@@ -1,6 +1,8 @@
 // core-conformance: core.data.loader.bind_text
+use core.data as data
 use core.data.loader as api
 
 fn run() {
-    print(api.bind_text("jet"))
+    loader :: data.file<String>("jet", "csv", data.DataLimits.safe()) ?? panic("loader")
+    print(api.bind_text(&loader, "jet"))
 }

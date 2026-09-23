@@ -287,11 +287,14 @@ impl<'a> Checker<'a> {
                     self.diags.push(layout_handle_renamed_to_layout(span));
                     return;
                 }
-                // D-ACRO-CASE1=A / D-ACRO-LEX1=A: retired word-cased acronym spellings.
-                if let Some(canonical) = crate::Syntax::retired_acronym_spelling(n) {
-                    self.diags
-                        .push(retired_acronym_spelling_diag(n, &canonical, span));
-                    return;
+                // `URL` resolves to the legacy `Url` nominal internally; the
+                // internal spelling must not reject canonical source declarations.
+                if n != "Url" {
+                    if let Some(canonical) = crate::Syntax::retired_acronym_spelling(n) {
+                        self.diags
+                            .push(retired_acronym_spelling_diag(n, &canonical, span));
+                        return;
+                    }
                 }
                 if let Some(diag) = retired_authority_vocabulary_diag(n, span) {
                     self.diags.push(diag);
@@ -390,7 +393,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                if let Some((module, leaf)) = n.split_once('.') {
+                if let Some((module, leaf)) = n.rsplit_once('.') {
                     if let (Some(modules), Some(&index)) = (self.modules, self.imports.get(module))
                     {
                         if modules[index].registry.contains(leaf)
@@ -1441,6 +1444,26 @@ impl<'a> Checker<'a> {
                 },
             ) if want_marker == got_marker => self.nominal_type_identity(want_inner, got_inner),
             (
+                Type::Tagged {
+                    marker:
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::CoreCryptoNominal,
+                        ),
+                    inner,
+                },
+                other,
+            )
+            | (
+                other,
+                Type::Tagged {
+                    marker:
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::CoreCryptoNominal,
+                        ),
+                    inner,
+                },
+            ) => self.nominal_type_identity(inner, other),
+            (
                 Type::Quantity {
                     base: want_base,
                     dimension: want_dimension,
@@ -1453,6 +1476,7 @@ impl<'a> Checker<'a> {
             _ => false,
         }
     }
+
 
     fn declared_nominal_identity(&self, spelling: &str) -> Option<String> {
         let (namespace, leaf) = Self::split_type_name(spelling);
@@ -1505,7 +1529,60 @@ impl<'a> Checker<'a> {
         None
     }
 
+    fn core_source_type_key<'b>(
+        &self,
+        spelling: &'b str,
+    ) -> Option<(&'static str, &'b str)> {
+        let (namespace, leaf) = Self::split_type_name(spelling);
+        let modules = self.modules?;
+        let source = namespace
+            .and_then(|namespace| {
+                self.core_imports
+                    .get(namespace)
+                    .and_then(|module| {
+                        jet_foundation::CoreModuleExports::core_source_module(module)
+                    })
+                    .or_else(|| {
+                        jet_foundation::CoreModuleExports::core_source_module_by_alias(namespace)
+                    })
+            })
+            .or_else(|| {
+                let owner = self.struct_owner_module(leaf, namespace)?;
+                let module = modules.get(owner)?;
+                jet_foundation::CoreModuleExports::core_source_modules()
+                    .iter()
+                    .find(|source| {
+                        module.source == source.source
+                            && (module.module_alias == source.alias
+                                || module.package_scope == ".")
+                    })
+            })?;
+        let owner = self
+            .struct_owner_module(leaf, namespace)
+            .or_else(|| {
+                modules.iter().enumerate().find_map(|(idx, module)| {
+                    (module.module_alias == source.alias && module.registry.contains(leaf))
+                        .then_some(idx)
+                })
+            })?;
+        modules
+            .get(owner)
+            .filter(|module| module.registry.contains(leaf))?;
+        Some((source.module, leaf))
+    }
+
     fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+        if want == got {
+            return true;
+        }
+        if let (Some((want_module, want_leaf)), Some((got_module, got_leaf))) = (
+            self.core_source_type_key(want),
+            self.core_source_type_key(got),
+        ) {
+            if want_module == got_module && want_leaf == got_leaf {
+                return true;
+            }
+        }
         self.declared_nominal_identity(want)
             .zip(self.declared_nominal_identity(got))
             .is_some_and(|(want, got)| want == got)

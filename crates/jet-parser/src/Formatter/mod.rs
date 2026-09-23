@@ -1020,11 +1020,9 @@ fn format_program_with_tokens(
         f.fmt_user_policy_decl(declaration);
         f.emit_trailing(declaration.span.end);
     }
-    // D-ENTRY-SCRIPT1=B: script statements stay on the top-level surface for
-    // formatting; sema adds the implicit `run` only after this pass. The AST
-    // stores declarations and script statements in separate collections, so
-    // merge them back by source position or fmt moves a later declaration
-    // ahead of earlier script code.
+    // D-ENTRY-SCRIPT1=C: retain loose statements for diagnostics and
+    // round-tripping, while sema rejects them in ordinary files. Notebook and
+    // REPL adapters build their own explicit `run` before formatting.
     let mut item_i = 0;
     let mut stmt_i = 0;
     let mut previous_was_script = false;

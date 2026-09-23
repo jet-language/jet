@@ -87,7 +87,8 @@ fn router_surface() {
 
 fn query_surface() {
     live :: query.live("rows", "rows", "initial", fetch_rows)
-    created :: query.new("rows", live)
+    seed :: query.WebQuerySeed{data: live.data, generation: live.generation, subscribers: live.subscribers}
+    created :: query.new("rows", seed)
     subscribed :: query.subscribe("rows")
     _generation :: query.invalidate(created)
     _value :: query.get(created)

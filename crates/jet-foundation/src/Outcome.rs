@@ -178,9 +178,7 @@ pub fn jet_err_from_conversion(
     source: String,
     target: String,
 ) -> JetErr {
-    let mut error = jet_err(message, code, cause);
-    jet_err_apply_conversion(&mut error, source, target);
-    error
+    jet_err_apply_conversion(jet_err(message, code, cause), source, target)
 }
 
 pub fn jet_err_typed_identity(error: &JetErr) -> Option<String> {
@@ -214,11 +212,12 @@ pub fn jet_err_record_conversion(error: &mut JetErr, source: String, target: Str
 /// Apply one declared conversion to an existing structured error. The
 /// conversion boundary owns the source identity and history; the converted
 /// error keeps its message, code, cause, context, and any earlier metadata.
-pub fn jet_err_apply_conversion(error: &mut JetErr, source: String, target: String) {
+pub fn jet_err_apply_conversion(mut error: JetErr, source: String, target: String) -> JetErr {
     if error.typed_identity.is_none() {
         error.typed_identity = Some(source.clone());
     }
-    jet_err_record_conversion(error, source, target);
+    jet_err_record_conversion(&mut error, source, target);
+    error
 }
 
 /// D-FAIL-ERROR1=A: the only String-to-default-error conversion.
@@ -1611,7 +1610,7 @@ mod jet_error_wasm_bridge {
                 converted.details = original.details;
             }
         }
-        jet_err_apply_conversion(&mut converted, source, target);
+        converted = jet_err_apply_conversion(converted, source, target);
         write_carrier(&converted);
         OK
     }
@@ -1697,8 +1696,8 @@ mod err_tests {
             "config.jet".to_string(),
             42,
         );
-        jet_err_apply_conversion(
-            &mut error,
+        error = jet_err_apply_conversion(
+            error,
             "IoError".to_string(),
             "ConfigError".to_string(),
         );

@@ -1157,7 +1157,7 @@ fn data_kernel_kind_value(kind: jet_foundation::PreludeDataFlow::LoaderKind) -> 
         "DataLoaderKind",
         match kind {
             jet_foundation::PreludeDataFlow::LoaderKind::File => "File",
-            jet_foundation::PreludeDataFlow::LoaderKind::Url => "Url",
+            jet_foundation::PreludeDataFlow::LoaderKind::URL => "URL",
             jet_foundation::PreludeDataFlow::LoaderKind::Database => "Database",
             jet_foundation::PreludeDataFlow::LoaderKind::Value => "Value",
         },
@@ -1249,6 +1249,9 @@ fn data_kernel_limits_value(limits: &DataKernelLimits) -> CtValue {
         ],
     )
 }
+pub(super) fn data_limits_safe_value() -> CtValue {
+    data_kernel_limits_value(&data_kernel_limits_safe())
+}
 
 fn data_kernel_status_value(status: &DataKernelStatus) -> CtValue {
     ct_struct(
@@ -1274,7 +1277,7 @@ fn data_kernel_status_value(status: &DataKernelStatus) -> CtValue {
                 data_loader_enum(
                     "DataInvalidationCause",
                     match status.invalidated_by {
-                        jet_foundation::PreludeDataFlow::InvalidationCause::None => "None",
+                        jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => "NoCause",
                         jet_foundation::PreludeDataFlow::InvalidationCause::Loader => "Loader",
                         jet_foundation::PreludeDataFlow::InvalidationCause::Input => "Input",
                         jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember => {
@@ -1848,7 +1851,7 @@ fn data_loader_payload(
         return Ok((payload, state.offline));
     }
     let operation = match state.source.kind {
-        jet_foundation::PreludeDataFlow::LoaderKind::Url => "data.loader.url",
+        jet_foundation::PreludeDataFlow::LoaderKind::URL => "data.loader.url",
         jet_foundation::PreludeDataFlow::LoaderKind::Database => "data.loader.database",
         jet_foundation::PreludeDataFlow::LoaderKind::File => "data.loader.archive",
         jet_foundation::PreludeDataFlow::LoaderKind::Value => "data.loader.value",
@@ -3020,11 +3023,11 @@ fn data_loader_constructor_in_state(
                 let kind = if locator.starts_with("http://")
                     || locator.starts_with("https://")
                 {
-                    jet_foundation::PreludeDataFlow::LoaderKind::Url
+                    jet_foundation::PreludeDataFlow::LoaderKind::URL
                 } else {
                     jet_foundation::PreludeDataFlow::LoaderKind::File
                 };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::Url {
+                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
                     "network"
                 } else {
                     "local"
@@ -3054,11 +3057,11 @@ fn data_loader_constructor_in_state(
                 let kind = if locator.starts_with("http://")
                     || locator.starts_with("https://")
                 {
-                    jet_foundation::PreludeDataFlow::LoaderKind::Url
+                    jet_foundation::PreludeDataFlow::LoaderKind::URL
                 } else {
                     jet_foundation::PreludeDataFlow::LoaderKind::File
                 };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::Url {
+                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
                     "network"
                 } else {
                     "local"
@@ -3148,7 +3151,7 @@ fn data_loader_constructor_in_state(
                     Err(error) => return Ok(error),
                 };
                 (
-                    jet_foundation::PreludeDataFlow::LoaderKind::Url,
+                    jet_foundation::PreludeDataFlow::LoaderKind::URL,
                     url,
                     String::new(),
                     Vec::new(),
@@ -3322,7 +3325,7 @@ fn eval_data_loader_method_in_state(
                         variant,
                         ..
                     }) if type_name == "DataInvalidationCause" => match variant.as_str() {
-                        "None" => jet_foundation::PreludeDataFlow::InvalidationCause::None,
+                        "NoCause" => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
                         "Loader" => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
                         "Input" => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
                         "ArchiveMember" => {
@@ -3495,12 +3498,12 @@ pub(super) fn eval_data_loader_call(
                             let kind = if locator.starts_with("http://")
                                 || locator.starts_with("https://")
                             {
-                                jet_foundation::PreludeDataFlow::LoaderKind::Url
+                                jet_foundation::PreludeDataFlow::LoaderKind::URL
                             } else {
                                 jet_foundation::PreludeDataFlow::LoaderKind::File
                             };
                             let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::Url
+                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
                             {
                                 "network"
                             } else {
@@ -3531,12 +3534,12 @@ pub(super) fn eval_data_loader_call(
                             let kind = if locator.starts_with("http://")
                                 || locator.starts_with("https://")
                             {
-                                jet_foundation::PreludeDataFlow::LoaderKind::Url
+                                jet_foundation::PreludeDataFlow::LoaderKind::URL
                             } else {
                                 jet_foundation::PreludeDataFlow::LoaderKind::File
                             };
                             let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::Url
+                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
                             {
                                 "network"
                             } else {
@@ -3596,7 +3599,7 @@ pub(super) fn eval_data_loader_call(
                                 Ok(authority) => authority,
                                 Err(error) => return Ok(error),
                             };
-                            (jet_foundation::PreludeDataFlow::LoaderKind::Url, url, String::new(), Vec::new(), format.to_string(), authority, data_limits_from_value(args.get(3)), None, None)
+                            (jet_foundation::PreludeDataFlow::LoaderKind::URL, url, String::new(), Vec::new(), format.to_string(), authority, data_limits_from_value(args.get(3)), None, None)
                         }
                         "database" => {
                             let query = data_loader_string_arg(args, 0, method, span)?;
@@ -3806,7 +3809,7 @@ pub(super) fn eval_data_loader_method(
                         variant,
                         ..
                     }) if type_name == "DataInvalidationCause" => match variant.as_str() {
-                        "None" => jet_foundation::PreludeDataFlow::InvalidationCause::None,
+                        "NoCause" => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
                         "Loader" => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
                         "Input" => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
                         "ArchiveMember" => {

@@ -803,8 +803,8 @@ pub(crate) fn method_call_in_subset(
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
-                    // as `http.Type.method(...)` and rewritten by sema to their
-                    // internal `HTTP*` type names.
+                    // as `http.Type.method(...)`; Body/Headers retain their
+                    // canonical public names while other carriers use HTTP names.
                     ("HTTPMethod", "custom", 1)
                     | (
                         "HTTPMethod",
@@ -815,10 +815,10 @@ pub(crate) fn method_call_in_subset(
                     | ("HTTPStatus", "new", 1)
                     | ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0)
                     | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
-                    | ("HTTPHeaders", "new", 0)
-                    | ("HTTPBody", "empty", 0)
-                    | ("HTTPBody", "bytes" | "json" | "form" | "multipart", 1)
-                    | ("HTTPBody", "text" | "reader", 1 | 2) => {
+                    | ("Headers", "new", 0)
+                    | ("Body", "empty", 0)
+                    | ("Body", "bytes" | "json" | "form" | "multipart", 1)
+                    | ("Body", "text" | "reader", 1 | 2) => {
                         return args
                             .iter()
                             .all(|argument| expr_in_subset(&argument.expr, cx, locals));

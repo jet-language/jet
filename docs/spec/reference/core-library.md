@@ -1004,12 +1004,16 @@ input must be unpadded and canonical.
 `issuer: ?String`, `expires_at: Int`, `not_before: ?Int`, and `issued_at:
 ?Int`. `AuthError` is an inspectable enum with `MalformedToken`,
 `UnsupportedToken`, `InvalidSignature`, `WeakKey`, `MissingClaim`,
-`WrongAudience`, `WrongIssuer`, `TokenExpired`, `DecodeError`, and
-`TokenNotYetValid` variants. Sessions use httponly/secure/samesite cookie
-defaults. The current OAuth surface fails closed: `oauth_begin` issues no
-bearer state and `oauth_finish` accepts no caller-supplied subject until a
-browser-bound provider flow verifies the provider proof, issuer, audience, and
-nonce.
+`WrongAudience`, `WrongIssuer`, `TokenExpired`, and `DecodeError`. `issuer`
+and `clock_skew` are optional for both verifiers; `footer` and
+`implicit_assertion` are optional for PASETO. Sessions use httponly/secure/
+samesite cookie defaults. OAuth requires a configured provider secret in
+`JET_OAUTH_<PROVIDER>_SECRET` (at least 32 bytes). `oauth_begin` creates a
+single-use, ten-minute opaque state; the returned state is also the OIDC
+nonce. `oauth_finish` accepts a provider-signed HS256 JWT assertion, verifies
+the configured issuer, audience, nonce, subject, expiry, and signature, and
+consumes the state before minting a session. Missing configuration or any
+invalid proof fails closed.
 The implementation is compiler-embedded, reuses Jet's JSON and crypto
 mechanisms, and adds no external dependency.
 
@@ -1471,22 +1475,21 @@ Examples: `examples/features/io/os_facts.jet`,
 
 ### `core.process` — exit and subprocesses (D-PROCESS1)
 
-`process.run(cmd)` accepts checked `Sh` typed text and directly executes its
-argv. Literal words become argv items; every `{hole}` becomes exactly one item,
-even when its value contains spaces, globs, or shell metacharacters. No shell
-parses the command. `process.cmd(argv).run()` remains the explicit argv path;
-both reach the same subprocess primitive. `Sh.raw(text)` is the sole audited
-runtime-string escape and splits audited text only on whitespace; it still does
-not invoke a shell.
+`process.cmd(argv)` builds an explicit argument vector and
+`process.run_spec(spec)` executes it without invoking a shell. The same
+`ProcessSpec` can be sent to `process.pipeline`, `process.capture`, or
+`process.check_call` when the caller wants a different receipt policy.
+Every argument remains a separate `String`, including spaces and shell
+metacharacters.
 
 ```jet
 use core.process as process
 use core.time as time
 
-fn run() {
-    target :: "directory with spaces;*.tmp"
-    copied :: process.run(Sh{"cp -- {target} backup"}) ?? return
-
+fn run() -[Exec, IO, Time.Wait]> {
+    spec :: process.cmd(["cp", "--", "directory with spaces;*.tmp", "backup"])
+        .stdout(.Capture)
+    copied :: process.run_spec(spec) ?? return
     spec :: process.cmd(["cargo", "test"])
         .cwd("crates/app")
         .env_clear()
@@ -1514,10 +1517,10 @@ fn run() {
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessReceipt !IOError` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
+| `run_spec(spec)` | `ProcessReceipt !IOError` | Execute one explicit `ProcessSpec` |
 | `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
 | `pipeline(specs)` | `ProcessReceipt !IOError` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
+| `check_call(spec)` | `ProcessReceipt !IOError` | Execute and report a checked receipt |
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
@@ -1546,16 +1549,17 @@ is an `IOError`, not a silently ignored limit.
 
 #### Authority-bound execution (D-AGENT-EXEC1=A)
 
-`process.workspace()` returns the ordinary `Authority` value for the safe
-workspace default. It grants repository reads and private build-directory
-writes. It denies network, home, secrets, devices, and inherited handles. Bind
-that value to the existing process object with `under(authority)`. A
-path-scoped authority also requires a host-supplied absolute working directory:
+An authority is explicit: construct it with `Authority.from_rights`, bind it
+to a `ProcessSpec` with `under(authority)`, and execute with `run_spec`:
 
 ```jet
-authority :: process.workspace()
-spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(authority)
-plan :: spec.plan()
+policy :: Authority.from_rights([
+    "FS.Read:repo",
+    "FS.Write:.jet/build",
+    "Exec:/usr/bin/cargo",
+])
+spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
+receipt :: process.run_spec(spec) ?? return
 ```
 
 Experts provide exact rights on the same value before binding it. The existing
@@ -1570,10 +1574,8 @@ policy :: Authority.from_rights([
 spec :: process.cmd(["cargo", "test"]).cwd("/workspace").under(policy)
 ```
 
-`plan()` resolves the executable identity without spawning. It records the
-redacted argv, exact authority, descendant mode, limits, output modes, backend,
-policy digest, and an input digest. Launch checks the same policy digest,
-input digest, and backend boundary. It never falls back to ambient authority.
+The receipt carries the policy facts and digest. Launch never falls back to
+ambient authority.
 The final `ProcessReceipt` carries the same policy facts and digest.
 
 `ProcessReceipt` redacts secret grant values, secret-looking environment values,
@@ -1933,16 +1935,17 @@ s :: v + w
 ```jet
 use core.math.random as random
 
-fn run() {
-    random.seed(42)                         // make the sequence repeatable
-    print(random.int(1, 6))                 // inclusive range (like dice)
-    print(random.float())                   // 0.0 .. 1.0
-    print(random.normal(0.0, 1.0))          // deterministic after seed()
-    items :: [10, 20, 30]
-    print(random.pick(items))               // one item, or None if list empty
-    print(random.sample(items, 2))          // no replacement
-    random.shuffle(&items)                  // shuffle in place
-    print(items)
+fn run() -[Rand]> {
+    random.seed(42)
+    print(random.int(1, 6))
+    print(random.float())
+    print(random.normal(0.0, 1.0))
+    items :: [String]{"red", "green", "blue"}
+    print(random.pick(items))
+    sample_items :: [Int]{10, 20, 30}
+    print(random.sample(sample_items, 2))
+    random.shuffle(&sample_items)
+    print(sample_items)
 }
 ```
 
@@ -1956,41 +1959,38 @@ nonces, tokens, salts, and anything security-sensitive.
 | `int(low, high)` | `Int` | Random integer, both ends inclusive |
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
 | `float_range(low, high)` | `Float` | Random float in `[low, high)`; returns `low` when the range is empty |
-| `bool(p)` | `Bool` | Draw `true` with probability `p`, clamped at 0 and 1 |
+| `bool()` | `Bool` | Draw a coin and advance the `Rand` stream |
 | `normal(mean, stddev)` | `Float` | Gaussian draw via Box-Muller; negative stddev is treated as 0 |
 | `exponential(lambda)` | `Float` | Exponential draw; non-positive lambda returns 0 |
-| `pick(xs)` | `?T` | Random element, or None if `xs` is empty |
-| `weighted_pick(xs, weights)` | `?T` | Weighted element; None for length mismatch or no positive weights |
-| `sample(xs, k)` | `[T]` | Up to `k` distinct elements without replacement |
-| `shuffle(&xs)` | nothing | Randomly reorder a list in place |
+| `pick(xs: [String])` | `?String` | Random element, or None if `xs` is empty |
+| `weighted_pick(xs: [String], weights)` | `?String` | Weighted element; None for invalid weights |
+| `sample(xs: [Int], k)` | `[Int]` | Up to `k` distinct elements without replacement |
+| `shuffle(&xs: &[Int])` | nothing | Randomly reorder an integer list in place |
 | `rng(seed)` | `Rng` | A **deterministic** RNG seeded by `seed` (D-DET1) |
 | `split(seed)` | `Rng` | Derive a deterministic child stream from the ambient stream plus `seed` |
 | `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
-The ambient calls above (`int`/`float`/…) read a process-global generator, so a
-`fn … -[]>` cannot call them (E3403 — they break reproducibility). To use
-randomness inside a `fn … -[]>`, take a seeded `Rng` **as a parameter** and draw
-through it — the seed makes the stream reproducible on every machine:
+Ambient calls carry the `Rand` effect, so callers declare it explicitly:
 
 ```jet
-fn roll(rng: &Rng) Int -[]> {
-    return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
+fn roll(rng: Rng) Int -[Rand]> {
+    rng.int(1, 6)
 }
-fn run() {
-    r := random.rng(42)            // same seed → same draws everywhere
-    print(roll(&r))
+fn run() -[Rand]> {
+    r := random.rng(42)
+    print(roll(r))
 }
 ```
 
-The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
+The injected `Rng` is an explicit seeded capability with the same deterministic
+draw families (D-DET-CAPAPI):
 
 | `Rng` method | Returns | What it does |
 |--------------|---------|--------------|
 | `int(lo, hi)` | `Int` | Draw an Int in `[lo, hi]` (inclusive); advances the stream |
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
 | `float_range(lo, hi)` | `Float` | Draw a Float in `[lo, hi)`; advances the stream |
-| `bool()` | `Bool` | Draw a coin; advances the stream |
-| `bool(p)` | `Bool` | Draw `true` with probability `p`; advances the stream |
+| `bool()` | `Bool` | Draw a coin; advances the explicit stream |
 | `normal(mean, stddev)` | `Float` | Gaussian draw; advances the stream |
 | `exponential(lambda)` | `Float` | Exponential draw; advances the stream |
 | `bytes(n)` | `[U8]` | Deterministic PRNG bytes; advances the stream |
@@ -2000,8 +2000,8 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 | `sample(xs, k)` | `[T]` | Up to `k` elements without replacement; advances the stream |
 | `shuffle(&xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
 
-Every draw needs a `&Rng` receiver, and `shuffle` needs the list passed with
-`&` because it edits in place.
+Rng draws advance the explicit capability; mutating `shuffle` takes its list
+by reference.
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `random` and `uniform` both
 already ship above, as `float()` and `float_range(low, high)`.
@@ -2250,21 +2250,17 @@ fn run() {
 | `now_utc()` | `DateTime` | Current UTC wall-clock date-time |
 | `from_unix_ms(ms)` | `DateTime` | Convert Unix milliseconds to UTC `DateTime` |
 | `from_unix_seconds(s)` / `from_unix_microseconds(us)` / `from_unix_nanoseconds(ns)` | `DateTime` | Convert an exact Unix count to UTC `DateTime` |
-| `parse_rfc3339(text)` | `DateTime !String` | Parse RFC 3339 / ISO 8601 offset text |
-| `parse_iso_week_date(text)` / `from_iso_week(year, week, weekday)` | `LocalDate !String` | Parse or construct an ISO week date (`weekday`: 1–7) |
-| `parse_zoned(text)` | `ZonedDateTime !String` | Parse RFC 9557 text with a bracketed IANA zone and verify its offset |
+| `parse_rfc3339(text)` | `DateTime !TimeError` | Parse RFC 3339 / ISO 8601 offset text |
+| `parse_iso_week_date(text)` / `from_iso_week(year, week, weekday)` | `LocalDate !TimeError` | Parse or construct an ISO week date (`weekday`: 1–7) |
+| `parse_zoned(text)` | `ZonedDateTime !TimeError` | Parse RFC 9557 text with a bracketed IANA zone and verify its offset |
 | `today()` | `LocalDate` | Current UTC date |
-| `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime !String` | Local wall-clock time |
+| `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime !TimeError` | Local wall-clock time |
 | `datetime(y, m, d, h, mi, s)` | `DateTime` | UTC date-time from civil components |
 | `days_in_month(y, m)` / `is_leap_year(y)` | `Int` / `Bool` | Calendar facts |
 | `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
-| `zone(name)` / `utc()` | `Zone !String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
+| `zone(name)` / `utc()` | `Zone !TimeError` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
-| `zoned_local(date, time, zone, disambiguation: "compatible")` | `ZonedDateTime !String` | Resolve local civil time in a zone; choose `compatible`, `earlier`, `later`, or `reject` for DST gaps and overlaps |
-| `sleep(duration: Duration)` | nothing | Block for the duration (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
-| `time.start()` | `Stopwatch` | Start a stopwatch |
-| `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
-| `clock(seed)` | `Clock` | A **deterministic** clock starting at `seed` ms (D-DET1) |
+| `zoned_local(date, time, zone, offset)` | `ZonedDateTime !TimeError` | Resolve local civil time with an explicit offset policy |
 | `Clock.system()` | `Clock` | An explicit monotonic production clock; carries the `Time` effect |
 | `Duration.nanoseconds/microseconds/milliseconds/seconds/minutes/hours(n)` | `Duration !RangeError` | Checked runtime elapsed-time span (D-TIMERES1=A: nanosecond count) |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
@@ -4352,9 +4348,9 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 
 | Module | Job | API |
 |--------|-----|-----|
-| `core.archive.gzip` | gzip byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] !String` |
-| `core.archive.zstd` | zstd byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] !String` |
-| `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
+| `core.archive.gzip` | gzip byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] !ArchiveError` |
+| `core.archive.zstd` | zstd byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] !ArchiveError` |
+| `core.archive` | zip/tar containers | `create(name, data) [U8]`, `compress`, `decompress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for
 containers such as `tar.gz`: build tar bytes with `core.archive`, then compress
@@ -4364,7 +4360,7 @@ those bytes with `core.archive.gzip`.
 `zip_close` produces the archive, and `zip_next`/`zip_read` walk and read named
 entries. `zip_names_json` lists entry names. `zip_extract` and `unzip` read one
 named entry directly. `deflate` and `inflate` operate on raw DEFLATE bytes;
-`zip_compress` and `zip_decompress` are the one-entry convenience calls.
+fallible archive operations return `ArchiveError` rather than a sentinel.
 
 ---
 

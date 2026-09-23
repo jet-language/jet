@@ -1,7 +1,7 @@
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
-use crate::Generics::substitute_type;
 use crate::Sema::CheckerCoreLib::{
-    is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse,
+    core_struct_field_type, is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps,
+    SwizzleParse,
 };
 use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
@@ -14,7 +14,6 @@ use crate::Sema::Registration::already_defined;
 use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKind, ViewAccess};
 use crate::Syntax;
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
-use std::collections::HashMap;
 
 /// D-INTDIV1=A: `/` answers the true quotient, so it hands back a Float even
 /// for two whole numbers. When that Float is being stored into a whole-number
@@ -326,25 +325,25 @@ impl<'a> Checker<'a> {
     }
 
     fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
-        let (owner_name, subst) = match owner {
-            Type::Named(name) => (name.as_str(), HashMap::new()),
-            Type::Apply { name, args } => {
-                let params = self.trait_reg.struct_params.get(name)?;
-                let subst = params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                (name.as_str(), subst)
-            }
+        let (owner_name, args) = match owner {
+            Type::Named(name) => (name.as_str(), &[][..]),
+            Type::Apply { name, args } => (name.as_str(), args.as_slice()),
             Type::Tagged { inner, .. } => return self.compound_owner_field_type(inner, field),
             _ => return None,
         };
-        self.registry
-            .struct_fields(owner_name)?
+        let (import_ns, leaf) = self.struct_type_name_parts(owner_name);
+        let Some(owner_mod) = self.struct_owner_module(leaf, import_ns) else {
+            return import_ns
+                .is_none()
+                .then(|| core_struct_field_type(leaf, field, args))
+                .flatten();
+        };
+        let fields = self.struct_fields_of(owner_mod, leaf)?;
+        let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
+        fields
             .iter()
             .find(|(name, _, _)| name == field)
-            .map(|(_, _, ty)| substitute_type(ty, &subst))
+            .map(|(_, _, ty)| self.instantiate_type_for_owner(owner_mod, ty, &subst))
     }
 
     pub(in crate::Sema) fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {
@@ -365,7 +364,7 @@ impl<'a> Checker<'a> {
         match target {
             LValue::Local { name, .. } => {
                 self.lookup(name).map(|info| info.ty.clone()).or_else(|| {
-                    self.is_persist_binding(name)
+                    self.is_global_mutable_binding(name)
                         .then(|| self.consts.get(name).cloned())
                         .flatten()
                 })
@@ -635,6 +634,7 @@ impl<'a> Checker<'a> {
                 {
                     !matches!(actual, Type::Result { .. })
                         && (actual == ok.as_ref()
+                            || self.nominal_type_identity(ok.as_ref(), actual)
                             || matches!(ok.as_ref(), Type::Union(members) if members.iter().any(|member| member == actual))
                             || actual.numeric_widening_to(ok).is_some()
                             // String-backed `View<str>` values keep `String` as
@@ -1082,7 +1082,7 @@ impl<'a> Checker<'a> {
                 .lookup(name)
                 .map(|info| info.ty.clone())
                 .or_else(|| {
-                    self.is_persist_binding(name)
+                    self.is_global_mutable_binding(name)
                         .then(|| self.consts.get(name).cloned())
                         .flatten()
                 })
@@ -1261,11 +1261,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(aliasing_while_mut(name, name_span));
                         }
                         let Some(info) = self.lookup(name).cloned() else {
-                            if self.is_persist_binding(name) {
-                                // D-PERSIST-DEVSTATE1=A: the marker makes
-                                // this module binding the one legal global
-                                // write target. Its type and assignment
-                                // rules were already checked above.
+                            if self.is_global_mutable_binding(name) {
+                                // A module-level mutable binding is a legal
+                                // write target; its type was checked at
+                                // declaration registration.
                                 return;
                             }
                             if self.consts.contains_key(name.as_str()) {

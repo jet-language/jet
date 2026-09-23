@@ -1,29 +1,23 @@
-// c81 / D-PLUGIN1=B / D-DEP-WASM1=A: `target: sandbox` — a host program loads
-// an isolated WASM Component Model sandbox and calls its exported functions.
+// c81 / D-PLUGIN1=A / D-PLUGIN-EXPORT1=A / D-EMBED2=C: `target: sandbox`
+// hosts an isolated WASM Component and exposes its frozen named exports.
 // `sandbox_src/` builds `mathkit.wasm` (see its package.jet for the rebuild
 // command); this file is the HOST, an ordinary native Jet program. Loading
-// and calling the sandbox never needs `#Unsafe` (I1) — the sandbox itself is
-// the safety boundary: it runs deny-by-default with zero host authority (the
-// wasmtime host registers no host imports), so sandbox code that tried to touch
-// the filesystem or the network would fail to instantiate rather than silently
-// succeed. That is the law E1258 states at compile time.
+// and calling the sandbox never needs `#Unsafe` (I1). This particular guest
+// declares no host imports; a Component that does declare one is preflighted
+// against the guest's `authority.needs` and this host's narrowed Authority
+// before linker registration or guest execution.
 use core.plugin as plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])
     mathkit :: plugin.load("examples/features/packages/sandbox_mathkit/mathkit.wasm", policy)
-    area :: mathkit.call("scale", [6.0, 7.0]) ?? panic("scale failed")
+    area :: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
-    diag :: mathkit.call("hypot", [3.0, 4.0]) ?? panic("hypot failed")
+    diag :: mathkit.hypot(3.0, 4.0) ?? panic("hypot failed")
     print("hypot(3, 4) = {diag}")
-    divisor :: mathkit.call_int("gcd", [48, 18]) ?? panic("gcd failed")
+    divisor :: mathkit.gcd(48, 18) ?? panic("gcd failed")
     print("gcd(48, 18) = {divisor}")
-    enabled :: mathkit.call_bool("is-enabled", [true]) ?? panic("is-enabled failed")
+    enabled :: mathkit.is_enabled(true) ?? panic("is_enabled failed")
     print("is-enabled(true) = {enabled}")
-    greeting :: mathkit.call_text("greet", ["Ada"]) ?? panic("greet failed")
+    greeting :: mathkit.greet("Ada") ?? panic("greet failed")
     print("greet(Ada) = {greeting}")
-    // Calling an export the sandbox doesn't have is a clean `Err`, never a
-    // crash (I2) — the sandboxed loader always reports, never traps the host.
-    missing :: mathkit.call("nope", [1.0]) ?? -1.0
-    print("calling a missing export fails cleanly, fallback = {missing}")
-}

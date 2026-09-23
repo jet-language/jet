@@ -575,7 +575,7 @@ fn parse_snapshot_export(frozen: &ApiFreeze::FrozenFn) -> Option<PluginExportFac
         .split(" ;")
         .next()?
         .trim();
-    let source = format!("{signature} -> {{}}");
+    let source = snapshot_signature_source(signature)?;
     let (tokens, lex_diagnostics) = crate::Lexer::lex(&source);
     if !lex_diagnostics.is_empty() {
         return None;
@@ -598,6 +598,36 @@ fn parse_snapshot_export(frozen: &ApiFreeze::FrozenFn) -> Option<PluginExportFac
             .collect(),
         return_type: function.return_type,
     })
+}
+
+/// Rebuild a parseable declaration from the return-type shape written to an
+/// API snapshot. Snapshots intentionally omit the source arrow; the parser
+/// still requires it before a return type. Parameter types may themselves
+/// contain function types, so the closing parameter delimiter must be found
+/// structurally rather than with a plain `rfind(')')`.
+fn snapshot_signature_source(signature: &str) -> Option<String> {
+    let open = signature.find('(')?;
+    let mut depth = 0usize;
+    for (offset, character) in signature[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    let close = open + offset;
+                    let prefix = &signature[..=close];
+                    let return_type = signature[close + 1..].trim();
+                    return Some(if return_type.is_empty() {
+                        format!("{prefix} {{}}")
+                    } else {
+                        format!("{prefix} -> {return_type} {{}}")
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Collect every C import row after CFFI assembly. Both user overlays and
@@ -860,4 +890,25 @@ pub(crate) fn check_guest_import_surface(
         }
     }
     ok
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snapshot_signature_source;
+
+    #[test]
+    fn snapshot_source_inserts_return_arrow() {
+        assert_eq!(
+            snapshot_signature_source("fn gcd(a: Int, b: Int) Int").as_deref(),
+            Some("fn gcd(a: Int, b: Int) -> Int {}"),
+        );
+    }
+
+    #[test]
+    fn snapshot_source_handles_nested_function_types() {
+        assert_eq!(
+            snapshot_signature_source("fn apply(callback: fn(Int) Int) Int").as_deref(),
+            Some("fn apply(callback: fn(Int) Int) -> Int {}"),
+        );
+    }
 }

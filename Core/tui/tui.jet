@@ -8,17 +8,21 @@ package {
         tui: .Library{ entry: tui }
     }
 }
-// core.tui — layout facts, colors, and events for a terminal renderer.
+use core as core
+use core.ui as ui
+use core.ui.[Rect, UiNode]
+
+// core.tui — the portable terminal presentation layer.
 //
-// This file does not draw. It sizes constraints, names ANSI colors, and
-// builds event values. The host (`core.term`, a TUI backend) paints.
-// Constraints are `{kind, n}` so split can inspect them without a match.
+// Models and layout are pure.  Terminal dimensions are the sole provider
+// seam; drawing remains owned by the selected UI backend.
+
 pub enum TuiEvent {
-    Key
-    Resize
-    Timer
-    Io
-    Focus
+    Key(code: String, modifiers: Int)
+    Resize(size: ui.Size)
+    Timer(id: String, elapsed_ms: Int)
+    Io(channel: String, payload: [U8])
+    Focus(focused: Bool)
     Interrupt
     Close
 }
@@ -30,11 +34,10 @@ pub enum TuiColorProfile {
     Ascii
 }
 
-pub struct TuiColor {
-    pub kind: String
-    pub a: Int
-    pub b: Int
-    pub c: Int
+pub enum TuiColor {
+    Ansi16(Int)
+    Ansi256(Int)
+    Rgb(red: Int, green: Int, blue: Int)
 }
 
 pub enum TuiDirection {
@@ -42,278 +45,119 @@ pub enum TuiDirection {
     Vertical
 }
 
-pub struct TuiConstraint {
-    pub kind: String
-    pub n: Int
+pub enum TuiConstraint {
+    Length(Float)
+    Min(Float)
+    Max(Float)
+    Percent(Float)
+    Fill(Float)
 }
 
 pub struct TuiCapabilities {
-    pub cols: Int
-    pub rows: Int
-    pub colors: TuiColorProfile
-    pub utf8: Bool
+    pub color_profile: TuiColorProfile
+    pub color: Bool
+    pub unicode: Bool
     pub mouse: Bool
+    pub resize: Bool
+    pub clipboard: Bool
+    pub width: Int
+    pub height: Int
 }
 
 pub struct TuiStyle {
+    pub foreground: ?TuiColor
+    pub background: ?TuiColor
     pub bold: Bool
     pub dim: Bool
     pub underline: Bool
-    pub fg: TuiColor
-    pub bg: TuiColor
 }
 
 pub struct TuiListState {
     pub selected: Int
     pub offset: Int
-    pub len: Int
 }
 
-pub struct TuiLayout {
-    pub direction: TuiDirection
-    pub constraints: [TuiConstraint]
-}
-
-pub struct TuiKeyEvent {
-    pub code: String
-    pub ctrl: Bool
-    pub alt: Bool
-    pub shift: Bool
-}
-
-pub struct TuiResizeEvent {
-    pub cols: Int
-    pub rows: Int
-}
-
-pub struct TuiTimerEvent {
-    pub id: Int
-    pub millis: Int
-}
-
-pub struct TuiIoEvent {
-    pub fd: Int
-}
-
-pub struct TuiFocusEvent {
-    pub gained: Bool
-}
-
-/// Probe the connected terminal. Unknown size is 80×24.
 pub fn capabilities() -> TuiCapabilities {
-    cols :: host_tty_cols()
-    rows :: host_tty_rows()
-    c := cols
-    r := rows
-    if c <= 0 -> c = 80
-    if r <= 0 -> r = 24
-    profile := TuiColorProfile.TrueColor
-    if !host_tty_color() -> profile = TuiColorProfile.Ascii
-    {cols: c, rows: r, colors: profile, utf8: true, mouse: host_tty_mouse()}
+    core.tui.capabilities()
 }
 
-/// Force ASCII-only capabilities (no color, 80×24).
-pub fn ascii() -> TuiCapabilities {
-    {cols: 80, rows: 24, colors: TuiColorProfile.Ascii, utf8: false, mouse: false}
+pub fn ascii(value: String) -> String { core.tui.ascii(value) }
+pub fn color_ansi16(index: Int) -> TuiColor { core.tui.color_ansi16(index) }
+pub fn color_ansi256(index: Int) -> TuiColor { core.tui.color_ansi256(index) }
+pub fn color_rgb(red: Int, green: Int, blue: Int) -> TuiColor {
+    core.tui.color_rgb(red, green, blue)
 }
 
-pub fn color_ansi16(n: Int) -> TuiColor { {kind: "ansi16", a: clamp(n, 0, 15), b: 0, c: 0} }
-
-pub fn color_ansi256(n: Int) -> TuiColor { {kind: "ansi256", a: clamp(n, 0, 255), b: 0, c: 0} }
-
-pub fn color_rgb(r: Int, g: Int, b: Int) -> TuiColor {
-    {kind: "rgb", a: clamp(r, 0, 255), b: clamp(g, 0, 255), c: clamp(b, 0, 255)}
+pub fn style() -> TuiStyle { core.tui.style() }
+pub fn style_bold(s: TuiStyle, enabled: Bool) -> TuiStyle {
+    core.tui.style_bold(^s, enabled)
 }
-
-/// Display columns: ASCII 1, CJK 2, combining 0. Control bytes are 0.
-pub fn display_width(text: String) -> Int {
-    w := 0
-    raw :: text.bytes()
-    i := 0
-    loop i < raw.len() {
-        pair :: decode_cp(raw, i)
-        w = w + cp_width(pair.cp)
-        i = pair.next
-    }
-    w
+pub fn style_dim(s: TuiStyle, enabled: Bool) -> TuiStyle {
+    core.tui.style_dim(^s, enabled)
 }
-
-pub fn fill() -> TuiConstraint { {kind: "fill", n: 0} }
-
-pub fn style() -> TuiStyle {
-    {bold: false, dim: false, underline: false, fg: color_ansi16(7), bg: color_ansi16(0)}
+pub fn style_underline(s: TuiStyle, enabled: Bool) -> TuiStyle {
+    core.tui.style_underline(^s, enabled)
 }
-
-pub fn style_bold(s: TuiStyle) -> TuiStyle { copy_style(s, true, s.dim, s.underline, s.fg, s.bg) }
-
-pub fn style_dim(s: TuiStyle) -> TuiStyle { copy_style(s, s.bold, true, s.underline, s.fg, s.bg) }
-
-pub fn style_underline(s: TuiStyle) -> TuiStyle { copy_style(s, s.bold, s.dim, true, s.fg, s.bg) }
-
 pub fn style_foreground(s: TuiStyle, color: TuiColor) -> TuiStyle {
-    copy_style(s, s.bold, s.dim, s.underline, color, s.bg)
+    core.tui.style_foreground(^s, color)
 }
-
 pub fn style_background(s: TuiStyle, color: TuiColor) -> TuiStyle {
-    copy_style(s, s.bold, s.dim, s.underline, s.fg, color)
+    core.tui.style_background(^s, color)
+}
+pub fn style_text(value: String, s: TuiStyle, caps: TuiCapabilities) -> String {
+    core.tui.style_text(value, s, caps)
+}
+pub fn display_width(value: String) -> Int { core.tui.display_width(value) }
+
+pub fn length(value: Float) -> TuiConstraint { core.tui.length(value) }
+pub fn min(value: Float) -> TuiConstraint { core.tui.min(value) }
+pub fn max(value: Float) -> TuiConstraint { core.tui.max(value) }
+pub fn percent(value: Float) -> TuiConstraint { core.tui.percent(value) }
+pub fn fill(weight: Float) -> TuiConstraint { core.tui.fill(weight) }
+pub fn horizontal() -> TuiDirection { core.tui.horizontal() }
+pub fn vertical() -> TuiDirection { core.tui.vertical() }
+
+pub fn layout(area: Rect, direction: TuiDirection, constraints: [TuiConstraint]) -> [Rect] {
+    owned_constraints :: ~constraints
+    core.tui.layout(area, direction, ^owned_constraints)
 }
 
-pub fn style_text(s: TuiStyle) -> TuiStyle { s }
-
-pub fn layout() -> TuiLayout { {direction: TuiDirection.Vertical, constraints: [TuiConstraint]{}} }
-
-pub fn horizontal() -> TuiLayout {
-    {direction: TuiDirection.Horizontal, constraints: [TuiConstraint]{}}
+pub fn list(items: [String]) -> UiNode {
+    owned_items :: ~items
+    core.tui.list(^owned_items)
+}
+pub fn table(headers: [String], rows: [[String]]) -> ui.UiNode {
+    owned_headers :: ~headers
+    owned_rows :: ~rows
+    core.tui.table(^owned_headers, ^owned_rows)
 }
 
-pub fn vertical() -> TuiLayout {
-    {direction: TuiDirection.Vertical, constraints: [TuiConstraint]{}}
-}
-
-pub fn length(n: Int) -> TuiConstraint { {kind: "length", n: clamp(n, 0, 100000)} }
-
-pub fn min(n: Int) -> TuiConstraint { {kind: "min", n: clamp(n, 0, 100000)} }
-
-pub fn max(n: Int) -> TuiConstraint { {kind: "max", n: clamp(n, 0, 100000)} }
-
-pub fn percent(n: Int) -> TuiConstraint { {kind: "percent", n: clamp(n, 0, 100)} }
-
-/// Split `total` along `layout.constraints`. Lengths are assigned first
-/// then percents of the remainder, then fill shares. Results are ≥0 and
-/// sum to `total` (remainder goes to the last fill / last constraint).
-pub fn split(layout: TuiLayout, total: Int) -> [Int] {
-    cs :: layout.constraints
-    n :: cs.len()
-    if n == 0 -> return [Int]{}
-    sizes := [Int]{}
-    loop i in 0..<n -> sizes.push(0)
-    remain := total
-    if remain < 0 -> remain = 0
-    loop i in 0..<n {
-        c :: cs[i]
-        if c.kind == "length" {
-            v := c.n
-            if v > remain -> v = remain
-            sizes[i] = v
-            remain = remain - v
-        }
-    }
-    loop i in 0..<n {
-        c :: cs[i]
-        if c.kind == "percent" -> sizes[i] = (remain * c.n) / 100
-    }
-    spent := 0
-    loop i in 0..<n -> spent = spent + sizes[i]
-    remain = total - spent
-    if remain < 0 -> remain = 0
-    fills := 0
-    loop i in 0..<n {
-        if cs[i].kind == "fill" || cs[i].kind == "min" -> fills = fills + 1
-    }
-    if fills == 0 {
-        sizes[n - 1] = sizes[n - 1] + remain
-        return sizes
-    }
-    share :: remain / fills
-    extra :: remain % fills
-    seen := 0
-    loop i in 0..<n {
-        if cs[i].kind == "fill" || cs[i].kind == "min" {
-            add := share
-            if seen == fills - 1 -> add = add + extra
-            v := sizes[i] + add
-            if cs[i].kind == "min" && v < cs[i].n -> v = cs[i].n
-            if cs[i].kind == "max" && v > cs[i].n -> v = cs[i].n
-            sizes[i] = v
-            seen = seen + 1
-        }
-    }
-    sizes
-}
-
-pub fn list() -> TuiListState { {selected: 0, offset: 0, len: 0} }
-
-pub fn list_state() -> TuiListState { list() }
-
+pub fn list_state() -> TuiListState { core.tui.list_state() }
 pub fn list_state_select(state: TuiListState, index: Int) -> TuiListState {
-    i := index
-    if i < 0 -> i = 0
-    if state.len > 0 && i >= state.len -> i = state.len - 1
-    off := state.offset
-    if i < off -> off = i
-    {selected: i, offset: off, len: state.len}
+    core.tui.list_state_select(^state, index)
+}
+pub fn list_state_selected(state: TuiListState) -> Int {
+    core.tui.list_state_selected(state)
+}
+pub fn list_state_offset(state: TuiListState, offset: Int) -> TuiListState {
+    core.tui.list_state_offset(^state, offset)
 }
 
-pub fn list_state_selected(state: TuiListState) -> Int { state.selected }
-
-pub fn list_state_offset(state: TuiListState) -> Int { state.offset }
-
-pub fn table() -> TuiLayout {
-    {direction: TuiDirection.Vertical, constraints: [TuiConstraint]{TuiConstraint{kind: "fill", n: 0}}}
+pub fn key_event(code: String) -> TuiEvent { core.tui.key_event(code) }
+pub fn key_event_modifiers(code: String, modifiers: Int) -> TuiEvent {
+    core.tui.key_event_modifiers(code, modifiers)
 }
-
-pub fn key_event(code: String) -> TuiKeyEvent {
-    {code: code, ctrl: false, alt: false, shift: false}
+pub fn resize_event(width: Float, height: Float) -> TuiEvent {
+    core.tui.resize_event(width, height)
 }
-
-pub fn key_event_modifiers(code: String, ctrl: Bool, alt: Bool, shift: Bool) -> TuiKeyEvent {
-    {code: code, ctrl: ctrl, alt: alt, shift: shift}
+pub fn timer_event(id: String, elapsed_ms: Int) -> TuiEvent {
+    core.tui.timer_event(id, elapsed_ms)
 }
-
-pub fn resize_event(cols: Int, rows: Int) -> TuiResizeEvent { {cols: cols, rows: rows} }
-
-pub fn timer_event(id: Int, millis: Int) -> TuiTimerEvent { {id: id, millis: millis} }
-
-pub fn io_event(fd: Int) -> TuiIoEvent { {fd: fd} }
-
-pub fn focus_event(gained: Bool) -> TuiFocusEvent { {gained: gained} }
-
-pub fn interrupt_event() -> TuiEvent { TuiEvent.Interrupt }
-
-pub fn close_event() -> TuiEvent { TuiEvent.Close }
-
-fn copy_style(s: TuiStyle, bold: Bool, dim: Bool, underline: Bool, fg: TuiColor, bg: TuiColor) -> TuiStyle {
-    {bold: bold, dim: dim, underline: underline, fg: fg, bg: bg}
+pub fn io_event(channel: String, payload: [U8]) -> TuiEvent {
+    owned_payload :: ~payload
+    core.tui.io_event(channel, ^owned_payload)
 }
+pub fn focus_event(focused: Bool) -> TuiEvent { core.tui.focus_event(focused) }
+pub fn interrupt_event() -> TuiEvent { core.tui.interrupt_event() }
+pub fn close_event() -> TuiEvent { core.tui.close_event() }
 
-fn clamp(n: Int, lo: Int, hi: Int) -> Int {
-    if n < lo -> return lo
-    if n > hi -> return hi
-    n
-}
-
-pub struct DecodePair {
-    pub cp: Int
-    pub next: Int
-}
-
-fn decode_cp(raw: [U8], i: Int) -> DecodePair {
-    if i >= raw.len() -> return ({cp: 0, next: i})
-    n :: raw[i]
-    if n < 128 -> return ({cp: n, next: i + 1})
-    if n < 224 && i + 1 < raw.len() -> return ({cp: ((n - 192) * 64) + (raw[i + 1]), next: i + 2})
-    if n < 240 && i + 2 < raw.len() {
-        return ({cp: ((n - 224) * 4096) + ((raw[i + 1]) * 64) + (raw[i + 2]), next: i + 3})
-    }
-    if i + 3 < raw.len() {
-        return ({cp: ((n - 240) * 262144) + ((raw[i + 1]) * 4096) + ((raw[i + 2]) * 64) + (raw[i + 3]), next: i + 4})
-    }
-    {cp: 65533, next: i + 1}
-}
-
-fn cp_width(cp: Int) -> Int {
-    if cp == 0 -> return 0
-    if cp < 32 -> return 0
-    if cp >= 127 && cp < 160 -> return 0
-    if cp >= 768 && cp <= 879 -> return 0
-    if cp >= 11008 -> return 2
-    1
-}
-
-fn host_tty_cols() -> Int { panic("host_tty_cols") }
-
-fn host_tty_rows() -> Int { panic("host_tty_rows") }
-
-fn host_tty_color() -> Bool { panic("host_tty_color") }
-
-fn host_tty_mouse() -> Bool { panic("host_tty_mouse") }

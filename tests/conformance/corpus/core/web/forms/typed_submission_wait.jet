@@ -2,5 +2,7 @@
 use core.web.forms as api
 
 fn run() {
-    print(api.typed_submission_wait(WebForm{}))
+    form :: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    submission :: api.typed_submit_async(form)
+    print(api.typed_submission_wait(submission))
 }

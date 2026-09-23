@@ -13,3 +13,37 @@ pub fn loading() -> Loadable { Loadable.Loading }
 pub fn loaded(value: Int) -> Loadable { Loadable.Loaded(value) }
 
 pub fn failed(reason: String) -> Loadable { Loadable.Failed(reason) }
+
+pub fn is_idle(state: Loadable) -> Bool { state == Loadable.Idle }
+pub fn is_loading(state: Loadable) -> Bool { state == Loadable.Loading }
+pub fn is_loaded(state: Loadable) -> Bool {
+    if state == {
+        .Loaded(_) -> true
+        else -> false
+    }
+}
+pub fn is_failed(state: Loadable) -> Bool {
+    if state == {
+        .Failed(_) -> true
+        else -> false
+    }
+}
+
+pub fn value(state: Loadable) -> ?Int {
+    if state == {
+        .Loaded(value) -> Val(value)
+        else -> None
+    }
+}
+
+pub fn reason(state: Loadable) -> ?String {
+    if state == {
+        .Failed(message) -> Val(message)
+        else -> None
+    }
+}
+
+pub fn retry(state: Loadable) -> Loadable {
+    if is_failed(state) || is_idle(state) -> return Loadable.Loading
+    ~state
+}

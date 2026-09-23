@@ -142,7 +142,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode",
             )
-            | ("core.sys", "decode")
             | ("core.db", "decode")
             | ("core.encoding.csv", "query")
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
@@ -403,11 +402,9 @@ fn web_apply(name: &str, arg: Type) -> Type {
     }
 }
 
-fn web_result(ok: Type) -> Type {
-    result_ty(ok, Type::String)
-}
-fn web_callback_result(ok: Type) -> Type {
-    result_ty(ok, Type::Named(Syntax::TYPE_ERR.to_string()))
+
+fn web_result_error(ok: Type, error: &str) -> Type {
+    result_ty(ok, web_named(error))
 }
 
 fn web_fixed_sig(
@@ -436,13 +433,10 @@ fn web_fixed_sig(
     let query = web_named("WebQuery");
     let query_mode = web_named("WebQueryNetworkMode");
     let mutation_state = web_named("WebMutationState");
-    let query_mutation = web_fn(
-        string.clone(),
-        web_callback_result(string.clone()),
-    );
-    let query_replay = web_fn(string.clone(), web_callback_result(unit_ty()));
+    let query_mutation = web_fn(string.clone(), string.clone());
+    let query_replay = web_fn(string.clone(), unit_ty());
     let form_action_error = web_named("WebFormActionError");
-    let signal = web_apply("Signal", t.clone());
+    let signal = string.clone();
     let form = web_named("WebForm");
     let form_input = web_named("WebFormInput");
     let form_field = web_named("WebFormFieldSpec");
@@ -451,12 +445,23 @@ fn web_fixed_sig(
     let form_decoded = web_named("WebFormDecodedInput");
     let form_errors = web_named("WebFormErrorState");
     let form_lifecycle = web_named("WebFormLifecycle");
-    let form_validation = web_named("WebFormTypedValidation");
+    let form_validation = web_named("WebFormValidation");
     let form_timing = web_named("WebFormValidationTiming");
-    let form_validator = web_fn(string.clone(), web_callback_result(unit_ty()));
+    let form_validator = web_fn(string.clone(), unit_ty());
     let form_submission = web_named("WebFormTypedSubmission");
-    let form_subscription = web_apply("Derived", web_named("WebFormFieldState"));
+    let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
+        ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
+        ("core.data.sketch", "merge") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(string.clone()),
+        )),
+        ("core.web.storage", "local" | "session") => {
+            Some((vec![], Some(web_named("WebStorage"))))
+        }
+        ("core.web.storage", "kind_local" | "kind_session") => {
+            Some((vec![], Some(string.clone())))
+        }
         // D-WEBFORM1=A: the ratified `web.form(Model, action: handler)`
         // surface lowers to the existing typed-form runtime boundary. Sema
         // replaces the model/action source values with a derived input and
@@ -472,9 +477,9 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, web_list(router_field.clone())),
                 (read, web_list(router_field.clone())),
-                (read, web_fn(navigation.clone(), web_callback_result(string.clone()))),
+                (read, web_fn(navigation.clone(), string.clone())),
             ],
-            Some(web_result(router.clone())),
+            Some(web_result_error(router.clone(), "WebRouterError")),
         )),
         ("core.web.router", "route_with_search_codec") => Some((
             vec![
@@ -483,20 +488,20 @@ fn web_fixed_sig(
                 (read, web_list(router_field.clone())),
                 (read, web_list(router_field.clone())),
                 (read, router_codec.clone()),
-                (read, web_fn(navigation.clone(), web_callback_result(string.clone()))),
+                (read, web_fn(navigation.clone(), string.clone())),
             ],
-            Some(web_result(router.clone())),
+            Some(web_result_error(router.clone(), "WebRouterError")),
         )),
         ("core.web.router", "not_found") => Some((
             vec![
                 (read, router.clone()),
                 (read, web_fn(string.clone(), string.clone())),
             ],
-            Some(web_result(router.clone())),
+            Some(web_result_error(router.clone(), "WebRouterError")),
         )),
         ("core.web.router", "navigate" | "preload") => Some((
             vec![(read, router.clone()), (read, string.clone())],
-            Some(web_result(web_named("WebNavigation"))),
+            Some(web_result_error(navigation.clone(), "WebRouterError")),
         )),
         ("core.web.router", "abort") => {
             Some((vec![(read, router.clone())], Some(bool_.clone())))
@@ -507,7 +512,7 @@ fn web_fixed_sig(
         )),
         ("core.web.router", "cache_state") => Some((
             vec![(read, router.clone()), (read, string.clone())],
-            Some(web_named("WebRouterCacheState")),
+            Some(web_named("WebRouterCacheStatus")),
         )),
         ("core.web.router", "cache_show") => {
             Some((vec![(read, router)], Some(string.clone())))
@@ -524,7 +529,7 @@ fn web_fixed_sig(
                 (read, web_map_string()),
                 (read, web_map_string()),
             ],
-            Some(web_result(string.clone())),
+            Some(web_result_error(string.clone(), "WebRouterError")),
         )),
         ("core.web.query", "new") => Some((
             vec![(read, string.clone()), (read, web_named("LiveQuery"))],
@@ -537,7 +542,7 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, Type::Fn {
                     params: vec![],
-                    ret: Some(Box::new(web_callback_result(string.clone()))),
+                    ret: Some(Box::new(string.clone())),
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
@@ -567,7 +572,7 @@ fn web_fixed_sig(
         )),
         ("core.web.query", "retry") => Some((
             vec![(read, query.clone()), (read, query_replay)],
-            Some(web_result(int.clone())),
+            Some(web_result_error(int.clone(), "WebQueryError")),
         )),
         ("core.web.query", "subscribe") => {
             Some((vec![(read, string.clone())], Some(query.clone())))
@@ -596,10 +601,10 @@ fn web_fixed_sig(
         )),
         ("core.web.query", "queue") => Some((
             vec![(read, query.clone()), (read, string.clone())],
-            Some(web_result(int.clone())),
+            Some(web_result_error(int.clone(), "WebQueryError")),
         )),
         ("core.web.query", "refresh") => {
-            Some((vec![(read, query)], Some(web_result(unit_ty()))))
+            Some((vec![(read, query)], Some(web_result_error(unit_ty(), "WebQueryError"))))
         }
         ("core.web.query", "facts") => {
             Some((vec![(read, query.clone())], Some(string.clone())))
@@ -623,7 +628,7 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, bool_.clone()),
             ],
-            Some(web_result(form.clone())),
+            Some(web_result_error(form.clone(), "WebFormError")),
         )),
         ("core.web.forms", "set") => Some((
             vec![
@@ -631,14 +636,14 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, string.clone()),
             ],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "blur") => Some((
             vec![(read, form.clone()), (read, string.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "validate") => {
-            Some((vec![(read, form.clone())], Some(web_result(unit_ty()))))
+            Some((vec![(read, form.clone())], Some(web_result_error(unit_ty(), "WebFormError"))))
         }
         ("core.web.forms", "validate_async") => Some((
             vec![(read, form.clone())],
@@ -646,7 +651,7 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "submit" | "no_script") => Some((
             vec![(read, form.clone())],
-            Some(web_result(string.clone())),
+            Some(web_result_error(string.clone(), "WebFormError")),
         )),
         ("core.web.forms", "html" | "show") => {
             Some((vec![(read, form.clone())], Some(string.clone())))
@@ -656,7 +661,7 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, web_list(form_field.clone())),
             ],
-            Some(web_result(form_input.clone())),
+            Some(web_result_error(form_input.clone(), "WebFormError")),
         )),
         ("core.web.forms", "input_rename") => Some((
             vec![
@@ -664,11 +669,11 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, string.clone()),
             ],
-            Some(web_result(form_input.clone())),
+            Some(web_result_error(form_input.clone(), "WebFormError")),
         )),
         ("core.web.forms", "input_exclude") => Some((
             vec![(read, form_input.clone()), (read, string.clone())],
-            Some(web_result(form_input.clone())),
+            Some(web_result_error(form_input.clone(), "WebFormError")),
         )),
         ("core.web.forms", "input_group") => Some((
             vec![
@@ -676,7 +681,7 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, string.clone()),
             ],
-            Some(web_result(form_input.clone())),
+            Some(web_result_error(form_input.clone(), "WebFormError")),
         )),
         ("core.web.forms", "input_replace") => Some((
             vec![
@@ -684,11 +689,11 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, form_field.clone()),
             ],
-            Some(web_result(form_input.clone())),
+            Some(web_result_error(form_input.clone(), "WebFormError")),
         )),
         ("core.web.forms", "typed") => Some((
             vec![(read, form_input.clone()), (read, string.clone())],
-            Some(web_result(form_typed.clone())),
+            Some(web_result_error(form_typed.clone(), "WebFormError")),
         )),
         ("core.web.forms", "typed_set") => Some((
             vec![
@@ -696,7 +701,7 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, string.clone()),
             ],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_set_async_validator") => Some((
             vec![
@@ -706,17 +711,14 @@ fn web_fixed_sig(
                 (read, int.clone()),
                 (read, form_validator.clone()),
             ],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_set_action") => Some((
             vec![
                 (read, form_typed.clone()),
                 (
                     read,
-                    web_fn(
-                        form_decoded.clone(),
-                        result_ty(string.clone(), form_action_error.clone()),
-                    ),
+                    web_fn(form_decoded.clone(), string.clone()),
                 ),
             ],
             Some(unit_ty()),
@@ -736,11 +738,11 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_blur") => Some((
             vec![(read, form_typed.clone()), (read, string.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_validate") => Some((
             vec![(read, form_typed.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_validate_async") => Some((
             vec![(read, form_typed.clone())],
@@ -762,7 +764,7 @@ fn web_fixed_sig(
         ("core.web.forms", "typed_submit") | ("core.web.forms", "typed_no_script") => {
             Some((
                 vec![(read, form_typed.clone())],
-                Some(web_result(string.clone())),
+                Some(web_result_error(string.clone(), "WebFormError")),
             ))
         }
         ("core.web.forms", "typed_submit_async") => Some((
@@ -771,11 +773,11 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_post") => Some((
             vec![(read, form_typed.clone()), (read, string.clone())],
-            Some(web_result(string.clone())),
+            Some(web_result_error(string.clone(), "WebFormError")),
         )),
         ("core.web.forms", "typed_decode_post") => Some((
             vec![(read, form_typed.clone()), (read, string.clone())],
-            Some(web_result(form_decoded.clone())),
+            Some(web_result_error(form_decoded.clone(), "WebFormError")),
         )),
         ("core.web.forms", "typed_html" | "typed_show") => Some((
             vec![(read, form_typed.clone())],
@@ -783,7 +785,7 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_state") => Some((
             vec![(read, form_typed.clone())],
-            Some(web_named("WebFormState")),
+            Some(string.clone()),
         )),
         ("core.web.forms", "typed_lifecycle") => Some((
             vec![(read, form_typed.clone())],
@@ -795,7 +797,7 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_focus") => Some((
             vec![(read, form_typed.clone()), (read, string.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_cancel") => Some((
             vec![(read, form_typed.clone())],
@@ -803,11 +805,11 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_select_field") => Some((
             vec![(read, form_typed), (read, string)],
-            Some(web_result(form_subscription)),
+            Some(web_result_error(form_field_state, "WebFormError")),
         )),
         ("core.web.forms", "typed_validation_wait") => Some((
             vec![(AccessConvention::Move, form_validation.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebFormError")),
         )),
         ("core.web.forms", "typed_validation_cancel") => Some((
             vec![(read, form_validation)],
@@ -815,7 +817,7 @@ fn web_fixed_sig(
         )),
         ("core.web.forms", "typed_submission_wait") => Some((
             vec![(AccessConvention::Move, form_submission.clone())],
-            Some(web_result(string.clone())),
+            Some(web_result_error(string.clone(), "WebFormError")),
         )),
         ("core.web.forms", "typed_submission_cancel") => Some((
             vec![(read, form_submission)],
@@ -848,13 +850,7 @@ fn web_fixed_sig(
         ("core.web.table", "with_server_page") => Some((
             vec![
                 (read, table.clone()),
-                (
-                    read,
-                    web_fn(
-                        table_state.clone(),
-                        web_callback_result(table_page.clone()),
-                    ),
-                ),
+                (read, web_fn(table_state.clone(), table_page.clone())),
             ],
             Some(table.clone()),
         )),
@@ -862,11 +858,11 @@ fn web_fixed_sig(
         ("core.web.table", "facts") => Some((vec![(read, table.clone())], Some(string.clone()))),
         ("core.web.table", "keys") => Some((
             vec![(read, table.clone())],
-            Some(web_result(web_list(string.clone()))),
+            Some(web_result_error(web_list(string.clone()), "WebTableError")),
         )),
         ("core.web.table", "page_state") => Some((
             vec![(read, table.clone())],
-            Some(web_result(table_page.clone())),
+            Some(web_result_error(table_page.clone(), "WebTableError")),
         )),
         ("core.web.table", "sort") => Some((
             vec![
@@ -905,19 +901,19 @@ fn web_fixed_sig(
         )),
         ("core.web.table", "set_rows") => Some((
             vec![(read, table.clone()), (read, web_list(t.clone()))],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebTableError")),
         )),
         ("core.web.table", "set_selected") => Some((
             vec![(read, table.clone()), (read, string.clone()), (read, bool_.clone())],
-            Some(web_result(table.clone())),
+            Some(web_result_error(table.clone(), "WebTableError")),
         )),
         ("core.web.table", "toggle_selection") => Some((
             vec![(read, table.clone()), (read, string.clone())],
-            Some(web_result(table.clone())),
+            Some(web_result_error(table.clone(), "WebTableError")),
         )),
         ("core.web.table", "focus") => Some((
             vec![(read, table.clone()), (read, string.clone())],
-            Some(web_result(table.clone())),
+            Some(web_result_error(table.clone(), "WebTableError")),
         )),
         ("core.web.table", "clear_focus") => {
             Some((vec![(read, table.clone())], Some(table.clone())))
@@ -935,15 +931,15 @@ fn web_fixed_sig(
         )),
         ("core.web.table", "selected_rows") => Some((
             vec![(read, table.clone())],
-            Some(web_result(web_list(table_row.clone()))),
+            Some(web_result_error(web_list(table_row.clone()), "WebTableError")),
         )),
         ("core.web.table", "insert_row") => Some((
             vec![(read, table.clone()), (read, t.clone())],
-            Some(web_result(string.clone())),
+            Some(web_result_error(string.clone(), "WebTableError")),
         )),
         ("core.web.table", "replace_row") => Some((
             vec![(read, table.clone()), (read, string.clone()), (read, t.clone())],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebTableError")),
         )),
         ("core.web.table", "update_row") => Some((
             vec![
@@ -951,11 +947,11 @@ fn web_fixed_sig(
                 (read, string.clone()),
                 (read, web_fn(t.clone(), t.clone())),
             ],
-            Some(web_result(unit_ty())),
+            Some(web_result_error(unit_ty(), "WebTableError")),
         )),
         ("core.web.table", "remove_row") => Some((
             vec![(read, table.clone()), (read, string.clone())],
-            Some(web_result(t.clone())),
+            Some(web_result_error(t.clone(), "WebTableError")),
         )),
         ("core.web.table", "first_page" | "next_page") => Some((
             vec![(read, table.clone())],
@@ -963,11 +959,11 @@ fn web_fixed_sig(
         )),
         ("core.web.table", "last_page") => Some((
             vec![(read, table.clone())],
-            Some(web_result(table.clone())),
+            Some(web_result_error(table.clone(), "WebTableError")),
         )),
         ("core.web.table", "visible_rows") => Some((
             vec![(read, table.clone()), (read, virtual_plan.clone())],
-            Some(web_result(web_list(table_row))),
+            Some(web_result_error(web_list(table_row), "WebTableError")),
         )),
         ("core.web.virtual", "window") => Some((
             vec![
@@ -1213,7 +1209,7 @@ fn web_fixed_sig(
         )),
         ("core.web.store", "inspect") => Some((
             vec![(read, web_apply("WebStore", t.clone()))],
-            Some(web_apply("WebStoreInspection", t.clone())),
+            Some(web_named("WebStoreInspection")),
         )),
         ("core.web.store", "facts_json" | "event_json") => Some((
             vec![(read, web_apply("WebStore", t))],
@@ -1240,6 +1236,11 @@ fn core_fixed_sig_impl(
         args: vec![Type::Float],
     };
     let io = io_error_ty();
+    let time_error = Type::Named("TimeError".to_string());
+    let archive_error = Type::Named("ArchiveError".to_string());
+    let gzip_error = Type::Named("GzipFileError".to_string());
+    let zstd_error = Type::Named("ZstdFileError".to_string());
+    let crypto_error = Type::Named("CryptoError".to_string());
     let json = json_ty();
     let list_u8 = Type::List(Box::new(u8_ty()));
     let list_float = Type::List(Box::new(Type::Float));
@@ -1447,6 +1448,14 @@ fn core_fixed_sig_impl(
         ("core.process", "argv" | "args") => {
             Some((vec![], Some(Type::List(Box::new(Type::String)))))
         }
+        ("core.process", "check") => Some((
+            vec![(read, Type::Named("ProcessReceipt".to_string()))],
+            Some(result_ty(unit.clone(), io.clone())),
+        )),
+        ("core.process", "status_ok") => Some((
+            vec![(read, Type::Named("ProcessReceipt".to_string()))],
+            Some(Type::Bool),
+        )),
         ("core.term", "confirm") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.term", "choose") => Some((
             vec![
@@ -1560,34 +1569,6 @@ fn core_fixed_sig_impl(
         ("core.sys", "set_current_dir") => Some((
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
-        )),
-        ("core.sys", "on_interrupt") => Some((
-            vec![(
-                read,
-                Type::Fn {
-                    params: vec![],
-                    ret: None,
-                    effect_bound: None,
-                    return_view_provenance: None,
-                    param_contract: None,
-                    call_metadata: None,
-                },
-            )],
-            None,
-        )),
-        ("core.sys", "atexit") => Some((
-            vec![(
-                read,
-                Type::Fn {
-                    params: vec![],
-                    ret: None,
-                    effect_bound: None,
-                    return_view_provenance: None,
-                    param_contract: None,
-                    call_metadata: None,
-                },
-            )],
-            None,
         )),
         ("core.sys", "fork" | "setsid" | "wait") => {
             Some((vec![], Some(result_ty(Type::Int, io_error_ty()))))
@@ -1817,17 +1798,6 @@ fn core_fixed_sig_impl(
         ("core.process", "on_signal") => Some((
             vec![(read, Type::Named("ProcessSignal".to_string()))],
             Some(unit.clone()),
-        )),
-        ("core.process", "workspace") => Some((
-            vec![],
-            Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
-        )),
-        ("core.process", "run") => Some((
-            vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
-            Some(result_ty(
-                Type::Named("ProcessReceipt".to_string()),
-                io_error_ty(),
-            )),
         )),
         ("core.process", "cmd") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
@@ -2505,16 +2475,12 @@ fn core_fixed_sig_impl(
         ("core.math.random", "paretovariate") => {
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
-        ("core.math.random", "binomialvariate") => Some((
-            vec![(read, Type::Int), (read, Type::Float)],
-            Some(Type::Int),
-        )),
         // D-CRYPTO-RNG1=A: fail-closed bytes from the target's tier-1 OS CSPRNG.
-        // Edition 2026 keeps the infallible source shape and takes E3001/exit 70
-        // on invalid length or provider failure; no weak fallback exists.
-        ("core.crypto.random", "bytes") => {
-            Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
-        }
+        // Invalid lengths and provider failures stay visible as CryptoError.
+        ("core.crypto.random", "bytes") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(list_u8.clone(), crypto_error.clone())),
+        )),
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
@@ -2575,7 +2541,9 @@ fn core_fixed_sig_impl(
         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
-        ("core.time", "now_utc") => Some((vec![], Some(Type::Named("DateTime".to_string())))),
+        ("core.time", "now") | ("core.time", "now_utc") => {
+            Some((vec![], Some(Type::Named("DateTime".to_string()))))
+        }
         ("core.time", "from_unix_ms") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("DateTime".to_string())),
@@ -2587,29 +2555,32 @@ fn core_fixed_sig_impl(
             Some(Type::Named("DateTime".to_string())),
         )),
         ("core.time", "today") => Some((vec![], Some(Type::Named("LocalDate".to_string())))),
-        ("core.time", "parse_rfc3339") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::Named("DateTime".to_string()), Type::String)),
-        )),
-        ("core.time", "parse_iso_week_date") => Some((
+        ("core.time", "parse" | "parse_iso_week_date") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("LocalDate".to_string()),
-                Type::String,
+                time_error.clone(),
+            )),
+        )),
+        ("core.time", "parse_rfc3339") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("DateTime".to_string()),
+                time_error.clone(),
             )),
         )),
         ("core.time", "from_iso_week") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("LocalDate".to_string()),
-                Type::String,
+                time_error.clone(),
             )),
         )),
         ("core.time", "parse_zoned") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("ZonedDateTime".to_string()),
-                Type::String,
+                time_error.clone(),
             )),
         )),
         ("core.time", "datetime") => Some((
@@ -2635,7 +2606,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("LocalTime".to_string()),
-                Type::String,
+                time_error.clone(),
             )),
         )),
         ("core.time", "period") => Some((
@@ -2648,7 +2619,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.time", "zone") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("Zone".to_string()), Type::String)),
+            Some(result_ty(Type::Named("Zone".to_string()), time_error.clone())),
         )),
         ("core.time", "utc") => Some((vec![], Some(Type::Named("Zone".to_string())))),
         ("core.time", "zoned") => Some((
@@ -2667,7 +2638,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(
                 Type::Named("ZonedDateTime".to_string()),
-                Type::String,
+                time_error,
             )),
         )),
         ("core.game", "run") => Some((
@@ -3816,7 +3787,7 @@ fn core_fixed_sig_impl(
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.net.url", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+            Some(result_ty(Type::Named("URL".to_string()), Type::String)),
         )),
         ("core.net.url", "from_parts") => Some((
             vec![
@@ -3829,18 +3800,18 @@ fn core_fixed_sig_impl(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+            Some(result_ty(Type::Named("URL".to_string()), Type::String)),
         )),
         ("core.net.url", "file") => Some((
             vec![(read, Type::String)],
-            Some(Type::Named("Url".to_string())),
+            Some(Type::Named("URL".to_string())),
         )),
         ("core.net.url", "data") => Some((
             vec![
-                (read, Type::Named("Mime".to_string())),
+                (read, Type::Named("MIME".to_string())),
                 (read, Type::String),
             ],
-            Some(Type::Named("Url".to_string())),
+            Some(Type::Named("URL".to_string())),
         )),
         ("core.net.url", "query") => Some((
             vec![(
@@ -3857,7 +3828,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::String, Type::String)),
         )),
         ("core.net.url", "geturl" | "unparse" | "urlunparse" | "urlunsplit") => Some((
-            vec![(read, Type::Named("Url".to_string()))],
+            vec![(read, Type::Named("URL".to_string()))],
             Some(Type::String),
         )),
         ("core.net.url", "urljoin") => Some((
@@ -3898,7 +3869,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.url", "urlparse" | "urlsplit") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+            Some(result_ty(Type::Named("URL".to_string()), Type::String)),
         )),
         ("core.net.url", "urldefrag") => Some((
             vec![(read, Type::String)],
@@ -3909,7 +3880,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.mime", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("Mime".to_string()), Type::String)),
+            Some(result_ty(Type::Named("MIME".to_string()), Type::String)),
         )),
         ("core.net.mime", "from_extension" | "extension") => Some((
             vec![(read, Type::String)],
@@ -4782,7 +4753,7 @@ fn core_fixed_sig_impl(
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
-                Type::Named("TcpListener".to_string()),
+                Type::Named("TCPListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -4826,31 +4797,31 @@ fn core_fixed_sig_impl(
         ("core.net", "tcp_listen_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
-                Type::Named("TcpListener".to_string()),
+                Type::Named("TCPListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_accept") => Some((
             vec![(
                 AccessConvention::Read,
-                Type::Named("TcpListener".to_string()),
+                Type::Named("TCPListener".to_string()),
             )],
             Some(result_ty(
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -4860,21 +4831,21 @@ fn core_fixed_sig_impl(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect_happy") => Some((
             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_read") => Some((
             vec![(
                 AccessConvention::Write,
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
             )],
             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
@@ -4882,7 +4853,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::String),
             ],
@@ -4892,7 +4863,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Int),
             ],
@@ -4905,7 +4876,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Int),
             ],
@@ -4915,7 +4886,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
@@ -4925,7 +4896,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
@@ -4935,7 +4906,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::String),
             ],
@@ -4945,7 +4916,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Named("NetShutdown".to_string())),
             ],
@@ -4954,7 +4925,7 @@ fn core_fixed_sig_impl(
         ("core.net", "tcp_close") => Some((
             vec![(
                 AccessConvention::Write,
-                Type::Named("TcpStream".to_string()),
+                Type::Named("TCPStream".to_string()),
             )],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
@@ -4962,7 +4933,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Named("NetReadyInterest".to_string())),
                 (read, Type::Int),
@@ -4989,18 +4960,18 @@ fn core_fixed_sig_impl(
             Some(Type::Option(Box::new(Type::Int))),
         )),
         ("core.net", "tcp_local_addr" | "tcp_peer_addr") => Some((
-            vec![(read, Type::Named("TcpStream".to_string()))],
+            vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
-            vec![(read, Type::Named("TcpStream".to_string()))],
+            vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "listener_local_socket_addr") => Some((
-            vec![(read, Type::Named("TcpListener".to_string()))],
+            vec![(read, Type::Named("TCPListener".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
@@ -5010,7 +4981,7 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Int),
             ],
@@ -5020,49 +4991,49 @@ fn core_fixed_sig_impl(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Int),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "nodelay") => Some((
-            vec![(read, Type::Named("TcpStream".to_string()))],
+            vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Bool, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "set_nodelay") => Some((
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Bool),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "ttl") => Some((
-            vec![(read, Type::Named("TcpStream".to_string()))],
+            vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "set_ttl") => Some((
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::Int),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "socket_type") => Some((
-            vec![(read, Type::Named("TcpStream".to_string()))],
+            vec![(read, Type::Named("TCPStream".to_string()))],
             Some(Type::String),
         )),
         ("core.net", "sendfile") => Some((
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TcpStream".to_string()),
+                    Type::Named("TCPStream".to_string()),
                 ),
                 (read, Type::String),
             ],
@@ -5071,7 +5042,7 @@ fn core_fixed_sig_impl(
         // Convenience: send a complete HTTP/1.1 response and close the stream.
         ("core.net", "tcp_reply") => Some((
             vec![
-                (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                (AccessConvention::Move, Type::Named("TCPStream".to_string())),
                 (read, Type::String),
                 (read, Type::String),
             ],
@@ -5080,19 +5051,19 @@ fn core_fixed_sig_impl(
         ("core.net", "udp_bind") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
-                Type::Named("UdpSocket".to_string()),
+                Type::Named("UDPSocket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_bind_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
-                Type::Named("UdpSocket".to_string()),
+                Type::Named("UDPSocket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_local_addr") => Some((
-            vec![(read, Type::Named("UdpSocket".to_string()))],
+            vec![(read, Type::Named("UDPSocket".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
@@ -5100,14 +5071,14 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "udp_set_timeout") => Some((
             vec![
-                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "udp_send_to") => Some((
             vec![
-                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::String),
                 (read, Type::Named("SocketAddr".to_string())),
             ],
@@ -5115,7 +5086,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "udp_recv_from") => Some((
             vec![
-                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -5125,7 +5096,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "udp_send_bytes_to") => Some((
             vec![
-                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::Named("SocketAddr".to_string())),
             ],
@@ -5133,7 +5104,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "udp_receive") => Some((
             vec![
-                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -5318,7 +5289,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "tls_connect") => Some((
             vec![
-                (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                (AccessConvention::Move, Type::Named("TCPStream".to_string())),
                 (read, Type::String),
             ],
             Some(result_ty(
@@ -5357,13 +5328,10 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.net.tls", "client") => Some((
-            vec![
-                (AccessConvention::Move, Type::Named("TcpStream".to_string())),
-                (read, Type::String),
-            ],
+            vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("TLSStream".to_string()),
-                Type::Named("NetError".to_string()),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
         ("core.net.tls", "read") => Some((
@@ -5433,11 +5401,25 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.tls", "close") => Some((
             vec![(
-                AccessConvention::Write,
+                AccessConvention::Move,
                 Type::Named("TLSStream".to_string()),
             )],
             Some(result_ty(
                 unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
+        )),
+        ("core.net.tls", "peer_port") => Some((
+            vec![(read, Type::Named("TLSStream".to_string()))],
+            Some(result_ty(
+                Type::Int,
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
+        )),
+        ("core.net.tls", "unwrap") => Some((
+            vec![(read, Type::Named("TLSStream".to_string()))],
+            Some(result_ty(
+                Type::Named("TCPStream".to_string()),
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
@@ -5583,72 +5565,68 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::String),
         )),
-        // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
-        // container formats. Stream gzip lives in core.archive.gzip.
-        // zip_compress creates a single-entry zip archive.
-        // Takes (name: String, data: [U8]) → [U8].
-        ("core.archive", "zip_compress") => Some((
-            vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
-        // D-DEP-ARCHIVE1=A: zip_decompress — extract first entry from a zip archive.
-        // Takes [U8] → [U8]. Returns empty list on invalid input.
+        // Jet owns archive containers and keeps malformed-input paths typed.
         ("core.archive", "zip_decompress") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::List(Box::new(u8_ty()))),
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
         ("core.archive", "crc32" | "adler32") => {
-            Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Int)))
+            Some((vec![(read, list_u8.clone())], Some(Type::Int)))
         }
-        ("core.archive", "deflate" | "inflate" | "zip_open" | "zip_close") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::List(Box::new(u8_ty()))),
+        ("core.archive", "deflate" | "create") => Some((
+            if name == "deflate" {
+                vec![(read, list_u8.clone())]
+            } else {
+                vec![(read, string.clone()), (read, list_u8.clone())]
+            },
+            Some(list_u8.clone()),
         )),
-        ("core.archive", "zip_names_json") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::String),
+        ("core.archive", "compress") => {
+            Some((vec![(read, list_u8.clone())], Some(list_u8.clone())))
+        }
+        ("core.archive", "decompress" | "gunzip" | "inflate" | "zip_open" | "zip_close") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
+        )),
+        ("core.archive", "zip_names_json" | "tar_names_json") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(string.clone(), archive_error.clone())),
+        )),
+        ("core.archive", "list") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_string.clone(), archive_error.clone())),
         )),
         ("core.archive", "zip_next") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::Int)],
-            Some(Type::String),
+            vec![(read, list_u8.clone()), (read, int)],
+            Some(result_ty(string.clone(), archive_error.clone())),
         )),
         ("core.archive", "zip_read") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
-            Some(Type::List(Box::new(u8_ty()))),
+            vec![(read, list_u8.clone()), (read, string.clone())],
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
         ("core.archive", "zip_write") => Some((
             vec![
-                (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, list_u8.clone()),
+                (read, string.clone()),
+                (read, list_u8.clone()),
             ],
-            Some(Type::List(Box::new(u8_ty()))),
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
-        ("core.archive", "zip_extract" | "unzip") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
-            Some(Type::List(Box::new(u8_ty()))),
+        ("core.archive", "zip_extract" | "unzip" | "tar_get") => Some((
+            if name == "tar_get" {
+                vec![(read, list_u8.clone()), (read, string.clone())]
+            } else {
+                vec![(read, list_u8.clone()), (read, string.clone())]
+            },
+            Some(result_ty(list_u8.clone(), archive_error.clone())),
         )),
-        // D-DEP-ARCHIVE1=A: tar_add — append/replace a named entry in a tar archive.
-        // Takes (archive: [U8], name: String, data: [U8]) → [U8].
         ("core.archive", "tar_add") => Some((
             vec![
-                (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, list_u8.clone()),
+                (read, string.clone()),
+                (read, list_u8.clone()),
             ],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
-        // D-DEP-ARCHIVE1=A: tar_get — extract a named entry from a tar archive.
-        // Takes (archive: [U8], name: String) → [U8]. Empty on not-found or bad input.
-        ("core.archive", "tar_get") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::String)],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
-        // D-DEP-ARCHIVE1=A: tar_names_json — list entry names as a JSON array string.
-        // Takes [U8] → String. Returns "[]" on empty or invalid archive.
-        ("core.archive", "tar_names_json") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::String),
+            Some(list_u8.clone()),
         )),
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.game.raylib`
         // bridge. The surface is intentionally tiny and display-gated.
@@ -5734,17 +5712,45 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        // D-CORE-COMPRESS1=A / D-CODECS1: core.archive.gzip / zstd are the
-        // only public stream-codec APIs. `compress` takes `[U8]` and is infallible;
-        // `decompress` is fallible (malformed compressed stream → `Err(String)`),
-        // following the same house style as core.encoding.hex/base64 `decode`.
         ("core.archive.gzip", "compress") | ("core.archive.zstd", "compress") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::List(Box::new(u8_ty()))),
+            vec![(read, list_u8.clone())],
+            Some(list_u8.clone()),
         )),
-        ("core.archive.gzip", "decompress") | ("core.archive.zstd", "decompress") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        ("core.archive.gzip", "compress_text") | ("core.archive.zstd", "compress_text") => Some((
+            vec![(read, string.clone())],
+            Some(list_u8.clone()),
+        )),
+        ("core.archive.gzip", "decompress") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), gzip_error.clone())),
+        )),
+        ("core.archive.zstd", "decompress") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(list_u8.clone(), zstd_error.clone())),
+        )),
+        ("core.archive.gzip", "decompress_text") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(string.clone(), gzip_error.clone())),
+        )),
+        ("core.archive.zstd", "decompress_text") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(string.clone(), zstd_error.clone())),
+        )),
+        ("core.archive.gzip", "compress_file") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(result_ty(Type::Bool, gzip_error.clone())),
+        )),
+        ("core.archive.gzip", "decompress_file") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(result_ty(Type::Bool, gzip_error)),
+        )),
+        ("core.archive.zstd", "compress_file") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(result_ty(Type::Bool, zstd_error.clone())),
+        )),
+        ("core.archive.zstd", "decompress_file") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(result_ty(Type::Bool, zstd_error)),
         )),
         // D-DBPOLICY-BIND1: core.db — SQLite via rusqlite (bundled). `open`/`open_memory`
         // produce an unscoped `DBConnection`; `policy` creates a typed policy
@@ -5926,7 +5932,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
-        ("core.encoding.base64", "encode" | "b64encode" | "standard_b64encode" | "b32encode" | "b32hexencode" | "a85encode" | "b85encode" | "z85encode" | "encodebytes" | "b2a_base64") => {
+        ("core.encoding.base64", "encode" | "encode_url" | "b64encode" | "standard_b64encode" | "urlsafe_b64encode" | "b32encode" | "b32hexencode" | "a85encode" | "b85encode" | "z85encode" | "encodebytes" | "b2a_base64") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
         ("core.encoding.base64", "b16encode") => {
@@ -6685,13 +6691,6 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             required("time"),
             required("zone"),
             optional("disambiguation", CoreDefault::String("compatible")),
-        ]),
-        // D-CONFIG-ENV1: labels are part of the runtime config surface, while
-        // the defaults keep `env.decode<T>()` as the beginner one-call form.
-        ("core.sys", "decode") => Some(vec![
-            optional("prefix", CoreDefault::String("")),
-            optional("file", CoreDefault::String(".env")),
-            optional("allow", CoreDefault::EmptyList),
         ]),
         // D-FOUND-COREAPI1=A: filesystem walks accept one optional, shared
         // ignore-file selector; omitted means no ignore rules.

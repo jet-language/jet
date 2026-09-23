@@ -867,14 +867,18 @@ where
     format!("LWWMap({parts})")
 }
 
-pub(crate) fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, String> {
-    let (table, compiled) = jet_std::jet_db_policy_compile(&table, &expression)?;
+pub(crate) fn jet_db_policy_new<T: Into<String>, U: Into<String>>(
+    table: T,
+    expression: U,
+) -> Result<JetRowPolicy, String> {
+    let (table, compiled) = jet_std::jet_db_policy_compile(&table.into(), &expression.into())?;
     Ok(JetRowPolicy {
         table,
         expression: compiled.canonical().to_string(),
         compiled,
     })
 }
+
 
 pub(crate) fn jet_db_policy_compiled(policy: &JetRowPolicy) -> jet_std::JetRowPolicyExpr {
     policy.compiled

@@ -50,22 +50,6 @@ fn replace_archive_entry(
     entries[index] = (name.to_owned(), data.to_vec());
 }
 
-pub fn jet_archive_zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
-    let Some((local_size, central_size, _)) = zip_archive_size(std::iter::once((name, data)))
-    else {
-        return Vec::new();
-    };
-    let Some(size) = local_size
-        .checked_add(central_size)
-        .and_then(|size| size.checked_add(22))
-    else {
-        return Vec::new();
-    };
-    if size > MAX_OUTPUT {
-        return Vec::new();
-    }
-    zip_write_all(&[(name.to_string(), data.to_vec())])
-}
 
 pub fn jet_archive_zip_decompress(data: &[u8]) -> Vec<u8> {
     zip_read_all(data)

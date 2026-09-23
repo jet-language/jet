@@ -1351,6 +1351,12 @@ pub(crate) fn register_const(
         Expr::Int(_, _, _, _) => Some(Type::Int),
         Expr::Float(_, _, _, _) => Some(Type::Float),
         Expr::Bool(_, _) => Some(Type::Bool),
+        Expr::Char(_, _) => (!c.mutable).then_some(Type::Char),
+        Expr::Str(parts, _)
+            if !c.mutable && matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
+        {
+            Some(Type::String)
+        }
         _ => None,
     };
     match ty {
@@ -1360,9 +1366,10 @@ pub(crate) fn register_const(
         None => {
             diags.push(Diagnostic::error(
                 "E0109",
-                "a const must be a plain number or `true`/`false` for now".to_string(),
-                "richer const values arrive with later milestones".to_string(),
-                "give the const a number, like `const limit = 10;`".to_string(),
+                "a module binding must use a supported scalar or string literal".to_string(),
+                "module globals need a value shape that every execution tier can initialize before `fn run`"
+                    .to_string(),
+                "use an integer, float, bool, char, or immutable string literal".to_string(),
                 Some(c.value.span()),
             ));
         }

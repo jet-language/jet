@@ -1009,7 +1009,7 @@ fn jet_jit_channel_close(ch: i64) {
     }
     with_runtime_mut(|rt| {
         if let Some(channel) = rt.channels.get(ch as usize) {
-            channel.close();
+            channel.cancel();
         }
     });
 }
@@ -1236,6 +1236,58 @@ fn jet_jit_channel_receive_result(ch: i64) -> i64 {
     }
 }
 
+fn jet_jit_channel_try_receive(ch: i64) -> i64 {
+    let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
+    let Some(chan) = chan else {
+        host_fault("jit channel try_receive: bad handle");
+        return 0;
+    };
+    let value = chan.try_receive();
+    with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
+    })
+}
+
+fn jet_jit_channel_is_timer(ch: i64) -> i64 {
+    let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+        host_fault("jit channel is_timer: bad handle");
+        return 0;
+    };
+    i64::from(chan.is_timer())
+}
+
+fn jet_jit_channel_is_interval(ch: i64) -> i64 {
+    let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+        host_fault("jit channel is_interval: bad handle");
+        return 0;
+    };
+    i64::from(chan.is_interval())
+}
+
+fn jet_jit_channel_is_cancelled(ch: i64) -> i64 {
+    let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+        host_fault("jit channel is_cancelled: bad handle");
+        return 0;
+    };
+    i64::from(chan.is_cancelled())
+}
+
+fn jet_jit_channel_is_ready(ch: i64) -> i64 {
+    let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+        host_fault("jit channel is_ready: bad handle");
+        return 0;
+    };
+    i64::from(chan.is_ready())
+}
+
+fn jet_jit_channel_delay_ms(ch: i64) -> i64 {
+    let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+        host_fault("jit channel delay_ms: bad handle");
+        return 0;
+    };
+    chan.delay_ms()
+
+}
 fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
     let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
     let Some(chan) = chan else {
@@ -2140,7 +2192,8 @@ fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     // Sender is stashed in `rt.senders` so `with_runtime_mut` stays `Default`-safe.
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
-        let ch = JetSchedulerChannel::new();
+        let delay = jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(duration_ns));
+        let ch = JetSchedulerChannel::timer(delay as i64);
         let tx = ch.sender();
         rt.channels.push(ch);
         let sid = rt.senders.len() as i64;
@@ -2182,7 +2235,8 @@ fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
 fn jet_jit_interval(duration_ns: i64) -> i64 {
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
-        let ch = JetSchedulerChannel::new();
+        let delay = jet_task_interval_ms_defaulted(jet_std_time_duration_to_millis(duration_ns));
+        let ch = JetSchedulerChannel::interval(delay as i64);
         let tx = ch.sender();
         rt.channels.push(ch);
         let sid = rt.senders.len() as i64;
@@ -2416,6 +2470,12 @@ host_fns! {
     sender_send: "jet_jit_sender_send" => jet_jit_sender_send: sig_send;
     sender_close: "jet_jit_sender_close" => jet_jit_sender_close: sig_void_i64_i64;
     receiver_receive: "jet_std::JetReceiver::receive" => jet_jit_channel_receive_result: sig_i64;
+    receiver_try_receive: "jet_std::JetReceiver::try_receive" => jet_jit_channel_try_receive: sig_i64;
+    receiver_is_timer: "jet_std::JetReceiver::is_timer" => jet_jit_channel_is_timer: sig_i64;
+    receiver_is_interval: "jet_std::JetReceiver::is_interval" => jet_jit_channel_is_interval: sig_i64;
+    receiver_is_cancelled: "jet_std::JetReceiver::is_cancelled" => jet_jit_channel_is_cancelled: sig_i64;
+    receiver_is_ready: "jet_std::JetReceiver::is_ready" => jet_jit_channel_is_ready: sig_i64;
+    receiver_delay_ms: "jet_std::JetReceiver::delay_ms" => jet_jit_channel_delay_ms: sig_i64;
     receiver_close: "jet_std::JetReceiver::close" => jet_jit_channel_close: sig_void_i64;
     sender_send_method: "jet_std::JetSender::send" => jet_jit_sender_send_unit: sig_void_i64_i64;
     sender_close_method: "jet_std::JetSender::close" => jet_jit_sender_close_unit: sig_void_i64;

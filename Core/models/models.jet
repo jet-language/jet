@@ -1,3 +1,4 @@
+
 package {
     name: "core.models"
     version: "0.1.0"
@@ -8,36 +9,10 @@ package {
         models: .Library{ entry: models }
     }
 }
-// core.models — a path plus a host handle to mapped weights.
+// core.models — the compiler-owned model provider boundary.
 //
-// Jet does not parse safetensors / GGUF here. `open` asks the host to map
-// the file; `tensor_names` / `bytes` are host cells.
-pub struct Model {
-    pub path: String
-    pub handle: Int
-    pub bytes: Int
-}
-
-/// Map `path`. Fails when the file cannot be opened.
-pub fn open(path: String) -[FS]> Model !IOError {
-    h :: host_model_open(path)
-    if h <= 0 {
-        return Err(IOError{operation: "models.open", message: "open failed", path: path, os_code: None})
-    }
-    n :: host_model_bytes(h)
-    Ok(Model{path: path, handle: h, bytes: n})
-}
-
-pub fn tensor_names(model: Model) -[FS]> [String] { host_model_tensors(model.handle) }
-
-fn host_model_open(path: String) -[FS]> Int { panic("host_model_open") }
-
-fn host_model_bytes(handle: Int) -[FS]> Int { panic("host_model_bytes") }
-
-fn host_model_tensors(handle: Int) -[FS]> [String] { panic("host_model_tensors") }
-
-pub fn is_open(model: Model) -> Bool { model.handle > 0 }
-
-pub fn path(model: Model) -> String { model.path }
-
-pub fn size(model: Model) -> Int { model.bytes }
+// Model outputs are opened directly with
+// `core.models.open<Trait>("output")`. Sema checks the literal output,
+// source trait, package metadata, and provider contract before execution.
+// This source package does not fabricate plain model handles or forward an
+// unimplemented tensor-name dispatcher.

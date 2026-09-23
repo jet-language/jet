@@ -1,28 +1,34 @@
-// core.ui.host.drag_drop — file and text drop events.
-pub struct UiDropEvent {
-    pub paths: [String]
-    pub text: String
-    pub x: Int
-    pub y: Int
+use core as core
+use core.ui.host.[UiGrantedPath, UiHostError, UiNodeId]
+
+// core.ui.host.drag_drop — typed file/text drop events.
+pub enum UiDragPhase {
+    Enter
+    Over
+    Drop
+    Leave
+    Cancel
 }
 
-/// Poll one drop. `None` when nothing is pending.
-pub fn poll() -> ?UiDropEvent {
-    n :: host_drop_count()
-    if n <= 0 -> return None
-    paths := host_drop_paths()
-    text :: host_drop_text()
-    x :: host_drop_x()
-    y :: host_drop_y()
-    Val(UiDropEvent{paths: paths, text: text, x: x, y: y})
+pub enum UiDragOperation {
+    Copy
+    Move
+    Link
 }
 
-fn host_drop_count() -> Int { panic("host_drop_count") }
+pub enum UiDropItem {
+    Text(value: String)
+    Uri(value: String)
+    File(value: UiGrantedPath)
+}
 
-fn host_drop_paths() -> [String] { panic("host_drop_paths") }
+pub struct UiDragEvent {
+    pub target: UiNodeId
+    pub phase: UiDragPhase
+    pub operation: UiDragOperation
+    pub items: [UiDropItem]
+}
 
-fn host_drop_text() -> String { panic("host_drop_text") }
-
-fn host_drop_x() -> Int { panic("host_drop_x") }
-
-fn host_drop_y() -> Int { panic("host_drop_y") }
+pub fn poll() -[IO]> ?UiDragEvent !UiHostError {
+    core.ui.host.drag_drop.poll()
+}

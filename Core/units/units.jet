@@ -8,14 +8,15 @@ package {
         units: .Library{ entry: units }
     }
 }
-pub struct Measurement {
-    pub magnitude: Float
-    pub unit: Float
+use core as core
+use core.math as math
+pub fn from(magnitude: Float, unit: Float) -> Measurement<Float> {
+    // Measurements carry an SI value and uncertainty; the unit scale is
+    // applied at construction because the carrier has no unit field.
+    measurement(magnitude * unit, uncertainty: 0.0)
 }
 
-pub fn from(magnitude: Float, unit: Float) -> Measurement { {magnitude: magnitude, unit: unit} }
-
-pub fn si(magnitude: Float) -> Measurement { {magnitude: magnitude, unit: 1.0} }
+pub fn si(magnitude: Float) -> Measurement<Float> { measurement(magnitude, uncertainty: 0.0) }
 
 @nano :: 0.000000001
 
@@ -31,39 +32,41 @@ pub fn si(magnitude: Float) -> Measurement { {magnitude: magnitude, unit: 1.0} }
 
 @giga :: 1000000000.0
 
-pub fn scale(m: Measurement, factor: Float) -> Measurement {
-    {magnitude: m.magnitude * factor, unit: m.unit}
+pub fn scale(m: Measurement<Float>, factor: Float) -> Measurement<Float> {
+    uncertainty := m.uncertainty * math.abs_float(factor)
+    measurement(m.value * factor, uncertainty: uncertainty)
 }
 
-pub fn add(a: Measurement, b: Measurement) -> Measurement {
-    {magnitude: a.magnitude + b.magnitude, unit: a.unit}
+pub fn add(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> { a + b }
+
+pub fn sub(a: Measurement<Float>, b: Measurement<Float>) -> Measurement<Float> { a - b }
+
+pub fn mul(a: Measurement<Float>, n: Float) -> Measurement<Float> {
+    a * measurement(n, uncertainty: Float{0.0})
 }
 
-pub fn sub(a: Measurement, b: Measurement) -> Measurement {
-    {magnitude: a.magnitude - b.magnitude, unit: a.unit}
+pub fn div(a: Measurement<Float>, n: Float) -> Measurement<Float> {
+    a / measurement(n, uncertainty: Float{0.0})
 }
 
-pub fn mul(a: Measurement, n: Float) -> Measurement { {magnitude: a.magnitude * n, unit: a.unit} }
-
-pub fn div(a: Measurement, n: Float) -> Measurement { {magnitude: a.magnitude / n, unit: a.unit} }
-
-pub fn convert(m: Measurement, new_unit: Float) -> Measurement {
-    if new_unit == 0.0 -> return m
-    si :: m.magnitude * m.unit
-    {magnitude: si / new_unit, unit: new_unit}
+pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> {
+    if new_unit == (Float{0.0}) -> return ~m
+    factor :: Float{1.0} / new_unit
+    scale(m, factor)
 }
 
-pub fn to_si(m: Measurement) -> Float { m.magnitude * m.unit }
+pub fn to_si(m: Measurement<Float>) -> Float { m.value }
 
-pub fn abs(m: Measurement) -> Measurement {
-    mag := m.magnitude
-    if mag < 0.0 -> mag = -mag
-    {magnitude: mag, unit: m.unit}
+pub fn abs(m: Measurement<Float>) -> Measurement<Float> {
+    if m.value < (Float{0.0}) -> return measurement(Float{0.0} - m.value, uncertainty: m.uncertainty)
+    ~m
 }
 
-pub fn show(m: Measurement) -> String { "{m.magnitude} (unit={m.unit})" }
+pub fn show(m: Measurement<Float>) -> String { "{m.value} ± {m.uncertainty}" }
 
-@metre :: 1.0
+@meter :: 1.0
+// British spellings remain source-compatible with the original Core surface.
+@metre :: @meter
 
 @gram :: 0.001
 
@@ -77,23 +80,26 @@ pub fn show(m: Measurement) -> String { "{m.magnitude} (unit={m.unit})" }
 
 @gibibyte :: 1073741824.0
 
-pub fn metres(n: Float) -> Measurement { from(n, 1.0) }
+pub fn meters(n: Float) -> Measurement<Float> { from(n, 1.0) }
 
-pub fn kilometres(n: Float) -> Measurement { from(n, 1000.0) }
+pub fn kilometers(n: Float) -> Measurement<Float> { from(n, 1000.0) }
+pub fn metres(n: Float) -> Measurement<Float> { meters(n) }
 
-pub fn grams(n: Float) -> Measurement { from(n, 0.001) }
+pub fn kilometres(n: Float) -> Measurement<Float> { kilometers(n) }
 
-pub fn kilograms(n: Float) -> Measurement { from(n, 1.0) }
+pub fn grams(n: Float) -> Measurement<Float> { from(n, 0.001) }
 
-pub fn seconds(n: Float) -> Measurement { from(n, 1.0) }
+pub fn kilograms(n: Float) -> Measurement<Float> { from(n, 1.0) }
 
-pub fn milliseconds(n: Float) -> Measurement { from(n, 0.001) }
+pub fn seconds(n: Float) -> Measurement<Float> { from(n, 1.0) }
 
-pub fn bytes_of(n: Float) -> Measurement { from(n, 1.0) }
+pub fn milliseconds(n: Float) -> Measurement<Float> { from(n, 0.001) }
 
-pub fn kibibytes(n: Float) -> Measurement { from(n, 1024.0) }
+pub fn bytes_of(n: Float) -> Measurement<Float> { from(n, 1.0) }
 
-pub fn equals(a: Measurement, b: Measurement) -> Bool {
+pub fn kibibytes(n: Float) -> Measurement<Float> { from(n, 1024.0) }
+
+pub fn equals(a: Measurement<Float>, b: Measurement<Float>) -> Bool {
     left :: to_si(a)
     right :: to_si(b)
     d := left - right
@@ -101,14 +107,14 @@ pub fn equals(a: Measurement, b: Measurement) -> Bool {
     d < 0.000000001
 }
 
-pub fn ratio(a: Measurement, b: Measurement) -> Float {
+pub fn ratio(a: Measurement<Float>, b: Measurement<Float>) -> Float {
     den :: to_si(b)
     if den == 0.0 -> return 0.0
     to_si(a) / den
 }
 
-pub fn is_zero(m: Measurement) -> Bool {
+pub fn is_zero(m: Measurement<Float>) -> Bool {
     v :: to_si(m)
-    if v < 0.0 -> v = -v
+    if v < 0.0 -> return v > -0.000000001
     v < 0.000000001
 }

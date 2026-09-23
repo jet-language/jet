@@ -24,6 +24,14 @@ use std::process::{Command, Stdio};
 mod common;
 use common::{jetpack_bin, Scratch};
 
+#[cfg(unix)]
+fn host_bash() -> std::path::PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").expect("tests run with PATH"))
+        .map(|directory| directory.join("bash"))
+        .find(|candidate| candidate.is_file())
+        .expect("tests need a bash executable")
+}
+
 /// A `jetpack` command with the env-hook state variables cleared, stdin nulled
 /// (non-interactive), and a fixed `PATH` baseline so activation output is
 /// deterministic.
@@ -68,7 +76,7 @@ fn hook_prints_installable_snippet_per_shell() {
         ("fish", "--on-event fish_prompt"),
     ] {
         let out = Command::new(jetpack_bin())
-            .args(["enter", "hook", shell])
+            .args(["env", "hook", shell])
             .output()
             .unwrap();
         assert!(out.status.success(), "`enter hook {shell}` must exit 0");
@@ -95,12 +103,13 @@ fn hook_prints_installable_snippet_per_shell() {
 #[test]
 fn hook_unknown_shell_is_a_clean_error() {
     let out = Command::new(jetpack_bin())
-        .args(["enter", "hook", "tcsh"])
+        .args(["env", "hook", "tcsh"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("unknown shell"), "{stderr}");
+    let stderr_lower = stderr.to_ascii_lowercase();
+    assert!(stderr_lower.contains("unknown shell"), "{stderr}");
     assert!(stderr.contains("bash, zsh, fish"), "{stderr}");
 }
 
@@ -108,7 +117,7 @@ fn hook_unknown_shell_is_a_clean_error() {
 fn export_outside_any_env_is_silent() {
     let scratch = Scratch::new("noenv");
     let out = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -136,7 +145,7 @@ fn export_does_not_emit_untrusted_typed_environment_shell_code() {
     .unwrap();
 
     let out = export_cmd(&project.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .env("HOME", &home.path)
         .output()
         .unwrap();
@@ -147,7 +156,7 @@ fn export_does_not_emit_untrusted_typed_environment_shell_code() {
     );
     #[cfg(unix)]
     {
-        let mut shell = Command::new("bash")
+        let mut shell = Command::new(host_bash())
             .args([
                 "--noprofile",
                 "--norc",
@@ -209,7 +218,7 @@ fn export_rejects_shell_syntax_in_environment_names() {
         let project = Scratch::new(name);
         fs::write(project.path.join("env.jet"), body).unwrap();
         let out = export_cmd(&project.path)
-            .args(["enter", "export", "bash"])
+            .args(["env", "export", "bash"])
             .output()
             .unwrap();
         assert!(!out.status.success(), "hostile {name} must be rejected");
@@ -232,7 +241,7 @@ fn export_activates_nearest_env_from_root_and_subdir() {
 
     for dir in [&scratch.path, &inner] {
         let out = export_cmd(dir)
-            .args(["enter", "export", "bash"])
+            .args(["env", "export", "bash"])
             .output()
             .unwrap();
         assert!(out.status.success());
@@ -257,11 +266,11 @@ fn export_uses_a_durable_hangar_path_for_realized_package() {
     let home = Scratch::new("package-export-home");
     let artifact = fixtures.join("omp-1.0.0");
     fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' cached\n").unwrap();
-    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
     fs::write(
         fixtures.join("jetpackage-omp.json"),
         format!(
-            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":\"omp-1.0.0\"}}"
         ),
     )
     .unwrap();
@@ -297,7 +306,7 @@ fn export_uses_a_durable_hangar_path_for_realized_package() {
     fs::remove_file(&artifact).unwrap();
 
     let out = export_cmd(&project.path)
-        .args(["enter", "--trust", "--offline", "export", "bash"])
+        .args(["env", "--trust", "--offline", "export", "bash"])
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
         .env("JETPACK_DENY_NETWORK", "1")
@@ -313,13 +322,22 @@ fn export_uses_a_durable_hangar_path_for_realized_package() {
         !script.contains("/proc/self/fd/"),
         "parent-shell activation leaked a process-local lease path:\n{script}"
     );
-    let durable_bin = root.path.join("hangar/objects").join(&digest).join("bin");
+    let durable_bin = fs::read_dir(root.path.join("hangar/objects"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find_map(|object| {
+            let name = object.file_name()?.to_str()?;
+            (name.starts_with("sha256-") && object.join("bin").is_dir()).then(|| object.join("bin"))
+        })
+        .expect("prep must publish a sealed Hangar object with a bin directory");
+    let expected_prefix = format!("export PATH='{}:", durable_bin.display());
     assert!(
-        script.contains(&format!("export PATH='{}:", durable_bin.display())),
+        script.contains(&expected_prefix),
         "activation did not publish the sealed Hangar bin directory:\n{script}"
     );
 
-    let mut shell = Command::new("bash")
+    let mut shell = Command::new(host_bash())
         .args([
             "--noprofile",
             "--norc",
@@ -370,7 +388,7 @@ fn enter_from_nested_directory_projects_allowlisted_dotenv_and_unsets() {
     .unwrap();
     let out = export_cmd(&inner)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "--",
@@ -400,7 +418,7 @@ fn export_disable_unloads_active_env() {
     write_prompt_only_env(&scratch.path);
     let root = scratch.path.to_string_lossy().into_owned();
     let out = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .env("JET_ENV_DISABLE", "1")
         .env("JETPACK_ENV_DIR", &root)
         .env("JETPACK_ENV_OLD_PATH", "/usr/bin:/bin")
@@ -420,13 +438,13 @@ fn export_unchanged_directory_is_silent() {
     write_prompt_only_env(&scratch.path);
     let root = scratch.path.to_string_lossy().into_owned();
     let first = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .output()
         .unwrap();
     assert!(first.status.success());
     let hash = activation_hash(&first.stdout);
     let out = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .env("JETPACK_ENV_DIR", &root)
         .env("JETPACK_ENV_HASH", hash)
         .output()
@@ -445,7 +463,7 @@ fn export_changed_definition_reactivates_at_next_prompt() {
     write_prompt_only_env(&scratch.path);
     let root = scratch.path.to_string_lossy().into_owned();
     let first = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .output()
         .unwrap();
     assert!(first.status.success());
@@ -456,7 +474,7 @@ fn export_changed_definition_reactivates_at_next_prompt() {
     )
     .unwrap();
     let out = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .env("JETPACK_ENV_DIR", &root)
         .env("JETPACK_ENV_HASH", hash)
         .output()
@@ -484,14 +502,14 @@ fn export_failed_reload_keeps_the_previous_activation() {
     write_prompt_only_env(&scratch.path);
     let root = scratch.path.to_string_lossy().into_owned();
     let first = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .output()
         .unwrap();
     assert!(first.status.success());
     let hash = activation_hash(&first.stdout);
     fs::write(scratch.path.join("env.jet"), "module env.dev {\n").unwrap();
     let out = export_cmd(&scratch.path)
-        .args(["enter", "export", "bash"])
+        .args(["env", "export", "bash"])
         .env("JETPACK_ENV_DIR", &root)
         .env("JETPACK_ENV_HASH", hash)
         .output()
@@ -521,7 +539,7 @@ fn enter_runs_a_trusted_lifecycle_hook_before_the_child() {
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "--",
@@ -566,7 +584,7 @@ fn run() {}
     .unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
-        .args(["enter", "--trust", "--no-color", "--", "true"])
+        .args(["env", "--trust", "--no-color", "--", "true"])
         // `enter` keeps the caller's toolchain visible. The nested `jet run`
         // task therefore needs the same Rust toolchain that runs this test;
         // the clean-shell proof below still uses the fixed minimal PATH.
@@ -599,7 +617,7 @@ fn enter_rejects_an_undeclared_lifecycle_job_before_launch() {
     fs::write(scratch.path.join("run.jet"), "fn run() {}\n").unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
-        .args(["enter", "--trust", "--no-color", "--", "true"])
+        .args(["env", "--trust", "--no-color", "--", "true"])
         .env(
             "PATH",
             std::env::var_os("PATH").expect("tests run with Rust on PATH"),
@@ -653,7 +671,7 @@ fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
         String::from_utf8_lossy(&trusted.stderr)
     );
     let out = export_cmd(&scratch.path)
-        .args(["enter", "--no-color", "export", "bash"])
+        .args(["env", "--no-color", "export", "bash"])
         .env("HOME", &home.path)
         .env(
             "PATH",
@@ -696,7 +714,7 @@ fn enter_requires_trust_for_a_trusted_lifecycle_hook() {
     .unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&project.path)
-        .args(["enter", "--no-color", "--", "/bin/true"])
+        .args(["env", "--no-color", "--", "/bin/true"])
         .env("HOME", &home.path)
         .env("PATH", "/usr/bin:/bin")
         .output()
@@ -726,7 +744,7 @@ fn env_test_rejects_an_untrusted_lifecycle_hook() {
     .unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
-        .args(["enter", "--trust", "--no-color", "test"])
+        .args(["env", "--trust", "--no-color", "test"])
         .env("PATH", "/usr/bin:/bin")
         .output()
         .unwrap();
@@ -765,7 +783,7 @@ fn env_test_runs_hooks_checks_and_command_in_a_clean_child() {
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "test",
@@ -829,7 +847,7 @@ fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
     let path_output = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "--",
@@ -857,7 +875,7 @@ fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
     let commit = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "--",
@@ -904,7 +922,7 @@ fn env_test_projects_git_hooks_into_the_clean_ci_command() {
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--env",
             "ci",
@@ -944,7 +962,7 @@ fn enter_rejects_a_missing_git_hooks_directory_before_launch() {
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
-            "enter",
+            "env",
             "--trust",
             "--no-color",
             "--",
@@ -987,7 +1005,7 @@ fn enter_rejects_a_trusted_hook_cwd_that_escapes_through_a_symlink() {
     .unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&project.path)
-        .args(["enter", "--trust", "--no-color", "--", "/bin/true"])
+        .args(["env", "--trust", "--no-color", "--", "/bin/true"])
         .env("PATH", "/usr/bin:/bin")
         .output()
         .unwrap();

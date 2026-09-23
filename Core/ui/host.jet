@@ -1,10 +1,9 @@
-// core.ui.host — file dialogs, clipboard, IME, shortcuts, accessibility.
+use core as core
+// core.ui.host — typed host capability leaves for dialogs and metadata.
 //
-// Dialogs and clipboard talk to the OS through `host_*`. Headless hosts
-// return `UiCancellation.Headless` rather than inventing a path.
-
-// Nested host helpers live beside this file in the package tree; the parent
-// UI module exposes the host surface directly.
+// Every operation that crosses the process boundary is forwarded to the
+// scoped provider.  Request construction and validation remain pure Jet code;
+// cancellation, headless, and denied outcomes stay typed.
 
 pub enum UiCapability {
     FileDialog
@@ -13,6 +12,7 @@ pub enum UiCapability {
     DragDrop
     Shortcuts
     Accessibility
+    FontShaping
 }
 
 pub enum UiCancellation {
@@ -39,6 +39,13 @@ pub enum UiHostError {
     Headless
     Denied
     Missing
+    InvalidRequest
+    CapabilityUnavailable
+    CapabilityDenied
+    HostFailure
+    ResourceDenied
+    ShortcutConflict
+    QueueFull
 }
 
 pub struct UiCapabilityFact {
@@ -55,93 +62,127 @@ pub struct UiFsRights {
     pub write: Bool
 }
 
-pub struct UiGrantedPath {
-    pub path: String
+pub struct UiFsGrant {
+    pub root: String
     pub rights: UiFsRights
 }
 
-pub struct UiFsGrant {
-    pub paths: [UiGrantedPath]
+pub struct UiGrantedPath {
+    pub path: String
+    pub grant_root: String
+    pub access: UiFsAccess
 }
 
 pub struct UiFileFilter {
     pub label: String
-    pub glob: String
+    pub extensions: [String]
+    pub mime_types: [String]
 }
 
 pub struct UiFileDialogRequest {
     pub kind: UiFileDialogKind
     pub title: String
-    pub filter: UiFileFilter
+    pub grant: UiFsGrant
+    pub initial_directory: ?UiGrantedPath
+    pub filters: [UiFileFilter]
+    pub allow_multiple: Bool
 }
 
 pub struct UiFileDialogSelection {
-    pub path: String
+    pub files: [UiGrantedPath]
+}
+
+pub struct UiShortcutModifiers {
+    pub bits: Int
 }
 
 pub struct UiShortcut {
-    pub chord: String
+    pub key: String
+    pub modifiers: UiShortcutModifiers
+}
+pub struct UiTextRange {
+    pub start: Int
+    pub end: Int
+}
+
+pub struct UiClipboardText {
+    pub text: String
+    pub selection: ?UiTextRange
+}
+
+pub struct UiClipboardWrite {
+    pub characters: Int
+}
+
+pub struct UiNodeId {
+    pub value: String
+}
+
+pub struct UiAccessibilityProjection {
+    pub lines: [String]
+}
+pub struct UiShortcutBinding {
+    pub shortcut: UiShortcut
     pub action: String
+    pub node: ?UiNodeId
 }
 
-pub struct UiAccessibilityTree {
-    pub role: String
-    pub label: String
+pub enum UiShortcutDispatch {
+    Dispatched(UiShortcutBinding)
+    Unhandled
 }
 
-pub fn capabilities() -> UiCapabilityFacts {
-    facts := [UiCapabilityFact]{}
-    facts.push(UiCapabilityFact{capability: UiCapability.FileDialog, available: host_has_file_dialog()})
-    facts.push(UiCapabilityFact{capability: UiCapability.Clipboard, available: host_has_clipboard()})
-    facts.push(UiCapabilityFact{capability: UiCapability.Ime, available: host_has_ime()})
-    facts.push(UiCapabilityFact{capability: UiCapability.DragDrop, available: host_has_drag_drop()})
-    facts.push(UiCapabilityFact{capability: UiCapability.Shortcuts, available: true})
-    facts.push(UiCapabilityFact{capability: UiCapability.Accessibility, available: host_has_a11y()})
-    UiCapabilityFacts{facts: facts}
+
+
+pub fn capabilities() -> UiCapabilityFacts { core.ui.host.capabilities() }
+
+pub fn open_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection !UiHostError {
+    core.ui.host.open_file(request)
 }
 
-pub fn open_file(request: UiFileDialogRequest) -[FS]> String !UiHostError {
-    path :: host_open_file(request.title, request.filter.glob)
-    if path.len() == 0 -> return Err(UiHostError.Cancelled)
-    Ok(path)
+pub fn save_file(request: UiFileDialogRequest) -[FS]> UiFileDialogSelection !UiHostError {
+    core.ui.host.save_file(request)
 }
 
-pub fn save_file(request: UiFileDialogRequest) -[FS]> String !UiHostError {
-    path :: host_save_file(request.title, request.filter.glob)
-    if path.len() == 0 -> return Err(UiHostError.Cancelled)
-    Ok(path)
+pub fn open_request(grant: UiFsGrant) -> UiFileDialogRequest {
+    core.ui.host.open_request(grant)
 }
 
-pub fn open_request(title: String, filter: UiFileFilter) -> UiFileDialogRequest {
-    UiFileDialogRequest{kind: UiFileDialogKind.Open, title: title, filter: filter}
+pub fn save_request(grant: UiFsGrant) -> UiFileDialogRequest {
+    core.ui.host.save_request(grant)
 }
 
-pub fn save_request(title: String, filter: UiFileFilter) -> UiFileDialogRequest {
-    UiFileDialogRequest{kind: UiFileDialogKind.Save, title: title, filter: filter}
+pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UiFileFilter !UiHostError {
+    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UiHostError.InvalidRequest)
+    loop extension in extensions {
+        if extension.len() == 0 -> return Err(UiHostError.InvalidRequest)
+    }
+    loop mime in mime_types {
+        if mime.len() == 0 -> return Err(UiHostError.InvalidRequest)
+    }
+    core.ui.host.file_filter(label, extensions, mime_types)
 }
 
-pub fn file_filter(label: String, glob: String) -> UiFileFilter { UiFileFilter{label: label, glob: glob} }
-
-pub fn file_filter_text() -> UiFileFilter { UiFileFilter{label: "Text", glob: "*.txt"} }
-
-pub fn fs_grant(path: String, rights: UiFsRights) -> UiFsGrant {
-    UiFsGrant{paths: [UiGrantedPath]{UiGrantedPath{path: path, rights: rights}}}
+pub fn file_filter_text() -> UiFileFilter {
+    core.ui.host.file_filter_text()
 }
 
-pub fn fs_rights_read() -> UiFsRights { UiFsRights{read: true, write: false} }
-pub fn fs_rights_write() -> UiFsRights { UiFsRights{read: false, write: true} }
-pub fn fs_rights_read_write() -> UiFsRights { UiFsRights{read: true, write: true} }
-
-pub fn shortcut(chord: String, action: String) -> UiShortcut { UiShortcut{chord: chord, action: action} }
-
-pub fn accessibility(role: String, label: String) -> UiAccessibilityTree {
-    UiAccessibilityTree{role: role, label: label}
+pub fn fs_grant(path: String, rights: UiFsRights) -> UiFsGrant !UiHostError {
+    if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UiHostError.InvalidRequest)
+    core.ui.host.fs_grant(path, rights)
 }
 
-fn host_has_file_dialog() -[FS]> Bool { panic("host_has_file_dialog") }
-fn host_has_clipboard() -> Bool { panic("host_has_clipboard") }
-fn host_has_ime() -> Bool { panic("host_has_ime") }
-fn host_has_drag_drop() -> Bool { panic("host_has_drag_drop") }
-fn host_has_a11y() -> Bool { panic("host_has_a11y") }
-fn host_open_file(title: String, glob: String) -[FS]> String { panic("host_open_file") }
-fn host_save_file(title: String, glob: String) -[FS]> String { panic("host_save_file") }
+pub fn fs_rights_read() -> UiFsRights { core.ui.host.fs_rights_read() }
+pub fn fs_rights_write() -> UiFsRights { core.ui.host.fs_rights_write() }
+pub fn fs_rights_read_write() -> UiFsRights { core.ui.host.fs_rights_read_write() }
+
+pub fn shortcut(key: String, modifiers: UiShortcutModifiers) -[IO]> UiShortcut !UiHostError {
+    if key.trim() == "" -> return Err(UiHostError.InvalidRequest)
+    core.ui.host.shortcut(key, modifiers)
+}
+
+pub fn accessibility(role: String, label: String) -[IO]> UiAccessibility !UiHostError {
+    if role.trim() == "" || label.trim() == "" -> return Err(UiHostError.InvalidRequest)
+    core.ui.host.accessibility(role, label)
+}
+

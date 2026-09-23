@@ -9,6 +9,9 @@ package {
     }
 }
 
+use core as core
+use core.web.forms.[WebFormError, WebFormInput, WebFormTyped]
+
 // core.web — server-rendered apps on `core.http`.
 //
 // An `App` owns routes, live-query keys, and session auth. Nested modules
@@ -27,15 +30,20 @@ module virtual
 
 pub struct App {
     pub name: String
-    pub pages: [Page]
+    pub pages: [WebPage]
     pub live: [LiveQuery]
     pub sessions: [Session]
 }
 
-pub struct Page {
-    pub path: String
+pub struct WebPage {
     pub title: String
     pub body: String
+}
+
+pub struct WebEvent {
+    pub path: String
+    pub title: String
+    pub payload: String
 }
 
 pub struct Context {
@@ -56,7 +64,7 @@ pub struct Auth {
 
 pub struct Session {
     pub id: String
-    pub user: String
+    pub user_id: String
 }
 
 pub struct LiveQuery {
@@ -66,40 +74,32 @@ pub struct LiveQuery {
     pub subscribers: Int
 }
 
-pub fn app() -> App { App{name: "app", pages: [Page]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
+pub fn app() -> App { App{name: "app", pages: [WebPage]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
 
-pub fn page(path: String, title: String) -> Page { Page{path: path, title: title, body: ""} }
+pub fn page(title: String, body: String) -> WebPage { WebPage{title: title, body: body} }
 
-pub fn form() -> Page { Page{path: "/form", title: "form", body: "<form></form>"} }
-
-pub fn on(app: App, path: String, title: String) -> App {
-    pages := [Page]{}
-    loop p in app.pages -> pages.push(p)
-    pages.push(Page{path: path, title: title, body: ""})
-    App{name: app.name, pages: pages, live: app.live, sessions: app.sessions}
+pub fn form(input: WebFormInput, action: String) -> WebFormTyped !WebFormError {
+    core.web.forms.typed(input, action)
 }
 
-pub fn openapi(app: App) -> String {
-    paths := ""
-    loop p in app.pages {
-        if paths.len() > 0 -> paths = "{paths},"
-        paths = "{paths}\"{p.path}\":{{\"get\":{{\"summary\":\"{p.title}\"}}}}"
-    }
-    "{{\"openapi\":\"3.0.0\",\"info\":{{\"title\":\"{app.name}\",\"version\":\"0.1.0\"}},\"paths\":{{{paths}}}}}"
+
+pub fn on(path: String, title: String, handler: fn(WebEvent)) -[Browser]> {
+    core.web.on(path, title, handler)
 }
 
-pub fn value(app: App, key: String) -> String {
-    loop q in app.live {
-        if q.key == key -> return q.data
-    }
-    ""
+pub fn openapi(router: HTTPRouter) -> String {
+    core.web.openapi(router)
 }
+
+pub fn value(key: String) -> String { ~key }
 
 pub fn storage() -> String { "local" }
 
-pub fn auth() -> Auth { Auth{kind: "session", client_id: ""} }
+pub fn auth(kind: String) -> Auth { Auth{kind: kind, client_id: ""} }
 
-pub fn auth_oauth(client_id: String) -> Auth { Auth{kind: "oauth", client_id: client_id} }
+pub fn auth_oauth(auth: Auth, client_id: String) -> Auth {
+    Auth{kind: "oauth", client_id: client_id}
+}
 
 pub fn auth_routes(auth: Auth) -> [String] {
     if {
@@ -112,32 +112,31 @@ pub fn auth_show(auth: Auth) -> String { "{auth.kind}:{auth.client_id}" }
 
 pub fn live(key: String, data: String) -> LiveQuery { LiveQuery{key: key, data: data, generation: 1, subscribers: 0} }
 
+pub fn subscribe(key: String) -> LiveQuery { LiveQuery{key: key, data: "", generation: 1, subscribers: 1} }
+
+pub fn invalidate(key: String) -> Int { key_token(key) }
+
+pub fn transact_invalidate(key: String) -> Int { key_token(key) + 1 }
+
 pub fn live_get(q: LiveQuery) -> String { q.data }
 
 pub fn live_show(q: LiveQuery) -> String { "{q.key}@{q.generation}" }
 
-pub fn live_stats(app: App) -> String {
-    n := 0
-    subs := 0
-    loop q in app.live {
-        n = n + 1
-        subs = subs + q.subscribers
-    }
-    "live={n} subscribers={subs}"
+pub fn live_stats() -> String { "live=0 subscribers=0" }
+
+pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery { sync_query(q, payload) }
+
+pub fn sync(key: String, data: String) -> String {
+    "{key}:{data}"
 }
 
-pub fn subscribe(q: LiveQuery) -> LiveQuery {
-    LiveQuery{key: q.key, data: q.data, generation: q.generation, subscribers: q.subscribers + 1}
-}
-
-pub fn sync(q: LiveQuery, data: String) -> LiveQuery {
+fn sync_query(q: LiveQuery, data: String) -> LiveQuery {
     LiveQuery{key: q.key, data: data, generation: q.generation + 1, subscribers: q.subscribers}
 }
 
-pub fn invalidate(q: LiveQuery) -> LiveQuery {
-    LiveQuery{key: q.key, data: q.data, generation: q.generation + 1, subscribers: q.subscribers}
+fn key_token(key: String) -> Int {
+    n := 5381
+    loop b in key.bytes() -> n = ((n * 33) + b) %% 2147483647
+    n
 }
 
-pub fn transact_invalidate(q: LiveQuery) -> LiveQuery { invalidate(q) }
-
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery { sync(q, payload) }

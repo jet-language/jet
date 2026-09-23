@@ -949,33 +949,6 @@ fn web_uses_font_shaping(program: &MirProgram, functions: &[&MirFunction]) -> bo
     })
 }
 
-fn web_history_core_call(program: &MirProgram, id: jet_foundation::MIR::MirCoreCallId) -> bool {
-    program
-        .core_calls
-        .iter()
-        .find(|call| call.id == id)
-        .is_some_and(|call| call.module == "core.testing" && call.member == "histories")
-}
-
-fn web_uses_history_runtime(program: &MirProgram, functions: &[&MirFunction]) -> bool {
-    functions.iter().any(|function| {
-        function.blocks.iter().any(|block| {
-            block.instructions.iter().any(|instruction| {
-                let uses_history_call = match &instruction.operation {
-                    MirOperation::CoreCall { call, .. } => web_history_core_call(program, *call),
-                    MirOperation::Call { callee, .. } => match callee {
-                        MirCallee::Core(id) => web_history_core_call(program, *id),
-                        _ => false,
-                    },
-                    _ => false,
-                };
-                let emits_history_closure = function_in_bucket(function, WebBucket::JS)
-                    && matches!(&instruction.operation, MirOperation::Closure { .. });
-                uses_history_call || emits_history_closure
-            })
-        })
-    })
-}
 
 fn web_task_join_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
@@ -988,6 +961,12 @@ fn web_channel_handle_call(program: &MirProgram, id: MirPreludeCallId) -> bool {
     program.prelude_calls.iter().find(|call| call.id == id).is_some_and(|call| {
         let expected_symbol = match call.member.as_str() {
             "receiver.receive" => "jet_std::JetReceiver::receive",
+            "receiver.try_receive" => "jet_std::JetReceiver::try_receive",
+            "receiver.is_timer" => "jet_std::JetReceiver::is_timer",
+            "receiver.is_interval" => "jet_std::JetReceiver::is_interval",
+            "receiver.is_cancelled" => "jet_std::JetReceiver::is_cancelled",
+            "receiver.is_ready" => "jet_std::JetReceiver::is_ready",
+            "receiver.delay_ms" => "jet_std::JetReceiver::delay_ms",
             "receiver.close" => "jet_std::JetReceiver::close",
             "sender.send" => "jet_std::JetSender::send",
             "sender.close" => "jet_std::JetSender::close",
@@ -1623,7 +1602,10 @@ fn emit_js_app(
         .runtime_parts
         .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
     let has_model_runtime = !program.facts.model_outputs.is_empty();
-    let include_history = web_uses_history_runtime(program, functions);
+    // The Wasm prelude always exports the history ABI, including for programs
+    // with no authored history call. Keep the canonical JS callback import
+    // present so WebAssembly instantiation never receives a missing import.
+    let include_history = true;
     // HarfBuzz is needed only when an emitted MIR function retains the
     // semantic `core.font.shape` call; UI itself must not bind it eagerly.
     let needs_font_shaping = web_uses_font_shaping(program, functions);
@@ -1674,6 +1656,18 @@ fn emit_js_app(
         out.push_str(", ...__jetModelHost.imports");
     }
     out.push_str(" })).exports;\n");
+    for constant in &program.constants {
+        if !artifact.modules.contains(&constant.module) {
+            continue;
+        }
+        let value = js_constant_expression(program, &constant.value)?;
+        let _ = writeln!(
+            out,
+            "globalThis[{}] = {};",
+            js_string(&constant.key),
+            value
+        );
+    }
     if has_model_runtime {
         out.push_str(
             "__jetModelHost.bind(__jetPreludeWasm);\n\
@@ -2636,7 +2630,18 @@ fn js_operation_expression(
         MirOperation::Global { name } => match name.as_str() {
             "transaction" => "(() => { const __jet_transaction = jet_transaction(); __jet_transactions.push(__jet_transaction); return __jet_transaction; })()".to_string(),
             "stm" => "jet_stm_begin()".to_string(),
-            _ => format!("globalThis[{}]", js_string(name)),
+            _ => {
+                let key = program
+                    .constants
+                    .iter()
+                    .find(|constant| {
+                        constant.key.as_str() == name.as_str()
+                            || constant.name.as_str() == name.as_str()
+                    })
+                    .map(|constant| constant.key.as_str())
+                    .unwrap_or(name);
+                format!("globalThis[{}]", js_string(key))
+            }
         },
         MirOperation::Phi { incoming } => {
             js_phi_expression(program, function, incoming)?
@@ -6279,12 +6284,24 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_std::channel", "jet_channel_new"),
     ("jet_std::channel_bounded", "jet_channel_bounded"),
     ("jet_std::JetReceiver::receive", "jet_channel_receive"),
+    ("jet_std::JetReceiver::try_receive", "jet_channel_try_receive"),
+    ("jet_std::JetReceiver::is_timer", "jet_channel_is_timer"),
+    ("jet_std::JetReceiver::is_interval", "jet_channel_is_interval"),
+    ("jet_std::JetReceiver::is_cancelled", "jet_channel_is_cancelled"),
+    ("jet_std::JetReceiver::is_ready", "jet_channel_is_ready"),
+    ("jet_std::JetReceiver::delay_ms", "jet_channel_delay_ms"),
     ("jet_std::JetReceiver::close", "jet_channel_close"),
-    ("jet_std::JetSender::send", "jet_channel_send"),
-    ("jet_std::JetSender::close", "jet_channel_close"),
     ("jet_std::jet_select_wait_tagged", "jet_scheduler_select"),
     ("jet_std::jet_select_try_wait_tagged", "jet_scheduler_try_select"),
     ("jet_std::JetShared::new", "jet_shared_new"),
+    ("jet_std::JetMeasurement::new", "jet_measurement_new"),
+    ("jet_std::JetMeasurement::value", "jet_measurement_value"),
+    ("jet_std::JetMeasurement::uncertainty", "jet_measurement_uncertainty"),
+    ("jet_std::JetMeasurement::add", "jet_measurement_add"),
+    ("jet_std::JetMeasurement::sub", "jet_measurement_sub"),
+    ("jet_std::JetMeasurement::mul", "jet_measurement_mul"),
+    ("jet_std::JetMeasurement::div", "jet_measurement_div"),
+    ("jet_std::JetMeasurement::sqrt", "jet_measurement_sqrt"),
     // Web adapters for the canonical reactive/UI Prelude routes.  The
     // generated app imports these from the one DOM runtime rather than
     // allowing namespaced Prelude symbols to become ambient JavaScript.
@@ -6447,6 +6464,12 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_std::JetDispatchReport::trace", "jet_dispatch_report_trace"),
     ("jet_channel_send", "jet_channel_send"),
     ("jet_channel_receive", "jet_channel_receive"),
+    ("jet_channel_try_receive", "jet_channel_try_receive"),
+    ("jet_channel_is_timer", "jet_channel_is_timer"),
+    ("jet_channel_is_interval", "jet_channel_is_interval"),
+    ("jet_channel_is_cancelled", "jet_channel_is_cancelled"),
+    ("jet_channel_is_ready", "jet_channel_is_ready"),
+    ("jet_channel_delay_ms", "jet_channel_delay_ms"),
     ("jet_channel_close", "jet_channel_close"),
     ("jet_scheduler_select", "jet_scheduler_select"),
     ("jet_scheduler_try_select", "jet_scheduler_try_select"),

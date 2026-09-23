@@ -675,7 +675,7 @@ mod data_kernel {
         pub(crate) struct DataStatus {
             pub(crate) step: String,
             pub(crate) path: String,
-            pub(crate) copy: String,
+            pub(crate) clone_value: String,
             pub(crate) ownership: String,
             pub(crate) trust: String,
             pub(crate) fallback: String,

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+use crate::Marshal::{alloc_string, clone_string, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 
@@ -329,8 +329,8 @@ fn jet_jit_duration_display(nanos: i64) -> i64 {
     })
 }
 
-fn result_err(msg: String) -> i64 {
-    result_err_msg(&msg)
+fn result_err(message: String) -> i64 {
+    result_err_record(message)
 }
 
 fn result_err_record(message: String) -> i64 {
@@ -885,12 +885,6 @@ fn jet_jit_calendar_timegm(
 }
 
 
-fn jet_jit_time_expired(expires_at_ms: i64, now_ms: i64) -> i8 {
-    i8::from(now_ms >= expires_at_ms)
-}
-fn jet_jit_time_remaining_ms(expires_at_ms: i64, now_ms: i64) -> i64 {
-    expires_at_ms.saturating_sub(now_ms)
-}
 fn jet_jit_time_datetime(
     year: i64,
     month: i64,
@@ -1636,8 +1630,6 @@ host_fns! {
     calendar_month_name: "jet_calendar_month_name" => jet_jit_calendar_month_name: unary;
     calendar_month_abbr: "jet_calendar_month_abbr" => jet_jit_calendar_month_abbr: unary;
     calendar_timegm: "jet_calendar_timegm" => jet_jit_calendar_timegm: hexary;
-    time_expired: "jet_time_expired" => jet_jit_time_expired: binary_i8;
-    time_remaining_ms: "jet_time_remaining_ms" => jet_jit_time_remaining_ms: binary;
     from_unix_seconds: "jet_jit_time_from_unix_seconds" => jet_jit_time_from_unix_seconds: unary;
     from_unix_microseconds: "jet_jit_time_from_unix_microseconds" => jet_jit_time_from_unix_microseconds: unary;
     from_unix_nanoseconds: "jet_jit_time_from_unix_nanoseconds" => jet_jit_time_from_unix_nanoseconds: unary;

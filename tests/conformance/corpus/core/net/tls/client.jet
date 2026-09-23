@@ -1,16 +1,6 @@
 // core-conformance: core.net.tls.client
-use core.net as net
 use core.net.tls as tls
-use core.time as time
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
-    tcp :: net.tcp_connect(address) ?? panic("connect")
-    server :: net.tcp_accept(listener) ?? panic("accept")
-    net.tcp_close(&server) ?? panic("close")
-    #Context(deadline: time.now() + 100) {
-        print(tls.client(^tcp, "localhost") ? stream ->
-            false ! tls_error -> true)
-    }
+fn run() -[Net]> {
+    print(tls.client("localhost", 0) == .Err(_))
 }

@@ -1,12 +1,45 @@
+use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.math as math
+
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+    {
+        format: format,
+        kind: EncodingErrorKind.Syntax,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn safe_limits() -> EncodingLimits {
+    {
+        buffer_bytes: 65536,
+        max_depth: 256,
+        max_item_bytes: 16777216,
+        max_total_bytes: None,
+        max_expansion_depth: 32,
+        max_expansion_bytes: 8388608,
+    }
+}
+
+
 // core.encoding.cbor — RFC 8949 definite-length CBOR as DataTree.
 //
-// Major types 0–5 and the common simple values (false, true, null) are
-// implemented in Jet. Indefinite-length items, tags, half-precision floats
-// and bstr → `DataTree` (no Bytes variant on the public tree) are rejected as
-// `Unsupported` rather than silently coerced. Canonical encode (`to_bytes_canonical`)
-// uses shortest integer forms and sorted map keys by encoded byte order.
+// Major types 0–5 and common simple values (false, true, null) are
+// implemented in Jet. Definite-length text, arrays, maps, and float64 are
+// supported. Indefinite-length items, tags, half/single-precision floats, and
+// bstr → `DataTree` (no Bytes variant on the public tree) are rejected as
+// `Unsupported` rather than silently coerced. Canonical encode
+// (`to_bytes_canonical`) uses shortest integer forms and sorted map keys by
+// encoded byte order.
 pub struct CBOROptions {
     pub max_depth: Int
+    pub max_items: Int
+    pub max_bytes: Int
+    pub require_canonical: Bool
 }
 
 pub struct CBORReader {
@@ -29,6 +62,7 @@ pub enum CBORErrorKind {
 pub struct CBORError {
     pub kind: CBORErrorKind
     pub byte_offset: Int
+    pub path: String
     pub reason: String
 }
 
@@ -44,20 +78,32 @@ pub fn reader(data: [U8]) -> CBORReader { {bytes: data, index: 0} }
 
 pub fn writer() -> CBORWriter { {parts: [U8]{}} }
 
+impl CBORWriter {
+    pub fn write(&self, value: DataTree) {
+        chunk :: encode_cbor(value, false)
+        loop b in chunk -> self.parts.push(b)
+    }
+
+    pub fn write_canonical(&self, value: DataTree) {
+        chunk :: encode_cbor(value, true)
+        loop b in chunk -> self.parts.push(b)
+    }
+
+    pub fn to_bytes(self) -> [U8] { self.parts }
+}
+
 fn decode_cbor(data: [U8]) -> DataTree !EncodingError {
     p := CBORReader{bytes: data, index: 0}
-    value :: p.read_value(0)
+    value :: p.read_value(1)
     if p.index != data.len() {
-        return Err(
-        EncodingError.syntax(
-        EncodingFormat.CBOR,
-        p.index,
-        1,
-        p.index + 1,
-        "",
-        "unexpected trailing CBOR bytes",
-        ),
-        )
+        return Err(syntax_error(
+            EncodingFormat.CBOR,
+            p.index,
+            1,
+            p.index + 1,
+            "",
+            "unexpected trailing CBOR bytes",
+        ))
     }
     Ok(value)
 }
@@ -86,14 +132,29 @@ impl CBORReader {
     }
 
     fn read_value(&self, depth: Int) -> DataTree !EncodingError {
-        if depth > EncodingLimits.safe().max_depth {
+        if depth > safe_limits().max_depth {
             return Err(self.fail(EncodingErrorKind.Limit, "CBOR nesting exceeds EncodingLimits.safe().max_depth"))
         }
         head :: self.read_byte()
-        major :: (head >> 5) & 7
-        extra :: head & 31
+        head_int := Int.from_u8(head)
+        major :: (head_int >> 5) & 7
+        extra :: head_int & 31
         if extra == 31 {
             return Err(self.fail(EncodingErrorKind.Unsupported, "indefinite-length CBOR is not part of the Core DataTree adapter"))
+        }
+        if major == 7 {
+            if extra == 20 -> return Ok(DataTree.Bool(false))
+            if extra == 21 -> return Ok(DataTree.Bool(true))
+            if extra == 22 -> return Ok(DataTree.Null)
+            if extra == 27 {
+                bits :: self.read_length(extra)
+                value :: math.from_bits(bits) ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR float64 value could not be reconstructed"))
+                return Ok(DataTree.Float(value))
+            }
+            return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR simple value or floating-point width"))
+        }
+        if major == 6 {
+            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR tags are not projected into DataTree"))
         }
         n :: self.read_length(extra)
         if major == {
@@ -105,64 +166,70 @@ impl CBORReader {
             return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR byte strings have no DataTree.Bytes variant; encode as text or use a typed field"))
         }
         if major == 3 {
+            if n > safe_limits().max_item_bytes {
+                return Err(self.fail(EncodingErrorKind.Limit, "CBOR text string exceeds EncodingLimits.safe().max_item_bytes"))
+            }
             raw := [U8]{}
-            loop _ in 0..<n -> raw.push(self.read_byte())
+            loop _ in 0..<n {
+                b :: self.read_byte()
+                raw.push(b)
+            }
             text :: String.from_bytes(raw) ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR text string is not valid UTF-8"))
             return Ok(DataTree.Text(text))
         }
         if major == 4 {
+            if n > safe_limits().max_item_bytes {
+                return Err(self.fail(EncodingErrorKind.Limit, "CBOR array exceeds EncodingLimits.safe().max_item_bytes"))
+            }
             items := [DataTree]{}
-            loop _ in 0..<n -> items.push(self.read_value(depth + 1))
+            loop _ in 0..<n {
+                item :: self.read_value(depth + 1)
+                items.push(item)
+            }
             return Ok(DataTree.Array(items))
         }
         if major == 5 {
+            if n > safe_limits().max_item_bytes {
+                return Err(self.fail(EncodingErrorKind.Limit, "CBOR map exceeds EncodingLimits.safe().max_item_bytes"))
+            }
             entries := [String:DataTree]{}
             loop _ in 0..<n {
                 key_tree :: self.read_value(depth + 1)
                 key :: key_tree.text() ?? return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR map keys must be text to land in DataTree.Object"))
+                if entries.has_key(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
                 value :: self.read_value(depth + 1)
                 _ :: entries.add(key, value)
             }
             return Ok(DataTree.Object(entries))
         }
-        if major == 6 {
-            _ :: self.read_value(depth + 1)
-            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR tags are not projected into DataTree"))
-        }
-        if extra == {
-            20 -> return Ok(DataTree.Bool(false))
-            21 -> return Ok(DataTree.Bool(true))
-            22 -> return Ok(DataTree.Null)
-            else -> { _ := 0 }
-        }
-        if extra == 26 {
-            _ :: self.read_byte()
-            _ :: self.read_byte()
-            _ :: self.read_byte()
-            _ :: self.read_byte()
-            return Err(self.fail(EncodingErrorKind.Unsupported, "IEEE 754 floats in CBOR stay on a typed path; DataTree.Float is JSON-oriented"))
-        }
-        Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR simple value or additional info"))
+        Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR major type"))
     }
 
-    fn read_length(&self, extra: U8) -> Int !EncodingError {
-        n :: extra
-        if n < 24 -> return Ok(n)
-        if n == 24 -> return Ok(self.read_byte())
-        if n == 25 {
+    fn read_length(&self, extra: Int) -> Int !EncodingError {
+        if extra < 24 -> return Ok(extra)
+        if extra == 24 {
+            b :: self.read_byte()
+            return Ok(Int.from_u8(b))
+        }
+        if extra == 25 {
             hi :: self.read_byte()
             lo :: self.read_byte()
-            return Ok((hi << 8) | lo)
+            return Ok((Int.from_u8(hi) << 8) | Int.from_u8(lo))
         }
-        if n == 26 {
+        if extra == 26 {
             b0 :: self.read_byte()
             b1 :: self.read_byte()
             b2 :: self.read_byte()
             b3 :: self.read_byte()
-            return Ok((b0 << 24) | (b1 << 16) | (b2 << 8) | b3)
+            return Ok((Int.from_u8(b0) << 24) | (Int.from_u8(b1) << 16) | (Int.from_u8(b2) << 8) | Int.from_u8(b3))
         }
-        if n == 27 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "64-bit CBOR lengths are not used by the DataTree adapter"))
+        if extra == 27 {
+            n := 0
+            loop _ in 0..<8 {
+                b :: self.read_byte()
+                n = (n << 8) | Int.from_u8(b)
+            }
+            return Ok(n)
         }
         Err(self.fail(EncodingErrorKind.Syntax, "invalid CBOR additional info"))
     }
@@ -174,39 +241,91 @@ fn encode_cbor(value: DataTree, canonical: Bool) -> [U8] {
     out
 }
 
+fn cbor_push(out: &[U8], value: U8) {
+    out.push(value)
+}
+
 fn write_cbor(out: &[U8], value: DataTree, canonical: Bool) {
     if value == {
-        .Null -> { out.push(U8{246}) }
+        .Null -> { cbor_push(&out, U8{246}) }
         .Bool(v) -> {
-            if v -> out.push(U8{245}) else -> out.push(U8{244})
-        }
-        .Int(n) -> { write_cbor_int(out, n) }
-        .Float(_) -> { write_cbor(out, DataTree.Text(value.to_text() ?? "0"), canonical) }
-        .Text(s) -> {
-            raw :: s.bytes()
-            write_cbor_head(out, 3, raw.len())
-            loop b in raw -> out.push(b)
-        }
-        .Array(items) -> {
-            write_cbor_head(out, 4, items.len())
-            loop item in items -> write_cbor(out, item, canonical)
-        }
-        .Object(entries) -> {
-            write_cbor_head(out, 5, entries.len())
-            loop pair in entries {
-                write_cbor(out, DataTree.Text(pair.key), canonical)
-                write_cbor(out, pair.value, canonical)
+            if v {
+                cbor_push(&out, U8{245})
+            } else {
+                cbor_push(&out, U8{244})
             }
         }
+        .Int(n) -> { write_cbor_int(&out, n) }
+        .Float(n) -> { write_cbor_float(&out, n) }
+        .Text(s) -> {
+            raw :: s.bytes()
+            write_cbor_head(&out, 3, raw.len())
+            loop b in raw { cbor_push(&out, b) }
+        }
+        .Array(items) -> { write_cbor_array(&out, items, canonical) }
+        .Object(entries) -> { write_cbor_object(&out, entries, canonical) }
+    }
+}
+
+fn write_cbor_array(out: &[U8], items: [DataTree], canonical: Bool) {
+    write_cbor_head(&out, 4, items.len())
+    loop item in items -> write_cbor(&out, item, canonical)
+}
+
+fn write_cbor_object(out: &[U8], entries: [String:DataTree], canonical: Bool) {
+    write_cbor_head(&out, 5, entries.len())
+    if !canonical {
+        loop pair in entries {
+            write_cbor(&out, DataTree.Text(pair.key), canonical)
+            write_cbor(&out, pair.value, canonical)
+        }
+        return
+    }
+    keys := [String]{}
+    loop pair in entries -> keys.push(pair.key)
+    loop i in 0..<keys.len() {
+        loop j in (i + 1)..<keys.len() {
+            if compare_cbor_text(keys[j], keys[i]) < 0 {
+                tmp :: ~keys[i]
+                keys[i] = keys[j]
+                keys[j] = tmp
+            }
+        }
+    }
+    loop key in keys {
+        write_cbor(&out, DataTree.Text(key), canonical)
+        write_cbor(&out, entries.get(key) ?? DataTree.Null, canonical)
+    }
+}
+
+fn compare_cbor_text(a: String, b: String) -> Int {
+    aa :: a.bytes()
+    bb :: b.bytes()
+    if aa.len() < bb.len() -> return -1
+    if aa.len() > bb.len() -> return 1
+    loop i in 0..<aa.len() {
+        if aa[i] < bb[i] -> return -1
+        if aa[i] > bb[i] -> return 1
+    }
+    0
+}
+
+fn write_cbor_float(out: &[U8], n: Float) {
+    bits :: math.to_bits(n)
+    out.push(U8{251})
+    k := 7
+    loop k >= 0 {
+        out.push(U8{(bits >> (k * 8)) & 255})
+        k -= 1
     }
 }
 
 fn write_cbor_int(out: &[U8], n: Int) {
     if n >= 0 {
-        write_cbor_head(out, 0, n)
+        write_cbor_head(&out, 0, n)
         return
     }
-    write_cbor_head(out, 1, -1 - n)
+    write_cbor_head(&out, 1, -1 - n)
 }
 
 fn write_cbor_head(out: &[U8], major: Int, n: Int) {
@@ -225,9 +344,18 @@ fn write_cbor_head(out: &[U8], major: Int, n: Int) {
         out.push(U8{n & 255})
         return
     }
-    out.push(U8{(major << 5) | 26})
-    out.push(U8{(n >> 24) & 255})
-    out.push(U8{(n >> 16) & 255})
-    out.push(U8{(n >> 8) & 255})
-    out.push(U8{n & 255})
+    if n < 4294967296 {
+        out.push(U8{(major << 5) | 26})
+        out.push(U8{(n >> 24) & 255})
+        out.push(U8{(n >> 16) & 255})
+        out.push(U8{(n >> 8) & 255})
+        out.push(U8{n & 255})
+        return
+    }
+    out.push(U8{(major << 5) | 27})
+    k := 7
+    loop k >= 0 {
+        out.push(U8{(n >> (k * 8)) & 255})
+        k -= 1
+    }
 }

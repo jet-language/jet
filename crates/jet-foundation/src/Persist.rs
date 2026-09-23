@@ -878,8 +878,8 @@ pub fn shared_remove_key(key: &str) -> bool {
     removed_entry || removed_runtime
 }
 
-/// Sync every `#Persist` binding in `bundle` into the shared store and return
-/// the values that should seed this generation's globals / JIT constants.
+/// Seed every writable module binding and migrate `#Persist` state in the shared
+/// store. The returned values seed this generation's globals / JIT constants.
 pub fn prepare_bundle(bundle: &ProgramBundle) -> PersistPrep {
     let mut store = shared_store().lock().expect("persist store lock poisoned");
     let mut candidate = store.clone();
@@ -896,21 +896,49 @@ pub fn prepare_bundle(bundle: &ProgramBundle) -> PersistPrep {
 fn prepare_bundle_into(bundle: &ProgramBundle, store: &mut PersistStore) -> PersistPrep {
     let mut prep = PersistPrep::default();
     let mut rejection = None;
-    for module in &bundle.modules {
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let module_identity = bundle
+            .name_ledger
+            .module_identity(module_index)
+            .unwrap_or_else(|| module.alias.clone());
         for item in &module.items {
             let Item::Const(c) = item else {
                 continue;
             };
-            if !c.is_persist {
+            if !c.is_persist && !c.mutable {
                 continue;
-            };
+            }
             let Some(fresh) = const_runtime_value(c) else {
                 continue;
             };
+            let key = format!("{}::{}", module_identity, c.name);
+            if c.mutable && !c.is_persist {
+                let shape = shape_fingerprint(c.ty.as_ref(), &fresh);
+                let payload = encode_payload(&fresh);
+                let entry = PersistEntry {
+                    module: module_identity.clone(),
+                    name: c.name.clone(),
+                    shape: shape.clone(),
+                    payload,
+                };
+                store.put(entry);
+                if let Some(runtime_value) = ct_to_runtime_value(&fresh) {
+                    store.runtime_values.insert(
+                        key.clone(),
+                        PersistRuntimeValue {
+                            shape,
+                            value: runtime_value,
+                        },
+                    );
+                }
+                prep.by_name.insert(c.name.clone(), fresh.clone());
+                prep.by_key.insert(key, fresh);
+                continue;
+            }
             let shape = shape_fingerprint(c.ty.as_ref(), &fresh);
             let fresh_payload = encode_payload(&fresh);
-            let key = format!("{}::{}", module.alias, c.name);
-            let outcome = store.plan_migrate(&module.alias, &c.name, &shape, &fresh_payload);
+            let key = format!("{}::{}", module_identity, c.name);
+            let outcome = store.plan_migrate(&module_identity, &c.name, &shape, &fresh_payload);
             let rejected = matches!(&outcome, PersistOutcome::Rejected { .. });
             if rejected {
                 let reason = outcome
@@ -925,7 +953,7 @@ fn prepare_bundle_into(bundle: &ProgramBundle, store: &mut PersistStore) -> Pers
                 .cloned()
                 .or_else(|| store.entries.get(&key).cloned())
                 .unwrap_or_else(|| PersistEntry {
-                    module: module.alias.clone(),
+                    module: module_identity.clone(),
                     name: c.name.clone(),
                     shape: shape.clone(),
                     payload: fresh_payload.clone(),
@@ -933,7 +961,7 @@ fn prepare_bundle_into(bundle: &ProgramBundle, store: &mut PersistStore) -> Pers
             let note = match outcome.disposition() {
                 "migrated" => Some(format!(
                     "[persist] migrated `{}::{}` to new shape",
-                    module.alias, c.name
+                    module_identity, c.name
                 )),
                 "rejected" => Some(format!(
                     "[persist] rejected `{}`: {}",

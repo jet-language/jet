@@ -1,21 +1,12 @@
-// core.text.fmt — number and duration spellings for logs and UI.
-//
-// These are display helpers, not parsers. `hex` / `bin` / `oct` emit
-// lowercase digits with no radix prefix. `grouped` uses `,` thousands
-// separators. `bytes` uses 1024-based units (`KiB`, `MiB`, `GiB`).
-pub fn number(n: Int) -> String { "{n}" }
+use core.text as unicode
+// core.text.fmt — deterministic number, quantity, and display formatting.
+// Radix helpers use lowercase digits; text padding counts UTF-8 scalars.
+pub fn number(n: Int) -> String { grouped_int(n) }
+pub fn bin(n: Int) -> String { radix_signed(n, 2) }
+pub fn oct(n: Int) -> String { radix_signed(n, 8) }
 
-pub fn bin(n: Int) -> String { radix(n, 2) }
-
-pub fn oct(n: Int) -> String { radix(n, 8) }
-
-/// `width` is the minimum digit count, zero-padded. Negative `n` keeps the sign.
-pub fn hex(n: Int, width: Int) -> String {
-    digits :: radix(abs_int(n), 16)
-    body :: pad_left(digits, width, "0")
-    if n < 0 -> return "-{body}"
-    body
-}
+/// `width` is the minimum digit count, zero-padded. Negative `n` keeps sign.
+pub fn hex(n: Int, width: Int) -> String { radix_signed_width(n, 16, width) }
 
 pub fn ordinal(n: Int) -> String {
     abs :: abs_int(n)
@@ -27,46 +18,123 @@ pub fn ordinal(n: Int) -> String {
         if m == 2 -> suffix = "nd"
         if m == 3 -> suffix = "rd"
     }
-    if n < 0 -> "-{abs}{suffix}"
-    "{abs}{suffix}"
+    "{grouped_int(n)}{suffix}"
 }
 
 pub fn plural(n: Int, singular: String, many: String) -> String {
-    if n == 1 -> return singular
-    many
+    word :: if abs_int(n) == 1 -> singular else -> many
+    "{grouped_int(n)} {word}"
 }
 
-pub fn pad_left(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 0) }
+pub fn pad_left(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 0) }
+pub fn pad_right(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 1) }
+pub fn pad_center(text: String, width: Int, fill: String) -> String { pad_mode(text, width, fill, 2) }
+pub fn pad(text: String, width: Int, fill: String) -> String { pad_right(text, width, fill) }
 
-pub fn pad_right(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 1) }
+pub fn grouped(n: Float, frac: Int) -> String { group_decimal(float_fixed(n, frac)) }
+pub fn decimal(n: Float, frac: Int) -> String { float_fixed(n, frac) }
+pub fn percent(n: Float, frac: Int) -> String { "{float_fixed(n * 100.0, frac)}%" }
+pub fn sci(n: Float, frac: Int) -> String {
+    if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
+    sign := ""
+    value := n
+    if value < 0.0 {
+        sign = "-"
+        value = -value
+    }
+    exponent := 0
+    loop value >= 10.0 {
+        value = value / 10.0
+        exponent = exponent + 1
+    }
+    loop value < 1.0 {
+        value = value * 10.0
+        exponent = exponent - 1
+    }
+    exp_sign := if exponent < 0 -> "-" else -> "+"
+    exp_abs :: abs_int(exponent)
+    exp_text := radix(exp_abs, 10)
+    if exp_text.bytes().len() < 2 -> exp_text = "0{exp_text}"
+    "{sign}{float_fixed(value, frac)}e{exp_sign}{exp_text}"
+}
 
-pub fn pad_center(text: String, width: Int, fill: String) -> String { pad(text, width, fill, 2) }
-
-pub fn pad(text: String, width: Int, fill: String) -> String { pad_left(text, width, fill) }
-
-pub fn grouped(n: Float, _frac: Int) -> String { "{n}" }
-
-pub fn decimal(n: Float, _frac: Int) -> String { "{n}" }
-
-pub fn percent(n: Float, _frac: Int) -> String { "{n}%" }
-
-pub fn sci(n: Float, _frac: Int) -> String { "{n}" }
-
-pub fn pretty(value: String) -> String { value }
+pub fn pretty(value: String) -> String {
+    out := ""
+    indent := 0
+    quoted := false
+    escaped := false
+    loop ch in unicode.scalars(value) {
+        if quoted {
+            out = "{out}{ch}"
+            if escaped -> escaped = false
+            else if ch == "\\" -> escaped = true
+            else if ch == "\"" -> quoted = false
+            next
+        }
+        if ch == "\"" {
+            quoted = true
+            out = "{out}{ch}"
+        } else if ch == "{{" || ch == "[" {
+            indent = indent + 2
+            out = "{out}{ch}\n{spaces(indent)}"
+        } else if ch == "}}" || ch == "]" {
+            indent = indent - 2
+            if indent < 0 -> indent = 0
+            out = "{trim_right(out)}\n{spaces(indent)}{ch}"
+        } else if ch == "," {
+            out = "{trim_right(out)},\n{spaces(indent)}"
+        } else {
+            out = "{out}{ch}"
+        }
+    }
+    trim_right(out)
+}
 
 pub fn bytes(n: Int) -> String {
-    if n < 1024 -> return "{n} B"
-    if n < 1048576 -> return "{n / 1024} KiB"
-    if n < 1073741824 -> "{n / 1048576} MiB"
-    "{n / 1073741824} GiB"
+    sign := ""
+    value := n
+    if value < 0 {
+        sign = "-"
+        value = -value
+    }
+    if value < 1024 -> return "{sign}{value} B"
+    if value < 1048576 -> return "{sign}{value / 1024} KiB"
+    if value < 1073741824 -> return "{sign}{value / 1048576} MiB"
+    if value < 1099511627776 -> return "{sign}{value / 1073741824} GiB"
+    "{sign}{value / 1099511627776} TiB"
 }
 
-/// `n` is milliseconds.
+/// `n` is milliseconds. Composite output is bounded to three non-zero units.
 pub fn duration(n: Int) -> String {
-    if n < 1000 -> return "{n}ms"
-    if n < 60000 -> return "{n / 1000}s"
-    if n < 3600000 -> "{n / 60000}m"
-    "{n / 3600000}h"
+    sign := ""
+    rest := n
+    if rest < 0 {
+        sign = "-"
+        rest = -rest
+    }
+    if rest < 1000 -> return "{sign}{rest}ms"
+    days := rest / 86400000
+    rest = rest %% 86400000
+    hours := rest / 3600000
+    rest = rest %% 3600000
+    minutes := rest / 60000
+    rest = rest %% 60000
+    seconds := rest / 1000
+    parts := [String]{}
+    if days > 0 -> parts.push("{days}d")
+    if hours > 0 -> parts.push("{hours}h")
+    if minutes > 0 -> parts.push("{minutes}m")
+    if seconds > 0 || parts.len() == 0 -> parts.push("{seconds}s")
+    out := ""
+    limit := parts.len()
+    if limit > 3 -> limit = 3
+    i := 0
+    loop i < limit {
+        if i > 0 -> out = "{out} "
+        out = "{out}{parts[i]}"
+        i = i + 1
+    }
+    "{sign}{out}"
 }
 
 fn abs_int(n: Int) -> Int {
@@ -77,67 +145,162 @@ fn abs_int(n: Int) -> Int {
 fn grouped_int(n: Int) -> String {
     sign := ""
     rest := n
-    if n < 0 {
+    if rest < 0 {
         sign = "-"
-        rest = -n
+        rest = -rest
     }
     digits :: radix(rest, 10)
     raw :: digits.bytes()
     out := [U8]{}
     i := 0
-    loop {
-        if i >= raw.len() -> break
+    loop i < raw.len() {
         remaining :: raw.len() - i
-        if i != 0 && remaining % 3 == 0 -> out.push(U8{44})
+        if i > 0 && remaining % 3 == 0 -> out.push(U8{44})
         out.push(raw[i])
         i = i + 1
     }
     "{sign}{String.from_bytes(out) ?? digits}"
 }
 
+fn radix_signed(n: Int, base: Int) -> String { radix_signed_width(n, base, 0) }
+
+fn radix_signed_width(n: Int, base: Int, width: Int) -> String {
+    sign := ""
+    value := n
+    if value < 0 {
+        sign = "-"
+        value = -value
+    }
+    digits :: radix(value, base)
+    "{sign}{pad_left(digits, width, "0")}"
+}
+
 fn radix(n: Int, base: Int) -> String {
     if n == 0 -> return "0"
     digits := [U8]{}
     x := n
-    loop {
-        if x <= 0 -> break
+    loop x > 0 {
         d :: x % base
         if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
-        x = x / base
+        x = x /% base
     }
     out := [U8]{}
     i := digits.len() - 1
-    loop {
-        if i < 0 -> break
+    loop i >= 0 {
         out.push(digits[i])
         i = i - 1
     }
     String.from_bytes(out) ?? "0"
 }
 
-fn pad(text: String, width: Int, fill: String, mode: Int) -> String {
-    raw :: text.bytes()
-    extra :: width - raw.len()
-    if extra <= 0 || fill.bytes().len() == 0 -> text
-    if mode == {
-        0 -> "{fill_repeat(fill, extra)}{text}"
-        1 -> "{text}{fill_repeat(fill, extra)}"
-        else -> {
-            left :: extra / 2
-            "{fill_repeat(fill, left)}{text}{fill_repeat(fill, extra - left)}"
-        }
+fn float_fixed(n: Float, frac: Int) -> String {
+    precision := frac
+    if precision < 0 -> precision = 0
+    scale := Float{1}
+    i := 0
+    loop i < precision {
+        scale = scale * Float{10}
+        i = i + 1
     }
+    scaled := n * scale
+    rounded := if scaled < 0.0 -> Int{scaled - 0.5} else -> Int{scaled + 0.5}
+    sign := ""
+    if rounded < 0 {
+        sign = "-"
+        rounded = -rounded
+    }
+    digits :: radix(rounded, 10)
+    if precision == 0 -> return "{sign}{digits}"
+    body := pad_left(digits, precision + 1, "0")
+    split :: body.bytes().len() - precision
+    "{sign}{slice(body, 0, split)}.{slice(body, split, body.bytes().len())}"
 }
 
-fn fill_repeat(fill: String, n: Int) -> String {
-    pad :: fill.bytes()
-    out := [U8]{}
-    loop {
-        if out.len() >= n -> break
-        loop b in pad {
-            if out.len() >= n -> break
-            out.push(b)
-        }
+fn group_decimal(text: String) -> String {
+    raw :: text.bytes()
+    sign := ""
+    start := 0
+    if raw.len() > 0 && (raw[0] == (U8{45}) || raw[0] == (U8{43})) {
+        sign = String.from_bytes([U8]{raw[0]}) ?? ""
+        start = 1
     }
-    String.from_bytes(out) ?? ""
+    dot := raw.len()
+    i := start
+    loop i < raw.len() {
+        if raw[i] == (U8{46}) {
+            dot = i
+            break
+        }
+        i = i + 1
+    }
+    whole := String.from_bytes(slice_b(raw, start, dot)) ?? "0"
+    frac := if dot < raw.len() -> String.from_bytes(slice_b(raw, dot, raw.len())) ?? "" else -> ""
+    "{sign}{grouped_digits(whole)}{frac}"
+}
+
+fn grouped_digits(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        remain :: raw.len() - i
+        if i > 0 && remain % 3 == 0 -> out.push(U8{44})
+        out.push(raw[i])
+        i = i + 1
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String {
+    need := width - unicode.scalar_count(text)
+    units :: unicode.scalars(fill)
+    if need <= 0 || units.len() == 0 -> return ~text
+    added := ""
+    i := 0
+    loop i < need {
+        added = "{added}{units[i % units.len()]}"
+        i = i + 1
+    }
+    if mode == 0 -> return "{added}{text}"
+    if mode == 1 -> return "{text}{added}"
+    left :: need /% 2
+    "{slice(added, 0, left)}{text}{slice(added, left, unicode.scalar_count(added))}"
+}
+
+fn spaces(n: Int) -> String {
+    out := ""
+    i := 0
+    loop i < n {
+        out = "{out} "
+        i = i + 1
+    }
+    out
+}
+
+fn trim_right(text: String) -> String {
+    raw :: text.bytes()
+    i := raw.len()
+    loop i > 0 && (raw[i - 1] == (U8{32}) || raw[i - 1] == (U8{10}) || raw[i - 1] == (U8{9})) -> i = i - 1
+    String.from_bytes(slice_b(raw, 0, i)) ?? text
+}
+
+fn slice(text: String, start: Int, end: Int) -> String {
+    units :: unicode.scalars(text)
+    out := ""
+    i := start
+    loop i < end && i < units.len() {
+        if i >= 0 -> out = "{out}{units[i]}"
+        i = i + 1
+    }
+    out
+}
+
+fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return ~out
+        out.push(raw[i])
+        i = i + 1
+    }
 }

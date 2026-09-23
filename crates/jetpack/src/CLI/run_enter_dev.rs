@@ -2040,6 +2040,17 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     mark("env-composed");
     if flags.prep {
         auto_clean_after_success(theme, &roots);
+        if let Err(error) = record_env_entry_receipt(
+            theme,
+            &project_dir,
+            &roots,
+            &definition_fingerprint,
+            inherited_loader_path.as_deref(),
+            secret_identity.as_deref().unwrap_or_default(),
+            &ready_stats,
+        ) {
+            theme.detail(&format!("couldn't record env entry: {error}"));
+        }
         return 0;
     }
     let entry = find_project_entry(&project_dir);
@@ -3761,7 +3772,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 &plan.environment,
             );
         if !trusted {
-            if std::io::stdin().is_terminal() {
+            if std::io::stdin().is_terminal() || parsed.flags.trust {
                 if Trust::gate_with_environment(
                     theme,
                     &store,
@@ -3946,7 +3957,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
             Ok(script) => script,
             Err(error) => {
                 theme.detail(&format!("environment activation was rejected: {error}"));
-                return 0;
+                return 2;
             }
         };
         script.push_str(&activation);

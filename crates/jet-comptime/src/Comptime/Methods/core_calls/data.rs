@@ -359,7 +359,7 @@ pub fn data_status_rows() -> Vec<(String, String, String, String, String, String
             (
                 row.step,
                 row.path,
-                row.copy,
+                row.clone_value,
                 row.ownership,
                 row.trust,
                 row.fallback,

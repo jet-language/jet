@@ -246,6 +246,7 @@ pub(crate) fn process_spec_method_return(
     match (method, n_args) {
         ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
         ("env", 2) => Some(Some(spec_ty)),
+        ("arg" | "args_extend", 1) => Some(Some(spec_ty)),
         // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: `.terminal()` keeps
         // portable defaults; `.terminal(TerminalPolicy)` selects explicit
         // size and mode on the same ProcessSpec.
@@ -284,6 +285,10 @@ pub(crate) fn process_spec_method_return(
         }
         ("env_clear" | "detached" | "plan" | "run" | "run_checked" | "spawn" | "abilities", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
+            Some(None)
+        }
+        ("arg" | "args_extend", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }
         ("under", _) => {

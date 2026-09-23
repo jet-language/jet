@@ -4,14 +4,13 @@ package {
     authority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }
 }
 
-// D-FFI-SH1: Sh is a library-defined nominal String-backed type with an
-// ordinary `CheckedText` implementation. Literal words are argv items;
-// each hole is exactly one argv item, regardless of spaces or shell metacharacters.
+// D-FFI-SH1: process.cmd keeps each argument separate, so spaces and shell
+// metacharacters stay data rather than becoming shell syntax.
 use core.process as process
 
-fn run() {
+fn run() -[Exec, Time.Wait]> {
     value :: "two words;*.jet"
-    cmd :: Sh{"printf <%s> {value}"}
-    result :: process.run(cmd)
+    spec :: process.cmd(["printf", "<%s>", value])
+    result :: process.run_spec(spec) ?? panic("process")
     print(result.output)
 }

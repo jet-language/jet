@@ -1,14 +1,5 @@
-package {
-    name: "core.math.combinatorics"
-    version: "0.1.0"
-    edition: "2026"
-    description: "core.math.combinatorics core library."
-    license: "MIT"
-    outputs: {
-        combinatorics: .Library{ entry: combinatorics }
-    }
-}
 use core.math as math
+
 // core.math.combinatorics — counting, ranking, and generation.
 //
 // `permutations` / `combinations` / `product` materialise the full
@@ -20,13 +11,7 @@ pub fn binomial(n: Int, k: Int) -> ?Int { math.binomial(n, k) }
 
 pub fn permutations_count(n: Int, k: Int) -> ?Int {
     if n < 0 || k < 0 || k > n -> return None
-    acc := 1
-    i := 0
-    loop i < k {
-        acc = acc * (n - i)
-        i = i + 1
-    }
-    Val(acc)
+    math.perm(n, k)
 }
 
 pub fn combinations_count(n: Int, k: Int) -> ?Int { math.binomial(n, k) }
@@ -87,7 +72,7 @@ fn perm_rec(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
     out := [[Int]]{}
     i := 0
     loop i < items.len() {
-        if !used[i] {
+        if used[i] == false {
             next_used := [Bool]{}
             loop u in used -> next_used.push(u)
             next_used[i] = true
@@ -225,21 +210,33 @@ pub fn compress(items: [Int], mask: [Bool]) -> [Int] {
 
 pub fn drop(items: [Int], n: Int) -> [Int] {
     out := [Int]{}
+    skip := n
+    if skip < 0 -> skip = 0
     i := 0
     loop i < items.len() {
-        if i >= n -> out.push(items[i])
+        if i >= skip -> out.push(items[i])
         i = i + 1
     }
     out
 }
+pub fn take_n(items: [Int], n: Int) -> [Int] {
+    out := [Int]{}
+    if n <= 0 -> return out
+    limit := n
+    if limit > items.len() -> limit = items.len()
+    loop i in 0..<limit -> out.push(items[i])
+    out
+}
+// `take` is retired because it is a Jet keyword; use `take_n`.
+
 
 pub fn takewhile(items: [Int], pred_nonneg: Bool) -> [Int] {
     out := [Int]{}
     loop x in items {
         ok := x >= 0
         if {
-            pred_nonneg && !ok -> return ~out
-            !pred_nonneg && ok -> return ~out
+            pred_nonneg && ok == false -> return ~out
+            pred_nonneg == false && ok -> return ~out
         }
         out.push(x)
     }
@@ -253,7 +250,7 @@ pub fn dropwhile(items: [Int], pred_nonneg: Bool) -> [Int] {
         ok := x >= 0
         keep := false
         if pred_nonneg && ok -> keep = true
-        if !pred_nonneg && !ok -> keep = true
+        if pred_nonneg == false && ok == false -> keep = true
         if skipping && keep -> next
         skipping = false
         out.push(x)
@@ -268,7 +265,7 @@ pub fn unique(items: [Int]) -> [Int] {
         loop y in out {
             if y == x -> seen = true
         }
-        if !seen -> out.push(x)
+        if seen == false -> out.push(x)
     }
     out
 }

@@ -1,6 +1,8 @@
 // core-conformance: core.data.loader.invalidate
+use core.data as data
 use core.data.loader as api
 
 fn run() {
-    print(api.invalidate(Loader{}))
+    loader :: data.file<String>("jet", "csv", data.DataLimits.safe()) ?? panic("loader")
+    print(api.invalidate(&loader, .Manual))
 }

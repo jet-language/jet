@@ -6,6 +6,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::Cx;
+use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::call_return_type_with_args;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::core_enum_equal_type;
@@ -296,9 +297,10 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
-        "core.web.storage.local", "set", "jet_web_storage_set", true, &[true, true],
+        "core.web.storage.local", "set", "jet_web_storage_local_set", true, &[true, true],
     ).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-        .without_direct_aot().without_direct_jit(),
+        .without_direct_aot()
+        .with_jit_symbol("jet_jit_web_storage_local_set"),
     CoreCallRecord::new(
         "core.net", "dns_ptr", "jet_net_dns_ptr", true, &[true, false],
     )
@@ -1677,11 +1679,11 @@ fn lower_compute_transform_call(
     })
 }
 
-/// Route the public archive surface through the loaded source package. The
-/// package module itself is the only caller that may lower the internal ABI
-/// calls below; all other callers use the ordinary file-module TIR path.
-fn lower_archive_source_call(
+/// Route source-owned Core members through the loaded Jet package. The source
+/// package itself keeps its internal ABI calls on the ordinary Core route.
+fn lower_core_source_call(
     method_span: Span,
+    module: &str,
     method: &str,
     type_args: &[Type],
     resolved_ret: Option<&Type>,
@@ -1689,19 +1691,24 @@ fn lower_archive_source_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
-    // Comptime evaluates a standalone fragment, not the emitted module graph.
-    // Keep its existing Core evaluator path; runtime bundles use the source
-    // module above and therefore remain subject to the normal frontend/TIR
-    // route.
-    if !cx.core_archive_source || cx.module_alias == "core_archive" {
+    let alias = cx.core_source_modules.get(module)?;
+    if alias == &cx.module_alias
+        || !jet_foundation::CoreModuleExports::core_source_owns(module, method)
+    {
         return None;
     }
-    let (sig, fixed_ret) = crate::Sema::core_fixed_sig("core.archive", method)?;
+    let (sig, fixed_ret) = crate::Sema::core_fixed_sig(module, method)
+        .or_else(|| crate::Sema::core_call_surface_signature(module, method))?;
+    if let (Some(actual), Some(expected)) = (resolved_ret, fixed_ret.as_ref()) {
+        if actual != expected {
+            return None;
+        }
+    }
     let targs = lower_module_args(args, Some(sig.as_slice()), env, cx);
     let Some(ty) = resolved_ret.cloned().or(fixed_ret) else {
         return Some(invariant_method_expr(
             method_span,
-            format!("archive call `core.archive.{method}` has no resolved return type"),
+            format!("source Core call `{module}.{method}` has no resolved return type"),
         ));
     };
     let target_return = match module_call_target_return(cx, Some(&ty)) {
@@ -1712,10 +1719,7 @@ fn lower_archive_source_call(
         ty,
         kind: TExprKind::ModuleCall {
             form: TModuleCallForm::Qualified {
-                // The source package is emitted as `mod __jet_core_archive`.
-                // `mangle_generated` would add a second generated prefix and
-                // produce the nonexistent `__jet___core_archive` path.
-                rust_mod: crate::Codegen::mangle("core_archive"),
+                rust_mod: crate::Codegen::mangle(alias),
                 rust_fn: mangle(method).to_string(),
             },
             target_return,
@@ -2115,6 +2119,11 @@ fn lower_core_crypto_alias_fast(
         return None;
     };
     if !matches!(module.as_str(), "core.crypto" | "core.crypto.expert") {
+        return None;
+    }
+    if static_call_type_name_lower(receiver, env).as_deref() == Some("Secret")
+        && matches!(method, "from_text" | "from_bytes")
+    {
         return None;
     }
     let Some((params, _)) = crate::Sema::core_fixed_sig(&module, &core_method) else {
@@ -6041,18 +6050,17 @@ fn lower_method_call_impl(
                     if module == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
                     }
-                    if module == "core.archive" {
-                        if let Some(source_call) = lower_archive_source_call(
-                            method_span,
-                            method,
-                            type_args,
-                            resolved_ret,
-                            args,
-                            cx,
-                            env,
-                        ) {
-                            return source_call;
-                        }
+                    if let Some(source_call) = lower_core_source_call(
+                        method_span,
+                        &module,
+                        method,
+                        type_args,
+                        resolved_ret,
+                        args,
+                        cx,
+                        env,
+                    ) {
+                        return source_call;
                     }
                     // D-VERDICT-1321-1: `core.term.print` is the qualified
                     // twin of ambient print. Emit one typed Print per argument
@@ -6304,18 +6312,17 @@ fn lower_method_call_impl(
                     if submodule == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
                     }
-                    if submodule == "core.archive" {
-                        if let Some(source_call) = lower_archive_source_call(
-                            method_span,
-                            method,
-                            type_args,
-                            resolved_ret,
-                            args,
-                            cx,
-                            env,
-                        ) {
-                            return source_call;
-                        }
+                    if let Some(source_call) = lower_core_source_call(
+                        method_span,
+                        &submodule,
+                        method,
+                        type_args,
+                        resolved_ret,
+                        args,
+                        cx,
+                        env,
+                    ) {
+                        return source_call;
                     }
                     if submodule == "core.mem" && method == "address_of" {
                         if args.len() != 1 {
@@ -8049,9 +8056,9 @@ fn lower_method_call_impl(
                     ok: Box::new(Type::String),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPRequest", "body") => Type::Named("HTTPBody".to_string()),
+                ("HTTPRequest", "body") => Type::Named("Body".to_string()),
                 ("HTTPRequest", "trailers") => Type::Result {
-                    ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+                    ok: Box::new(Type::Named("Headers".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
                 ("HTTPRequest", "body_len") => Type::Int,
@@ -8081,7 +8088,7 @@ fn lower_method_call_impl(
                     ok: Box::new(Type::String),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPResponse", "body") => Type::Named("HTTPBody".to_string()),
+                ("HTTPResponse", "body") => Type::Named("Body".to_string()),
                 ("HTTPResponse", "header") => Type::Option(Box::new(Type::String)),
                 ("HTTPResponse", "cookies") => Type::List(Box::new(Type::String)),
                 ("HTTPResponse", "trailers") => Type::Result {
@@ -8093,27 +8100,27 @@ fn lower_method_call_impl(
                 ("HTTPResponse", "timings") => Type::List(Box::new(Type::Int)),
                 ("HTTPResponse", "reused_connection") => Type::Bool,
                 ("HTTPResponse", "raw_content_encoding") => Type::Option(Box::new(Type::String)),
-                ("HTTPHeaders", "first") => Type::Option(Box::new(Type::String)),
-                ("HTTPHeaders", "all") => Type::List(Box::new(Type::String)),
-                ("HTTPHeaders", "append" | "set") => Type::Result {
-                    ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+                ("Headers", "first") => Type::Option(Box::new(Type::String)),
+                ("Headers", "all") => Type::List(Box::new(Type::String)),
+                ("Headers", "append" | "set") => Type::Result {
+                    ok: Box::new(Type::Named("Headers".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPHeaders", "remove") => Type::Named("HTTPHeaders".to_string()),
+                ("Headers", "remove") => Type::Named("Headers".to_string()),
                 ("HTTPMux", _) => unit_type(),
                 ("HTTPHandler", "handle") => Type::Result {
                     ok: Box::new(Type::Named("HTTPResponse".to_string())),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPBody", "bytes") => Type::Result {
+                ("Body", "bytes") => Type::Result {
                     ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPBody", "text") => Type::Result {
+                ("Body", "text") => Type::Result {
                     ok: Box::new(Type::String),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
-                ("HTTPBody", "json") => type_args.first().map_or_else(
+                ("Body", "json") => type_args.first().map_or_else(
                     || {
                         resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                             ok: Box::new(Type::Named("Unknown".to_string())),
@@ -8140,8 +8147,8 @@ fn lower_method_call_impl(
                         },
                     )
                 }
-                ("HTTPBody", "chunks") => Type::Named("HTTPBodyChunks".to_string()),
-                ("HTTPBody", "copy_to") => Type::Result {
+                ("Body", "chunks") => Type::Named("HTTPBodyChunks".to_string()),
+                ("Body", "copy_to") => Type::Result {
                     ok: Box::new(Type::Int),
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
@@ -8684,10 +8691,19 @@ fn lower_method_call_impl(
                 "receive" => (
                     THandleOp::ChannelReceive,
                     Type::Result {
-                        ok: Box::new(elem),
+                        ok: Box::new(elem.clone()),
                         err: Box::new(Type::Named("Closed".to_string())),
                     },
                 ),
+                "try_receive" => (
+                    THandleOp::ChannelTryReceive,
+                    Type::Option(Box::new(elem.clone())),
+                ),
+                "is_timer" => (THandleOp::ChannelIsTimer, Type::Bool),
+                "is_interval" => (THandleOp::ChannelIsInterval, Type::Bool),
+                "is_cancelled" => (THandleOp::ChannelIsCancelled, Type::Bool),
+                "is_ready" => (THandleOp::ChannelIsReady, Type::Bool),
+                "delay_ms" => (THandleOp::ChannelDelayMs, Type::Int),
                 "close" => (THandleOp::ChannelClose, unit_type()),
                 "send" => (THandleOp::SenderSend, unit_type()),
                 _ => unreachable!("is_concurrency_method_name admitted only these names"),
@@ -9393,7 +9409,13 @@ fn lower_method_call_impl(
                                 false,
                                 params.map(|types| types.as_slice()),
                             ) {
-                                return callback;
+                                return if method.starts_with("para_")
+                                    && !(method == "para_map" && index != 0)
+                                {
+                                    force_thread_callback_value(callback, cx)
+                                } else {
+                                    callback
+                                };
                             }
                         }
                         if let (Expr::Lambda(lam), Some(params)) = (&a.expr, params) {
@@ -9445,7 +9467,7 @@ fn lower_method_call_impl(
                                     tl.ret = Some(error);
                                 }
                             }
-                            return TExpr {
+                            let callback = TExpr {
                                 ty: Type::Fn {
                                     params: params.clone(),
                                     ret: tl.ret.clone().map(Box::new),
@@ -9456,6 +9478,26 @@ fn lower_method_call_impl(
                                 },
                                 kind: TExprKind::Lambda(Box::new(tl)),
                             };
+                            return if method.starts_with("para_")
+                                && !(method == "para_map" && index != 0)
+                            {
+                                force_thread_callback_value(callback, cx)
+                            } else {
+                                callback
+                            };
+                        }
+                        if method.starts_with("para_") && !(method == "para_map" && index != 0) {
+                            if let Some(params) = params {
+                                let callable = lower_expr(&a.expr, cx, env);
+                                let callback = TExpr {
+                                    ty: callable.ty.clone(),
+                                    kind: TExprKind::HostBorrowCallback {
+                                        callable: Box::new(callable),
+                                        params: params.clone(),
+                                    },
+                                };
+                                return force_thread_callback_value(callback, cx);
+                            }
                         }
                         // A function parameter is already a checked Jet callable,
                         // but collection helpers lend each item as `&T`. Adapt
@@ -9473,18 +9515,6 @@ fn lower_method_call_impl(
                                     params: params.cloned().unwrap_or_default(),
                                 },
                             };
-                        }
-                        if method.starts_with("para_") && !(method == "para_map" && index != 0) {
-                            if let Some(params) = params {
-                                let callable = lower_expr(&a.expr, cx, env);
-                                return TExpr {
-                                    ty: callable.ty.clone(),
-                                    kind: TExprKind::HostBorrowCallback {
-                                        callable: Box::new(callable),
-                                        params: params.clone(),
-                                    },
-                                };
-                            }
                         }
                         lower_expr(&a.expr, cx, env)
                     })
@@ -10214,10 +10244,34 @@ fn lower_method_call_impl(
                 }
             });
         }
-        if let Some((core_method, _mutates)) = service_method_route(handle, method) {
+        if let Some((core_method, mutates)) = service_method_route(handle, method) {
             return in_own_frame(|| {
                 let mut lowered_args = Vec::with_capacity(args.len() + 2);
-                lowered_args.push(lower_expr(receiver, cx, env));
+                let lowered_receiver = lowered_receiver.borrow_mut().take();
+                let lowered_receiver =
+                    lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+                let receiver = if mutates {
+                    if let TExprKind::Borrow { place, .. } = &lowered_receiver.kind {
+                        TExpr {
+                            ty: lowered_receiver.ty.clone(),
+                            kind: TExprKind::Borrow {
+                                place: place.clone(),
+                                mutable: true,
+                            },
+                        }
+                    } else {
+                        TExpr {
+                            ty: lowered_receiver.ty.clone(),
+                            kind: TExprKind::Borrow {
+                                place: Box::new(lowered_receiver),
+                                mutable: true,
+                            },
+                        }
+                    }
+                } else {
+                    lowered_receiver
+                };
+                lowered_args.push(receiver);
                 if handle == "ServiceTree" && method == "worker" && args.len() == 3 {
                     lowered_args.push(lower_expr(&args[0].expr, cx, env));
                     let handler = match &args[1].expr {
@@ -10827,6 +10881,12 @@ fn lower_method_call_impl(
             });
         }
     }
+    let checked_text_static = |type_name: &str| {
+        cx.string_distinct_has_registered_method(type_name, "check")
+            && (method == "check"
+                || (cx.string_distinct_has_registered_method(type_name, "encode_hole")
+                    && matches!(method, "from" | "encode_hole")))
+    };
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
@@ -10836,28 +10896,14 @@ fn lower_method_call_impl(
             recv_type.as_deref(),
             Some("ExpiringSecret" | crate::Syntax::EXPIRING_VALUE_TYPE)
         )
-        || recv_type.as_deref().is_some_and(|type_name| {
-            cx.string_distinct_has_registered_method(type_name, "check")
-                && cx.string_distinct_has_registered_method(type_name, "encode_hole")
-                && matches!(method, "from" | "encode_hole")
-        })
-        || matches!(receiver, Expr::Ident(type_name, _) if !env.locals.contains_key(type_name)
-            && cx.string_distinct_has_registered_method(type_name, "check")
-            && cx.string_distinct_has_registered_method(type_name, "encode_hole")
-            && matches!(method, "from" | "encode_hole"))
+        || recv_type.as_deref().is_some_and(checked_text_static)
+        || matches!(receiver, Expr::Ident(type_name, _) if checked_text_static(type_name))
         || static_call_type_name_lower(receiver, env).is_some_and(|type_name| {
-            cx.string_distinct_has_registered_method(&type_name, "check")
-                && cx.string_distinct_has_registered_method(&type_name, "encode_hole")
-                && matches!(method, "from" | "encode_hole")
+            checked_text_static(&type_name)
         })
     {
         let explicit_checked_text_type = match receiver {
-            Expr::Ident(type_name, _)
-                if !env.locals.contains_key(type_name)
-                    && cx.string_distinct_has_registered_method(type_name, "check")
-                    && cx.string_distinct_has_registered_method(type_name, "encode_hole")
-                    && matches!(method, "from" | "encode_hole") =>
-            {
+            Expr::Ident(type_name, _) if checked_text_static(type_name) => {
                 Some(type_name.clone())
             }
             _ => None,
@@ -10978,10 +11024,7 @@ fn lower_method_call_impl(
                 // inherent facades over the ordinary CheckedText implementation.
                 // Their Rust names stay bare; only actual Jet methods use the
                 // `__jet_` mangle.
-                if cx.string_distinct_has_registered_method(&type_name, "check")
-                    && cx.string_distinct_has_registered_method(&type_name, "encode_hole")
-                    && matches!(method, "from" | "encode_hole")
-                {
+                if checked_text_static(&type_name) {
                     let lowered_args: Vec<_> = args
                         .iter()
                         .map(|argument| lower_one_call_arg(argument, None, env, cx))
@@ -10992,7 +11035,7 @@ fn lower_method_call_impl(
                             .get(&(type_name.clone(), method.to_string()))
                             .cloned()
                             .unwrap_or_default();
-                        resolved_method_type_args(
+                        let inferred = resolved_method_type_args(
                             cx,
                             &type_name,
                             method,
@@ -11001,7 +11044,12 @@ fn lower_method_call_impl(
                             &lowered_args,
                             type_args,
                             resolved_ret,
-                        )
+                        );
+                        if inferred.is_empty() && type_args.is_empty() && lowered_args.len() == 1 {
+                            vec![lowered_args[0].value.ty.clone()]
+                        } else {
+                            inferred
+                        }
                     } else {
                         type_args.to_vec()
                     };
@@ -11022,16 +11070,24 @@ fn lower_method_call_impl(
                         generic_method_instance_leaf(&owner, method, &resolved_type_args)
                     };
                     return TExpr {
-                        ty: resolved_ret.cloned().unwrap_or_else(|| {
-                            if method == "from" {
-                                Type::Result {
-                                    ok: Box::new(Type::Named(type_name.clone())),
-                                    err: Box::new(Type::String),
+                        ty: resolved_ret
+                            .cloned()
+                            .or_else(|| {
+                                cx.method_rets
+                                    .get(&(type_name.clone(), method.to_string()))
+                                    .cloned()
+                                    .flatten()
+                            })
+                            .unwrap_or_else(|| {
+                                if method == "from" {
+                                    Type::Result {
+                                        ok: Box::new(Type::Named(type_name.clone())),
+                                        err: Box::new(Type::String),
+                                    }
+                                } else {
+                                    Type::String
                                 }
-                            } else {
-                                Type::String
-                            }
-                        }),
+                            }),
                         kind: TExprKind::StaticCall {
                             owner: TStaticOwner::User(type_name.clone()),
                             owner_type: Some(Type::Named(type_name)),
@@ -11149,19 +11205,19 @@ fn lower_method_call_impl(
                         | "HTTPVersion"
                         | "HTTPHeaderName"
                         | "HTTPHeaderValue"
-                        | "HTTPHeaders"
-                        | "HTTPBody"
+                        | "Headers"
+                        | "Body"
                 ) {
                     return in_own_frame(|| {
                         let method_rust = match (type_name.as_str(), method, args.len()) {
-                            ("HTTPBody", "bytes", 1) => "from_bytes",
-                            ("HTTPBody", "text", 1) => "from_text",
-                            ("HTTPBody", "text", 2) => "from_text_with_mime",
-                            ("HTTPBody", "json", 1) => "from_json",
-                            ("HTTPBody", "form", 1) => "from_form",
-                            ("HTTPBody", "multipart", 1) => "from_multipart",
-                            ("HTTPBody", "reader", 1) => "from_reader",
-                            ("HTTPBody", "reader", 2) => "from_reader_with_length",
+                            ("Body", "bytes", 1) => "from_bytes",
+                            ("Body", "text", 1) => "from_text",
+                            ("Body", "text", 2) => "from_text_with_mime",
+                            ("Body", "json", 1) => "from_json",
+                            ("Body", "form", 1) => "from_form",
+                            ("Body", "multipart", 1) => "from_multipart",
+                            ("Body", "reader", 1) => "from_reader",
+                            ("Body", "reader", 2) => "from_reader_with_length",
                             _ => method,
                         };
                         return TExpr {
@@ -11169,7 +11225,11 @@ fn lower_method_call_impl(
                                 .cloned()
                                 .unwrap_or_else(|| Type::Named(type_name.clone())),
                             kind: TExprKind::StaticCall {
-                                owner: rooted_owner(format!("Jet{type_name}")),
+                                owner: rooted_owner(
+                                    net_handle_rust_type(type_name.as_str())
+                                        .map(str::to_owned)
+                                        .unwrap_or_else(|| format!("Jet{type_name}")),
+                                ),
                                 owner_type: None,
                                 method: TMethodRef::bare(method_rust),
                                 type_args: Vec::new(),

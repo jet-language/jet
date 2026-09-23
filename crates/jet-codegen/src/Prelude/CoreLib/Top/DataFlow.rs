@@ -2547,7 +2547,7 @@ fn jet_data_loader_kernel_kind(
 ) -> jet_foundation::PreludeDataFlow::LoaderKind {
     match kind {
         jet_std::DataLoaderKind::File => jet_foundation::PreludeDataFlow::LoaderKind::File,
-        jet_std::DataLoaderKind::Url => jet_foundation::PreludeDataFlow::LoaderKind::Url,
+        jet_std::DataLoaderKind::URL => jet_foundation::PreludeDataFlow::LoaderKind::URL,
         jet_std::DataLoaderKind::Database => {
             jet_foundation::PreludeDataFlow::LoaderKind::Database
         }
@@ -2601,8 +2601,8 @@ fn jet_data_loader_kernel_status(
             }
         },
         invalidated_by: match status.invalidated_by {
-            jet_std::DataInvalidationCause::None => {
-                jet_foundation::PreludeDataFlow::InvalidationCause::None
+            jet_std::DataInvalidationCause::NoCause => {
+                jet_foundation::PreludeDataFlow::InvalidationCause::NoCause
             }
             jet_std::DataInvalidationCause::Loader => {
                 jet_foundation::PreludeDataFlow::InvalidationCause::Loader
@@ -2681,8 +2681,8 @@ fn jet_data_loader_apply_kernel<T>(
         }
     };
     loader.status.invalidated_by = match state.status.invalidated_by {
-        jet_foundation::PreludeDataFlow::InvalidationCause::None => {
-            jet_std::DataInvalidationCause::None
+        jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => {
+            jet_std::DataInvalidationCause::NoCause
         }
         jet_foundation::PreludeDataFlow::InvalidationCause::Loader => {
             jet_std::DataInvalidationCause::Loader
@@ -2734,8 +2734,8 @@ fn jet_data_loader_status_from_kernel(
             }
         },
         invalidated_by: match status.invalidated_by {
-            jet_foundation::PreludeDataFlow::InvalidationCause::None => {
-                jet_std::DataInvalidationCause::None
+            jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => {
+                jet_std::DataInvalidationCause::NoCause
             }
             jet_foundation::PreludeDataFlow::InvalidationCause::Loader => {
                 jet_std::DataInvalidationCause::Loader
@@ -2912,7 +2912,7 @@ fn jet_data_loader_new<T>(
         status: jet_std::DataLoaderStatus {
             identity: state.status.identity,
             freshness: jet_std::DataFreshness::Pending,
-            invalidated_by: jet_std::DataInvalidationCause::None,
+            invalidated_by: jet_std::DataInvalidationCause::NoCause,
             error: state.status.error,
             cleanup: state.status.cleanup,
             buffered_bytes: state.status.buffered_bytes,
@@ -3011,7 +3011,7 @@ fn jet_data_loader_url<T>(
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_new(
-        jet_std::DataLoaderKind::Url,
+        jet_std::DataLoaderKind::URL,
         url.clone(),
         String::new(),
         Vec::new(),
@@ -3433,7 +3433,7 @@ fn jet_data_loader_payload<T>(
         return Ok((payload, loader.offline));
     }
     let operation = match loader.source.kind {
-        jet_std::DataLoaderKind::Url => "data.loader.url",
+        jet_std::DataLoaderKind::URL => "data.loader.url",
         jet_std::DataLoaderKind::Database => "data.loader.database",
         jet_std::DataLoaderKind::File => "data.loader.archive",
         jet_std::DataLoaderKind::Value => "data.loader.value",
@@ -3603,8 +3603,8 @@ fn jet_data_loader_invalidate<T>(
     jet_foundation::PreludeDataFlow::invalidate(
         &mut state,
         match cause {
-            jet_std::DataInvalidationCause::None => {
-                jet_foundation::PreludeDataFlow::InvalidationCause::None
+            jet_std::DataInvalidationCause::NoCause => {
+                jet_foundation::PreludeDataFlow::InvalidationCause::NoCause
             }
             jet_std::DataInvalidationCause::Loader => {
                 jet_foundation::PreludeDataFlow::InvalidationCause::Loader
@@ -3809,10 +3809,10 @@ impl JetShow for jet_std::DataFormat {
 impl JetShow for jet_std::DataStatus {
     fn jet_show(&self) -> String {
         format!(
-            "DataStatus(step: {}, path: {}, copy: {}, ownership: {}, trust: {}, fallback: {}, replacement: {})",
+            "DataStatus(step: {}, path: {}, clone_value: {}, ownership: {}, trust: {}, fallback: {}, replacement: {})",
             jet_data_loader_bounded_text(&self.step, JET_DATA_LOADER_MAX_STATUS_TEXT),
             jet_data_loader_bounded_text(&self.path, JET_DATA_LOADER_MAX_STATUS_TEXT),
-            jet_data_loader_bounded_text(&self.copy, JET_DATA_LOADER_MAX_STATUS_TEXT),
+            jet_data_loader_bounded_text(&self.clone_value, JET_DATA_LOADER_MAX_STATUS_TEXT),
             jet_data_loader_bounded_text(&self.ownership, JET_DATA_LOADER_MAX_STATUS_TEXT),
             jet_data_loader_bounded_text(&self.trust, JET_DATA_LOADER_MAX_STATUS_TEXT),
             jet_data_loader_bounded_text(&self.fallback, JET_DATA_LOADER_MAX_STATUS_TEXT),
@@ -4448,7 +4448,7 @@ mod jet_data_web {
         result_tree(vec![
             ("step", text_tree(value.step.clone())),
             ("path", text_tree(value.path.clone())),
-            ("copy", text_tree(value.copy.clone())),
+            ("clone_value", text_tree(value.clone_value.clone())),
             ("ownership", text_tree(value.ownership.clone())),
             ("trust", text_tree(value.trust.clone())),
             ("fallback", text_tree(value.fallback.clone())),
@@ -4726,7 +4726,7 @@ mod jet_data_web {
                     "Credential" => jet_std::DataInvalidationCause::Credential,
                     "Capability" => jet_std::DataInvalidationCause::Capability,
                     "Manual" => jet_std::DataInvalidationCause::Manual,
-                    _ => jet_std::DataInvalidationCause::None,
+                    _ => jet_std::DataInvalidationCause::NoCause,
                 };
                 if has_typed_loader(index) {
                     with_typed_loader(index, &operation, |loader| { loader.invalidate(cause); Ok(jet_std::DataTree::Null) })

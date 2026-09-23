@@ -15,15 +15,12 @@ fn is_core_closure_marker(usage: &str) -> bool {
     usage.starts_with(CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
 }
 
-/// `__core_source` is reserved for a package whose source tree is actually
+/// `__core_source` is reserved for packages whose source tree is actually
 /// available to the Core provider. Compiler-owned runtime fragments use only
 /// the intrinsic marker; claiming a source package for them would make cache
 /// and provenance records lie about their authority.
 fn has_core_source_package(module: &str) -> bool {
-    // D-CORE-SOURCE-AUTHORITY1=A: archive is the current Core package boundary.
-    // Keep this list explicit until each remaining compiler-owned surface has a
-    // real package source tree and the sema loader can consume it.
-    module == "core.archive"
+    jet_foundation::CoreModuleExports::core_source_module(module).is_some()
 }
 
 /// Attach the semantic Core source and intrinsic closure to the direct helper
@@ -849,8 +846,8 @@ fn is_http_nominal_type(name: &str) -> bool {
             | "HTTPVersion"
             | "HTTPHeaderName"
             | "HTTPHeaderValue"
-            | "HTTPHeaders"
-            | "HTTPBody"
+            | "Headers"
+            | "Body"
     )
 }
 

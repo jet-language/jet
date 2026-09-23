@@ -2026,6 +2026,10 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "{ version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }",
     ),
     (
+        "age",
+        "{ version = \"0.10\" }",
+    ),
+    (
         "argon2",
         "{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }",
     ),
@@ -2616,6 +2620,12 @@ fn build_bridge_full(
         deps.insert(
             SUBTLE_CRATE_SPEC.0.to_string(),
             SUBTLE_CRATE_SPEC.1.to_string(),
+        );
+    }
+    if needs_secrets {
+        deps.insert(
+            AGE_CRATE_SPEC.0.to_string(),
+            AGE_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_compress {

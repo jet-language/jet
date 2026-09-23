@@ -72,9 +72,8 @@ fn append_module_semantics(s: &mut String, module: &crate::AST::LoadedModule) {
     s.push('\u{1}');
     let _ = write!(s, "{:?}", module.imports);
     s.push('\u{1}');
-    // D-ENTRY-SCRIPT1=B: pre-sema script statements are program content
-    // too. They have not become the ordinary implicit `run` item yet, so
-    // serializing only `items` would let distinct scripts share a key.
+    // D-ENTRY-SCRIPT1=C: top-level executable statements are retained in the
+    // canonical source identity so rejected files cannot alias declarations.
     let _ = write!(s, "{:?}", module.script_body);
     s.push('\u{1}');
     let _ = write!(s, "{:?}", module.items);

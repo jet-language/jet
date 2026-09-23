@@ -1,0 +1,57 @@
+#Error
+pub struct CryptoError { pub reason: String }
+fn hmac_sha256_raw(a: [U8], b: [U8]) -> [U8] { ~a }
+fn pbkdf2_block_salt(salt: [U8], index: Int) -> [U8] {
+    out := ~salt
+    out.push(to_u8(index >> 24))
+    out.push(to_u8(index >> 16))
+    out.push(to_u8(index >> 8))
+    out.push(to_u8(index))
+    out
+}
+fn to_u8(n: Int) -> U8 { U8{n & 255} }
+pub fn hkdf_sha256(ikm: [U8], salt: [U8], info: [U8], len: Int) -> [U8] !CryptoError {
+    if len < 0 || len > 8160 -> return Err(CryptoError{reason: "x"})
+    prk :: hmac_sha256_raw(salt, ikm)
+    out := [U8]{}
+    block := [U8]{}
+    i := 1
+    loop out.len() < len {
+        material := [U8]{}
+        loop b in block -> material.push(b)
+        loop b in info -> material.push(b)
+        material.push(U8{i})
+        block = hmac_sha256_raw(prk, material)
+        loop b in block {
+            if out.len() >= len -> break
+            out.push(b)
+        }
+        i += 1
+    }
+    Ok(out)
+}
+pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] !CryptoError {
+    if iterations < 1 || key_len < 1 -> return Err(CryptoError{reason: "x"})
+    blocks :: (key_len + 31) /% 32
+    out := [U8]{}
+    block_index := 0
+    loop block_index < blocks {
+        i :: block_index + 1
+        block_salt :: pbkdf2_block_salt(salt, i)
+        u := hmac_sha256_raw(password, block_salt)
+        acc := [U8]{}
+        loop byte in u -> acc.push(byte)
+        repetition := 1
+        loop repetition < iterations {
+            u = hmac_sha256_raw(password, u)
+            loop j in 0..<32 -> acc[j] = (U8{acc[j] ~| u[j]})
+            repetition += 1
+        }
+        loop b in acc {
+            if out.len() >= key_len -> break
+            out.push(b)
+        }
+        block_index += 1
+    }
+    Ok(out)
+}

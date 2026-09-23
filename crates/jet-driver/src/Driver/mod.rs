@@ -6976,7 +6976,6 @@ fn compile_src_on_compiler_stack(
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
-    bundle.materialize_script_entries();
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
@@ -7915,7 +7914,6 @@ fn check_eval_on_compiler_stack(
         Ok(c) => c,
         Err(diags) => return (diags, None, crate::Sema::SemIndexEffectFacts::default()),
     };
-    bundle.materialize_script_entries();
     let (diags, facts) =
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Eval);
     (diags, Some(bundle), facts)
@@ -8275,8 +8273,8 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
     if entry_fn == "run" {
         return;
     }
-    // Keep an invalid explicit-run script unchanged so sema can report the conflict and retain
-    // its whole-file auto-wrap edit. Valid scripts have already been materialized by the loader.
+    // Keep an invalid loose-statement file unchanged when it already has an
+    // explicit `fn run`; sema reports the ordinary-file entry diagnostic.
     let entry_module = &bundle.modules[bundle.entry];
     if !entry_module.script_body.is_empty()
         && entry_module

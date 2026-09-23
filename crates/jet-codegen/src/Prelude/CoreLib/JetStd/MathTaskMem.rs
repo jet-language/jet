@@ -936,41 +936,44 @@ macro_rules! jet_lane_show {
 
     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
     pub fn after(ms: i64) -> JetReceiver<()> {
-        let (tx, rx) = channel::<()>();
         let delay = super::jet_task_delay_ms_defaulted(ms);
+        let inner = super::JetSchedulerChannel::timer(delay as i64);
+        let tx = inner.sender();
         super::jet_scheduler_spawn_detached_timer(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(());
         });
-        rx
+        JetReceiver { inner }
     }
 
     /// D-TASKRUNTIME1=A: one-shot typed timer channel for select timeout values.
     pub fn after_value<T: Send + 'static>(ms: i64, value: T) -> JetReceiver<T> {
-        let (tx, rx) = channel::<T>();
         let delay = super::jet_task_delay_ms_defaulted(ms);
+        let inner = super::JetSchedulerChannel::timer(delay as i64);
+        let tx = inner.sender();
         super::jet_scheduler_spawn_detached_timer(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(value);
         });
-        rx
+        JetReceiver { inner }
     }
 
     /// D-TASKRUNTIME1=A: interval timer channel; sends 1, 2, ... until process exit.
     pub fn interval(ms: i64) -> JetReceiver<i64> {
-        let (tx, rx) = channel::<i64>();
         let delay = super::jet_task_interval_ms_defaulted(ms);
+        let inner = super::JetSchedulerChannel::interval(delay as i64);
+        let tx = inner.sender();
         super::jet_scheduler_spawn_detached_timer(move || {
             let mut tick = 1i64;
             loop {
                 super::jet_scheduler_sleep_ms(delay);
-                if !tx.tx.send(tick) {
+                if !tx.send(tick) {
                     break;
                 }
                 tick += 1;
             }
         });
-        rx
+        JetReceiver { inner }
     }
 
     pub struct JetReceiver<T> {
@@ -1012,9 +1015,33 @@ macro_rules! jet_lane_show {
             }
         }
 
-        /// Explicitly close the channel (wakes waiters); same as dropping the last sender.
+        pub fn try_receive(&self) -> Option<T> {
+            self.inner.try_receive()
+        }
+
+        pub fn is_timer(&self) -> bool {
+            self.inner.is_timer()
+        }
+
+        pub fn is_interval(&self) -> bool {
+            self.inner.is_interval()
+        }
+
+        pub fn is_cancelled(&self) -> bool {
+            self.inner.is_cancelled()
+        }
+
+        pub fn is_ready(&self) -> bool {
+            self.inner.is_ready()
+        }
+
+        pub fn delay_ms(&self) -> i64 {
+            self.inner.delay_ms()
+        }
+
+        /// Explicitly close the channel (wakes waiters); same as cancellation.
         pub fn close(&self) {
-            self.inner.close();
+            self.inner.cancel();
         }
     }
 

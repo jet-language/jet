@@ -662,7 +662,7 @@ fn alloc_env_config_origins(origins: &[(String, String)]) -> i64 {
     })
 }
 
-/// Build the resident `DataTree` source carrier for `core.sys.decode`.
+/// Build the resident `DataTree` source carrier for environment configuration.
 ///
 /// The source order, dotenv parser, prefix fold, nested-key split, and
 /// allowlist are all owned by `Prelude/Core/EnvConfig.rs`; this function only
@@ -757,6 +757,15 @@ fn hex_encode_upper(bytes: &[u8]) -> String {
 fn b64_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_b64_encode(&bytes.to_vec())
 }
+fn b64_encode_handle(handle: i64) -> String {
+    let packed = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .int_list_slice(handle)
+            .map(encoding_base_rt::jet_std_b64_encode_ints)
+    });
+    packed.unwrap_or_else(|| b64_encode(&clone_bytes(handle)))
+}
+
 
 fn b64url_encode(bytes: &[u8]) -> String {
     encoding_base_rt::jet_std_b64url_encode(&bytes.to_vec())
@@ -1026,7 +1035,7 @@ fn jet_jit_a2b_uu(text: i64) -> i64 {
 }
 
 fn jet_jit_b64_encode(bytes: i64) -> i64 {
-    let encoded = b64_encode(&clone_bytes(bytes));
+    let encoded = b64_encode_handle(bytes);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
@@ -2749,44 +2758,6 @@ fn typed_env_error_result(
     result_err_fields(mapped)
 }
 
-fn jet_jit_env_decode(prefix: i64, file: i64, allow: i64, type_key: i64) -> i64 {
-    let prefix_text = clone_string(prefix);
-    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
-        return result_err_fields(json_rt::FieldError::one("typed env received an invalid type key"));
-    };
-    let Some(descriptor) = typed_runtime_descriptor(&type_key) else {
-        return result_err_fields(json_rt::FieldError::one(format!(
-            "typed env has no type `{type_key}`"
-        )));
-    };
-    let result = jet_jit_env_config(prefix, file, allow);
-    let Some((tree_handle, origins_handle)) = Concurrency::with_runtime_mut(|rt| {
-        let Some((ok, bits)) = runtime_host::jit_result_parts(rt, result) else {
-            return None;
-        };
-        if !ok {
-            return None;
-        }
-        let carrier = bits as i64;
-        Some((
-            rt.heap.record_get_int(carrier, 0)?,
-            rt.heap.record_get_int(carrier, 1)?,
-        ))
-    }) else {
-        return result;
-    };
-    let Some(tree) = read_datatree(tree_handle) else {
-        return result_err_fields(json_rt::FieldError::one("typed env returned an invalid DataTree"));
-    };
-    let origins = clone_env_config_origins(origins_handle);
-    let tree = typed_env_project_tree(&tree, &descriptor, &prefix_text, &origins);
-    match typed_decode_value(&tree, &descriptor)
-        .and_then(|value| typed_slot_raw(value, &descriptor).map_err(json_rt::FieldError::one))
-    {
-        Ok(value) => result_ok(value as u64),
-        Err(errors) => typed_env_error_result(errors, &origins),
-    }
-}
 
 fn jet_jit_db_decode(row: i64, type_key: i64) -> i64 {
     let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
@@ -4719,7 +4690,6 @@ host_fns! {
     xml_parse_options_safe: "jet_std::XMLParseOptions::safe" => jet_jit_xml_parse_options_safe: sig_nullary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
-    env_decode: "jet_jit_env_decode" => jet_jit_env_decode: sig_quaternary;
     env_config: "jet_jit_env_config" => jet_jit_env_config: sig_ternary;
     env_config_map: "jet_jit_env_config_map" => jet_jit_env_config_map: sig_binary;
 }

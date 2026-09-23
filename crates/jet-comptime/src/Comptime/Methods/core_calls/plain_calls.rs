@@ -292,74 +292,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             },
         ),
-        // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
-        // transforms. Keep them interpreter-resident; never route through the
-        // native FFI bridge or an AOT fallback.
-        ("core.archive", "zip_compress") => {
-            Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_compress(
-                as_string(one(0)?, span)?,
-                &as_bytes(one(1)?, span)?,
-            )))
-        }
-        ("core.archive", "zip_decompress") => Ok(CtValue::Bytes(
-            crate::Comptime::ArchiveLite::zip_decompress(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "crc32") => Ok(CtValue::Int(crate::Comptime::ArchiveLite::crc32_value(
-            &as_bytes(one(0)?, span)?,
-        ))),
-        ("core.archive", "adler32") => Ok(CtValue::Int(crate::Comptime::ArchiveLite::adler32(
-            &as_bytes(one(0)?, span)?,
-        ))),
-        ("core.archive", "deflate") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::deflate(
-            &as_bytes(one(0)?, span)?,
-        ))),
-        ("core.archive", "inflate") => Ok(CtValue::Bytes(
-            crate::Comptime::ArchiveLite::inflate_bytes(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "zip_names_json") => Ok(CtValue::Str(
-            crate::Comptime::ArchiveLite::zip_names_json(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "zip_open") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_open(
-            &as_bytes(one(0)?, span)?,
-        ))),
-        ("core.archive", "zip_next") => Ok(CtValue::Str(crate::Comptime::ArchiveLite::zip_next(
-            &as_bytes(one(0)?, span)?,
-            as_int(one(1)?, span)?,
-        ))),
-        ("core.archive", "zip_read") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_read(
-            &as_bytes(one(0)?, span)?,
-            &as_string(one(1)?, span)?,
-        ))),
-        ("core.archive", "zip_write") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_write(
-            &as_bytes(one(0)?, span)?,
-            &as_string(one(1)?, span)?,
-            &as_bytes(one(2)?, span)?,
-        ))),
-        ("core.archive", "zip_close") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_close(
-            &as_bytes(one(0)?, span)?,
-        ))),
-        ("core.archive", "zip_extract") => {
-            Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::zip_extract(
-                &as_bytes(one(0)?, span)?,
-                &as_string(one(1)?, span)?,
-            )))
-        }
-        ("core.archive", "unzip") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::unzip(
-            &as_bytes(one(0)?, span)?,
-            &as_string(one(1)?, span)?,
-        ))),
-        ("core.archive", "tar_add") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::tar_add(
-            &as_bytes(one(0)?, span)?,
-            as_string(one(1)?, span)?,
-            &as_bytes(one(2)?, span)?,
-        ))),
-        ("core.archive", "tar_get") => Ok(CtValue::Bytes(crate::Comptime::ArchiveLite::tar_get(
-            &as_bytes(one(0)?, span)?,
-            as_string(one(1)?, span)?,
-        ))),
-        ("core.archive", "tar_names_json") => Ok(CtValue::Str(
-            crate::Comptime::ArchiveLite::tar_names_json(&as_bytes(one(0)?, span)?),
-        )),
         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
         ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
             type_name: "Loadable".to_string(),
@@ -1410,43 +1342,21 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.regex", "replace") => regex_replace(args, span),
         ("core.regex", "replace_first") => regex_replace_first(args, span),
         ("core.regex", "match") => regex_match(args, span),
-        // --- core.math.random (ambient; seed for deterministic REPL transcripts) ---
+        // Ambient random public draws are Jet-owned. These provider leaves
+        // only seed the shared stream and expose bounded source bits.
         ("core.math.random", "seed") => {
-            let seed = match one(0)? {
-                CtValue::Int(n) => *n as u64,
-                _ => return Err(unsupported("random.seed expects an Int", span)),
-            };
-            ambient_random_kernel::seed(seed as i64);
+            let seed = as_int(one(0)?, span)?;
+            ambient_random_kernel::seed(seed);
             Ok(CtValue::Unit)
         }
-        ("core.math.random", "int") => {
-            let low = match one(0)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("random.int expects Int bounds", span)),
-            };
-            let high = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("random.int expects Int bounds", span)),
-            };
-            Ok(CtValue::Int(ambient_random_kernel::int(low, high)))
+        ("core.math.random", "getrandbits") => {
+            let bits = as_int(one(0)?, span)?;
+            Ok(CtValue::Int(ambient_random_kernel::getrandbits(bits)))
         }
-        ("core.math.random", "float") => {
-            Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::float())))
-        }
-        // D-DET1: testing.fake_rng is the test-facing spelling of the same
-        // caller-seeded deterministic Rng capability as random.rng.
-        ("core.math.random", "rng") | ("core.testing", "fake_rng") => {
-            let seed = match one(0)? {
-                CtValue::Int(n) => *n as u64,
-                _ => {
-                    let api = if method == "rng" {
-                        "random.rng"
-                    } else {
-                        "testing.fake_rng"
-                    };
-                    return Err(unsupported(&format!("{api} expects an Int seed"), span));
-                }
-            };
+        // D-DET1: testing.fake_rng is source-owned; only random.rng remains
+        // as the explicit provider capability constructor.
+        ("core.math.random", "rng") => {
+            let seed = as_int(one(0)?, span)? as u64;
             Ok(CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
@@ -1598,92 +1508,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
             })
-        }
-        ("core.math.random", "float_range") => {
-            let low = as_float(one(0)?, span)?;
-            let high = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(
-                ambient_random_kernel::float_range(low, high),
-            )))
-        }
-        ("core.math.random", "bool") => {
-            let p = as_float(one(0)?, span)?;
-            Ok(CtValue::Bool(ambient_random_kernel::bool_p(p)))
-        }
-        ("core.math.random", "normal") => {
-            let mean = as_float(one(0)?, span)?;
-            let stddev = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::normal(
-                mean, stddev,
-            ))))
-        }
-        ("core.math.random", "exponential") => {
-            let lambda = as_float(one(0)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(
-                ambient_random_kernel::exponential(lambda),
-            )))
-        }
-        ("core.math.random", "bytes") => {
-            let n = match one(0)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("random.bytes expects an Int count", span)),
-            };
-            Ok(CtValue::Bytes(ambient_random_kernel::bytes(n)))
-        }
-        ("core.math.random", "pick") => {
-            let CtValue::List(xs) = one(0)?.clone() else {
-                return Err(unsupported("random.pick needs a list", span));
-            };
-            match ambient_random_kernel::pick(&xs) {
-                Some(v) => Ok(CtValue::Present(Box::new(v))),
-                None => Ok(CtValue::absent(
-                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
-                        unsupported("random.pick needs a resolved element type", span)
-                    })?,
-                )),
-            }
-        }
-        ("core.math.random", "weighted_pick") => {
-            let CtValue::List(xs) = one(0)?.clone() else {
-                return Err(unsupported("random.weighted_pick needs a list", span));
-            };
-            let CtValue::List(ws) = one(1)?.clone() else {
-                return Err(unsupported(
-                    "random.weighted_pick needs a [Float] weights list",
-                    span,
-                ));
-            };
-            let weights: Vec<f64> = ws
-                .iter()
-                .map(|w| as_float(w, span))
-                .collect::<Result<_, _>>()?;
-            match ambient_random_kernel::weighted_pick(&xs, &weights) {
-                Some(v) => Ok(CtValue::Present(Box::new(v))),
-                None => Ok(CtValue::absent(
-                    CtValue::resolved_option_element_type(resolved_ret).ok_or_else(|| {
-                        unsupported("random.weighted_pick needs a resolved element type", span)
-                    })?,
-                )),
-            }
-        }
-        ("core.math.random", "sample") => {
-            let CtValue::List(xs) = one(0)?.clone() else {
-                return Err(unsupported("random.sample needs a list", span));
-            };
-            let k = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("random.sample count must be Int", span)),
-            };
-            Ok(CtValue::List(ambient_random_kernel::sample(&xs, k)))
-        }
-        ("core.math.random", "shuffle") => {
-            let CtValue::List(mut xs) = one(0)?.clone() else {
-                return Err(unsupported("random.shuffle needs a list", span));
-            };
-            ambient_random_kernel::shuffle(&mut xs);
-            // TIR writes this returned list back through the borrowed place;
-            // the AST dispatcher owns the equivalent write-back path.
-            Ok(CtValue::List(xs))
         }
         ("core.crypto.random", "bytes") => {
             let count = match one(0)? {
@@ -2247,7 +2071,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     fields: vec![
                         ("step".to_string(), CtValue::Str(row.step)),
                         ("path".to_string(), CtValue::Str(row.path)),
-                        ("copy".to_string(), CtValue::Str(row.copy)),
+                        ("clone_value".to_string(), CtValue::Str(row.clone_value)),
                         ("ownership".to_string(), CtValue::Str(row.ownership)),
                         ("trust".to_string(), CtValue::Str(row.trust)),
                         ("fallback".to_string(), CtValue::Str(row.fallback)),

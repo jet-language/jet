@@ -2,121 +2,320 @@ package {
     name: "core.build"
     version: "0.1.0"
     edition: "2026"
-    description: "Build graph and cache receipts."
+    description: "Checked build graph projections and deterministic receipts."
     license: "MIT"
     outputs: {
         build: .Library{ entry: build }
     }
 }
-// core.build — an in-memory action graph plus a receipt diff.
-//
-// Nodes are keyed by action identity. `graph` starts empty. Edges are
-// input-file digests; `receipt_diff` compares two graphs by key and reports
-// added, removed, and digest-changed files. This is the typed surface; the
-// live compiler still owns the real cache.
+
+// core.build is the read-only boundary for checked BuildPlan facts.  The
+// compiler owns graph(plan); receipt_diff is also available to the source
+// evaluator for already-materialized graph values.  Neither operation reads
+// the filesystem or consults a cache, so equal graph values always compare
+// equal and output order is canonical.
 pub struct BuildGraphTarget {
+    pub id: Int
     pub name: String
     pub kind: String
+    pub deps: [Int]
+    pub actions: [Int]
+    pub files: [String]
+    pub plugin: ?Int
 }
 
 pub struct BuildGraphAction {
+    pub id: Int
+    pub name: String
+    pub kind: String
+    pub inputs: [String]
+    pub outputs: [String]
+    pub target: ?Int
+    pub caps: [String]
+    pub pools: [String]
+    pub legacy_wrapper: ?String
+    pub plugin: ?Int
+    pub compiler_owned: Bool
     pub key: String
-    pub command: String
+    pub cache_hit: ?Bool
 }
 
 pub struct BuildGraphActionKey {
+    pub action: String
     pub key: String
 }
 
 pub struct BuildGraphFile {
     pub path: String
-    pub digest: String
+    pub owner: ?Int
+    pub consumers: [Int]
+    pub targets: [Int]
 }
 
 pub struct BuildGraphNode {
+    pub kind: String
     pub key: String
-    pub command: String
-    pub inputs: [BuildGraphFile]
+    pub subject: String
+    pub inputs: [String]
+    pub input_digests: [BuildGraphInputDigest]
 }
 
 pub struct BuildGraphInputDigest {
-    pub path: String
+    pub name: String
     pub digest: String
 }
 
 pub struct BuildGraphFileDelta {
     pub path: String
-    pub before: String
-    pub after: String
+    pub before: ?BuildGraphFile
+    pub after: ?BuildGraphFile
 }
 
 pub struct BuildGraphKeyDelta {
-    pub key: String
-    pub kind: String
+    pub action: String
+    pub before: ?String
+    pub after: ?String
 }
 
 pub struct BuildGraphCacheDelta {
-    pub hits: Int
-    pub misses: Int
-    pub changed: Int
+    pub action: String
+    pub before: ?Bool
+    pub after: ?Bool
 }
 
 pub struct BuildGraphDiff {
-    pub added: [BuildGraphKeyDelta]
-    pub removed: [BuildGraphKeyDelta]
-    pub files: [BuildGraphFileDelta]
-    pub cache: BuildGraphCacheDelta
+    pub file_deltas: [BuildGraphFileDelta]
+    pub affected_files: [String]
+    pub key_deltas: [BuildGraphKeyDelta]
+    pub cache_deltas: [BuildGraphCacheDelta]
 }
 
 pub struct BuildGraph {
+    pub targets: [BuildGraphTarget]
+    pub actions: [BuildGraphAction]
+    pub action_keys: [BuildGraphActionKey]
+    pub cache_hits: [BuildGraphAction]
+    pub files: [BuildGraphFile]
+    pub affected_files: [BuildGraphFile]
     pub nodes: [BuildGraphNode]
 }
 
-/// Empty graph. Add nodes by constructing `BuildGraph` values; this helper
-/// is the documented constructor.
-pub fn graph() -> BuildGraph { {nodes: [BuildGraphNode]{}} }
+/// `graph` is a compiler-owned query.  Runtime code cannot manufacture a
+/// BuildPlan, so failing closed here is preferable to returning an empty
+/// graph that looks like a successful build.  The comptime dispatcher replaces
+/// this body with the checked projection.
+pub fn graph(_plan: BuildPlan) -> BuildGraph {
+    panic("core.build.graph requires a checked BuildPlan in build/comptime code")
+}
 
-/// Compare two graphs. Keys present only on `after` are added; only on
-/// `before` are removed; shared keys with a different input digest are
-/// file deltas. Cache hits are shared unchanged keys.
+/// Compare two checked graph projections without reading source files or
+/// making cache policy decisions.  All deltas are ordered lexicographically;
+/// action keys compare recipe identity, while affected files follow changed
+/// actions through declared outputs, consumers, and target dependencies.
 pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
-    added := [BuildGraphKeyDelta]{}
-    removed := [BuildGraphKeyDelta]{}
-    files := [BuildGraphFileDelta]{}
-    hits := 0
-    changed := 0
-    loop n in after.nodes {
-        prev :: find_node(before, n.key)
-        if prev == .None -> added.push(BuildGraphKeyDelta{key: n.key, kind: "added"}) else {
-            p :: prev ?? BuildGraphNode{key: "", command: "", inputs: [BuildGraphFile]{}}
-            if node_digest(p) == node_digest(n) -> hits = hits + 1 else {
-                changed = changed + 1
-                files.push(BuildGraphFileDelta{path: n.key, before: node_digest(p), after: node_digest(n)})
-            }
+    file_deltas :: diff_files(before, after)
+
+    action_names := [String]{}
+    loop action in before.actions -> append_unique(&action_names, action.name)
+    loop action in after.actions -> append_unique(&action_names, action.name)
+    action_names.sort()
+
+    key_deltas := [BuildGraphKeyDelta]{}
+    cache_deltas := [BuildGraphCacheDelta]{}
+    changed_actions := [String]{}
+    loop name in action_names {
+        before_action :: find_action_name(before, name)
+        after_action :: find_action_name(after, name)
+        if action_changed(before_action, after_action) -> append_unique(&changed_actions, name)
+
+        before_key :: action_key(before_action)
+        after_key :: action_key(after_action)
+        if before_key != after_key {
+            key_deltas.push(BuildGraphKeyDelta{action: ~name, before: before_key, after: after_key})
+        }
+
+        before_hit :: action_cache_hit(before_action)
+        after_hit :: action_cache_hit(after_action)
+        if before_hit != after_hit {
+            cache_deltas.push(BuildGraphCacheDelta{action: ~name, before: before_hit, after: after_hit})
         }
     }
-    loop n in before.nodes {
-        if find_node(after, n.key) == .None {
-            removed.push(BuildGraphKeyDelta{key: n.key, kind: "removed"})
-        }
-    }
-    {
-        added: added,
-        removed: removed,
-        files: files,
-        cache: BuildGraphCacheDelta{hits: hits, misses: added.len(), changed: changed},
+
+    affected := affected_files(before, changed_actions)
+    loop path in affected_files(after, changed_actions) -> append_unique(&affected, path)
+    affected.sort()
+    return {
+        file_deltas: file_deltas,
+        affected_files: affected,
+        key_deltas: key_deltas,
+        cache_deltas: cache_deltas,
     }
 }
 
-fn find_node(g: BuildGraph, key: String) -> ?BuildGraphNode {
-    loop n in g.nodes {
-        if n.key == key -> return Val(n)
+fn diff_files(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
+    paths := [String]{}
+    loop file in before.files -> append_unique(&paths, file.path)
+    loop file in after.files -> append_unique(&paths, file.path)
+    paths.sort()
+
+    out := [BuildGraphFileDelta]{}
+    loop path in paths {
+        before_file :: find_file(before.files, path)
+        after_file :: find_file(after.files, path)
+        if file_identity(before, before_file) != file_identity(after, after_file) {
+            out.push(BuildGraphFileDelta{path: path, before: before_file, after: after_file})
+        }
+    }
+    out
+}
+
+fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
+    pending_actions := [String]{}
+    loop action in graph.actions {
+        if contains_string(changed_actions, action.name) -> append_unique(&pending_actions, action.name)
+    }
+    pending_targets := [Int]{}
+    seen_actions := [String]{}
+    seen_targets := [Int]{}
+    affected := [String]{}
+    action_index := 0
+    target_index := 0
+
+    loop action_index < pending_actions.len() || target_index < pending_targets.len() {
+        loop action_index < pending_actions.len() {
+            action_name :: pending_actions[action_index]
+            action_index += 1
+            if contains_string(seen_actions, action_name) -> next
+            append_unique(&seen_actions, action_name)
+            action :: find_action_name(graph, action_name) ?? next
+            loop output in action.outputs {
+                append_unique(&affected, output)
+                file :: find_file(graph.files, output) ?? next
+                loop consumer_id in file.consumers {
+                    consumer :: find_action_id(graph, consumer_id)
+                    if consumer != .None {
+                        consumer_action :: consumer
+                        append_unique(&pending_actions, consumer_action.name)
+                    }
+                }
+            }
+            loop target in graph.targets {
+                if contains_int(target.actions, action.id) -> append_unique_int(&pending_targets, target.id)
+            }
+        }
+
+        loop target_index < pending_targets.len() {
+            target_id :: pending_targets[target_index]
+            target_index += 1
+            if contains_int(seen_targets, target_id) -> next
+            append_unique_int(&seen_targets, target_id)
+            loop target in graph.targets {
+                if contains_int(target.deps, target_id) {
+                    loop action_id in target.actions {
+                        action :: find_action_id(graph, action_id)
+                        if action != .None {
+                            named :: action
+                            append_unique(&pending_actions, named.name)
+                        }
+                    }
+                    append_unique_int(&pending_targets, target.id)
+                }
+            }
+        }
+    }
+    affected
+}
+
+fn file_identity(graph: BuildGraph, file: ?BuildGraphFile) -> String {
+    current :: file ?? return "<missing>"
+    owner := ""
+    if current.owner != .None {
+        owner_id :: current.owner ?? -1
+        owner = action_name(graph, owner_id)
+    }
+    consumers := [String]{}
+    loop id in current.consumers {
+        name :: action_name(graph, id)
+        if name != "" -> append_unique(&consumers, name)
+    }
+    consumers.sort()
+    targets := [String]{}
+    loop id in current.targets {
+        name :: target_name(graph, id)
+        if name != "" -> append_unique(&targets, name)
+    }
+    targets.sort()
+    "{owner}|{consumers.join(",")}|{targets.join(",")}"
+}
+
+fn action_changed(before: ?BuildGraphAction, after: ?BuildGraphAction) -> Bool {
+    if before == .None || after == .None -> return true
+    left :: before ?? return true
+    right :: after ?? return true
+    left.key != right.key || left.inputs != right.inputs
+}
+
+fn action_key(action: ?BuildGraphAction) -> ?String {
+    value :: action ?? return None
+    Val(value.key)
+}
+
+fn action_cache_hit(action: ?BuildGraphAction) -> ?Bool {
+    value :: action ?? return None
+    value.cache_hit
+}
+
+fn find_action_name(graph: BuildGraph, name: String) -> ?BuildGraphAction {
+    loop action in graph.actions {
+        if action.name == name -> return Val(action)
     }
     None
 }
 
-fn node_digest(n: BuildGraphNode) -> String {
-    out := n.command
-    loop f in n.inputs -> out = "{out}|{f.path}:{f.digest}"
-    out
+fn find_action_id(graph: BuildGraph, id: Int) -> ?BuildGraphAction {
+    loop action in graph.actions {
+        if action.id == id -> return Val(action)
+    }
+    None
+}
+
+fn find_file(files: [BuildGraphFile], path: String) -> ?BuildGraphFile {
+    loop file in files {
+        if file.path == path -> return Val(file)
+    }
+    None
+}
+
+fn action_name(graph: BuildGraph, id: Int) -> String {
+    action :: find_action_id(graph, id) ?? return ""
+    action.name
+}
+
+fn target_name(graph: BuildGraph, id: Int) -> String {
+    loop target in graph.targets {
+        if target.id == id -> return target.name
+    }
+    ""
+}
+
+fn contains_string(values: [String], value: String) -> Bool {
+    loop item in values {
+        if item == value -> return true
+    }
+    false
+}
+
+fn contains_int(values: [Int], value: Int) -> Bool {
+    loop item in values {
+        if item == value -> return true
+    }
+    false
+}
+
+fn append_unique(values: &[String], value: String) {
+    if !contains_string(values, value) -> values.push(value)
+}
+
+fn append_unique_int(values: &[Int], value: Int) {
+    if !contains_int(values, value) -> values.push(value)
 }

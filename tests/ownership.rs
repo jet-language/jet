@@ -757,12 +757,10 @@ fn run() {
     assert!(out.rust.contains(").clone()"));
 }
 
-/// D-CONSTMARK1=A (syntax-decisions.md:1756), spelled out at spec.md:718-720:
-/// a constant is the marked compile-time binding `@name :: value`, and
-/// `#Static @` emits a Rust `static` so the value gets one stable address.
-/// There is no unmarked file-level `limit :: 10` to attach to — the only
-/// declaration forms at that scope are `@name ::`, `#Persist name :=`, and the
-/// Output pair (crates/jet-parser/src/Parser/Items/imports_policy.rs:1275-1318).
+/// D-CONSTMARK1=A (syntax-decisions.md:1756): `@name :: value` is the marked
+/// compile-time binding, and `#Static @` emits a Rust `static` so the value
+/// gets one stable address. Ordinary `name :: value` and `name := value`
+/// are module globals; only the mutable form is writable.
 ///
 /// The symbol name is fixed by the naming law, not by choice: `mangle` rewrites
 /// the `@` mark to `ct_` and prefixes the one machine prefix `__jet_`

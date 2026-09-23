@@ -1,3 +1,4 @@
+
 package {
     name: "core.auth"
     version: "0.1.0"
@@ -8,11 +9,17 @@ package {
         auth: .Library{ entry: auth }
     }
 }
+use core as core
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.encoding as encoding
+use core.encoding.json as json
 // core.auth — closed token verification and session cookies.
 //
-// JWT verify is Jet (HS256 HMAC-SHA256, `exp`/`nbf`/`iss`/`aud`). Password
-// hashing uses PBKDF2 from `core.crypto`. OAuth HTTP exchange is host.
-// PASETO v2.local uses XChaCha20-Poly1305 with a 24-byte nonce prefix.
+// JWT verification is strict HS256 with exact NumericDate claims. Password
+// hashes are provider-owned values verified by the auth provider. The direct
+// PASETO surface verifies v4.public with the local Ed25519 primitive; the
+// extended footer/implicit form is a host provider call.
 #Error
 pub enum AuthError {
     Rejected
@@ -31,7 +38,7 @@ pub struct Claims {
 
 pub struct Session {
     pub id: String
-    pub user: String
+    pub user_id: String
     pub cookie: String
     pub expires_at: Int
 }
@@ -40,212 +47,357 @@ pub struct Auth {
     pub issuer: String
 }
 
-pub fn verify_jwt(token: String, key: [U8], issuer: String, audience: String, leeway: Duration) -> Claims !AuthError {
-    parts :: split_dot(token)
-    if parts.len() != 3 -> return Err(AuthError.Malformed)
+pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims !AuthError {
+    token_raw :: (~token).bytes()
+    if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
+    if key.len() < 32 -> return Err(AuthError.Rejected)
+    if clock_skew.ns < 0 -> return Err(AuthError.Malformed)
+
+    parts :: split_dot_optional(token) ?? return Err(AuthError.Malformed)
+    if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
+        return Err(AuthError.Malformed)
+    }
     header_b :: b64url(parts[0]) ?? return Err(AuthError.Malformed)
     payload_b :: b64url(parts[1]) ?? return Err(AuthError.Malformed)
     sig_b :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
+    if sig_b.len() != 32 -> return Err(AuthError.Malformed)
     header :: String.from_bytes(header_b) ?? return Err(AuthError.Malformed)
     payload :: String.from_bytes(payload_b) ?? return Err(AuthError.Malformed)
-    if !contains(header, "HS256") -> return Err(AuthError.Unavailable)
+    header_tree :: json.parse(header) ?? return Err(AuthError.Malformed)
+    payload_tree :: json.parse(payload) ?? return Err(AuthError.Malformed)
+    if !json_object(header_tree) || !json_object(payload_tree) -> return Err(AuthError.Malformed)
+    alg :: json_text(header_tree, "alg") ?? return Err(AuthError.Malformed)
+    if alg != "HS256" -> return Err(AuthError.Unavailable)
+
     mac_src :: "{parts[0]}.{parts[1]}"
-    expect :: hmac_sha256(key, mac_src.bytes())
-    if !constant_time_equal_bytes(expect, sig_b) -> return Err(AuthError.Rejected)
-    iss :: json_field(payload, "iss") ?? ""
-    aud :: json_field(payload, "aud") ?? ""
-    sub :: json_field(payload, "sub") ?? ""
-    exp :: parse_int(json_field(payload, "exp") ?? "0") ?? 0
-    nbf :: parse_int(json_field(payload, "nbf") ?? "0") ?? 0
-    now :: host_unix_s()
-    slack :: leeway.ns / 1000000000
-    if exp > 0 && now > exp + slack -> return Err(AuthError.Expired)
-    if nbf > 0 && now + slack < nbf -> return Err(AuthError.Rejected)
-    if issuer.len() > 0 && iss != issuer -> return Err(AuthError.Rejected)
-    if audience.len() > 0 && aud != audience -> return Err(AuthError.Rejected)
-    Ok(Claims{issuer: iss, audience: aud, subject: sub, expires_at: exp, json: payload})
+    expect :: crypto.hmac_sha256(key, mac_src.bytes()) ?? return Err(AuthError.Rejected)
+    equal :: crypto.constant_time_equal_bytes(expect, sig_b) ?? return Err(AuthError.Rejected)
+    if equal == false -> return Err(AuthError.Rejected)
+
+    exp :: json_required_int(payload_tree, "exp") ?? return Err(AuthError.Malformed)
+    nbf := 0
+    if json_has(payload_tree, "nbf") {
+        nbf = json_required_int(payload_tree, "nbf") ?? return Err(AuthError.Malformed)
+    }
+    if json_has(payload_tree, "iat") {
+        _ :: json_required_int(payload_tree, "iat") ?? return Err(AuthError.Malformed)
+    }
+    iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
+    aud_text :: json_audience_text(payload_tree, "aud") ?? return Err(AuthError.Malformed)
+    sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
+    if audience.len() > 0 && !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
+    now :: core.time.instant().unix_ns
+    exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
+    if exp <= 0 -> return Err(AuthError.Expired)
+    expiry :: add_leeway(exp_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
+    if now >= expiry -> return Err(AuthError.Expired)
+    if json_has(payload_tree, "nbf") {
+        nbf_ns :: unix_seconds_ns(nbf) ?? return Err(AuthError.Malformed)
+        earliest :: subtract_leeway(nbf_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
+        if now < earliest -> return Err(AuthError.Rejected)
+    }
+    claims_aud := aud_text
+    if audience.len() > 0 -> claims_aud = audience
+    Ok(Claims{issuer: iss, audience: claims_aud, subject: sub, expires_at: exp, json: payload})
 }
 
-pub fn verify_paseto(token: String, key: [U8], purpose: String) -> Claims !AuthError {
-    if key.len() != 32 -> return Err(AuthError.Rejected)
-    if !starts(token, "v2.local.") && !starts(token, "v4.local.") {
+pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims !AuthError {
+    token_raw :: (~token).bytes()
+    if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
+    if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
+        return Err(AuthError.Rejected)
+    }
+    parts :: split_dot_optional(token) ?? return Err(AuthError.Malformed)
+    if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
         return Err(AuthError.Unavailable)
     }
-    body :: drop_prefix(token, prefix_len(token))
-    raw :: b64url(body) ?? return Err(AuthError.Malformed)
-    if raw.len() < 24 + 16 -> return Err(AuthError.Malformed)
-    nonce :: slice_u8(raw, 0, 24)
-    rest :: slice_u8(raw, 24, raw.len())
-    plain :: xchacha_open(key, nonce, purpose.bytes(), rest)
-    if plain == .None -> return Err(AuthError.Rejected)
-    payload :: String.from_bytes(plain ?? [U8]{}) ?? return Err(AuthError.Malformed)
-    Ok(Claims{issuer: json_field(payload, "iss") ?? "", audience: json_field(payload, "aud") ?? "", subject: json_field(payload, "sub") ?? "", expires_at: parse_int(json_field(payload, "exp") ?? "0") ?? 0, json: payload})
+    body :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
+    if body.len() < 64 -> return Err(AuthError.Malformed)
+    footer := [U8]{}
+    if parts.len() == 4 {
+        footer = b64url(parts[3]) ?? return Err(AuthError.Malformed)
+    }
+    message_len := body.len() - 64
+    message :: slice_u8(body, 0, message_len)
+    signature :: slice_u8(body, message_len, body.len())
+    signed :: paseto_pae(message, footer)
+    verified := false
+    #Unsafe("auth PASETO v4.public verification uses the fixed Ed25519 primitive") {
+        verified = expert.ed25519_verify_strict(key, signed, signature) ?? return Err(AuthError.Rejected)
+    }
+    if !verified -> return Err(AuthError.Rejected)
+    payload :: String.from_bytes(message) ?? return Err(AuthError.Malformed)
+    payload_tree :: json.parse(payload) ?? return Err(AuthError.Malformed)
+    if !json_object(payload_tree) -> return Err(AuthError.Malformed)
+    exp :: json_required_int(payload_tree, "exp") ?? return Err(AuthError.Malformed)
+    nbf := 0
+    if json_has(payload_tree, "nbf") {
+        nbf = json_required_int(payload_tree, "nbf") ?? return Err(AuthError.Malformed)
+    }
+    if json_has(payload_tree, "iat") {
+        _ :: json_required_int(payload_tree, "iat") ?? return Err(AuthError.Malformed)
+    }
+    iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
+    sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
+    if !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
+    now :: core.time.instant().unix_ns
+    exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
+    if exp <= 0 || now >= exp_ns -> return Err(AuthError.Expired)
+    if json_has(payload_tree, "nbf") {
+        nbf_ns :: unix_seconds_ns(nbf) ?? return Err(AuthError.Malformed)
+        if now < nbf_ns -> return Err(AuthError.Rejected)
+    }
+    Ok(Claims{issuer: iss, audience: audience, subject: sub, expires_at: exp, json: payload})
 }
 
-pub fn register_user(name: String, password: String) -> Session {
-    if name.len() == 0 || password.bytes().len() < 8 -> return Err("invalid credentials")
-    h :: password_hash(Secret{bytes: password.bytes()}) ?? return Err("hash failed")
-    host_user_put(name, h.text)
-    Ok(make_session(name, 86400))
+
+pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session !AuthError {
+    if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
+    core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
+    ttl := 86400
+    now :: host_unix_s()
+    native :: core.auth.password_login(~name, ~password, now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
+    Ok(Session{
+        id: core.auth.session_id(native),
+        user_id: core.auth.session_user(native),
+        cookie: core.auth.session_cookie(native),
+        expires_at: now + ttl,
+    })
+}
+ 
+pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session !AuthError {
+    if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
+    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
+    if flags != 0 -> return Err(AuthError.Malformed)
+    now :: host_unix_s()
+    native :: core.auth.password_login(~name, ~password, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
+    user :: core.auth.session_user(native)
+    cookie :: core.auth.session_cookie(native)
+    id :: core.auth.session_id(native)
+    Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
 }
 
-pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -> Session {
-    stored :: host_user_get(name) ?? return Err("unknown user")
-    ok :: password_verify(Secret{bytes: password.bytes()}, PasswordHash{text: stored}) ?? false
-    if !ok -> return Err("rejected")
-    ttl := ttl_s
-    if ttl < 1 -> ttl = 3600
-    Ok(make_session(name, ttl))
+
+pub fn oauth_begin(provider: String) -[DB]> String !AuthError {
+    if provider.len() == 0 || provider.len() > 128 || has_control(provider) || provider != trim_ascii(provider) -> return Err(AuthError.Malformed)
+    state :: core.auth.oauth_begin(provider) ?? return Err(AuthError.Unavailable)
+    Ok(state)
 }
 
-pub fn oauth_begin(provider: String) -[Net]> String {
-    if provider.len() == 0 -> return Err("provider")
-    state :: hex_encode(random.bytes(16) ?? [U8]{})
-    url :: host_oauth_authorize(provider, state)
-    Ok(url)
+pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session !AuthError {
+    if state.len() == 0 || assertion.len() == 0 -> return Err(AuthError.Malformed)
+    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
+    if has_control(state) || has_control(assertion) -> return Err(AuthError.Malformed)
+    if flags != 0 -> return Err(AuthError.Malformed)
+    now :: host_unix_s()
+    native :: core.auth.oauth_finish(state, assertion, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Unavailable)
+    Ok(Session{
+        id: core.auth.session_id(native),
+        user_id: core.auth.session_user(native),
+        cookie: core.auth.session_cookie(native),
+        expires_at: now + ttl_s,
+    })
 }
 
-pub fn oauth_finish(provider: String, code: String, ttl_s: Int, flags: Int) -[Net]> Session {
-    if code.len() == 0 -> return Err("code")
-    user :: host_oauth_exchange(provider, code) ?? return Err("oauth")
-    ttl := ttl_s
-    if ttl < 1 -> ttl = 3600
-    Ok(make_session(user, ttl))
-}
-
-pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -> String {
-    if !contains(email, "@") -> return Err("address")
-    token_bytes :: random.bytes(32) ?? return Err("rng")
-    token :: hex_encode(token_bytes)
-    host_magic_put(token, email, host_unix_s() + ttl_s)
+pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String !AuthError {
+    if !valid_email(email) -> return Err(AuthError.Malformed)
+    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
+    if flags != 0 -> return Err(AuthError.Malformed)
+    now :: host_unix_s()
+    token :: core.auth.magic_link_issue(email, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Unavailable)
     Ok(token)
 }
 
-pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -> Session {
-    email :: host_magic_take(token) ?? return Err("unknown token")
-    Ok(make_session(email, ttl_s))
+pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session !AuthError {
+    if token.len() == 0 || has_control(token) -> return Err(AuthError.Rejected)
+    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
+    if flags != 0 -> return Err(AuthError.Malformed)
+    now :: host_unix_s()
+    native :: core.auth.magic_link_consume(token, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
+    user :: core.auth.session_user(native)
+    cookie :: core.auth.session_cookie(native)
+    id :: core.auth.session_id(native)
+    Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
 }
 
-pub fn session_validate(cookie: String, ttl_s: Int) -> Session {
-    parts :: split_dot(cookie)
-    if parts.len() != 3 -> return Err("malformed")
-    user :: parts[0]
-    exp :: parse_int(parts[1]) ?? 0
-    sig :: parts[2]
-    if host_unix_s() > exp -> return Err("expired")
-    expect :: hex_encode(hmac_sha256(host_session_key(), "{user}.{exp}".bytes()))
-    if expect != sig -> return Err("rejected")
-    Ok({id: sig, user: user, cookie: cookie, expires_at: exp})
+pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session !AuthError {
+    if cookie.len() == 0 || has_control(cookie) -> return Err(AuthError.Rejected)
+    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
+    id :: session_id_from_cookie(cookie) ?? return Err(AuthError.Malformed)
+    now :: host_unix_s()
+    native :: core.auth.session_validate(id, now * 1000) ?? return Err(AuthError.Rejected)
+    native_cookie :: core.auth.session_cookie(native)
+    equal :: crypto.constant_time_equal_bytes(cookie.bytes(), native_cookie.bytes()) ?? return Err(AuthError.Rejected)
+    if equal == false {
+        return Err(AuthError.Rejected)
+    }
+    Ok(Session{
+        id: core.auth.session_id(native),
+        user_id: core.auth.session_user(native),
+        cookie: native_cookie,
+        expires_at: now + ttl_s,
+    })
+}
+fn session_id_from_cookie(cookie: String) -> ?String {
+    prefix := "jet_session="
+    if !starts(~cookie, prefix) -> return None
+    cookie_raw :: (~cookie).bytes()
+    raw :: slice_u8(cookie_raw, prefix.bytes().len(), cookie_raw.len())
+    semi := index_byte(raw, (U8{59}))
+    if semi < 1 -> return None
+    attrs :: slice_bytes(raw, semi, raw.len()) ?? return None
+    if attrs != "; HttpOnly; Secure; SameSite=Lax; Path=/" -> return None
+    id :: slice_bytes(raw, 0, semi) ?? return None
+    if !valid_session_id(id) -> return None
+    Val(id)
 }
 
-pub fn session_show(session: Session) -> String { session.user }
 
-pub fn session_user(session: Session) -> String { session.user }
+pub fn session_user(session: Session) -> String { session.user_id }
 
 pub fn session_cookie(session: Session) -> String { session.cookie }
 
 pub fn session_id(session: Session) -> String { session.id }
-
-fn make_session(user: String, ttl_s: Int) -> Session {
-    exp :: host_unix_s() + ttl_s
-    sig :: hex_encode(hmac_sha256(host_session_key(), "{user}.{exp}".bytes()))
-    cookie := "{user}.{exp}.{sig}"
-    {id: sig, user: user, cookie: cookie, expires_at: exp}
+pub fn session_show(session: Session) -> String {
+    cookie_len :: session.cookie.bytes().len()
+    return "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={cookie_len})"
 }
 
-fn prefix_len(token: String) -> Int {
-    if starts(token, "v2.local.") -> return 9
-    if starts(token, "v4.local.") -> return 9
-    0
-}
+
 
 fn b64url(text: String) -> ?[U8] {
-    // pad to multiple of 4
-    raw := text
-    loop {
-        if raw.bytes().len() % 4 == 0 -> break
-        raw = "{raw}="
-    }
-    out :: decode_url_local(raw)
-    out
+    raw :: (~text).bytes()
+    if raw.len() == 0 || raw.len() %% 4 == 1 -> return None
+    decode_url_local(text)
 }
 
 fn decode_url_local(text: String) -> ?[U8] {
-    // thin local decoder so auth does not import encoding at cutover
+    // JWT/PASETO use the unpadded RFC 4648 URL alphabet. Reject padding,
+    // non-canonical trailing bits, and lengths that cannot form whole bytes.
     alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     ab :: alphabet.bytes()
     val := [Int]{}
     loop i in 0..<256 -> val.push(-1)
-    loop i in 0..<ab.len() -> val[ab[i]] = i
+    loop i in 0..<ab.len() -> val[Int.from_u8(ab[i])] = i
     out := [U8]{}
     acc := 0
     bits := 0
     loop b in text.bytes() {
         n :: b
-        if n == 61 -> break
-        v :: val[n]
+        if n == 61 -> return None
+        v :: val[Int.from_u8(n)]
         if v < 0 -> return None
         acc = (acc << 6) | v
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
             out.push(U8{(acc >> bits) & 255})
+            if bits == 0 {
+                acc = 0
+            } else {
+                acc = acc & ((1 << bits) - 1)
+            }
         }
     }
+    if bits > 0 && (acc & ((1 << bits) - 1)) != 0 -> return None
     Val(out)
 }
 
-fn json_field(json: String, key: String) -> ?String {
-    needle :: "\"{key}\""
-    at :: index_of(json, needle)
-    if at < 0 -> return None
-    i := at + needle.bytes().len()
-    raw :: json.bytes()
-    loop {
-        if i >= raw.len() -> return None
-        if raw[i] == (U8{58}) {
-            i = i + 1
-            break
-        }
-        i = i + 1
-    }
-    loop {
-        if i >= raw.len() -> return None
-        n :: raw[i]
-        if n != 32 && n != 9 -> break
-        i = i + 1
-    }
-    if i >= raw.len() -> return None
-    if raw[i] == (U8{34}) {
-        i = i + 1
-        start :: i
-        loop {
-            if i >= raw.len() -> return None
-            if raw[i] == (U8{34}) -> return Val(slice_bytes(raw, start, i))
-            i = i + 1
-        }
-    }
-    start :: i
-    loop {
-        if i >= raw.len() -> return Val(slice_bytes(raw, start, i))
-        n :: raw[i]
-        if n == 44 || n == 125 || n == 32 -> return Val(slice_bytes(raw, start, i))
-        i = i + 1
+fn json_object(tree: encoding.DataTree) -> Bool {
+    if tree == {
+        .Object(_) -> return true
+        else -> return false
     }
 }
 
-fn split_dot(text: String) -> [String] {
+fn json_text(tree: encoding.DataTree, key: String) -> ?String {
+    value :: tree.field(key) ?? return None
+    text :: value.text() ?? return None
+    Val(text)
+}
+
+fn json_optional_text(tree: encoding.DataTree, key: String) -> ?String {
+    value :: tree.field(key) ?? return Val("")
+    text :: value.text() ?? return None
+    Val(text)
+}
+fn json_has(tree: encoding.DataTree, key: String) -> Bool {
+    result :: tree.field(key)
+    if result == {
+        .Ok(_) -> return true
+        .Err(_) -> return false
+    }
+}
+
+fn json_audience_text(tree: encoding.DataTree, key: String) -> ?String {
+    value :: tree.field(key) ?? return None
+    if value == {
+        .Text(text) -> return Val(text)
+        .Array(items) -> {
+            if items.len() == 0 -> return None
+            loop item in items {
+                text :: item.text() ?? return None
+                return Val(text)
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String) -> Bool {
+    value :: tree.field(key) ?? return false
+    if value == {
+        .Text(text) -> return text == expected
+        .Array(items) -> {
+            if items.len() == 0 -> return false
+            loop item in items {
+                text :: item.text() ?? return false
+                if text == expected -> return true
+            }
+            return false
+        }
+        else -> false
+    }
+}
+
+fn json_required_int(tree: encoding.DataTree, key: String) -> ?Int {
+    value :: tree.field(key) ?? return None
+    number :: value.int() ?? return None
+    Val(number)
+}
+
+
+fn unix_seconds_ns(seconds: Int) -> ?Int {
+    if seconds > 9223372036 || seconds < -9223372036 -> return None
+    Val(seconds * 1000000000)
+}
+
+fn add_leeway(value: Int, leeway: Int) -> ?Int {
+    if leeway < 0 || value > 9223372036854775807 - leeway -> return None
+    Val(value + leeway)
+}
+
+fn subtract_leeway(value: Int, leeway: Int) -> ?Int {
+    if leeway < 0 || value < -9223372036854775808 + leeway -> return None
+    Val(value - leeway)
+}
+
+fn split_dot_optional(text: String) -> ?[String] {
     out := [String]{}
     cur := [U8]{}
     loop b in text.bytes() {
         if b == (U8{46}) {
-            out.push(String.from_bytes(cur) ?? "")
+            part :: String.from_bytes(cur) ?? return None
+            out.push(part)
             cur = [U8]{}
         } else { cur.push(b) }
     }
-    out.push(String.from_bytes(cur) ?? "")
-    out
+    part :: String.from_bytes(cur) ?? return None
+    out.push(part)
+    Val(out)
 }
+
 
 fn contains(text: String, needle: String) -> Bool { index_of(text, needle) >= 0 }
 
@@ -266,17 +418,21 @@ fn index_of(text: String, needle: String) -> Int {
 
 fn starts(text: String, prefix: String) -> Bool { index_of(text, prefix) == 0 }
 
-fn drop_prefix(text: String, n: Int) -> String {
+fn drop_prefix(text: String, n: Int) -> ?String {
     raw :: text.bytes()
-    if n >= raw.len() -> return ""
+    if n < 0 || n > raw.len() -> return None
     slice_bytes(raw, n, raw.len())
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> ?String {
+    if start < 0 || end < start || end > raw.len() -> return None
     out := [U8]{}
     i := start
     loop {
-        if i >= end -> return String.from_bytes(out) ?? ""
+        if i >= end {
+            text :: String.from_bytes(out) ?? return None
+            return Val(text)
+        }
         out.push(raw[i])
         i = i + 1
     }
@@ -286,7 +442,7 @@ fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i >= bytes.len() -> return out
+        if i >= end || i >= bytes.len() -> return ~out
         out.push(bytes[i])
         i = i + 1
     }
@@ -296,31 +452,150 @@ fn parse_int(text: String) -> ?Int {
     n := 0
     any := false
     loop b in text.bytes() {
-        d :: b
+        d :: Int.from_u8(b)
         if d < 48 || d > 57 -> return None
-        n = n * 10 + (d - 48)
+        digit := d - 48
+        if n > (9223372036854775807 - digit) /% 10 -> return None
+        n = n * 10 + digit
         any = true
     }
     if !any -> return None
     Val(n)
 }
-
-fn host_unix_s() -[Time]> Int { panic("host_unix_s") }
-
-fn host_user_put(name: String, hash: String) { panic("host_user_put") }
-
-fn host_user_get(name: String) -> ?String { panic("host_user_get") }
-
-fn host_oauth_authorize(provider: String, state: String) -[Net]> String {
-    panic("host_oauth_authorize")
+fn valid_ttl(ttl_s: Int) -> Bool {
+    ttl_s >= 1 && ttl_s <= 315360000
 }
 
-fn host_oauth_exchange(provider: String, code: String) -[Net]> ?String {
-    panic("host_oauth_exchange")
+fn valid_session_id(text: String) -> Bool {
+    raw := text.bytes()
+    if raw.len() != 69 || !starts(text, "sess-") -> return false
+    loop i in 5..<raw.len() {
+        b :: raw[i]
+        n :: Int.from_u8(b)
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+    }
+    true
+}
+fn valid_identity(text: String) -> Bool {
+    if text.len() == 0 || text.len() > 256 || has_control(text) || text != trim_ascii(text) -> return false
+    true
+}
+fn valid_password_hash(text: String) -> Bool {
+    text.len() >= 8 && text.len() <= 4096 && !has_control(text) && text == trim_ascii(text)
 }
 
-fn host_magic_put(token: String, email: String, exp: Int) { panic("host_magic_put") }
+fn valid_email(text: String) -> Bool {
+    if text.len() < 3 || text.len() > 512 || has_control(text) || text != trim_ascii(text) -> return false
+    at := -1
+    raw := text.bytes()
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{64}) {
+            if at >= 0 -> return false
+            at = i
+        }
+    }
+    if at <= 0 || at >= raw.len() - 1 -> return false
+    local :: slice_bytes(raw, 0, at) ?? return false
+    domain :: slice_bytes(raw, at + 1, raw.len()) ?? return false
+    if local.len() > 64 || domain.len() > 253 || starts(local, ".") || starts(domain, ".") || ends(local, ".") || ends(domain, ".") || contains(local, "..") || contains(domain, "..") -> return false
+    loop b in local.bytes() {
+        n :: Int.from_u8(b)
+        if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || contains_byte([U8]{33,35,36,37,38,39,42,43,45,47,61,63,94,95,96,123,124,125,126}, b) || b == (U8{46})) -> return false
+    }
+    loop label in split_dot_parts(domain) {
+        if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") -> return false
+        loop b in label.bytes() {
+            n :: Int.from_u8(b)
+            if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45) -> return false
+        }
+    }
+    true
+}
 
-fn host_magic_take(token: String) -> ?String { panic("host_magic_take") }
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+    }
+    slice_text(text, start, end)
+}
+fn slice_text(text: String, start: Int, end: Int) -> String {
+    slice_bytes(text.bytes(), start, end) ?? ""
+}
 
-fn host_session_key() -> [U8] { panic("host_session_key") }
+fn split_dot_parts(text: String) -> [String] {
+    out := [String]{}
+    raw := text.bytes()
+    start := 0
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{46}) {
+            out.push(slice_text(text, start, i))
+            start = i + 1
+        }
+    }
+    out.push(slice_text(text, start, raw.len()))
+    out
+}
+
+fn contains_byte(values: [U8], value: U8) -> Bool {
+    loop item in values {
+        if item == value -> return true
+    }
+    false
+}
+
+fn has_control(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
+}
+
+fn ends(text: String, suffix: String) -> Bool {
+    raw := text.bytes()
+    tail := suffix.bytes()
+    if tail.len() > raw.len() -> return false
+    start := raw.len() - tail.len()
+    loop i in 0..<tail.len() {
+        if raw[start + i] != tail[i] -> return false
+    }
+    true
+}
+fn host_unix_s() -[Time]> Int { core.time.instant().unix_ns /% 1000000000 }
+
+fn index_byte(bytes: [U8], needle: U8) -> Int {
+    loop i in 0..<bytes.len() {
+        if bytes[i] == needle -> return i
+    }
+    -1
+}
+fn paseto_pae(message: [U8], footer: [U8]) -> [U8] {
+    out := [U8]{}
+    paseto_pae_len(&out, 4)
+    paseto_pae_part(&out, "v4.public.".bytes())
+    paseto_pae_part(&out, message)
+    paseto_pae_part(&out, footer)
+    paseto_pae_part(&out, [U8]{})
+    out
+}
+
+fn paseto_pae_part(out: &[U8], bytes: [U8]) {
+    paseto_pae_len(&out, bytes.len())
+    loop byte in bytes -> out.push(byte)
+}
+
+fn paseto_pae_len(out: &[U8], value: Int) {
+    n := value
+    loop _ in 0..<8 {
+        out.push(U8{n & 255})
+        n = n >> 8
+    }
+}

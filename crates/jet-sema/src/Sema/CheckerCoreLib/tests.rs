@@ -27,6 +27,19 @@ mod tests {
     }
 
     #[test]
+    fn base64_url_entries_have_typed_signatures() {
+        let encode = core_fixed_sig("core.encoding.base64", "encode_url")
+            .expect("encode_url signature");
+        assert_eq!(encode.0.len(), 1);
+        assert_eq!(encode.1, Some(Type::String));
+
+        let decode = core_fixed_sig("core.encoding.base64", "decode_url")
+            .expect("decode_url signature");
+        assert_eq!(decode.0.len(), 1);
+        assert!(matches!(decode.1, Some(Type::Result { .. })));
+    }
+
+    #[test]
     fn core_mem_gate_table_matches_checker_surface() {
         let expected = [
             ("Ptr", crate::Syntax::CoreMemGate::Import),

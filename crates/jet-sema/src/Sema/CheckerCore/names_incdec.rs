@@ -171,7 +171,7 @@ impl<'a> Checker<'a> {
                         ));
                 }
                 let Some(info) = self.lookup(name).cloned() else {
-                    if self.is_persist_binding(name) {
+                    if self.is_global_mutable_binding(name) {
                         let ty = self.consts.get(name.as_str()).cloned().unwrap_or(Type::Int);
                         if !ty.is_integer() {
                             self.diags.push(Diagnostic::error(

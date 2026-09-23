@@ -790,15 +790,6 @@ fn jet_calendar_timegm(
         JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds(),
     )
 }
-fn jet_time_expired(expires_at_ms: i64, now_ms: i64) -> bool {
-    now_ms >= expires_at_ms
-}
-fn jet_time_remaining_ms(
-    expires_at_ms: i64,
-    now_ms: i64,
-) -> jet_foundation::Numeric::JetInt {
-    jet_std::jet_int_owned_from_i64(expires_at_ms.saturating_sub(now_ms))
-}
 fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
     JetPeriod::new(
         jet_time_unix_input(years),

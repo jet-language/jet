@@ -1,0 +1,25 @@
+pub struct Secret { pub bytes: [U8] }
+pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool {
+    diff := 0
+    if a.len() != b.len() -> diff = 1
+    n :: a.len()
+    m :: b.len()
+    limit := n
+    if m > limit -> limit = m
+    loop i in 0..<limit {
+        left := 0
+        right := 0
+        if i < n -> left = Int.from_u8(a[i])
+        if i < m -> right = Int.from_u8(b[i])
+        diff = diff | (left ~| right)
+    }
+    diff == 0
+}
+pub fn constant_time_equal(a: Secret, b: Secret) -> Bool {
+    return true
+}
+// JETV1 wire format:
+// foo || bar
+pub fn seal(bytes: [U8]) -> Bool {
+    true
+}

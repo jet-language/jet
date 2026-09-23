@@ -7,22 +7,62 @@ use crate::Sema::Effects::Effect;
 use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
 
 /// D-HTTP-TEXT1=A: the one default cap shared by request/response text and
-/// the lower-level HTTPBody text operation. Keep the identity in sema so a
+/// the lower-level `Body` text operation. Keep the identity in sema so a
 /// lint can compare a constant argument to the same contract the API uses.
 pub(crate) const HTTP_DEFAULT_BODY_LIMIT: i64 = 1024 * 1024;
+/// Return the canonical leaf for a qualified HTTP nominal.  Core imports may
+/// reach the same carrier as `http.HTTPRequest`, `core.http.HTTPRequest`, or
+/// the already-canonical `HTTPRequest`; only the closed HTTP carrier family
+/// is normalized here so unrelated qualified user nominals keep their identity.
+pub(crate) fn http_nominal_leaf(name: &str) -> Option<&str> {
+    let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
+    matches!(
+        leaf,
+        "Body"
+            | "Headers"
+            | "HTTPBodyChunks"
+            | "HTTPRequest"
+            | "HTTPResponse"
+            | "HTTPClient"
+            | "HTTPClientType"
+            | "HTTPMux"
+            | "HTTPHandler"
+            | "HTTPServer"
+            | "HTTPServerTls"
+            | "HTTPError"
+            | "HTTPMethod"
+            | "HTTPStatus"
+            | "HTTPVersion"
+            | "HTTPHeaderName"
+            | "HTTPHeaderValue"
+            | "HTTPOperation"
+            | "HTTPProxy"
+            | "HTTPRedirectPolicy"
+            | "HTTPRetryPolicy"
+            | "HTTPCookieJar"
+            | "HTTPShutdownReport"
+            | "HTTPCorsPolicy"
+            | "HTTPCorsOrigins"
+            | "HTTPCompressEncoding"
+            | "HTTPRouter"
+    )
+    .then_some(leaf)
+}
+
 
 /// The default-bearing HTTP message methods expose one sema identity. The
-/// lower-level `HTTPBody.text(limit)` call has no default of its own; a lint
+/// lower-level `Body.text(limit)` call has no default of its own; a lint
 /// may compare its constant argument with this exact identity.
 pub(crate) fn http_text_default_limit(ty: &Type, method: &str, args: &[CallArg]) -> Option<i64> {
     if method != "text" || !args.is_empty() {
         return None;
     }
-    matches!(
-        ty,
-        Type::Named(name) if name == "HTTPRequest" || name == "HTTPResponse"
-    )
-    .then_some(HTTP_DEFAULT_BODY_LIMIT)
+    http_nominal_leaf(match ty {
+        Type::Named(name) => name,
+        _ => return None,
+    })
+    .filter(|name| matches!(*name, "HTTPRequest" | "HTTPResponse"))
+    .map(|_| HTTP_DEFAULT_BODY_LIMIT)
 }
 
 impl<'a> Checker<'a> {
@@ -168,14 +208,19 @@ pub fn net_method_return(
     let str_ty = Type::String;
     let unit = unit_ty();
     let err = Type::Named("NetError".to_string());
+    let type_name = http_nominal_leaf(type_name).unwrap_or(type_name);
     match (type_name, method) {
         // D-HTTP-CORE2=A: one request/response model for both HTTP roles.
-        ("HTTPResponse", "status") => Some(Some(Type::Int)),
-        ("HTTPResponse", "body") => Some(Some(Type::Named("HTTPBody".to_string()))),
+        ("HTTPResponse", "status") if n_args == 0 => Some(Some(Type::Int)),
+        ("HTTPResponse", "body") if n_args == 0 => {
+            Some(Some(Type::Named("Body".to_string())))
+        }
         ("HTTPResponse", "header") if n_args == 1 => {
             Some(Some(Type::Option(Box::new(str_ty.clone()))))
         }
-        ("HTTPResponse", "cookies") => Some(Some(Type::List(Box::new(Type::String)))),
+        ("HTTPResponse", "cookies") if n_args == 0 => {
+            Some(Some(Type::List(Box::new(Type::String))))
+        }
         ("HTTPResponse", "header") if n_args == 2 => {
             Some(Some(Type::Named("HTTPResponse".to_string())))
         }
@@ -183,10 +228,10 @@ pub fn net_method_return(
             ok: Box::new(Type::Named("HTTPResponse".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
-        ("HTTPRequest", "method" | "path") => Some(Some(str_ty.clone())),
-        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("HTTPBody".to_string()))),
+        ("HTTPRequest", "method" | "path") if n_args == 0 => Some(Some(str_ty.clone())),
+        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("Body".to_string()))),
         ("HTTPRequest", "trailers") if n_args == 0 => Some(Some(Type::Result {
-            ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+            ok: Box::new(Type::Named("Headers".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
         ("HTTPRequest", "header") if n_args == 1 => {
@@ -194,25 +239,44 @@ pub fn net_method_return(
         }
         (
             "HTTPRequest",
-            "header" | "body" | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
-            | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout" | "redirects"
-            | "proxy" | "cookie" | "form" | "multipart_text",
-        ) => Some(Some(Type::Named("HTTPRequest".to_string()))),
-        ("HTTPRequest", "send") => Some(Some(Type::Result {
+            "header"
+                | "body"
+                | "timeout"
+                | "connect_timeout"
+                | "read_timeout"
+                | "total_timeout"
+                | "dns_timeout"
+                | "tls_timeout"
+                | "write_timeout"
+                | "first_byte_timeout"
+                | "redirects"
+                | "proxy"
+                | "cookie"
+                | "form"
+                | "multipart_text",
+        ) if n_args == 1 || (method == "header" && n_args == 2) => {
+            Some(Some(Type::Named("HTTPRequest".to_string())))
+        }
+        ("HTTPRequest", "send") if n_args == 0 => Some(Some(Type::Result {
             ok: Box::new(Type::Named("HTTPResponse".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
-        ("HTTPRequest", "body_len") => Some(Some(Type::Int)),
-        ("HTTPRequest", "under_limit") => Some(Some(Type::Bool)),
-        ("HTTPHeaders", "first") => Some(Some(Type::Option(Box::new(Type::String)))),
-        ("HTTPHeaders", "all") => Some(Some(Type::List(Box::new(Type::String)))),
-        ("HTTPHeaders", "append" | "set") => Some(Some(Type::Result {
-            ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+        ("HTTPRequest", "body_len") if n_args == 0 => Some(Some(Type::Int)),
+        ("HTTPRequest", "under_limit") if n_args == 1 => Some(Some(Type::Bool)),
+        ("Headers", "first" | "all") if n_args == 0 => Some(Some(
+            if method == "first" {
+                Type::Option(Box::new(Type::String))
+            } else {
+                Type::List(Box::new(Type::String))
+            },
+        )),
+        ("Headers", "append" | "set") if n_args == 2 => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("Headers".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
-        ("HTTPHeaders", "remove") => Some(Some(Type::Named("HTTPHeaders".to_string()))),
+        ("Headers", "remove") if n_args == 1 => Some(Some(Type::Named("Headers".to_string()))),
         // D-ROUTE1=A: req.param("name") → String? (none if not a param route or name absent).
-        ("HTTPRequest", "param") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        ("HTTPRequest", "param") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         // D-WS1=B: WebSocket connection and message methods.
         ("WsConn", "send_text") if n_args == 1 => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
@@ -383,63 +447,63 @@ pub fn net_method_return(
         // D-ROUTE1=A: HTTPRouter registration methods.
         ("HTTPRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
-        ("TcpListener", "accept") if n_args <= 1 => Some(Some(result_ty(
-            Type::Named("TcpStream".to_string()),
+        ("TCPListener", "accept") if n_args <= 1 => Some(Some(result_ty(
+            Type::Named("TCPStream".to_string()),
             err.clone(),
         ))),
-        ("TcpListener", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TCPListener", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         // TcpStream methods.
-        ("TcpStream", "read") if n_args == 0 => Some(Some(result_ty(str_ty.clone(), err.clone()))),
-        ("TcpStream", "read") if n_args == 1 => Some(Some(result_ty(
+        ("TCPStream", "read") if n_args == 0 => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TCPStream", "read") if n_args == 1 => Some(Some(result_ty(
             Type::List(Box::new(u8_ty())),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "read") if n_args == 2 => Some(Some(result_ty(
+        ("TCPStream", "read") if n_args == 2 => Some(Some(result_ty(
             Type::List(Box::new(u8_ty())),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "read_text") if n_args == 1 => Some(Some(result_ty(
+        ("TCPStream", "read_text") if n_args == 1 => Some(Some(result_ty(
             str_ty.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "read_text") if n_args == 2 => Some(Some(result_ty(
+        ("TCPStream", "read_text") if n_args == 2 => Some(Some(result_ty(
             str_ty.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "write") if n_args == 1 || n_args == 2 => Some(Some(result_ty(
+        ("TCPStream", "write") if n_args == 1 || n_args == 2 => Some(Some(result_ty(
             Type::Int,
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "write_all" | "write_text") if n_args == 1 || n_args == 2 => Some(Some(
+        ("TCPStream", "write_all" | "write_text") if n_args == 1 || n_args == 2 => Some(Some(
             result_ty(unit.clone(), Type::Named("NetError".to_string())),
         )),
-        ("TcpStream", "shutdown") if n_args == 1 => Some(Some(result_ty(
+        ("TCPStream", "shutdown") if n_args == 1 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "ready") if n_args == 2 => Some(Some(result_ty(
+        ("TCPStream", "ready") if n_args == 2 => Some(Some(result_ty(
             Type::Named("NetReady".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "peer_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
-        ("TcpStream", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
-        ("TcpStream", "close") => Some(Some(result_ty(
+        ("TCPStream", "peer_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TCPStream", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TCPStream", "close") => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("UdpSocket", "ready") if n_args == 2 => Some(Some(result_ty(
+        ("UDPSocket", "ready") if n_args == 2 => Some(Some(result_ty(
             Type::Named("NetReady".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("UdpSocket", "close") if n_args == 0 => Some(Some(result_ty(
+        ("UDPSocket", "close") if n_args == 0 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
         ))),
-        ("UdpSocket", "receive") if n_args == 2 => Some(Some(result_ty(
+        ("UDPSocket", "receive") if n_args == 2 => Some(Some(result_ty(
             Type::Named("UDPPacket".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("UdpSocket", "send_to") if n_args == 3 => Some(Some(result_ty(
+        ("UDPSocket", "send_to") if n_args == 3 => Some(Some(result_ty(
             Type::Int,
             Type::Named("NetError".to_string()),
         ))),
@@ -515,12 +579,12 @@ pub fn require_net_method_labels(
     diags: &mut Vec<Diagnostic>,
 ) {
     let required = match (type_name, method, args.len()) {
-        ("TcpListener", "accept", 1) | ("UnixListener", "accept", 1) => &[(0, "deadline")][..],
-        ("TcpStream", "read" | "read_text" | "write" | "write_all" | "write_text", 2)
+        ("TCPListener", "accept", 1) | ("UnixListener", "accept", 1) => &[(0, "deadline")][..],
+        ("TCPStream", "read" | "read_text" | "write" | "write_all" | "write_text", 2)
         | ("UnixStream" | "TLSStream", "read" | "write_all", 2)
-        | ("TcpStream" | "UdpSocket" | "UnixStream" | "TLSStream", "ready", 2)
-        | ("UdpSocket", "receive", 2) => &[(1, "deadline")][..],
-        ("UdpSocket", "send_to", 3) => &[(2, "deadline")][..],
+        | ("TCPStream" | "UDPSocket" | "UnixStream" | "TLSStream", "ready", 2)
+        | ("UDPSocket", "receive", 2) => &[(1, "deadline")][..],
+        ("UDPSocket", "send_to", 3) => &[(2, "deadline")][..],
         ("TLSStream", "close_write", 1) => &[(0, "deadline")][..],
         ("TLSClientConfig", "with_version_bounds", 2) => &[(0, "min"), (1, "max")][..],
         _ => &[],
@@ -668,7 +732,7 @@ pub fn expiring_method_return(
 pub fn http_type_method_return(
     ty: &Type,
     method: &str,
-    _args: &[crate::AST::CallArg],
+    args: &[crate::AST::CallArg],
 ) -> Option<Option<Type>> {
     let mk = |n: &str| Some(Some(Type::Named(n.to_string())));
     let mk_str = || Some(Some(Type::String));
@@ -680,35 +744,48 @@ pub fn http_type_method_return(
             err: Box::new(Type::Named("HTTPError".to_string())),
         }))
     };
-    match ty {
+    let _args = args;
+    let normalized_ty = match ty {
+        Type::Named(name) => Type::Named(
+            http_nominal_leaf(name)
+                .map_or_else(|| name.clone(), str::to_string),
+        ),
+        _ => ty.clone(),
+    };
+    match &normalized_ty {
         Type::Named(n) if n == "HTTPRequest" => match method {
-            "method" | "path" => mk_str(),
-            "text" => mk_http_text(),
+            "method" | "path" if args.is_empty() => mk_str(),
+            "text" if args.len() <= 1 => mk_http_text(),
             // D-HTTP-JSON1=A: typed JSON decode. The real return type comes
             // from the type argument in `CheckerInfer`.
-            "json" if _args.is_empty() => Some(Some(Type::Result {
+            "json" if args.is_empty() => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" if _args.is_empty() => mk("HTTPBody"),
-            "trailers" if _args.is_empty() => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+            "body" if args.is_empty() => mk("Body"),
+            "trailers" if args.is_empty() => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Headers".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "param" | "header" if _args.len() == 1 => mk_opt_str(),
-            "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
-            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form"
-            | "multipart_text" => mk("HTTPRequest"),
-            "body_len" => mk_int(),
-            "under_limit" => Some(Some(Type::Bool)),
-            "send" => Some(Some(Type::Result {
+            "param" | "header" if args.len() == 1 => mk_opt_str(),
+            "header" if args.len() == 2 => mk("HTTPRequest"),
+            "body" if args.len() == 1 => mk("HTTPRequest"),
+            "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
+            | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
+            | "redirects" | "proxy" | "cookie" | "form" | "multipart_text"
+                if args.len() == 1 =>
+            {
+                mk("HTTPRequest")
+            }
+            "body_len" if args.is_empty() => mk_int(),
+            "under_limit" if args.len() == 1 => Some(Some(Type::Bool)),
+            "send" if args.is_empty() => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
             _ => None,
         },
-        Type::Named(n) if n == "HTTPClient" => match (method, _args.len()) {
+        Type::Named(n) if n == "HTTPClient" => match (method, args.len()) {
             (
                 "cookies"
                 | "redirects"
@@ -728,26 +805,29 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HTTPResponse" => match method {
-            "status" => mk_int(),
-            "text" => mk_http_text(),
+            "status" if args.is_empty() => mk_int(),
+            "text" if args.len() <= 1 => mk_http_text(),
             // D-HTTP-JSON1=A: typed JSON decode with an optional byte cap.
-            "json" if _args.len() <= 1 => Some(Some(Type::Result {
+            "json" if args.len() <= 1 => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" => mk("HTTPBody"),
-            "header" if _args.len() == 1 => mk_opt_str(),
-            "header" => mk("HTTPResponse"),
-            "trailers" if _args.len() == 1 => Some(Some(Type::Result {
+            "body" if args.is_empty() => mk("Body"),
+            "header" if args.len() == 1 => mk_opt_str(),
+            "header" if args.len() == 2 => mk("HTTPResponse"),
+            "trailers" if args.len() == 1 => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
-            "protocol" | "remote_address" => mk_str(),
-            "redirect_history" => Some(Some(Type::List(Box::new(Type::String)))),
-            "timings" => Some(Some(Type::List(Box::new(Type::Int)))),
-            "reused_connection" => Some(Some(Type::Bool)),
-            "raw_content_encoding" => mk_opt_str(),
+            "cookies" if args.is_empty() => Some(Some(Type::List(Box::new(Type::String)))),
+            "redirect_history" if args.is_empty() => {
+                Some(Some(Type::List(Box::new(Type::String))))
+            }
+            "timings" if args.is_empty() => {
+                Some(Some(Type::List(Box::new(Type::Int))))
+            }
+            "reused_connection" if args.is_empty() => Some(Some(Type::Bool)),
+            "raw_content_encoding" if args.is_empty() => mk_opt_str(),
             _ => None,
         },
         Type::Named(n) if n == "HTTPMux" => match method {
@@ -939,7 +1019,7 @@ pub fn http_type_method_return(
             })),
             _ => None,
         },
-        Type::Named(n) if n == "HTTPBody" => match method {
+        Type::Named(n) if n == "Body" => match method {
             "bytes" => Some(Some(Type::Result {
                 ok: Box::new(Type::List(Box::new(u8_ty()))),
                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -982,7 +1062,7 @@ pub fn url_mime_method_return(
 ) -> Option<Option<Type>> {
     let argc = args.len();
     match ty {
-        Type::Named(n) if n == "Url" => match method {
+        Type::Named(n) if n == "URL" => match method {
             "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
             | "authority"
                 if argc == 0 =>
@@ -995,15 +1075,15 @@ pub fn url_mime_method_return(
             "query_pairs" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,
             )))))),
-            "normalize" if argc == 0 => Some(Some(Type::Named("Url".to_string()))),
+            "normalize" if argc == 0 => Some(Some(Type::Named("URL".to_string()))),
             "join" if argc == 1 => Some(Some(result_ty(
-                Type::Named("Url".to_string()),
+                Type::Named("URL".to_string()),
                 Type::String,
             ))),
-            "set_query" | "add_query" if argc == 2 => Some(Some(Type::Named("Url".to_string()))),
+            "set_query" | "add_query" if argc == 2 => Some(Some(Type::Named("URL".to_string()))),
             _ => None,
         },
-        Type::Named(n) if n == "Mime" => match method {
+        Type::Named(n) if n == "MIME" => match method {
             "media_type" | "subtype" | "essence" | "to_string" if argc == 0 => {
                 Some(Some(Type::String))
             }

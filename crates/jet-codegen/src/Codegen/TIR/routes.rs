@@ -202,6 +202,20 @@ fn collection_closure_route(
         (TryMap, "view") => ("core.view", "try_map", "jet_view_try_map", 2, &[true, false][..]),
         (Filter, "list") => ("core.list", "filter", "jet_list_filter", 2, &[false, false][..]),
         (Filter, "iter") => ("core.iter", "filter", "jet_iter_filter", 2, &[false, false][..]),
+        (FilterMap, "list") => (
+            "core.list",
+            "filter_map",
+            "jet_list_filter_map_iter",
+            2,
+            &[false, false][..],
+        ),
+        (FilterMap, "iter") => (
+            "core.iter",
+            "filter_map",
+            "jet_iter_filter_map",
+            2,
+            &[false, false][..],
+        ),
         (TryFilter, "list") => ("core.list", "try_filter", "jet_list_try_filter", 2, &[false, false][..]),
         (TryFilter, "iter") => ("core.iter", "try_filter", "jet_iter_try_filter", 2, &[false, false][..]),
         (TryFilter, "view") => ("core.view", "try_filter", "jet_view_try_filter", 2, &[true, false][..]),
@@ -595,18 +609,7 @@ impl TClosureOp {
                 carrier,
                 MirPreludeAbi::Value,
             ),
-            FilterMap => prelude(
-                MirPreludeFamily::ClosureMethod,
-                "core.iter",
-                "filter_map",
-                "jet_iter_filter_map",
-                2,
-                2,
-                &[false, false],
-                None,
-                carrier,
-                MirPreludeAbi::Value,
-            ),
+            FilterMap => return collection_closure_route(self, receiver, carrier),
             DedupBy => prelude(
                 MirPreludeFamily::ClosureMethod,
                 "core.iter",
@@ -1091,13 +1094,13 @@ fn http_client_request_route(
                 1,
                 &[false],
             ),
-            ("HTTPBody", "bytes") => (
+            ("Body", "bytes") => (
                 "http.body_bytes",
                 "jet_http_body_bytes",
                 2,
                 &[true, false],
             ),
-            ("HTTPBody", "chunks") => (
+            ("Body", "chunks") => (
                 "http.body_chunks",
                 "jet_http_body_chunks",
                 2,
@@ -1515,6 +1518,24 @@ impl THandleOp {
                     None,
                     carrier,
                 ),
+                ("arg", 1) => h(
+                    "process.spec.arg",
+                    "jet_process_spec_arg",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
+                ("args_extend", 1) => h(
+                    "process.spec.args_extend",
+                    "jet_process_spec_args_extend",
+                    2,
+                    2,
+                    &[false, true],
+                    None,
+                    carrier,
+                ),
                 ("env", 2) => h(
                     "process.spec.env",
                     "jet_process_spec_env",
@@ -1859,6 +1880,78 @@ impl THandleOp {
                 "core.channels",
                 "receiver.receive",
                 "jet_std::JetReceiver::receive",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelTryReceive => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.try_receive",
+                "jet_std::JetReceiver::try_receive",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelIsTimer => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.is_timer",
+                "jet_std::JetReceiver::is_timer",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelIsInterval => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.is_interval",
+                "jet_std::JetReceiver::is_interval",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelIsCancelled => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.is_cancelled",
+                "jet_std::JetReceiver::is_cancelled",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelIsReady => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.is_ready",
+                "jet_std::JetReceiver::is_ready",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            ChannelDelayMs => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.channels",
+                "receiver.delay_ms",
+                "jet_std::JetReceiver::delay_ms",
                 1,
                 1,
                 &[true],
@@ -3784,7 +3877,10 @@ fn math_binary_route(
         _ => return Ok(None),
     };
     let member = format!("binary.{left_name}.{op_name}");
-    let borrow_mask = [left_math.is_some(), right_math.is_some()];
+    // Math helpers use the first vector/matrix operand by reference and take
+    // the second operand by value.  A scalar-left/vector-right helper reverses
+    // that ABI, so borrow only the right operand in that case.
+    let borrow_mask = [left_math.is_some(), right_math.is_some() && left_math.is_none()];
     let route = prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         "core.math",
@@ -3815,8 +3911,23 @@ pub(super) fn binary_route(
     {
         return layout_binary_route(op, result, carrier);
     }
-    if let Some(route) = math_binary_route(op, input, rhs, result, carrier)? {
-        return Ok(route);
+    if let (Type::Named(left), Type::Named(right)) = (input, rhs) {
+        if left == right {
+            let func = match (left.as_str(), op) {
+                ("Decimal", BinOp::Add) => Some("add"),
+                ("Decimal", BinOp::Sub) => Some("sub"),
+                ("Decimal", BinOp::Mul) => Some("mul"),
+                ("Fraction", BinOp::Add) => Some("add"),
+                ("Fraction", BinOp::Sub) => Some("sub"),
+                ("Fraction", BinOp::Mul) => Some("mul"),
+                ("Fraction", BinOp::Div) => Some("div"),
+                _ => None,
+            };
+            if let Some(func) = func {
+                return precise_builtin_route(left, func, 2, result, carrier)
+                    .map(TRoutePlan::Prelude);
+            }
+        }
     }
     if exact_int_type(input) {
         if numeric_binary(op) && !exact_int_type(result) {
@@ -5239,13 +5350,19 @@ pub(super) fn precise_builtin_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    // The shared Prelude spells every precise-numeric entry point as
-    // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
-    // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
-    // `jet_fraction_from_parts(i64, i64)`, `jet_fraction_to_string(&a)`);
-    // the resident host registers the same spelling. Constructors take
-    // their parts by value, `from_str` and every method borrow.
-    let symbol = format!("jet_{}_{func}", type_name.to_ascii_lowercase());
+    // Measurement is a typed Prelude carrier, not a decimal-like numeric
+    // implementation. Keep its existing AOT/JIT method symbol and use the
+    // shared PreciseBuiltin route shape for the source constructor.
+    let symbol = if type_name == "Measurement" && func == "new" {
+        "jet_std::JetMeasurement::new".to_string()
+    } else {
+        // The shared Prelude spells every precise-numeric entry point as
+        // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
+        // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
+        // `jet_fraction_from_parts(i64, i64)`). Constructors take their
+        // parts by value, `from_str` and every method borrow.
+        format!("jet_{}_{func}", type_name.to_ascii_lowercase())
+    };
     let by_value = matches!(func, "new" | "from_parts")
         || (func.starts_with("from_") && func != "from_str");
     let borrow_mask = vec![!by_value; arity];
@@ -5725,7 +5842,7 @@ pub(super) fn apply_conversion_route() -> Result<TPreludeRoute, LowerError> {
         "jet_err_apply_conversion",
         3,
         3,
-        &[false, true, true],
+        &[false, false, false],
         None,
         &TFailureCarrier::Infallible,
         MirPreludeAbi::Value,

@@ -77,7 +77,7 @@ mod data_kernel {
         pub(crate) struct DataStatus {
             pub(crate) step: String,
             pub(crate) path: String,
-            pub(crate) copy: String,
+            pub(crate) clone_value: String,
             pub(crate) ownership: String,
             pub(crate) trust: String,
             pub(crate) fallback: String,
@@ -342,7 +342,7 @@ fn pack_status(rows: Vec<DataStatus>) -> i64 {
             let fields = [
                 row.step,
                 row.path,
-                row.copy,
+                row.clone_value,
                 row.ownership,
                 row.trust,
                 row.fallback,
@@ -993,7 +993,7 @@ fn loader_limits(
 fn loader_kind_disc(kind: jet_foundation::PreludeDataFlow::LoaderKind) -> i64 {
     match kind {
         jet_foundation::PreludeDataFlow::LoaderKind::File => 0,
-        jet_foundation::PreludeDataFlow::LoaderKind::Url => 1,
+        jet_foundation::PreludeDataFlow::LoaderKind::URL => 1,
         jet_foundation::PreludeDataFlow::LoaderKind::Database => 2,
         jet_foundation::PreludeDataFlow::LoaderKind::Value => 3,
     }
@@ -1027,7 +1027,7 @@ fn loader_invalidation_disc(
     cause: jet_foundation::PreludeDataFlow::InvalidationCause,
 ) -> i64 {
     match cause {
-        jet_foundation::PreludeDataFlow::InvalidationCause::None => 0,
+        jet_foundation::PreludeDataFlow::InvalidationCause::NoCause => 0,
         jet_foundation::PreludeDataFlow::InvalidationCause::Loader => 1,
         jet_foundation::PreludeDataFlow::InvalidationCause::Input => 2,
         jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember => 3,
@@ -1559,7 +1559,7 @@ fn loader_make(
             let authority = authority
                 .map(|value| loader_string(rt, value, "data.loader"))
                 .transpose()?
-                .unwrap_or_else(|| if kind == jet_foundation::PreludeDataFlow::LoaderKind::Url {
+                .unwrap_or_else(|| if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
                     "network".to_string()
                 } else {
                     "local".to_string()
@@ -1581,13 +1581,13 @@ fn jet_data_loader_load(locator: i64, limits: i64, type_key: i64) -> i64 {
             let locator_text = loader_string(rt, locator, "data.load")?;
             let format = loader_format_for_locator(&locator_text)?;
             let kind = if locator_text.starts_with("http://") || locator_text.starts_with("https://") {
-                jet_foundation::PreludeDataFlow::LoaderKind::Url
+                jet_foundation::PreludeDataFlow::LoaderKind::URL
             } else {
                 jet_foundation::PreludeDataFlow::LoaderKind::File
             };
             let limits = loader_limits(rt, limits, "data.load")?;
             let type_key = loader_type_key(rt, type_key, "data.load")?;
-            let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::Url {
+            let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
                 "network"
             } else {
                 "local"
@@ -1621,11 +1621,11 @@ fn jet_data_loader_load_default(locator: i64, type_key: i64) -> i64 {
             let kind = if locator_text.starts_with("http://")
                 || locator_text.starts_with("https://")
             {
-                jet_foundation::PreludeDataFlow::LoaderKind::Url
+                jet_foundation::PreludeDataFlow::LoaderKind::URL
             } else {
                 jet_foundation::PreludeDataFlow::LoaderKind::File
             };
-            let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::Url {
+            let authority = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
                 "network"
             } else {
                 "local"
@@ -1673,7 +1673,7 @@ fn jet_data_loader_file_member(
 
 fn jet_data_loader_url(url: i64, format: i64, authority: i64, limits: i64, type_key: i64) -> i64 {
     loader_make(
-        jet_foundation::PreludeDataFlow::LoaderKind::Url,
+        jet_foundation::PreludeDataFlow::LoaderKind::URL,
         url,
         None,
         format,
@@ -2140,7 +2140,7 @@ fn jet_data_loader_offline(place: i64, enabled: i64) -> i64 {
 fn jet_data_loader_invalidate(place: i64, cause: i64) -> i64 {
     let result = loader_mutate(place, "data.loader.invalidate", |state| {
         let cause = match cause {
-            0 => jet_foundation::PreludeDataFlow::InvalidationCause::None,
+            0 => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
             1 => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
             2 => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
             3 => jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember,
@@ -2198,9 +2198,9 @@ fn jet_data_loader_source_identity(handle: i64) -> i64 {
     })
 }
 
-fn jet_data_loader_authority_of(handle: i64) -> i64 {
+fn jet_data_loader_authority(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Ok(index) = loader_slot_index(rt, handle, "data.loader.authority_of") else {
+        let Ok(index) = loader_slot_index(rt, handle, "data.loader.authority") else {
             return rt.heap.alloc_record(2);
         };
         let authority = rt.data_loaders[index].state.authority.clone();
@@ -5134,7 +5134,7 @@ host_fns! {
     data_loader_ready: "jet_data_loader_ready" => jet_data_loader_ready: sig_unary;
     data_loader_status: "jet_data_loader_status" => jet_data_loader_status: sig_unary;
     data_loader_source_identity: "jet_data_loader_source_identity" => jet_data_loader_source_identity: sig_unary;
-    data_loader_authority_of: "jet_data_loader_authority_of" => jet_data_loader_authority_of: sig_unary;
+    data_loader_authority: "jet_data_loader_authority" => jet_data_loader_authority: sig_unary;
     data_snapshot_reusable: "jet_data_snapshot_reusable" => jet_data_snapshot_reusable: sig_binary;
     data_stream_cancel: "jet_data_stream_cancel" => jet_data_stream_cancel: sig_unary;
     csv_reader: "jet_jit_data_csv_reader" => jet_jit_data_csv_reader: sig_ternary;

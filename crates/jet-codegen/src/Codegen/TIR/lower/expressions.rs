@@ -3602,7 +3602,23 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     let Type::Named(name) = &value.ty else {
         return value;
     };
-    if cx.has_display_type(name) {
+    // Primitive display is a shared Prelude operation; it has no checked
+    // instance receiver row in fragment registries.
+    let prelude_scalar = matches!(
+        value.ty.without_user_tags(),
+        Type::Named(name)
+            if matches!(
+                name.as_str(),
+                "Int" | "Float" | "Bool" | "String" | "Char" | "I8" | "I16" | "I32" | "I64"
+                    | "I128" | "U8" | "U16" | "U32" | "U64" | "U128"
+            )
+    );
+    // A generic Printable parameter is formatted through the shared Prelude
+    // route after monomorphization. It has no concrete Display receiver
+    // convention in the fragment registry, so do not synthesize a user trait
+    // method call for it here.
+    let generic_parameter = cx.current_type_params.borrow().contains(name);
+    if !prelude_scalar && !generic_parameter && cx.has_display_type(name) {
         return TExpr {
             ty: Type::String,
             kind: TExprKind::MethodCall {
@@ -4348,6 +4364,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let value = cx.const_values.get(name);
                         let ty = env
                             .ty_of(name)
+                            .or_else(|| cx.const_types.get(name).cloned())
                             .or_else(|| value.map(crate::AST::CtValue::jet_type))
                             .unwrap_or(Type::Int);
                         return TExpr {
@@ -5457,9 +5474,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                     });
                 }
-                // D-TYPE2-UNCERT1=A: the canonical source constructor lowers to
-                // the same Prelude symbol every engine already uses. `core.units`
-                // is an internal route, not a second user-visible spelling.
+                // D-TYPE2-UNCERT1=A: the canonical source constructor uses the
+                // existing typed Prelude route directly. `core.units.from` is
+                // source-owned and is not a second CoreCall dispatcher entry.
                 if call.name == "measurement"
                     && !cx.sigs.contains_key(&call.name)
                     && !env.locals.contains_key(&call.name)
@@ -5471,18 +5488,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             .iter()
                             .map(|argument| lower_expr(&argument.expr, cx, env))
                             .collect::<Vec<_>>();
-                        let widen_to_vec = vec![false; args.len()];
-                        return core_call_expr(
-                            Type::Apply {
+                        TExpr {
+                            ty: Type::Apply {
                                 name: Syntax::TYPE_MEASUREMENT.to_string(),
                                 args: vec![Type::Float],
                             },
-                            "core.units",
-                            "from",
-                            args,
-                            call.name_span,
-                            widen_to_vec,
-                        );
+                            kind: TExprKind::PreciseBuiltin {
+                                type_name: Syntax::TYPE_MEASUREMENT.to_string(),
+                                func: "new".to_string(),
+                                args,
+                            },
+                        }
                     });
                 }
                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)

@@ -1,6 +1,10 @@
 // core-conformance: core.data.loader.snapshot_reusable
+use core.data as data
 use core.data.loader as api
 
 fn run() {
-    print(api.snapshot_reusable(Loader{}))
+    loader :: data.file<String>("jet", "csv", data.DataLimits.safe()) ?? panic("loader")
+    identity :: api.source_identity(loader)
+    snapshot :: data.DataSnapshotIdentity{id: "jet", source: identity.locator, content: "", schema: "", format: .CSV}
+    print(api.snapshot_reusable(snapshot, snapshot))
 }

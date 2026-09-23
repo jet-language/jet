@@ -8,11 +8,11 @@ package {
         wrap: .Library{ entry: wrap }
     }
 }
+use core.text as unicode
 // core.text.wrap — paragraph filling, indent, and HTML escaping.
 //
-// Python `textwrap` plus `html.escape` / `html.unescape` for the common
-// document-prep jobs. Width is measured in bytes of UTF-8 (ASCII-first);
-// CJK display width lives in `core.text.display_width`.
+// Python `textwrap` plus scalar-safe width, indentation, and escaping.
+// Width is measured in terminal display columns using `core.text`.
 pub fn wrap(text: String, width: Int) -> [String] {
     if width <= 0 -> return [String]{text}
     words := split_ws(text)
@@ -45,10 +45,10 @@ pub fn fill(text: String, width: Int) -> String {
 }
 
 pub fn shorten(text: String, width: Int, placeholder: String) -> String {
-    if text.bytes().len() <= width -> return text
-    keep := width - placeholder.bytes().len()
+    if unicode.scalar_count(text) <= width -> return ~text
+    keep := width - unicode.scalar_count(placeholder)
     if keep < 0 -> keep = 0
-    "{slice_b(text.bytes(), 0, keep)}{placeholder}"
+    "{take_scalars(text, keep)}{placeholder}"
 }
 
 pub fn indent(text: String, prefix: String) -> String {
@@ -71,7 +71,7 @@ pub fn dedent(text: String) -> String {
         m :: leading_spaces(line)
         if margin < 0 || m < margin -> margin = m
     }
-    if margin <= 0 -> return text
+    if margin <= 0 -> return ~text
     s := ""
     i := 0
     loop i < lines.len() {
@@ -88,36 +88,35 @@ pub fn dedent(text: String) -> String {
 pub fn expand_tabs(text: String, tabsize: Int) -> String {
     size := tabsize
     if size <= 0 -> size = 8
-    out := [U8]{}
+    out := ""
     col := 0
-    loop b in text.bytes() {
-        if b == (U8{9}) {
-            n := size - (col %% size)
-            loop n > 0 {
-                out.push(U8{32})
-                col = col + 1
-                n = n - 1
+    cr :: String.from_bytes([U8]{13}) ?? ""
+    loop scalar in unicode.scalars(text) {
+        if scalar == "\t" {
+            n := size - (col % size)
+            i := 0
+            loop i < n {
+                out = "{out} "
+                i = i + 1
             }
-            next
+            col = col + n
+        } else {
+            out = "{out}{scalar}"
+            if scalar == "\n" || scalar == cr -> col = 0 else -> col = col + unicode.display_width(scalar)
         }
-        out.push(b)
-        if b == (U8{10}) -> col = 0 else -> col = col + 1
     }
-    String.from_bytes(out) ?? text
+    out
 }
 
 pub fn html_escape(text: String, quote: Bool) -> String {
     out := ""
-    loop b in text.bytes() {
-        n :: b
-        if {
-            n == 38 -> { out = "{out}&amp;" }
-            n == 60 -> { out = "{out}&lt;" }
-            n == 62 -> { out = "{out}&gt;" }
-            quote && n == 34 -> { out = "{out}&quot;" }
-            quote && n == 39 -> { out = "{out}&#x27;" }
-            else -> { out = "{out}{String.from_bytes([U8]{b}) ?? ""}" }
-        }
+    loop scalar in unicode.scalars(text) {
+        if scalar == "&" -> out = "{out}&amp;"
+        else if scalar == "<" -> out = "{out}&lt;"
+        else if scalar == ">" -> out = "{out}&gt;"
+        else if quote && scalar == "\"" -> out = "{out}&quot;"
+        else if quote && scalar == "'" -> out = "{out}&#x27;"
+        else -> out = "{out}{scalar}"
     }
     out
 }
@@ -133,27 +132,19 @@ pub fn html_unescape(text: String) -> String {
 }
 
 fn split_ws(text: String) -> [String] {
-    raw :: text.bytes()
     out := [String]{}
-    start := -1
-    i := 0
-    loop i <= raw.len() {
-        space := false
-        if i == raw.len() -> space = true else {
-            n :: raw[i]
-            space = n == 32 || n == 9 || n == 10 || n == 13
-        }
-        if {
-            space -> {
-                if start >= 0 {
-                    out.push(slice_b(raw, start, i))
-                    start = -1
-                }
+    current := ""
+    loop scalar in unicode.scalars(text) {
+        if unicode.is_whitespace(scalar) {
+            if current.bytes().len() > 0 {
+                out.push(current)
+                current = ""
             }
-            start < 0 -> { start = i }
+        } else {
+            current = "{current}{scalar}"
         }
-        i = i + 1
     }
+    if current.bytes().len() > 0 -> out.push(current)
     out
 }
 
@@ -202,7 +193,7 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> String {
 }
 
 fn replace_all(text: String, old: String, new: String) -> String {
-    if old.bytes().len() == 0 -> text
+    if old.bytes().len() == 0 -> return ~text
     out := ""
     i := 0
     loop {
@@ -265,21 +256,24 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
     words := split_ws(body)
     out := [String]{}
     prefix := spec.initial_indent
-    line := prefix
+    line := ~prefix
+    prefix_width := unicode.display_width(~prefix)
     loop w in words {
         piece := w
         if spec.drop_whitespace && is_blank(piece) -> next
         sep := " "
-        if line.bytes().len() == prefix.bytes().len() -> sep = ""
+        if prefix_width == unicode.display_width(line) -> sep = ""
         trial :: "{line}{sep}{piece}"
-        if trial.bytes().len() <= width {
+        if unicode.display_width(trial) <= width {
             line = trial
             next
         }
-        if line.bytes().len() > prefix.bytes().len() -> out.push(line)
+        if unicode.display_width(line) > prefix_width -> out.push(line)
         if {
-            piece.bytes().len() > width && spec.break_long_words -> {
-                chunks :: break_word(piece, width)
+            unicode.display_width(piece) > width && spec.break_long_words -> {
+                chunk_width := width - unicode.display_width(spec.subsequent_indent)
+                if chunk_width <= 0 -> chunk_width = 1
+                chunks :: break_word(piece, chunk_width)
                 k := 0
                 loop k < chunks.len() {
                     if k + 1 == chunks.len() -> line = "{spec.subsequent_indent}{chunks[k]}" else {
@@ -291,8 +285,9 @@ pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
             else -> line = "{spec.subsequent_indent}{piece}"
         }
         prefix = spec.subsequent_indent
+        prefix_width = unicode.display_width(~prefix)
     }
-    if line.bytes().len() > prefix.bytes().len() || prefix.bytes().len() == 0 && line.bytes().len() > 0 {
+    if unicode.display_width(line) > prefix_width || prefix_width == 0 && line.bytes().len() > 0 {
         out.push(line)
     }
     if spec.max_lines > 0 && out.len() > spec.max_lines {
@@ -353,14 +348,37 @@ pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> 
 }
 
 fn break_word(word: String, width: Int) -> [String] {
+    if width <= 0 -> return [String]{word}
     out := [String]{}
-    raw :: word.bytes()
+    current := ""
+    current_width := 0
+    units :: unicode.scalars(word)
     i := 0
-    loop i < raw.len() {
-        end := i + width
-        if end > raw.len() -> end = raw.len()
-        out.push(slice_b(raw, i, end))
-        i = end
+    loop i < units.len() {
+        scalar := units[i]
+        w :: unicode.display_width(scalar)
+        if current.bytes().len() > 0 && current_width + w > width {
+            out.push(current)
+            current = ""
+            current_width = 0
+        }
+        current = "{current}{scalar}"
+        current_width = current_width + w
+        i = i + 1
+    }
+    if current.bytes().len() > 0 -> out.push(current)
+    out
+}
+
+fn take_scalars(text: String, n: Int) -> String {
+    if n <= 0 -> return ""
+    out := ""
+    i := 0
+    units :: unicode.scalars(text)
+    loop i < units.len() {
+        if i >= n -> break
+        out = "{out}{units[i]}"
+        i = i + 1
     }
     out
 }

@@ -275,7 +275,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
         | "DBConnection" | "DBScope" | "DbPool" | "DbLease" | "DbPoolReceipt" | "DBError"
-        // D-LIB-CALLGRANT1=A: a loaded Mod is opaque; its read roots are the
+        | "DBValue"
         // only constructable part of the host grant value.
         | "Mod" | "ModGrant"
         | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
@@ -285,13 +285,13 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
         | "DataLineOptions" | "DataColumn" | "DataFormat" | "DataSchema"
-        | "DataStatus" | "DataSummary"
+        | "DataFreshness" | "DataInvalidationCause" | "DataAuthority" | "DataStatus" | "DataSummary" | "DataJoin"
         | "Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch"
         | "DataWatchStatus" | "Group"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
         | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderKind"
         | "DataLoaderStatus" | "DataLoader" | "DataSnapshot"
-        | "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate"
+        | "JetDataPlot" | "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate"
         | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind"
         | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind"
         | "JetDataPlotInteraction" | "JetDataPlotBackend" | "JetDataPlotSupport"
@@ -313,7 +313,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-ITERTOOLS1=A: expanded collection handles.
         | Syntax::TYPE_BITS | Syntax::TYPE_BYTES
         // E2-M10: networking opaque types.
-        | "TcpListener" | "TcpStream" | "IPAddr" | "SocketAddr" | "UdpSocket" | "UDPPacket"
+        | "TCPListener" | "TCPStream" | "IPAddr" | "SocketAddr" | "UDPSocket" | "UDPPacket"
         | "DNSSrv" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
@@ -331,7 +331,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // are opaque and receive no structural/collection capabilities.
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
         | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash"
-        | "Digest256" | "Digest512" | "Hasher" | "CryptoError"
+        | "Digest256" | "Digest512" | "Hasher" | "CryptoError" | "FileCryptoError"
         | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
         | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
@@ -442,14 +442,14 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
         | "ZonedDateTime"
         // D-URL1=A: typed URL and MIME values.
-        | "Url" | Syntax::TYPE_URL | "Mime"
+        | Syntax::TYPE_URL | "MIME"
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
         | "Limits" | "SMTPAuth" | "TLSTrust" | "DkimConfig" | "SMTPConfig" | "Mailer"
         | "Regex" | "RegexFlags" | "Match"
         | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
-        | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
+        | "Body" | "Headers" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
         | "BrowserIntercept"
@@ -507,9 +507,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ObligationParamInfo" | "ParamZone"
         | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "OriginInfo"
         | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
-        | "MaturityInfo" | "Maturity"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "ArithmeticOperationInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
+        || is_db_value_type_name(name)
         || is_io_error_type_name(name)
         || is_utf8_error_type_name(name)
 }
@@ -1611,15 +1611,13 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "identity" => Some(Type::String),
             "format" => Some(Type::Named("DataFormat".to_string())),
             "columns" => Some(Type::List(Box::new(Type::Named("DataColumn".to_string())))),
-            "projection" => Some(Type::Option(Box::new(Type::Named(
-                "ShapeProjection".to_string(),
-            )))),
+            "projection" => Some(Type::Option(Box::new(Type::String))),
             _ => None,
         };
     }
     if type_name == "DataStatus" {
         return match field {
-            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
+            "step" | "path" | "clone_value" | "ownership" | "trust" | "fallback" | "replacement" => {
                 Some(Type::String)
             }
             _ => None,
@@ -1666,14 +1664,14 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "JetDataPlotField" {
         return match field {
-            "id" | "name" | "type_name" => Some(Type::String),
+            "name" => Some(Type::String),
+            "kind" => Some(Type::Named("JetDataPlotValue".to_string())),
             _ => None,
         };
     }
     if type_name == "JetDataPlotSchema" {
         return match field {
-            "identity" | "row_type" => Some(Type::String),
-            "columns" => Some(Type::List(Box::new(Type::Named(
+            "fields" => Some(Type::List(Box::new(Type::Named(
                 "JetDataPlotField".to_string(),
             )))),
             _ => None,
@@ -1681,88 +1679,65 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "JetDataPlotSourceFacts" {
         return match field {
-            "table_plan_identity" | "source_identity" | "schema_identity" | "row_type"
-            | "data_identity" | "provenance" => Some(Type::String),
-            "rows" => Some(Type::Int),
+            "rows" | "columns" => Some(Type::Int),
             _ => None,
         };
     }
     if type_name == "JetDataPlotEncoding" {
         return match field {
-            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
-            "field" => Some(Type::Named("JetDataPlotField".to_string())),
-            "aggregate" => Some(Type::Named("JetDataPlotAggregate".to_string())),
+            "x" | "y" => Some(Type::String),
+            "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
             _ => None,
         };
     }
     if type_name == "JetDataPlotScale" {
         return match field {
-            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
             "kind" => Some(Type::Named("JetDataPlotScaleKind".to_string())),
-            "domain" => Some(Type::Named("JetDataPlotDomain".to_string())),
-            "clamp" | "reverse" => Some(Type::Bool),
+            "field" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotAxis" {
         return match field {
-            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
-            "title" => Some(Type::String),
-            "visible" | "grid" => Some(Type::Bool),
-            "ticks" => Some(Type::Int),
+            "field" | "title" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotLegend" {
         return match field {
-            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
-            "title" => Some(Type::String),
             "position" => Some(Type::Named("JetDataPlotLegendPosition".to_string())),
-            "visible" => Some(Type::Bool),
             _ => None,
         };
     }
     if type_name == "JetDataPlotFacet" {
         return match field {
-            "field" => Some(Type::Named("JetDataPlotField".to_string())),
             "kind" => Some(Type::Named("JetDataPlotFacetKind".to_string())),
-            "title" => Some(Type::String),
-            "columns" | "rows" => Some(Type::Int),
+            "field" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotLayer" {
         return match field {
-            "name" => Some(Type::String),
             "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
-            "encodings" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotEncoding".to_string(),
-            )))),
-            "transforms" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotTransform".to_string(),
-            )))),
-            "opacity" => Some(Type::Float),
+            "encoding" => Some(Type::Named("JetDataPlotEncoding".to_string())),
             _ => None,
         };
     }
     if type_name == "JetDataPlotAccessibility" {
         return match field {
-            "title" | "description" | "summary" => Some(Type::String),
-            "keyboard" | "announce_selection" => Some(Type::Bool),
+            "title" | "summary" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotLayout" {
         return match field {
-            "width" | "height" | "margin_top" | "margin_right" | "margin_bottom"
-            | "margin_left" => Some(Type::Float),
+            "width" | "height" => Some(Type::Int),
             _ => None,
         };
     }
     if type_name == "JetDataPlotCapability" {
         return match field {
             "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
-            "feature" | "reason" | "replacement" => Some(Type::String),
             "support" => Some(Type::Named("JetDataPlotSupport".to_string())),
             _ => None,
         };
@@ -1770,97 +1745,50 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "JetDataPlotError" {
         return match field {
             "kind" => Some(Type::Named("JetDataPlotErrorKind".to_string())),
-            "operation" | "reason" => Some(Type::String),
-            "field" | "channel" | "mark" | "expected" | "actual" => {
-                Some(Type::Option(Box::new(Type::String)))
-            }
-            "index" => Some(Type::Option(Box::new(Type::Int))),
+            "message" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotPlan" {
         return match field {
-            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
-            "schema" => Some(Type::Named("JetDataPlotSchema".to_string())),
             "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
-            "encodings" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotEncoding".to_string(),
-            )))),
-            "transforms" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotTransform".to_string(),
-            )))),
-            "scales" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotScale".to_string(),
-            )))),
-            "axes" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotAxis".to_string(),
-            )))),
-            "legends" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotLegend".to_string(),
-            )))),
-            "facets" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotFacet".to_string(),
-            )))),
-            "layers" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotLayer".to_string(),
-            )))),
-            "interactions" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotInteraction".to_string(),
-            )))),
-            "accessibility" => Some(Type::Named("JetDataPlotAccessibility".to_string())),
+            "labels" => Some(Type::List(Box::new(Type::String))),
+            "values" => Some(Type::List(Box::new(Type::Float))),
             "layout" => Some(Type::Named("JetDataPlotLayout".to_string())),
+            "encoding" => Some(Type::Named("JetDataPlotEncoding".to_string())),
+            "schema" => Some(Type::Named("JetDataPlotSchema".to_string())),
             _ => None,
         };
     }
     if type_name == "JetDataPlotSelectedRow" {
         return match field {
             "index" => Some(Type::Int),
-            "values" => Some(Type::List(Box::new(Type::Tuple(vec![
-                (
-                    "field".to_string(),
-                    Box::new(Type::Named("JetDataPlotField".to_string())),
-                ),
-                (
-                    "value".to_string(),
-                    Box::new(Type::Named("JetDataPlotValue".to_string())),
-                ),
-            ])))),
             _ => None,
         };
     }
     if type_name == "JetDataPlotInspection" {
         return match field {
-            "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
-            "selected_indices" => Some(Type::List(Box::new(Type::Int))),
-            "selected_columns" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotField".to_string(),
-            )))),
-            "selected_data" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotSelectedRow".to_string(),
-            )))),
+            "text" => Some(Type::String),
             _ => None,
         };
     }
     if type_name == "JetDataPlotRender" {
         return match field {
-            "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
             "format" => Some(Type::Named("JetDataPlotRenderFormat".to_string())),
             "body" => Some(Type::String),
-            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
-            "capabilities" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotCapability".to_string(),
-            )))),
             _ => None,
         };
     }
     if type_name == "JetDataPlotProjection" {
         return match field {
-            "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
-            "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
-            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
-            "capabilities" => Some(Type::List(Box::new(Type::Named(
-                "JetDataPlotCapability".to_string(),
-            )))),
+            "start" | "end" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotColumn" {
+        return match field {
+            "name" => Some(Type::String),
+            "values" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         };
     }
@@ -2080,11 +2008,11 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // D-HTTP-CORE2=A: one byte-native message model.
         ("HTTPRequest", "method" | "path") => Some(Type::String),
-        ("HTTPRequest", "body") => Some(Type::Named("HTTPBody".to_string())),
-        ("HTTPRequest", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
+        ("HTTPRequest", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPRequest", "headers") => Some(Type::Named("Headers".to_string())),
         ("HTTPResponse", "status") => Some(Type::Int),
-        ("HTTPResponse", "body") => Some(Type::Named("HTTPBody".to_string())),
-        ("HTTPResponse", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
+        ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
         ("HTTPServerTls", "cert_pem" | "key_pem") => Some(Type::String),
         // D-LOGTRACE1=A: typed logging values are Prelude structs, so their
@@ -2321,6 +2249,12 @@ fn compiler_package_struct_field(type_name: &str, field: &str) -> Option<Type> {
 /// table first (D-SHIFT1 user-type-wins), exactly as `Checker::field_type`
 /// does.
 pub fn core_struct_field_type(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+    // Corelib nominal types carry a compiler-owned source identity. The
+    // canonical Core record oracle is keyed by the declared type leaf.
+    let type_name = type_name
+        .strip_prefix("<corelib>/")
+        .and_then(|identity| identity.rsplit("::").next())
+        .unwrap_or(type_name);
     if args.is_empty() {
         core_struct_field(type_name, field)
     } else {
@@ -2419,6 +2353,9 @@ pub(crate) fn core_generic_struct_field(
             )))),
             _ => None,
         };
+    }
+    if type_name == "Measurement" && args.len() == 1 {
+        return matches!(field, "value" | "uncertainty").then_some(args[0].clone());
     }
     if type_name == "FfiCallbackEvent" && args.len() == 1 {
         return (field == "value").then_some(args[0].clone());
@@ -2536,10 +2473,25 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
+    if type_name == "JetDataPlot" && args.len() == 1 {
+        return match field {
+            "rows" => Some(Type::List(Box::new(args[0].clone()))),
+            "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
+            _ => None,
+        };
+    }
     if type_name == "Group" && args.len() == 2 {
         return match field {
             "key" => Some(args[0].clone()),
             "value" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "DataStream" && args.len() == 1 {
+        return match field {
+            "items" => Some(Type::List(Box::new(args[0].clone()))),
+            "index" => Some(Type::Int),
+            "cancelled" => Some(Type::Bool),
             _ => None,
         };
     }
@@ -2565,12 +2517,6 @@ pub(crate) fn core_generic_struct_field(
             "schema" => Some(Type::Named("DataSchema".to_string())),
             "status" => Some(Type::Named("DataLoaderStatus".to_string())),
             "content" => Some(Type::List(Box::new(u8_ty()))),
-            _ => None,
-        };
-    }
-    if type_name == "JetDataPlotColumn" && args.len() == 1 {
-        return match field {
-            "field" => Some(Type::Named("JetDataPlotField".to_string())),
             _ => None,
         };
     }
@@ -3004,7 +2950,7 @@ pub(crate) fn core_http_variants(
         variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
         variants.insert(
-            "Url".to_string(),
+            "URL".to_string(),
             (zero, VariantPayload::Single(Type::String, zero)),
         );
         return Some(variants);
@@ -3655,6 +3601,15 @@ pub fn encoding_handle_method_return(
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
     match type_name {
+        // D-COMPUTE1=D: Tensor is a Core-exported struct whose source
+        // declaration is owned by `core.compute`; keep its field shape here
+        // so imported values and `Tensor{ ... }` literals share one oracle.
+        "Tensor" => Some(vec![
+            ("shape".to_string(), Type::List(Box::new(Type::Int))),
+            ("data".to_string(), Type::List(Box::new(Type::Float))),
+            ("device".to_string(), Type::String),
+            ("numeric_profile".to_string(), Type::String),
+        ]),
         // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
         name if name == Syntax::TYPE_ERR => Some(vec![
             ("message".to_string(), Type::String),
@@ -3858,6 +3813,130 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("sum".to_string(), Type::Float),
             ("mean".to_string(), Type::Float),
         ]),
+        "DataSummary" => Some(vec![
+            ("count".to_string(), Type::Int),
+            ("sum".to_string(), Type::Float),
+            ("mean".to_string(), Type::Float),
+            ("min".to_string(), Type::Float),
+            ("max".to_string(), Type::Float),
+            ("median".to_string(), Type::Float),
+            ("variance".to_string(), Type::Float),
+            ("stddev".to_string(), Type::Float),
+        ]),
+        "JetDataPlotField" => Some(vec![
+            ("name".to_string(), Type::String),
+            ("kind".to_string(), Type::Named("JetDataPlotValue".to_string())),
+        ]),
+        "JetDataPlotSchema" => Some(vec![(
+            "fields".to_string(),
+            Type::List(Box::new(Type::Named("JetDataPlotField".to_string()))),
+        )]),
+        "JetDataPlotSourceFacts" => Some(vec![
+            ("rows".to_string(), Type::Int),
+            ("columns".to_string(), Type::Int),
+        ]),
+        "JetDataPlotEncoding" => Some(vec![
+            ("x".to_string(), Type::String),
+            ("y".to_string(), Type::String),
+            ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+        ]),
+        "JetDataPlotScale" => Some(vec![
+            (
+                "kind".to_string(),
+                Type::Named("JetDataPlotScaleKind".to_string()),
+            ),
+            ("field".to_string(), Type::String),
+        ]),
+        "JetDataPlotAxis" => Some(vec![
+            ("field".to_string(), Type::String),
+            ("title".to_string(), Type::String),
+        ]),
+        "JetDataPlotLegend" => Some(vec![(
+            "position".to_string(),
+            Type::Named("JetDataPlotLegendPosition".to_string()),
+        )]),
+        "JetDataPlotFacet" => Some(vec![
+            (
+                "kind".to_string(),
+                Type::Named("JetDataPlotFacetKind".to_string()),
+            ),
+            ("field".to_string(), Type::String),
+        ]),
+        "JetDataPlotLayer" => Some(vec![
+            ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+            (
+                "encoding".to_string(),
+                Type::Named("JetDataPlotEncoding".to_string()),
+            ),
+        ]),
+        "JetDataPlotAccessibility" => Some(vec![
+            ("title".to_string(), Type::String),
+            ("summary".to_string(), Type::String),
+        ]),
+        "JetDataPlotLayout" => Some(vec![
+            ("width".to_string(), Type::Int),
+            ("height".to_string(), Type::Int),
+        ]),
+        "JetDataPlotCapability" => Some(vec![
+            (
+                "backend".to_string(),
+                Type::Named("JetDataPlotBackend".to_string()),
+            ),
+            (
+                "support".to_string(),
+                Type::Named("JetDataPlotSupport".to_string()),
+            ),
+        ]),
+        "JetDataPlotError" => Some(vec![
+            (
+                "kind".to_string(),
+                Type::Named("JetDataPlotErrorKind".to_string()),
+            ),
+            ("message".to_string(), Type::String),
+        ]),
+        "JetDataPlotColumn" => Some(vec![
+            ("name".to_string(), Type::String),
+            (
+                "values".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
+        ]),
+        "JetDataPlotSelectedRow" => Some(vec![("index".to_string(), Type::Int)]),
+        "JetDataPlotInspection" => Some(vec![("text".to_string(), Type::String)]),
+        "JetDataPlotRender" => Some(vec![
+            (
+                "format".to_string(),
+                Type::Named("JetDataPlotRenderFormat".to_string()),
+            ),
+            ("body".to_string(), Type::String),
+        ]),
+        "JetDataPlotProjection" => Some(vec![
+            ("start".to_string(), Type::Int),
+            ("end".to_string(), Type::Int),
+        ]),
+        "JetDataPlotPlan" => Some(vec![
+            ("mark".to_string(), Type::Named("JetDataPlotMark".to_string())),
+            (
+                "labels".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
+            (
+                "values".to_string(),
+                Type::List(Box::new(Type::Float)),
+            ),
+            (
+                "layout".to_string(),
+                Type::Named("JetDataPlotLayout".to_string()),
+            ),
+            (
+                "encoding".to_string(),
+                Type::Named("JetDataPlotEncoding".to_string()),
+            ),
+            (
+                "schema".to_string(),
+                Type::Named("JetDataPlotSchema".to_string()),
+            ),
+        ]),
         "Limits" => Some(vec![
             ("max_reply_line_bytes".to_string(), Type::Int),
             ("max_reply_lines".to_string(), Type::Int),
@@ -4027,6 +4106,17 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("instant".to_string(), Type::Named("DateTime".to_string())),
             ("zone".to_string(), Type::Named("Zone".to_string())),
         ]),
+"MIME" => Some(vec![
+    ("top".to_string(), Type::String),
+    ("sub".to_string(), Type::String),
+]),
+        "NetErrorDetail" => Some(vec![
+            ("operation".to_string(), Type::String),
+            ("address".to_string(), Type::Option(Box::new(Type::String))),
+            ("name".to_string(), Type::Option(Box::new(Type::String))),
+            ("message".to_string(), Type::String),
+            ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+        ]),
         "Instant" => Some(vec![("unix_ns".to_string(), Type::Int)]),
         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
@@ -4050,6 +4140,34 @@ pub(crate) fn core_generic_constructable_fields(
     type_name: &str,
     args: &[Type],
 ) -> Option<Vec<(String, Type)>> {
+    if type_name == "DataJoin" && args.len() == 2 {
+        return Some(vec![
+            ("left".to_string(), args[0].clone()),
+            ("right".to_string(), args[1].clone()),
+        ]);
+    }
+    if type_name == "JetDataPlot" && args.len() == 1 {
+        return Some(vec![
+            (
+                "rows".to_string(),
+                Type::List(Box::new(args[0].clone())),
+            ),
+            (
+                "plan".to_string(),
+                Type::Named("JetDataPlotPlan".to_string()),
+            ),
+        ]);
+    }
+    if type_name == "DataStream" && args.len() == 1 {
+        return Some(vec![
+            (
+                "items".to_string(),
+                Type::List(Box::new(args[0].clone())),
+            ),
+            ("index".to_string(), Type::Int),
+            ("cancelled".to_string(), Type::Bool),
+        ]);
+    }
     if args.len() != 1 {
         return None;
     }
@@ -4255,13 +4373,19 @@ pub(crate) fn core_encoding_variants(
             "Overflow",
             "State",
             "Bridge",
+            "Unsupported",
+            "DuplicateKey",
+            "MissingKey",
+            "WrongOwner",
+            "StaleRevision",
+            "InvalidValue",
         ],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
         "DataFormat" => &["CSV", "JSON", "JSONL", "Parquet", "Arrow"],
-        "DataLoaderKind" => &["File", "Url", "Database", "Value"],
+        "DataLoaderKind" => &["File", "URL", "Database", "Value"],
         "DataFreshness" => &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
         "DataInvalidationCause" => &[
-            "None",
+            "NoCause",
             "Loader",
             "Input",
             "ArchiveMember",
@@ -4280,25 +4404,21 @@ pub(crate) fn core_encoding_variants(
             "Cancelled",
         ],
         "JobQueueDeliveryPolicy" => &["AtLeastOnce"],
-        "JetDataPlotMark" => &["Line", "Bar", "Point"],
-        "JetDataPlotChannel" => &["X", "Y", "Color", "Size", "Text", "Detail"],
-        "JetDataPlotAggregate" => &["None", "Count", "Sum", "Mean", "Min", "Max"],
-        "JetDataPlotFilterOp" => &[
-            "Equal",
-            "NotEqual",
-            "Less",
-            "LessEqual",
-            "Greater",
-            "GreaterEqual",
-        ],
-        "JetDataPlotScaleKind" => &["Linear", "Log", "Band", "Point"],
-        "JetDataPlotLegendPosition" => &["Top", "Right", "Bottom", "Left"],
-        "JetDataPlotFacetKind" => &["Row", "Column"],
-        "JetDataPlotInteraction" => &["Hover", "Select", "Zoom", "Pan", "Brush"],
-        "JetDataPlotBackend" => &["Terminal", "Browser", "Native", "Export"],
-        "JetDataPlotSupport" => &["Supported", "Degraded", "Unsupported"],
-        "JetDataPlotErrorKind" => &["InvalidArgument", "NonFinite", "Unsupported", "Empty", "Limit"],
-        "JetDataPlotRenderFormat" => &["Text", "Svg"],
+        "JetDataPlotMark" => &["Bar", "Line", "Point"],
+        "JetDataPlotChannel" => &["X", "Y", "Color", "Size"],
+        "JetDataPlotAggregate" => &["Sum", "Mean", "Count", "Min", "Max"],
+        "JetDataPlotFilterOp" => &["Eq", "Ne", "Lt", "Le", "Gt", "Ge"],
+        "JetDataPlotValue" => &["Number", "Text", "Bool"],
+        "JetDataPlotTransform" => &["Identity", "Filter", "Aggregate"],
+        "JetDataPlotScaleKind" => &["Linear", "Log", "Band"],
+        "JetDataPlotDomain" => &["Auto", "Explicit"],
+        "JetDataPlotLegendPosition" => &["Top", "Bottom", "Left", "Right"],
+        "JetDataPlotFacetKind" => &["Wrap", "Grid"],
+        "JetDataPlotInteraction" => &["Hover", "Select", "Pan"],
+        "JetDataPlotBackend" => &["Svg", "Text"],
+        "JetDataPlotSupport" => &["Full", "Partial", "Unsupported"],
+        "JetDataPlotErrorKind" => &["Schema", "Encoding", "Render"],
+        "JetDataPlotRenderFormat" => &["Svg", "Text", "Json"],
         "CBORErrorKind" => &[
             "Syntax",
             "Truncated",
@@ -4308,24 +4428,10 @@ pub(crate) fn core_encoding_variants(
             "TrailingData",
             "NonCanonical",
         ],
-        "XMLReason" => &[
-            "InvalidEncoding",
-            "Malformed",
-            "MismatchedTag",
-            "InvalidName",
-            "Namespace",
-            "DuplicateAttribute",
-            "Entity",
-            "EntityCycle",
-            "Limit",
-            "Canonicalization",
-            "Shape",
-            "Unsupported",
-        ],
-        "XMLEntityPolicy" => &["Preserve", "Reject"],
-        "XMLEncoding" => &["UTF8", "UTF8BOM", "UTF16LE", "UTF16BE"],
-        "XMLLexicalPolicy" => &["PreserveValid", "Deterministic"],
-        "XMLCanonicalMode" => &["Inclusive11", "Exclusive10"],
+        "XMLReason" => &["Syntax", "Truncated", "ForbiddenDtd", "UnknownEntity"],
+        "XMLEntityPolicy" => &["PredefinedOnly", "Reject"],
+        "XMLEncoding" => &["Utf8", "Utf16"],
+        "XMLCanonicalMode" => &["Inclusive", "Exclusive"],
         _ => return None,
     };
     for name in units {
@@ -4342,158 +4448,6 @@ pub(crate) fn core_encoding_variants(
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
-    }
-    if enum_name == "XMLEntityPolicy" {
-        variants.insert(
-            "Resolve".to_string(),
-            (
-                zero,
-                VariantPayload::Single(
-                    Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::String),
-                    },
-                    zero,
-                ),
-            ),
-        );
-    }
-    if enum_name == "JetDataPlotValue" {
-        for (name, ty) in [
-            ("Text", Type::String),
-            ("Integer", Type::Int),
-            ("Number", Type::Float),
-            ("Boolean", Type::Bool),
-        ] {
-            variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
-        }
-    }
-    if enum_name == "JetDataPlotValue" {
-        variants.insert("Null".to_string(), (zero, VariantPayload::Unit));
-    }
-    if enum_name == "JetDataPlotDomain" {
-        variants.insert(
-            "Numeric".to_string(),
-            (
-                zero,
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "min".to_string(),
-                        name_span: zero,
-                        ty: Type::Float,
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "max".to_string(),
-                        name_span: zero,
-                        ty: Type::Float,
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-        );
-        variants.insert(
-            "Categories".to_string(),
-            (
-                zero,
-                VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
-            ),
-        );
-    }
-    if enum_name == "JetDataPlotTransform" {
-        variants.insert(
-            "Filter".to_string(),
-            (
-                zero,
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "field".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotField".to_string()),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "op".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotFilterOp".to_string()),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "value".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotValue".to_string()),
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-        );
-        variants.insert(
-            "Sort".to_string(),
-            (
-                zero,
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "field".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotField".to_string()),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "descending".to_string(),
-                        name_span: zero,
-                        ty: Type::Bool,
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-        );
-        variants.insert(
-            "Bin".to_string(),
-            (
-                zero,
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "field".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotField".to_string()),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "step".to_string(),
-                        name_span: zero,
-                        ty: Type::Float,
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-        );
-        variants.insert(
-            "Aggregate".to_string(),
-            (
-                zero,
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "group_by".to_string(),
-                        name_span: zero,
-                        ty: Type::List(Box::new(Type::Named("JetDataPlotField".to_string()))),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "field".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotField".to_string()),
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "aggregate".to_string(),
-                        name_span: zero,
-                        ty: Type::Named("JetDataPlotAggregate".to_string()),
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-        );
     }
     Some(variants)
 }

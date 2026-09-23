@@ -282,10 +282,10 @@ pub(crate) mod os_rt {
         jet_std_os_hostname, jet_std_os_initgroups, jet_std_os_kill, jet_std_os_loadavg,
         jet_std_os_mkfifo, jet_std_os_name, jet_std_os_pid, jet_std_os_pipe, jet_std_os_release,
         jet_std_os_set_current_dir, jet_std_os_setgid, jet_std_os_setpgid, jet_std_os_setpgrp,
-        jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid, jet_std_os_success,
-        jet_std_os_sync, jet_std_os_temp_dir, jet_std_os_times, jet_std_os_umask,
-        jet_std_os_uptime, jet_std_os_username, jet_std_os_utime, jet_std_os_version,
-        jet_std_os_wait, jet_std_os_waitpid,
+        jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid, jet_std_os_sync,
+        jet_std_os_temp_dir, jet_std_os_times, jet_std_os_umask, jet_std_os_uptime,
+        jet_std_os_username, jet_std_os_utime, jet_std_os_version, jet_std_os_wait,
+        jet_std_os_waitpid,
     };
 }
 
@@ -589,9 +589,6 @@ fn jet_jit_os_loadavg() -> i64 {
 }
 fn jet_jit_os_times() -> i64 {
     alloc_f64_list_os(&os_rt::jet_std_os_times())
-}
-fn jet_jit_os_success(status: i64) -> i8 {
-    i8::from(os_rt::jet_std_os_success(status))
 }
 fn jet_jit_os_exitcode(status: i64) -> i64 {
     os_rt::jet_std_os_exitcode(status)
@@ -2329,7 +2326,6 @@ host_fns! {
     os_uptime: "jet_jit_os_uptime" => jet_jit_os_uptime: sig_f64;
     os_loadavg: "jet_jit_os_loadavg" => jet_jit_os_loadavg: sig_i64;
     os_times: "jet_jit_os_times" => jet_jit_os_times: sig_i64;
-    os_success: "jet_jit_os_success" => jet_jit_os_success: sig_i64_i8;
     os_exitcode: "jet_jit_os_exitcode" => jet_jit_os_exitcode: sig_unary_i64;
     os_expand: "jet_jit_os_expand" => jet_jit_os_expand: sig_unary_i64;
     os_getpgid: "jet_jit_os_getpgid" => jet_jit_os_getpgid: sig_unary_i64;
@@ -2352,11 +2348,8 @@ host_fns! {
     os_setsid: "jet_jit_os_setsid" => jet_jit_os_setsid: sig_i64;
     os_initgroups: "jet_jit_os_initgroups" => jet_jit_os_initgroups: sig_i64_i64_i64;
     os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
-    core_os_on_interrupt: "jet_std_os_on_interrupt" => jet_jit_core_os_on_interrupt: sig_unary_i64;
     os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
     os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
-    os_on_interrupt: "jet_jit_os_on_interrupt" => jet_jit_os_on_interrupt: sig_void_i64;
-    os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
     log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;

@@ -1,9 +1,43 @@
 // D-EMAIL1: envelope recipients stay separate from message serialization.
 use core.email as email
+use core.text.parse as text_parse
 
 fn run() {
     sender :: email.address("sender@example.com") ?? return
     recipient :: email.address("recipient@example.net") ?? return
-    envelope :: email.envelope(sender, [recipient]) ?? return
+    envelope :: email.envelope(sender, [~recipient]) ?? return
+    message :: email.message(
+    sender,
+    [~recipient],
+    [Address]{},
+    subject: "Welcome",
+    text: "Hello",
+    html: HTML{"<b>Hello</b>"},
+    attachments: [],
+    ) ?? return
+    wire :: email.serialize(message) ?? return
+    (found, mailbox_user, domain) :: text_parse.split_once(recipient.mailbox, "@")
+    smtp_config :: email.SMTPConfig{
+        host: "smtp.example.net",
+        port: 587,
+        security: .StartTls,
+        auth: .None,
+        recipient_policy: .RequireAll,
+        trust: .System,
+        limits: email.Limits.safe(),
+        dkim: None,
+    }
+    dkim_state :: if smtp_config.dkim == {
+        .None -> "off"
+        .Val(_) -> "configured"
+    }
     print("recipients:{envelope.recipients.len()}")
+    sender_display_state :: if sender.display == {
+        .None -> "absent"
+        .Val(_) -> "present"
+    }
+    print("sender-display:{sender_display_state}")
+    if found -> print("recipient:{mailbox_user}@{domain}")
+    print("dkim:{dkim_state}")
+    print("message-bytes:{wire.len()}")
 }

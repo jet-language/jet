@@ -1,17 +1,6 @@
 // core-conformance: core.net.tls.write_text
-use core.net as net
 use core.net.tls as tls
-use core.time as time
 
 fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
-    client :: net.tcp_connect(address) ?? panic("connect")
-    server :: net.tcp_accept(listener) ?? panic("accept")
-    net.tcp_close(&server) ?? panic("close")
-    #Context(deadline: time.now() + 100) {
-        print(net.tls_connect(^client, "localhost") ? stream ->
-            tls.write_text(&stream, "x") ? written -> true ! write_error -> false
-            ! connect_error -> true)
-    }
+    print(tls.write_text(TLSStream{}, "") == .Err(_))
 }

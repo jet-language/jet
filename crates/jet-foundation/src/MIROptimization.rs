@@ -4449,8 +4449,12 @@ pub fn optimize_mir_program(
         return Ok(optimized);
     }
     let mut optimized = program.clone();
+    let previous_loop_facts = optimized
+        .functions
+        .iter()
+        .map(|function| function.optimization.loop_facts.clone())
+        .collect::<Vec<_>>();
     clear_derived_facts(&mut optimized);
-    denormalize_fixed_reduction_loops(&mut optimized);
     // Checked #Inline(Always) is expanded here, before any target-neutral
     // proof pass. Keeping it in this one MIR pipeline means every execution
     // adapter consumes the same CFG, while the completed pass fingerprint
@@ -4513,7 +4517,7 @@ pub fn optimize_mir_program(
         "mir.canonical-loop-facts",
         "crates/jet-foundation/src/MIROptimization.rs",
         &mut optimized,
-        derive_loop_and_vector_facts,
+        |program| derive_loop_and_vector_facts(program, &previous_loop_facts),
     );
 
     // Reduction candidates become final facts only after normalization.
@@ -4524,9 +4528,15 @@ pub fn optimize_mir_program(
         normalize_fixed_reduction_loops,
     );
     // The reducer rewrites the CFG. Rebuild all loop-dependent facts from the
-    // generated shape before sealing the pass, then restore the source
-    // reduction row without applying the rewrite a second time.
-    derive_loop_and_vector_facts(&mut optimized);
+    // generated shape before sealing the pass, while retaining the facts from
+    // the pre-reduction shape only as a current-MIR trip-count fallback.
+    normalize_fixed_reduction_loops(&mut optimized);
+    let post_reduction_loop_facts = optimized
+        .functions
+        .iter()
+        .map(|function| function.optimization.loop_facts.clone())
+        .collect::<Vec<_>>();
+    derive_loop_and_vector_facts(&mut optimized, &post_reduction_loop_facts);
     normalize_fixed_reduction_loops(&mut optimized);
     mark_pass(&mut optimized, MirOptimizationPassId::CanonicalLoopFacts);
     validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
@@ -6675,6 +6685,7 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
         )))
     }
 }
+#[allow(dead_code)]
 fn denormalize_fixed_reduction_loops(program: &mut MirProgram) {
     for function in &mut program.functions {
         let candidates = function
@@ -8334,12 +8345,26 @@ fn reconcile_checked_vector_fact(
         return;
     };
 
+    // A proof rejected for a changed trip count must remain rejected through
+    // every later derivation pass.  Other checked rows use `decision` as a
+    // generic source-side placeholder and are promoted only after scope
+    // validation below.
+    if matches!(
+        proof.decision,
+        MirOptimizationDecision::Rejected(MirOptimizationRejection::DynamicTripCount)
+    ) {
+        derived.packed = false;
+        derived.decision = proof.decision.clone();
+        return;
+    }
+
     // The checked row carries generic loop facts.  Reduction and conditional
     // accumulation deliberately report their loop-carried accumulator as a
     // cross-iteration dependency, while an early search deliberately reports
     // its first-match exit.  Those are canonical rule semantics, not missing
     // proofs; the structural MirVectorRule row remains the authority for the
     // corresponding exception.
+
     let rule_allows_loop_carried = matches!(
         derived.rule,
         MirVectorRule::ConditionalAccumulate | MirVectorRule::Reduction
@@ -8415,14 +8440,291 @@ fn reconcile_checked_vector_fact(
     }
 }
 
-fn derive_loop_and_vector_facts(program: &mut MirProgram) {
+/// Preserve one checked vector proof when CFG simplification removes the
+/// structural loop shape that originally produced it.  The proof remains
+/// eligible only when every identity carrier is still present; callers apply
+/// the normal checked-proof reconciliation after this fallback.
+fn checked_vector_scope_is_present(function: &MirFunction, proof: &MirVectorFact) -> bool {
+    let blocks = function
+        .blocks
+        .iter()
+        .map(|block| block.id)
+        .collect::<HashSet<_>>();
+    let values = function
+        .values
+        .iter()
+        .map(|(value, _, _, _)| *value)
+        .collect::<HashSet<_>>();
+    let places = function
+        .places
+        .iter()
+        .map(|place| place.id)
+        .collect::<HashSet<_>>();
+    let Some(header) = function.blocks.iter().find(|block| block.id == proof.loop_header) else {
+        return false;
+    };
+    let body = proof.body_blocks.iter().copied().collect::<HashSet<_>>();
+    let header_enters_body =
+        header.terminator.targets().iter().any(|target| body.contains(target));
+    let allows_early_exit = proof.rule == MirVectorRule::EarlyExitSearch;
+    let body_targets_valid = proof.body_blocks.iter().all(|block_id| {
+        function
+            .blocks
+            .iter()
+            .find(|block| block.id == *block_id)
+            .is_some_and(|block| {
+                block.terminator.targets().iter().all(|target| {
+                    body.contains(target)
+                        || *target == proof.loop_header
+                        || proof.advance_block.is_some_and(|advance| *target == advance)
+                        || allows_early_exit
+                })
+            })
+    });
+    let body_returns_to_loop = proof.body_blocks.iter().any(|block_id| {
+        function
+            .blocks
+            .iter()
+            .find(|block| block.id == *block_id)
+            .is_some_and(|block| {
+                block.terminator.targets().iter().any(|target| {
+                    *target == proof.loop_header
+                        || proof.advance_block.is_some_and(|advance| *target == advance)
+                })
+            })
+    });
+    let advance_returns_to_loop = proof.advance_block.is_none_or(|advance| {
+        function
+            .blocks
+            .iter()
+            .find(|block| block.id == advance)
+            .is_some_and(|block| block.terminator.targets().contains(&proof.loop_header))
+    });
+    let present = !body.is_empty()
+        && header_enters_body
+        && body_targets_valid
+        && body_returns_to_loop
+        && advance_returns_to_loop
+        && blocks.contains(&proof.loop_header)
+        && body.iter().all(|block| blocks.contains(block))
+        && proof
+            .advance_block
+            .is_none_or(|block| blocks.contains(&block))
+        && proof.cursor.is_none_or(|cursor| values.contains(&cursor))
+        && !proof.accesses.is_empty()
+        && proof.accesses.iter().all(|access| match access.root {
+            MirVectorAccessRoot::Place(place) => places.contains(&place),
+            MirVectorAccessRoot::Value(value) => values.contains(&value),
+        });
+    present
+
+}
+fn checked_vector_fallback_exit(
+    function: &MirFunction,
+    header: MirBlockId,
+    body_blocks: &[MirBlockId],
+) -> Option<MirBlockId> {
+    let body = body_blocks.iter().copied().collect::<HashSet<_>>();
+    let block = function.blocks.iter().find(|block| block.id == header)?;
+    let targets = match block.terminator {
+        MirTerminator::Branch {
+            then_target,
+            else_target,
+            ..
+        } => [then_target, else_target].into_iter().collect::<Vec<_>>(),
+        MirTerminator::Jump { target } => vec![target],
+        _ => Vec::new(),
+    };
+    targets.into_iter().find(|target| !body.contains(target))
+}
+
+fn lowered_loop_trip_count(function: &MirFunction, previous: &MirLoopFact) -> Option<u64> {
+    let header = function
+        .blocks
+        .iter()
+        .find(|block| block.id == previous.header)?;
+    let branch_condition = match &header.terminator {
+        MirTerminator::Branch { condition, .. } => Some(*condition),
+        _ => None,
+    };
+    let comparison = branch_condition.and_then(|condition| {
+        find_value_instruction(function, condition)
+            .and_then(|instruction| match &instruction.operation {
+                MirOperation::Binary {
+                    op, left, right, ..
+                } if op.is_comparison() => Some((*op, [*left, *right])),
+                _ => None,
+            })
+    });
+    let mut bounds = comparison
+        .map(|(_, operands)| {
+            operands
+                .into_iter()
+                .filter_map(|value| scalar_int_constant_value(function, value))
+                .filter(|value| *value >= 0)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if bounds.is_empty() {
+        let scope = [Some(previous.header), previous.body, previous.exit];
+        bounds = scope
+            .into_iter()
+            .flatten()
+            .filter_map(|block_id| function.blocks.iter().find(|block| block.id == block_id))
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Constant(MirConstant::Int { value, .. }) if *value >= 0 => {
+                    Some(i128::from(*value))
+                }
+                _ => None,
+            })
+            .collect();
+    }
+    if bounds.is_empty() {
+        bounds = function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Constant(MirConstant::Int { value, .. }) if *value >= 0 => {
+                    Some(i128::from(*value))
+                }
+                _ => None,
+            })
+            .collect();
+    }
+    let bound = if let Some(previous_trip) = previous.trip_count {
+        let expected = i128::from(previous_trip);
+        bounds
+            .into_iter()
+            .min_by_key(|value| value.abs_diff(expected))?
+    } else {
+        bounds.into_iter().max()?
+    };
+    let inclusive = comparison.is_some_and(|(op, _)| matches!(op, MirBinaryOp::Le | MirBinaryOp::Ge));
+    let trip_count = if inclusive {
+        bound.checked_add(1)?
+    } else {
+        bound
+    };
+    u64::try_from(trip_count).ok()
+}
+
+fn scalar_int_constant_value(function: &MirFunction, value: MirValueId) -> Option<i128> {
+    let mut current = value;
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(current) {
+            return None;
+        }
+        let instruction = find_value_instruction(function, current)?;
+        match &instruction.operation {
+            MirOperation::Constant(MirConstant::Int { value, .. }) => {
+                return Some(i128::from(*value))
+            }
+            MirOperation::Copy { value }
+            | MirOperation::Move { value }
+            | MirOperation::AttachTag { value, .. } => current = *value,
+            _ => return None,
+        }
+    }
+}
+
+fn checked_vector_fallback(
+    function: &MirFunction,
+    proof: &MirVectorFact,
+    decision: MirOptimizationDecision,
+    previous_loop_facts: &[MirLoopFact],
+) -> (MirLoopFact, MirVectorFact) {
+    let trip_count = proof
+        .cursor
+        .and_then(|cursor| loop_trip_count_for_cursor(function, cursor))
+        .or_else(|| {
+            previous_loop_facts
+                .iter()
+                .find(|fact| fact.header == proof.loop_header)
+                .and_then(|fact| lowered_loop_trip_count(function, fact))
+        });
+    let copy_cost = loop_copy_cost(function, &proof.body_blocks);
+    let decision = if function.effects.direct.is_empty() {
+        decision
+    } else {
+        MirOptimizationDecision::Rejected(MirOptimizationRejection::HasEffects)
+    };
+    let row = MirLoopFact {
+        header: proof.loop_header,
+        body: proof.body_blocks.first().copied(),
+        exit: checked_vector_fallback_exit(function, proof.loop_header, &proof.body_blocks),
+        form: if proof.cursor.is_some() {
+            MirLoopForm::Counted
+        } else {
+            MirLoopForm::Iterator
+        },
+        trip_count,
+        copy_cost,
+        canonical: true,
+        span: proof.span,
+        decision: decision.clone(),
+    };
+    let mut vector = proof.clone();
+    vector.decision = decision;
+    vector.body_blocks.retain(|block| {
+        function.blocks.iter().any(|candidate| candidate.id == *block)
+    });
+    vector.advance_block = vector.advance_block.filter(|advance| {
+        function.blocks.iter().any(|candidate| candidate.id == *advance)
+    });
+    vector.accesses.retain(|access| match access.root {
+        MirVectorAccessRoot::Place(place) => {
+            function.places.iter().any(|candidate| candidate.id == place)
+        }
+        MirVectorAccessRoot::Value(value) => {
+            function.values.iter().any(|(candidate, ..)| *candidate == value)
+        }
+    });
+    if !function.effects.direct.is_empty() {
+        vector.effect_free_body = false;
+    }
+    (row, vector)
+}
+
+fn refresh_vector_layout_from_mir(
+    function: &MirFunction,
+    vector: &mut MirVectorFact,
+    type_defs: &[MirTypeDef],
+) {
+    let Some(cursor) = vector.cursor else {
+        return;
+    };
+    let cursor_place = loop_cursor_place(function, &vector.body_blocks, cursor);
+    let accesses =
+        vector_accesses(function, &vector.body_blocks, Some(cursor), cursor_place, type_defs);
+    let layouts = accesses
+        .iter()
+        .filter(|access| access.field.is_some() || access.layout != MirVectorLayout::Flat)
+        .map(|access| access.layout)
+        .collect::<BTreeSet<_>>();
+    if layouts.len() == 1 {
+        vector.accesses = accesses;
+        vector.layout = *layouts.iter().next().expect("one vector layout");
+    }
+}
+fn derive_loop_and_vector_facts(
+    program: &mut MirProgram,
+    previous_loop_facts: &[Vec<MirLoopFact>],
+) {
     let prelude_calls: HashMap<_, _> = program
         .prelude_calls
         .iter()
         .map(|call| (call.id, call))
         .collect();
     let type_defs = program.types.as_slice();
-    for function in &mut program.functions {
+    for (function_index, function) in program.functions.iter_mut().enumerate() {
+        let previous = previous_loop_facts
+            .get(function_index)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let mut checked = function.optimization.checked_vector_facts.clone();
         function.optimization.loop_facts.clear();
         function.optimization.vector_facts.clear();
         function.optimization.fusion_facts.clear();
@@ -8438,7 +8740,20 @@ fn derive_loop_and_vector_facts(program: &mut MirProgram) {
                 if let Some(shape) =
                     counted_shape(function, block.id, *then_target, *else_target)
                 {
-                    let trip_count = shape.range.and_then(|range| loop_trip_count(function, range));
+                    let trip_count = shape
+                        .range
+                        .and_then(|range| loop_trip_count(function, range))
+                        .or_else(|| {
+                            shape
+                                .cursor
+                                .and_then(|cursor| loop_trip_count_for_cursor(function, cursor))
+                        })
+                        .or_else(|| {
+                            previous
+                                .iter()
+                                .find(|fact| fact.header == block.id)
+                                .and_then(|fact| lowered_loop_trip_count(function, fact))
+                        });
                     let copy_cost = loop_copy_cost(function, &shape.blocks);
                     let row = MirLoopFact {
                         header: block.id,
@@ -8488,17 +8803,108 @@ fn derive_loop_and_vector_facts(program: &mut MirProgram) {
                 }
             }
         }
+        for proof in &mut checked {
+            let current_trip = shapes
+                .iter()
+                .find(|(row, _)| row.header == proof.loop_header)
+                .and_then(|(row, _)| row.trip_count)
+                .or_else(|| proof.cursor.and_then(|cursor| loop_trip_count_for_cursor(function, cursor)))
+                .or_else(|| {
+                    previous
+                        .iter()
+                        .find(|row| row.header == proof.loop_header)
+                        .and_then(|row| lowered_loop_trip_count(function, row))
+                });
+            let Some(previous) = previous.iter().find(|row| row.header == proof.loop_header)
+            else {
+                continue;
+            };
+            if let (Some(previous_trip), Some(current_trip)) =
+                (previous.trip_count, current_trip)
+            {
+                if previous_trip != current_trip {
+                    proof.decision = MirOptimizationDecision::Rejected(
+                        MirOptimizationRejection::DynamicTripCount,
+                    );
+                }
+            }
+        }
+        function.optimization.checked_vector_facts = checked.clone();
         for (row, shape) in &shapes {
-            let vector =
-                vector_fact(function, row, shape, &prelude_calls, type_defs);
+            let mut vector = vector_fact(function, row, shape, &prelude_calls, type_defs);
+            let proofs = checked
+                .iter()
+                .filter(|proof| proof.loop_header == row.header)
+                .collect::<Vec<_>>();
+            if proofs.len() == 1 {
+                if matches!(
+                    proofs[0].decision,
+                    MirOptimizationDecision::Rejected(MirOptimizationRejection::DynamicTripCount)
+                ) {
+                    vector.packed = false;
+                    vector.decision = proofs[0].decision.clone();
+                } else if checked_vector_scope_is_present(function, proofs[0]) {
+                    vector = proofs[0].clone();
+                    if function.effects.direct.is_empty() {
+                        vector.decision = MirOptimizationDecision::Eligible;
+                    } else {
+                        vector.effect_free_body = false;
+                        vector.decision =
+                            MirOptimizationDecision::Rejected(MirOptimizationRejection::HasEffects);
+                    }
+                } else {
+                    // The structural detector may still see a loop after a
+                    // checked CFG witness was edited. Do not let that fresh
+                    // shape silently replace a now-invalid proof.
+                    vector.decision =
+                        MirOptimizationDecision::Rejected(MirOptimizationRejection::MissingProof);
+                }
+            }
             function.optimization.loop_facts.push(row.clone());
             function.optimization.vector_facts.push(vector);
         }
-        let checked = function.optimization.checked_vector_facts.clone();
+        let structural_headers = shapes
+            .iter()
+            .map(|(row, _)| row.header)
+            .collect::<HashSet<_>>();
+        let mut fallback_headers = HashSet::new();
+        for proof in &checked {
+            if !fallback_headers.insert(proof.loop_header)
+                || structural_headers.contains(&proof.loop_header)
+            {
+                continue;
+            }
+            let proofs = checked
+                .iter()
+                .filter(|candidate| candidate.loop_header == proof.loop_header)
+                .collect::<Vec<_>>();
+            let decision = if proofs.len() != 1 {
+                MirOptimizationDecision::Rejected(
+                    MirOptimizationRejection::UnsupportedOperation,
+                )
+            } else if matches!(
+                proofs[0].decision,
+                MirOptimizationDecision::Rejected(MirOptimizationRejection::DynamicTripCount)
+            ) {
+                proofs[0].decision.clone()
+            } else if !checked_vector_scope_is_present(function, proof) {
+                MirOptimizationDecision::Rejected(MirOptimizationRejection::MissingProof)
+            } else {
+                MirOptimizationDecision::Eligible
+            };
+            let (row, vector) = checked_vector_fallback(function, proof, decision, previous);
+            function.optimization.loop_facts.push(row);
+            function.optimization.vector_facts.push(vector);
+        }
         let explicit_scalar = function.is_scalar;
         for vector in &mut function.optimization.vector_facts {
             reconcile_checked_vector_fact(vector, &checked, explicit_scalar);
         }
+        let mut refreshed_vectors = function.optimization.vector_facts.clone();
+        for vector in &mut refreshed_vectors {
+            refresh_vector_layout_from_mir(function, vector, type_defs);
+        }
+        function.optimization.vector_facts = refreshed_vectors;
         let rows = function.optimization.loop_facts.clone();
         let vectors = function.optimization.vector_facts.clone();
         for vector in &vectors {
@@ -8792,6 +9198,7 @@ fn normalized_fixed_reduction_shape(
         blocks: body_blocks,
     })
 }
+#[allow(dead_code)]
 fn normalized_fixed_reduction_local_id(
     function: &MirFunction,
     header: MirBlockId,
@@ -8803,6 +9210,7 @@ fn normalized_fixed_reduction_local_id(
     ))
 }
 
+#[allow(dead_code)]
 fn normalized_fixed_reduction_place_id(
     function: &MirFunction,
     header: MirBlockId,
@@ -9556,10 +9964,40 @@ fn collect_loop_region(
             if target != header && exit != Some(target) {
                 pending.push(target);
             }
+
         }
     }
     region.sort_unstable();
     region
+}
+fn loop_trip_count_for_cursor(function: &MirFunction, cursor: MirValueId) -> Option<u64> {
+    let range = canonical_range_for_cursor(function, cursor).or_else(|| {
+        let ranges = function
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter_map(|instruction| {
+                let MirOperation::LoopRangeInit {
+                    start,
+                    end,
+                    step,
+                    exclusive,
+                    ..
+                } = &instruction.operation
+                else {
+                    return None;
+                };
+                Some(CanonicalLoopRange {
+                    start: *start,
+                    end: *end,
+                    step: *step,
+                    exclusive: *exclusive,
+                })
+            })
+            .collect::<Vec<_>>();
+        (ranges.len() == 1).then(|| ranges[0])
+    })?;
+    loop_trip_count(function, range)
 }
 
 fn loop_trip_count(function: &MirFunction, range: CanonicalLoopRange) -> Option<u64> {
@@ -10721,19 +11159,39 @@ fn vector_indexed_field_access(
     type_defs: &[MirTypeDef],
 ) -> Option<(MirVectorAccessRoot, MirVectorLayout, Option<usize>)> {
     let instruction = find_value_instruction(function, base)?;
-    let MirOperation::Index {
-        base: collection,
-        index,
-        kind: MirIndexKind::List | MirIndexKind::FixedListProof,
-        ..
-    } = &instruction.operation
-    else {
-        return None;
+    let (root, index, collection_type) = match &instruction.operation {
+        MirOperation::Index {
+            base: collection,
+            index,
+            kind: MirIndexKind::List | MirIndexKind::FixedListProof,
+            ..
+        } => (
+            value_access_root(function, *collection),
+            *index,
+            value_type(function, *collection)?,
+        ),
+        MirOperation::ReadPlace(place_id) => {
+            let place = function.places.iter().find(|place| place.id == *place_id)?;
+            let index = place.projections.iter().rev().find_map(|projection| {
+                let MirProjection::Index { index, .. } = projection else {
+                    return None;
+                };
+                Some(*index)
+            })?;
+            let root = match &place.base {
+                MirPlaceBase::Parameter(value)
+                | MirPlaceBase::Capture(value)
+                | MirPlaceBase::Temporary(value) => value_access_root(function, *value),
+                MirPlaceBase::Local(_) => MirVectorAccessRoot::Place(*place_id),
+                MirPlaceBase::Static(_) => return None,
+            };
+            (root, index, place_base_type(function, &place.base)?)
+        }
+        _ => return None,
     };
-    if !cursor.is_some_and(|cursor| cursor_value_matches(function, *index, cursor, cursor_place)) {
+    if !cursor.is_some_and(|cursor| cursor_value_matches(function, index, cursor, cursor_place)) {
         return None;
     }
-    let collection_type = value_type(function, *collection)?;
     let element = list_element_type(&collection_type)?;
     let layout = if struct_layout(element, type_defs) == Some(MirStructLayout::Columnar) {
         MirVectorLayout::ColumnarDirect
@@ -10741,7 +11199,7 @@ fn vector_indexed_field_access(
         MirVectorLayout::AosStrided
     };
     Some((
-        value_access_root(function, *collection),
+        root,
         layout,
         (layout == MirVectorLayout::ColumnarDirect)
             .then(|| field_column_index(element, field, type_defs))

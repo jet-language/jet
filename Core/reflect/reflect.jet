@@ -11,10 +11,11 @@ package {
 
 // core.reflect — a text projection of a value, not a type registry.
 //
-// `of` takes the `Show` text of a value (the compiler will pass that at
-// cutover). It returns a compact type guess: quoted text → String, digits
-// → Int, true/false → Bool, `{…}` → Struct, `[…]` → List, otherwise the
-// leading identifier.
+// `of` takes the `Show` text of a value (the compiler's runtime carrier
+// supplies the richer path/field view at the intrinsic boundary). The source
+// twin still classifies portable text deterministically: quoted text, scalar
+// literals, collections, results, and leading nominal identifiers retain
+// distinct categories.
 
 pub struct ReflectValue {
     pub type_name: String
@@ -30,16 +31,23 @@ fn classify(value: String) -> ReflectValue {
     t :: trim(value)
     if t.len() == 0 -> return (ReflectValue{type_name: "Empty", display: t})
     raw :: t.bytes()
-    if raw[0] == (U8{34}) -> return (ReflectValue{type_name: "String", display: t})
+    if raw.len() >= 2 && raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34}) -> return (ReflectValue{type_name: "String", display: t})
+    if raw.len() >= 2 && raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39}) -> return (ReflectValue{type_name: "Char", display: t})
     if t == {
         "true" | "false" -> return (ReflectValue{type_name: "Bool", display: t})
         "None" -> return (ReflectValue{type_name: "Option", display: t})
+        "null" -> return (ReflectValue{type_name: "Null", display: t})
         else -> { _ := 0 }
     }
+    if starts(t, "Some(") -> return (ReflectValue{type_name: "Option", display: t})
     if starts(t, "Ok(") || starts(t, "Err(") -> return (ReflectValue{type_name: "Result", display: t})
     if raw[0] == (U8{91}) -> return (ReflectValue{type_name: "List", display: t})
     if raw[0] == (U8{123}) -> return (ReflectValue{type_name: "Struct", display: t})
     if is_number(t) -> return (ReflectValue{type_name: "Int", display: t})
+    if Float.parse(t) == {
+        .Ok(_) -> return (ReflectValue{type_name: "Float", display: t})
+        else -> { _ := 0 }
+    }
     name := ident_prefix(t)
     if name.len() > 0 -> return (ReflectValue{type_name: name, display: t})
     ReflectValue{type_name: "Value", display: t}
@@ -62,14 +70,14 @@ fn trim(text: String) -> String {
     loop s < e {
         n :: raw[s]
         if {
-            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> s = s + 1
+            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> s += 1
             else -> break
         }
     }
     loop e > s {
         n :: raw[e - 1]
         if {
-            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> e = e - 1
+            n == (U8{32}) || n == (U8{9}) || n == (U8{10}) || n == (U8{13}) -> e -= 1
             else -> break
         }
     }
@@ -82,14 +90,14 @@ fn is_number(text: String) -> Bool {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     i := 0
-    if raw[0] == (U8{45}) {
+    if raw[0] == (U8{45}) || raw[0] == (U8{43}) {
         if raw.len() == 1 -> return false
         i = 1
     }
     loop i < raw.len() {
         n :: raw[i]
         if n < (U8{48}) || n > (U8{57}) -> return false
-        i = i + 1
+        i += 1
     }
     true
 }
@@ -99,8 +107,7 @@ fn ident_prefix(text: String) -> String {
     out := [U8]{}
     loop i in 0..<raw.len() {
         n :: raw[i]
-        ok := (n >= (U8{65}) && n <= (U8{90})) || (n >= (U8{97}) && n <= (U8{122})) || n == (U8{95})
-        if i > 0 -> ok = ok || (n >= (U8{48}) && n <= (U8{57}))
+        ok :: (n >= (U8{65}) && n <= (U8{90})) || (n >= (U8{97}) && n <= (U8{122})) || n == (U8{95}) || (i > 0 && n >= (U8{48}) && n <= (U8{57}))
         if !ok -> break
         out.push(raw[i])
     }

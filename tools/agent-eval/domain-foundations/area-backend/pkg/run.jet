@@ -88,19 +88,11 @@ fn contract_check(document: String) !Never -[]> {
 }
 fn state_label(delivery: ^Delivery) -[DB]> String !Never {
     state :: delivery.status() ?? panic("delivery status")
-    if state == {
-        .Pending -> "pending"
-        .Accepted -> "accepted"
-        .Delivering -> "delivering"
-        .Delivered -> "delivered"
-        .DeadLettered -> "dead"
-        .Cancelled -> "cancelled"
-        else -> "unknown"
-    }
+    return state.show()
 }
 
 
-fn load_user(address: String, tx: Sender<Int>) {
+fn load_user(address: String, tx: Sender<Int>) !Never {
     started :: time.now()
     _response :: http_client.get("http://{address}/health") ?? return
     tx.send(time.now() - started)
@@ -112,7 +104,7 @@ fn load_test(address: String) !Never {
     loop _user in 1..1000 {
         tx :: ~sender
         workers.push(task {
-            load_user(address, tx) ?? return
+            load_user(address, tx) ?? panic("load worker failed")
         })
     }
     loop workers.len() > 0 {
@@ -152,7 +144,10 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure | DBError) {
 
     tree := service.tree("backend")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    state_store :: service.state_store("/home/nate/.cache/jet-luna/dx3/area-backend/pkg/service-state.log") ?? panic("state store")
+    scratch_root :: Path.from("/home/nate/.cache/jet-test-scratch").join("area-backend-{time.now()}")
+    files.create_dir_all(scratch_root) ?? panic("scratch")
+    state_path :: scratch_root.join("service-state.log").to_string()
+    state_store :: service.state_store(state_path) ?? panic("state store")
     tree.set_state_event_log(state_store, "backend-events", 1, "reversible") ?? panic("state log")
     queue_endpoint :: tree.worker("orders", queue_worker, capacity: 8) ?? panic("worker")
     tree.start() ?? panic("service start")
@@ -167,7 +162,7 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure | DBError) {
     serving :: task { server.serve() }
     time.sleep(20ms)
 
-    openapi_path :: "/home/nate/.cache/jet-luna/dx3/area-backend/pkg/openapi.json"
+    openapi_path :: scratch_root.join("openapi.json").to_string()
     files.write(openapi_path, openapi_document()) ?? panic("openapi export")
     print("openapi:{files.exists(openapi_path)}")
     exported :: files.read(openapi_path) ?? panic("openapi read")

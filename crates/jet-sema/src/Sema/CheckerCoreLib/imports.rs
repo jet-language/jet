@@ -573,6 +573,9 @@ impl<'a> Checker<'a> {
             }
             let qualify_unit = |ty: Type| {
                 ty.map_named_types(&|name| {
+                    if let Some(leaf) = super::net_text_time::http_nominal_leaf(name) {
+                        return Some(leaf.to_string());
+                    }
                     target
                         .registry
                         .unit_dimension(name)

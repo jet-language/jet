@@ -1323,6 +1323,7 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
 
 function parseCoreSource(source) {
   const modules = [];
+  const sourceModules = [];
   const bootstraps = [];
   const dispatcherRows = [];
   const ambientRoutes = [];
@@ -1330,6 +1331,8 @@ function parseCoreSource(source) {
   let rootTypes = [];
   let namespaceOnly = [];
   const seenModules = new Set();
+  const seenSourceModules = new Set();
+  const seenSourceAliases = new Set();
   const seenBootstraps = new Set();
   const seenFormatVariants = new Set();
   const seenFormatLabels = new Set();
@@ -1425,6 +1428,37 @@ function parseCoreSource(source) {
         module: module,
         member: member,
         expression: expression,
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    const sourceModule = line.match(
+      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}$/,
+    );
+    if (sourceModule) {
+      const module = sourceModule[1];
+      const path = sourceModule[2];
+      const alias = sourceModule[3];
+      if (seenSourceModules.has(module)) {
+        throw new Error("duplicate Core source module `" + module + "` at line " + sourceLine);
+      }
+      if (seenSourceAliases.has(alias)) {
+        throw new Error("duplicate Core source alias `" + alias + "` at line " + sourceLine);
+      }
+      const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
+      if (!ownedMembers.length) {
+        throw new Error("Core source module owns no members at line " + sourceLine);
+      }
+      if (!existsSync(join(ROOT, path))) {
+        throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
+      }
+      seenSourceModules.add(module);
+      seenSourceAliases.add(alias);
+      sourceModules.push({
+        module: module,
+        path: path,
+        alias: alias,
+        ownedMembers: ownedMembers,
         sourceLine: sourceLine,
       });
       continue;
@@ -1548,6 +1582,29 @@ function parseCoreSource(source) {
   const memberSets = new Map(modules.map(function (entry) {
     return [entry.module, new Set(entry.members)];
   }));
+  for (const sourceModule of sourceModules) {
+    if (!moduleSet.has(sourceModule.module)) {
+      throw new Error("Core source module names missing Core module `" + sourceModule.module + "`");
+    }
+    const members = memberSets.get(sourceModule.module);
+    for (const member of sourceModule.ownedMembers) {
+      if (!members.has(member)) {
+        throw new Error("Core source module owns undeclared member `" +
+          sourceModule.module + "." + member + "`");
+      }
+    }
+  }
+  for (const sourceModule of sourceModules) {
+    const sourceFunctions = new Set(Array.from(
+      read(sourceModule.path).matchAll(/^\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+    ).map(function (match) { return match[1]; }));
+    for (const member of sourceModule.ownedMembers) {
+      if (!sourceFunctions.has(member)) {
+        throw new Error("Core source module does not define owned member `" +
+          sourceModule.module + "." + member + "` at line " + sourceModule.sourceLine);
+      }
+    }
+  }
   for (const entry of modules) {
     for (const dependency of entry.dependencies) {
       if (!moduleSet.has(dependency)) {
@@ -1599,6 +1656,7 @@ function parseCoreSource(source) {
   }
   return {
     modules,
+    sourceModules,
     bootstraps,
     rootTypes,
     namespaceOnly,
@@ -1848,6 +1906,15 @@ function generatedCoreExports(source, declarations) {
     "}",
     "",
     "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreSourceModule {",
+    "    pub module: &'static str,",
+    "    pub alias: &'static str,",
+    "    pub path: &'static str,",
+    "    pub owned_members: &'static [&'static str],",
+    "    pub source: &'static str,",
+    "}",
+    "",
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
     "pub struct CoreBootstrapStep {",
     "    pub name: &'static str,",
     "    pub dependencies: &'static [&'static str],",
@@ -1891,6 +1958,16 @@ function generatedCoreExports(source, declarations) {
     lines.push("    CoreModuleDeclaration { module: \"" + entry.module +
       "\", members: " + stem + "_MEMBERS, type_exports: " + stem + "_TYPES, dependencies: " +
       stem + "_DEPENDENCIES },");
+  }
+  lines.push("];", "");
+  lines.push("pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[");
+  for (const entry of declarations.sourceModules) {
+    lines.push("    CoreSourceModule { module: \"" + entry.module +
+      "\", alias: \"" + entry.alias +
+      "\", path: \"" + entry.path +
+      "\", owned_members: &[" +
+      entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
+      "], source: " + JSON.stringify(read(entry.path)) + " },");
   }
   lines.push("];", "");
   lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +

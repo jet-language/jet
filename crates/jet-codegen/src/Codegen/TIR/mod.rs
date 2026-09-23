@@ -62,6 +62,28 @@ pub use mir::{
 use tir_to_mir_types::{
     lower_declarations_from_items_with_boxed_edges, lower_tir_declarations, TirDeclarations,
 };
+pub(super) fn source_constant_value(
+    definition: &crate::AST::ConstDef,
+) -> Option<crate::AST::CtValue> {
+    definition.ct.clone().or_else(|| match &definition.value {
+        crate::AST::Expr::Int(value, ..) => Some(crate::AST::CtValue::Int(*value)),
+        crate::AST::Expr::Float(value, _, is_f32, _) => Some(crate::AST::CtValue::Float(
+            crate::AST::CtFloat::literal(*value, *is_f32),
+        )),
+        crate::AST::Expr::Bool(value, _) => Some(crate::AST::CtValue::Bool(*value)),
+        crate::AST::Expr::Char(value, _) => Some(crate::AST::CtValue::Char(*value)),
+        crate::AST::Expr::Str(parts, _)
+            if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)]) =>
+        {
+            let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else {
+                unreachable!("string literal guard must match one literal part");
+            };
+            Some(crate::AST::CtValue::Str(value.clone()))
+        }
+        _ => None,
+    })
+}
+
 
 fn set_lowered_method_name(lowered: &mut TFunc, name: impl FnOnce() -> String) {
     if !matches!(&lowered.kind, TFuncKind::TraitMethod { .. }) {
@@ -4105,7 +4127,6 @@ fn lower_checked_tir_program_on_stack(
                     continue;
                 }
                 Item::Func(f) => {
-                    // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
                     // Named HTTP callbacks are checked at the route boundary and must
                     // still get a TFunc row even when the enclosing route helper is
                     // outside the broad resident subset.
@@ -4997,19 +5018,11 @@ fn lower_checked_tir_program_on_stack(
                         .is_persist
                         .then(|| persist_overrides.get(&c.name).cloned())
                         .flatten();
-                    if let Some(value) = persisted.clone().or_else(|| c.ct.clone()) {
+                    if let Some(value) = persisted.or_else(|| source_constant_value(c)) {
+                        if let crate::AST::CtValue::Int(value) = &value {
+                            int_constants.insert(c.name.clone(), *value);
+                        }
                         constants.insert(c.name.clone(), value);
-                    }
-                    let value = match persisted.or_else(|| c.ct.clone()) {
-                        Some(crate::AST::CtValue::Int(value)) => Some(value),
-                        Some(_) => None,
-                        None => match &c.value {
-                            crate::AST::Expr::Int(value, _, _, _) => Some(*value),
-                            _ => None,
-                        },
-                    };
-                    if let Some(value) = value {
-                        int_constants.insert(c.name.clone(), value);
                     }
                 }
                 Item::CodeModule(cm) => {
@@ -5056,24 +5069,13 @@ fn lower_checked_tir_program_on_stack(
                                     );
                                 }
                                 Item::Const(c) => {
-                                    if let Some(value) = &c.ct {
-                                        constants.insert(
-                                            jet_foundation::Names::member_name(&cm.name, &c.name),
-                                            value.clone(),
-                                        );
-                                    }
-                                    let value = match &c.ct {
-                                        Some(crate::AST::CtValue::Int(value)) => Some(*value),
-                                        _ => match &c.value {
-                                            crate::AST::Expr::Int(value, _, _, _) => Some(*value),
-                                            _ => None,
-                                        },
-                                    };
-                                    if let Some(value) = value {
-                                        int_constants.insert(
-                                            jet_foundation::Names::member_name(&cm.name, &c.name),
-                                            value,
-                                        );
+                                    let name =
+                                        jet_foundation::Names::member_name(&cm.name, &c.name);
+                                    if let Some(value) = source_constant_value(c) {
+                                        if let crate::AST::CtValue::Int(value) = &value {
+                                            int_constants.insert(name.clone(), *value);
+                                        }
+                                        constants.insert(name, value);
                                     }
                                 }
                                 _ => {}
@@ -10587,7 +10589,7 @@ pub enum TClosureOp {
     /// `chunk_while(f)` — `jet_iter_chunk_while({as_iter}, f)`.
     ChunkWhile,
     // D-FAILCOMP1: failure-aware adapters.
-    /// `filter_map(f)` — `jet_list_filter_map((recv).clone(), f)`.
+    /// `filter_map(f)` — `jet_list_filter_map_iter((recv).clone(), f)`.
     FilterMap,
     // D-PARCAPTURE1=D: explicit `para_` adapters.
     ParaMap,
@@ -12011,6 +12013,18 @@ pub enum THandleOp {
     /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
     /// `Result<T, Closed>`.
     ChannelReceive,
+    /// Receiver `try_receive()` → `Option<T>`.
+    ChannelTryReceive,
+    /// Receiver metadata query: timer origin.
+    ChannelIsTimer,
+    /// Receiver metadata query: interval origin.
+    ChannelIsInterval,
+    /// Receiver metadata query: explicit cancellation.
+    ChannelIsCancelled,
+    /// Receiver metadata query: queued value or closed state.
+    ChannelIsReady,
+    /// Receiver metadata query: configured timer/interval delay.
+    ChannelDelayMs,
     /// Explicit channel close on Receiver or Sender.
     ChannelClose,
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.

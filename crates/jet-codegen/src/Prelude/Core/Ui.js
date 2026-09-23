@@ -174,6 +174,9 @@ function jet_ui_web_node(label, width, height, kind = "Custom", role, color) {
 }
 
 function jet_ui_null() {
+  if (typeof jetDom !== "undefined" && typeof jetDom.createBackend === "function") {
+    return jetDom.createBackend();
+  }
   return { kind: "headless", commands: [], frame: null, node: null };
 }
 

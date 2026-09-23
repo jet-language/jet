@@ -7,6 +7,7 @@ package {
 // #709 / #237 C4 / #706: hostile typed-data corpus — typed DataError or safe behavior.
 use core.data as data
 use core.files as files
+use core.data.stream as stream
 use core.testing as testing
 
 #Codable
@@ -128,7 +129,8 @@ fn run() {
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    if data.query(reader)
+    rows :: stream.collect(&reader) ?? panic("collect")
+    if data.query(rows)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)
         .collect() == {

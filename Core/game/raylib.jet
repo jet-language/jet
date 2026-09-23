@@ -1,9 +1,10 @@
+use core as core
+
 // core.game.raylib — display-gated raylib bridge (D-RAYLIB1=A).
 //
-// Without a display the bridge is a deterministic headless adapter: window
-// state lives in the returned `RaylibWindow`, drawing calls record a
-// command list, and `key_down` / `gamepad_*` read host cells that are
-// false/0.0 in CI. `JET_RAYLIB_DISPLAY=1` is a host concern.
+// This module owns no host fallback.  Window, input, drawing, texture, and
+// audio state are provider-owned; unavailable display/audio capabilities are
+// reported by the provider's typed result rather than fabricated locally.
 pub struct RaylibWindow {
     pub width: Int
     pub height: Int
@@ -22,153 +23,96 @@ pub struct RaylibColor {
     pub a: Int
 }
 
-pub fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor {
-    {r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
+pub struct RaylibTextureAtlas {
+    pub path: String
 }
 
-/// Open a window. The host may create a real display; otherwise the
-/// returned value is headless and `window_ready` is still true.
+pub struct RaylibSound {
+    pub path: String
+}
+
+pub fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor {
+    RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
+}
+
 pub fn window_open(width: Int, height: Int, title: String) -> RaylibWindow {
-    w := width
-    if w < 1 -> w = 1
-    h := height
-    if h < 1 -> h = 1
-    native :: host_window_open(w, h, title)
-    {
-        width: w,
-        height: h,
-        title: title,
-        open: true,
-        drawing: false,
-        should_close: false,
-        fps: 60,
-        commands: [String]{"open:{native}"},
-    }
+    w := clamp_dimension(width)
+    h := clamp_dimension(height)
+    core.game.raylib.window_open(w, h, title)
 }
 
 pub fn window_should_close(window: RaylibWindow) -> Bool {
-    if !window.open -> return true
-    if window.should_close -> return true
-    host_window_should_close()
+    core.game.raylib.window_should_close(window)
 }
 
-pub fn window_ready(window: RaylibWindow) -> Bool { window.open }
-
-pub fn close_window(window: RaylibWindow) -> RaylibWindow {
-    host_close_window()
-    {
-        width: window.width,
-        height: window.height,
-        title: window.title,
-        open: false,
-        drawing: false,
-        should_close: true,
-        fps: window.fps,
-        commands: window.commands,
-    }
+pub fn window_ready(window: RaylibWindow) -> Bool {
+    core.game.raylib.window_ready(window)
 }
 
-pub fn begin_drawing(window: RaylibWindow) -> RaylibWindow {
-    host_begin_drawing()
-    with_drawing(window, true)
+pub fn close_window(window: RaylibWindow) {
+    core.game.raylib.close_window(window)
 }
 
-pub fn end_drawing(window: RaylibWindow) -> RaylibWindow {
-    host_end_drawing()
-    with_drawing(window, false)
+pub fn begin_drawing(window: RaylibWindow) {
+    core.game.raylib.begin_drawing(window)
 }
 
-pub fn clear_background(color: RaylibColor) { host_clear_background(color.r, color.g, color.b, color.a) }
+pub fn end_drawing() {
+    core.game.raylib.end_drawing()
+}
 
-pub fn draw_rectangle(x: Int, y: Int, w: Int, h: Int, color: RaylibColor) {
-    host_draw_rectangle(x, y, w, h, color.r, color.g, color.b, color.a)
+pub fn clear_background(color: RaylibColor) {
+    core.game.raylib.clear_background(color)
+}
+
+pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) {
+    core.game.raylib.draw_rectangle(x, y, width, height, color)
 }
 
 pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) {
-    host_draw_text(text, x, y, size, color.r, color.g, color.b, color.a)
+    core.game.raylib.draw_text(text, x, y, size, color)
 }
 
-pub fn draw_sprite(atlas: String, x: Int, y: Int) { host_draw_sprite(atlas, x, y) }
+pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) {
+    core.game.raylib.draw_sprite(atlas, source, x, y)
+}
 
 pub fn set_target_fps(fps: Int) {
-    n := fps
-    if n < 1 -> n = 1
-    host_set_target_fps(n)
+    core.game.raylib.set_target_fps(fps)
 }
 
-pub fn key_down(key: Int) -> Bool { host_key_down(key) }
-
-pub fn gamepad_down(gamepad: Int, button: Int) -> Bool { host_gamepad_down(gamepad, button) }
-
-pub fn gamepad_axis(gamepad: Int, axis: Int) -> Float { host_gamepad_axis(gamepad, axis) }
-
-pub fn load_texture_atlas(path: String) -[FS]> String {
-    if path.bytes().len() == 0 -> return ""
-    loaded :: host_load_texture_atlas(path)
-    if loaded.len() > 0 -> return loaded
-    ~path
+pub fn key_down(key: String) -> Bool {
+    core.game.raylib.key_down(key)
 }
 
-pub fn load_sound(path: String) -[FS]> String {
-    if path.bytes().len() == 0 -> return ""
-    loaded :: host_load_sound(path)
-    if loaded.len() > 0 -> return loaded
-    ~path
+pub fn gamepad_down(gamepad: Int, button: String) -> Bool {
+    core.game.raylib.gamepad_down(gamepad, button)
 }
 
-pub fn play_sound(sound: String) { host_play_sound(sound) }
-
-fn with_drawing(window: RaylibWindow, drawing: Bool) -> RaylibWindow {
-    {
-        width: window.width,
-        height: window.height,
-        title: window.title,
-        open: window.open,
-        drawing: drawing,
-        should_close: window.should_close,
-        fps: window.fps,
-        commands: window.commands,
-    }
+pub fn gamepad_axis(gamepad: Int, axis: String) -> Float {
+    core.game.raylib.gamepad_axis(gamepad, axis)
 }
 
-fn clamp8(n: Int) -> Int {
-    if n < 0 -> return 0
-    if n > 255 -> return 255
-    n
+pub fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas {
+    core.game.raylib.load_texture_atlas(path)
 }
 
-fn host_window_open(width: Int, height: Int, title: String) -[FS]> Int { panic("host_window_open") }
-
-fn host_window_should_close() -> Bool { panic("host_window_should_close") }
-
-fn host_close_window() { panic("host_close_window") }
-
-fn host_begin_drawing() { panic("host_begin_drawing") }
-
-fn host_end_drawing() { panic("host_end_drawing") }
-
-fn host_clear_background(r: Int, g: Int, b: Int, a: Int) { panic("host_clear_background") }
-
-fn host_draw_rectangle(x: Int, y: Int, w: Int, h: Int, r: Int, g: Int, b: Int, a: Int) {
-    panic("host_draw_rectangle")
+pub fn load_sound(path: String) -[FS, GPU]> RaylibSound {
+    core.game.raylib.load_sound(path)
 }
 
-fn host_draw_text(text: String, x: Int, y: Int, size: Int, r: Int, g: Int, b: Int, a: Int) {
-    panic("host_draw_text")
+pub fn play_sound(sound: RaylibSound) -> Bool {
+    core.game.raylib.play_sound(sound)
 }
 
-fn host_draw_sprite(atlas: String, x: Int, y: Int) { panic("host_draw_sprite") }
+fn clamp8(value: Int) -> Int {
+    if value < 0 -> return 0
+    if value > 255 -> return 255
+    value
+}
 
-fn host_set_target_fps(fps: Int) { panic("host_set_target_fps") }
-
-fn host_key_down(key: Int) -> Bool { panic("host_key_down") }
-
-fn host_gamepad_down(gamepad: Int, button: Int) -> Bool { panic("host_gamepad_down") }
-
-fn host_gamepad_axis(gamepad: Int, axis: Int) -> Float { panic("host_gamepad_axis") }
-
-fn host_load_texture_atlas(path: String) -[FS]> String { panic("host_load_texture_atlas") }
-
-fn host_load_sound(path: String) -[FS]> String { panic("host_load_sound") }
-
-fn host_play_sound(sound: String) { panic("host_play_sound") }
+fn clamp_dimension(value: Int) -> Int {
+    if value < 1 -> return 1
+    if value > 2147483647 -> return 2147483647
+    value
+}

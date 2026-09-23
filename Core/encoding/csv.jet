@@ -1,3 +1,32 @@
+use core as core
+use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
+    {
+        format: format,
+        kind: EncodingErrorKind.Syntax,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError {
+    {
+        format: format,
+        kind: EncodingErrorKind.Unsupported,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "",
+        reason: reason,
+        cause: None,
+    }
+}
+
 // core.encoding.csv — RFC 4180 tables as field rows.
 //
 // `rows` is the physical codec: it does not guess types. Every cell stays
@@ -6,8 +35,8 @@
 // tree without a second table type.
 //
 // Typed `decode<T>` remains a compiler lowering over header-named columns.
-// `query` is the SQL-head door and stays host-backed until the query kernel
-// is itself written in Jet.
+// `query` is a deliberately small SQL-shaped selector over caller-provided
+// filesystem input; it does not add a second query engine.
 pub struct CSVRow {
     pub line: Int
     pub fields: [String]
@@ -41,6 +70,7 @@ pub struct CSVWriter {
 /// current Core surface; this codec does not drop the first row — callers
 /// that want a header skip `rows[0]`.
 pub fn rows(text: String, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] !EncodingError {
+    _ :: header
     parse_rows(text, skip_blank)
 }
 
@@ -72,10 +102,13 @@ pub fn writer() -> CSVWriter { {parts: [String]{}} }
 
 /// Tiny SQL: `SELECT *` (all rows as arrays) or `SELECT COUNT(*)`.
 pub fn query(path: String, sql: String) -[FS]> DataTree !EncodingError {
-    text :: host_read_text(path) ?? return Err(EncodingError.syntax(EncodingFormat.CSV, 0, 1, 1, "", "missing csv"))
+    text :: host_read_text(path) ?? return Err(syntax_error(EncodingFormat.CSV, 0, 1, 1, "", "missing csv"))
     physical :: parse_rows(text, true)
-    q := ascii_fold(sql)
-    if contains(q, "count") -> return Ok(DataTree.Int(physical.len()))
+    q := trim_ascii(ascii_fold(sql))
+    if q == "select count(*)" || q == "select count(*) from csv" -> return Ok(DataTree.Int(physical.len()))
+    if q != "select *" && q != "select * from csv" {
+        return Err(unsupported_error(EncodingFormat.CSV, 0, "CSV query supports only SELECT * and SELECT COUNT(*)"))
+    }
     items := [DataTree]{}
     loop row in physical {
         fields := [DataTree]{}
@@ -83,6 +116,30 @@ pub fn query(path: String, sql: String) -[FS]> DataTree !EncodingError {
         items.push(DataTree.Array(fields))
     }
     Ok(DataTree.Array(items))
+}
+
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: raw[start]
+        if n == 32 || n == 9 || n == 10 || n == 13 {
+            start += 1
+            next
+        }
+        break
+    }
+    loop end > start {
+        n :: raw[end - 1]
+        if n == 32 || n == 9 || n == 10 || n == 13 {
+            end -= 1
+            next
+        }
+        break
+    }
+    if end <= start -> return ""
+    String.from_bytes(raw[start..end - 1]) ?? ""
 }
 
 fn ascii_fold(text: String) -> String {
@@ -94,21 +151,10 @@ fn ascii_fold(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
-fn contains(text: String, needle: String) -> Bool {
-    hay :: text.bytes()
-    nd :: needle.bytes()
-    if nd.len() > hay.len() -> return false
-    loop i in 0..<(hay.len() - nd.len() + 1) {
-        ok := true
-        loop j in 0..<nd.len() {
-            if hay[i + j] != nd[j] -> ok = false
-        }
-        if ok -> return true
-    }
-    false
-}
 
-fn host_read_text(path: String) -[FS]> ?String { panic("host_read_text") }
+fn host_read_text(path: String) -[FS]> ?String {
+    Val(core.files.read(path) ?? return None)
+}
 
 fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
     raw :: text.bytes()
@@ -116,12 +162,15 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
     fields := [String]{}
     field := [U8]{}
     line := 1
+    row_line := 1
     column := 1
     i := 0
     quoted := false
+    closed := false
     loop i < raw.len() {
         b :: raw[i]
         n :: b
+        if fields.len() == 0 && field.len() == 0 && !quoted && !closed -> row_line = line
         if quoted {
             if n == 34 {
                 if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
@@ -131,6 +180,7 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
                     next
                 }
                 quoted = false
+                closed = true
                 i += 1
                 column += 1
                 next
@@ -140,29 +190,56 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
             if n == 10 {
                 line += 1
                 column = 1
-            } else { column += 1 }
+            } else {
+                column += 1
+            }
             next
         }
+        if closed {
+            if n == 44 {
+                fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+                field = [U8]{}
+                closed = false
+                i += 1
+                column += 1
+                next
+            }
+            if n == 10 || n == 13 {
+                fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+                field = [U8]{}
+                blank :: fields.len() == 1 && fields[0].len() == 0
+                if !(skip_blank && blank) -> rows.push(CSVRow{line: row_line, fields: fields})
+                fields = [String]{}
+                closed = false
+                if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
+                line += 1
+                column = 1
+                i += 1
+                next
+            }
+            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a comma or line break"))
+        }
         if n == 34 {
+            if field.len() != 0 -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
             quoted = true
             i += 1
             column += 1
             next
         }
         if n == 44 {
-            fields.push(String.from_bytes(field) ?? "")
+            fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
             field = [U8]{}
             i += 1
             column += 1
             next
         }
         if n == 10 || n == 13 {
-            if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
-            fields.push(String.from_bytes(field) ?? "")
+            fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
             field = [U8]{}
             blank :: fields.len() == 1 && fields[0].len() == 0
-            if !(skip_blank && blank) -> rows.push(CSVRow{line: line, fields: fields})
+            if !(skip_blank && blank) -> rows.push(CSVRow{line: row_line, fields: fields})
             fields = [String]{}
+            if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
             line += 1
             column = 1
             i += 1
@@ -172,21 +249,11 @@ fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] !EncodingError {
         i += 1
         column += 1
     }
-    if quoted {
-        return Err(
-        EncodingError.syntax(
-        EncodingFormat.CSV,
-        i,
-        line,
-        column,
-        "",
-        "unterminated quoted CSV field",
-        ),
-        )
-    }
-    if field.len() > 0 || fields.len() > 0 {
-        fields.push(String.from_bytes(field) ?? "")
-        rows.push(CSVRow{line: line, fields: fields})
+    if quoted -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "unterminated quoted CSV field"))
+    if field.len() > 0 || fields.len() > 0 || closed {
+        fields.push(String.from_bytes(~field) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+        blank :: fields.len() == 1 && fields[0].len() == 0
+        if !(skip_blank && blank) -> rows.push(CSVRow{line: row_line, fields: fields})
     }
     Ok(rows)
 }
@@ -206,7 +273,7 @@ fn encode_field(field: String) -> String {
         n :: b
         if n == 44 || n == 34 || n == 10 || n == 13 -> needs = true
     }
-    if !needs -> return field
+    if !needs -> return ~field
     out := [U8]{34}
     loop b in field.bytes() {
         if b == (U8{34}) {

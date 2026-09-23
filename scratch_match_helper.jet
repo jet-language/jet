@@ -1,0 +1,19 @@
+enum D { Null Array([D]) }
+enum E { Null Begin End Field(String) Item(D) }
+fn append_object(out: &[E], key: String, value: D) {
+    out.push(E.Field(key))
+    append(&out, value)
+}
+fn append(out: &[E], value: D) {
+    if value == {
+        .Null -> out.push(E.Null)
+        .Array(items) -> {
+            out.push(E.Begin)
+            loop item in items -> append(&out, item)
+            out.push(E.End)
+        }
+    }
+}
+fn append2(out: &[E], value: D, entries: [(key: String, value: D)]) {
+    loop pair in entries -> append_object(&out, pair.key, pair.value)
+}

@@ -1,12 +1,19 @@
-// core.ui.host.clipboard — UTF-8 clipboard text.
-pub fn read_text() -> String { host_clipboard_read() }
+use core as core
+use core.ui.host.[UiClipboardText, UiClipboardWrite, UiHostError]
 
-pub fn write_text(text: String) { host_clipboard_write(text) }
+// core.ui.host.clipboard — typed UTF-8 clipboard provider.
+pub fn read_text() -[IO]> UiClipboardText !UiHostError {
+    core.ui.host.clipboard.read_text()
+}
 
-fn host_clipboard_read() -> String { panic("host_clipboard_read") }
+pub fn write_text(text: String) -[IO]> UiClipboardWrite !UiHostError {
+    core.ui.host.clipboard.write_text(text)
+}
 
-fn host_clipboard_write(text: String) { panic("host_clipboard_write") }
+pub fn clear() -[IO]> UiClipboardWrite !UiHostError {
+    write_text("")
+}
 
-pub fn clear() { host_clipboard_write("") }
-
-pub fn is_empty() -> Bool { host_clipboard_read().bytes().len() == 0 }
+pub fn is_empty() -[IO]> Bool !UiHostError {
+    read_text().text.len() == 0
+}

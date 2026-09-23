@@ -135,22 +135,22 @@ fn scan_logs(path: Path) -> ScanResult {
 
 // The typed HarfBuzz handle remains gated by D-FOUND-HANDLE1. This example
 // still performs real shaping through the audited `hb-shape` process boundary.
-fn discover_font(language: String) -> ?String {
-    result :: process.cmd(["fc-match", "-f", "%{{file}}", "sans:lang={language}"])
+fn discover_font(language: String) -[Exec, Time.Wait]> ?String {
+    spec :: process.cmd(["fc-match", "-f", "%{{file}}", "sans:lang={language}"])
         .stdout(.Capture)
         .stderr(.Capture)
-        .run() ?? return None
+    result :: process.run_spec(spec) ?? return None
     if !result.success -> return None
     font :: result.output.trim()
     if font.len() == 0 -> return None
     return Val(font)
 }
 
-fn shape_with_harfbuzz(font: String, sample: String) -> String {
-    result :: process.cmd(["hb-shape", "--output-format=json", font, sample])
+fn shape_with_harfbuzz(font: String, sample: String) -[Exec, Time.Wait]> String {
+    spec :: process.cmd(["hb-shape", "--output-format=json", font, sample])
         .stdout(.Capture)
         .stderr(.Capture)
-        .run() ?? return "unavailable:hb-shape"
+    result :: process.run_spec(spec) ?? return "unavailable:hb-shape"
     if !result.success -> return "unavailable:hb-shape"
     return result.output.trim()
 }

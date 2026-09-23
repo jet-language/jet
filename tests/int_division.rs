@@ -9,7 +9,7 @@ mod tir_support;
 
 use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
 
-const SEED: &str = "fn score(n: Int) Int -> {\n    return n\n}\n";
+const SEED: &str = "fn score(n: Int) -> Int {\n    return n\n}\n";
 
 /// D-INTDIV1=A: `7 / 2` is 3.5, and the fraction survives an average.
 #[test]
@@ -177,7 +177,7 @@ fn run() {
         (
             "u8_call_div_zero",
             r#"
-fn score(n: U8) U8 -> {
+fn score(n: U8) -> U8 {
     return n
 }
 fn run() {

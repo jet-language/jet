@@ -1422,7 +1422,7 @@ const GENERATED_SIGNATURE_OVERRIDES = new Map([
   ["core.units.kilo", ""],
   ["core.units.mebibyte", ""],
   ["core.units.mega", ""],
-  ["core.units.metre", ""],
+  ["core.units.meter", ""],
   ["core.units.micro", ""],
   ["core.units.milli", ""],
   ["core.units.nano", ""],

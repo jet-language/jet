@@ -2,110 +2,118 @@ package {
     name: "core.sys"
     version: "0.1.0"
     edition: "2026"
-    description: "This process and its environment."
+    description: "System environment and process operations."
     license: "MIT"
     outputs: {
         sys: .Library{ entry: sys }
     }
 }
-// core.sys — this process and its environment.
-//
-// `get` / `set` / `unset` / `vars` are the environment. `name` / `family` /
-// `arch` / `cpu_count` are static facts about the host. POSIX identity and
-// job-control calls (`getuid`, `kill`, `fork`, …) fail with `IOError` on
-// platforms that do not provide them; they are never silently skipped.
-// `success` is `code == 0`. `expand` performs `$VAR` / `${VAR}` / `%VAR%`
-// substitution without running a shell.
-//
-// The OS door is private `host_*` cells. Expansion, decoding, and the
-// home/temp fallbacks are Jet.
-#Error
-pub enum EnvError {
-    UnknownEncoding
-    Invalid
+use core as core
+
+
+pub fn get(name: String) -[Env]> ?String { core.sys.get(name) }
+
+pub fn set(name: String, value: String) -[Env]> { core.sys.set(name, value) }
+
+pub fn unset(name: String) -[Env]> Bool !EnvError { core.sys.unset(name) }
+
+pub fn vars() -[Env]> [String] !EnvError { core.sys.vars() }
+
+pub fn current_dir() -[FS, Env]> String !IOError { core.sys.current_dir() }
+
+pub fn home_dir() -[Env]> ?String {
+    home :: get("HOME")
+    if home != None -> return Val(home)
+    get("USERPROFILE")
 }
 
-pub fn get(name: String) -[Env]> ?String { host_env_get(name) }
+pub fn name() -[Env]> String { core.sys.name() }
 
-pub fn set(name: String, value: String) -[Env]> { host_env_set(name, value) }
-
-pub fn unset(name: String) -[Env]> { host_env_unset(name) }
-
-pub fn vars() -[Env]> [String] { host_env_vars() }
-
-/// Decode an environment value. `utf-8` / `utf8` / `ascii` / `latin-1` /
-/// `iso-8859-1` are accepted. Anything else is `UnknownEncoding`.
-pub fn decode(name: String, value: String, encoding: String) -> String !EnvError {
-    enc := ascii_lower(encoding)
-    if enc == "utf-8" || enc == "utf8" || enc == "utf_8" -> return Ok(value)
-    if enc == "ascii" || enc == "us-ascii" {
-        loop b in value.bytes() {
-            n :: b
-            if n > 127 -> return Err(EnvError.Invalid)
-        }
-        return Ok(value)
+pub fn family() -[Env]> String {
+    platform_name :: ascii_lower(name())
+    if platform_name == "windows" || platform_name.starts_with("windows") -> return "windows"
+    if platform_name == "linux" || platform_name == "darwin" || platform_name == "macos" || platform_name == "osx" || platform_name == "freebsd" || platform_name == "openbsd" || platform_name == "netbsd" || platform_name == "android" {
+        return "unix"
     }
-    if enc == "latin-1" || enc == "latin1" || enc == "iso-8859-1" || enc == "iso8859-1" {
-        return Ok(value)
-    }
-    Err(EnvError.UnknownEncoding)
+    platform_name
 }
 
-/// `$VAR`, `${VAR}`, and Windows `%VAR%`. Unknown names become empty.
-/// `$$` and `%%` emit a single delimiter. Nested expansion is not applied.
-pub fn expand(text: String) -[Env]> String {
-    raw :: text.bytes()
+pub fn arch() -[Env]> String { core.sys.arch() }
+
+pub fn temp_dir() -[Env]> String {
+    tmp :: get("TMPDIR")
+    if tmp != None -> return tmp
+    temp :: get("TEMP")
+    if temp != None -> return temp
+    fallback :: get("TMP")
+    if fallback != None -> return fallback
+    "/tmp"
+}
+
+pub fn executable() -[Env]> String { core.sys.executable() }
+
+pub fn hostname() -[Env]> String { core.sys.hostname() }
+
+pub fn username() -[Env]> String {
+    user :: get("USER")
+    if user != None -> return user
+    username :: get("USERNAME")
+    if username != None -> return username
+    core.sys.username()
+}
+
+pub fn release() -[Env]> String { core.sys.release() }
+
+pub fn version() -[Env]> String { core.sys.version() }
+
+pub fn expand(value: String) -[Env]> String {
+    raw :: value.bytes()
     out := [U8]{}
     i := 0
     loop {
-        if i >= raw.len() -> return String.from_bytes(out) ?? text
-        n :: raw[i]
-        if n == 36 {
+        if i >= raw.len() -> return String.from_bytes(out) ?? value
+        byte :: raw[i]
+        if byte == (U8{36}) {
             if i + 1 < raw.len() && raw[i + 1] == (U8{36}) {
                 out.push(U8{36})
                 i = i + 2
                 next
             }
-            name := ""
-            if {
-                i + 1 < raw.len() && raw[i + 1] == (U8{123}) -> {
-                    j := i + 2
-                    loop {
-                        if j >= raw.len() {
-                            out.push(U8{36})
-                            i = i + 1
-                            break
-                        }
-                        if raw[j] == (U8{125}) {
-                            name = slice_ascii(raw, i + 2, j)
-                            i = j + 1
-                            break
-                        }
-                        j = j + 1
-                    }
+            if i + 1 < raw.len() && raw[i + 1] == (U8{123}) {
+                j := i + 2
+                loop {
+                    if j >= raw.len() -> break
+                    if raw[j] == (U8{125}) -> break
+                    j = j + 1
                 }
-                else -> {
-                    j := i + 1
-                    loop {
-                        if j >= raw.len() || !is_ident(raw[j]) -> break
-                        j = j + 1
-                    }
-                    if j == i + 1 {
-                        out.push(U8{36})
-                        i = i + 1
-                        next
-                    }
-                    name = slice_ascii(raw, i + 1, j)
-                    i = j
+                if j >= raw.len() {
+                    out.push(byte)
+                    i = i + 1
+                    next
                 }
+                key :: slice_ascii(raw, i + 2, j)
+                replacement :: get(key) ?? ""
+                loop item in replacement.bytes() -> out.push(item)
+                i = j + 1
+                next
             }
-            if name.len() > 0 {
-                val :: host_env_get(name) ?? ""
-                loop b in val.bytes() -> out.push(b)
+            j := i + 1
+            loop {
+                if j >= raw.len() || !is_env_ident(raw[j]) -> break
+                j = j + 1
             }
+            if j == i + 1 {
+                out.push(byte)
+                i = i + 1
+                next
+            }
+            key :: slice_ascii(raw, i + 1, j)
+            replacement :: get(key) ?? ""
+            loop item in replacement.bytes() -> out.push(item)
+            i = j
             next
         }
-        if n == 37 {
+        if byte == (U8{37}) {
             j := i + 1
             loop {
                 if j >= raw.len() -> break
@@ -113,266 +121,212 @@ pub fn expand(text: String) -[Env]> String {
                 j = j + 1
             }
             if j < raw.len() && raw[j] == (U8{37}) && j > i + 1 {
-                name :: slice_ascii(raw, i + 1, j)
-                val :: host_env_get(name) ?? ""
-                loop b in val.bytes() -> out.push(b)
+                key :: slice_ascii(raw, i + 1, j)
+                replacement :: get(key) ?? ""
+                loop item in replacement.bytes() -> out.push(item)
                 i = j + 1
                 next
             }
         }
-        out.push(raw[i])
+        out.push(byte)
         i = i + 1
     }
 }
 
-pub fn current_dir() -[FS]> String !IOError { host_cwd() }
+pub fn pid() -[Env]> Int { core.sys.getpid() }
 
-pub fn set_current_dir(path: String) !IOError {
-    host_chdir(path)
-    Ok()
-}
-
-pub fn home_dir() -[Env]> ?String {
-    h :: host_env_get("HOME")
-    if h != None -> return h
-    host_env_get("USERPROFILE")
-}
-
-pub fn temp_dir() -[Env]> String {
-    t :: host_env_get("TMPDIR") ?? host_env_get("TEMP") ?? host_env_get("TMP") ?? "/tmp"
-    t
-}
-
-pub fn executable() -[Env]> String { host_executable() }
-
-pub fn name() -[Env]> String { host_os_name() }
-
-pub fn family() -[Env]> String {
-    n :: ascii_lower(host_os_name())
-    if n == "linux" || n == "darwin" || n == "freebsd" || n == "openbsd" || n == "netbsd" || n == "android" {
-        return "unix"
-    }
-    if starts(n, "windows") -> return "windows"
-    if n == "macos" || n == "osx" -> return "unix"
-    n
-}
-
-pub fn arch() -[Env]> String { host_arch() }
+pub fn getpid() -[Env]> Int { core.sys.getpid() }
 
 pub fn cpu_count() -[Env]> Int {
-    n :: host_cpu_count()
-    if n < 1 -> return 1
-    n
+    count :: core.sys.cpu_count()
+    if count < 1 -> return 1
+    count
 }
 
-pub fn pid() -[Env]> Int { host_pid() }
+pub fn getppid() -[Env]> Int { core.sys.getppid() }
 
-pub fn getpid() -[Env]> Int { pid() }
+pub fn getuid() -[Env]> Int { core.sys.getuid() }
 
-pub fn getppid() -[Env]> Int { host_ppid() }
+pub fn geteuid() -[Env]> Int { core.sys.geteuid() }
 
-pub fn hostname() -[Env]> String { host_hostname() }
+pub fn getgid() -[Env]> Int { core.sys.getgid() }
 
-pub fn username() -[Env]> String {
-    u :: host_env_get("USER") ?? host_env_get("USERNAME") ?? host_username()
-    u
+pub fn getegid() -[Env]> Int { core.sys.getegid() }
+
+pub fn getpgrp() -[Env]> Int { core.sys.getpgrp() }
+
+pub fn umask(mask: Int) -[FS, Env]> Int {
+    #Unsafe("posix umask: change the process file-creation mask") {
+        return core.sys.umask(mask)
+    }
 }
-
-pub fn release() -[Env]> String { host_os_release() }
-
-pub fn version() -[Env]> String { host_os_version() }
-
-pub fn getuid() -[Env]> Int { host_getuid() }
-
-pub fn geteuid() -[Env]> Int { host_geteuid() }
-
-pub fn getgid() -[Env]> Int { host_getgid() }
-
-pub fn getegid() -[Env]> Int { host_getegid() }
-
-pub fn getgroups() -[Env]> [Int] { host_getgroups() }
-
-pub fn getpgrp() -[Env]> Int { host_getpgrp() }
-
-pub fn getpgid(pid: Int) -[Env]> Int !IOError { host_getpgid(pid) }
-
-pub fn getsid(pid: Int) -[Env]> Int !IOError { host_getsid(pid) }
-
-pub fn getpriority(pid: Int) -[Env]> Int !IOError { host_getpriority(pid) }
-
-pub fn setpriority(pid: Int, priority: Int) !IOError {
-    host_setpriority(pid, priority)
-    Ok()
-}
-
-pub fn uptime() -[Time]> Float { host_uptime() }
-
-pub fn loadavg() -[Env]> (fifteen: Float, five: Float, one: Float) { host_loadavg() }
-
-pub fn times() -[Env]> (child_system: Float, child_user: Float, system: Float, user: Float) {
-    host_times()
-}
-
-pub fn sync() -[FS]> { host_sync() }
-
-pub fn umask(mask: Int) -[FS]> Int { host_umask(mask) }
-
 pub fn exitcode(code: Int) -> Int { code }
 
 pub fn success(code: Int) -> Bool { code == 0 }
 
-pub fn utime(path: String, atime: Int, mtime: Int) !IOError {
-    host_utime(path, atime, mtime)
-    Ok()
+pub fn uptime() -[Time, Env]> Float { core.sys.uptime() }
+
+pub fn getgroups() -[Env]> [Int] { core.sys.getgroups() }
+
+pub fn loadavg() -[Env]> [Float] { core.sys.loadavg() }
+
+pub fn times() -[Env]> [Float] { core.sys.times() }
+
+pub fn getpgid(pid: Int) -[Env]> Int !IOError {
+    #Unsafe("posix getpgid: inspect a process group") {
+        return core.sys.getpgid(pid)
+    }
 }
 
-pub fn stop(pid: Int) { host_kill(pid, 19) }
-
-pub fn fork() -> Int !IOError { host_fork() }
-
-pub fn setuid(uid: Int) !IOError {
-    host_setuid(uid)
-    Ok()
+pub fn getsid(pid: Int) -[Env]> Int !IOError {
+    #Unsafe("posix getsid: inspect a process session") {
+        return core.sys.getsid(pid)
+    }
 }
 
-pub fn setgid(gid: Int) !IOError {
-    host_setgid(gid)
-    Ok()
+pub fn getpriority(which: Int) -[Env]> Int !IOError {
+    #Unsafe("posix getpriority: read process scheduling priority") {
+        return core.sys.getpriority(which)
+    }
 }
 
-pub fn setpgid(pid: Int, pgid: Int) !IOError {
-    host_setpgid(pid, pgid)
-    Ok()
+pub fn setpriority(which: Int, priority: Int) !IOError -[Env]> {
+    #Unsafe("posix setpriority: change process scheduling priority") {
+        return core.sys.setpriority(which, priority)
+    }
 }
 
-pub fn setpgrp() !IOError {
-    host_setpgid(0, 0)
-    Ok()
+pub fn utime(path: String, atime: Int, mtime: Int) !IOError -[FS, Env]> {
+    #Unsafe("posix utime: change file timestamps") {
+        return core.sys.utime(path, atime, mtime)
+    }
 }
 
-pub fn setsid() -> Int !IOError { host_setsid() }
+pub fn sync() -[FS, Env]> { core.sys.sync() }
 
-pub fn initgroups(user: String, gid: Int) !IOError {
-    host_initgroups(user, gid)
-    Ok()
+pub fn stop(code: Int) -[Env]> {
+    #Unsafe("posix stop: terminate the process with an exit code") {
+        core.sys.stop(code)
+    }
 }
 
-pub fn kill(pid: Int, signal: Int) !IOError {
-    host_kill(pid, signal)
-    Ok()
+pub fn set_current_dir(path: String) !IOError -[FS, Env]> {
+    return core.sys.set_current_dir(path)
+}
+pub fn pipe() -[FS, Env]> [Int] !IOError {
+    #Unsafe("posix pipe: create process file descriptors") {
+        return core.sys.pipe()
+    }
 }
 
-pub fn wait() -> Int !IOError { host_wait(-1) }
-
-pub fn waitpid(pid: Int) -> Int !IOError { host_wait(pid) }
-
-pub fn pipe() -[FS]> [Int] !IOError { host_pipe() }
-
-pub fn close_fd(fd: Int) -[FS]> { host_close_fd(fd) }
-
-pub fn mkfifo(path: String, mode: Int) !IOError {
-    host_mkfifo(path, mode)
-    Ok()
+pub fn close_fd(fd: Int) -[FS, Env]> {
+    #Unsafe("posix close_fd: close a process file descriptor") {
+        core.sys.close_fd(fd)
+    }
 }
 
-pub fn atexit(hook: Int) { host_atexit(hook) }
-
-pub fn on_interrupt(hook: Int) { host_on_interrupt(hook) }
-
-fn host_env_get(name: String) -[Env]> ?String { panic("host_env_get") }
-
-fn host_env_set(name: String, value: String) -[Env]> { panic("host_env_set") }
-
-fn host_env_unset(name: String) -[Env]> { panic("host_env_unset") }
-
-fn host_env_vars() -[Env]> [String] { panic("host_env_vars") }
-
-fn host_cwd() -[FS]> String !IOError { panic("host_cwd") }
-
-fn host_chdir(path: String) !IOError { panic("host_chdir") }
-
-fn host_executable() -[Env]> String { panic("host_executable") }
-
-fn host_os_name() -[Env]> String { panic("host_os_name") }
-
-fn host_arch() -[Env]> String { panic("host_arch") }
-
-fn host_cpu_count() -[Env]> Int { panic("host_cpu_count") }
-
-fn host_pid() -[Env]> Int { panic("host_pid") }
-
-fn host_ppid() -[Env]> Int { panic("host_ppid") }
-
-fn host_hostname() -[Env]> String { panic("host_hostname") }
-
-fn host_username() -[Env]> String { panic("host_username") }
-
-fn host_os_release() -[Env]> String { panic("host_os_release") }
-
-fn host_os_version() -[Env]> String { panic("host_os_version") }
-
-fn host_getuid() -[Env]> Int { panic("host_getuid") }
-
-fn host_geteuid() -[Env]> Int { panic("host_geteuid") }
-
-fn host_getgid() -[Env]> Int { panic("host_getgid") }
-
-fn host_getegid() -[Env]> Int { panic("host_getegid") }
-
-fn host_getgroups() -[Env]> [Int] { panic("host_getgroups") }
-
-fn host_getpgrp() -[Env]> Int { panic("host_getpgrp") }
-
-fn host_getpgid(pid: Int) -[Env]> Int !IOError { panic("host_getpgid") }
-
-fn host_getsid(pid: Int) -[Env]> Int !IOError { panic("host_getsid") }
-
-fn host_getpriority(pid: Int) -[Env]> Int !IOError { panic("host_getpriority") }
-
-fn host_setpriority(pid: Int, priority: Int) !IOError { panic("host_setpriority") }
-
-fn host_uptime() -[Time]> Float { panic("host_uptime") }
-
-fn host_loadavg() -[Env]> (fifteen: Float, five: Float, one: Float) { panic("host_loadavg") }
-
-fn host_times() -[Env]> (child_system: Float, child_user: Float, system: Float, user: Float) {
-    panic("host_times")
+pub fn mkfifo(path: String, mode: Int) !IOError -[FS, Env]> {
+    #Unsafe("posix mkfifo: create a named pipe") {
+        return core.sys.mkfifo(path, mode)
+    }
 }
 
-fn host_sync() -[FS]> { panic("host_sync") }
+pub fn fork() -[Env]> Int !IOError {
+    #Unsafe("posix fork: create a child process") {
+        return core.sys.fork()
+    }
+}
 
-fn host_umask(mask: Int) -[FS]> Int { panic("host_umask") }
+pub fn setsid() -[Env]> Int !IOError {
+    #Unsafe("posix setsid: create a process session") {
+        return core.sys.setsid()
+    }
+}
 
-fn host_utime(path: String, atime: Int, mtime: Int) !IOError { panic("host_utime") }
+pub fn wait() -[Env, Time.Wait]> Int !IOError {
+    #Unsafe("posix wait: reap a child process") {
+        return core.sys.wait()
+    }
+}
 
-fn host_kill(pid: Int, signal: Int) !IOError { panic("host_kill") }
+pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int !IOError {
+    #Unsafe("posix waitpid: reap a selected child process") {
+        return core.sys.waitpid(pid, options)
+    }
+}
 
-fn host_fork() -> Int !IOError { panic("host_fork") }
+pub fn setuid(uid: Int) !IOError -[Env]> {
+    #Unsafe("posix setuid: change process credentials") {
+        return core.sys.setuid(uid)
+    }
+}
 
-fn host_setuid(uid: Int) !IOError { panic("host_setuid") }
+pub fn setgid(gid: Int) !IOError -[Env]> {
+    #Unsafe("posix setgid: change process credentials") {
+        return core.sys.setgid(gid)
+    }
+}
 
-fn host_setgid(gid: Int) !IOError { panic("host_setgid") }
+pub fn setpgrp() !IOError -[Env]> {
+    #Unsafe("posix setpgrp: change process group topology") {
+        return core.sys.setpgrp()
+    }
+}
 
-fn host_setpgid(pid: Int, pgid: Int) !IOError { panic("host_setpgid") }
+pub fn setpgid(pid: Int, pgid: Int) !IOError -[Env]> {
+    #Unsafe("posix setpgid: change process group topology") {
+        return core.sys.setpgid(pid, pgid)
+    }
+}
 
-fn host_setsid() -> Int !IOError { panic("host_setsid") }
+pub fn kill(pid: Int, signal: Int) !IOError -[Env]> {
+    #Unsafe("posix kill: send a signal to a process") {
+        return core.sys.kill(pid, signal)
+    }
+}
 
-fn host_initgroups(user: String, gid: Int) !IOError { panic("host_initgroups") }
+pub fn initgroups(user: String, group: Int) !IOError -[Env]> {
+    #Unsafe("posix initgroups: change supplementary groups") {
+        return core.sys.initgroups(user, group)
+    }
+}
 
-fn host_wait(pid: Int) -> Int !IOError { panic("host_wait") }
 
-fn host_pipe() -[FS]> [Int] !IOError { panic("host_pipe") }
+pub fn platform() -[Env]> String { "{name()}-{arch()}" }
 
-fn host_close_fd(fd: Int) -[FS]> { panic("host_close_fd") }
+pub fn is_windows() -[Env]> Bool { family() == "windows" }
 
-fn host_mkfifo(path: String, mode: Int) !IOError { panic("host_mkfifo") }
+pub fn is_unix() -[Env]> Bool { family() == "unix" }
 
-fn host_atexit(hook: Int) { panic("host_atexit") }
+pub fn is_linux() -[Env]> Bool {
+    platform_name :: ascii_lower(name())
+    platform_name == "linux"
+}
 
-fn host_on_interrupt(hook: Int) { panic("host_on_interrupt") }
+pub fn is_macos() -[Env]> Bool {
+    platform_name :: ascii_lower(name())
+    platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
+}
 
-fn is_ident(b: U8) -> Bool {
-    n :: b
+pub fn uname() -[Env]> String { "{name()} {release()} {version()} {arch()}" }
+
+pub fn sysname() -[Env]> String { name() }
+
+pub fn machine() -[Env]> String { arch() }
+
+pub fn getenv(name: String) -[Env]> ?String { get(name) }
+
+pub fn pathsep() -[Env]> String {
+    if is_windows() -> return ";"
+    ":"
+}
+
+pub fn linesep() -[Env]> String {
+    if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? ""
+    "\n"
+}
+fn is_env_ident(byte: U8) -> Bool {
+    n :: byte
     if n >= 65 && n <= 90 -> return true
     if n >= 97 && n <= 122 -> return true
     if n >= 48 && n <= 57 -> return true
@@ -391,50 +345,9 @@ fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
 
 fn ascii_lower(text: String) -> String {
     out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    loop byte in text.bytes() {
+        n :: byte
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(byte)
     }
     String.from_bytes(out) ?? text
-}
-
-fn starts(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
-    if b.len() > a.len() -> return false
-    loop i in 0..<b.len() {
-        if a[i] != b[i] -> return false
-    }
-    true
-}
-
-pub fn platform() -> String { "{name()}-{arch()}" }
-
-pub fn is_windows() -> Bool { family() == "windows" }
-
-pub fn is_unix() -> Bool {
-    f :: family()
-    f == "unix" || f == "posix" || f == "linux" || f == "darwin"
-}
-
-pub fn is_linux() -> Bool { name() == "linux" }
-
-pub fn is_macos() -> Bool { name() == "darwin" || name() == "macos" }
-
-pub fn uname() -> String { "{sysname()} {release()} {machine()}" }
-
-pub fn sysname() -> String { name() }
-
-pub fn machine() -> String { arch() }
-
-pub fn getenv(name: String, fallback: String) -[Env]> String { get(name) ?? fallback }
-
-pub fn pathsep() -> String {
-    if is_windows() -> ";"
-    ":"
-}
-
-pub fn linesep() -> String {
-    if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? "\n"
-    "\n"
 }

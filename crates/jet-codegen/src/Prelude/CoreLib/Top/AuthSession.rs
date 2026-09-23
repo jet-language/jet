@@ -72,6 +72,7 @@ struct JetAuthUserStore {
     users: Vec<JetAuthUser>,
     sessions: Vec<JetAuthSession>,
     magic_tokens: Vec<JetAuthMagicToken>,
+    oauth_states: Vec<JetAuthOAuthState>,
 }
 
 static JET_AUTH_STORE: JetAuthOnceLock<JetAuthMutex<JetAuthUserStore>> = JetAuthOnceLock::new();
@@ -152,6 +153,435 @@ fn jet_auth_opaque_token(prefix: &str) -> Result<String, String> {
     }
     Ok(token)
 }
+#[derive(Clone)]
+struct JetAuthOAuthState {
+    state: String,
+    provider: String,
+    nonce: String,
+    expires_at: i64,
+}
+
+#[derive(Default)]
+struct JetAuthOAuthClaims {
+    algorithm: Option<String>,
+    nonce: Option<String>,
+    issuer: Option<String>,
+    audience: Option<String>,
+    subject: Option<String>,
+    expires_at: Option<i64>,
+    issued_at: Option<i64>,
+}
+
+fn jet_auth_valid_oauth_provider(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn jet_auth_oauth_env_suffix(provider: &str) -> Option<String> {
+    jet_auth_valid_oauth_provider(provider).then(|| {
+        provider
+            .chars()
+            .map(|character| character.to_ascii_uppercase())
+            .collect()
+    })
+}
+
+fn jet_auth_oauth_config(provider: &str) -> Result<(Vec<u8>, String, String), String> {
+    let suffix = jet_auth_oauth_env_suffix(provider)
+        .ok_or_else(|| "OAuth provider is invalid".to_string())?;
+    let secret = std::env::var(format!("JET_OAUTH_{suffix}_SECRET"))
+        .map_err(|_| "OAuth provider is not configured".to_string())?;
+    if secret.as_bytes().len() < 32 {
+        return Err("OAuth provider secret is too short".to_string());
+    }
+    let issuer = std::env::var(format!("JET_OAUTH_{suffix}_ISSUER"))
+        .unwrap_or_else(|_| provider.to_string());
+    let audience = std::env::var(format!("JET_OAUTH_{suffix}_AUDIENCE"))
+        .unwrap_or_else(|_| provider.to_string());
+    if !jet_auth_valid_identifier(&issuer, 1024) || !jet_auth_valid_identifier(&audience, 1024) {
+        return Err("OAuth provider metadata is invalid".to_string());
+    }
+    Ok((secret.into_bytes(), issuer, audience))
+}
+
+fn jet_auth_now_ms() -> Result<i64, String> {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is unavailable".to_string())?
+        .as_millis();
+    i64::try_from(millis).map_err(|_| "system clock is out of range".to_string())
+}
+
+fn jet_oauth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
+    if text.is_empty() || text.len() > 16 * 1024 || text.len() % 4 == 1 {
+        return Err("OAuth assertion encoding is invalid".to_string());
+    }
+    let mut out = Vec::with_capacity(text.len().saturating_mul(3) / 4);
+    let mut accumulator = 0u32;
+    let mut bits = 0u8;
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return Err("OAuth assertion encoding is invalid".to_string()),
+        };
+        accumulator = ((accumulator << 6) | u32::from(value)) & 0x00ff_ffff;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((accumulator >> bits) & 0xff) as u8);
+        }
+    }
+    if bits != 0 && (accumulator & ((1u32 << bits) - 1)) != 0 {
+        return Err("OAuth assertion encoding is non-canonical".to_string());
+    }
+    Ok(out)
+}
+
+fn jet_oauth_json_hex4(chars: &[char], position: &mut usize) -> Option<u32> {
+    let mut value = 0u32;
+    for _ in 0..4 {
+        let digit = chars.get(*position)?.to_digit(16)?;
+        *position += 1;
+        value = value * 16 + digit;
+    }
+    Some(value)
+}
+
+fn jet_oauth_json_string(chars: &[char], position: &mut usize) -> Option<String> {
+    if chars.get(*position) != Some(&'"') {
+        return None;
+    }
+    *position += 1;
+    let mut out = String::new();
+    while let Some(character) = chars.get(*position).copied() {
+        *position += 1;
+        match character {
+            '"' => return Some(out),
+            '\\' => {
+                let escaped = chars.get(*position).copied()?;
+                *position += 1;
+                match escaped {
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    '/' => out.push('/'),
+                    'b' => out.push('\u{0008}'),
+                    'f' => out.push('\u{000c}'),
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    'u' => {
+                        let high = jet_oauth_json_hex4(chars, position)?;
+                        if (0xD800..=0xDBFF).contains(&high) {
+                            if chars.get(*position) != Some(&'\\') {
+                                return None;
+                            }
+                            *position += 1;
+                            if chars.get(*position) != Some(&'u') {
+                                return None;
+                            }
+                            *position += 1;
+                            let low = jet_oauth_json_hex4(chars, position)?;
+                            if !(0xDC00..=0xDFFF).contains(&low) {
+                                return None;
+                            }
+                            let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+                            out.push(char::from_u32(combined)?);
+                        } else if (0xDC00..=0xDFFF).contains(&high) {
+                            return None;
+                        } else {
+                            out.push(char::from_u32(high)?);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            character if (character as u32) < 0x20 => return None,
+            _ => out.push(character),
+        }
+    }
+    None
+}
+
+fn jet_oauth_json_whitespace(character: char) -> bool {
+    matches!(character, ' ' | '\n' | '\r' | '\t')
+}
+
+fn jet_oauth_skip_whitespace(chars: &[char], position: &mut usize) {
+    while chars
+        .get(*position)
+        .copied()
+        .is_some_and(jet_oauth_json_whitespace)
+    {
+        *position += 1;
+    }
+}
+
+fn jet_oauth_json_skip_value(chars: &[char], position: &mut usize) -> bool {
+    let Some(first) = chars.get(*position).copied() else {
+        return false;
+    };
+    if first == '"' {
+        return jet_oauth_json_string(chars, position).is_some();
+    }
+    if first == '{' || first == '[' {
+        let mut closers = vec![if first == '{' { '}' } else { ']' }];
+        *position += 1;
+        while let Some(character) = chars.get(*position).copied() {
+            if character == '"' {
+                if jet_oauth_json_string(chars, position).is_none() {
+                    return false;
+                }
+                continue;
+            }
+            if character == '{' {
+                closers.push('}');
+                *position += 1;
+                continue;
+            }
+            if character == '[' {
+                closers.push(']');
+                *position += 1;
+                continue;
+            }
+            if character == '}' || character == ']' {
+                if closers.last().copied() != Some(character) {
+                    return false;
+                }
+                closers.pop();
+                *position += 1;
+                if closers.is_empty() {
+                    return true;
+                }
+                continue;
+            }
+            *position += 1;
+        }
+        return false;
+    }
+    let start = *position;
+    while let Some(character) = chars.get(*position).copied() {
+        if jet_oauth_json_whitespace(character)
+            || matches!(character, ',' | '}' | ']')
+        {
+            break;
+        }
+        *position += 1;
+    }
+    *position > start
+}
+
+fn jet_oauth_parse_i64(text: &str) -> Option<i64> {
+    let (negative, digits) = text
+        .strip_prefix('-')
+        .map_or((false, text), |digits| (true, digits));
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if negative && digits == "0" {
+        return None;
+    }
+    let limit = if negative { 1u64 << 63 } else { i64::MAX as u64 };
+    let magnitude = digits.bytes().try_fold(0u64, |value, byte| {
+        let value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(byte - b'0'))?;
+        (value <= limit).then_some(value)
+    })?;
+    if negative {
+        if magnitude == 1u64 << 63 {
+            Some(i64::MIN)
+        } else {
+            i64::try_from(magnitude).ok()?.checked_neg()
+        }
+    } else {
+        i64::try_from(magnitude).ok()
+    }
+}
+
+fn jet_oauth_parse_claims(text: &str) -> Result<JetAuthOAuthClaims, String> {
+    if text.len() > 32 * 1024 {
+        return Err("OAuth assertion payload is too large".to_string());
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut position = 0usize;
+    jet_oauth_skip_whitespace(&chars, &mut position);
+    if chars.get(position) != Some(&'{') {
+        return Err("OAuth assertion payload is not an object".to_string());
+    }
+    position += 1;
+    let mut claims = JetAuthOAuthClaims::default();
+    loop {
+        jet_oauth_skip_whitespace(&chars, &mut position);
+        if chars.get(position) == Some(&'}') {
+            position += 1;
+            break;
+        }
+        let key = jet_oauth_json_string(&chars, &mut position)
+            .ok_or_else(|| "OAuth assertion claim name is invalid".to_string())?;
+        jet_oauth_skip_whitespace(&chars, &mut position);
+        if chars.get(position) != Some(&':') {
+            return Err("OAuth assertion claim separator is invalid".to_string());
+        }
+        position += 1;
+        jet_oauth_skip_whitespace(&chars, &mut position);
+        match key.as_str() {
+            "alg" | "nonce" | "iss" | "aud" | "sub" => {
+                let value = jet_oauth_json_string(&chars, &mut position)
+                    .ok_or_else(|| format!("OAuth claim `{key}` must be text"))?;
+                let slot = match key.as_str() {
+                    "alg" => &mut claims.algorithm,
+                    "nonce" => &mut claims.nonce,
+                    "iss" => &mut claims.issuer,
+                    "aud" => &mut claims.audience,
+                    "sub" => &mut claims.subject,
+                    _ => unreachable!(),
+                };
+                if slot.replace(value).is_some() {
+                    return Err(format!("OAuth claim `{key}` is duplicated"));
+                }
+            }
+            "exp" | "iat" => {
+                let start = position;
+                while let Some(character) = chars.get(position).copied() {
+                    if jet_oauth_json_whitespace(character)
+                        || matches!(character, ',' | '}' | ']')
+                    {
+                        break;
+                    }
+                    position += 1;
+                }
+                let value = jet_oauth_parse_i64(
+                    &chars[start..position].iter().copied().collect::<String>(),
+                )
+                .ok_or_else(|| format!("OAuth claim `{key}` must be an integer"))?;
+                let slot = if key == "exp" {
+                    &mut claims.expires_at
+                } else {
+                    &mut claims.issued_at
+                };
+                if slot.replace(value).is_some() {
+                    return Err(format!("OAuth claim `{key}` is duplicated"));
+                }
+            }
+            _ => {
+                if !jet_oauth_json_skip_value(&chars, &mut position) {
+                    return Err("OAuth assertion claim value is invalid".to_string());
+                }
+            }
+        }
+        jet_oauth_skip_whitespace(&chars, &mut position);
+        match chars.get(position).copied() {
+            Some(',') => position += 1,
+            Some('}') => {
+                position += 1;
+                break;
+            }
+            _ => return Err("OAuth assertion object is invalid".to_string()),
+        }
+    }
+    jet_oauth_skip_whitespace(&chars, &mut position);
+    if position != chars.len() {
+        return Err("OAuth assertion has trailing data".to_string());
+    }
+    Ok(claims)
+}
+
+fn jet_auth_oauth_verify(
+    entry: &JetAuthOAuthState,
+    assertion: &str,
+    now_ms: i64,
+    secret: &[u8],
+    issuer: &str,
+    audience: &str,
+) -> Result<String, String> {
+    if assertion.len() > 64 * 1024 {
+        return Err("OAuth assertion is too large".to_string());
+    }
+    let mut parts = assertion.split('.');
+    let header_part = parts
+        .next()
+        .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
+    let payload_part = parts
+        .next()
+        .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
+    let signature_part = parts
+        .next()
+        .ok_or_else(|| "OAuth assertion is malformed".to_string())?;
+    if parts.next().is_some()
+        || header_part.is_empty()
+        || payload_part.is_empty()
+        || signature_part.is_empty()
+    {
+        return Err("OAuth assertion is malformed".to_string());
+    }
+    let header = String::from_utf8(jet_oauth_b64url_decode(header_part)?)
+        .map_err(|_| "OAuth assertion header is not UTF-8".to_string())?;
+    let payload = String::from_utf8(jet_oauth_b64url_decode(payload_part)?)
+        .map_err(|_| "OAuth assertion payload is not UTF-8".to_string())?;
+    let signature = jet_oauth_b64url_decode(signature_part)?;
+    let header_claims = jet_oauth_parse_claims(&header)?;
+    if header_claims.algorithm.as_deref() != Some("HS256") {
+        return Err("OAuth assertion algorithm is not allowed".to_string());
+    }
+    let expected = jet_hmac_sha256(
+        secret,
+        format!("{header_part}.{payload_part}").as_bytes(),
+    );
+    if !jet_ct_eq(&expected, &signature) {
+        return Err("OAuth assertion signature is invalid".to_string());
+    }
+    let claims = jet_oauth_parse_claims(&payload)?;
+    if claims.nonce.as_deref().is_none_or(|nonce| {
+        !jet_auth_constant_time_text_eq(nonce, &entry.nonce)
+    }) {
+        return Err("OAuth assertion nonce is invalid".to_string());
+    }
+    if claims.issuer.as_deref() != Some(issuer) {
+        return Err("OAuth assertion issuer is invalid".to_string());
+    }
+    if claims.audience.as_deref() != Some(audience) {
+        return Err("OAuth assertion audience is invalid".to_string());
+    }
+    let now_s = now_ms
+        .checked_div(1_000)
+        .ok_or_else(|| "OAuth clock is invalid".to_string())?;
+    let expires_at = claims
+        .expires_at
+        .ok_or_else(|| "OAuth assertion expiry is missing".to_string())?;
+    if expires_at <= now_s {
+        return Err("OAuth assertion is expired".to_string());
+    }
+    if claims
+        .issued_at
+        .is_some_and(|issued_at| issued_at > now_s.saturating_add(60))
+    {
+        return Err("OAuth assertion was issued in the future".to_string());
+    }
+    let subject = claims
+        .subject
+        .ok_or_else(|| "OAuth assertion subject is missing".to_string())?;
+    if !jet_auth_valid_identifier(&subject, 512) {
+        return Err("OAuth assertion subject is invalid".to_string());
+    }
+    Ok(subject)
+}
+
+fn jet_auth_valid_session_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 69
+        && bytes.starts_with(b"sess-")
+        && bytes[5..]
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
 
 /// D-AUTH1=A: the session cookie's `HttpOnly`/`Secure`/`SameSite`/`Path`
 /// defaults are ONE fact. Password login, magic-link consume, and OAuth finish
@@ -240,7 +670,7 @@ fn jet_auth_session_validate(
     session_id: &String,
     now_ms: i64,
 ) -> Result<JetAuthSession, String> {
-    if !jet_auth_valid_identifier(session_id, 256) {
+    if !jet_auth_valid_session_id(session_id) {
         return Err("missing: session".to_string());
     }
     let Ok(store) = jet_auth_store().lock() else {
@@ -331,25 +761,64 @@ pub(crate) fn jet_auth_magic_link_consume(
 }
 
 fn jet_auth_oauth_begin(provider: String) -> Result<String, String> {
-    if !jet_auth_valid_identifier(&provider, 128) {
-        return Err("OAuth provider is invalid".to_string());
+    let _ = jet_auth_oauth_config(&provider)?;
+    let now_ms = jet_auth_now_ms()?;
+    let expires_at = now_ms
+        .checked_add(10 * 60 * 1_000)
+        .ok_or_else(|| "OAuth state lifetime is out of range".to_string())?;
+    let state = jet_auth_opaque_token("oauth")?;
+    // The public API returns only `state`; use that opaque value as the OIDC
+    // nonce too so callers can place the same value in the provider request.
+    let nonce = state.clone();
+    let Ok(mut store) = jet_auth_store().lock() else {
+        return Err("auth store is unavailable".to_string());
+    };
+    store.oauth_states.retain(|entry| entry.expires_at > now_ms);
+    if store.oauth_states.len() >= 256 {
+        store.oauth_states.remove(0);
     }
-    // This surface has no browser-session binding or provider metadata
-    // verifier. Do not issue a bearer state that callers cannot safely finish.
-    Err("OAuth requires a browser-bound provider flow".to_string())
+    store.oauth_states.push(JetAuthOAuthState {
+        state: state.clone(),
+        provider,
+        nonce,
+        expires_at,
+    });
+    Ok(state)
 }
 
 fn jet_auth_oauth_finish(
     state: String,
-    subject: String,
+    assertion: String,
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<JetAuthSession, String> {
-    let _ = (state, subject, now_ms, ttl_ms);
-    // A raw subject is not an OAuth/OIDC proof. Keep the entire incomplete
-    // flow closed until a provider signature/issuer/audience/nonce check and a
-    // browser binding are available in this shared Prelude seam.
-    Err("OAuth completion requires verified provider proof and browser binding".to_string())
+    if !jet_auth_valid_identifier(&state, 256) || assertion.is_empty() {
+        return Err("OAuth completion is invalid".to_string());
+    }
+    let Ok(mut store) = jet_auth_store().lock() else {
+        return Err("auth store is unavailable".to_string());
+    };
+    let index = store
+        .oauth_states
+        .iter()
+        .position(|entry| {
+            jet_auth_constant_time_text_eq(&entry.state, &state) && now_ms < entry.expires_at
+        })
+        .ok_or_else(|| "OAuth state is expired or unknown".to_string())?;
+    let entry = store.oauth_states[index].clone();
+    let (secret, issuer, audience) = jet_auth_oauth_config(&entry.provider)?;
+    let subject = jet_auth_oauth_verify(
+        &entry,
+        &assertion,
+        now_ms,
+        &secret,
+        &issuer,
+        &audience,
+    )?;
+    let session = jet_auth_session_value(subject, now_ms, ttl_ms)?;
+    store.oauth_states.remove(index);
+    store.sessions.push(session.clone());
+    Ok(session)
 }
 
 fn jet_auth_session_user(session: &JetAuthSession) -> String {

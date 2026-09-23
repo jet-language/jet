@@ -1054,12 +1054,12 @@ impl DataSchema {
 }
 
 /// D-DATA-STATUS1 / D-DATA-BRIDGE1: native or bridge step facts.
-/// Bridges must declare copy, ownership, trust, fallback, and replacement.
+/// Bridges must declare clone_value, ownership, trust, fallback, and replacement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataStatus {
     pub step: String,
     pub path: String,
-    pub copy: String,
+    pub clone_value: String,
     pub ownership: String,
     pub trust: String,
     pub fallback: String,
@@ -1071,7 +1071,7 @@ pub struct DataStatus {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum DataLoaderKind {
     File,
-    Url,
+    URL,
     Database,
     Value,
 }
@@ -1120,7 +1120,7 @@ pub enum DataFreshness {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum DataInvalidationCause {
-    None,
+    NoCause,
     Loader,
     Input,
     ArchiveMember,
@@ -6348,6 +6348,33 @@ impl JetDecimal {
         out
     }
 
+}
+
+impl std::ops::Add for JetDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        JetDecimal::add(&self, &rhs)
+    }
+}
+
+impl std::ops::Sub for JetDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        JetDecimal::sub(&self, &rhs)
+    }
+}
+
+impl std::ops::Mul for JetDecimal {
+    type Output = Self;
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        JetDecimal::mul(&self, &rhs)
+    }
 }
 
 impl super::JetShow for JetDecimal {

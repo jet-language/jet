@@ -44,6 +44,19 @@ fn jet_process_spec_under_wire(
     spec
 }
 
+fn jet_process_spec_arg(mut spec: jet_std::ProcessSpec, extra: &String) -> jet_std::ProcessSpec {
+    spec.cmd.push(extra.clone());
+    spec
+}
+
+fn jet_process_spec_args_extend(
+    mut spec: jet_std::ProcessSpec,
+    extra: &Vec<String>,
+) -> jet_std::ProcessSpec {
+    spec.cmd.extend(extra.iter().cloned());
+    spec
+}
+
 fn jet_process_spec_cwd(mut spec: jet_std::ProcessSpec, cwd: &String) -> jet_std::ProcessSpec {
     spec.cwd = Some(cwd.clone());
     spec

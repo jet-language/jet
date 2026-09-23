@@ -101,9 +101,10 @@ fn generated_patchable_methods(
         .filter(|field| field.computed.is_none())
         .map(|field| field.name.clone())
         .collect::<Vec<_>>();
-    let mut source = format!("struct __JetPatchableMethods {{\n");
+    let mut source = String::new();
+    source.push_str(&format!("struct __JetPatchableMethods {{\n"));
     source.push_str(&format!(
-        "    fn apply(self, patch: {patch}) {base} -> {{\n        return {base}{{\n"
+        "    fn apply(self, patch: {patch}) -> {base} {{\n        return {base}{{\n"
     ));
     for (index, field) in fields.iter().enumerate() {
         if index != 0 {
@@ -115,7 +116,7 @@ fn generated_patchable_methods(
     }
     source.push_str("\n        }\n    }\n\n");
     source.push_str(&format!(
-        "    fn diff(^new: {base}, ^old: {base}) {patch} -> {{\n        return {patch}{{\n"
+        "    fn diff(^new: {base}, ^old: {base}) -> {patch} {{\n        return {patch}{{\n"
     ));
     for (index, field) in fields.iter().enumerate() {
         if index != 0 {
@@ -128,7 +129,7 @@ fn generated_patchable_methods(
     source.push_str("\n        }\n    }\n}\n\n");
     source.push_str("struct __JetPatchablePatchMethods {\n");
     source.push_str(&format!(
-        "    fn merge(self, ^other: {patch}) {patch} -> {{\n        return {patch}{{\n"
+        "    fn merge(self, ^other: {patch}) -> {patch} {{\n        return {patch}{{\n"
     ));
     for (index, field) in fields.iter().enumerate() {
         if index != 0 {

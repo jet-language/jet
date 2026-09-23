@@ -4,39 +4,40 @@ use core.archive as ar
 
 fn run() {
     original :: [U8]{72, 101, 108, 108, 111}  // ASCII "Hello"
-    // Zip round-trip: compress into a single-entry zip archive, then extract.
-    zip_data :: ar.zip_compress("entry.txt", original)
+    // Zip round-trip: create a single-entry zip archive, then extract.
+    zip_data :: ar.create("entry.txt", original)
     print(zip_data.len() != 0)
-    zip_restored :: ar.zip_decompress(zip_data)
+    zip_restored :: ar.zip_decompress(zip_data) ?? panic("zip decompress")
     print(zip_restored == original)
     vector :: "123456789".bytes()
     print(ar.crc32(vector) == 3421780262)
     print(ar.adler32(vector) == 152961502)
     deflated :: ar.deflate(original)
-    print(ar.inflate(deflated) == original)
+    inflated :: ar.inflate(deflated) ?? panic("inflate")
+    print(inflated == original)
     empty :: [U8]{}
     bye :: [U8]{98, 121, 101}  // ASCII "bye"
     // The streaming state keeps multiple named entries in one archive.
-    writer0 :: ar.zip_open(empty)
-    writer1 :: ar.zip_write(writer0, "hello.txt", original)
-    writer2 :: ar.zip_write(writer1, "bye.txt", [U8]{98, 121, 101})
-    multi_zip :: ar.zip_close(writer2)
-    print(ar.zip_names_json(multi_zip) == "[\"hello.txt\",\"bye.txt\"]")
-    reader :: ar.zip_open(multi_zip)
-    print(ar.zip_next(reader, 0) == "hello.txt")
-    print(ar.zip_next(reader, 1) == "bye.txt")
-    print(ar.zip_read(reader, "bye.txt") == bye)
-    print(ar.zip_extract(multi_zip, "hello.txt") == original)
-    print(ar.unzip(multi_zip, "bye.txt") == bye)
+    writer0 :: ar.zip_open(empty) ?? panic("zip open")
+    writer1 :: ar.zip_write(writer0, "hello.txt", original) ?? panic("zip write")
+    writer2 :: ar.zip_write(writer1, "bye.txt", bye) ?? panic("zip write")
+    multi_zip :: ar.zip_close(writer2) ?? panic("zip close")
+    print((ar.zip_names_json(multi_zip) ?? panic("zip names")) == "[\"hello.txt\",\"bye.txt\"]")
+    reader :: ar.zip_open(multi_zip) ?? panic("zip open")
+    print((ar.zip_next(reader, 0) ?? panic("zip next")) == "hello.txt")
+    print((ar.zip_next(reader, 1) ?? panic("zip next")) == "bye.txt")
+    print((ar.zip_read(reader, "bye.txt") ?? panic("zip read")) == bye)
+    print((ar.zip_extract(multi_zip, "hello.txt") ?? panic("zip extract")) == original)
+    print((ar.unzip(multi_zip, "bye.txt") ?? panic("unzip")) == bye)
     // Tar round-trip: build a two-entry archive, extract by name, list names.
     tar1 :: ar.tar_add(empty, "hello.txt", original)
     tar2 :: ar.tar_add(tar1, "bye.txt", bye)
     // Archive is non-empty.
     print(tar2.len() != 0)
     // Exact content round-trip.
-    hello_back :: ar.tar_get(tar2, "hello.txt")
+    hello_back :: ar.tar_get(tar2, "hello.txt") ?? panic("tar get")
     print(hello_back == original)
     // Names come back as a JSON array string.
-    names :: ar.tar_names_json(tar2)
+    names :: ar.tar_names_json(tar2) ?? panic("tar names")
     print(names == "[\"hello.txt\",\"bye.txt\"]")
 }

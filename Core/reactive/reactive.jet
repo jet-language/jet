@@ -30,7 +30,28 @@ pub fn computed(value: Int) -> Computed { {value: value, version: 0} }
 
 pub fn derived(value: Int) -> Computed { computed(value) }
 
+
 pub fn set(sig: Signal, value: Int) -> Signal { {value: value, version: sig.version + 1} }
+
+pub fn set_if_changed(sig: Signal, value: Int) -> Signal {
+    if sig.value == value -> return ~sig
+    set(sig, value)
+}
+
+pub fn changed(sig: Signal, value: Int) -> Bool { sig.value != value }
+
+pub fn computed_update(c: Computed, delta: Int) -> Computed {
+    computed_set(c, c.value + delta)
+}
+
+pub fn computed_version(c: Computed) -> Int { c.version }
+
+pub fn effect_run_if(e: Effect, value: Int) -> Effect {
+    if e.last == value -> return ~e
+    effect_run(e, value)
+}
+
+pub fn effect_changed(e: Effect, value: Int) -> Bool { e.last != value }
 
 pub fn get(sig: Signal) -> Int { sig.value }
 
@@ -42,6 +63,6 @@ pub fn computed_get(c: Computed) -> Int { c.value }
 
 pub fn computed_set(c: Computed, value: Int) -> Computed { {value: value, version: c.version + 1} }
 
-pub fn effect_run(e: Effect, value: Int) -> Effect { {last: value} }
+pub fn effect_run(_e: Effect, value: Int) -> Effect { {last: value} }
 
 pub fn effect_last(e: Effect) -> Int { e.last }

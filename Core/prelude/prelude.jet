@@ -2,16 +2,17 @@ package {
     name: "core.prelude"
     version: "0.1.0"
     edition: "2026"
-    description: "Always-imported prelude hooks."
+    description: "Always-imported identity and scalar helpers."
     license: "MIT"
     outputs: {
         prelude: .Library{ entry: prelude }
     }
 }
-// core.prelude — values the compiler keeps alive across inlining.
-//
-// `keep` is a use-site barrier so a binding is not deleted as dead.
-pub fn keep(value: Int) -> Int { value }
+
+// core.prelude contains only total value helpers.  `keep` is the compiler's
+// identity/use-site barrier; every other declaration is an ordinary Jet
+// function with the same value in and value out.
+pub fn keep<T>(value: T) -> T { value }
 
 pub fn identity(value: ^String) -> String { value }
 

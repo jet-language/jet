@@ -751,6 +751,16 @@ impl JetArena {
             _ => None,
         }
     }
+    /// Borrow a dense integer list for native read-only kernels.
+    ///
+    /// `[U8]` literals and other packed integer lists use this representation;
+    /// callers must finish the read before mutating the arena.
+    pub fn int_list_slice(&self, list: i64) -> Option<&[i64]> {
+        match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => Some(values.as_slice()),
+            _ => None,
+        }
+    }
 
     /// Mutable erased view for collection operations whose shared kernels use
     /// `JetVal` values. Converting a dense integer carrier here is a cold
@@ -1866,6 +1876,7 @@ mod tests {
         assert_eq!(arena.list_get_int(list, 2), Some(3));
         arena.list_set_int(list, 2, 9).unwrap();
         assert_eq!(arena.clone_int_list(list), Some(vec![1, 2, 9, 4]));
+        assert_eq!(arena.int_list_slice(list), Some(&[1, 2, 9, 4][..]));
 
         let slice = arena.list_slice(list, 1, 3).unwrap();
         assert_eq!(arena.clone_int_list(slice), Some(vec![2, 9]));

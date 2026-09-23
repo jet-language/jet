@@ -2,5 +2,7 @@
 use core.web.forms as api
 
 fn run() {
-    print(api.typed_validation_cancel(WebForm{}))
+    form :: api.typed(api.input("jet", [WebFormFieldSpec]{}) ?? panic("input"), "jet") ?? panic("typed")
+    validation :: api.typed_validate_async(form)
+    print(api.typed_validation_cancel(validation))
 }

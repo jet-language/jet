@@ -437,7 +437,7 @@ impl<'a> Checker<'a> {
             &Type::Named(owner_type.clone()),
             "body",
             &[],
-            Type::Named("HTTPBody".to_string()),
+            Type::Named("Body".to_string()),
         ) || !landed_http_method(
             &Type::Named(owner_type.clone()),
             "text",
@@ -516,15 +516,15 @@ impl<'a> Checker<'a> {
         recv_type: Option<&str>,
     ) -> Option<TextEdit> {
         if method != "text"
-            || recv_type != Some("HTTPBody")
-            || self.registry.contains("HTTPBody")
+            || recv_type != Some("Body")
+            || self.registry.contains("Body")
             || args.len() != 1
             || !is_plain_call_arg(&args[0])
         {
             return None;
         }
         if !landed_http_method(
-            &Type::Named("HTTPBody".to_string()),
+            &Type::Named("Body".to_string()),
             "text",
             args,
             http_text_result(),
@@ -7104,6 +7104,13 @@ impl<'a> Checker<'a> {
     /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
+        if let Type::Tagged {
+            marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+            inner,
+        } = t
+        {
+            return self.field_type(inner, member, span);
+        }
         // D-PIN2=A / D-PIN3=A: reaching a field through `Pin<T>` resolves against
         // `T`. The field's own declared type is the mark: a `Pin<U>` field comes
         // back as `Pin<U>` and keeps the no-move promise, every other field comes

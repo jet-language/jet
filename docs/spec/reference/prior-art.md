@@ -24,15 +24,15 @@ analysis of each one lives in Jet's own primary documents:
   reach research.
 - `docs/proposals/jetpack/world-class-package-manager.md` — package-manager and
   supply-chain research.
-- `docs/research/*` — active dated deep-dive reports; finished mines live under
-  `docs/archive/`.
+- `docs/research/*` — active dated deep-dive reports; finished mines remain
+  under the research and audit categories.
 
 ---
 
 ## Videos, talks & podcasts
 
-Mined in full with transcript + comment analysis (see `docs/research/`,
-`docs/archive/`, and the `mine-for-jet` skill).
+Mined in full with transcript + comment analysis (see `docs/research/` and the
+`mine-for-jet` skill).
 
 **September research playlist (14 videos, mined 2026-09-09).** Full captured
 transcript arguments, stratified audience samples, and selected visual frames.

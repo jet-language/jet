@@ -1,4 +1,12 @@
-// core.web.query — client query cache and mutations.
+// core.web.query — typed live-query state and mutation transitions.
+
+#Error
+pub enum WebQueryError {
+    Offline
+    Conflict
+    Invalid
+}
+
 pub enum WebQueryStatus {
     Pending
     Fresh
@@ -22,6 +30,12 @@ pub enum WebQueryNetworkMode {
     OfflineFirst
 }
 
+pub struct WebQueryState {
+    pub status: WebQueryStatus
+    pub generation: Int
+    pub online: Bool
+}
+
 pub struct WebQuery {
     pub key: String
     pub data: String
@@ -30,6 +44,7 @@ pub struct WebQuery {
     pub generation: Int
     pub mode: WebQueryNetworkMode
     pub online: Bool
+    pub subscribers: Int
 }
 
 pub struct WebMutationState {
@@ -37,73 +52,164 @@ pub struct WebMutationState {
     pub data: String
     pub error: String
 }
+pub struct WebQuerySeed {
+    pub data: String
+    pub generation: Int
+    pub subscribers: Int
+}
 
-pub fn new(key: String, data: String) -> WebQuery {
-    {key: key, data: data, status: WebQueryStatus.Fresh, error: "", generation: 1, mode: WebQueryNetworkMode.Online, online: true}
+pub fn new(key: String, initial: WebQuerySeed) -> WebQuery {
+    WebQuery{key: key, data: initial.data, status: WebQueryStatus.Fresh, error: "", generation: initial.generation, mode: WebQueryNetworkMode.Online, online: true, subscribers: initial.subscribers}
+}
+
+pub fn live(key: String, data: String, url: String, loader: fn() -> String) -> WebQuery {
+    loaded := data
+    if url.len() > 0 -> loaded = loader()
+    WebQuery{key: key, data: loaded, status: WebQueryStatus.Fresh, error: "", generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 0}
 }
 
 pub fn get(q: WebQuery) -> String { q.data }
+pub fn show(q: WebQuery) -> String { "{q.key}={q.data}" }
 
-pub fn live(key: String, data: String) -> WebQuery { new(key, data) }
-
-pub fn refresh(q: WebQuery) -> WebQuery {
-    {key: q.key, data: q.data, status: WebQueryStatus.Fetching, error: q.error, generation: q.generation + 1, mode: q.mode, online: q.online}
+pub fn state(q: WebQuery) -> WebQueryState {
+    WebQueryState{status: q.status, generation: q.generation, online: q.online}
 }
-
-pub fn invalidate(q: WebQuery) -> WebQuery {
-    {key: q.key, data: q.data, status: WebQueryStatus.Stale, error: q.error, generation: q.generation + 1, mode: q.mode, online: q.online}
-}
-
-pub fn mutate(q: WebQuery, data: String) -> WebQuery {
-    {key: q.key, data: data, status: WebQueryStatus.Fresh, error: "", generation: q.generation + 1, mode: q.mode, online: q.online}
-}
-
-pub fn mutate_with_invalidations(q: WebQuery, data: String) -> WebQuery { mutate(q, data) }
-
-pub fn subscribe(q: WebQuery) -> WebQuery { q }
-
-pub fn state(q: WebQuery) -> String { status_name(q.status) }
 
 pub fn state_signal(q: WebQuery) -> String { "{q.key}:{status_name(q.status)}:{q.generation}" }
 
 pub fn mutation_state(q: WebQuery) -> WebMutationState {
-    st := WebMutationStatus.Idle
-    if q.status == WebQueryStatus.Fetching -> st = WebMutationStatus.Pending
-    if q.status == WebQueryStatus.Error -> st = WebMutationStatus.Error
-    if q.status == WebQueryStatus.Fresh -> st = WebMutationStatus.Success
-    {status: st, data: q.data, error: q.error}
+    status := WebMutationStatus.Idle
+    if q.status == WebQueryStatus.Pending || q.status == WebQueryStatus.Fetching -> status = WebMutationStatus.Pending
+    if q.status == WebQueryStatus.Error || q.status == WebQueryStatus.Offline -> status = WebMutationStatus.Error
+    if q.status == WebQueryStatus.Fresh -> status = WebMutationStatus.Success
+    WebMutationState{status: status, data: q.data, error: q.error}
 }
 
-pub fn mutation_signal(q: WebQuery) -> String { mutation_state(q).error }
+pub fn mutation_signal(q: WebQuery) -> String { "{status_name(q.status)}:{q.generation}" }
 
-pub fn show(q: WebQuery) -> String { "{q.key}={q.data}" }
-
-pub fn cancel(q: WebQuery) -> WebQuery {
-    {key: q.key, data: q.data, status: WebQueryStatus.Stale, error: q.error, generation: q.generation, mode: q.mode, online: q.online}
+pub fn subscribe(key: String) -> WebQuery {
+    WebQuery{key: key, data: "", status: WebQueryStatus.Stale, error: "", generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 1}
 }
 
-pub fn retry(q: WebQuery) -> WebQuery {
-    if q.online {
-        return {key: q.key, data: q.data, status: WebQueryStatus.Fetching, error: "", generation: q.generation + 1, mode: q.mode, online: q.online}
+pub fn invalidate(q: &WebQuery) -> Int {
+    q.status = WebQueryStatus.Stale
+    q.generation = q.generation + 1
+    q.generation
+}
+
+pub fn refresh(q: &WebQuery) !WebQueryError {
+    if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
+    if !q.online && q.mode != WebQueryNetworkMode.Always {
+        q.status = WebQueryStatus.Offline
+        q.error = "offline"
+        return Err(WebQueryError.Offline)
     }
-    {key: q.key, data: q.data, status: WebQueryStatus.Offline, error: q.error, generation: q.generation, mode: q.mode, online: q.online}
+    q.status = WebQueryStatus.Fetching
+    q.error = ""
+    q.generation = q.generation + 1
+    return Ok()
 }
 
-pub fn queue(q: WebQuery, data: String) -> WebQuery { mutate(q, data) }
+pub fn cancel(q: &WebQuery) -> Bool {
+    if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending {
+        q.status = WebQueryStatus.Stale
+        q.error = "cancelled"
+        q.generation = q.generation + 1
+        return true
+    }
+    false
+}
+
+pub fn queue(q: &WebQuery, data: String) -> Int !WebQueryError {
+    if data.len() == 0 || data.len() > 1048576 -> return Err(WebQueryError.Invalid)
+    if q.status == WebQueryStatus.Fetching -> return Err(WebQueryError.Invalid)
+    q.data = data
+    q.status = WebQueryStatus.Pending
+    q.error = ""
+    q.generation = q.generation + 1
+    q.generation
+}
+
+pub fn retry(q: &WebQuery, replay: fn(String)) -> Int !WebQueryError {
+    if !q.online && q.mode != WebQueryNetworkMode.Always -> return Err(WebQueryError.Offline)
+    q.status = WebQueryStatus.Fetching
+    q.error = ""
+    replay(q.key)
+    q.generation = q.generation + 1
+    q.generation
+}
+
+pub fn mutate(q: &WebQuery, key: String, expected: ?String, mutation: fn(String) -> String) -> WebMutationState {
+    if key != q.key {
+        q.status = WebQueryStatus.Error
+        q.error = "key"
+        return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
+    }
+    if expected != None {
+        actual :: expected
+        if actual != q.data {
+            q.status = WebQueryStatus.Error
+            q.error = "conflict"
+            return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
+        }
+    }
+    if !q.online && q.mode != WebQueryNetworkMode.Always {
+        if q.mode == WebQueryNetworkMode.OfflineFirst {
+            q.status = WebQueryStatus.Pending
+            q.error = "offline"
+            return WebMutationState{status: WebMutationStatus.Pending, data: q.data, error: q.error}
+        }
+        q.status = WebQueryStatus.Offline
+        q.error = "offline"
+        return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
+    }
+    q.status = WebQueryStatus.Pending
+    q.error = ""
+    next := mutation(q.data)
+    if next.len() > 1048576 {
+        q.status = WebQueryStatus.Error
+        q.error = "payload"
+        return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
+    }
+    q.data = next
+    q.status = WebQueryStatus.Fresh
+    q.generation = q.generation + 1
+    WebMutationState{status: WebMutationStatus.Success, data: q.data, error: ""}
+}
+
+pub fn mutate_with_invalidations(q: &WebQuery, key: String, expected: ?String, invalidations: [String], mutation: fn(String) -> String) -> WebMutationState {
+    result :: mutate(q, key, expected, mutation)
+    if result.status == WebMutationStatus.Success && invalidations.len() > 0 {
+        return WebMutationState{status: WebMutationStatus.Settled, data: result.data, error: ""}
+    }
+    result
+}
+
+pub fn set_online(q: &WebQuery, online: Bool) {
+    if q.online == online -> return
+    q.online = online
+    q.generation = q.generation + 1
+    if !online {
+        q.status = WebQueryStatus.Offline
+        q.error = "offline"
+    } else if q.status == WebQueryStatus.Offline {
+        q.status = WebQueryStatus.Stale
+        q.error = ""
+    }
+}
+
+pub fn set_mode(q: &WebQuery, mode: WebQueryNetworkMode) {
+    q.mode = mode
+    if q.online || mode != WebQueryNetworkMode.Always -> return
+    if q.status == WebQueryStatus.Offline {
+        q.status = WebQueryStatus.Stale
+        q.error = ""
+    }
+}
+
 
 pub fn facts(q: WebQuery) -> String {
-    "{{\\\"key\\\":\\\"{q.key}\\\",\\\"status\\\":\\\"{status_name(q.status)}\\\",\\\"generation\\\":{q.generation},\\\"online\\\":{bool_json(q.online)}}}"
-}
-
-pub fn set_mode(q: WebQuery, mode: WebQueryNetworkMode) -> WebQuery {
-    {key: q.key, data: q.data, status: q.status, error: q.error, generation: q.generation, mode: mode, online: q.online}
-}
-
-pub fn set_online(q: WebQuery, online: Bool) -> WebQuery {
-    st := q.status
-    if !online -> st = WebQueryStatus.Offline
-    if online && q.status == WebQueryStatus.Offline -> st = WebQueryStatus.Stale
-    {key: q.key, data: q.data, status: st, error: q.error, generation: q.generation, mode: q.mode, online: online}
+    "{{\"key\":\"{q.key}\",\"status\":\"{status_name(q.status)}\",\"generation\":{q.generation},\"online\":{bool_json(q.online)},\"subscribers\":{q.subscribers}}}"
 }
 
 fn status_name(s: WebQueryStatus) -> String {
@@ -118,6 +224,6 @@ fn status_name(s: WebQueryStatus) -> String {
 }
 
 fn bool_json(b: Bool) -> String {
-    if b -> "true"
+    if b -> return "true"
     "false"
 }

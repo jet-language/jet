@@ -1880,6 +1880,7 @@ impl<'a> Checker<'a> {
                 crate::AST::Item::Const(constant)
                     if constant.name == name
                         && (constant.is_persist
+                            || constant.mutable
                             || constant
                                 .attrs
                                 .iter()
@@ -2221,9 +2222,8 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        if self.is_persist_binding(&root) {
-            // D-PERSIST-DEVSTATE1=A: a write place into the pinned module
-            // value is valid; the marker is the permission fact.
+        if self.is_global_mutable_binding(&root) {
+            // Module-level mutable bindings are legal write places.
             return;
         }
         if self.consts.contains_key(&root) {

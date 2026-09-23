@@ -12,14 +12,14 @@ fn worker(receiver: Receiver<Int>, sender: Sender<Int>) {
     }
 }
 
-fn run_batch(count: Int, jobs: Sender<Int>, results: Receiver<Int>) Int -> {
+fn run_batch(count: Int, jobs: Sender<Int>, results: Receiver<Int>) -> Int {
     loop value in 1..count -> jobs.send(value)
     sum := 0
     loop _ in 0..<count -> sum += results.receive() ?? 0
     sum
 }
 
-fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) String -> {
+fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) -> String {
     if command == "ready" -> return "ready"
     if command == "shutdown" -> return "bye"
     if command.starts_with("batch ") {
@@ -28,7 +28,7 @@ fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) String -
             return "batch {count} total {run_batch(count, jobs, results)}"
         }
     }
-    return "error"
+    "error"
 }
 
 fn run(args: Args) {
@@ -38,7 +38,7 @@ fn run(args: Args) {
         @[ worker1..worker4 ]@ :: task worker(~jobs_receiver, ~results_sender)
         listener :: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
-            stream :: listener.accept()
+            stream := listener.accept()
             command :: "{stream.read_text(1024).trim()}"
             reply :: response(command, ~jobs_sender, ~results_receiver)
             stream.write_text("{reply}\n")

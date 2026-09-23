@@ -1,4 +1,8 @@
-// t-digest (Dunning). Centroids clustered by a scale of 100.
+use core.math as math
+
+// Deterministic weighted t-digest.  Centroids stay sorted by (mean, weight)
+// and are compressed in that order, so the result does not depend on hash
+// iteration or provider row order.
 pub struct TDigest {
     pub delta: Float
     pub means: [Float]
@@ -11,33 +15,53 @@ pub struct Centroid {
     pub weight: Float
 }
 
-pub fn new() -> TDigest { {delta: 100.0, means: [Float]{}, weights: [Float]{}, total: 0.0} }
+pub fn new() -> TDigest {
+    {delta: Float{100.0}, means: [Float]{}, weights: [Float]{}, total: Float{0.0}}
+}
 
 pub fn add(td: TDigest, x: Float, w: Float) -> TDigest {
-    means := [Float]{}
-    weights := [Float]{}
-    loop m in td.means -> means.push(m)
-    loop n in td.weights -> weights.push(n)
+    if !math.is_finite(x) || !math.is_finite(w) || w <= (Float{0.0}) -> return ~td
+
+    base := td
+    if !digest_shape_ok(td) -> base = new()
+    delta := base.delta
+    if !math.is_finite(delta) || delta <= (Float{0.0}) -> delta = Float{100.0}
+    means := copy_floats(base.means)
+    weights := copy_floats(base.weights)
     means.push(x)
     weights.push(w)
-    total := td.total + w
-    // compress if too many centroids
+    insert_sorted(&means, &weights)
+    total := base.total + w
+    if total <= (Float{0.0}) || !math.is_finite(total) -> return base
     if means.len() > 64 {
-        c :: compress(means, weights, td.delta, total)
-        return {delta: td.delta, means: c.means, weights: c.weights, total: total}
+        packed :: compress(^means, ^weights, delta, total)
+        return {delta: delta, means: packed.means, weights: packed.weights, total: total}
     }
-    {delta: td.delta, means: means, weights: weights, total: total}
+    {delta: delta, means: means, weights: weights, total: total}
 }
 
 pub fn quantile(td: TDigest, q: Float) -> Float {
-    if td.means.len() == 0 -> return 0.0
-    if q <= 0.0 -> return td.means[0]
-    if q >= 1.0 -> return td.means[td.means.len() - 1]
+    if !digest_shape_ok(td) || td.total <= (Float{0.0}) -> return Float{0.0}
+    if !math.is_finite(q) -> return Float{0.0}
+    if q <= (Float{0.0}) -> return td.means[0]
+    if q >= (Float{1.0}) -> return td.means[td.means.len() - 1]
+
+    // Interpolate between centroid centers rather than returning a step
+    // function.  This keeps one-point and weighted samples exact while
+    // making the result useful between centroids.
     target :: q * td.total
-    acc := 0.0
+    cumulative := Float{0.0}
+    previous_center := Float{0.0}
     loop i in 0..<td.means.len() {
-        acc = acc + td.weights[i]
-        if acc >= target -> return td.means[i]
+        w :: td.weights[i]
+        center :: cumulative + w / (Float{2.0})
+        if target <= center {
+            if i == 0 || center <= previous_center -> return td.means[i]
+            fraction :: (target - previous_center) / (center - previous_center)
+            return td.means[i - 1] + (td.means[i] - td.means[i - 1]) * fraction
+        }
+        cumulative = cumulative + w
+        previous_center = center
     }
     td.means[td.means.len() - 1]
 }
@@ -47,38 +71,66 @@ pub struct Packed {
     pub weights: [Float]
 }
 
-fn compress(means: [Float], weights: [Float], delta: Float, total: Float) -> Packed {
-    // sort by mean (insertion)
-    n :: means.len()
-    loop i in 1..<n {
-        j := i
-        loop {
-            if j <= 0 || means[j - 1] <= means[j] -> break
-            tm :: means[j]
-            means[j] = means[j - 1]
-            means[j - 1] = tm
-            tw :: weights[j]
-            weights[j] = weights[j - 1]
-            weights[j - 1] = tw
-            j = j - 1
-        }
-    }
+fn compress(means: ^[Float], weights: ^[Float], delta: Float, total: Float) -> Packed {
+    if means.len() == 0 -> return Packed{means: [Float]{}, weights: [Float]{}}
+    if delta <= (Float{0.0}) || total <= (Float{0.0}) -> return Packed{means: means, weights: weights}
     om := [Float]{means[0]}
     ow := [Float]{weights[0]}
-    acc := weights[0]
-    loop i in 1..<n {
-        // merge if the running quantile bin is small
-        cap :: total / delta
-        if ow[ow.len() - 1] + weights[i] <= cap {
-            w :: ow[ow.len() - 1] + weights[i]
-            m :: (om[om.len() - 1] * ow[ow.len() - 1] + means[i] * weights[i]) / w
-            om[om.len() - 1] = m
-            ow[ow.len() - 1] = w
+    cumulative := weights[0]
+    loop i in 1..<means.len() {
+        // t-digest's scale is smallest at the tails and largest near the
+        // median.  A minimum capacity of one keeps tiny samples alive.
+        q :: (cumulative - ow[ow.len() - 1] / (Float{2.0})) / total
+        cap := total * (Float{4.0}) * q * ((Float{1.0}) - q) / delta
+        if cap < (Float{1.0}) -> cap = Float{1.0}
+        candidate :: ow[ow.len() - 1] + weights[i]
+        if candidate <= cap {
+            old_weight :: ~ow[ow.len() - 1]
+            ow[ow.len() - 1] = candidate
+            om[om.len() - 1] = (om[om.len() - 1] * old_weight + means[i] * weights[i]) / candidate
         } else {
             om.push(means[i])
             ow.push(weights[i])
         }
-        acc = acc + weights[i]
+        cumulative = cumulative + weights[i]
     }
-    {means: om, weights: ow}
+    Packed{means: om, weights: ow}
+}
+
+fn insert_sorted(means: &[Float], weights: &[Float]) {
+    i := 1
+    loop i < means.len() {
+        j := i
+        loop {
+            if j <= 0 -> break
+            if means[j - 1] < means[j] -> break
+            if means[j - 1] == means[j] && weights[j - 1] <= weights[j] -> break
+            tm :: ~means[j]
+            means[j] = means[j - 1]
+            means[j - 1] = tm
+            tw :: ~weights[j]
+            weights[j] = weights[j - 1]
+            weights[j - 1] = tw
+            j = j - 1
+        }
+        i = i + 1
+    }
+}
+
+fn copy_floats(values: [Float]) -> [Float] {
+    out := [Float]{}
+    loop value in values -> out.push(value)
+    out
+}
+
+fn digest_shape_ok(td: TDigest) -> Bool {
+    if td.means.len() == 0 || td.means.len() != td.weights.len() -> return false
+    if !math.is_finite(td.delta) || td.delta <= (Float{0.0}) -> return false
+    if !math.is_finite(td.total) || td.total <= (Float{0.0}) -> return false
+    sum := Float{0.0}
+    loop i in 0..<td.means.len() {
+        if !math.is_finite(td.means[i]) || !math.is_finite(td.weights[i]) || td.weights[i] <= (Float{0.0}) -> return false
+        sum = sum + td.weights[i]
+    }
+    sum > (Float{0.0}) && math.is_finite(sum)
 }

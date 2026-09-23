@@ -8,55 +8,55 @@ package {
         html: .Library{ entry: html }
     }
 }
-// core.text.html — Python `html` plus the tag strip people actually write.
-//
-// `escape` is XML-safe (`&` `<` `>` `"` `'`). `unescape` understands named
-// entities `amp` `lt` `gt` `quot` `apos` `nbsp` and numeric `&#N;` / `&#xH;`.
-// Unknown entities are left intact. `strip_tags` removes `<...>` spans; it is
-// not a parser and will not execute scripts.
+
+use core.text as unicode
+
+// XML-safe escaping and bounded entity decoding. Unknown entities remain
+// unchanged; tag stripping is deliberately a span operation, not a parser.
 pub fn escape(text: String) -> String { escape_quote(text, true) }
 
 pub fn escape_quote(text: String, quote: Bool) -> String {
     out := ""
-    loop b in text.bytes() {
-        n :: b
-        if {
-            n == 38 -> { out = "{out}&amp;" }
-            n == 60 -> { out = "{out}&lt;" }
-            n == 62 -> { out = "{out}&gt;" }
-            quote && n == 34 -> { out = "{out}&quot;" }
-            quote && n == 39 -> { out = "{out}&#x27;" }
-            else -> { out = "{out}{String.from_bytes([U8]{b}) ?? ""}" }
-        }
+    loop ch in unicode.scalars(text) {
+        if ch == "&" -> out = "{out}&amp;"
+        else if ch == "<" -> out = "{out}&lt;"
+        else if ch == ">" -> out = "{out}&gt;"
+        else if quote && ch == "\"" -> out = "{out}&quot;"
+        else if quote && ch == "'" -> out = "{out}&#x27;"
+        else -> out = "{out}{ch}"
     }
     out
 }
 
 pub fn unescape(text: String) -> String {
     raw :: text.bytes()
-    out := [U8]{}
+    out := ""
     i := 0
     loop i < raw.len() {
-        if raw[i] == (U8{38}) {
-            semi := i + 1
-            loop semi < raw.len() && semi - i < 32 {
-                if raw[semi] == (U8{59}) -> break
-                semi = semi + 1
-            }
-            if semi < raw.len() && raw[semi] == (U8{59}) {
-                name :: String.from_bytes(slice_b(raw, i + 1, semi)) ?? ""
-                decoded :: entity(name)
-                if decoded.bytes().len() > 0 {
-                    loop b in decoded.bytes() -> out.push(b)
-                    i = semi + 1
-                    next
-                }
+        if raw[i] != (U8{38}) {
+            width :: utf8_width(raw, i)
+            out = "{out}{slice_b(raw, i, i + width)}"
+            i = i + width
+            next
+        }
+        semi := i + 1
+        loop semi < raw.len() && semi - i <= 32 {
+            if raw[semi] == (U8{59}) -> break
+            semi = semi + 1
+        }
+        if semi < raw.len() && raw[semi] == (U8{59}) {
+            name :: String.from_bytes(slice_b(raw, i + 1, semi)) ?? ""
+            decoded :: entity(name)
+            if decoded.bytes().len() > 0 {
+                out = "{out}{decoded}"
+                i = semi + 1
+                next
             }
         }
-        out.push(raw[i])
+        out = "{out}&"
         i = i + 1
     }
-    String.from_bytes(out) ?? text
+    out
 }
 
 pub fn strip_tags(text: String) -> String {
@@ -64,96 +64,108 @@ pub fn strip_tags(text: String) -> String {
     out := [U8]{}
     i := 0
     loop i < raw.len() {
-        if raw[i] == (U8{60}) {
-            loop i < raw.len() {
-                if raw[i] == (U8{62}) {
-                    i = i + 1
-                    break
-                }
-                i = i + 1
-            }
+        if raw[i] != (U8{60}) {
+            out.push(raw[i])
+            i = i + 1
             next
         }
-        out.push(raw[i])
-        i = i + 1
+        close := i + 1
+        loop close < raw.len() && raw[close] != (U8{62}) -> close = close + 1
+        if close >= raw.len() {
+            out.push(raw[i])
+            i = i + 1
+            next
+        }
+        i = close + 1
     }
     String.from_bytes(out) ?? text
 }
 
 pub fn unescape_and_strip(text: String) -> String { unescape(strip_tags(text)) }
-
 pub fn attr_escape(text: String) -> String { escape_quote(text, true) }
-
 pub fn text_escape(text: String) -> String { escape_quote(text, false) }
 
 fn entity(name: String) -> String {
-    if name == {
-        "amp" -> return "&"
-        "lt" -> return "<"
-        "gt" -> return ">"
-        "quot" -> return "\""
-        "apos" -> return "'"
-        "nbsp" -> return " "
-        "copy" -> return "(c)"
-        "reg" -> return "(R)"
-        "trade" -> return "(TM)"
-        "mdash" -> return "-"
-        "ndash" -> return "-"
-        "hellip" -> return "..."
-        else -> { _ := 0 }
-    }
+    if name == "amp" -> return "&"
+    if name == "lt" -> return "<"
+    if name == "gt" -> return ">"
+    if name == "quot" -> return "\""
+    if name == "apos" -> return "'"
+    if name == "nbsp" -> return " "
+    if name == "copy" -> return "©"
+    if name == "reg" -> return "®"
+    if name == "trade" -> return "™"
+    if name == "mdash" -> return "—"
+    if name == "ndash" -> return "–"
+    if name == "hellip" -> return "…"
     raw :: name.bytes()
-    if raw.len() >= 2 && raw[0] == (U8{35}) {
-        if raw[1] == (U8{120}) || raw[1] == (U8{88}) {
-            n := 0
-            i := 2
-            loop i < raw.len() {
-                d :: hex_val(raw[i]) ?? return ""
-                n = n * 16 + d
-                i = i + 1
-            }
-            return scalar(n)
-        }
-        n := 0
-        i := 1
-        loop i < raw.len() {
-            d :: raw[i]
-            if d < 48 || d > 57 -> return ""
-            n = n * 10 + (d - 48)
-            i = i + 1
-        }
-        return scalar(n)
+    if raw.len() < 2 || raw[0] != (U8{35}) -> return ""
+    n := 0
+    i := 1
+    base := 10
+    if raw[1] == (U8{120}) || raw[1] == (U8{88}) {
+        base = 16
+        i = 2
     }
-    ""
+    if i >= raw.len() -> return ""
+    loop i < raw.len() {
+        digit := if base == 16 -> hex_val(raw[i]) else -> decimal_val(raw[i])
+        d :: digit ?? return ""
+        n = n * base + d
+        i = i + 1
+    }
+    scalar(n)
 }
 
 fn scalar(n: Int) -> String {
-    if n == {
-        34 -> return "\""
-        39 -> return "'"
-        38 -> return "&"
-        60 -> return "<"
-        62 -> return ">"
-        160 -> return " "
-        else -> { _ := 0 }
+    if n == 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> return "�"
+    out := [U8]{}
+    if n < 128 -> out.push(U8{n})
+    else if n < 2048 {
+        out.push(U8{192 | (n >> 6)})
+        out.push(U8{128 | (n & 63)})
+    } else if n < 65536 {
+        out.push(U8{224 | (n >> 12)})
+        out.push(U8{128 | ((n >> 6) & 63)})
+        out.push(U8{128 | (n & 63)})
+    } else {
+        out.push(U8{240 | (n >> 18)})
+        out.push(U8{128 | ((n >> 12) & 63)})
+        out.push(U8{128 | ((n >> 6) & 63)})
+        out.push(U8{128 | (n & 63)})
     }
-    if n >= 32 && n <= 126 -> return String.from_bytes([U8]{(U8{n})}) ?? ""
-    ""
+    String.from_bytes(out) ?? "�"
+}
+
+fn decimal_val(b: U8) -> ?Int {
+    n :: Int.from_u8(b)
+    if n < 48 || n > 57 -> return None
+    Val(n - 48)
 }
 
 fn hex_val(b: U8) -> ?Int {
-    n :: b
+    n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 65 && n <= 70 -> return Val(n - 55)
     if n >= 97 && n <= 102 -> return Val(n - 87)
     None
 }
 
+fn utf8_width(raw: [U8], at: Int) -> Int {
+    if at < 0 || at >= raw.len() -> return 1
+    b :: raw[at]
+    if b < 128 -> return 1
+    if b >= 194 && b <= 223 && at + 1 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 -> return 2
+    if b >= 224 && b <= 239 && at + 2 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 -> return 3
+    if b >= 240 && b <= 244 && at + 3 < raw.len() && raw[at + 1] >= 128 && raw[at + 1] <= 191 && raw[at + 2] >= 128 && raw[at + 2] <= 191 && raw[at + 3] >= 128 && raw[at + 3] <= 191 -> return 4
+    1
+}
+
 fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i >= raw.len() -> return out
+        if i >= end || i < 0 || i >= raw.len() -> return ~out
         out.push(raw[i])
         i = i + 1
     }

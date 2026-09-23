@@ -173,6 +173,14 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_COPY.to_string(), span));
         }
+        // D-ITER-METHOD1: the retired `take` capture keyword remains reserved
+        // in ordinary expression positions, but iterator APIs use `.take(...)`
+        // as a normal member spelling.
+        if matches!(self.peek().kind, TokKind::KwMove) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_MOVE.to_string(), span));
+        }
         // D-EFFECT-DECL1=A: `effect` is a declaration keyword in item
         // position, but existing APIs such as `reactive.effect()` keep
         // their ordinary qualified member spelling.
@@ -180,7 +188,7 @@ impl<'a> Parser<'a> {
             let span = self.peek().span;
             self.bump();
             return Ok((Syntax::KW_EFFECT_DECL.to_string(), span));
-        }
+        };
         self.expect_ident("after `.`")
     }
 

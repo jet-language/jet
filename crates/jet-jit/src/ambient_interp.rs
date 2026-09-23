@@ -371,7 +371,7 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
             MirRuntimeValue::List(values.iter().map(http_tree_runtime).collect())
         }
         HttpTree::Object(fields) => MirRuntimeValue::Struct {
-            type_name: "HTTPBody".to_string(),
+            type_name: "Body".to_string(),
             fields: fields
                 .iter()
                 .map(|(name, value)| (name.clone(), http_tree_runtime(value)))
@@ -571,14 +571,14 @@ fn http_response(status: i64, body: &str) -> MirRuntimeValue {
             (
                 "headers".to_string(),
                 MirRuntimeValue::Struct {
-                    type_name: "HTTPHeaders".to_string(),
+                    type_name: "Headers".to_string(),
                     fields: Vec::new(),
                 },
             ),
             (
                 "body".to_string(),
                 MirRuntimeValue::Struct {
-                    type_name: "HTTPBody".to_string(),
+                    type_name: "Body".to_string(),
                     fields: vec![(
                         "bytes".to_string(),
                         MirRuntimeValue::Bytes(body.as_bytes().to_vec()),
@@ -588,7 +588,7 @@ fn http_response(status: i64, body: &str) -> MirRuntimeValue {
             (
                 "trailers".to_string(),
                 MirRuntimeValue::Struct {
-                    type_name: "HTTPHeaders".to_string(),
+                    type_name: "Headers".to_string(),
                     fields: Vec::new(),
                 },
             ),

@@ -6,10 +6,13 @@ function jet_web_closed_result() {
 }
 
 class JetWebChannel {
-  constructor(capacity = null) {
+  constructor(capacity = null, kind = "channel", delayMs = 0) {
     this.capacity = capacity == null ? null : Number(BigInt(capacity) <= 0n ? 1n : BigInt(capacity));
     this.queue = [];
     this.closed = false;
+    this.cancelled = false;
+    this.kind = kind;
+    this.delayMs = BigInt(delayMs);
     this.receivers = new Set();
     this.senders = [];
     this.selectWaiters = new Set();
@@ -77,9 +80,12 @@ class JetWebChannel {
       this.senders.push({ value, resolve });
     });
   }
-
-  close() {
-    if (this.closed) return;
+  close(cancelled = false) {
+    if (this.closed) {
+      this.cancelled ||= cancelled;
+      return;
+    }
+    this.cancelled = cancelled;
     this.closed = true;
     for (const resolve of this.receivers) resolve(jet_web_closed_result());
     this.receivers.clear();
@@ -128,7 +134,32 @@ function jet_channel_receive(receiver) {
 }
 
 function jet_channel_close(endpoint) {
-  endpoint.channel.close();
+  endpoint.channel.close(endpoint instanceof JetWebReceiver);
+}
+
+function jet_channel_try_receive(receiver) {
+  const result = receiver.channel.tryReceive();
+  return result.ready ? jet_option_some(result.value) : jet_option_none();
+}
+
+function jet_channel_is_timer(receiver) {
+  return receiver.channel.kind === "timer";
+}
+
+function jet_channel_is_interval(receiver) {
+  return receiver.channel.kind === "interval";
+}
+
+function jet_channel_is_cancelled(receiver) {
+  return receiver.channel.cancelled;
+}
+
+function jet_channel_is_ready(receiver) {
+  return receiver.channel.queue.length !== 0 || receiver.channel.closed;
+}
+
+function jet_channel_delay_ms(receiver) {
+  return receiver.channel.delayMs;
 }
 
 function jet_web_duration_ns(value) {

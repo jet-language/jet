@@ -182,11 +182,19 @@ expr     = precedence climbing over:
 - A program must define `fn run` with no parameters and no return type,
   `fn run() !` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E1308). Execution starts
-  there. `run` never takes `pub` (S12).
-- `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
-  Assigning to an immutable binding is E0111.
-  Names may not shadow an existing name in scope (E0118).
-  Types never annotate the binding name — use `Type{ … }` or a signature/field.
+  there. `run` never takes `pub` (S12). Notebook and REPL evaluation may
+  construct their own explicit `run` for the submitted fragment.
+- At ordinary file scope, `name :: value` declares an immutable module global
+  and `name := value` declares a mutable module global. Both use a tier-stable
+  scalar literal (or an immutable string literal), are initialized before
+  `fn run`, and are visible to every function in that file; only `:=` may be
+  assigned after initialization. Computed work belongs inside `fn run`. Inside
+  a function, the same spellings remain local bindings (D-BIND-BARE1).
+- Loose executable statements at ordinary file scope are rejected with E0621;
+  Jet never invents an implicit runtime function. Move executable code into
+  an explicit `fn run`.
+- Names may not shadow an existing name in scope (E0118).
+- Types never annotate the binding name — use `Type{ … }` or a signature/field.
 - `@[ a, b ]@` expands one complete binding or expression statement per entry.
   Multiple fences advance in lock-step. `@[ task1..task8 ]@` generates or
   reuses the ascending numbered names. An expression fence also expands an
@@ -744,18 +752,12 @@ fn integrate(e: &Entity, dt: Float) -[!Mem.Alloc]> {
 }
 ```
 
-(examples/features/memory/effect_denials.jet)
-
-The old `#Policy(no_alloc)`, `#Policy(zero_rc)`, and
-`#Policy(arena_bounded(N))` spellings are tombstoned. Write the corresponding
-`!Mem.*` denial on the function signature; a package manifest writes the same
-right under `authority: .{ holds: { deny: [...] } }`.
-
 `@name :: value` is the explicit compile-time-demand binding
 (S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
-`#Static @` emits a Rust `static`
-when a stable address is required. `#Persist name := value` marks hot-reload
-state on a bare binding (D-PERSIST1).
+At file scope, unmarked `name :: value` and `name := value` are runtime module
+globals; they do not require `#Persist`. `#Static @` emits a Rust `static`
+when a stable address is required. `#Persist name := value` additionally marks
+hot-reload state on a bare binding (D-PERSIST1).
 
 Aliasing rule, stated for humans: *while something is being changed, nobody
 else may be looking at it.* Foreign `read`/`write` spellings are paused under
@@ -4466,12 +4468,12 @@ edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
 written `package.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
 (vision.md's ladder) without discarding what it already declared.
 
-## `target: sandbox` — isolated WASM Component Model packages (c81, D-PLUGIN1=B, D-DEP-WASM1=A)
+## `target: sandbox` — isolated WASM Component Model packages (c81, D-PLUGIN1=A, D-PLUGIN-EXPORT1=A, D-DEP-WASM1=A, D-EMBED2=C)
 
 A package built `target: sandbox` compiles to an isolated `wasm32` Component
 Model module instead of a native binary. A host program loads and calls it —
 safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
-sandbox is the safety boundary, by construction. This is a general
+Component is the safety boundary, by construction. This is a general
 application-sandbox substrate (WIT world `jetplugin`), distinct from PATH
 `jet-*` helpers (D-DX5) and from the compiler-extension API (Tower #549,
 D-DX5-HOOK1=A: typed read-only post-sema snapshot in world
@@ -4504,27 +4506,52 @@ A host is an ordinary native Jet program:
 use core.plugin as plugin
 
 fn run() {
-    mathkit :: plugin.load("mathkit.wasm")
-    area :: mathkit.call("scale", [6.0, 7.0]) ?? panic("scale failed")
+    policy :: Authority.from_rights(["FS.Read:repo"])
+    mathkit :: plugin.load("mathkit.wasm", policy)
+    area :: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
 }
 ```
 
-`Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) -> Float !String`,
-`.call_int(name, [Int]) -> Int !String`, `.call_bool(name, [Bool]) -> Bool
-!String`, and `.call_text(name, [String]) -> String !String` are the typed instance
-methods. Every exported function remains homogeneous: all parameters and the
-return type use the same `Int`, `Float`, `Bool`, or `Text` shape (E1260). The
-wasmtime host embedded
-via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
-runtime-side only, I6) registers **zero host imports** — deny-by-default
-authority: a sandbox that tried to touch the filesystem, network, or clock
-simply fails to instantiate at load time, reported as a clean `Err`, never a
-crash (I2). A sandbox's own code may not use any host effect — caught at build
-time as E1258, not deferred to that runtime failure. Guest-local `Mem` effects
-remain allowed because the Component Model Text ABI needs sandbox memory for
-string arguments and results.
+`Plugin.load(path, authority) -> Plugin<Interface>` produces a typed handle.
+The handle exposes the frozen, registered Component export names as ordinary
+named methods; the method's complete parameter and result contract is checked
+before code generation. There is no dynamic export lookup or missing-export
+fallback to teach. Every exported function remains homogeneous: all parameters
+and the return type use the same `Int`, `Float`, `Bool`, or `Text` shape
+(E1260), or a recursively closed Component Model shape.
+
+At load, the Component loader reads the module under the explicit,
+resource-scoped `FS.Read` authority and preflights every declared WIT import
+as a typed fact. The guest's `authority.needs` and the one narrowed Authority
+must cover each fact before the linker registers it or instantiation starts.
+Unknown, wrong-shape, missing, or denied imports fail closed before guest code
+or an external effect can run. A guest with no declared imports has an
+explicit empty capability set, never an ambient fallback. Registered imports
+re-check the same typed decision at the call edge and apply the same resource
+scope to their path or endpoint arguments. A failure is a clean `Err`, not a
+host crash (I2).
+
+A sandbox guest may declare supported host effects through its package
+`authority.needs`; the compiler checks those declarations and the Component
+host enforces them at load. Guest-local `Mem` effects remain allowed because
+the Component Model Text ABI needs sandbox memory for string arguments and
+results. New host capabilities still require a ratified decision.
+
+D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
+target field (`sandbox { export: "mathkit" }`), defaulting to the package
+name. D-PLUGIN-VERSION1=A: the exported interface is frozen via
+`Sema::ApiFreeze`'s pub-metadata semver-snapshot mechanism (the same one an
+ordinary library's public API uses, E1218/E2601) — keyed `plugin__<export>`
+in `.jet/cache/api/` so it never collides with a library's own frozen API in
+the same project. Rebuilding a sandbox with an unchanged interface freezes
+silently; removing or changing an export is E1257, naming the exact delta.
+
+Full worked example: `examples/features/packages/sandbox_mathkit/` (a
+`sandbox_src/` package + a host `run.jet`; golden-enforced, I5). New
+diagnostics: E1257 (interface changed incompatibly), E1258 (authority
+denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
+shape) — see docs/spec/diagnostics.md.
 
 D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
 target field (`sandbox { export: "mathkit" }`), defaulting to the package

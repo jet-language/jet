@@ -1,76 +1,111 @@
 // core.encoding.base64 — RFC 4648 §4 standard and §5 URL alphabets.
 //
-// `encode` / `decode` use `A-Za-z0-9+/` with `=` padding. `encode_url` /
-// `decode_url` use `A-Za-z0-9-_` and omit padding on encode; `decode_url`
-// still accepts optional `=` so tokens from either spelling round-trip.
-// Whitespace is rejected. There is no "loose" decoder in this module; strip
-// or canonicalize first.
-//
-// Edition 2027 of the compiler builtin is strict the same way. This Jet
-// source matches that contract so cutover does not change decode failures.
+// Standard encoding is padded; URL encoding is unpadded.  Both decoders are
+// canonical and reject whitespace, mixed alphabets, malformed padding, and
+// non-zero unused bits instead of silently repairing the input.
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
+#Error
+pub struct Base64Error {
+    pub reason: String
+}
+
+impl Base64Error {
+    pub fn new(reason: String) -> Base64Error { Base64Error{reason: reason} }
+}
+
+fn rewrap(reason: String) -> Base64Error { Base64Error{reason: reason} }
+
+
+fn u8_int(b: U8) -> Int { Int.from_u8(b) }
 
 @c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
 @c_url_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
-/// Standard Base64 with padding.
 pub fn encode(data: [U8]) -> String { encode_with(data, @c_alphabet, true) }
 
-/// URL-safe Base64 without padding.
 pub fn encode_url(data: [U8]) -> String { encode_with(data, @c_url_alphabet, false) }
 
-/// Decode standard Base64. Padding must be correct when present.
-pub fn decode(text: String) -> [U8] { decode_with(text, false) }
+pub fn decode(text: String) -> [U8] !Base64Error { decode_with(text, false) }
 
-/// Decode URL-safe Base64. Standard alphabet characters are rejected so a
-/// mistaken `+`/`/` cannot silently land in a URL token.
-pub fn decode_url(text: String) -> [U8] { decode_with(text, true) }
-/// Python-compatible spelling for standard Base64 encoding.
+pub fn decode_url(text: String) -> [U8] !Base64Error { decode_with(text, true) }
+
 pub fn b64encode(data: [U8]) -> String { encode(data) }
-
-/// Explicit standard-alphabet spelling for Base64 encoding.
 pub fn standard_b64encode(data: [U8]) -> String { encode(data) }
-
-/// Python-compatible spelling for URL-safe Base64 encoding.
 pub fn urlsafe_b64encode(data: [U8]) -> String { encode_url(data) }
+pub fn b64decode(text: String) -> [U8] !Base64Error { decode(text) }
+pub fn standard_b64decode(text: String) -> [U8] !Base64Error { decode(text) }
+pub fn urlsafe_b64decode(text: String) -> [U8] !Base64Error { decode_url(text) }
 
-/// Python-compatible spelling for standard Base64 decoding.
-pub fn b64decode(text: String) -> [U8] { decode(text) }
-
-/// Explicit standard-alphabet spelling for Base64 decoding.
-pub fn standard_b64decode(text: String) -> [U8] { decode(text) }
-
-/// Python-compatible spelling for URL-safe Base64 decoding.
-pub fn urlsafe_b64decode(text: String) -> [U8] { decode_url(text) }
-/// Python-compatible uppercase hexadecimal aliases.
 pub fn b16encode(data: [U8]) -> String { hex.encode_upper(data) }
-pub fn b16decode(text: String) -> [U8] { hex.decode(text) }
-
-/// Python-compatible Base32 aliases.
+pub fn b16decode(text: String) -> [U8] !Base64Error { decode_hex(text) }
 pub fn b32encode(data: [U8]) -> String { base32.encode(data) }
-pub fn b32decode(text: String) -> [U8] { base32.decode(text) }
+pub fn b32decode(text: String) -> [U8] !Base64Error { decode_base32(text) }
 pub fn b32hexencode(data: [U8]) -> String { base32.b32hexencode(data) }
-pub fn b32hexdecode(text: String) -> [U8] { base32.b32hexdecode(text) }
+pub fn b32hexdecode(text: String) -> [U8] !Base64Error { decode_base32hex(text) }
 
-/// Python-compatible Adobe Ascii85 aliases.
-pub fn a85encode(data: [U8]) -> String { encode(data) }
-pub fn a85decode(text: String) -> [U8] { decode(text) }
+/// Adobe Ascii85 without optional `<~` framing.
+pub fn a85encode(data: [U8]) -> String { ascii85_encode(data) }
+pub fn a85decode(text: String) -> [U8] !Base64Error { ascii85_decode(text) }
 
-/// Python-compatible RFC 1924 Base85 aliases.
-pub fn b85encode(data: [U8]) -> String { encode(data) }
-pub fn b85decode(text: String) -> [U8] { decode(text) }
+/// RFC 1924 Base85.
+pub fn b85encode(data: [U8]) -> String !Base64Error { base85_encode(data, @c_b85_alphabet, false) }
+pub fn b85decode(text: String) -> [U8] !Base64Error { base85_decode(text, @c_b85_alphabet, false) }
 
-/// Python-compatible ZeroMQ Z85 aliases.
-pub fn z85encode(data: [U8]) -> String { encode(data) }
-pub fn z85decode(text: String) -> [U8] { decode(text) }
+/// ZeroMQ Z85. Z85 intentionally requires complete 4-byte/5-character
+/// quanta; silently padding a key would change its value.
+pub fn z85encode(data: [U8]) -> String !Base64Error { base85_encode(data, @c_z85_alphabet, true) }
+pub fn z85decode(text: String) -> [U8] !Base64Error { base85_decode(text, @c_z85_alphabet, true) }
 
+pub fn encodebytes(data: [U8]) -> String {
+    raw :: encode(data).bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        end := i + 76
+        if end > raw.len() -> end = raw.len()
+        loop j in i..<end -> out.push(raw[j])
+        out.push(U8{10})
+        i = end
+    }
+    String.from_bytes(out) ?? ""
+}
 
-pub fn encodebytes(data: [U8]) -> String { encode(data) }
-pub fn decodebytes(text: String) -> [U8] { decode(text) }
-pub fn b2a_base64(data: [U8]) -> String { encode(data) }
-pub fn a2b_base64(text: String) -> [U8] { decode(text) }
+pub fn decodebytes(text: String) -> [U8] !Base64Error {
+    raw := [U8]{}
+    loop b in text.bytes() {
+        n :: b
+        if n == 9 || n == 10 || n == 11 || n == 12 || n == 13 || n == 32 -> next
+        raw.push(b)
+    }
+    decode(String.from_bytes(raw) ?? "")
+}
+
+pub fn b2a_base64(data: [U8]) -> String { "{encode(data)}\n" }
+pub fn a2b_base64(text: String) -> [U8] !Base64Error { decodebytes(text) }
+fn decode_hex(text: String) -> [U8] !Base64Error {
+    result :: hex.decode(text)
+    if result == {
+        .Ok(value) -> return Ok(value)
+        .Err(_) -> return Err(rewrap("invalid Base16 input"))
+    }
+}
+
+fn decode_base32(text: String) -> [U8] !Base64Error {
+    result :: base32.decode(text)
+    if result == {
+        .Ok(value) -> return Ok(value)
+        .Err(_) -> return Err(rewrap("invalid Base32 input"))
+    }
+}
+
+fn decode_base32hex(text: String) -> [U8] !Base64Error {
+    result :: base32.b32hexdecode(text)
+    if result == {
+        .Ok(value) -> return Ok(value)
+        .Err(_) -> return Err(rewrap("invalid Base32hex input"))
+    }
+}
 
 fn encode_with(data: [U8], alphabet: String, pad: Bool) -> String {
     ab :: alphabet.bytes()
@@ -104,55 +139,64 @@ fn encode_with(data: [U8], alphabet: String, pad: Bool) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn decode_with(text: String, url: Bool) -> [U8] {
+fn decode_with(text: String, url: Bool) -> [U8] !Base64Error {
     raw :: text.bytes()
+    if raw.len() == 0 -> return Ok([U8]{})
     table :: decode_table(url)
-    // Strip padding for length math; at most two `=` bytes at the end.
     pad := 0
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{61}) {
         pad += 1
         end -= 1
-        if pad > 2 {
-            return Err("invalid Base64 padding; at most two '=' bytes may trail the alphabet")
-        }
     }
-    if end % 4 == 1 {
-        return Err("invalid Base64 length; leftover 1 byte cannot encode a full quantum")
+    if url && pad > 0 -> return Err(rewrap("invalid Base64url padding; '=' is not part of the canonical URL alphabet"))
+    if pad > 2 -> return Err(rewrap("invalid Base64 padding; at most two '=' characters may trail the alphabet"))
+    loop i in 0..<end {
+        if raw[i] == (U8{61}) -> return Err(rewrap("invalid Base64 padding; '=' may appear only at the end"))
+        if table[u8_int(raw[i])] < 0 -> return Err(rewrap("invalid Base64 character; expected the selected RFC 4648 alphabet"))
+    }
+    rem :: end %% 4
+    if rem == 1 -> return Err(rewrap("invalid Base64 length; encoded length cannot represent whole bytes"))
+    expected := 0
+    if rem == 2 -> expected = 2
+    if rem == 3 -> expected = 1
+    if url {
+        if pad != 0 -> return Err(rewrap("invalid Base64url padding; '=' is not part of the canonical URL alphabet"))
+    } else if pad != expected {
+        return Err(rewrap("invalid Base64 padding; expected the RFC 4648 padding for the final quantum"))
+    }
+    if rem == 2 {
+        last :: table[u8_int(raw[end - 1])]
+        if (last & 15) != 0 -> return Err(rewrap("invalid Base64 encoding; non-zero unused bits"))
+    }
+    if rem == 3 {
+        last :: table[u8_int(raw[end - 1])]
+        if (last & 3) != 0 -> return Err(rewrap("invalid Base64 encoding; non-zero unused bits"))
     }
     out := [U8]{}
     i := 0
     loop i + 4 <= end {
-        a :: table_value(table, raw[i])
-        b :: table_value(table, raw[i + 1])
-        c :: table_value(table, raw[i + 2])
-        d :: table_value(table, raw[i + 3])
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        c :: table[u8_int(raw[i + 2])]
+        d :: table[u8_int(raw[i + 3])]
         n :: (a << 18) | (b << 12) | (c << 6) | d
-        b0 :: (n >> 16) & 255
-        b1 :: (n >> 8) & 255
-        b2 :: n & 255
-        out.push(U8{b0})
-        out.push(U8{b1})
-        out.push(U8{b2})
+        out.push(U8{(n >> 16) & 255})
+        out.push(U8{(n >> 8) & 255})
+        out.push(U8{n & 255})
         i += 4
     }
-    rem :: end - i
     if rem == 2 {
-        a :: table_value(table, raw[i])
-        b :: table_value(table, raw[i + 1])
-        n :: (a << 18) | (b << 12)
-        b0 :: (n >> 16) & 255
-        out.push(U8{b0})
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        out.push(U8{((a << 2) | (b >> 4)) & 255})
     }
     if rem == 3 {
-        a :: table_value(table, raw[i])
-        b :: table_value(table, raw[i + 1])
-        c :: table_value(table, raw[i + 2])
-        n :: (a << 18) | (b << 12) | (c << 6)
-        b0 :: (n >> 16) & 255
-        b1 :: (n >> 8) & 255
-        out.push(U8{b0})
-        out.push(U8{b1})
+        a :: table[u8_int(raw[i])]
+        b :: table[u8_int(raw[i + 1])]
+        c :: table[u8_int(raw[i + 2])]
+        out.push(U8{((a << 2) | (b >> 4)) & 255})
+        out.push(U8{((b << 4) | (c >> 2)) & 255})
     }
     Ok(out)
 }
@@ -162,24 +206,13 @@ fn decode_table(url: Bool) -> [Int] {
     loop _ in 0..<256 -> table.push(-1)
     alphabet :: if url -> @c_url_alphabet else -> @c_alphabet
     ab :: alphabet.bytes()
-    loop i in 0..<ab.len() {
-        idx :: ab[i]
-        table[u8_int(idx)] = i
-    }
+    loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     table
-}
-
-fn table_value(table: [Int], b: U8) -> Int {
-    n :: table[u8_int(b)]
-    if n < 0 {
-        return Err("invalid Base64 character; expected the alphabet, and optional trailing '='")
-    }
-    Ok(n)
 }
 
 pub fn encode_url_padded(data: [U8]) -> String { encode_with(data, @c_url_alphabet, true) }
 
-pub fn decode_padded(text: String) -> [U8] { decode(text) }
+pub fn decode_padded(text: String) -> [U8] !Base64Error { decode(text) }
 
 pub fn pad(text: String) -> String {
     raw :: text.bytes()
@@ -207,21 +240,138 @@ pub fn unpad(text: String) -> String {
 }
 
 pub fn is_base64(text: String) -> Bool {
-    raw :: text.bytes()
-    if raw.len() == 0 -> return false
+    decode(text) == .Ok(_)
+}
+
+@c_b85_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{{|}}~"
+@c_z85_alphabet :: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{{}}@%$#"
+
+fn ascii85_encode(data: [U8]) -> String {
+    out := [U8]{}
     i := 0
-    pad := 0
-    loop i < raw.len() {
-        n :: raw[i]
-        if n == 61 {
-            pad = pad + 1
-            if pad > 2 -> return false
+    loop i < data.len() {
+        remain :: data.len() - i
+        width := remain
+        if width > 4 -> width = 4
+        a :: u8_int(data[i])
+        b :: if width > 1 -> u8_int(data[i + 1]) else -> 0
+        c :: if width > 2 -> u8_int(data[i + 2]) else -> 0
+        d :: if width > 3 -> u8_int(data[i + 3]) else -> 0
+        n :: (a << 24) | (b << 16) | (c << 8) | d
+        if width == 4 && n == 0 {
+            out.push(U8{122})
         } else {
-            if pad > 0 -> return false
-            ok := (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 47 || n == 45 || n == 95
-            if !ok -> return false
+            digits := [U8]{}
+            v := n
+            loop _ in 0..<5 {
+                digits.push(U8{33 + (v %% 85)})
+                v = v /% 85
+            }
+            k := digits.len()
+            loop k > 0 {
+                k -= 1
+                if width == 4 || k >= 5 - (width + 1) -> out.push(digits[k])
+            }
         }
-        i = i + 1
+        i += width
     }
-    raw.len() %% 4 == 0 || pad > 0
+    String.from_bytes(out) ?? ""
+}
+
+fn ascii85_decode(text: String) -> [U8] !Base64Error {
+    raw :: text.bytes()
+    out := [U8]{}
+    group := [Int]{}
+    loop b in raw {
+        n :: u8_int(b)
+        if n == 122 {
+            if group.len() != 0 -> return Err(rewrap("invalid Ascii85 `z` shorthand inside a quantum"))
+            out.push(U8{0})
+            out.push(U8{0})
+            out.push(U8{0})
+            out.push(U8{0})
+            next
+        }
+        if n < 33 || n > 117 -> return Err(rewrap("invalid Ascii85 character"))
+        group.push(n - 33)
+        if group.len() == 5 {
+            value := 0
+            loop d in group -> value = value * 85 + d
+            out.push(U8{(value >> 24) & 255})
+            out.push(U8{(value >> 16) & 255})
+            out.push(U8{(value >> 8) & 255})
+            out.push(U8{value & 255})
+            group = [Int]{}
+        }
+    }
+    if group.len() == 1 -> return Err(rewrap("invalid Ascii85 length; a final quantum needs at least two characters"))
+    if group.len() > 1 {
+        original :: group.len()
+        loop group.len() < 5 -> group.push(84)
+        value := 0
+        loop d in group -> value = value * 85 + d
+        loop j in 0..<(original - 1) -> out.push(U8{(value >> (24 - j * 8)) & 255})
+    }
+    Ok(out)
+}
+
+fn base85_encode(data: [U8], alphabet: String, require_full: Bool) -> String !Base64Error {
+    if require_full && data.len() %% 4 != 0 -> return Err(rewrap("Z85 encoding requires a byte length divisible by four"))
+    ab :: alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < data.len() {
+        width := data.len() - i
+        if width > 4 -> width = 4
+        a :: u8_int(data[i])
+        b :: if width > 1 -> u8_int(data[i + 1]) else -> 0
+        c :: if width > 2 -> u8_int(data[i + 2]) else -> 0
+        d :: if width > 3 -> u8_int(data[i + 3]) else -> 0
+        value :: (a << 24) | (b << 16) | (c << 8) | d
+        digits := [Int]{}
+        v := value
+        loop _ in 0..<5 {
+            digits.push(v %% 85)
+            v = v /% 85
+        }
+        k := digits.len()
+        loop k > 0 {
+            k -= 1
+            if width == 4 || k >= 5 - (width + 1) -> out.push(ab[digits[k]])
+        }
+        i += width
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn base85_decode(text: String, alphabet: String, require_full: Bool) -> [U8] !Base64Error {
+    raw :: text.bytes()
+    if require_full && raw.len() %% 5 != 0 -> return Err(rewrap("Z85 decoding requires a character length divisible by five"))
+    if !require_full && raw.len() %% 5 == 1 -> return Err(rewrap("invalid Base85 length; a final quantum needs at least two characters"))
+    ab :: alphabet.bytes()
+    table := [Int]{}
+    loop _ in 0..<256 -> table.push(-1)
+    loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        remain :: raw.len() - i
+        width := remain
+        if width > 5 -> width = 5
+        digits := [Int]{}
+        loop j in 0..<width {
+            v :: table[u8_int(raw[i + j])]
+            if v < 0 -> return Err(rewrap("invalid Base85 character"))
+            digits.push(v)
+        }
+        original :: width
+        loop digits.len() < 5 -> digits.push(84)
+        value := 0
+        loop d in digits -> value = value * 85 + d
+        count := 4
+        if original < 5 -> count = original - 1
+        loop j in 0..<count -> out.push(U8{(value >> (24 - j * 8)) & 255})
+        i += width
+    }
+    Ok(out)
 }

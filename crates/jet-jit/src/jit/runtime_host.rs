@@ -38,7 +38,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Cell as LocalCell, Collections, Compress, Compute, Concurrency, CoreHost, Crypto,
+    Cell as LocalCell, Collections, Compute, Concurrency, CoreHost, Crypto,
     Encoding, Fmt, JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text,
     Time, RESIDENT_JIT_RUN_LOCK,
 };
@@ -6527,6 +6527,12 @@ fn runtime_clone_result(
 ) -> Result<i64, String> {
     let result = jit_result(runtime, value)
         .ok_or_else(|| format!("JIT copy `{}` value is not a result", descriptor.name))?;
+    if !result.ok && descriptor.kind == RuntimeValueKind::Option {
+        // An absent Option has no payload. Its descriptor intentionally carries
+        // only the success type; cloning a nonexistent failure value must not
+        // demand a Result error descriptor.
+        return Ok(alloc_jit_result(runtime, false, 0));
+    }
     let payload_type = if result.ok { descriptor.ok } else { descriptor.err }
         .ok_or_else(|| {
             format!(
@@ -8383,7 +8389,7 @@ fn jet_jit_err_apply_conversion(handle: i64, source: i64, target: i64) -> i64 {
             rt.set_host_fault("declared conversion has an invalid default Err carrier");
             return 0;
         };
-        jet_foundation::Outcome::jet_err_apply_conversion(&mut error, source, target);
+        error = jet_foundation::Outcome::jet_err_apply_conversion(error, source, target);
         rt.errors.push(error);
         rt.errors.len() as i64
     })
@@ -11742,8 +11748,6 @@ pub(crate) fn declare_host_fns_for_module<M: Module>(module: &mut M) -> Result<H
     let encoding = Encoding::declare_encoding_host_fns(module)?;
     let stream = crate::enc_stream::declare_stream_host_fns(module)?;
     let fmt = Fmt::declare_fmt_host_fns(module)?;
-    let compress = Compress::declare_compress_host_fns(module)?;
-    let archive = Archive::declare_archive_host_fns(module)?;
     let process = Process::declare_process_host_fns(module)?;
     let num = Numeric::declare_numeric_host_fns(module)?;
     let solver = Solver::declare_solver_host_fns(module)?;
@@ -11771,8 +11775,8 @@ pub(crate) fn declare_host_fns_for_module<M: Module>(module: &mut M) -> Result<H
     let math_extra = crate::MathExtra::declare_math_extra_host_fns(module)?;
     let ffi = crate::Ffi::declare_ffi_host_fns(module)?;
     declare_host_fns(
-        module, coll, compute, memory, cell, conc, core, encoding, stream, fmt, compress,
-        archive, process, num, solver, random, text, sketch, args, db, crypto, net, net_http,
+        module, coll, compute, memory, cell, conc, core, encoding, stream, fmt,
+        process, num, solver, random, text, sketch, args, db, crypto, net, net_http,
         game, plugin, raylib, layout, reactive, ui, web, parse, data, time, io, watcher, math,
         math_extra, ffi,
     )
@@ -11801,8 +11805,6 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Encoding::register_encoding_symbols(&mut builder);
     crate::enc_stream::register_stream_symbols(&mut builder);
     Fmt::register_fmt_symbols(&mut builder);
-    Compress::register_compress_symbols(&mut builder);
-    Archive::register_archive_symbols(&mut builder);
     Process::register_process_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
@@ -15183,8 +15185,6 @@ host_fns! {
         encoding: Encoding::EncodingHostFns,
         stream: crate::enc_stream::StreamHostFns,
         fmt: Fmt::FmtHostFns,
-        compress: Compress::CompressHostFns,
-        archive: Archive::ArchiveHostFns,
         process: Process::ProcessHostFns,
         num: Numeric::NumericHostFns,
         solver: Solver::SolverHostFns,

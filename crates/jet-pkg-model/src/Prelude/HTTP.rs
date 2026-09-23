@@ -74,6 +74,8 @@ const HTTP_RESPONSE_BODY_LIMIT: usize = 64 * 1024 * 1024;
 const HTTP_RESPONSE_READ_CHUNK_LIMIT: usize = 64 * 1024;
 const HTTP_H2_FRAME_OVERHEAD: usize = 9;
 const HTTP_H2_QUEUE_FRAME_LIMIT: usize = 4096;
+/// Keep abandoned stream ids bounded while late peer frames are discarded.
+const HTTP_H2_ABANDONED_STREAM_LIMIT: usize = HTTP_H2_QUEUE_FRAME_LIMIT;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
 /// to the public closed HTTPError without carrying backend prose across the seam.
@@ -1192,6 +1194,7 @@ struct H2Connection {
     max_frame: usize,
     streams: HashMap<u32, VecDeque<H2Frame>>,
     active_streams: std::collections::HashSet<u32>,
+    abandoned_streams: std::collections::HashSet<u32>,
     queued_frame_bytes: usize,
     queued_frame_count: usize,
 }
@@ -1212,10 +1215,12 @@ impl H2Connection {
             max_frame: 16_384,
             streams: HashMap::new(),
             active_streams: std::collections::HashSet::new(),
+            abandoned_streams: std::collections::HashSet::new(),
             queued_frame_bytes: 0,
             queued_frame_count: 0,
         })
     }
+
 
     fn release_queued_frame(&mut self, frame: &H2Frame) {
         self.queued_frame_bytes = self
@@ -1278,6 +1283,35 @@ impl H2Connection {
             }
         }
     }
+    /// Cancel a response whose body was abandoned before END_STREAM.  The
+    /// connection stays reusable only after the peer has an explicit reset;
+    /// late DATA/HEADERS are ignored through `abandoned_streams`.
+    fn abandon_stream(&mut self, stream: u32) -> Result<(), JetHTTPBridgeError> {
+        if !self.active_streams.contains(&stream) {
+            self.release_stream(stream);
+            return Ok(());
+        }
+        if self.abandoned_streams.len() >= HTTP_H2_ABANDONED_STREAM_LIMIT {
+            self.release_stream(stream);
+            return Err(JetHTTPBridgeError::Protocol);
+        }
+        self.abandoned_streams.insert(stream);
+        let result = h2_write_frame(&mut self.io, 3, 0, stream, &8u32.to_be_bytes())
+            .and_then(|()| self.io.flush().map_err(map_h2_io));
+        self.release_stream(stream);
+        result
+    }
+
+    fn discard_abandoned_frame(&mut self, frame: &H2Frame) -> bool {
+        if !self.abandoned_streams.contains(&frame.stream) {
+            return false;
+        }
+        if frame.kind == 3 || matches!(frame.kind, 0 | 1) && frame.flags & 1 != 0 {
+            self.abandoned_streams.remove(&frame.stream);
+        }
+        true
+    }
+
 
     fn control(&mut self, frame: &H2Frame) -> Result<bool, JetHTTPBridgeError> {
         match frame.kind {
@@ -1366,6 +1400,9 @@ impl H2Connection {
         self.io.flush().map_err(map_h2_io)?;
         loop {
             let frame = h2_read_frame(&mut self.io)?;
+            if self.discard_abandoned_frame(&frame) {
+                continue;
+            }
             if frame.kind == 6 && frame.flags & 1 != 0 && frame.payload == PAYLOAD {
                 return Ok(());
             }
@@ -1414,6 +1451,9 @@ impl H2Connection {
                     || self.stream_send_windows.get(&stream).copied().unwrap_or(0) <= 0
                 {
                     let frame = h2_read_frame(&mut self.io)?;
+                    if self.discard_abandoned_frame(&frame) {
+                        continue;
+                    }
                     if !self.control(&frame)? {
                         self.enqueue_frame(frame, Some(stream))?;
                     }
@@ -1473,11 +1513,10 @@ impl H2Connection {
                     Err(error) => return Err(error),
                 },
             };
-            if self.control(&frame)? {
+            if self.discard_abandoned_frame(&frame) {
                 continue;
             }
-            if frame.stream != stream {
-                self.enqueue_frame(frame, None)?;
+            if self.control(&frame)? {
                 continue;
             }
             if frame.kind == 3 {
@@ -3873,15 +3912,14 @@ fn decoded_gzip(
         Err(JetHTTPBridgeError::UnsupportedEncoding)
     }
 }
-
 fn read_h2_response(
     connection: Arc<Mutex<H2Connection>>,
     stream_id: u32,
     status: i64,
     headers: Vec<(String, String)>,
     end_stream: bool,
-    _key: PoolKey,
-    _pool: Arc<Mutex<ClientPool>>,
+    key: PoolKey,
+    pool: Arc<Mutex<ClientPool>>,
     decompress: bool,
     facts: Arc<ResponseFacts>,
     request_started: Instant,
@@ -3898,6 +3936,8 @@ fn read_h2_response(
     }
     let reader = H2BodyReader {
         connection: Some(connection),
+        key,
+        pool,
         stream_id,
         pending: Vec::new(),
         cursor: 0,
@@ -3945,6 +3985,8 @@ fn read_h2_response(
 
 struct H2BodyReader {
     connection: Option<Arc<Mutex<H2Connection>>>,
+    key: PoolKey,
+    pool: Arc<Mutex<ClientPool>>,
     stream_id: u32,
     pending: Vec<u8>,
     cursor: usize,
@@ -4010,6 +4052,9 @@ impl H2BodyReader {
                 Some(frame) => frame,
                 None => h2_read_frame(&mut connection.io).map_err(h2_reader_error)?,
             };
+            if connection.discard_abandoned_frame(&frame) {
+                continue;
+            }
             if connection.control(&frame).map_err(h2_reader_error)? {
                 continue;
             }
@@ -4097,7 +4142,27 @@ impl H2BodyReader {
 
 impl Drop for H2BodyReader {
     fn drop(&mut self) {
-        self.release_stream();
+        let Some(session) = self.connection.take() else {
+            self.permit.take();
+            return;
+        };
+        let cleanup = session
+            .lock()
+            .map_err(|_| JetHTTPBridgeError::Internal)
+            .and_then(|mut connection| {
+                if self.end_after_pending {
+                    connection.release_stream(self.stream_id);
+                    Ok(())
+                } else {
+                    connection.abandon_stream(self.stream_id)
+                }
+            });
+        if cleanup.is_err() {
+            if let Ok(mut pool) = self.pool.lock() {
+                pool.remove_h2(&self.key, &session);
+            }
+        }
+        self.permit.take();
     }
 }
 
