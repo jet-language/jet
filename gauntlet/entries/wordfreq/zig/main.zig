@@ -6,6 +6,7 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
     const input = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], allocator, .limited(64 * 1024 * 1024));
+    if (!std.unicode.utf8ValidateSlice(input)) return error.InvalidUtf8;
     var counts = std.StringHashMap(usize).init(allocator);
     var words = std.ArrayList(Entry).empty;
     var tokens = std.mem.tokenizeAny(u8, input, " \n\t\r\x0c\x0b");
