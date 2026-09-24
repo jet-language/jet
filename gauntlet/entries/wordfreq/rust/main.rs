@@ -4,7 +4,10 @@ fn main() {
     let input = fs::read_to_string(env::args().nth(1).unwrap()).unwrap();
     let mut counts = HashMap::<&str, usize>::new();
     let mut total: usize = 0;
-    for word in input.split_ascii_whitespace() {
+    for word in input
+        .split(|character: char| character == ' ' || ('\t'..='\r').contains(&character))
+        .filter(|word| !word.is_empty())
+    {
         *counts.entry(word).or_default() += 1;
         total += 1;
     }
