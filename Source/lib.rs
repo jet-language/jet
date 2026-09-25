@@ -138,15 +138,15 @@ pub mod Store;
 use std::collections::BTreeMap;
 use Diagnostics::Diagnostic;
 
-/// Run compiler work on the canonical worker with the compiler Core callback
-/// installed. Both the public frontend helpers and lower Driver adapters use
-/// this seam, so direct checks and build preparation cannot lose the
-/// `core.compiler` package-view bridge.
+/// Run root compiler work with its scoped Core evaluator on the compiler worker.
+/// This facade installs the callback; the inward Driver seam carries it onto
+/// the worker without depending on this crate. Callers needing `core.compiler`
+/// operations must enter here, not call the worker-stack primitive directly.
 #[doc(hidden)]
 pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    // Nested compiler entry points already have this callback installed. Do
-    // not reinstall it: `Comptime::with_ambient` clears its temporary hooks
-    // rather than restoring the caller's hooks when the body returns.
+    // Nested root entries keep the installed callback and the caller's other
+    // ambient hooks. The outer with_ambient scope restores its previous hooks
+    // on both return and unwind; the Driver reuses an active compiler worker.
     if Comptime::ambient_hooks()
         .0
         .is_some_and(|hook| {

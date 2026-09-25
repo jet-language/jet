@@ -4,25 +4,20 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 
 ## Pipeline
 
+```text
+Jet source
+  -> lexer -> tokens with byte spans
+  -> parser -> AST
+  -> sema -> checked bundle and semantic facts
+  -> TIR -> canonical, validated and optimized MIR
+               |-> MIRRust -> Rust -> rustc/LLVM -> native artifact
+               |-> Cranelift -> resident native execution
+               `-> MIR evaluator -> interpreter/comptime execution
 ```
- Jet source (.jet)
-        │
-        ▼
- jet-lexer ──► tokens (every token has a byte Span)
-        │
-        ▼
-jet-parser ──► AST                      ┐
-        │                               │  the FRONT END owns all
-        ▼                               │  semantics and every
-  jet-sema ──► checked AST              │  user-facing diagnostic
-        │      (M2: + ownership check)  ┘
-        ▼
-jet-codegen ──► boring Rust source
-        │
-        ▼
-     rustc  ──► native binary      (verifier + optimizer; never
-                                    speaks to users — see R5)
-```
+
+The front end owns language checks and user-facing compiler diagnostics.
+Backends consume checked facts; a rustc rejection of generated Rust is an
+internal compiler error, not another language checker.
 
 ### Build graph and compiler nodes
 
@@ -39,20 +34,19 @@ owns node identity and dependencies, while the store owns run evidence.
 
 ### Typed IR (TIR) — the codegen seam
 
-Codegen does not read the AST plus side registries; it lowers the checked AST to a
-**typed IR** (`crates/jet-codegen/src/Codegen/TIR/`) that carries only sema-approved facts, then emits
-Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
-is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
-body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
-`impl Old -> New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
-coverage, and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE),
-never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/`emit_stmt`/
-`emit_stmts`/`emit_lambda`) was deleted (c109) once a whole-test-suite byte-parity check proved
-every reachable body routes through the TIR; no legacy emit machinery remains. Constructs the
-gate excludes are provably sema-unreachable (generic-struct methods E0311, bare `?? return`
-in a value fn E0405, nested `??T`, a bare `Variant(n) ->` arm) — they never reach codegen.
-(Type *definitions* — `emit_struct`/`emit_enum`/`emit_trait_def` — are structural, not bodies,
-and emit directly; only executable bodies go through the TIR.)
+The [TIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) accepts the
+checked bundle and carries sema-approved types, access conventions and effects.
+[MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mir.rs) gives those facts
+canonical type, function, place and artifact identities. The resulting MIR is
+validated and optimized before execution or emission. Neither lowering infers
+new language permissions or falls back to an unchecked AST emitter.
+
+The [driver's source compilation path](../../crates/jet-driver/src/Driver/mod.rs)
+lowers the checked bundle once and passes its selected artifact to
+[`MIRRust`](../../crates/jet-codegen/src/Codegen/MIRRust.rs).
+The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
+passes canonical MIR and an artifact identity to the resident backends.
+These are consumers of one checked meaning, not separate front ends.
 
 ### One reflection model
 
@@ -101,7 +95,7 @@ facade and binary host over these internal APIs.
 | `jet-parser` | tokens to AST, formatter | yes (E00xx) |
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
-| `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
+| `jet-codegen` | checked bundle to TIR and canonical MIR; Rust emission and MIR evaluation | **never** |
 | `jet-pkg-model` | **L1**, shared read-only package/config data model: `package.jet` manifest parsing and the optional leading inline `package { … }` carrier, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
 | `jet-env-model` | **L2**, shared pure environment plan model: `ModuleEval` and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes; native Nix cache admission uses the inward `jet-net` streaming transport | package/JetOS diagnostics |
@@ -118,6 +112,102 @@ facade and binary host over these internal APIs.
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
+
+### Retained compiler host boundary
+
+The compiler port changes the implementation language of policy, not the
+ownership of language meaning. A Jet pass must replace its Rust policy at the
+existing seam, with the same inputs, identities, ordering and diagnostics.
+It must not introduce a third front end, a second query verdict, or a new
+execution lens. Rust source emission, rustc/LLVM and Cranelift remain supported
+consumers; self-hosting does not mean replacing them.
+
+The table describes crossing responsibilities, not a list of completed ports.
+Its source links own the executable contracts. The proof-home references are
+Tower acceptance boundaries, not evidence supplied by this inventory.
+
+| Crossing and executable contract | Policy that can live in Jet | Responsibility retained by the Rust host |
+|---|---|---|
+| [Foundation types and syntax](../../crates/jet-foundation/src/lib.rs) → [lexer](../../crates/jet-lexer/src/Lexer/Terminators.rs) | Token/terminator decisions over source facts; foundation and syntax proof home #808 | Source bytes, byte-span validity, raw token payloads and the existing Unicode primitive; no reinterpretation of Jet records as Rust memory |
+| [Parser](../../crates/jet-parser/src/lib.rs) → canonical AST | Grammar and AST construction, #809 | Own and marshal token/AST storage at a private crossing; preserve original spans and diagnostic records rather than parse a second time for the host |
+| [Sema](../../crates/jet-sema/src/lib.rs) → checked bundle/effect facts | Types, effects, ownership and semantic verdicts, #810 | Keep the checked bundle and its facts together; unchecked or mismatched facts must not enter lowering |
+| [TIR/MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) → [MIR consumers](../../crates/jet-foundation/src/JitBackend.rs) | Semantic lowering over already-checked facts, #811 | Canonical MIR validation, artifact selection and retained Rust/Cranelift execution adapters; backends cannot invent a source-level rule |
+| [Comptime ambient bridge](../../crates/jet-comptime/src/Comptime/AmbientRuntime.rs) ↔ [compiler Core evaluator](../../Source/Compiler.rs) | Compiler queries and compile-time/build policy, #812 | Scoped evaluator installation, host capabilities and value/error transport; compiler authority is not a process-global callback |
+| [Loader and Driver](../../crates/jet-driver/src/Driver/mod.rs) ↔ [root entry](../../Source/lib.rs) | Front-end orchestration, #813 | Filesystem/process access, worker lifetime and stack, toolchain invocation and panic transport; no Cargo dependency from an inward seam back to the facade |
+| [Query service](../../crates/jet-driver/src/QueryService.rs) ↔ [query cache](../../crates/jet-queries/src/lib.rs) | Tooling projections of the checked result, #813 | Revision/dependency invalidation and cache storage; cached values retain the checked bundle and effect-fact association, not an independent analysis |
+| [Diagnostics](../../crates/jet-foundation/src/Diagnostics.rs) ↔ [CLI](../../crates/jet-cli/src/lib.rs) | Diagnostic construction and user-facing compiler/tooling policy, #813 | Render registered diagnostics and apply existing exit policy; an internal backend failure must not become a new user-language diagnostic |
+
+Compiler seams depend inward through local path dependencies, as in the
+[driver manifest](../../crates/jet-driver/Cargo.toml); the
+[foundation](../../crates/jet-foundation/Cargo.toml) and
+[query cache](../../crates/jet-queries/Cargo.toml) are leaves. A private Jet pass
+does not justify a new external compiler dependency or a cycle back to the
+root. The [runtime-side JIT dependencies](../../crates/jet-jit/Cargo.toml) have
+their own approved backend/bridge contracts; they are not permission to add
+dependencies to compiler policy.
+
+#### Scoped entry and failure containment
+
+[`Source/lib.rs::run_compiler_work`](../../Source/lib.rs) installs the root's
+`Compiler::eval_core_call_with_type` callback around work. The inward
+[`jet_driver::run_compiler_work`](../../crates/jet-driver/src/lib.rs) carries
+the ambient callbacks onto the
+[`CompilerStack`](../../crates/jet-foundation/src/CompilerStack.rs) worker and
+installs the MIR evaluator. Nested entries reuse that worker. The root callback
+provides the read-only `core.compiler` queries and checked `core.build` queries;
+the lower worker primitive alone does not install this root-owned authority.
+`Comptime::with_ambient` restores the previous callbacks on return and unwind.
+Nothing in this crossing grants runtime code a compile-time compiler API.
+
+This is a scoped Rust call boundary, not a C ABI or a promise about Rust
+`Vec`, enum or pointer layout. The worker transports a Rust panic payload
+unchanged back to its Rust caller; it does not relabel an ICE as a successful
+pass. Machine-code host crossings are different:
+[`jet-jit::host_seam`](../../crates/jet-jit/src/host_seam.rs) catches inside
+each generated C shim and reports through the existing status channel before
+returning to Cranelift code. No unwind may cross a JIT/C frame. A new private
+compiler adapter must preserve these distinct containment rules.
+
+The host, pass and private value contract are source-coupled in one build, with
+no independently versioned public ABI or compatibility negotiation; changing
+the crossing migrates both sides and its behavioral witness in one cutover.
+
+The behavioral boundary witness is
+[`selfhost_host_boundary`](../../tests/selfhost_host_boundary.rs): real
+ambient parser queries return parsed items and malformed-source diagnostics,
+nested calls reuse the worker, and unwinding preserves the payload without
+leaking compiler authority. Bypassing the root wrapper while retaining only
+the lower Driver worker removes the evaluator and makes that witness fail.
+This tests the host boundary, not a Jet implementation of a compiler pass.
+
+#### Terminator-pass crossing
+
+Tower #3581 specifies the first bounded replacement at
+[`Lexer/Terminators.rs`](../../crates/jet-lexer/src/Lexer/Terminators.rs):
+`insert_terminators` and its decision helpers, reached by `lex`, `lex_config`
+and `lex_generated` after raw scanning. Its private input is source bytes plus
+exhaustive indexed raw-token facts, including the existing Unicode-uppercase
+primitive. Its output is ordered `InsertSemi`/`SplitHeader` events. Jet owns
+the insertion and split-header decisions; the host validates bounds/order,
+moves the original payload-bearing tokens and formats the existing diagnostic.
+The raw scanner and parser are outside that pass. Keeping payload ownership
+on the host avoids encoding a second token model or copying compiler objects
+across a supposed stable ABI.
+
+Bootstrap must produce the candidate's checked MIR through the Rust reference
+before installing the scoped private lexer driver. That driver must reach the
+actual Loader/parser/compiler path and evaluate through the existing evaluator.
+A candidate failure is a failure, never permission to fall back to Rust policy.
+This specifies a crossing; it does not install a Jet terminator implementation.
+The pass's own-source, differential, mutation and execution-tier witnesses
+belong to #3581, independently of this host-boundary witness.
+
+The subsequent self-host proof homes remain separate obligations: #814 is the
+pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,
+and #816 is the Jet-built compiler full-suite closeout. The policy-family
+homes #808–#813 and the boundary inventory #218 cannot substitute for those
+bootstrap and fixed-point proofs.
+
 
 ### Machine-wide artifact store
 
