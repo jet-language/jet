@@ -10833,9 +10833,9 @@ pub(crate) fn register_packed_enum_show(enum_name: &str, variants: Vec<(String, 
     });
 }
 
-fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
+fn show_packed_enum(packed: i64, enum_name: &str, rt: &crate::JitRuntime) -> String {
     if enum_name == "IOError" {
-        return crate::Process::process_error_show_text(packed, heap);
+        return crate::Process::process_error_show_text(packed, rt);
     }
     let def = PACKED_ENUM_SHOW.with(|t| t.borrow().get(enum_name).cloned());
     let Some(def) = def else {
@@ -10848,10 +10848,10 @@ fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> St
     let payload = match kind {
         0 => None,
         1 => Some((packed >> 8).to_string()),
-        2 => Some(show_packed_enum(packed >> 8, &nested, heap)),
+        2 => Some(show_packed_enum(packed >> 8, &nested, rt)),
         // String handle in high bits — AOT JetShow uses Debug quotes.
         3 => {
-            let text = heap.clone_string(packed >> 8).unwrap_or_default();
+            let text = rt.heap.clone_string(packed >> 8).unwrap_or_default();
             Some(format!("{text:?}"))
         }
         _ => return format!("<{vname}?>"),
@@ -10859,8 +10859,8 @@ fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> St
     jet_foundation::StructuralDebug::jet_debug_variant(&vname, payload)
 }
 
-pub(crate) fn render_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
-    show_packed_enum(packed, enum_name, heap)
+pub(crate) fn render_packed_enum(packed: i64, enum_name: &str, rt: &crate::JitRuntime) -> String {
+    show_packed_enum(packed, enum_name, rt)
 }
 
 fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
@@ -10879,7 +10879,7 @@ fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
     // is not where the program printed it.
     let text = Concurrency::with_runtime_mut(|rt| {
         let name = packed_enum_name(name_ptr, name_len);
-        Some(show_packed_enum(packed, &name, &rt.heap))
+        Some(show_packed_enum(packed, &name, rt))
     });
     if let Some(text) = text {
         let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
@@ -10891,13 +10891,13 @@ fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
 fn jet_jit_enum_show(packed: i64, name_ptr: i64, name_len: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let name = packed_enum_name(name_ptr, name_len);
-        let text = show_packed_enum(packed, &name, &rt.heap);
+        let text = show_packed_enum(packed, &name, rt);
         rt.heap.alloc_string(text)
     })
 }
 fn jet_jit_io_error_show(packed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let text = show_packed_enum(packed, "IOError", &rt.heap);
+        let text = show_packed_enum(packed, "IOError", rt);
         rt.heap.alloc_string(text)
     })
 }

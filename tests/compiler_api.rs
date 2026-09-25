@@ -840,8 +840,18 @@ repository: "https://repo-user:repo-secret@example.test/acme/repo?token=repo-que
 
 #[test]
 fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/tooling/compiler_api_package");
+    assert!(
+        !source_root.join(".jet").exists(),
+        "checked-in compiler API example already has generated `.jet` state"
+    );
+    let staged = common::ProjectScratch::for_project(&source_root, "compiler-api-package");
+    let root = staged.path.clone();
+    assert!(
+        root.join(".jet/lock").is_file(),
+        "staged compiler API project did not map fixture-state to `.jet`"
+    );
     let expected = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples/features/expected/tooling/compiler_api_package.out"),
@@ -954,6 +964,10 @@ fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
         );
         let _ = fs::remove_dir_all(build_dir);
     }
+    assert!(
+        !source_root.join(".jet").exists(),
+        "compiler API package commands created `.jet` in the checked-in project"
+    );
 }
 
 

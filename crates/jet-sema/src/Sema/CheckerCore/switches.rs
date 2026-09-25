@@ -320,7 +320,6 @@ impl<'a> Checker<'a> {
                 reactive_local: false,
                 reactive_shared: false,
                 single_use_span: None,
-                constant_value: None,
                 invalid: false,
             },
         );
@@ -352,7 +351,6 @@ impl<'a> Checker<'a> {
                     reactive_local: false,
                     reactive_shared: false,
                     single_use_span: None,
-                    constant_value: None,
                     invalid: false,
                 },
             );
@@ -937,7 +935,6 @@ impl<'a> Checker<'a> {
                         reactive_local: false,
                         reactive_shared: false,
                         single_use_span: None,
-                        constant_value: None,
                         invalid: false,
                     },
                 );
@@ -1178,6 +1175,14 @@ impl<'a> Checker<'a> {
             // Skipping every arm is itself a path through here.
             let all_arm_paths_exit = !paths.is_empty() && paths.iter().all(|path| !path.reachable);
             let mut fallthrough = outside_table.clone();
+            // A statement guard may skip every arm, but a value-position
+            // guard must provide a value on that reachable path as well.
+            // Pattern tables already diagnose uncovered cases above.
+            if subjectless_guard && fallthrough.reachable {
+                if let Some(expected) = value_expected {
+                    self.report_missing_block_value(expected, span);
+                }
+            }
             if all_arm_paths_exit {
                 // A guard that exits on `.None` proves the payload on the
                 // fallthrough path just like an explicit `else` complement.

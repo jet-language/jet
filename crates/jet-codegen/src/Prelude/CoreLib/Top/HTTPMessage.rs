@@ -343,7 +343,7 @@ impl JetHTTPBodyCloser {
 }
 
 enum JetHTTPBodySource {
-    Bytes(std::io::Cursor<Vec<u8>>),
+    Bytes(std::io::Cursor<std::sync::Arc<[u8]>>),
     File(std::io::Take<std::fs::File>),
     Reader {
         reader: Box<dyn std::io::Read + Send>,
@@ -374,10 +374,19 @@ impl JetHTTPBodySource {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JetHTTPBodyKind {
+    Empty,
+    Text,
+    Bytes,
+}
+
 struct JetHTTPBodyState {
     source: Option<JetHTTPBodySource>,
     length: Option<usize>,
     content_type: Option<String>,
+    source_kind: Option<JetHTTPBodyKind>,
+    source_payload: Option<std::sync::Arc<[u8]>>,
     drained: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -394,7 +403,7 @@ struct JetHTTPBody {
 
 impl JetHTTPBody {
     fn empty() -> Self {
-        Self::from_bytes(Vec::new())
+        Self::from_source_bytes(Vec::new(), None, JetHTTPBodyKind::Empty)
     }
 
     fn from_bytes(bytes: Vec<u8>) -> Self {
@@ -402,29 +411,43 @@ impl JetHTTPBody {
     }
 
     fn from_bytes_with_content_type(bytes: Vec<u8>, content_type: Option<String>) -> Self {
+        Self::from_source_bytes(bytes, content_type, JetHTTPBodyKind::Bytes)
+    }
+
+    fn from_source_bytes(
+        bytes: Vec<u8>,
+        content_type: Option<String>,
+        source_kind: JetHTTPBodyKind,
+    ) -> Self {
+        let bytes = std::sync::Arc::<[u8]>::from(bytes);
         let length = bytes.len();
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == 0));
-        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
-            source: Some(JetHTTPBodySource::Bytes(std::io::Cursor::new(bytes))),
-            length: Some(length),
-            content_type,
-            drained,
-        })) }
+        Self {
+            state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+                source: Some(JetHTTPBodySource::Bytes(std::io::Cursor::new(bytes.clone()))),
+                length: Some(length),
+                content_type,
+                source_kind: Some(source_kind),
+                source_payload: Some(bytes),
+                drained,
+            })),
+        }
     }
-
     fn from_text(text: String) -> Self {
-        Self::from_bytes_with_content_type(
+        Self::from_source_bytes(
             text.into_bytes(),
             Some("text/plain; charset=utf-8".to_string()),
+            JetHTTPBodyKind::Text,
+        )
+    }
+    fn from_text_with_mime(text: String, content_type: jet_std::JetMIME) -> Self {
+        Self::from_source_bytes(
+            text.into_bytes(),
+            Some(content_type.to_string_value()),
+            JetHTTPBodyKind::Text,
         )
     }
 
-    fn from_text_with_mime(text: String, content_type: jet_std::JetMIME) -> Self {
-        Self::from_bytes_with_content_type(
-            text.into_bytes(),
-            Some(content_type.to_string_value()),
-        )
-    }
 
     fn from_json<T: __jet_Encode>(value: T) -> Self {
         Self::from_bytes_with_content_type(
@@ -514,6 +537,8 @@ impl JetHTTPBody {
                 source: Some(JetHTTPBodySource::Reader { reader: Box::new(reader), closer: None }),
                 length,
                 content_type,
+                source_kind: None,
+                source_payload: None,
                 drained,
             })),
         }
@@ -532,6 +557,8 @@ impl JetHTTPBody {
             }),
             length,
             content_type: None,
+            source_kind: None,
+            source_payload: None,
             drained,
         })) }
     }
@@ -542,6 +569,8 @@ impl JetHTTPBody {
             source: Some(JetHTTPBodySource::File(std::io::Read::take(file, length as u64))),
             length: Some(length),
             content_type: None,
+            source_kind: None,
+            source_payload: None,
             drained,
         })) }
     }
@@ -573,6 +602,8 @@ impl JetHTTPBody {
                 }),
                 length,
                 content_type: None,
+                source_kind: None,
+                source_payload: None,
                 drained,
             })),
         }
@@ -599,6 +630,46 @@ impl JetHTTPBody {
 
     fn is_empty(&self) -> bool {
         self.length() == Some(0)
+    }
+
+    fn source_kind(&self) -> Option<JetHTTPBodyKind> {
+        self.state.lock().ok().and_then(|state| state.source_kind)
+    }
+
+    fn source_is_empty(&self) -> bool {
+        self.source_kind()
+            .map_or_else(|| self.is_empty(), |kind| kind == JetHTTPBodyKind::Empty)
+    }
+
+    fn source_is_text(&self) -> bool {
+        self.source_kind() == Some(JetHTTPBodyKind::Text)
+    }
+
+    fn source_is_bytes(&self) -> bool {
+        self.source_kind()
+            .map_or_else(|| !self.is_empty(), |kind| kind == JetHTTPBodyKind::Bytes)
+    }
+
+    fn source_payload(&self) -> Option<std::sync::Arc<[u8]>> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.source_payload.clone())
+    }
+
+    fn source_text(&self) -> String {
+        String::from_utf8(
+            self.source_payload()
+                .expect("source HTTP text body has no owned payload")
+                .to_vec(),
+        )
+        .expect("source HTTP text body payload is not UTF-8")
+    }
+
+    fn source_bytes(&self) -> Vec<u8> {
+        self.source_payload()
+            .expect("source HTTP byte body has no owned payload")
+            .to_vec()
     }
 
     fn chunks(&self, max_chunk: usize) -> Result<JetHTTPBodyChunks, JetHTTPError> {
@@ -657,7 +728,9 @@ struct JetHTTPBodyChunks {
 impl JetHTTPBodyChunks {
     fn failed(error: JetHTTPError) -> Self {
         Self {
-            source: JetHTTPBodySource::Bytes(std::io::Cursor::new(Vec::new())),
+            source: JetHTTPBodySource::Bytes(std::io::Cursor::new(
+                std::sync::Arc::<[u8]>::from(Vec::<u8>::new()),
+            )),
             max_chunk: 1,
             done: false,
             initial_error: Some(error),
@@ -978,23 +1051,20 @@ impl JetHTTPHeaders {
         Self::default()
     }
 
+    fn from_source_fields(fields: Vec<(String, String)>) -> Self {
+        Self { entries: fields }
+    }
+
+    fn source_fields(&self) -> Vec<(String, String)> {
+        self.entries.clone()
+    }
+
     fn valid_name(name: &str) -> bool {
-        !name.is_empty()
-            && name.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric()
-                    || matches!(
-                        byte,
-                        b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+'
-                            | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
-                    )
-            })
+        jet_http_header_name_valid(name)
     }
 
     fn valid_value(value: &str) -> bool {
-        value.chars().all(|character| {
-            (!character.is_control() || character == '\t')
-                && (!character.is_whitespace() || matches!(character, ' ' | '\t'))
-        })
+        jet_http_header_value_valid(value)
     }
 
     fn append(&mut self, name: &str, value: &str) -> Result<(), String> {

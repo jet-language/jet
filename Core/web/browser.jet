@@ -6,6 +6,10 @@ use core as core
 // generated source are Jet: they never need a real browser. Headless CI
 // uses `connect` which may return `BrowserError.Headless`.
 
+c_max_source_bytes :: 1048576
+
+c_max_source_name :: 256
+
 #Error
 pub enum BrowserError {
     Connect
@@ -60,6 +64,7 @@ pub struct BrowserPage {
 
 pub struct BrowserFrame {
     pub id: Int
+    pub page_id: Int
     pub url: String
 }
 
@@ -67,6 +72,7 @@ pub struct BrowserLocator {
     pub selector: String
     pub page_id: Int
 }
+
 pub struct BrowserLocked {
     pub reason: String
 }
@@ -111,13 +117,14 @@ pub struct BrowserServer {
     pub url: String
     pub running: Bool
     pub logs: String
+    native: ?BrowserTestServer
 }
 
-pub fn config() -> BrowserTestConfig {
-    BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: "http://127.0.0.1:0"}
+pub fn config() -> BrowserTestConfig !BrowserError {
+    core.web.browser.config()
 }
 
-pub fn config_from_env() -[Env, Net]> BrowserTestConfig !BrowserError {
+pub fn config_from_env() -[Env, FS]> BrowserTestConfig !BrowserError {
     core.web.browser.config_from_env()
 }
 
@@ -126,14 +133,14 @@ pub fn make_profile(name: String) -> BrowserProfile {
     BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
 }
 
-pub fn timeout(ms: Int) -> BrowserTimeout {
-    n := ms
-    if n < 0 -> n = 0
-    BrowserTimeout{ms: n}
+pub fn timeout(ms: Int) -> BrowserTimeout !BrowserError {
+    core.web.browser.timeout(ms)
 }
 
-pub fn locked(reason: String) -> BrowserLocked { BrowserLocked{reason: reason} }
+pub fn locked(engine: String) -[FS, IO]> BrowserLocked !BrowserError {
+    core.web.browser.locked(engine)
 
+}
 pub fn connect() -[Net]> Browser !BrowserError { core.web.browser.connect("default") }
 
 pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser !BrowserError {
@@ -157,14 +164,21 @@ pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage {
 }
 
 
-pub fn fixture_source(name: String, body: String) -> String { generate_source(name, body, "") }
+pub fn fixture_source(name: String, body: String) -> String !BrowserError {
+    generate_source(name, body, "")
+}
 
-pub fn generate_source(name: String, body: String, base_url: String) -> String {
+pub fn generate_source(name: String, body: String, base_url: String) -> String !BrowserError {
+    if name.len() == 0 || name.len() > c_max_source_name || body.len() > c_max_source_bytes || base_url.len() > c_max_source_bytes {
+        return Err(BrowserError.Protocol)
+    }
     url := base_url
     if url.len() == 0 -> url = "/"
     test_name := source_name(name)
     escaped :: esc_source(url)
-    "// generated browser test\nfn {test_name}() {{\n    _ :: \"{escaped}\"\n    {body}\n}}\n"
+    out := "// generated browser test\nfn {test_name}() {{\n    _ :: \"{escaped}\"\n    {body}\n}}\n"
+    if out.len() > c_max_source_bytes -> return Err(BrowserError.Protocol)
+    Ok(out)
 }
 
 pub fn report_new(title: String) -> BrowserReport { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
@@ -220,9 +234,10 @@ pub fn write_report(report: BrowserReport, path: String) !IOError {
 }
 
 pub fn server_start(root: String) -[Net]> BrowserServer !BrowserError {
+    if root.len() > c_max_source_bytes -> return Err(BrowserError.Protocol)
     cfg := BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: root}
     native :: core.web.browser.server_start(cfg)
-    Ok(BrowserServer{url: native.url(), running: true, logs: native.logs()})
+    Ok(BrowserServer{url: native.url(), running: true, logs: native.logs(), native: Val(native)})
 }
 pub fn watch_changed(path: String) -[FS, Net]> Bool !BrowserError {
     // The public carrier has no prior mtime.  A negative baseline is the
@@ -231,7 +246,10 @@ pub fn watch_changed(path: String) -[FS, Net]> Bool !BrowserError {
 }
 
 pub fn server_stop(server: BrowserServer) -> BrowserServer {
-    BrowserServer{url: server.url, running: false, logs: server.logs}
+    if server.native == None -> return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
+    native :: server.native ?? return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
+    _ :: core.web.browser.server_stop(native)
+    BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
 }
 
 pub fn server_url(server: BrowserServer) -> String { server.url }

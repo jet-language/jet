@@ -291,6 +291,12 @@ pub(crate) mod collection_semantics {
     pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
         jet_zip_row_count(lengths, mode)
     }
+    pub(super) fn string_split(text: &str, separator: &str) -> Vec<String> {
+        jet_iter_string_split(text, separator).to_list()
+    }
+}
+pub fn string_split(text: &str, separator: &str) -> Vec<String> {
+    collection_semantics::string_split(text, separator)
 }
 
 pub use collection_semantics::LoopListCursor;

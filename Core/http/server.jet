@@ -21,7 +21,7 @@ pub fn bind(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration
     provider.bind(addr, mux, tls: tls, deadline: deadline)
 }
 
-pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) !HTTPError -[Net, Time.Wait]> {
+pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duration) !HTTPError {
     if tls == None {
         if deadline == None {
             provider.serve(addr, mux) ?? return
@@ -37,12 +37,12 @@ pub fn serve(addr: String, mux: HTTPMux, tls: ?HTTPServerTls, deadline: ?Duratio
     provider.serve(addr, mux, tls: tls, deadline: deadline) ?? return
 }
 
-pub fn serve_once(addr: String, mux: HTTPMux) !HTTPError -[Net, Time.Wait]> {
+pub fn serve_once(addr: String, mux: HTTPMux) !HTTPError {
     provider.serve_once(addr, mux) ?? return
 }
 
 
-pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) !HTTPError -[Net, Time.Wait]> {
+pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) !HTTPError {
     provider.serve_once_listener(listener, mux) ?? return
 }
 
@@ -50,8 +50,8 @@ pub fn response(status: Int, body: String) -> HTTPResponse {
     provider.response(status, body)
 }
 
-pub fn json(status: Int, body: String) -> HTTPResponse {
-    provider.json(status, body)
+pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse {
+    provider.json<T>(status, body)
 }
 
 pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse !HTTPError {

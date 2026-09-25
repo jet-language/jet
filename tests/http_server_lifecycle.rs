@@ -386,6 +386,7 @@ impl Drop for JetDbRequestScope {
 }
 
 
+include!("../crates/jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");

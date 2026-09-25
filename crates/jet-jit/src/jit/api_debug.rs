@@ -143,6 +143,10 @@ pub(crate) fn try_resident(
         )
     }) {
         Ok(outcome) => {
+            let native_fns = plan.rows.iter()
+                .map(|row| (row.function, row.function_name.as_str()))
+                .collect::<Vec<_>>();
+            super::tier_cache::publish_capture(&native_fns, artifact);
             record_trace(plan.rows.clone());
             publish_runtime_decisions(program, artifact, &plan.rows);
             Ok(outcome)
@@ -428,6 +432,7 @@ pub fn jit_expr_tag(operation: &MirOperation) -> &'static str {
         MirOperation::ReadPlace(_) => "ReadPlace",
         MirOperation::MovePlace { .. } => "MovePlace",
         MirOperation::WritePlace { .. } => "WritePlace",
+        MirOperation::ReplacePlace { .. } => "ReplacePlace",
         MirOperation::InitializeUninit { .. } => "InitializeUninit",
         MirOperation::Copy { .. } => "Copy",
         MirOperation::Move { .. } => "Move",

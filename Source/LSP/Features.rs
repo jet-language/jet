@@ -485,12 +485,14 @@ fn callable_summary_json(db: &SymbolDB, selection: Option<&str>) -> String {
     let write_parameters = signature
         .parameters
         .iter()
-        .filter(|parameter| parameter.access == "write")
+        .filter(|parameter| {
+            parameter.access == jet_foundation::AST::AccessConvention::Write
+        })
         .map(|parameter| {
             format!(
                 "{{\"name\":\"{}\",\"type\":\"{}\",\"access\":\"write\",\"evidence\":\"declared_parameter\"}}",
                 json_escape(&parameter.name),
-                json_escape(&parameter.ty),
+                json_escape(&parameter.type_name()),
             )
         })
         .collect::<Vec<_>>()
@@ -596,17 +598,31 @@ fn callable_summary_json(db: &SymbolDB, selection: Option<&str>) -> String {
         "{{\"kind\":\"checked_declaration\",\"module_path\":\"{}\"}}",
         json_escape(&definition.module_path),
     );
-    let failure = format!(
-        "{{\"type\":\"{}\",\"source\":\"{}\",\"evidence\":\"checked_contract\"}}",
-        json_escape(&signature.failure_contract),
-        json_escape(&signature.failure_source),
-    );
+    let failure = match &signature.failure_contract {
+        jet_semindex::CallableFactAvailability::Checked(failure) => format!(
+            "{{\"status\":\"checked\",\"type\":\"{}\",\"source\":\"{}\",\"evidence\":\"checked_contract\"}}",
+            json_escape(&failure.effective_type().name()),
+            json_escape(&failure.source()),
+        ),
+        jet_semindex::CallableFactAvailability::Unavailable(unavailable) => format!(
+            "{{\"status\":\"unavailable\",\"required_stage\":\"{}\",\"reason\":\"{}\"}}",
+            json_escape(unavailable.required_stage.as_str()),
+            json_escape(unavailable.reason),
+        ),
+    };
+    let producer_status = match signature.metadata_producer_status {
+        jet_foundation::AST::MetadataProducerStatus::ContractOnly => "contract_only",
+        jet_foundation::AST::MetadataProducerStatus::NotImplemented => "not_implemented",
+        jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension => {
+            "existing_callable_producer_needs_extension"
+        }
+    };
     let limits = format!(
         "{{\"records\":{},\"records_truncated\":{}}}",
         MAX_SUMMARY_RECORDS, records_truncated
     );
     format!(
-        "{{\"status\":\"{}\",\"callable\":{},\"declaration_source\":{},\"failure\":{},\"write_access_parameters\":[{}],\"effects\":{},\"returned_views\":[{}],\"policies\":[{}],\"checked_records\":[{}],\"limits\":{},\"runtime_observation\":\"{}\"}}",
+        "{{\"status\":\"{}\",\"callable\":{},\"declaration_source\":{},\"failure\":{},\"write_access_parameters\":[{}],\"effects\":{},\"returned_views\":[{}],\"policies\":[{}],\"metadata_producer_status\":\"{}\",\"checked_records\":[{}],\"limits\":{},\"runtime_observation\":\"{}\"}}",
         status,
         callable,
         declaration_source,
@@ -614,7 +630,8 @@ fn callable_summary_json(db: &SymbolDB, selection: Option<&str>) -> String {
         write_parameters,
         effects,
         returned_views,
-        json_string_array(signature.policies.iter().cloned()),
+        json_string_array(signature.policy_names().into_iter()),
+        producer_status,
         checked_records,
         limits,
         if records.iter().any(|record| record.observation.is_some()) {
@@ -2096,16 +2113,29 @@ pub(crate) fn register_generated_declarations(
             module_path: declaration.module_path.clone(),
             kind: SymKind::Function {
                 params: Vec::new(),
+                param_sources: Vec::new(),
+                signature_facts_available: false,
                 param_contract: Vec::new(),
                 param_variadic: Vec::new(),
-                ret: None,
-                failure_contract: "unknown".to_string(),
-                failure_source: "generated BuildPlan declaration".to_string(),
+                return_type: None,
+                failure_contract: jet_semindex::CallableFactAvailability::Unavailable(
+                    jet_semindex::CallableFactUnavailable {
+                        required_stage: AST::CompilerStage::Typed,
+                        reason: "generated declaration has no checked failure contract",
+                    },
+                ),
+                foreign_boundary: false,
                 effects: None,
                 effect_via: None,
                 param_access: Vec::new(),
                 param_defaults: Vec::new(),
                 policies: Vec::new(),
+                generic_parameters: jet_semindex::CallableFactAvailability::Unavailable(
+                    jet_semindex::CallableFactUnavailable {
+                        required_stage: AST::CompilerStage::Typed,
+                        reason: "generated declaration has no parsed generic parameter facts",
+                    },
+                ),
             },
         });
     }

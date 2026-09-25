@@ -13,10 +13,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
 use crate::Types::{
-    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CompilerFact, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
-    InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
-    StateGraphFact, StateNodeFact, StateTransitionFact, StructuralNode, StructuralSlotBoundary,
-    StructuralSlotKind, SymbolDef, SymbolKind,
+    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CallableDefaultFact,
+    CallableFactAvailability, CallableFactUnavailable, CompilerFact, DefinitionAnchor,
+    DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin,
+    OutputEntryFact, OutputFact, SemIndex, SourceSpan, StateGraphFact, StateNodeFact,
+    StateTransitionFact, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef,
+    SymbolKind,
 };
 use crate::JSON::{convert_defs, convert_effects, convert_refs};
 
@@ -26,22 +28,30 @@ pub enum SymKind {
     Module,
     Function {
         params: Vec<(String, AST::Type)>,
+        param_sources: Vec<SourceSpan>,
+        /// False only for generated function-name placeholders whose source
+        /// provides no checker-owned signature facts.
+        signature_facts_available: bool,
         /// Public call labels and zones, kept separately from local body names.
         /// D-APILABEL1=A: LSP consumers must show the callable contract.
         param_contract: Vec<(String, String, AST::ParamZone)>,
         /// D-VARIADIC1: the public parameter list marks its final rest slot;
         /// the AST type stored in `params` remains the element type.
         param_variadic: Vec<bool>,
-        ret: Option<AST::Type>,
-        /// D-FAILURE-FOUNDATION1: the effective Result-shaped contract and
-        /// its source spelling/proof are facts, not inferred from `ret`.
-        failure_contract: String,
-        failure_source: String,
+        /// Declared return type before failure-contract projection.
+        return_type: Option<AST::Type>,
+        /// Checked by the callable checker, or explicitly unavailable at a
+        /// foreign boundary.
+        failure_contract: CallableFactAvailability<AST::FailureContract>,
+        /// A foreign declaration has no checked body summary; inferred rows
+        /// must not turn its unknown callable effects into a known empty row.
+        foreign_boundary: bool,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
         param_access: Vec<AST::AccessConvention>,
-        param_defaults: Vec<Option<String>>,
-        policies: Vec<String>,
+        param_defaults: Vec<Option<CallableDefaultFact>>,
+        policies: Vec<AST::CallablePolicy>,
+        generic_parameters: CallableFactAvailability<Vec<AST::TypeParam>>,
     },
     Struct {
         fields: Vec<(String, AST::Type)>,
@@ -615,14 +625,13 @@ fn fn_signature(
     param_contract: &[(String, String, AST::ParamZone)],
     param_variadic: &[bool],
     ret: &Option<AST::Type>,
-    failure_contract: &str,
-    failure_source: &str,
+    failure_contract: &CallableFactAvailability<AST::FailureContract>,
     effects: Option<&Vec<(String, Span)>>,
     effect_via: Option<&(String, Span)>,
     view_provenance: Option<&AST::ViewProvenanceMap>,
     param_access: &[AST::AccessConvention],
-    param_defaults: &[Option<String>],
-    policies: &[String],
+    param_defaults: &[Option<CallableDefaultFact>],
+    policies: &[AST::CallablePolicy],
 ) -> String {
     let mut parameter_parts = function_parameter_parts(params, param_contract, param_variadic);
     let mut parameter_index = 0;
@@ -635,11 +644,15 @@ fn fn_signature(
             .copied()
             .unwrap_or(AST::AccessConvention::Read)
             .sigil();
-        let default = param_defaults
+        part.insert_str(0, access);
+        if let Some(default) = param_defaults
             .get(parameter_index)
             .and_then(Option::as_ref)
-            .map_or_else(String::new, |value| format!("{{{value}}}"));
-        *part = format!("{access}{part}{default}");
+        {
+            part.push('{');
+            part.push_str(&default.source_text);
+            part.push('}');
+        }
         parameter_index += 1;
     }
     let params = parameter_parts.join(", ");
@@ -690,17 +703,91 @@ fn fn_signature(
             signature.push_str(&AST::canonical_view_provenance_map(map));
         }
     }
-    if !policies.is_empty() {
+    let policy_names = policies
+        .iter()
+        .map(AST::CallablePolicy::display)
+        .collect::<Vec<_>>();
+    if !policy_names.is_empty() {
         signature.push_str(" ; policies=[");
-        signature.push_str(&policies.join(", "));
+        signature.push_str(&policy_names.join(", "));
         signature.push(']');
     }
     signature.push_str("\nfailure: ");
-    signature.push_str(failure_contract);
-    signature.push_str(" (");
-    signature.push_str(failure_source);
+    match failure_contract {
+        CallableFactAvailability::Checked(failure) => {
+            signature.push_str(&failure.effective_type().name());
+            signature.push_str(" (");
+            signature.push_str(&failure.source());
+        }
+        CallableFactAvailability::Unavailable(unavailable) => {
+            signature.push_str("unavailable (");
+            signature.push_str(unavailable.reason);
+        }
+    }
     signature.push(')');
     signature
+}
+fn method_parameter_defaults(f: &AST::Func, source: &str) -> Vec<Option<CallableDefaultFact>> {
+    parameter_defaults(&f.params, source, true)
+}
+
+fn parameter_defaults(
+    params: &[AST::Param],
+    source: &str,
+    skip_self: bool,
+) -> Vec<Option<CallableDefaultFact>> {
+    params
+        .iter()
+        .filter(|parameter| !skip_self || parameter.name != Syntax::KW_SELF)
+        .map(|parameter| {
+            parameter.default.as_ref().map(|default| {
+                CallableDefaultFact {
+                    source_text: source
+                        .get(default.span().start..default.span().end)
+                        .expect("callable default span must select source text")
+                        .to_string(),
+                    source: SourceSpan::from(default.span()),
+                    value_unavailable: CallableFactUnavailable {
+                        required_stage: AST::CompilerStage::Prepared,
+                        reason: "the semindex producer does not evaluate callable defaults",
+                    },
+                }
+            })
+        })
+        .collect()
+}
+
+fn callable_policies(f: &AST::Func) -> Vec<AST::CallablePolicy> {
+    f.markers
+        .iter()
+        .find(|marker| marker.name == Syntax::MARKER_POLICY)
+        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
+        .map(|chain| chain.policies)
+        .unwrap_or_default()
+}
+
+fn callable_kind(f: &AST::Func, source: &str) -> SymKind {
+    SymKind::Function {
+        params: method_params(f),
+        param_sources: f
+            .params
+            .iter()
+            .filter(|p| p.name != Syntax::KW_SELF)
+            .map(|p| p.name_span.into())
+            .collect(),
+        signature_facts_available: true,
+        param_contract: method_parameter_contract(f),
+        param_variadic: method_parameter_variadic(f),
+        return_type: f.return_type.clone(),
+        failure_contract: CallableFactAvailability::Checked(f.failure_contract()),
+        foreign_boundary: f.inline_foreign.is_some(),
+        effects: f.declared_effects.clone(),
+        effect_via: f.effect_via.clone(),
+        param_access: method_parameter_access(f),
+        param_defaults: method_parameter_defaults(f, source),
+        policies: callable_policies(f),
+        generic_parameters: CallableFactAvailability::Checked(f.type_params.clone()),
+    }
 }
 
 fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
@@ -731,35 +818,6 @@ fn method_parameter_access(f: &AST::Func) -> Vec<AST::AccessConvention> {
         .collect()
 }
 
-fn method_parameter_defaults(f: &AST::Func, source: &str) -> Vec<Option<String>> {
-    f.params
-        .iter()
-        .filter(|p| p.name != Syntax::KW_SELF)
-        .map(|p| {
-            p.default.as_ref().map(|default| {
-                source
-                    .get(default.span().start..default.span().end)
-                    .unwrap_or("…")
-                    .to_string()
-            })
-        })
-        .collect()
-}
-
-fn callable_policies(f: &AST::Func) -> Vec<String> {
-    f.markers
-        .iter()
-        .find(|marker| marker.name == Syntax::MARKER_POLICY)
-        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
-        .map(|chain| {
-            chain
-                .policies
-                .iter()
-                .map(|policy| policy.display())
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
 fn parameter_contract(params: &[AST::Param]) -> Vec<(String, String, AST::ParamZone)> {
     params
@@ -898,7 +956,7 @@ fn method_fact(
     let param_defaults = method_parameter_defaults(f, source);
     let policies = callable_policies(f);
     let return_type = Some(f.effective_return_type());
-    let failure = f.failure_contract();
+    let failure = CallableFactAvailability::Checked(f.failure_contract());
     MemberFact {
         owner: owner.to_string(),
         name: f.name.clone(),
@@ -911,8 +969,7 @@ fn method_fact(
             &method_parameter_contract(f),
             &method_parameter_variadic(f),
             &return_type,
-            &failure.effective_type().name(),
-            &failure.source(),
+            &failure,
             f.declared_effects.as_ref(),
             f.effect_via.as_ref(),
             f.return_view_provenance.as_ref(),
@@ -1467,9 +1524,9 @@ fn apply_inferred_effect_rows(
             params,
             param_contract,
             param_variadic,
-            ret,
+            return_type,
             failure_contract,
-            failure_source,
+            foreign_boundary,
             effects,
             effect_via,
             param_access,
@@ -1480,7 +1537,7 @@ fn apply_inferred_effect_rows(
         else {
             continue;
         };
-        if effects.is_some() || effect_via.is_some() {
+        if *foreign_boundary || effects.is_some() || effect_via.is_some() {
             continue;
         }
         let local_key = if let Some(key) = inline_keys.get(&(def.def_span.start, def.def_span.end))
@@ -1505,14 +1562,19 @@ fn apply_inferred_effect_rows(
                 .map(|effect| (effect, def.def_span))
                 .collect(),
         );
+        let display_return_type = match failure_contract {
+            CallableFactAvailability::Checked(failure) => {
+                Some(failure.effective_type())
+            }
+            CallableFactAvailability::Unavailable(_) => return_type.clone(),
+        };
         let signature = fn_signature(
             &def.name,
             params,
             param_contract,
             param_variadic,
-            ret,
+            &display_return_type,
             failure_contract,
-            failure_source,
             effects.as_ref(),
             None,
             db.view_provenance.get(&def.identity),
@@ -1865,25 +1927,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     .view_provenance
                     .insert(fn_identity.clone(), provenance.clone());
             }
-            let params: Vec<(String, AST::Type)> = method_params(f);
             let sym = SymDef {
                 identity: fn_identity.clone(),
                 name: f.name.clone(),
                 def_span: f.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Function {
-                    params: params.clone(),
-                    param_contract: method_parameter_contract(f),
-                    param_variadic: method_parameter_variadic(f),
-                    ret: Some(f.effective_return_type()),
-                    failure_contract: f.failure_contract().effective_type().name(),
-                    failure_source: f.failure_contract().source(),
-                    effects: f.declared_effects.clone(),
-                    effect_via: f.effect_via.clone(),
-                    param_access: method_parameter_access(f),
-                    param_defaults: method_parameter_defaults(f, &module.source),
-                    policies: callable_policies(f),
-                },
+                kind: callable_kind(f, &module.source),
             };
             let mut hover_text = hover_for_fn(f);
             for (active, name) in [
@@ -2106,24 +2155,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Function {
-                        params: meth
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.name.clone(), p.ty.clone()))
-                            .collect(),
-                        param_contract: method_parameter_contract(meth),
-                        param_variadic: method_parameter_variadic(meth),
-                        ret: Some(meth.effective_return_type()),
-                        failure_contract: meth.failure_contract().effective_type().name(),
-                        failure_source: meth.failure_contract().source(),
-                        effects: meth.declared_effects.clone(),
-                        effect_via: meth.effect_via.clone(),
-                        param_access: method_parameter_access(meth),
-                        param_defaults: method_parameter_defaults(meth, &module.source),
-                        policies: callable_policies(meth),
-                    },
+                    kind: callable_kind(meth, &module.source),
                 });
                 ctx.db.hover.push(HoverEntry {
                     span: meth.name_span,
@@ -2186,19 +2218,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         name: meth.name.clone(),
                         def_span: meth.name_span,
                         module_path: mp.to_string(),
-                        kind: SymKind::Function {
-                            params: method_params(meth),
-                            param_contract: method_parameter_contract(meth),
-                            param_variadic: method_parameter_variadic(meth),
-                            ret: Some(meth.effective_return_type()),
-                            failure_contract: meth.failure_contract().effective_type().name(),
-                            failure_source: meth.failure_contract().source(),
-                            effects: meth.declared_effects.clone(),
-                            effect_via: meth.effect_via.clone(),
-                            param_access: method_parameter_access(meth),
-                            param_defaults: method_parameter_defaults(meth, &module.source),
-                            policies: callable_policies(meth),
-                        },
+                            kind: callable_kind(meth, &module.source),
                     });
                     with_caller(
                         ctx,
@@ -2296,24 +2316,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Function {
-                        params: meth
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.name.clone(), p.ty.clone()))
-                            .collect(),
-                        param_contract: method_parameter_contract(meth),
-                        param_variadic: method_parameter_variadic(meth),
-                        ret: Some(meth.effective_return_type()),
-                        failure_contract: meth.failure_contract().effective_type().name(),
-                        failure_source: meth.failure_contract().source(),
-                        effects: meth.declared_effects.clone(),
-                        effect_via: meth.effect_via.clone(),
-                        param_access: method_parameter_access(meth),
-                        param_defaults: method_parameter_defaults(meth, &module.source),
-                        policies: callable_policies(meth),
-                    },
+                    kind: callable_kind(meth, &module.source),
                 });
                 with_caller(
                     ctx,
@@ -2342,7 +2345,6 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
-                    let return_type = Some(meth.effective_return_type());
                     ctx.db.members.push(method_fact(
                         &ctx.scope_identity,
                         &e.name,
@@ -2358,19 +2360,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         name: meth.name.clone(),
                         def_span: meth.name_span,
                         module_path: mp.to_string(),
-                        kind: SymKind::Function {
-                            params: method_params(meth),
-                            param_contract: method_parameter_contract(meth),
-                            param_variadic: method_parameter_variadic(meth),
-                            ret: return_type,
-                            failure_contract: meth.failure_contract().effective_type().name(),
-                            failure_source: meth.failure_contract().source(),
-                            effects: meth.declared_effects.clone(),
-                            effect_via: meth.effect_via.clone(),
-                            param_access: method_parameter_access(meth),
-                            param_defaults: method_parameter_defaults(meth, &module.source),
-                            policies: callable_policies(meth),
-                        },
+                            kind: callable_kind(meth, &module.source),
                     });
                     with_caller(
                         ctx,
@@ -2405,13 +2395,22 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             for sig in &t.methods {
                 let return_type = Some(sig.effective_return_type());
-                let failure = sig.failure_contract();
+                let failure =
+                    CallableFactAvailability::Checked(sig.failure_contract());
                 let params: Vec<(String, AST::Type)> = sig
                     .params
                     .iter()
                     .filter(|p| p.name != Syntax::KW_SELF)
                     .map(|p| (p.name.clone(), p.ty.clone()))
                     .collect();
+                let param_access = sig
+                    .params
+                    .iter()
+                    .filter(|p| p.name != Syntax::KW_SELF)
+                    .map(|p| p.convention)
+                    .collect::<Vec<_>>();
+                let param_defaults =
+                    parameter_defaults(&sig.params, &module.source, true);
                 ctx.db.defs.push(SymDef {
                     identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
                     name: sig.name.clone(),
@@ -2419,34 +2418,24 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     module_path: mp.to_string(),
                     kind: SymKind::Function {
                         params: params.clone(),
+                        param_sources: sig
+                            .params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| p.name_span.into())
+                            .collect(),
+                        signature_facts_available: true,
                         param_contract: parameter_contract(&sig.params),
                         param_variadic: parameter_variadic(&sig.params),
-                        ret: Some(sig.effective_return_type()),
-                        failure_contract: sig.failure_contract().effective_type().name(),
-                        failure_source: sig.failure_contract().source(),
+                        return_type: sig.return_type.clone(),
+                        failure_contract: failure.clone(),
+                        foreign_boundary: false,
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
-                        param_access: sig
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| p.convention)
-                            .collect(),
-                        param_defaults: sig
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| {
-                                p.default.as_ref().map(|default| {
-                                    module
-                                        .source
-                                        .get(default.span().start..default.span().end)
-                                        .unwrap_or("…")
-                                        .to_string()
-                                })
-                            })
-                            .collect(),
+                        param_access: param_access.clone(),
+                        param_defaults: param_defaults.clone(),
                         policies: Vec::new(),
+                        generic_parameters: CallableFactAvailability::Checked(Vec::new()),
                     },
                 });
                 ctx.db.members.push(MemberFact {
@@ -2463,29 +2452,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         &parameter_contract(&sig.params),
                         &parameter_variadic(&sig.params),
                         &return_type,
-                        &failure.effective_type().name(),
-                        &failure.source(),
+                        &failure,
                         sig.declared_effects.as_ref(),
                         None,
                         None,
-                        &sig.params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| p.convention)
-                            .collect::<Vec<_>>(),
-                        &sig.params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| {
-                                p.default.as_ref().map(|default| {
-                                    module
-                                        .source
-                                        .get(default.span().start..default.span().end)
-                                        .unwrap_or("…")
-                                        .to_string()
-                                })
-                            })
-                            .collect::<Vec<_>>(),
+                        &param_access,
+                        &param_defaults,
                         &[],
                     ),
                     module_path: mp.to_string(),
@@ -2545,24 +2517,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Function {
-                        params: meth
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.name.clone(), p.ty.clone()))
-                            .collect(),
-                        param_contract: method_parameter_contract(meth),
-                        param_variadic: method_parameter_variadic(meth),
-                        ret: Some(meth.effective_return_type()),
-                        failure_contract: meth.failure_contract().effective_type().name(),
-                        failure_source: meth.failure_contract().source(),
-                        effects: meth.declared_effects.clone(),
-                        effect_via: meth.effect_via.clone(),
-                        param_access: method_parameter_access(meth),
-                        param_defaults: method_parameter_defaults(meth, &module.source),
-                        policies: callable_policies(meth),
-                    },
+                    kind: callable_kind(meth, &module.source),
                 });
                 for p in &meth.params {
                     if p.name != Syntax::KW_SELF {
@@ -2639,16 +2594,37 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     module_path: mp.to_string(),
                     kind: SymKind::Function {
                         params,
+                        param_sources: function
+                            .params
+                            .iter()
+                            .map(|parameter| parameter.name_span.into())
+                            .collect(),
+                        signature_facts_available: true,
                         param_contract,
                         param_variadic,
-                        ret: function.return_type.clone(),
-                        failure_contract: "unknown".to_string(),
-                        failure_source: "extern Jet boundary".to_string(),
+                        return_type: function.return_type.clone(),
+                        failure_contract: CallableFactAvailability::Unavailable(
+                            CallableFactUnavailable {
+                                required_stage: AST::CompilerStage::Typed,
+                                reason: "extern Jet boundary has no checked failure contract",
+                            },
+                        ),
+                        foreign_boundary: true,
                         effects: None,
                         effect_via: None,
                         param_access,
-                        param_defaults: function.params.iter().map(|_| None).collect(),
+                        param_defaults: parameter_defaults(
+                            &function.params,
+                            &module.source,
+                            false,
+                        ),
                         policies: Vec::new(),
+                        generic_parameters: CallableFactAvailability::Unavailable(
+                            CallableFactUnavailable {
+                                required_stage: AST::CompilerStage::Typed,
+                                reason: "extern declarations expose no generic parameter facts",
+                            },
+                        ),
                     },
                 });
             }

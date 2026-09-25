@@ -8,7 +8,6 @@ use jet_foundation::{
     MIR::{
         MirArtifactId, MirCallee, MirDecisionLedger, MirDecisionRow, MirFailureCarrier,
         MirFunction, MirFunctionId, MirOperation, MirProgram, MirRuntimeValue, MirSemanticOp,
-        MirTypeKind,
     },
     SchemaMigration::SchemaMigrationReceipt,
 };
@@ -18,7 +17,7 @@ use super::deopt::clear_deopt_state;
 use super::functions_compile::{
     compile_program, install_finalized_iterable_hooks, redefine_mir_functions, CompiledMirProgram,
 };
-use super::runtime_host::{new_jit_module, ResidentHotSwapPlan, ResidentModule};
+use super::runtime_host::{new_jit_module, EntryErrorType, ResidentHotSwapPlan, ResidentModule};
 use super::safety::artifact_entry;
 use super::tiers::{runtime_decision_rows, TierRow};
 use super::types_meta::mir_fn_name;
@@ -112,26 +111,26 @@ fn main_serves_app(program: &MirProgram, artifact: MirArtifactId) -> bool {
             .is_some_and(|name| name == "App")
 }
 
-fn main_returns_default_err(program: &MirProgram, artifact: MirArtifactId) -> bool {
-    match entry_function(program, artifact).map(|function| &function.failure) {
-        Some(MirFailureCarrier::Result { error, .. }) => matches!(
-            error.kind(),
-            MirTypeKind::Apply { name, .. } if name.name == "Error"
-        ),
-        _ => false,
+fn main_error_type(program: &MirProgram, artifact: MirArtifactId) -> Option<EntryErrorType> {
+    let MirFailureCarrier::Result { error, .. } = &entry_function(program, artifact)?.failure else {
+        return None;
+    };
+    if matches!(error.layout.abi, jet_foundation::MIR::MirAbi::Never) {
+        return Some(EntryErrorType::Uninhabited);
+    }
+    // Compiler-owned carriers have exact canonical declaration keys. A user
+    // type with the same leaf spelling must retain its own display descriptor.
+    let builtin = error.nominal_id().and_then(|id| {
+        program.types.iter().find(|definition| definition.id == id)
+            .map(|definition| definition.key.as_str())
+    });
+    match builtin {
+        Some(jet_foundation::Syntax::TYPE_ERR) => Some(EntryErrorType::Default),
+        Some(jet_foundation::Syntax::TYPE_IO_ERROR) => Some(EntryErrorType::Io),
+        _ => super::runtime_host::runtime_type_id(error).map(EntryErrorType::Descriptor),
     }
 }
 
-fn main_error_type(program: &MirProgram, artifact: MirArtifactId) -> Option<String> {
-    match entry_function(program, artifact).map(|function| &function.failure) {
-        Some(MirFailureCarrier::Result { error, .. }) => Some(error.canonical_key()),
-        _ => None,
-    }
-}
-
-fn main_error_is_packed(_program: &MirProgram, _artifact: MirArtifactId) -> bool {
-    false
-}
 fn install_cli_function_pointers(
     module: &JITModule,
     compiled: &CompiledMirProgram,
@@ -208,6 +207,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         lazy_iters: Vec::new(),
         type_descriptors: HashMap::new(),
         type_descriptor_names: HashMap::new(),
+        default_error_type: None,
         trait_object_types: HashMap::new(),
         dma_types: HashMap::new(),
         dma_transfers: HashMap::new(),
@@ -430,9 +430,7 @@ pub(crate) fn ensure_resident_module(
     release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Result<(), String> {
     let main_returns_result = main_returns_result(program, artifact);
-    let main_returns_default_err = main_returns_default_err(program, artifact);
     let main_error_type = main_error_type(program, artifact);
-    let main_error_is_packed = main_error_is_packed(program, artifact);
     let main_returns_app = main_returns_app(program, artifact);
     let main_serves_app = main_serves_app(program, artifact);
     crate::CLI::prepare_cli_from_mir(program, artifact);
@@ -464,9 +462,7 @@ pub(crate) fn ensure_resident_module(
                 main_returns_result,
                 main_returns_app,
                 main_serves_app,
-                main_returns_default_err,
                 main_error_type,
-                main_error_is_packed,
             });
         });
         return Ok(());
@@ -493,31 +489,31 @@ pub(crate) fn ensure_resident_module(
             resident.main_returns_result = main_returns_result;
             resident.main_returns_app = main_returns_app;
             resident.main_serves_app = main_serves_app;
-            resident.main_returns_default_err = main_returns_default_err;
             resident.main_error_type = main_error_type;
-            resident.main_error_is_packed = main_error_is_packed;
             Ok(())
         })
     })
 }
 
 pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
-    let (code, main_returns_result, main_returns_app, main_serves_app) = RESIDENT_MODULE
-        .with(|slot| {
-            slot.borrow_mut().as_mut().map(|resident| {
-                resident
-                    .module
-                    .finalize_definitions()
-                    .expect("resident JIT functions must finalize");
-                (
-                    resident.module.get_finalized_function(resident.main_id),
-                    resident.main_returns_result,
-                    resident.main_returns_app,
-                    resident.main_serves_app,
-                )
-            })
-        })
-        .ok_or_else(|| "resident module missing".to_string())?;
+    let (code, main_returns_result, main_returns_app, main_serves_app, main_error_type) =
+        RESIDENT_MODULE.with(|slot| -> Result<_, String> {
+            let mut resident_guard = slot.borrow_mut();
+            let resident = resident_guard
+                .as_mut()
+                .ok_or_else(|| "resident module missing".to_string())?;
+            resident
+                .module
+                .finalize_definitions()
+                .map_err(|error| error.to_string())?;
+            Ok((
+                resident.module.get_finalized_function(resident.main_id),
+                resident.main_returns_result,
+                resident.main_returns_app,
+                resident.main_serves_app,
+                resident.main_error_type,
+            ))
+        })?;
 
     let cli_adapter = crate::CLI::cli_run_requires_adapter();
     RESIDENT_RUNTIME.with(|slot| {
@@ -538,7 +534,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             if runtime.exit_code.is_none() {
                 if main_returns_result {
                     if let Some(app) =
-                        super::runtime_host::report_unhandled_entry_result(handle)
+                        super::runtime_host::report_unhandled_entry_result(handle, main_error_type)
                     {
                         if main_serves_app {
                             crate::Web::serve_app(app);
@@ -553,7 +549,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             let handle = entry();
             if main_returns_result {
                 if let Some(app) =
-                    super::runtime_host::report_unhandled_entry_result(handle)
+                    super::runtime_host::report_unhandled_entry_result(handle, main_error_type)
                 {
                     if main_serves_app {
                         crate::Web::serve_app(app);

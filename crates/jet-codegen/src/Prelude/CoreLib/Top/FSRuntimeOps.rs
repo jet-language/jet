@@ -171,6 +171,30 @@ pub(crate) fn jet_std_fs_lock_path(path: &String) -> Result<String, jet_std::IOE
     Ok(path.clone())
 }
 
+pub(crate) fn jet_std_fs_temp_dir(prefix: &String) -> Result<JetTempDirOwner, jet_std::IOError> {
+    let path = jet_std_fs_temp_dir_path(prefix)?;
+    Ok(JetTempDirOwner {
+        path,
+        cleanup: std::rc::Rc::new(()),
+    })
+}
+
+pub(crate) fn jet_std_fs_temp_file(prefix: &String) -> Result<JetTempFileOwner, jet_std::IOError> {
+    let path = jet_std_fs_temp_file_path(prefix)?;
+    Ok(JetTempFileOwner {
+        path,
+        cleanup: std::rc::Rc::new(()),
+    })
+}
+
+pub(crate) fn jet_std_fs_lock(path: &String) -> Result<JetFileLockOwner, jet_std::IOError> {
+    let path = jet_std_fs_lock_path(path)?;
+    Ok(JetFileLockOwner {
+        path,
+        cleanup: std::rc::Rc::new(()),
+    })
+}
+
 pub(crate) fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
@@ -208,6 +232,17 @@ pub(crate) fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::
     }
     jet_fs_canonicalize(path)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Resolve, path, error))
+}
+pub(crate) fn jet_fs_remove_path(path: &String) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    jet_fs_remove_entry(path)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
 }
 pub(crate) struct JetFsStat {
     pub(crate) size: i64,

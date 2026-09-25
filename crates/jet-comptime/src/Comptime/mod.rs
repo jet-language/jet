@@ -17,7 +17,6 @@
 
 mod AmbientRuntime;
 pub mod AppLite;
-mod ArchiveLite;
 mod ArgsLite;
 pub mod AuthLite;
 pub mod Build;
@@ -64,6 +63,7 @@ pub mod ServicesLite;
 pub mod SyncLite;
 mod TextLite;
 pub use TextLite::file_reader_next_line;
+pub use TextLite::{mir_fs_lock, mir_fs_temp_dir, mir_fs_temp_file, MirFileOwner};
 pub mod MirBridge;
 pub mod Template;
 mod TypedDecode;

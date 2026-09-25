@@ -173,6 +173,9 @@ pub fn truncate(buf: StringBuf, size: Int) -> StringBuf !IOError {
     if buf.pos < 0 -> return Err(io_err("truncate", "buffer is closed"))
     if size < 0 -> return Err(io_err("truncate", "size must be non-negative"))
     raw :: buf.text.bytes()
+    if buf.pos > raw.len() || !utf8_boundary(raw, buf.pos) {
+        return Err(io_err("truncate", "cursor is not a valid UTF-8 boundary"))
+    }
     n := size
     if n > raw.len() -> n = raw.len()
     if !utf8_boundary(raw, n) -> return Err(io_err("truncate", "size splits a UTF-8 code point"))
@@ -257,9 +260,9 @@ fn io_err(operation: String, message: String) -> IOError {
     })
 }
 
-@seek_set :: 0
-@seek_cur :: 1
-@seek_end :: 2
+seek_set :: 0
+seek_cur :: 1
+seek_end :: 2
 
 pub fn string_io(text: String) -> StringBuf { string_buf(text) }
 pub fn bytes_io(data: [U8]) -> BytesBuf { bytes_buf(data) }

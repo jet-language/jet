@@ -347,14 +347,6 @@ pub(super) fn history_u64_from_ct(value: &CtValue) -> Result<u64, String> {
         .map_err(|_| "history count must be a non-negative Int".to_string())
 }
 
-pub(super) fn history_positive_count_from_ct(value: &CtValue) -> Result<usize, String> {
-    let count = history_u64_from_ct(value)?;
-    if count == 0 {
-        return Err("history cases must be a positive Int".to_string());
-    }
-    usize::try_from(count)
-        .map_err(|_| "history cases exceed the supported host count range".to_string())
-}
 
 pub(super) fn history_u32_from_ct(value: &CtValue, label: &str) -> Result<u32, String> {
     let count = history_u64_from_ct(value)
@@ -1644,18 +1636,28 @@ pub(crate) fn apply_testing_histories(
     }
     let command_key = command_type.identity_key();
     let data_tree_command = command_key == "DataTree" || command_key.starts_with("DataTree|");
-    let seed = match history_u64_from_ct(&args[0]) {
-        Ok(value) => value,
-        Err(reason) => {
-            return Ok(CtValue::failed(Box::new(CtValue::Str(reason))));
-        }
+    let Some(cases) = exact_big(&args[1]).and_then(|number| number.try_i64()) else {
+        return Ok(CtValue::failed(Box::new(CtValue::Str(
+            jet_foundation::TestingHistory::HISTORY_CASE_BOUND_INVALID_REASON.to_string(),
+        ))));
     };
-    let cases = match history_positive_count_from_ct(&args[1]) {
-        Ok(value) => value,
-        Err(reason) => {
-            return Ok(CtValue::failed(Box::new(CtValue::Str(reason))));
-        }
+    let Some(seed) = exact_big(&args[0]).and_then(|number| number.try_i64()) else {
+        return Ok(CtValue::failed(Box::new(CtValue::Str(
+            jet_foundation::TestingHistory::HISTORY_SEED_INVALID_REASON.to_string(),
+        ))));
     };
+    let (seed, cases) =
+        match jet_foundation::TestingHistory::validate_history_bounds(seed, cases) {
+            Ok(bounds) => bounds,
+            Err(reason) => {
+                return Ok(CtValue::failed(Box::new(CtValue::Str(reason.to_string()))));
+            }
+        };
+    if cases == 0 {
+        return Ok(CtValue::failed(Box::new(CtValue::Str(
+            "history cases must be a positive Int".to_string(),
+        ))));
+    }
     let strategy_value = match history_option_value(&args[2]) {
         Ok(value) => value,
         Err(reason) => {

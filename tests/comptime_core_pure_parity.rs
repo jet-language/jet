@@ -1548,13 +1548,15 @@ fn public_transcript_covers_solver_exactly() {
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
 fn archive_view() String -> {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
-    zipped :: archive.zip_compress("hello.txt", bytes)
+    zipped :: archive.create("hello.txt", bytes)
     empty :: [U8]{}
     tarred := archive.tar_add(empty, "hello.txt", bytes)
     tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
-    zip_bytes :: archive.zip_decompress(zipped)
-    tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt")
-    return "{zip_bytes}|{tar_bytes}|{archive.tar_names_json(tarred)}|{archive.tar_get(tarred, "missing").len()}"
+    zip_bytes :: archive.zip_decompress(zipped) ?? [U8]{}
+    tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt") ?? [U8]{}
+    names_json :: archive.tar_names_json(tarred) ?? ""
+    missing :: archive.tar_get(tarred, "missing") ?? [U8]{}
+    return "{zip_bytes}|{tar_bytes}|{names_json}|{missing.len()}"
 }"#;
 const ARCHIVE_EXPECTED: &str =
     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
@@ -1563,7 +1565,10 @@ fn invalid_tar_name_view(name: String) String -> {
     empty :: [U8]{}
     valid :: archive.tar_add(empty, "keep.txt", [1])
     attempted :: archive.tar_add(valid, name, [2])
-    return "{archive.tar_names_json(attempted)}|{archive.tar_get(attempted, "keep.txt")}|{archive.tar_get(attempted, name)}"
+    names_json :: archive.tar_names_json(attempted) ?? ""
+    kept :: archive.tar_get(attempted, "keep.txt") ?? [U8]{}
+    rejected :: archive.tar_get(attempted, name) ?? [U8]{}
+    return "{names_json}|{kept}|{rejected}"
 }"#;
 const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "[\"keep.txt\"]|[1]|[]";
 

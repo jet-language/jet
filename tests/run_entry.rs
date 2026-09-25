@@ -482,6 +482,7 @@ fn run() !CryptoError {
 #[test]
 fn user_crypto_error_is_a_normal_declared_entry_error() {
     let src = r#"
+#Error
 enum CryptoError {
     Internal
 }
@@ -496,6 +497,7 @@ fn run() !CryptoError {
 #[test]
 fn typed_entry_error_pins_the_declared_family() {
     let src = r#"
+#Error
 enum StoreErr {
     Missing
 }
@@ -506,7 +508,8 @@ fn run() !StoreErr {
 "#;
     let out = jet::compile(src).expect("typed fallible entries must compile");
     assert!(
-        out.rust.contains("JetOutcome<(), __jet_StoreErr>"),
+        out.rust
+            .contains("JetOutcome<(), __jet__d_c_cinput_djet_c_cStoreErr>"),
         "the entry must keep StoreErr as its error family:\n{}",
         out.rust
     );

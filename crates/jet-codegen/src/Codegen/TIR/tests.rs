@@ -345,7 +345,10 @@ fn refusal_after_sema(src: &str, fn_name: &str) -> String {
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         let covered = tir_covers(f, &cx);
         let detail = refusal::describe(&cx);
-        format!("covered={covered}; core_imports={:?}; {detail}", cx.core_imports)
+        format!(
+            "covered={covered}; core_imports={:?}; {detail}",
+            cx.core_imports
+        )
     })
 }
 
@@ -373,6 +376,93 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         lower_func(f, &cx)
     })
+}
+
+
+#[test]
+fn loaded_core_source_signatures_include_transitive_files_calls() {
+    fn loaded_module(alias: &str, source: &str) -> crate::AST::LoadedModule {
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("parse failed");
+        crate::AST::LoadedModule {
+            path: std::path::PathBuf::from(format!("{alias}.jet")),
+            display: format!("{alias}.jet"),
+            source: source.to_string(),
+            alias: alias.to_string(),
+            imports: std::mem::take(&mut program.imports),
+            items: std::mem::take(&mut program.items),
+            script_body: std::mem::take(&mut program.script_body),
+            block_spans: std::mem::take(&mut program.block_spans),
+            web_target_ceiling: program.web_target_ceiling,
+            pub_file: program.pub_file,
+            no_prelude: program.no_prelude,
+            default_target: program.default_target,
+            html_path: program.html_path,
+            policy_declarations: program.policy_declarations,
+            user_policy_declarations: program.user_policy_declarations,
+            rule_facts: std::mem::take(&mut program.rule_facts),
+        }
+    }
+
+    let files = jet_foundation::CoreModuleExports::core_source_module("core.files")
+        .expect("core.files source module");
+    let files_path = jet_foundation::CoreModuleExports::core_source_module("core.files.path")
+        .expect("core.files.path source module");
+    let modules = vec![
+        loaded_module("caller", "use core.files.path.[Path]\nfn run() {}"),
+        loaded_module(files_path.alias, "use core.files as files"),
+        loaded_module(
+            files.alias,
+            "pub fn read_bytes(path: String) -> [U8] { [U8]{} }\n\
+             pub fn write_bytes(path: String, bytes: [U8]) {}",
+        ),
+    ];
+    let bundle = crate::AST::ProgramBundle {
+        entry: 0,
+        project_root: std::path::PathBuf::new(),
+        modules,
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
+        parse_teaching: Vec::new(),
+        used_core: HashSet::new(),
+        ffi_callback_fns: HashSet::new(),
+        cffi: crate::AST::CFfi::default(),
+        comptime_inputs: Vec::new(),
+        name_ledger: crate::AST::NameLedger::default(),
+        layer_ceiling: None,
+        inferred_layer: crate::Syntax::RuntimeLayer::Core,
+        web_partitions: HashMap::new(),
+        web_partition_enforced: false,
+        web_partition_report: None,
+        dep_roots: HashMap::new(),
+        package_guarantees: Default::default(),
+        program_allocator: Default::default(),
+        active_os: crate::Syntax::OSTarget::host(),
+        build_facts: Default::default(),
+        edition: "2026".to_string(),
+    };
+    let signatures = crate::Codegen::core_source_sig_map(&bundle);
+    let read = signatures
+        .get(&("core.files".to_string(), "read_bytes".to_string()))
+        .expect("loaded core.files.read_bytes signature");
+    assert_eq!(read.params.len(), 1);
+    assert!(matches!(&read.params[0].1, crate::AST::Type::String));
+    assert!(matches!(
+        read.return_type.as_ref(),
+        Some(crate::AST::Type::List(inner))
+            if matches!(inner.as_ref(), crate::AST::Type::Named(name) if name == "U8")
+    ));
+    let write = signatures
+        .get(&("core.files".to_string(), "write_bytes".to_string()))
+        .expect("loaded core.files.write_bytes signature");
+    assert_eq!(write.params.len(), 2);
+    assert!(matches!(&write.params[0].1, crate::AST::Type::String));
+    assert!(matches!(
+        &write.params[1].1,
+        crate::AST::Type::List(inner)
+            if matches!(inner.as_ref(), crate::AST::Type::Named(name) if name == "U8")
+    ));
+    assert!(write.return_type.is_none());
 }
 
 #[test]
@@ -427,10 +517,7 @@ fn explicit_run_is_lowered_as_the_canonical_run_function() {
         "the explicit run must be the sole ordinary run"
     );
     let run = runs[0];
-    assert!(
-        run.params.is_empty(),
-        "run must have no parameters"
-    );
+    assert!(run.params.is_empty(), "run must have no parameters");
     assert!(!run.is_job && !run.is_unsafe && !run.is_reactive);
     assert!(matches!(
         &run.return_type,
@@ -1512,6 +1599,83 @@ fn covers_fallible_return_and_try() {
 }
 
 #[test]
+fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
+    let source = jet_foundation::CoreModuleExports::core_source_module("core.http")
+        .expect("Core HTTP source module");
+    let source_for_parse = jet_pkg_model::Package::mask_inline_package_source(source.source)
+        .expect("Core HTTP package header")
+        .0;
+    let (tokens, lex_diags) = crate::Lexer::lex(&source_for_parse);
+    assert!(lex_diags.is_empty(), "Core HTTP lex errors: {lex_diags:?}");
+    let (program, _) =
+        crate::Parser::parse_for_check_with_source(&tokens, &source_for_parse)
+            .expect("Core HTTP source parses");
+    let mut method = program
+        .items
+        .into_iter()
+        .find_map(|item| match item {
+            Item::Enum(definition) if definition.name == "Method" => Some(definition),
+            _ => None,
+        })
+        .expect("Core HTTP Method declaration");
+
+    let identity = format!(
+        "<corelib>/{}::Method",
+        source
+            .path
+            .strip_suffix(".jet")
+            .expect("Core source path suffix")
+    );
+    method.name = identity.clone();
+    let mut checked_nominals = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
+    checked_nominals
+        .foreign_modules
+        .insert(identity.clone(), source.alias.to_string());
+    checked_nominals.enums.insert(identity, method);
+
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items_with_boxed_edges(
+        &[],
+        "",
+        &HashSet::new(),
+        &HashSet::new(),
+        &HashSet::new(),
+        Some(&checked_nominals),
+    );
+    let method = declarations
+        .type_defs
+        .iter()
+        .find(|definition| definition.key == "Method")
+        .expect("compiler-owned Core Method type row");
+    let super::tir_to_mir_types::TirTypeDefKind::Enum { variants, .. } = &method.kind else {
+        panic!("Core Method must be an enum row");
+    };
+    let expected = jet_foundation::CoreModuleExports::core_enum_variants("Method")
+        .expect("Core Method variant export names");
+    assert_eq!(
+        variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
+        expected
+    );
+    let custom = variants
+        .iter()
+        .find(|variant| variant.name == "Custom")
+        .expect("Method.Custom variant");
+    assert!(matches!(
+        &custom.payload,
+        super::tir_to_mir_types::TirVariantPayload::Single(crate::AST::Type::String)
+    ));
+    assert!(
+        variants
+            .iter()
+            .filter(|variant| variant.name != "Custom")
+            .all(|variant| matches!(
+                &variant.payload,
+                super::tir_to_mir_types::TirVariantPayload::Unit
+            )),
+        "only Method.Custom has a payload"
+    );
+}
+
+#[test]
 fn compiler_owned_default_err_is_a_struct_row() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(&[], "");
     let err = declarations
@@ -1525,7 +1689,10 @@ fn compiler_owned_default_err_is_a_struct_row() {
         "default Err must be a struct, got {kind}"
     );
     for field in ["message", "code", "cause"] {
-        assert!(kind.contains(field), "default Err missing field {field} in {kind}");
+        assert!(
+            kind.contains(field),
+            "default Err missing field {field} in {kind}"
+        );
     }
 }
 #[test]
@@ -1554,11 +1721,13 @@ fn compiler_owned_core_ui_registry_has_nominal_rows() {
         panic!("UiShortcut must lower as a struct row");
     };
     assert_eq!(
-        fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["key", "modifiers"]
     );
 }
-
 
 #[test]
 fn mir_lowers_default_err_return() {
@@ -1573,9 +1742,226 @@ fn mir_lowers_default_err_return() {
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        super::lower_checked_mir_program_for(&bundle, request).unwrap_or_else(|err| {
-            panic!("default Err return failed to lower to MIR: {err:?}")
-        });
+        super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
+    });
+}
+
+#[test]
+fn mir_types_absent_match_arm_from_its_checked_option_peer() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "\
+fn canonical_device(device: String) -> ?String {
+    if device == {
+        \"CPU\" | \"cpu\" -> Val(\"CPU\")
+        \"Auto\" | \"auto\" -> Val(\"Auto\")
+        \"CUDA\" | \"cuda\" -> Val(\"CUDA\")
+        \"Metal\" | \"metal\" -> Val(\"Metal\")
+        \"Vulkan\" | \"vulkan\" -> Val(\"Vulkan\")
+        \"WebGPU\" | \"webgpu\" -> Val(\"WebGPU\")
+        else -> None
+    }
+}
+fn run() {}
+";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("canonical_device failed to lower to MIR: {err:?}"));
+        mir.validate()
+            .unwrap_or_else(|err| panic!("canonical_device MIR failed validation: {err}"));
+        let function = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "canonical_device")
+            .expect("canonical_device MIR function");
+        assert!(
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| block.instructions.iter())
+                .any(|instruction| {
+                    matches!(
+                        &instruction.operation,
+                        jet_foundation::MIR::MirOperation::Absent
+                    ) && instruction.ty.as_ref().is_some_and(|ty| {
+                        matches!(
+                            &ty.kind,
+                            jet_foundation::MIR::MirTypeKind::Option(inner)
+                                if matches!(&inner.kind, jet_foundation::MIR::MirTypeKind::String)
+                        )
+                    })
+                }),
+            "the final None arm must retain the checked Option<String> type",
+        );
+    });
+}
+
+#[test]
+fn mir_lowers_core_net_error_constructors_as_typed_enums() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "\
+fn net_err(op: String, addr: String, message: String) -> NetError {
+    return NetError.InvalidInput(NetErrorDetail{
+        operation: op,
+        address: Val(addr),
+        name: None,
+        message: message,
+        os_code: None,
+    })
+}
+fn dns_err(name: String) -> NetError {
+    return NetError.DNS(NetDnsError.NotFound(name))
+}
+fn run() {}
+";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("NetError construction failed to lower to MIR: {err:?}"));
+        mir.validate()
+            .unwrap_or_else(|err| panic!("NetError MIR failed validation: {err}"));
+        let net_err_fn = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "net_err")
+            .expect("net_err MIR function");
+        let has_absent_payload = |matches_payload: fn(&jet_foundation::MIR::MirTypeKind) -> bool| {
+            net_err_fn
+                .blocks
+                .iter()
+                .flat_map(|block| block.instructions.iter())
+                .any(|instruction| {
+                    matches!(
+                        &instruction.operation,
+                        jet_foundation::MIR::MirOperation::Absent
+                    ) && instruction.ty.as_ref().is_some_and(|ty| {
+                        matches!(
+                            &ty.kind,
+                            jet_foundation::MIR::MirTypeKind::Option(inner)
+                                if matches_payload(&inner.kind)
+                        )
+                    })
+                })
+        };
+        assert!(
+            has_absent_payload(|kind| matches!(
+                kind,
+                jet_foundation::MIR::MirTypeKind::String
+            )),
+            "NetErrorDetail.name must retain its checked Option<String> type",
+        );
+        assert!(
+            has_absent_payload(|kind| matches!(
+                kind,
+                jet_foundation::MIR::MirTypeKind::Int
+            )),
+            "NetErrorDetail.os_code must retain its checked Option<Int> type",
+        );
+
+
+        let net_error = mir
+            .types
+            .iter()
+            .find(|ty| ty.key == "NetError")
+            .expect("compiler-owned NetError type row");
+        let net_dns_error = mir
+            .types
+            .iter()
+            .find(|ty| ty.key == "NetDnsError")
+            .expect("compiler-owned NetDnsError type row");
+        let detail = mir
+            .types
+            .iter()
+            .find(|ty| ty.key == "NetErrorDetail")
+            .expect("compiler-owned NetErrorDetail type row");
+
+        let jet_foundation::MIR::MirTypeDefKind::Enum {
+            variants: net_error_variants,
+            ..
+        } = &net_error.kind
+        else {
+            panic!("NetError must be an enum row");
+        };
+        assert_eq!(
+            net_error_variants
+                .iter()
+                .map(|variant| variant.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "InvalidInput",
+                "PermissionDenied",
+                "AddressInUse",
+                "AddressUnavailable",
+                "ConnectionRefused",
+                "ConnectionReset",
+                "NotConnected",
+                "Closed",
+                "Timeout",
+                "Cancelled",
+                "Unsupported",
+                "TLS",
+                "Protocol",
+                "Other",
+                "DNS",
+            ]
+        );
+        let invalid_input = net_error_variants
+            .iter()
+            .find(|variant| variant.name == "InvalidInput")
+            .expect("NetError.InvalidInput variant row");
+        let jet_foundation::MIR::MirVariantPayload::Single(payload) = &invalid_input.payload else {
+            panic!("NetError.InvalidInput must carry NetErrorDetail");
+        };
+        assert_eq!(payload.identity, Some(detail.id));
+
+        let jet_foundation::MIR::MirTypeDefKind::Enum {
+            variants: net_dns_variants,
+            ..
+        } = &net_dns_error.kind
+        else {
+            panic!("NetDnsError must be an enum row");
+        };
+        assert_eq!(
+            net_dns_variants
+                .iter()
+                .map(|variant| variant.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["NotFound", "Failure"]
+        );
+
+        let has_enum = |function_name: &str, type_id, variant_name: &str| {
+            let function = mir
+                .functions
+                .iter()
+                .find(|function| function.name == function_name)
+                .unwrap_or_else(|| panic!("missing MIR function {function_name}"));
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| block.instructions.iter())
+                .any(|instruction| {
+                    matches!(
+                        &instruction.operation,
+                        jet_foundation::MIR::MirOperation::Enum {
+                            type_id: owner,
+                            variant,
+                            ..
+                        } if *owner == type_id && variant == variant_name
+                    )
+                })
+        };
+        assert!(has_enum("net_err", net_error.id, "InvalidInput"));
+        assert!(has_enum("dns_err", net_error.id, "DNS"));
+        assert!(has_enum("dns_err", net_dns_error.id, "NotFound"));
     });
 }
 
@@ -1624,9 +2010,8 @@ fn mir_lowers_user_struct_and_instance_method() {
         );
         let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
             .unwrap_or_else(|err| panic!("user struct method failed to lower to MIR: {err:?}"));
-        mir.validate().unwrap_or_else(|err| {
-            panic!("user struct MIR failed validate: {err}")
-        });
+        mir.validate()
+            .unwrap_or_else(|err| panic!("user struct MIR failed validate: {err}"));
         let method = mir
             .functions
             .iter()
@@ -1672,9 +2057,8 @@ fn mir_lowers_computed_field_getter_onto_inherent_impl() {
         );
         let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
             .unwrap_or_else(|err| panic!("computed field failed to lower to MIR: {err:?}"));
-        mir.validate().unwrap_or_else(|err| {
-            panic!("computed field MIR failed validate: {err}")
-        });
+        mir.validate()
+            .unwrap_or_else(|err| panic!("computed field MIR failed validate: {err}"));
         let method = mir
             .functions
             .iter()
@@ -2073,9 +2457,9 @@ fn covers_struct_destructure() {
     // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
     // byte-for-byte (per-field type from `cx.struct_fields`).
     assert!(covers(
-            "struct Point { x: Int, y: Int }\nfn f() { p :: Point{ x: 1, y: 2 }\nPoint{ x, y } :: p\nprint(x + y) }",
-            "f"
-        ));
+        "struct Point { x: Int, y: Int }\nfn f() { p :: Point{ x: 1, y: 2 }\nPoint{ x, y } :: p\nprint(x + y) }",
+        "f"
+    ));
 }
 
 #[test]

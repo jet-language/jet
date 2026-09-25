@@ -31,6 +31,12 @@ impl TimeError {
 
 
 
+pub struct Date {
+    pub year: Int
+    pub month: Int
+    pub day: Int
+}
+
 pub struct LocalDate {
     pub year: Int
     pub month: Int
@@ -67,6 +73,8 @@ pub struct ZonedDateTime {
 pub struct Instant {
     pub unix_ns: Int
 }
+
+
 
 
 pub struct Stopwatch {
@@ -170,15 +178,49 @@ pub fn datetime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second:
     DateTime{year: date.year, month: date.month, day: date.day, hour: tm.hour, minute: tm.minute, second: tm.second, nano: 0}
 }
 
-pub fn from_timestamp(seconds: Int) -> DateTime { from_unix_ns(seconds * 1000000000) }
+pub fn from_timestamp(seconds: Int) -> DateTime { from_unix_seconds(seconds) }
 
-pub fn from_unix_seconds(seconds: Int) -> DateTime { from_timestamp(seconds) }
+pub fn from_unix_seconds(seconds: Int) -> DateTime { from_unix_parts(seconds, 0) }
 
-pub fn from_unix_ms(ms: Int) -> DateTime { from_unix_ns(ms * 1000000) }
+pub fn from_unix_ms(ms: Int) -> DateTime {
+    secs :: epoch_seconds(ms, 1000)
+    nano :: epoch_remainder(ms, 1000) * 1000000
+    from_unix_parts(secs, nano)
+}
 
-pub fn from_unix_microseconds(us: Int) -> DateTime { from_unix_ns(us * 1000) }
+pub fn from_unix_microseconds(us: Int) -> DateTime {
+    secs :: epoch_seconds(us, 1000000)
+    nano :: epoch_remainder(us, 1000000) * 1000
+    from_unix_parts(secs, nano)
+}
 
-pub fn from_unix_nanoseconds(ns: Int) -> DateTime { from_unix_ns(ns) }
+pub fn from_unix_nanoseconds(ns: Int) -> DateTime {
+    from_unix_parts(epoch_seconds(ns, 1000000000), epoch_remainder(ns, 1000000000))
+}
+
+fn from_unix_parts(seconds: Int, nano: Int) -> DateTime {
+    days :: floor_div(seconds, 86400)
+    sod := seconds %% 86400
+    if sod < 0 -> sod = sod + 86400
+    date :: civil_from_days(days)
+    h :: sod /% 3600
+    mi :: (sod %% 3600) /% 60
+    s :: sod %% 60
+    DateTime{year: date.year, month: date.month, day: date.day, hour: h, minute: mi, second: s, nano: nano}
+}
+
+fn epoch_seconds(value: Int, unit: Int) -> Int {
+    q := value /% unit
+    r :: value %% unit
+    if r < 0 -> q = q - 1
+    q
+}
+
+fn epoch_remainder(value: Int, unit: Int) -> Int {
+    r := value %% unit
+    if r < 0 -> r = r + unit
+    r
+}
 
 pub fn from_iso_week(year: Int, week: Int, weekday: Int) -> LocalDate !TimeError {
     if week < 1 || week > 53 -> return Err(TimeError{reason: "ISO week must be 1..=53"})
@@ -344,15 +386,7 @@ fn host_unix_ns() -[Time]> Int { core.time.instant().unix_ns }
 fn host_sleep_ns(ns: Int) -[Time]> { core.time.sleep(Duration{ns: ns}) }
 
 fn from_unix_ns(ns: Int) -> DateTime {
-    secs :: floor_div(ns, 1000000000)
-    nano :: ns - secs * 1000000000
-    days :: floor_div(secs, 86400)
-    sod :: secs - days * 86400
-    date :: civil_from_days(days)
-    h :: sod /% 3600
-    mi :: (sod %% 3600) /% 60
-    s :: sod %% 60
-    DateTime{year: date.year, month: date.month, day: date.day, hour: h, minute: mi, second: s, nano: nano}
+    from_unix_parts(epoch_seconds(ns, 1000000000), epoch_remainder(ns, 1000000000))
 }
 
 fn days_from_civil(y: Int, m: Int, d: Int) -> Int {
@@ -411,17 +445,28 @@ fn iso_week_number(date: LocalDate) -> Int {
 
 fn datetime_to_ns(dt: DateTime) -> Int {
     days :: days_from_civil(dt.year, dt.month, dt.day)
-    sod :: dt.hour * 3600 + dt.minute * 60 + dt.second
-    days * 86400 * 1000000000 + sod * 1000000000 + dt.nano
+    day_seconds :: saturating_scale_ns(days, 86400)
+    day_ns :: saturating_scale_ns(day_seconds, 1000000000)
+    sod := saturating_scale_ns(dt.hour, 3600)
+    sod = saturating_add_ns(sod, saturating_scale_ns(dt.minute, 60))
+    sod = saturating_add_ns(sod, dt.second)
+    sod_ns :: saturating_scale_ns(sod, 1000000000)
+    total := saturating_add_day(day_ns, sod_ns)
+    if total == time_int_min() || total == time_int_max() -> return total
+    saturating_add_ns(total, dt.nano)
 }
 fn time_int_min() -> Int { -9223372036854775808 }
-
 fn time_int_max() -> Int { 9223372036854775807 }
 
 fn saturating_add_ns(a: Int, b: Int) -> Int {
     if b > 0 && a > time_int_max() - b -> return time_int_max()
     if b < 0 && a < time_int_min() - b -> return time_int_min()
     a + b
+}
+
+fn saturating_add_day(day: Int, remainder: Int) -> Int {
+    if day == time_int_min() || day == time_int_max() -> return day
+    saturating_add_ns(day, remainder)
 }
 
 fn saturating_sub_ns(a: Int, b: Int) -> Int {
@@ -475,24 +520,31 @@ fn parse_frac_nano(text: String) -> ?Int {
 }
 
 fn parse_int(text: String) -> ?Int {
-    if text.bytes().len() == 0 -> return None
-    n := 0
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
     sign := 1
     i := 0
-    raw :: text.bytes()
     if raw[0] == (U8{45}) {
         sign = -1
         i = 1
     }
     if i >= raw.len() -> return None
+    // Accumulate negatively so the signed minimum remains representable.
+    n := 0
     loop i < raw.len() {
         d :: raw[i]
         dn :: d
         if dn < 48 || dn > 57 -> return None
-        n = n * 10 + (dn - 48)
+        digit :: dn - 48
+        if n < (time_int_min() + digit) /% 10 -> return None
+        n = n * 10 - digit
         i = i + 1
     }
-    Val(sign * n)
+    if sign > 0 {
+        if n == time_int_min() -> return None
+        return Val(0 - n)
+    }
+    Val(n)
 }
 
 fn split_char(text: String, sep: Int) -> [String] {
@@ -600,9 +652,23 @@ pub fn strftime(format: String, dt: DateTime) -> String {
 }
 
 
-pub fn unix_seconds(dt: DateTime) -> Int { floor_div(datetime_to_ns(dt), 1000000000) }
+pub fn unix_seconds(dt: DateTime) -> Int {
+    days :: days_from_civil(dt.year, dt.month, dt.day)
+    sod := saturating_scale_ns(dt.hour, 3600)
+    sod = saturating_add_ns(sod, saturating_scale_ns(dt.minute, 60))
+    sod = saturating_add_ns(sod, dt.second)
+    saturating_add_day(saturating_scale_ns(days, 86400), sod)
+}
 
-pub fn unix_ms(dt: DateTime) -> Int { floor_div(datetime_to_ns(dt), 1000000) }
+pub fn unix_ms(dt: DateTime) -> Int {
+    days :: days_from_civil(dt.year, dt.month, dt.day)
+    sod := saturating_scale_ns(dt.hour, 3600)
+    sod = saturating_add_ns(sod, saturating_scale_ns(dt.minute, 60))
+    sod = saturating_add_ns(sod, dt.second)
+    subday_ms := saturating_scale_ns(sod, 1000)
+    subday_ms = saturating_add_ns(subday_ms, dt.nano /% 1000000)
+    saturating_add_day(saturating_scale_ns(days, 86400000), subday_ms)
+}
 
 pub fn add_days(date: LocalDate, days: Int) -> LocalDate { civil_from_days(days_from_civil(date.year, date.month, date.day) + days) }
 

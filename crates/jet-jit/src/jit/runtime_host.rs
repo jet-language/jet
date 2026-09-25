@@ -392,6 +392,7 @@ mod string_bytes_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/StringBytes.rs");
 }
 
+
 #[derive(Clone, Debug)]
 struct JitTestingFailure {
     message: String,
@@ -1735,6 +1736,9 @@ pub(crate) fn install_program_type_descriptors(
     program: &MirProgram,
     functions: &[&MirFunction],
 ) {
+    runtime.default_error_type = program.types.iter()
+        .find(|definition| definition.key == jet_foundation::Syntax::TYPE_ERR)
+        .map(|definition| definition.id.0);
     runtime.install_type_descriptors(runtime_type_descriptors(program));
     let existing: HashSet<u64> = runtime.type_descriptors.keys().copied().collect();
     let extras = functions
@@ -2898,6 +2902,9 @@ pub(crate) struct JitRuntime {
     pub(crate) lazy_iters: Vec<Option<JitLazyIter>>,
     pub(crate) type_descriptors: HashMap<u64, RuntimeTypeDescriptor>,
     pub(crate) type_descriptor_names: HashMap<String, u64>,
+    /// Checked identity for the built-in Err record's fixed ABI. Unlike the
+    /// generic descriptor registry, this fact is carried by warm artifacts.
+    pub(crate) default_error_type: Option<u64>,
     /// Concrete nominal type identity for each heap record promoted to a
     /// trait object. The Cranelift call site uses this side table to select
     /// the checked impl method without changing record field layout.
@@ -3490,6 +3497,19 @@ impl JitRuntime {
 
     /// Snapshot string handles allocated during lowering (baked into code).
     pub(crate) fn snapshot_compile_strings(&mut self) {
+        // The disk format restores strings, not other compile-time arenas.
+        // Check before invocation so runtime allocations do not affect admission.
+        if self.heap.has_non_string_state()
+            || !self.pattern_descriptors.is_empty()
+            || !self.dma_types.is_empty()
+            || !self.iterable_hooks.is_empty()
+            || !self.hardware_setups.is_empty()
+            || !self.task_labels.is_empty()
+            || !self.zip_plans.is_empty()
+            || !self.model_outputs.is_empty()
+        {
+            super::tier_cache::abort_capture();
+        }
         self.compile_strings = self.heap.string_slots();
         if let Some(host) = self.hardware_host.as_mut() {
             for (handle, value) in &self.compile_strings {
@@ -4006,6 +4026,17 @@ pub(crate) struct ResidentHotSwapPlan {
     pub(crate) rechecked_items: Vec<String>,
 }
 
+/// Checked entry display ABI, projected from the MIR failure type once.
+/// Descriptor rails require the resident schema registry; the other rails
+/// are self-contained and may be persisted with native warm artifacts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EntryErrorType {
+    Default,
+    Io,
+    Uninhabited,
+    Descriptor(u64),
+}
+
 pub(crate) struct ResidentModule {
     pub(crate) module: JITModule,
     pub(crate) host: HostFns,
@@ -4013,9 +4044,7 @@ pub(crate) struct ResidentModule {
     pub(crate) main_returns_result: bool,
     pub(crate) main_returns_app: bool,
     pub(crate) main_serves_app: bool,
-    pub(crate) main_returns_default_err: bool,
-    pub(crate) main_error_type: Option<String>,
-    pub(crate) main_error_is_packed: bool,
+    pub(crate) main_error_type: Option<EntryErrorType>,
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
@@ -8337,6 +8366,8 @@ fn jet_jit_err_with_context_frame(
     })
 }
 
+// The registered jet_entry_error_exit_jet ABI accepts JetErr, not an erased
+// arbitrary error. Typed program entries use report_unhandled_entry_result.
 fn jet_jit_entry_error_exit(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(error) = jit_error(rt, handle) {
@@ -8344,18 +8375,8 @@ fn jet_jit_entry_error_exit(handle: i64) {
             rt.set_rendered_runtime_stop(report, 1);
             return;
         }
-        // `T ![FieldError]` and other non-default carriers reach the edge as
-        // heap records/lists. Rendering them is a user-level stop, not an ICE.
-        let rendered = show_entry_error_handle(rt, handle)
-            .unwrap_or_else(|| format!("unhandled error"));
-        let report = jet_foundation::Outcome::jet_journey_report(&rendered);
-        rt.set_rendered_runtime_stop(report, 1);
+        rt.set_host_fault("default Err exit has an invalid checked carrier");
     });
-}
-
-fn show_entry_error_handle(rt: &mut JitRuntime, handle: i64) -> Option<String> {
-    let type_id = rt.trait_object_types.get(&handle).copied()?;
-    debug_nominal_handle(rt, handle, type_id.0, 0)
 }
 
 /// AOT `main` matches `run()`'s Result and calls `jet_entry_error_exit_jet`.
@@ -8364,16 +8385,46 @@ fn show_entry_error_handle(rt: &mut JitRuntime, handle: i64) -> Option<String> {
 ///
 /// The successful payload is returned so an App entry can cross the same
 /// runtime boundary as the generated AOT main.
-pub(crate) fn report_unhandled_entry_result(handle: i64) -> Option<i64> {
-    let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| jit_result_parts(rt, handle)) else {
-        return None;
-    };
-    if ok {
-        Some(bits as i64)
-    } else {
-        jet_jit_entry_error_exit(bits as i64);
+pub(crate) fn report_unhandled_entry_result(handle: i64, error_type: Option<EntryErrorType>) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some((ok, bits)) = jit_result_parts(rt, handle) else {
+            return None;
+        };
+        if ok {
+            return Some(bits as i64);
+        }
+        let Some(error_type) = error_type else {
+            rt.set_host_fault("MIR entry failure has no checked error type");
+            return None;
+        };
+        let payload = bits as i64;
+        // Choose the checked display ABI, never infer a type from payload bits:
+        // a packed error may numerically overlap an unrelated default Err.
+        let rendered = match error_type {
+            EntryErrorType::Default => {
+                let Some(error) = jit_error(rt, payload) else {
+                    rt.set_host_fault("MIR entry Err has an invalid checked carrier");
+                    return None;
+                };
+                rt.set_rendered_runtime_stop(jet_foundation::Outcome::jet_error_report(&error).render(), 1);
+                return None;
+            }
+            EntryErrorType::Io => crate::Process::process_error_show_text(payload, rt),
+            EntryErrorType::Uninhabited => {
+                rt.set_host_fault("MIR entry returned a failure from an uninhabited error domain");
+                return None;
+            }
+            EntryErrorType::Descriptor(type_id) => {
+                if rt.runtime_type_descriptor(type_id).is_none() {
+                    rt.set_host_fault("MIR entry error type has no registered descriptor");
+                    return None;
+                }
+                display_handle_text(rt, payload, type_id, 0)
+            }
+        };
+        rt.set_rendered_runtime_stop(jet_foundation::Outcome::jet_journey_report(&rendered), 1);
         None
-    }
+    })
 }
 
 /// Apply a declared error conversion to the existing shared carrier. The JIT
@@ -8724,9 +8775,7 @@ fn jit_heap_error(
     rt: &JitRuntime,
     handle: i64,
 ) -> Option<jet_foundation::Outcome::JetErr> {
-    let err_type_id = *rt
-        .type_descriptor_names
-        .get(jet_foundation::Syntax::TYPE_ERR)?;
+    let err_type_id = rt.default_error_type?;
     let tagged = rt.trait_object_types.get(&handle)?;
     if tagged.0 != err_type_id {
         return None;
@@ -10775,6 +10824,30 @@ fn jet_jit_service_task_status_show(value: i64) -> i64 {
 }
 
 
+/// Use the checked MIR struct ABI: IOOperation is an enum record and every
+/// Option is a result-arena handle, just as for a source-built IOContext.
+pub(crate) fn alloc_io_context(
+    rt: &mut JitRuntime,
+    operation: i64,
+    resource: Option<&str>,
+    os_code: Option<i64>,
+    cause: Option<&str>,
+) -> i64 {
+    let operation_record = rt.heap.alloc_record(1);
+    let _ = rt.heap.record_set_int(operation_record, 0, operation);
+    let resource_bits = resource.map(|value| rt.heap.alloc_string(value));
+    let resource = alloc_jit_result(rt, resource_bits.is_some(), resource_bits.unwrap_or(0) as u64);
+    let os_code = alloc_jit_result(rt, os_code.is_some(), os_code.unwrap_or(0) as u64);
+    let cause_bits = cause.map(|value| rt.heap.alloc_string(value));
+    let cause = alloc_jit_result(rt, cause_bits.is_some(), cause_bits.unwrap_or(0) as u64);
+    let context = rt.heap.alloc_record(4);
+    let _ = rt.heap.record_set_int(context, 0, operation_record);
+    let _ = rt.heap.record_set_int(context, 1, resource);
+    let _ = rt.heap.record_set_int(context, 2, os_code);
+    let _ = rt.heap.record_set_int(context, 3, cause);
+    context
+}
+
 pub(crate) fn alloc_io_error_result(
     rt: &mut JitRuntime,
     variant: i64,
@@ -10782,15 +10855,7 @@ pub(crate) fn alloc_io_error_result(
     resource: Option<&str>,
     cause: &str,
 ) -> i64 {
-    let context = rt.heap.alloc_record(4);
-    let _ = rt.heap.record_set_int(context, 0, operation);
-    let resource = resource
-        .map(|value| rt.heap.alloc_string(value.to_string()).wrapping_add(1))
-        .unwrap_or(0);
-    let _ = rt.heap.record_set_int(context, 1, resource);
-    let _ = rt.heap.record_set_int(context, 2, 0);
-    let cause = rt.heap.alloc_string(cause.to_string()).wrapping_add(1);
-    let _ = rt.heap.record_set_int(context, 3, cause);
+    let context = alloc_io_context(rt, operation, resource, None, Some(cause));
     alloc_jit_result(rt, false, (context as u64).wrapping_shl(8) | variant as u64)
 }
 
@@ -11832,7 +11897,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Math::register_math_host_symbols(&mut builder);
     crate::MathExtra::register_math_extra_symbols(&mut builder);
     crate::Ffi::register_ffi_host_symbols(&mut builder);
-    let mut module = JITModule::new(builder);
+    let mut module = JITModule::new(builder).map_err(|error| error.to_string())?;
     let host = declare_host_fns_for_module(&mut module)?;
     Ok((module, host))
 }
@@ -14080,23 +14145,14 @@ fn jet_jit_testing_histories(
     command_type: i64,
 ) -> i64 {
     let relation = ObservationRelation::TypedEquality;
+    let (seed, cases) =
+        match jet_foundation::TestingHistory::validate_history_bounds(seed, cases) {
+            Ok(bounds) => bounds,
+            Err(error) => return crate::Marshal::result_err_msg(error),
+        };
     let command_type = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(command_type))
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "HistoryCommand".to_string());
-    let Ok(seed) = u64::try_from(seed) else {
-        return testing_history_terminal(
-            relation,
-            ComparisonStatus::Unavailable,
-            "core.testing.histories seed must be non-negative",
-        );
-    };
-    let Ok(cases) = usize::try_from(cases) else {
-        return testing_history_terminal(
-            relation,
-            ComparisonStatus::Unavailable,
-            "core.testing.histories case bound is invalid",
-        );
-    };
     let slots = Concurrency::with_runtime_mut(|rt| {
         Some((
             jit_callable_slot(rt, model)?,

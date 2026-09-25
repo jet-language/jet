@@ -2,5 +2,7 @@
 use core.data as api
 
 fn run() {
-    print(api.database<String>("SELECT 1", [String]{}, "local", api.DataLimits.safe()))
+    loader := api.database<String>("SELECT 1", [String]{"flag"}, "local", api.DataLimits.safe()) ?? panic("database")
+    if loader.source.parameters[0] != "value-807d0fbcae7c4b20518d4d85664f6820aafdf936104122c5073e7744c46c4b87" -> panic("database parameter identity")
+    print(loader.source.parameters[0])
 }

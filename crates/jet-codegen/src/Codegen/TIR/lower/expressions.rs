@@ -1,44 +1,8 @@
-use crate::jet_generated_format as jet_format;
-use crate::Codegen::escape_rust_str;
-use crate::Codegen::is_db_value_type_name;
-use crate::Codegen::is_json_type_name;
-use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
-use crate::Codegen::net_handle_rust_type;
-use crate::Codegen::tuple_fields_plain;
-use crate::Codegen::tuple_struct_name;
+use crate::AST::{
+    AccessConvention, BinOp, Call, CallArg, ContractClause, CtValue, EnumLitArg, Expr, IndexKind,
+    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
+};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::ambient_err_local;
-use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::data_plan_for_core_call;
-use crate::Codegen::TIR::extern_call_return_type;
-use crate::Codegen::TIR::imported_module_call_target_return;
-use crate::Codegen::TIR::int_lit_type;
-use crate::Codegen::TIR::is_numeric_bounds_const;
-use crate::Codegen::TIR::lower::contract_expr_proven;
-use crate::Codegen::TIR::lower::core_module_path_from_receiver;
-use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
-use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
-use crate::Codegen::TIR::lower::lower_comptime_scalar;
-use crate::Codegen::TIR::lower::lower_incdec_place;
-use crate::Codegen::TIR::lower_enum_arg;
-use crate::Codegen::TIR::lower_extern_call_arg;
-use crate::Codegen::TIR::lower_lambda;
-use crate::Codegen::TIR::solve_new_type;
-use crate::Codegen::TIR::lower_method_call_with_sig;
-use crate::Codegen::TIR::lower_one_call_arg;
-use crate::Codegen::TIR::lower_panic_stop;
-use std::collections::HashSet;
-use crate::Codegen::TIR::lower_require_eq_stop;
-use crate::Codegen::TIR::lower_require_stop;
-use crate::Codegen::TIR::lower_stmts;
-use crate::Codegen::TIR::module_call_source_return_type;
-use crate::Codegen::TIR::preserve_typed_list_shape;
-use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::TIR::view_copy_owned_type;
-use crate::Codegen::TIR::tir_address_lifetime;
-use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TAddressLifetime;
@@ -62,24 +26,62 @@ use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TOptionProbe;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TPreludeArg;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::{
-    call_return_type, call_return_type_with_args, demand_generic_free_function, THandleOp,
-};
+use crate::Codegen::TIR::ambient_err_local;
+use crate::Codegen::TIR::ast_operand_is_integer;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::data_plan_for_core_call;
+use crate::Codegen::TIR::extern_call_return_type;
+use crate::Codegen::TIR::imported_module_call_target_return;
+use crate::Codegen::TIR::int_lit_type;
+use crate::Codegen::TIR::is_numeric_bounds_const;
+use crate::Codegen::TIR::lower::contract_expr_proven;
+use crate::Codegen::TIR::lower::core_module_path_from_receiver;
+use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
+use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
+use crate::Codegen::TIR::lower::lower_comptime_scalar;
+use crate::Codegen::TIR::lower::lower_incdec_place;
+use crate::Codegen::TIR::lower_enum_arg;
+use crate::Codegen::TIR::lower_extern_call_arg;
+use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::lower_method_call_with_sig;
+use crate::Codegen::TIR::lower_one_call_arg;
+use crate::Codegen::TIR::lower_panic_stop;
+use crate::Codegen::TIR::lower_require_eq_stop;
+use crate::Codegen::TIR::lower_require_stop;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::module_call_source_return_type;
+use crate::Codegen::TIR::preserve_typed_list_shape;
+use crate::Codegen::TIR::solve_new_type;
+use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::tir_address_lifetime;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::view_copy_owned_type;
 use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
+use crate::Codegen::TIR::{
+    THandleOp, call_return_type, call_return_type_with_args, demand_generic_free_function,
+};
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
+use crate::Codegen::net_handle_rust_type;
+use crate::Codegen::tuple_fields_plain;
+use crate::Codegen::tuple_struct_name;
 use crate::Diagnostics::Span;
 use crate::Syntax;
-use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, ContractClause, CtValue, EnumLitArg, Expr, IndexKind,
-    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
-};
+use crate::jet_generated_format as jet_format;
 use jet_foundation::CanonicalPass;
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::collections::{HashMap, VecDeque};
 /// Run one branch body in its own stack frame.
 ///
@@ -133,9 +135,7 @@ fn math_scalar_builtin(
 fn coerce_math_scalar_to_float(scalar: TExpr, line: u32) -> TExpr {
     match &scalar.ty {
         Type::Float | Type::Float32 => scalar,
-        Type::Named(name)
-            if name == Syntax::TYPE_DECIMAL || name == Syntax::TYPE_FRACTION =>
-        {
+        Type::Named(name) if name == Syntax::TYPE_DECIMAL || name == Syntax::TYPE_FRACTION => {
             TExpr {
                 ty: Type::Float,
                 kind: TExprKind::PreciseBuiltin {
@@ -305,7 +305,9 @@ pub(crate) fn lower_fn_value_call(
         } => Some(metadata.conventions.as_slice()),
         _ => None,
     };
-    if callee_expr.and_then(thread_callback_ident).is_some_and(|name| env.is_send_fn(name))
+    if callee_expr
+        .and_then(thread_callback_ident)
+        .is_some_and(|name| env.is_send_fn(name))
         && matches!(&callee_t.ty, Type::Fn { .. })
     {
         // A callback-safe local is stored in the canonical callback
@@ -405,8 +407,7 @@ pub(crate) fn resolve_unknown_index_kind(
     cx: &Cx,
 ) -> Option<IndexKind> {
     if let Some(field) = layout_selector_name(index) {
-        return is_layout_info_expr(base_t)
-            .then(|| IndexKind::LayoutField(field.to_string()));
+        return is_layout_info_expr(base_t).then(|| IndexKind::LayoutField(field.to_string()));
     }
 
     let base_ty = base_t.ty.without_user_tags();
@@ -425,14 +426,10 @@ pub(crate) fn resolve_unknown_index_kind(
         {
             Some(IndexKind::List)
         }
-        Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
-            Some(IndexKind::Pool)
-        }
+        Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(IndexKind::Pool),
         ty if ty.is_compute_tensor_family() && is_range => Some(IndexKind::Range),
         Type::Map { .. } => Some(IndexKind::Map),
-        Type::Named(name)
-            if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) =>
-        {
+        Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) => {
             Some(IndexKind::Lane(name.clone()))
         }
         Type::Named(name) if cx.index_hooks.contains_key(name) => {
@@ -475,7 +472,9 @@ fn shared_guard_projection(ty: &Type) -> Option<(Type, bool)> {
                         args[0].clone(),
                         matches!(
                             marker,
-                            crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)
+                            crate::AST::TagMarker::Internal(
+                                crate::AST::InternalTag::SharedGuardEdit
+                            )
                         ),
                     ))
                 }
@@ -635,7 +634,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
 /// so leaving the source owner in place would produce `Owner::Owner::Trait::op`.
 /// Keep the trait/RHS suffix (which is part of the checked dispatch contract)
 /// and replace only that source owner with the canonical lowered owner.
-fn canonicalize_operator_method_identity(expr: &mut TExpr) {
+fn canonicalize_operator_method_identity(expr: &mut TExpr, cx: &Cx) {
     let TExprKind::MethodCall { recv, method, .. } = &mut expr.kind else {
         return;
     };
@@ -646,7 +645,9 @@ fn canonicalize_operator_method_identity(expr: &mut TExpr) {
         return;
     };
     let owner = match recv.ty.without_user_tags() {
-        Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+        Type::Named(name) | Type::Apply { name, .. } => {
+            crate::Codegen::TIR::canonical_enum_owner(cx, name)
+        }
         _ => return,
     };
     let marker = format!("::{trait_name}::");
@@ -679,8 +680,7 @@ fn fallback_checked_method_return(
         }
         None => false,
     };
-    if recv_type
-        .and_then(|name| name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX))
+    if recv_type.and_then(|name| name.strip_prefix(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX))
         == Some("core.term")
         && method == Syntax::BUILTIN_PRINT
     {
@@ -736,13 +736,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             unreachable!("method chain contains only method calls")
         };
         let resolved_ret = resolved_ret.clone().or_else(|| {
-            fallback_checked_method_return(
-                receiver,
-                method,
-                recv_type.as_deref(),
-                cx,
-                env,
-            )
+            fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
         });
         // A field receiver does not persist `recv_type` on the AST method
         // node. Pre-lower precise/string conversion receivers so the
@@ -765,13 +759,15 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         let method_sig = expr_cache_take_method_sig(call, cx);
         let precise_method = matches!(
             (dispatch_recv_type.as_deref(), method.as_str(), args.len()),
-            (Some("Decimal"), "add" | "sub" | "mul" | "div" | "equal" | "compare", 1)
-                | (
-                    Some("Decimal"),
-                    "round" | "floor" | "ceil" | "to_string" | "to_float",
-                    0
-                )
-                | (Some("Fraction"), "add" | "sub" | "mul" | "div" | "equal", 1)
+            (
+                Some("Decimal"),
+                "add" | "sub" | "mul" | "div" | "equal" | "compare",
+                1
+            ) | (
+                Some("Decimal"),
+                "round" | "floor" | "ceil" | "to_string" | "to_float",
+                0
+            ) | (Some("Fraction"), "add" | "sub" | "mul" | "div" | "equal", 1)
                 | (
                     Some("Fraction"),
                     "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
@@ -844,7 +840,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 method_sig.as_deref(),
             )
         };
-        canonicalize_operator_method_identity(&mut lowered);
+        canonicalize_operator_method_identity(&mut lowered, cx);
         // D-VALIDATE1: `check` is synthesized after sema's ordinary call
         // propagation pass. Its callable still uses the default Result carrier,
         // so project that carrier here before the next method in the chain
@@ -927,9 +923,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ..
                 }
             );
-            if matches!(&lowered.kind, TExprKind::ModuleCall { .. })
-                && !preserve_inline_carrier
-            {
+            if matches!(&lowered.kind, TExprKind::ModuleCall { .. }) && !preserve_inline_carrier {
                 lowered.ty = resolved_ret.clone();
             }
         }
@@ -1119,7 +1113,14 @@ pub(super) fn lower_or_fallback(
             Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
             other => other,
         };
-        let value = if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
+        let value = if matches!(&value.kind, TExprKind::Absent)
+            && matches!(&return_ty, Type::Option(_))
+        {
+            TExpr {
+                ty: return_ty.clone(),
+                kind: TExprKind::Absent,
+            }
+        } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
             value
         } else {
             preserve_typed_list_shape(value, payload_ty, cx)
@@ -1440,6 +1441,10 @@ fn lower_pre_contracts_for_args(
             call_span.start,
             index
         );
+        let moves_value = matches!(
+            arg.fact_channel().exclusivity,
+            crate::Codegen::TIR::TExclusivity::Move
+        );
         let original = std::mem::replace(
             &mut arg.value,
             TExpr {
@@ -1470,9 +1475,17 @@ fn lower_pre_contracts_for_args(
         } else {
             TLocal::user(&temp)
         };
-        arg.value = TExpr {
+        let replacement = TExpr {
             ty: ty.clone(),
             kind: TExprKind::Local(local.clone()),
+        };
+        arg.value = if moves_value {
+            TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Move(Box::new(replacement)),
+            }
+        } else {
+            replacement
         };
         contract_env.bind(param_name, local, Some(ty.clone()));
         proof_bindings.insert(param_name.clone(), actual_ty);
@@ -2379,6 +2392,13 @@ fn result_handler_ast(expr: &Expr) -> Option<ResultHandlerAst<'_>> {
     })
 }
 
+fn result_handler_pattern(cond: TIfCond) -> TPattern {
+    let TIfCond::IfLet { pattern, .. } = cond else {
+        unreachable!("checked Result handler must bind an Ok or Err pattern")
+    };
+    pattern
+}
+
 fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     let shape = result_handler_ast(expr)?;
     let base_env = clone_env(env);
@@ -2396,7 +2416,7 @@ fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option
     // other branch retained its Result carrier. The statement-position path
     // below already uses this explicit condition/body/value sequence; keep the
     // value form on the same one-mechanism path.
-    let (lowered, lowered_ty) = {
+    let lowered = {
         let mut handler_env = clone_env(env);
         handler_env.bind(&temp, temp_local, Some(subject.ty.clone()));
 
@@ -2409,10 +2429,13 @@ fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option
         let (ok_cond, ok_bindings, mut ok_body) =
             super::control_flow::lower_if_cond(&ok_cond_expr, cx, &mut ok_env);
         for (name, place, ty) in ok_bindings {
-            ok_env.bind(&name, place, ty);
+            ok_env.bind(&name, place, ty.clone());
+            if matches!(ty, Some(Type::Named(ref name)) if cx.has_close_type(name)) {
+                ok_env.mark_resource(&name);
+            }
         }
         ok_body.extend(lower_stmts(shape.ok_body, cx, &mut ok_env));
-        let ok_value = lower_expr(shape.ok_value, cx, &mut ok_env);
+        let ok_value = lower_owned_expr(shape.ok_value, cx, &mut ok_env);
 
         let err_cond_expr = Expr::PatternTest {
             subject: Box::new(Expr::Ident(temp.clone(), shape.err_cond_span)),
@@ -2423,10 +2446,13 @@ fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option
         let (err_cond, err_bindings, mut err_body) =
             super::control_flow::lower_if_cond(&err_cond_expr, cx, &mut err_env);
         for (name, place, ty) in err_bindings {
-            err_env.bind(&name, place, ty);
+            err_env.bind(&name, place, ty.clone());
+            if matches!(ty, Some(Type::Named(ref name)) if cx.has_close_type(name)) {
+                err_env.mark_resource(&name);
+            }
         }
         err_body.extend(lower_stmts(shape.err_body, cx, &mut err_env));
-        let err_value = lower_expr(shape.err_value, cx, &mut err_env);
+        let err_value = lower_owned_expr(shape.err_value, cx, &mut err_env);
         let terminal = lower_expr(shape.terminal, cx, &mut handler_env);
 
         let inner_ty = tir_if_join_type(
@@ -2435,51 +2461,30 @@ fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option
             tir_expr_reaches_merge(&terminal),
             &terminal.ty,
         );
-        let inner = TExpr {
-            ty: inner_ty,
-            kind: TExprKind::IfExpr {
-                cond: Box::new(err_cond),
-                then_body: err_body,
-                then_value: Box::new(err_value),
-                else_body: Vec::new(),
-                else_value: Box::new(terminal),
-            },
-        };
+        let inner_reaches = tir_if_branch_reaches_merge(&err_body, &err_value)
+            || tir_expr_reaches_merge(&terminal);
         let outer_ty = tir_if_join_type(
             tir_if_branch_reaches_merge(&ok_body, &ok_value),
             &ok_value.ty,
-            tir_expr_reaches_merge(&inner),
-            &inner.ty,
+            inner_reaches,
+            &inner_ty,
         );
-        (
-            TExpr {
-                ty: outer_ty.clone(),
-                kind: TExprKind::IfExpr {
-                    cond: Box::new(ok_cond),
-                    then_body: ok_body,
-                    then_value: Box::new(ok_value),
-                    else_body: Vec::new(),
-                    else_value: Box::new(inner),
-                },
+        TExpr {
+            ty: outer_ty,
+            kind: TExprKind::ResultHandler {
+                subject: Box::new(subject),
+                ok_pattern: result_handler_pattern(ok_cond),
+                ok_body,
+                ok_value: Box::new(ok_value),
+                err_pattern: result_handler_pattern(err_cond),
+                err_body,
+                err_value: Box::new(err_value),
+                terminal: Box::new(terminal),
             },
-            outer_ty,
-        )
+        }
     };
     *env = base_env;
-    Some(canonicalize_pre_tier_expr(TExpr {
-        ty: lowered_ty,
-        kind: TExprKind::InlineBlock(vec![
-            TStmt::Let {
-                name: temp,
-                kw: "let",
-                let_ty: crate::Codegen::TIR::TLetTy::inferred(),
-                init: subject,
-                gc_promotion: None,
-                gc_transferred: false,
-            },
-            TStmt::ExprStmt(lowered),
-        ]),
-    }))
+    Some(canonicalize_pre_tier_expr(lowered))
 }
 
 fn dispatch_condition_subject(expr: &Expr) -> Option<&Expr> {
@@ -2563,7 +2568,6 @@ enum DiscardedExprWork<'a> {
         else_body: Option<Vec<TStmt>>,
     },
     FinishResultHandler {
-        temp: String,
         subject: TExpr,
         ok_cond: TIfCond,
         ok_body: Vec<TStmt>,
@@ -2635,7 +2639,10 @@ pub(crate) fn lower_discarded_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TSt
                     let (ok_cond, ok_bindings, mut ok_body) =
                         super::control_flow::lower_if_cond(&ok_cond_expr, cx, &mut ok_env);
                     for (name, place, ty) in ok_bindings {
-                        ok_env.bind(&name, place, ty);
+                        ok_env.bind(&name, place, ty.clone());
+                        if matches!(ty, Some(Type::Named(ref ty_name)) if cx.has_close_type(ty_name)) {
+                            ok_env.mark_resource(&name);
+                        }
                     }
                     ok_body.extend(lower_stmts(shape.ok_body, cx, &mut ok_env));
 
@@ -2648,12 +2655,14 @@ pub(crate) fn lower_discarded_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TSt
                     let (err_cond, err_bindings, mut err_body) =
                         super::control_flow::lower_if_cond(&err_cond_expr, cx, &mut err_env);
                     for (name, place, ty) in err_bindings {
-                        err_env.bind(&name, place, ty);
+                        err_env.bind(&name, place, ty.clone());
+                        if matches!(ty, Some(Type::Named(ref ty_name)) if cx.has_close_type(ty_name)) {
+                            err_env.mark_resource(&name);
+                        }
                     }
                     err_body.extend(lower_stmts(shape.err_body, cx, &mut err_env));
 
                     work.push(DiscardedExprWork::FinishResultHandler {
-                        temp,
                         subject,
                         ok_cond,
                         ok_body,
@@ -2761,7 +2770,6 @@ pub(crate) fn lower_discarded_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TSt
                 });
             }
             DiscardedExprWork::FinishResultHandler {
-                temp,
                 subject,
                 ok_cond,
                 mut ok_body,
@@ -2782,47 +2790,24 @@ pub(crate) fn lower_discarded_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TSt
                 let TStmt::ExprStmt(terminal) = terminal else {
                     unreachable!("discarded Result handler terminal must lower to an expression");
                 };
-                // Keep the existing Result-handler expression shape so the
-                // emitter's one-match path consumes the carrier once. The
-                // source tails are statements before a Unit tail, which
-                // discards their values without asking Rust to unify them.
-                let unit_tail = || TExpr {
+                // Both branches project from the one owned carrier; a
+                // discarded tail still evaluates before the Unit result.
+                let unit_tail = || Box::new(TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Unit,
-                };
-                let inner = TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::IfExpr {
-                        cond: Box::new(err_cond),
-                        then_body: err_body,
-                        then_value: Box::new(unit_tail()),
-                        else_body: Vec::new(),
-                        else_value: Box::new(terminal),
-                    },
-                };
-                let outer = TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::IfExpr {
-                        cond: Box::new(ok_cond),
-                        then_body: ok_body,
-                        then_value: Box::new(unit_tail()),
-                        else_body: Vec::new(),
-                        else_value: Box::new(inner),
-                    },
-                };
+                });
                 lowered.push(TStmt::ExprStmt(canonicalize_pre_tier_expr(TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::InlineBlock(vec![
-                        TStmt::Let {
-                            name: temp,
-                            kw: "let",
-                            let_ty: crate::Codegen::TIR::TLetTy::inferred(),
-                            init: subject,
-                            gc_promotion: None,
-                            gc_transferred: false,
-                        },
-                        TStmt::ExprStmt(outer),
-                    ]),
+                    kind: TExprKind::ResultHandler {
+                        subject: Box::new(subject),
+                        ok_pattern: result_handler_pattern(ok_cond),
+                        ok_body,
+                        ok_value: unit_tail(),
+                        err_pattern: result_handler_pattern(err_cond),
+                        err_body,
+                        err_value: unit_tail(),
+                        terminal: Box::new(terminal),
+                    },
                 })));
             }
         }
@@ -3138,9 +3123,9 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 work.push(ExprWork::Enter(else_value));
             }
             ExprWork::LowerIfElseValue(state) => {
-                let else_value = expr_cache_take(state.else_value, cx)
+                let mut else_value = expr_cache_take(state.else_value, cx)
                     .expect("if else value was lowered exactly once");
-                let then_value = state
+                let mut then_value = state
                     .then_value_lowered
                     .expect("if then value is consumed once");
                 let mut then_body = state.then_prefix;
@@ -3148,6 +3133,20 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 let then_reaches_merge = tir_if_branch_reaches_merge(&then_body, &then_value);
                 let else_reaches_merge =
                     tir_if_branch_reaches_merge(&state.else_lowered, &else_value);
+                if then_reaches_merge && else_reaches_merge {
+                    let then_absent = matches!(&then_value.kind, TExprKind::Absent);
+                    let else_absent = matches!(&else_value.kind, TExprKind::Absent);
+                    // `None` has no payload from which to infer its option type.
+                    // Use only the exact checked type of a live, non-absent peer.
+                    if then_absent && !else_absent && matches!(&else_value.ty, Type::Option(_)) {
+                        then_value.ty = else_value.ty.clone();
+                    } else if else_absent
+                        && !then_absent
+                        && matches!(&then_value.ty, Type::Option(_))
+                    {
+                        else_value.ty = then_value.ty.clone();
+                    }
+                }
                 let ty = tir_if_join_type(
                     then_reaches_merge,
                     &then_value.ty,
@@ -3281,6 +3280,13 @@ fn tir_expr_reaches_merge(expr: &TExpr) -> bool {
         } => {
             tir_if_branch_reaches_merge(then_body, then_value)
                 || tir_if_branch_reaches_merge(else_body, else_value)
+        }
+        TExprKind::ResultHandler {
+            ok_body, ok_value, err_body, err_value, terminal, ..
+        } => {
+            tir_if_branch_reaches_merge(ok_body, ok_value)
+                || tir_if_branch_reaches_merge(err_body, err_value)
+                || tir_expr_reaches_merge(terminal)
         }
         TExprKind::InlineBlock(stmts) => tir_stmt_sequence_reaches_merge(stmts),
         TExprKind::Try { inner, .. } => tir_expr_reaches_merge(inner),
@@ -3664,7 +3670,9 @@ pub(crate) fn print_values(values: impl IntoIterator<Item = TExpr>, cx: &Cx, sit
         return TExpr {
             ty: unit_type(),
             kind: TExprKind::Print(Box::new(
-                values.pop().expect("one-value print fast path has one value"),
+                values
+                    .pop()
+                    .expect("one-value print fast path has one value"),
             )),
         };
     }
@@ -3911,7 +3919,6 @@ fn lower_raw_contextual_result_variant(
     }
 }
 
-
 fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     if call.name != Syntax::LIT_ERR
         || cx.sigs.contains_key(&call.name)
@@ -4025,9 +4032,16 @@ fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     }
 }
 
+fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
+    cx.const_ref_keys
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
+}
 /// A compile-time name is an ordinary identifier whose mark is part of the
 /// spelling. When sema has not yet baked `value`, look the binding up the same
 /// way `Ident` does: a fragment local first, then the evaluator's const table.
+
 fn lower_named_comptime_binding(name: &str, cx: &Cx, env: &LowerEnv) -> Option<TExpr> {
     if env.locals.contains_key(name) {
         return Some(TExpr {
@@ -4035,18 +4049,22 @@ fn lower_named_comptime_binding(name: &str, cx: &Cx, env: &LowerEnv) -> Option<T
             kind: TExprKind::Local(env.local_of(name)),
         });
     }
-    if !cx.consts.contains_key(name) && !cx.const_values.contains_key(name) {
+    if !cx.consts.contains_key(name)
+        && !cx.const_values.contains_key(name)
+        && !cx.const_ref_keys.contains_key(name)
+    {
         return None;
     }
     Some(in_own_frame(|| {
         let value = cx.const_values.get(name);
         let ty = env
             .ty_of(name)
+            .or_else(|| cx.const_ref_types.get(name).cloned())
             .or_else(|| value.map(crate::AST::CtValue::jet_type))
             .unwrap_or(Type::Int);
         TExpr {
             kind: lower_comptime_scalar(value, Some(&ty))
-                .unwrap_or_else(|| TExprKind::ConstRef(name.to_string())),
+                .unwrap_or_else(|| TExprKind::ConstRef(checked_const_ref_name(name, cx))),
             ty,
         }
     }))
@@ -4359,17 +4377,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // locals. Parameters and local bindings shadow a same-named
                 // package constant just as every other lexical binding does.
                 // parity: guard tests/tir_patterns_and_fields.rs::lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers
-                if cx.consts.contains_key(name) {
+                if cx.consts.contains_key(name) || cx.const_ref_keys.contains_key(name) {
                     return in_own_frame(|| {
                         let value = cx.const_values.get(name);
                         let ty = env
                             .ty_of(name)
+                            .or_else(|| cx.const_ref_types.get(name).cloned())
                             .or_else(|| cx.const_types.get(name).cloned())
                             .or_else(|| value.map(crate::AST::CtValue::jet_type))
                             .unwrap_or(Type::Int);
                         return TExpr {
                             kind: lower_comptime_scalar(value, Some(&ty))
-                                .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
+                                .unwrap_or_else(|| {
+                                    TExprKind::ConstRef(checked_const_ref_name(name, cx))
+                                }),
                             ty,
                         };
                     });
@@ -4453,8 +4474,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // context. A later function may mention a const still being
                 // evaluated; keep a named reference instead of poisoning the
                 // fragment with an invariant violation.
-                ty: env.ty_of(name).unwrap_or(Type::Int),
-                kind: TExprKind::ConstRef(name.clone()),
+                ty: env
+                    .ty_of(name)
+                    .or_else(|| cx.const_ref_types.get(name).cloned())
+                    .unwrap_or(Type::Int),
+                kind: TExprKind::ConstRef(checked_const_ref_name(name, cx)),
             }),
         // c109 Phase 13: a direct call THROUGH a fn-value (`Expr::CallValue`).
         // Sema's `.call(args)` projection joins this helper below. Function-type
@@ -4649,8 +4673,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::BoolLit(value),
                     };
                 }
-                let lhs = lower_expr(l, cx, env);
+                let mut lhs = lower_expr(l, cx, env);
                 let mut rhs = lower_expr(r, cx, env);
+                // Sema contextualizes None from its peer for equality. Retain
+                // that checked option type when lowering the literal to MIR.
+                if matches!(&rhs.kind, TExprKind::Absent) && matches!(&lhs.ty, Type::Option(_)) {
+                    rhs.ty = lhs.ty.clone();
+                }
+                if matches!(&lhs.kind, TExprKind::Absent) && matches!(&rhs.ty, Type::Option(_)) {
+                    lhs.ty = rhs.ty.clone();
+                }
                 // Imported method signatures retain their declaration-module
                 // nominal. Apply that canonical owner to a contextually typed enum
                 // literal; its source node carries only the visible leaf.
@@ -5004,8 +5036,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // Result.  Lower only the two arithmetic operations for which
                 // that table has a geometry builtin; every other binary shape
                 // remains on the generic path below.
-                if matches!(*op, BinOp::Add | BinOp::Sub)
-                {
+                if matches!(*op, BinOp::Add | BinOp::Sub) {
                     if let Some(Ok(result_ty)) =
                         crate::Sema::geometry_binop_result(*op, &lhs.ty, &rhs.ty)
                     {
@@ -5211,6 +5242,25 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     };
                 }
+                // D-NUMOPS1 permits a shift count of any integer width. Exact
+                // Int shift kernels take an exact-Int count, so losslessly
+                // promote a fixed-width count here and give every tier the
+                // same typed operands instead of relying on backend coercions.
+                if matches!(*op, BinOp::Shl | BinOp::Shr)
+                    && crate::Codegen::TIR::routes::exact_int_type(&lhs.ty)
+                    && rhs.ty.is_integer()
+                    && !crate::Codegen::TIR::routes::exact_int_type(&rhs.ty)
+                {
+                    rhs = TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::NumericMethod {
+                            recv: Box::new(rhs),
+                            op: TNumericOp::CastAs {
+                                dst_rust: String::new(),
+                            },
+                        },
+                    };
+                }
                 TExpr {
                     ty,
                     kind: TExprKind::Binary {
@@ -5323,12 +5373,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             }
                         }
                         let operand = lower_expr(source, cx, env);
-                        let view_owned_ty = view_copy_owned_type(&operand.ty).or_else(|| match source {
-                            Expr::Ident(name, _) => env
-                                .split_view_handle(name)
-                                .and_then(|ty| view_copy_owned_type(&ty)),
-                            _ => None,
-                        });
+                        let view_owned_ty =
+                            view_copy_owned_type(&operand.ty).or_else(|| match source {
+                                Expr::Ident(name, _) => env
+                                    .split_view_handle(name)
+                                    .and_then(|ty| view_copy_owned_type(&ty)),
+                                _ => None,
+                            });
                         let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
                         let is_view = view_owned_ty.is_some();
                         let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
@@ -5529,6 +5580,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 kind: TExprKind::ResourceTake(env.resource_take_place(name)),
                             },
                             expr => lower_expr(expr, cx, env),
+                        };
+                        let resource = if call.args[0].convention == AccessConvention::Move
+                            && !matches!(&resource.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
+                        {
+                            TExpr {
+                                ty: resource.ty.clone(),
+                                kind: TExprKind::Move(Box::new(resource)),
+                            }
+                        } else {
+                            resource
                         };
                         return TExpr {
                             ty: unit_type(),
@@ -6471,9 +6532,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 // ways: an inline-module member or an import. Failing both tables
                                 // there is a genuine internal contradiction (I3).
                                 jet_foundation::ice!(
-                                None,
-                                "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
-                            )
+                                    None,
+                                    "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                                )
                             }
                         });
                         return TExpr {
@@ -6497,9 +6558,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if net_handle_rust_type(type_name).is_some() {
                     return in_own_frame(|| {
                         // A prelude struct has no boxed (recursive) edges.
+                        // Reapply checked field types to bare `None`, whose
+                        // context-free TIR placeholder is `Option<Int>`.
+                        let resolved_ty = Type::Named(type_name.clone());
                         let mut tfields: Vec<(String, TExpr, bool)> = fields
                             .iter()
-                            .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
+                            .map(|(n, _, fe)| {
+                                let mut value = lower_expr(fe, cx, env);
+                                if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
+                                    if matches!(&value.kind, TExprKind::Absent)
+                                        && matches!(&fty, Type::Option(_))
+                                    {
+                                        value.ty = fty;
+                                    }
+                                }
+                                (n.clone(), value, false)
+                            })
                             .collect();
                         let extra = if type_name == "HTTPRequest" {
                             Some(crate::Codegen::TIR::TStructExtra::HTTPRequestParams)
@@ -6741,9 +6815,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let leaf_count = cx
                             .struct_fields
                             .keys()
-                            .filter(|name| {
-                                name.rsplit("::").next().unwrap_or(name) == type_name
-                            })
+                            .filter(|name| name.rsplit("::").next().unwrap_or(name) == type_name)
                             .count();
                         if same_leaf
                             && leaf_count > 1
@@ -6824,12 +6896,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 })
             })
         }
-        // c109 Phase 3: a struct field read in borrow position. Resolve the field
-        // type ONCE here from the receiver's resolved struct type (totality). A
-        // covered function never reaches here with a non-struct receiver (sema
-        // guarantees field reads target struct values).
+        // Direct module constants share Expr::Field with ordinary projections.
+        // Consume only the NameLedger-backed const site first; subsequent
+        // branches keep existing Core and struct-field handling.
         Expr::Field(receiver, member, span) => {
             in_own_frame(|| {
+                if let Some((key, ty)) =
+                    cx.checked_const_ref_sites.get(&(span.start, span.end))
+                {
+                    return TExpr {
+                        ty: ty.clone(),
+                        kind: TExprKind::ConstRef(key.clone()),
+                    };
+                }
                 if core_module_path_from_receiver(receiver, cx, env).as_deref() == Some("core.math")
                 {
                     // Module fields, not calls. A 0-arg CoreCall left resident
@@ -6877,27 +6956,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `info.methods[0].@effects`. Recovering this carrier type here
                 // keeps the projection canonical instead of falling through to
                 // the integer sentinel used only for impossible field shapes.
-                let reflected_fact_receiver = crate::Codegen::TIR::declared_field_ty(
-                    receiver,
-                    cx,
-                    env,
-                )
-                .is_some_and(|ty| {
-                    matches!(
-                        ty.without_user_tags(),
-                        Type::Named(type_name)
-                            if matches!(
-                                type_name.as_str(),
-                                "TypeInfo"
-                                    | "FunctionInfo"
-                                    | "MethodInfo"
-                                    | "FieldInfo"
-                                    | "TypeParamInfo"
-                                    | "FactInfo"
-                                    | "FactValue"
-                            )
-                    )
-                });
+                let reflected_fact_receiver =
+                    crate::Codegen::TIR::declared_field_ty(receiver, cx, env).is_some_and(|ty| {
+                        matches!(
+                            ty.without_user_tags(),
+                            Type::Named(type_name)
+                                if matches!(
+                                    type_name.as_str(),
+                                    "TypeInfo"
+                                        | "FunctionInfo"
+                                        | "MethodInfo"
+                                        | "FieldInfo"
+                                        | "TypeParamInfo"
+                                        | "FactInfo"
+                                        | "FactValue"
+                                )
+                        )
+                    });
                 if fact_member && (compiler_fact_receiver || reflected_fact_receiver) {
                     return in_own_frame(|| {
                         let recv = lower_expr(receiver, cx, env);
@@ -7262,6 +7337,31 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if let Some(guard_value) = shared_guard_value_field(recv.clone(), member) {
                     return in_own_frame(|| guard_value);
                 }
+                if member == "path"
+                    && cx.core_imports.values().any(|module| module == "core.files")
+                {
+                    if let Type::Named(type_name) = &recv.ty {
+                        let op = if cx.local_type_names.contains(type_name) {
+                            None
+                        } else {
+                            match crate::Sema::core_file_handle_dispatch_name(type_name) {
+                                Some("FileReader") => Some(THandleOp::FileReaderPath),
+                                Some("FileWriter") => Some(THandleOp::FileWriterPath),
+                                _ => None,
+                            }
+                        };
+                        if let Some(op) = op {
+                            return TExpr {
+                                ty: Type::String,
+                                kind: TExprKind::HandleMethod {
+                                    recv: Box::new(recv),
+                                    op,
+                                    args: Vec::new(),
+                                },
+                            };
+                        }
+                    }
+                }
                 // D-FIELDPOL1: a computed field is not a Rust struct member — sema
                 // (`CheckerFieldPolicy`) already synthesized it as a getter method
                 // on `s.methods`; route the read to a call of that method instead
@@ -7558,15 +7658,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     None
                 };
                 let kind = inferred_kind.as_ref().unwrap_or(kind);
-                debug_assert!(
-                    !matches!(kind, IndexKind::Unknown),
-                    "sema-to-TIR handoff violated: unresolved index kind"
-                );
                 if matches!(kind, IndexKind::Unknown) {
-                    return invariant_violation_expr(
-                        *span,
-                        "sema-to-TIR handoff violated: unresolved index kind",
+                    let message = format!(
+                        "sema-to-TIR handoff violated: unresolved index kind; file={}; function={}; span={}..{}; base={:?}; index={:?}",
+                        cx.file,
+                        cx.current_fn.borrow().as_str(),
+                        span.start,
+                        span.end,
+                        base_t.ty,
+                        index_t.ty,
                     );
+                    debug_assert!(false, "{message}");
+                    return invariant_violation_expr(*span, message);
                 }
                 // D-LAYOUT-FACTS1=B: select the checked layout field through
                 // the typed `fields.find(...).unwrap()` path. The exact-name
@@ -8241,6 +8344,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         } if is_binding_free_user_variant_pattern_test(pattern, cx) => {
             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
         }
+        // Result tag tests in expression position have no bindings to carry.
+        // Reuse structural MIR pattern matching, which probes the same Result
+        // carrier on AOT, JIT, and interpreter without evaluating the subject twice.
+        Expr::PatternTest {
+            subject,
+            pattern:
+                pattern @ (Pattern::Ok { binding, .. } | Pattern::Err { binding, .. }),
+            ..
+        } if binding.is_empty() || binding == "_" => TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::PatternMatches {
+                subj: Box::new(lower_expr(subject, cx, env)),
+                pattern: TPattern::from_ast(
+                    pattern.clone(),
+                    None,
+                    TPatternPosition::Arm,
+                    false,
+                    false,
+                ),
+            },
+        },
         // D-FAIL-CARRIER1: sema represents expression-position `value == None`
         // as an absent pattern test.  Probe the same carrier used by TIR `if`
         // conditions, then negate its presence.  The evaluator and resident JIT
@@ -8349,10 +8473,12 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type, line: u32) {
                 func,
                 args,
             } if type_name == Syntax::TYPE_DECIMAL && func == "from_str" => match args.as_slice() {
-                [TExpr {
-                    kind: TExprKind::StrLit(parts),
-                    ..
-                }] => match parts.as_slice() {
+                [
+                    TExpr {
+                        kind: TExprKind::StrLit(parts),
+                        ..
+                    },
+                ] => match parts.as_slice() {
                     [TStrPart::Lit(raw)] => raw.replace('_', "").parse::<f64>().ok(),
                     _ => None,
                 },
@@ -8976,6 +9102,19 @@ impl OrderedArg for crate::Codegen::TIR::TCallArg {
     }
 
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
+        // Materializing the expression must not turn a checked move into a
+        // shared read of the argument temporary at the eventual call.
+        let replacement = if matches!(
+            self.fact_channel().exclusivity,
+            crate::Codegen::TIR::TExclusivity::Move
+        ) {
+            TExpr {
+                ty: replacement.ty.clone(),
+                kind: TExprKind::Move(Box::new(replacement)),
+            }
+        } else {
+            replacement
+        };
         let mut value = std::mem::replace(&mut self.value, replacement);
         // Cloning is part of evaluating the supplied expression, so perform it
         // in source order rather than leaving the wrapper on the later call.
@@ -9068,7 +9207,7 @@ impl OrderedArg for TExpr {
     }
 }
 
-/// Replace each listed argument with a read of a fresh temporary, and return
+/// Replace each listed argument with an access to a fresh temporary, and return
 /// the `let` statements that bind them — emitted in `order`, which is source
 /// order, not declaration order.
 fn bind_arg_temporaries<A: OrderedArg>(
@@ -9163,8 +9302,8 @@ fn compiler_fact_type(fact: &str) -> Type {
 #[cfg(test)]
 mod source_order_tests {
     use super::*;
-    use crate::Codegen::TIR::TExternArg;
     use crate::AST::BinOp;
+    use crate::Codegen::TIR::TExternArg;
 
     fn int(value: i64) -> TExpr {
         TExpr {

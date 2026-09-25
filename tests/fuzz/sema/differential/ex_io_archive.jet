@@ -5,9 +5,9 @@ use core.archive as ar
 fn run() {
     original :: [U8]{72, 101, 108, 108, 111}  // ASCII "Hello"
     // Zip round-trip: compress into a single-entry zip archive, then extract.
-    zip_data :: ar.zip_compress("entry.txt", original)
+    zip_data :: ar.create("entry.txt", original)
     print((zip_data.len() > 0))
-    zip_restored :: ar.zip_decompress(zip_data)
+    zip_restored :: ar.zip_decompress(zip_data) ?? panic("zip decompress")
     print((zip_restored == original))
     // Tar round-trip: build a two-entry archive, extract by name, list names.
     empty :: [U8]{}
@@ -17,9 +17,9 @@ fn run() {
     // Archive is non-empty.
     print((tar2.len() > 0))
     // Exact content round-trip.
-    hello_back :: ar.tar_get(tar2, "hello.txt")
+    hello_back :: ar.tar_get(tar2, "hello.txt") ?? panic("tar get")
     print((hello_back == original))
     // Names come back as a JSON array string.
-    names :: ar.tar_names_json(tar2)
+    names :: ar.tar_names_json(tar2) ?? panic("tar names")
     print((names == "[\"hello.txt\",\"bye.txt\"]"))
 }

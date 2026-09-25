@@ -23,7 +23,8 @@ pub struct URL {
 }
 
 pub fn parse(text: String) -> URL !URLError {
-    raw :: text.bytes()
+    input :: trim_ascii(text)
+    raw :: input.bytes()
     if raw.len() == 0 -> return Err(URLError.Syntax)
     colon := scheme_colon(raw)
     if colon <= 0 -> return Err(URLError.Syntax)
@@ -79,7 +80,7 @@ pub fn parse(text: String) -> URL !URLError {
                 host = ascii_lower(hostport)
             }
         }
-        if host.bytes().len() == 0 -> return Err(URLError.Syntax)
+        if !valid_url_host(host) -> return Err(URLError.Syntax)
         rest_i = auth_end
     } else if scheme == "http" || scheme == "https" || scheme == "ws" || scheme == "wss" {
         return Err(URLError.Syntax)
@@ -100,13 +101,15 @@ pub fn parse(text: String) -> URL !URLError {
         }
     }
     path_raw :: slice(raw, rest_i, qpos)
-    path := if scheme == "data" -> path_raw else -> normalize_path(path_raw, host.bytes().len() > 0)
+    if !valid_percent(path_raw) -> return Err(URLError.Percent)
+    path := if scheme == "data" -> path_raw else -> percent_decode(path_raw) ?? return Err(URLError.Percent)
+    path = if scheme == "data" -> path else -> normalize_path(path, host.bytes().len() > 0)
     if path.bytes().len() == 0 && host.bytes().len() > 0 -> path = "/"
     query := ""
     if qpos < hash -> query = slice(raw, qpos + 1, hash)
     fragment := ""
-    if hash < raw.len() -> fragment = slice(raw, hash + 1, raw.len())
-    Ok(URL{scheme: scheme, user: user, password: password, host: host, port: port, path: path, query: query, fragment: fragment, raw: ""})
+    if hash < raw.len() -> fragment = percent_decode(slice(raw, hash + 1, raw.len())) ?? return Err(URLError.Percent)
+    Ok(URL{scheme: scheme, user: user, password: password, host: host, port: port, path: path, query: query, fragment: fragment, raw: input})
 }
 
 pub fn from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> URL !URLError {
@@ -115,14 +118,15 @@ pub fn from_parts(scheme: String, host: String, path: String, query: [[String]],
     if host.bytes().len() == 0 && (scheme_l == "http" || scheme_l == "https" || scheme_l == "ws" || scheme_l == "wss") {
         return Err(URLError.Syntax)
     }
+    if host.bytes().len() > 0 && !valid_url_host(ascii_lower(host)) -> return Err(URLError.Syntax)
     p := path
     if host.bytes().len() > 0 && p.bytes().len() == 0 -> p = "/"
     if host.bytes().len() > 0 && p.bytes().len() > 0 && p.bytes()[0] != (U8{47}) -> p = "/{p}"
     q :: encode_query(query)
     raw := "{scheme_l}:"
     if host.bytes().len() > 0 {
-        rendered_host := host
-        if contains_byte(host, 58) && !starts(host, "[") -> rendered_host = "[{host}]"
+        rendered_host := ascii_lower(host)
+        if contains_byte(host, 58) && !starts(host, "[") -> rendered_host = "[{rendered_host}]"
         raw = "{raw}//{rendered_host}"
     }
     raw = "{raw}{p}"
@@ -135,14 +139,13 @@ pub fn file(path: String) -> URL {
     p := path
     if p.bytes().len() == 0 -> p = "/"
     if p.bytes()[0] != (U8{47}) -> p = "/{p}"
-    URL{scheme: "file", user: "", password: "", host: "", port: -1, path: normalize_path(p, false), query: "", fragment: "", raw: ""}
+    URL{scheme: "file", user: "", password: "", host: "", port: -1, path: normalize_path(p, true), query: "", fragment: "", raw: ""}
 }
 
 pub fn data(mime: MIME, payload: String) -> URL {
     encoded :: percent_encode(payload)
     URL{scheme: "data", user: "", password: "", host: "", port: -1, path: "{mime.top}/{mime.sub},{encoded}", query: "", fragment: "", raw: ""}
 }
-
 fn default_port(scheme: String) -> Int {
     if scheme == {
         "http" | "ws" -> 80
@@ -150,6 +153,8 @@ fn default_port(scheme: String) -> Int {
         "ftp" -> 21
         "ssh" -> 22
         "smtp" -> 25
+        "pop3" -> 110
+        "imap" -> 143
         else -> -1
     }
 }
@@ -217,22 +222,32 @@ pub fn unparse(url: URL) -> String {
     }
     path := url.path
     if authority.bytes().len() > 0 && path.bytes().len() == 0 -> path = "/"
+    path_text :: if scheme == "data" -> path else -> encode_component(path, true, false)
     query_text := ""
     if url.query.bytes().len() > 0 -> query_text = "?{url.query}"
     fragment_text := ""
-    if url.fragment.bytes().len() > 0 -> fragment_text = "#{url.fragment}"
-    if authority.bytes().len() > 0 -> return "{scheme}://{authority}{path}{query_text}{fragment_text}"
-    if scheme == "file" -> return "file://{path}{query_text}{fragment_text}"
-    return "{scheme}:{path}{query_text}{fragment_text}"
+    if url.fragment.bytes().len() > 0 -> fragment_text = "#{percent_encode(url.fragment)}"
+    if authority.bytes().len() > 0 -> return "{scheme}://{authority}{path_text}{query_text}{fragment_text}"
+    if scheme == "file" -> return "file://{path_text}{query_text}{fragment_text}"
+    return "{scheme}:{path_text}{query_text}{fragment_text}"
 }
 
 pub fn urljoin(base: String, rel: String) -> String !URLError {
-    if rel.bytes().len() == 0 -> return ~base
-    if has_scheme(rel) -> return ~rel
+    if rel.bytes().len() == 0 {
+        parsed_base :: parse(base)
+        return unparse(parsed_base)
+    }
+    if has_scheme(rel) {
+        parsed_rel :: parse(rel)
+        return unparse(parsed_rel)
+    }
     parsed :: parse(base)
-    if starts(rel, "//") -> return "{parsed.scheme}:{rel}"
+    if starts(rel, "//") {
+        authority_url :: parse("{parsed.scheme}:{rel}")
+        return unparse(authority_url)
+    }
     if rel.bytes()[0] == (U8{35}) {
-        fragment :: slice(rel.bytes(), 1, rel.bytes().len())
+        fragment :: percent_decode(slice(rel.bytes(), 1, rel.bytes().len())) ?? return Err(URLError.Percent)
         return unparse(URL{
             scheme: parsed.scheme,
             user: parsed.user,
@@ -247,6 +262,7 @@ pub fn urljoin(base: String, rel: String) -> String !URLError {
     }
     if rel.bytes()[0] == (U8{63}) {
         query := slice(rel.bytes(), 1, rel.bytes().len())
+        if !valid_percent(query) -> return Err(URLError.Percent)
         return unparse(URL{
             scheme: parsed.scheme,
             user: parsed.user,
@@ -261,10 +277,13 @@ pub fn urljoin(base: String, rel: String) -> String !URLError {
     }
     hash := index_of(rel.bytes(), 35)
     rel_no_frag := if hash >= 0 -> slice(rel.bytes(), 0, hash) else -> rel
-    frag := if hash >= 0 -> slice(rel.bytes(), hash + 1, rel.bytes().len()) else -> ""
+    frag_raw := if hash >= 0 -> slice(rel.bytes(), hash + 1, rel.bytes().len()) else -> ""
+    frag :: percent_decode(frag_raw) ?? return Err(URLError.Percent)
     qpos := index_of(rel_no_frag.bytes(), 63)
-    rel_path := if qpos >= 0 -> slice(rel_no_frag.bytes(), 0, qpos) else -> rel_no_frag
+    rel_path_raw := if qpos >= 0 -> slice(rel_no_frag.bytes(), 0, qpos) else -> rel_no_frag
+    rel_path :: percent_decode(rel_path_raw) ?? return Err(URLError.Percent)
     rel_query := if qpos >= 0 -> slice(rel_no_frag.bytes(), qpos + 1, rel_no_frag.bytes().len()) else -> ""
+    if !valid_percent(rel_query) -> return Err(URLError.Percent)
     path := parsed.path
     query := parsed.query
     if rel_path.bytes().len() == 0 {
@@ -457,6 +476,65 @@ fn parse_port(text: String) -> ?Int {
     Val(n)
 }
 
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+    }
+    if end <= start -> return ""
+    slice(raw, start, end)
+}
+
+fn valid_percent(text: String) -> Bool {
+    raw :: text.bytes()
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{37}) {
+            if i + 2 >= raw.len() || !is_hex_byte(raw[i + 1]) || !is_hex_byte(raw[i + 2]) -> return false
+            i = i + 3
+        } else {
+            i = i + 1
+        }
+    }
+    true
+}
+
+fn valid_url_host(host: String) -> Bool {
+    raw :: host.bytes()
+    if raw.len() == 0 -> return false
+    label := 0
+    non_dot := false
+    i := 0
+    loop i < raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n == 46 {
+            if label == 0 && i < raw.len() - 1 -> return false
+            label = 0
+        } else {
+            if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 || n == 91 || n == 93 -> return false
+            label = label + 1
+            if label > 63 -> return false
+            non_dot = true
+        }
+        i = i + 1
+    }
+    if !non_dot -> return false
+    if label == 0 && raw[raw.len() - 1] != (U8{46}) -> return false
+    true
+}
+
+fn is_hex_byte(b: U8) -> Bool {
+    n :: Int.from_u8(b)
+    (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102)
+}
+
 fn normalize_path(path: String, absolute: Bool) -> String {
     raw :: path.bytes()
     segments := [String]{}
@@ -465,12 +543,13 @@ fn normalize_path(path: String, absolute: Bool) -> String {
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{47}) {
             segment :: slice(raw, start, i)
-            if segment == "" || segment == "." {
-                // Keep the leading root implied by `absolute`; empty interior
-                // segments are collapsed to one slash.
-                if segments.len() > 0 && segments[segments.len() - 1] != ".." -> _ :: segments.pop()
-                else if !absolute -> segments.push("..")
-            } else {
+            if segment == ".." {
+                if segments.len() > 0 && segments[segments.len() - 1] != ".." {
+                    _ :: segments.pop()
+                } else if !absolute {
+                    segments.push("..")
+                }
+            } else if segment != "" && segment != "." {
                 segments.push(segment)
             }
             start = i + 1

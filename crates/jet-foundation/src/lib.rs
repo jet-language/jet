@@ -7,11 +7,8 @@ pub mod CLISchema;
 pub mod CanonicalAST;
 pub mod Collections;
 pub mod CompilerStack;
-/// Canonical, dependency-free `core.archive` ABI kernel. The same source is
-/// included by the package bridge, JIT host, and resident evaluator.
-#[path = "CoreArchive.rs"]
-pub mod CoreArchive;
 pub mod CoreModuleExports;
+pub mod CoreSourceParts;
 pub mod Evidence;
 pub mod Diagnostics;
 pub mod Coverage;
@@ -23,7 +20,6 @@ mod ExactUnitConversion;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
-pub mod GzipKernel;
 pub mod JSON;
 pub mod DataTree;
 pub mod JSONNumber;

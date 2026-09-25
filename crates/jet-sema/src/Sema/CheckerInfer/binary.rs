@@ -1503,11 +1503,15 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some((trait_name, method, mut ret)) = hook {
-                    let operator_rhs = self
-                        .trait_reg
-                        .operator_impl_for(&lt, trait_name, &rt)
+                    let (owner_type, _, owner_traits) = self.capability_type_context(&lt);
+                    let operator_rhs = owner_traits
+                        .operator_impl_for(&owner_type, trait_name, &owner_type)
                         .map(|implementation| {
-                            ret = implementation.result.clone();
+                            ret = if implementation.result == owner_type {
+                                lt.clone()
+                            } else {
+                                implementation.result.clone()
+                            };
                             implementation.rhs.clone()
                         })
                         .or_else(|| {
@@ -1543,6 +1547,13 @@ impl<'a> Checker<'a> {
                             ));
                             return None;
                         }
+                        // The synthesized call is not re-inferred, so record the
+                        // same checked dependency and effect as an explicit method call.
+                        self.record_method_reference(type_name, method, span);
+                        self.record_edge(
+                            crate::Sema::effect_key(Some(Self::split_type_name(type_name).1), method),
+                            span,
+                        );
                         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
                         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
                         let call = Expr::MethodCall {

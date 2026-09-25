@@ -11,26 +11,11 @@ package {
 use core.text as unicode
 // core.text.wrap — paragraph filling, indent, and HTML escaping.
 //
-// Python `textwrap` plus scalar-safe width, indentation, and escaping.
+// Python `textwrap` plus display-column-safe width, indentation, and escaping.
 // Width is measured in terminal display columns using `core.text`.
 pub fn wrap(text: String, width: Int) -> [String] {
-    if width <= 0 -> return [String]{text}
-    words := split_ws(text)
-    out := [String]{}
-    line := ""
-    loop w in words {
-        if line.bytes().len() == 0 {
-            line = w
-            next
-        }
-        trial :: "{line} {w}"
-        if trial.bytes().len() <= width -> line = trial else {
-            out.push(line)
-            line = w
-        }
-    }
-    if line.bytes().len() > 0 -> out.push(line)
-    out
+    spec :: wrapper(width)
+    wrap_with(text, spec)
 }
 
 pub fn fill(text: String, width: Int) -> String {
@@ -45,10 +30,9 @@ pub fn fill(text: String, width: Int) -> String {
 }
 
 pub fn shorten(text: String, width: Int, placeholder: String) -> String {
-    if unicode.scalar_count(text) <= width -> return ~text
-    keep := width - unicode.scalar_count(placeholder)
-    if keep < 0 -> keep = 0
-    "{take_scalars(text, keep)}{placeholder}"
+    if width <= 0 -> return ""
+    if unicode.display_width(text) <= width -> return ~text
+    shorten_text(text, width, placeholder, false)
 }
 
 pub fn indent(text: String, prefix: String) -> String {
@@ -91,8 +75,9 @@ pub fn expand_tabs(text: String, tabsize: Int) -> String {
     out := ""
     col := 0
     cr :: String.from_bytes([U8]{13}) ?? ""
-    loop scalar in unicode.scalars(text) {
-        if scalar == "\t" {
+    crlf :: "{cr}\n"
+    loop cluster in unicode.graphemes(text) {
+        if cluster == "\t" {
             n := size - (col % size)
             i := 0
             loop i < n {
@@ -101,8 +86,12 @@ pub fn expand_tabs(text: String, tabsize: Int) -> String {
             }
             col = col + n
         } else {
-            out = "{out}{scalar}"
-            if scalar == "\n" || scalar == cr -> col = 0 else -> col = col + unicode.display_width(scalar)
+            out = "{out}{cluster}"
+            if cluster == "\n" || cluster == cr || cluster == crlf {
+                col = 0
+            } else {
+                col = col + unicode.display_width(cluster)
+            }
         }
     }
     out
@@ -145,6 +134,26 @@ fn split_ws(text: String) -> [String] {
         }
     }
     if current.bytes().len() > 0 -> out.push(current)
+    out
+}
+
+fn split_ws_preserving(text: String) -> [String] {
+    out := [String]{}
+    current := ""
+    current_whitespace := false
+    has_current := false
+    loop scalar in unicode.scalars(text) {
+        whitespace := unicode.is_whitespace(scalar)
+        if has_current && whitespace != current_whitespace {
+            out.push(current)
+            current = ""
+            has_current = false
+        }
+        current = "{current}{scalar}"
+        current_whitespace = whitespace
+        has_current = true
+    }
+    if has_current -> out.push(current)
     out
 }
 
@@ -249,52 +258,73 @@ pub fn wrapper(width: Int) -> Wrapper {
 }
 
 pub fn wrap_with(text: String, spec: Wrapper) -> [String] {
+    if spec.width <= 0 -> return [String]{text}
     body := text
     if spec.expand_tabs -> body = expand_tabs(body, spec.tabsize)
-    width := spec.width
-    if width <= 0 -> width = 1
     words := split_ws(body)
+    if !spec.drop_whitespace -> words = split_ws_preserving(body)
     out := [String]{}
-    prefix := spec.initial_indent
-    line := ~prefix
-    prefix_width := unicode.display_width(~prefix)
-    loop w in words {
-        piece := w
+    line_indent := spec.initial_indent
+    indent_width := unicode.display_width(line_indent)
+    line := ~line_indent
+    line_has_text := false
+    loop piece in words {
         if spec.drop_whitespace && is_blank(piece) -> next
-        sep := " "
-        if prefix_width == unicode.display_width(line) -> sep = ""
-        trial :: "{line}{sep}{piece}"
-        if unicode.display_width(trial) <= width {
-            line = trial
-            next
+        if line_has_text {
+            separator := " "
+            if !spec.drop_whitespace -> separator = ""
+            trial :: "{line}{separator}{piece}"
+            if unicode.display_width(trial) <= spec.width {
+                line = trial
+                next
+            }
+            out.push(line)
+            line_indent = spec.subsequent_indent
+            indent_width = unicode.display_width(line_indent)
+            line = ~line_indent
+            line_has_text = false
         }
-        if unicode.display_width(line) > prefix_width -> out.push(line)
-        if {
-            unicode.display_width(piece) > width && spec.break_long_words -> {
-                chunk_width := width - unicode.display_width(spec.subsequent_indent)
-                if chunk_width <= 0 -> chunk_width = 1
-                chunks :: break_word(piece, chunk_width)
-                k := 0
-                loop k < chunks.len() {
-                    if k + 1 == chunks.len() -> line = "{spec.subsequent_indent}{chunks[k]}" else {
-                        out.push("{spec.subsequent_indent}{chunks[k]}")
-                    }
-                    k = k + 1
+        capacity := spec.width - indent_width
+        if capacity <= 0 -> capacity = 1
+        piece_width := unicode.display_width(piece)
+        if piece_width <= capacity || !spec.break_long_words {
+            line = "{line_indent}{piece}"
+            line_has_text = true
+        } else {
+            remaining := piece
+            loop remaining.bytes().len() > 0 {
+                chunks :: break_word(remaining, capacity, spec.break_on_hyphens)
+                if chunks.len() == 0 {
+                    line = "{line_indent}{remaining}"
+                    line_has_text = true
+                    remaining = ""
+                } else if chunks.len() == 1 {
+                    line = "{line_indent}{chunks[0]}"
+                    line_has_text = true
+                    remaining = ""
+                } else {
+                    out.push("{line_indent}{chunks[0]}")
+                    remaining = join_chunks(chunks, 1)
+                    line_indent = spec.subsequent_indent
+                    indent_width = unicode.display_width(line_indent)
+                    line = ~line_indent
+                    line_has_text = false
+                    capacity = spec.width - indent_width
+                    if capacity <= 0 -> capacity = 1
                 }
             }
-            else -> line = "{spec.subsequent_indent}{piece}"
         }
-        prefix = spec.subsequent_indent
-        prefix_width = unicode.display_width(~prefix)
     }
-    if unicode.display_width(line) > prefix_width || prefix_width == 0 && line.bytes().len() > 0 {
-        out.push(line)
-    }
+    if line_has_text -> out.push(line)
     if spec.max_lines > 0 && out.len() > spec.max_lines {
         keep := [String]{}
         i := 0
         loop i < spec.max_lines {
-            if i + 1 == spec.max_lines -> keep.push(shorten(out[i], spec.width, spec.placeholder)) else {
+            if i + 1 == spec.max_lines {
+                last_indent := spec.initial_indent
+                if i > 0 -> last_indent = spec.subsequent_indent
+                keep.push(line_with_placeholder(out[i], last_indent, spec.width, spec.placeholder))
+            } else {
                 keep.push(out[i])
             }
             i = i + 1
@@ -347,40 +377,121 @@ pub fn hanging_indent(text: String, first: String, rest: String, width: Int) -> 
     fill_with(text, spec)
 }
 
-fn break_word(word: String, width: Int) -> [String] {
+fn break_word(word: String, width: Int, break_on_hyphens: Bool) -> [String] {
     if width <= 0 -> return [String]{word}
+    units :: unicode.graphemes(word)
     out := [String]{}
-    current := ""
-    current_width := 0
-    units :: unicode.scalars(word)
-    i := 0
-    loop i < units.len() {
-        scalar := units[i]
-        w :: unicode.display_width(scalar)
-        if current.bytes().len() > 0 && current_width + w > width {
-            out.push(current)
-            current = ""
-            current_width = 0
+    if units.len() == 0 -> return out
+    start := 0
+    loop start < units.len() {
+        i := start
+        current_width := 0
+        last_hyphen := -1
+        overflowed := false
+        loop i < units.len() {
+            unit :: units[i]
+            unit_width :: unicode.display_width(unit)
+            if i > start && current_width + unit_width > width {
+                overflowed = true
+                break
+            }
+            if i == start && current_width + unit_width > width {
+                i = i + 1
+                overflowed = true
+                break
+            }
+            current_width = current_width + unit_width
+            if unit == "-" -> last_hyphen = i + 1
+            i = i + 1
         }
-        current = "{current}{scalar}"
-        current_width = current_width + w
-        i = i + 1
+        if i <= start -> i = start + 1
+        end := i
+        if overflowed && break_on_hyphens && last_hyphen > start && last_hyphen < i {
+            end = last_hyphen
+        }
+        if end <= start -> end = start + 1
+        out.push(join_units(units, start, end))
+        start = end
     }
-    if current.bytes().len() > 0 -> out.push(current)
     out
 }
 
-fn take_scalars(text: String, n: Int) -> String {
-    if n <= 0 -> return ""
+fn join_units(units: [String], start: Int, end: Int) -> String {
     out := ""
-    i := 0
-    units :: unicode.scalars(text)
-    loop i < units.len() {
-        if i >= n -> break
+    i := start
+    loop i < end {
         out = "{out}{units[i]}"
         i = i + 1
     }
     out
+}
+
+fn join_chunks(chunks: [String], start: Int) -> String {
+    out := ""
+    i := start
+    loop i < chunks.len() {
+        out = "{out}{chunks[i]}"
+        i = i + 1
+    }
+    out
+}
+
+fn shorten_text(text: String, width: Int, placeholder: String, force_placeholder: Bool) -> String {
+    if width <= 0 -> return ""
+    placeholder_width := unicode.display_width(placeholder)
+    text_width := unicode.display_width(text)
+    if !force_placeholder && text_width <= width -> return ~text
+    if force_placeholder && text_width + placeholder_width <= width -> return "{text}{placeholder}"
+    if placeholder_width > width -> return take_width(placeholder, width)
+    available := width - placeholder_width
+    prefix := word_prefix(text, available)
+    "{prefix}{placeholder}"
+}
+
+fn word_prefix(text: String, width: Int) -> String {
+    if width <= 0 -> return ""
+    words :: split_ws(text)
+    if words.len() == 0 -> return ""
+    current := ""
+    i := 0
+    loop i < words.len() {
+        candidate := words[i]
+        if current.bytes().len() > 0 -> candidate = "{current} {words[i]}"
+        if unicode.display_width(candidate) <= width {
+            current = candidate
+        } else {
+            if current.bytes().len() == 0 -> return take_width(words[i], width)
+            return ~current
+        }
+        i = i + 1
+    }
+    current
+}
+
+fn take_width(text: String, width: Int) -> String {
+    if width <= 0 -> return ""
+    out := ""
+    current_width := 0
+    clusters :: unicode.graphemes(text)
+    i := 0
+    loop i < clusters.len() {
+        cluster :: clusters[i]
+        cluster_width :: unicode.display_width(cluster)
+        if current_width + cluster_width > width -> return ~out
+        out = "{out}{cluster}"
+        current_width = current_width + cluster_width
+        i = i + 1
+    }
+    out
+}
+
+fn line_with_placeholder(line: String, line_indent: String, width: Int, placeholder: String) -> String {
+    capacity := width - unicode.display_width(line_indent)
+    if capacity <= 0 -> return ~line_indent
+    indent_bytes := line_indent.bytes().len()
+    content := line
+    if line.bytes().len() >= indent_bytes -> content = slice_b(line.bytes(), indent_bytes, line.bytes().len())
+    "{line_indent}{shorten_text(content, capacity, placeholder, true)}"
 }
 
 fn join_lines(lines: [String]) -> String {

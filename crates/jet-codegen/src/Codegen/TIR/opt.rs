@@ -1,10 +1,10 @@
 use super::{
-    TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TIfCond, TJitSpawnBody, TLetTy, TLocal,
-    TPlace, TStmt, TLambda, TLambdaBody, TirProgram,
+    TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TIfCond, TJitSpawnBody, TLambda, TLambdaBody,
+    TLetTy, TLocal, TPlace, TStmt, TirProgram,
 };
 use super::{canonical_identity, canonical_payload};
-use jet_foundation::CanonicalPass;
 use crate::AST::Type;
+use jet_foundation::CanonicalPass;
 use std::sync::Arc;
 
 /// Canonicalize loop spellings once, after the complete checked TIR program is built.
@@ -78,10 +78,7 @@ fn empty_shared_body() -> Arc<[TStmt]> {
     Arc::from(Vec::<TStmt>::new().into_boxed_slice())
 }
 
-fn visit_shared_slots(
-    stmts: &mut [TStmt],
-    visit: &mut impl FnMut(&mut Arc<[TStmt]>),
-) {
+fn visit_shared_slots(stmts: &mut [TStmt], visit: &mut impl FnMut(&mut Arc<[TStmt]>)) {
     for stmt in stmts {
         match stmt {
             TStmt::Reactive { executable } => {
@@ -180,8 +177,7 @@ fn canonicalize_shared_slots(slots: &mut [SharedSlot]) {
         let first = group[0];
         let mut shared = std::mem::replace(&mut slots[first].body, empty_shared_body());
         for &index in group.iter().skip(1) {
-            let duplicate =
-                std::mem::replace(&mut slots[index].body, empty_shared_body());
+            let duplicate = std::mem::replace(&mut slots[index].body, empty_shared_body());
             drop(duplicate);
         }
         if let Some(body) = Arc::get_mut(&mut shared) {
@@ -751,7 +747,9 @@ fn canonicalize_fn_value(kind: &mut TFnValueKind) {
             }
         }
         TFnValueKind::Policy {
-            policy_args, callee, ..
+            policy_args,
+            callee,
+            ..
         } => {
             for arg in policy_args {
                 canonicalize_expr(&mut arg.value);
@@ -783,6 +781,16 @@ fn canonicalize_expr(expr: &mut TExpr) {
             canonicalize_expr(then_value);
             canonicalize_stmts(else_body);
             canonicalize_expr(else_value);
+        }
+        TExprKind::ResultHandler {
+            subject, ok_body, ok_value, err_body, err_value, terminal, ..
+        } => {
+            canonicalize_expr(subject);
+            canonicalize_stmts(ok_body);
+            canonicalize_expr(ok_value);
+            canonicalize_stmts(err_body);
+            canonicalize_expr(err_value);
+            canonicalize_expr(terminal);
         }
         TExprKind::Lambda(lambda) => canonicalize_lambda(lambda),
         TExprKind::CoreClosureCall { kind } => canonicalize_core_closure(kind),
@@ -818,8 +826,9 @@ fn canonicalize_expr(expr: &mut TExpr) {
         TExprKind::OrFallback { value, fallback } => {
             canonicalize_expr(value);
             match fallback {
-                super::TOrFallback::Value(value)
-                | super::TOrFallback::Return(Some(value)) => canonicalize_expr(value),
+                super::TOrFallback::Value(value) | super::TOrFallback::Return(Some(value)) => {
+                    canonicalize_expr(value)
+                }
                 super::TOrFallback::Panic { msg, .. } => canonicalize_expr(msg),
                 _ => {}
             }
@@ -872,7 +881,9 @@ fn canonicalize_expr(expr: &mut TExpr) {
         | TExprKind::TaskGroupAll { tasks: operand }
         | TExprKind::TaskGroupRace { tasks: operand }
         | TExprKind::TaskGroupAny { tasks: operand }
-        | TExprKind::HostBorrowCallback { callable: operand, .. } => canonicalize_expr(operand),
+        | TExprKind::HostBorrowCallback {
+            callable: operand, ..
+        } => canonicalize_expr(operand),
         TExprKind::SelectRecv { builder, channel } => {
             canonicalize_expr(builder);
             canonicalize_expr(channel);
@@ -1027,9 +1038,7 @@ fn canonicalize_expr(expr: &mut TExpr) {
 fn fold_expr(expr: &mut TExpr) {
     let folded = match &expr.kind {
         TExprKind::Unary { op, operand } => fold_unary(expr, *op, operand),
-        TExprKind::Binary {
-            op, lhs, rhs, ..
-        } => fold_binary(expr, *op, lhs, rhs),
+        TExprKind::Binary { op, lhs, rhs, .. } => fold_binary(expr, *op, lhs, rhs),
         _ => None,
     };
     if let Some(replacement) = folded {
@@ -1040,10 +1049,12 @@ fn fold_expr(expr: &mut TExpr) {
 fn fold_unary(expr: &TExpr, op: crate::AST::UnOp, operand: &TExpr) -> Option<TExpr> {
     match op {
         crate::AST::UnOp::Not => match &operand.kind {
-            TExprKind::BoolLit(value) if expr.ty.without_user_tags() == &Type::Bool => Some(TExpr {
-                ty: expr.ty.clone(),
-                kind: TExprKind::BoolLit(!*value),
-            }),
+            TExprKind::BoolLit(value) if expr.ty.without_user_tags() == &Type::Bool => {
+                Some(TExpr {
+                    ty: expr.ty.clone(),
+                    kind: TExprKind::BoolLit(!*value),
+                })
+            }
             _ => None,
         },
         crate::AST::UnOp::Neg => {
@@ -1057,12 +1068,7 @@ fn fold_unary(expr: &TExpr, op: crate::AST::UnOp, operand: &TExpr) -> Option<TEx
     }
 }
 
-fn fold_binary(
-    expr: &TExpr,
-    op: crate::AST::BinOp,
-    lhs: &TExpr,
-    rhs: &TExpr,
-) -> Option<TExpr> {
+fn fold_binary(expr: &TExpr, op: crate::AST::BinOp, lhs: &TExpr, rhs: &TExpr) -> Option<TExpr> {
     match (&lhs.kind, &rhs.kind) {
         (TExprKind::BoolLit(left), TExprKind::BoolLit(right))
             if matches!(
@@ -1209,4 +1215,3 @@ fn floor_div(left: i64, right: i64) -> Option<i64> {
         Some(quotient)
     }
 }
-

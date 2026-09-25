@@ -106,27 +106,6 @@ fn jet_std_fs_walk_files_with_ignore(
     out.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(out)
 }
-fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOError> {
-    let path = jet_std_fs_temp_dir_path(prefix)?;
-    Ok(jet_std::TempDir {
-        path,
-        cleanup: std::rc::Rc::new(()),
-    })
-}
-fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::IOError> {
-    let path = jet_std_fs_temp_file_path(prefix)?;
-    Ok(jet_std::TempFile {
-        path,
-        cleanup: std::rc::Rc::new(()),
-    })
-}
-fn jet_std_fs_lock(path: &String) -> Result<jet_std::FileLock, jet_std::IOError> {
-    let path = jet_std_fs_lock_path(path)?;
-    Ok(jet_std::FileLock {
-        path,
-        cleanup: std::rc::Rc::new(()),
-    })
-}
 fn jet_watcher_files(path: &String) -> Result<jet_std::WatchHandle, jet_std::IOError> {
     jet_std::WatchHandle::files(path.clone())
 }

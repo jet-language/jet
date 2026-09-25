@@ -66,16 +66,16 @@ pub struct VjpRun {
     pub gradient: Tensor
 }
 
-@c_max_tensor_elements :: 16777216
-@c_f32_max :: Float{3.4028234663852886e38}
-@c_pivot_tolerance :: Float{0.000000000000001}
-@c_two_pi :: Float{6.283185307179586}
-@c_profile_f64 :: "F64Strict+Reproducible"
-@c_profile_f32 :: "F32Strict+Reproducible"
-@c_profile_f32_receipt :: "backend=cpu-oracle;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;dispatch=scalar;vector_width=1;tail=scalar;cache=none"
-@c_abilities_f64 :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"reproducible-reduction\", \"differential-oracle\"]"
-@c_abilities_f32 :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
-@c_mask64 :: 18446744073709551615
+c_max_tensor_elements :: 16777216
+f32_max_limit :: 3.4028234663852886e38
+pivot_tolerance :: 0.000000000000001
+two_pi :: 6.283185307179586
+profile_f64_value :: "F64Strict+Reproducible"
+profile_f32_value :: "F32Strict+Reproducible"
+profile_f32_receipt_value :: "backend=cpu-oracle;version=builtin;profile=F32Strict+Reproducible;algorithm=blocked-matmul;tile=8;dispatch=scalar;vector_width=1;tail=scalar;cache=none"
+abilities_f64_json :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"reproducible-reduction\", \"differential-oracle\"]"
+abilities_f32_json :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
+c_mask64 :: 18446744073709551615
 
 pub fn device_cpu() -> ComputeDevice { ComputeDevice{kind: "CPU", index: 0} }
 pub fn device_auto() -> ComputeDevice { ComputeDevice{kind: "Auto", index: 0} }
@@ -169,20 +169,29 @@ pub fn profile_f32_strict() -> String { c_profile_f32_receipt() }
 pub fn profile_show() -> String { c_profile_f32_receipt() }
 
 pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool !ComputeError {
-    _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
-    Ok(offset_of(shape, index) != None)
+    _ :: checked_numel(shape)
+    if shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
+    loop axis in 0..<shape.len() {
+        if index[axis] < 0 || index[axis] >= shape[axis] -> return Err(ComputeError.OutOfBounds)
+    }
+    Ok(true)
 }
 
 pub fn get(tensor: Tensor, index: [Int]) -> Float !ComputeError {
     _ :: validate_tensor(tensor)
+    if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.OutOfBounds)
     Ok(tensor.data[o])
 }
 
 pub fn set(tensor: &Tensor, index: [Int], value: Float) !ComputeError {
     _ :: validate_tensor_ref(tensor)
+    if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     _ :: finite_or_error(value)
-    if tensor.numeric_profile == c_profile_f32() && !f32_value_ok(value) -> return Err(ComputeError.Arithmetic)
+    if tensor.numeric_profile == c_profile_f32() {
+        value_ok :: f32_value_ok(value)
+        if !value_ok -> return Err(ComputeError.Arithmetic)
+    }
     o_opt :: offset_of(tensor.shape, index)
     if o_opt == None -> return Err(ComputeError.OutOfBounds)
     o :: o_opt
@@ -242,8 +251,14 @@ pub fn matmul(a: Tensor, b: Tensor) -> Tensor !ComputeError {
 // make the source contract diverge from the native dispatcher.
 pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor !ComputeError {
     _ :: validate_matmul_inputs(a, b)
-    loop value in a.data -> _ :: profile_value_or_error(value, c_profile_f32())
-    loop value in b.data -> _ :: profile_value_or_error(value, c_profile_f32())
+    loop value in a.data {
+        _ :: finite_or_error(value)
+        if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)
+    }
+    loop value in b.data {
+        _ :: finite_or_error(value)
+        if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)
+    }
     matmul_blocked(a, b, 8, c_profile_f32())
 }
 
@@ -258,6 +273,7 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
     out_n :: checked_numel(out_shape)
     axis_len :: tensor.shape[axis]
     out := [Float]{}
+    profile :: tensor_profile(tensor)
     loop flat in 0..<out_n {
         if axis_len == 0 {
             out.push(Float{0.0})
@@ -278,41 +294,40 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor !ComputeError {
         loop k in 0..<axis_len {
             src_index[axis] = k
             o :: offset_of(tensor.shape, src_index) ?? return Err(ComputeError.OutOfBounds)
-            total = float_add(total, tensor.data[o])
-            _ :: profile_value_or_error(total, tensor_profile(tensor))
+            total = profile_round(float_add(total, tensor.data[o]), profile) ?? return Err(ComputeError.Arithmetic)
         }
         out.push(total)
     }
-    Ok(make_tensor(out_shape, out, tensor.device, tensor_profile(tensor)))
+    Ok(make_tensor(out_shape, out, tensor.device, profile))
 }
 
 pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor !ComputeError {
     _ :: validate_same_tensor_inputs(pred, target)
     if pred.data.len() == 0 -> return Err(ComputeError.Shape)
+    profile :: tensor_profile(pred)
     total := Float{0.0}
     loop i in 0..<pred.data.len() {
-        d :: float_sub(pred.data[i], target.data[i])
-        total = float_add(total, float_mul(d, d))
-        _ :: profile_value_or_error(total, tensor_profile(pred))
+        d :: profile_round(float_sub(pred.data[i], target.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
+        square :: profile_round(float_mul(d, d), profile) ?? return Err(ComputeError.Arithmetic)
+        total = profile_round(float_add(total, square), profile) ?? return Err(ComputeError.Arithmetic)
     }
-    value :: float_div(total, Float{pred.data.len()})
-    _ :: profile_value_or_error(value, tensor_profile(pred))
-    Ok(make_tensor([Int]{1}, [Float]{value}, pred.device, tensor_profile(pred)))
+    value :: profile_round(float_div(total, Float{pred.data.len()}), profile) ?? return Err(ComputeError.Arithmetic)
+    Ok(make_tensor([Int]{1}, [Float]{value}, pred.device, profile))
 }
 
 pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor !ComputeError {
     _ :: validate_same_tensor_inputs(weights, grad)
-    _ :: finite_or_error(lr)
-    _ :: profile_value_or_error(lr, tensor_profile(weights))
-    ordering :: core.math.cmp(lr, Float{0.0})
+    profile :: tensor_profile(weights)
+    lr_value :: profile_round(lr, profile) ?? return Err(ComputeError.Arithmetic)
+    ordering :: core.math.cmp(lr_value, Float{0.0})
     if ordering < 0 -> return Err(ComputeError.Arithmetic)
     data := [Float]{}
     loop i in 0..<weights.data.len() {
-        value :: float_sub(weights.data[i], float_mul(lr, grad.data[i]))
-        _ :: profile_value_or_error(value, tensor_profile(weights))
+        scaled :: profile_round(float_mul(lr_value, grad.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
+        value :: profile_round(float_sub(weights.data[i], scaled), profile) ?? return Err(ComputeError.Arithmetic)
         data.push(value)
     }
-    Ok(make_tensor(copy_i(weights.shape), data, weights.device, tensor_profile(weights)))
+    Ok(make_tensor(copy_i(weights.shape), data, weights.device, profile))
 }
 
 pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun !ComputeError {
@@ -320,11 +335,11 @@ pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VjpRun !ComputeError 
     _ :: validate_same_tensor_inputs(pred, target)
     n :: pred.data.len()
     if n == 0 -> return Err(ComputeError.Shape)
-    scale :: Float{2.0} / Float{n}
+    scale :: profile_round(Float{2.0} / Float{n}, tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
     data := [Float]{}
     loop i in 0..<n {
-        value :: float_mul(float_sub(pred.data[i], target.data[i]), scale)
-        _ :: profile_value_or_error(value, tensor_profile(pred))
+        difference :: profile_round(float_sub(pred.data[i], target.data[i]), tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
+        value :: profile_round(float_mul(difference, scale), tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
         data.push(value)
     }
     gradient :: make_tensor(copy_i(pred.shape), data, pred.device, tensor_profile(pred))
@@ -343,13 +358,16 @@ pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor !ComputeErro
     _ :: validate_tensor(tangent)
     if tangent.shape != pred.shape || tensor_device_name(tangent.device) != tensor_device_name(pred.device) || tensor_profile(tangent) != tensor_profile(pred) -> return Err(ComputeError.Shape)
     if pred.data.len() == 0 -> return Err(ComputeError.Shape)
-    scale :: Float{2.0} / Float{pred.data.len()}
+    profile :: tensor_profile(pred)
+    scale :: profile_round(Float{2.0} / Float{pred.data.len()}, profile) ?? return Err(ComputeError.Arithmetic)
     total := Float{0.0}
     loop i in 0..<pred.data.len() {
-        total = float_add(total, float_mul(float_mul(scale, float_sub(pred.data[i], target.data[i])), tangent.data[i]))
-        _ :: profile_value_or_error(total, tensor_profile(pred))
+        difference :: profile_round(float_sub(pred.data[i], target.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
+        scaled :: profile_round(float_mul(scale, difference), profile) ?? return Err(ComputeError.Arithmetic)
+        contribution :: profile_round(float_mul(scaled, tangent.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
+        total = profile_round(float_add(total, contribution), profile) ?? return Err(ComputeError.Arithmetic)
     }
-    Ok(make_tensor([Int]{1}, [Float]{total}, pred.device, tensor_profile(pred)))
+    Ok(make_tensor([Int]{1}, [Float]{total}, pred.device, profile))
 }
 
 pub fn det(tensor: Tensor) -> Float !ComputeError {
@@ -437,7 +455,7 @@ pub fn inv(tensor: Tensor) -> Tensor !ComputeError {
         diagonal := work[k * width + k]
         loop j in 0..<width {
             value := float_div(work[k * width + j], diagonal)
-            _ :: profile_value_or_error(value, profile)
+            value = profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
             work[k * width + j] = value
         }
         loop i in 0..<n {
@@ -445,7 +463,7 @@ pub fn inv(tensor: Tensor) -> Tensor !ComputeError {
             factor := work[i * width + k]
             loop j in 0..<width {
                 value := float_sub(work[i * width + j], float_mul(factor, work[k * width + j]))
-                _ :: profile_value_or_error(value, profile)
+                value = profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
                 work[i * width + j] = value
             }
         }
@@ -513,7 +531,7 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
         diagonal := augmented[k * width + k]
         loop j in k..<width {
             value := float_div(augmented[k * width + j], diagonal)
-            _ :: profile_value_or_error(value, profile)
+            value = profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
             augmented[k * width + j] = value
         }
         loop i in 0..<n {
@@ -521,7 +539,7 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor !ComputeError {
             factor := augmented[i * width + k]
             loop j in k..<width {
                 value := float_sub(augmented[i * width + j], float_mul(factor, augmented[k * width + j]))
-                _ :: profile_value_or_error(value, profile)
+                value = profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
                 augmented[i * width + j] = value
             }
         }
@@ -553,12 +571,13 @@ pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
     n :: tensor.shape[0]
     if n == 0 -> return Ok(make_tensor([Int]{0}, [Float]{}, tensor.device, tensor_profile(tensor)))
     if n > 8388608 -> return Err(ComputeError.Shape)
+    profile :: tensor_profile(tensor)
     if is_power_two(n) {
-        data :: fft_radix2(tensor.data)
-        loop value in data {
-            _ :: profile_value_or_error(value, tensor_profile(tensor))
+        data := fft_radix2(tensor.data, profile) ?? return Err(ComputeError.Arithmetic)
+        loop i in 0..<data.len() {
+            data[i] = profile_round(data[i], profile) ?? return Err(ComputeError.Arithmetic)
         }
-        return Ok(make_tensor([Int]{n * 2}, data, tensor.device, tensor_profile(tensor)))
+        return Ok(make_tensor([Int]{n * 2}, data, tensor.device, profile))
     }
     if n > 4096 -> return Err(ComputeError.Unsupported)
     data := [Float]{}
@@ -569,19 +588,18 @@ pub fn fft(tensor: Tensor) -> Tensor !ComputeError {
             angle :: float_sub(Float{0.0}, float_div(float_mul(float_mul(c_two_pi(), Float{k}), Float{t}), Float{n}))
             cosine :: float_cos(angle) ?? return Err(ComputeError.Arithmetic)
             sine :: float_sin(angle) ?? return Err(ComputeError.Arithmetic)
-            re = float_add(re, float_mul(tensor.data[t], cosine))
-            im = float_add(im, float_mul(tensor.data[t], sine))
+            re = profile_round(float_add(re, float_mul(tensor.data[t], cosine)), profile) ?? return Err(ComputeError.Arithmetic)
+            im = profile_round(float_add(im, float_mul(tensor.data[t], sine)), profile) ?? return Err(ComputeError.Arithmetic)
         }
-        _ :: profile_value_or_error(re, tensor_profile(tensor))
-        _ :: profile_value_or_error(im, tensor_profile(tensor))
         data.push(re)
         data.push(im)
     }
-    Ok(make_tensor([Int]{n * 2}, data, tensor.device, tensor_profile(tensor)))
+    Ok(make_tensor([Int]{n * 2}, data, tensor.device, profile))
 }
 
 pub fn to_sparse(tensor: Tensor) -> SparseTensor !ComputeError {
     _ :: validate_tensor(tensor)
+    if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
     m :: tensor.shape[0]
     n :: tensor.shape[1]
@@ -619,8 +637,8 @@ pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor !ComputeError {
         start :: sp.row_ptr[i]
         finish :: sp.row_ptr[i + 1]
         loop p in start..<finish {
-            total = float_add(total, float_mul(sp.values[p], x.data[sp.col_idx[p]]))
-            _ :: profile_value_or_error(total, tensor_profile(x))
+            product :: profile_round(float_mul(sp.values[p], x.data[sp.col_idx[p]]), tensor_profile(x)) ?? return Err(ComputeError.Arithmetic)
+            total = profile_round(float_add(total, product), tensor_profile(x)) ?? return Err(ComputeError.Arithmetic)
         }
         out.push(total)
     }
@@ -648,7 +666,8 @@ pub fn serialize(tensor: Tensor) -> String !ComputeError {
         }
     }
     body :: "shape={shape_text};data={data_text};profile={profile}"
-    "{body};checksum={wire_checksum(body)}"
+    checksum :: wire_checksum(body) ?? return Err(ComputeError.Serialization)
+    "{body};checksum={checksum}"
 }
 
 pub fn deserialize(text: String) -> Tensor !ComputeError {
@@ -694,7 +713,8 @@ pub fn deserialize(text: String) -> Tensor !ComputeError {
         _ :: require_hex_byte(byte)
     }
     body :: "shape={shape_text};data={data_text};profile={profile}"
-    if checksum != wire_checksum(body) -> return Err(ComputeError.Serialization)
+    expected_checksum :: wire_checksum(body) ?? return Err(ComputeError.Serialization)
+    if checksum != expected_checksum -> return Err(ComputeError.Serialization)
     shape := [Int]{}
     shape_parts :: split_byte(shape_text, 44) ?? return Err(ComputeError.Parse)
     if shape_parts.len() == 0 -> return Err(ComputeError.Shape)
@@ -736,25 +756,26 @@ pub fn stream_sync(stream: ComputeStream) !ComputeError {
     return
 }
 
-fn c_profile_f64() -> String { @c_profile_f64 }
-fn c_profile_f32() -> String { @c_profile_f32 }
-fn c_profile_f32_receipt() -> String { @c_profile_f32_receipt }
-fn c_abilities_f64() -> String { @c_abilities_f64 }
-fn c_abilities_f32() -> String { @c_abilities_f32 }
-fn c_max_elements() -> Int { @c_max_tensor_elements }
-fn c_pivot_tolerance() -> Float { @c_pivot_tolerance }
-fn c_two_pi() -> Float { @c_two_pi }
+fn c_profile_f64() -> String !Never { profile_f64_value }
+fn c_profile_f32() -> String !Never { profile_f32_value }
+fn c_profile_f32_receipt() -> String { profile_f32_receipt_value }
+fn c_abilities_f64() -> String { abilities_f64_json }
+fn c_abilities_f32() -> String { abilities_f32_json }
+fn c_max_elements() -> Int !Never { c_max_tensor_elements }
+fn c_f32_max() -> Float !Never { f32_max_limit }
+fn c_pivot_tolerance() -> Float !Never { pivot_tolerance }
+fn c_two_pi() -> Float !Never { two_pi }
 
-fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor {
+fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor !Never {
     Tensor{shape: shape, data: data, device: tensor_device_name(device), numeric_profile: profile}
 }
 
-fn tensor_profile(tensor: Tensor) -> String {
+fn tensor_profile(tensor: Tensor) -> String !Never {
     if tensor.numeric_profile == "" -> return c_profile_f64()
     tensor.numeric_profile
 }
 
-fn tensor_device_name(device: String) -> String {
+fn tensor_device_name(device: String) -> String !Never {
     if device == "cpu" || device == "CPU" -> return "CPU"
     if device == "auto" || device == "Auto" -> return "Auto"
     if device == "cuda" || device == "CUDA" -> return "CUDA"
@@ -765,7 +786,7 @@ fn tensor_device_name(device: String) -> String {
 }
 
 fn select_device(kind: String) -> ?String {
-    name :: tensor_device_name(kind)
+    name :: tensor_device_name(kind) ?? panic("unreachable !Never device normalization failure")
     if name == "CPU" || name == "Auto" -> return Val("CPU")
     if name == "CUDA" || name == "Metal" || name == "Vulkan" || name == "WebGPU" -> return Val(name)
     None
@@ -858,8 +879,12 @@ fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor !C
                 loop i in i0..<i_end {
                     loop j in j0..<j_end {
                         total := out[i * n + j]
-                        loop q in k0..<k_end -> total = float_add(total, float_mul(a.data[i * k + q], b.data[q * n + j]))
-                        _ :: profile_value_or_error(total, profile)
+                        loop q in k0..<k_end {
+                            left :: if profile == c_profile_f32() -> f32_round_value(a.data[i * k + q]) else -> a.data[i * k + q]
+                            right :: if profile == c_profile_f32() -> f32_round_value(b.data[q * n + j]) else -> b.data[q * n + j]
+                            product :: profile_round(float_mul(left, right), profile) ?? return Err(ComputeError.Arithmetic)
+                            total = profile_round(float_add(total, product), profile) ?? return Err(ComputeError.Arithmetic)
+                        }
                         out[i * n + j] = total
                     }
                 }
@@ -881,10 +906,11 @@ fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor !ComputeError {
     out_n :: checked_numel(out_shape)
     av :: materialize_broadcast(a, out_shape)
     bv :: materialize_broadcast(b, out_shape)
+    profile :: tensor_profile(a)
     out := [Float]{}
     loop i in 0..<out_n {
-        x :: av[i]
-        y :: bv[i]
+        x :: profile_round(av[i], profile) ?? return Err(ComputeError.Arithmetic)
+        y :: profile_round(bv[i], profile) ?? return Err(ComputeError.Arithmetic)
         ordering := float_cmp(y, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
         if op == 3 && ordering == 0 -> return Err(ComputeError.Arithmetic)
         value := float_add(x, y)
@@ -907,16 +933,18 @@ fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor !ComputeError {
                 value = y
             }
         }
-        _ :: profile_value_or_error(value, tensor_profile(a))
-        out.push(value)
+        rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
+        out.push(rounded)
     }
-    Ok(make_tensor(out_shape, out, a.device, tensor_profile(a)))
+    Ok(make_tensor(out_shape, out, a.device, profile))
 }
 
 fn unary(tensor: Tensor, op: Int) -> Tensor !ComputeError {
     _ :: validate_tensor(tensor)
+    profile :: tensor_profile(tensor)
     out := [Float]{}
-    loop x in tensor.data {
+    loop raw in tensor.data {
+        x :: profile_round(raw, profile) ?? return Err(ComputeError.Arithmetic)
         ordering :: float_cmp(x, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
         if op == 3 && ordering <= 0 -> return Err(ComputeError.Arithmetic)
         if op == 4 && ordering < 0 -> return Err(ComputeError.Arithmetic)
@@ -925,10 +953,10 @@ fn unary(tensor: Tensor, op: Int) -> Tensor !ComputeError {
         if op == 2 -> value = float_exp(x) ?? return Err(ComputeError.Arithmetic)
         if op == 3 -> value = float_ln(x) ?? return Err(ComputeError.Arithmetic)
         if op == 4 -> value = float_sqrt(x) ?? return Err(ComputeError.Arithmetic)
-        _ :: profile_value_or_error(value, tensor_profile(tensor))
-        out.push(value)
+        rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
+        out.push(rounded)
     }
-    Ok(make_tensor(copy_i(tensor.shape), out, tensor.device, tensor_profile(tensor)))
+    Ok(make_tensor(copy_i(tensor.shape), out, tensor.device, profile))
 }
 
 fn filled(shape: [Int], value: Float) -> Tensor !ComputeError {
@@ -1004,7 +1032,7 @@ fn materialize_broadcast(tensor: Tensor, target: [Int]) -> [Float] !ComputeError
     Ok(out)
 }
 
-fn decode_index(flat: Int, shape: [Int]) -> [Int] {
+fn decode_index(flat: Int, shape: [Int]) -> [Int] !Never {
     out := [Int]{}
     remainder := flat
     i := shape.len()
@@ -1032,7 +1060,7 @@ fn offset_of(shape: [Int], index: [Int]) -> ?Int {
     Val(offset)
 }
 
-fn reverse_i(values: &[Int]) {
+fn reverse_i(values: &[Int]) !Never {
     i := 0
     j := values.len() - 1
     loop i < j {
@@ -1044,16 +1072,16 @@ fn reverse_i(values: &[Int]) {
     }
 }
 
-fn min_int(a: Int, b: Int) -> Int {
+fn min_int(a: Int, b: Int) -> Int !Never {
     if a < b {
         return a
     }
     b
 }
 
-fn is_power_two(n: Int) -> Bool { n > 0 && (n & (n - 1)) == 0 }
+fn is_power_two(n: Int) -> Bool !Never { n > 0 && (n & (n - 1)) == 0 }
 
-fn fft_radix2(input: [Float]) -> [Float] {
+fn fft_radix2(input: [Float], profile: String) -> [Float] !ComputeError {
     n :: input.len()
     out := [Float]{}
     loop x in input {
@@ -1081,8 +1109,8 @@ fn fft_radix2(input: [Float]) -> [Float] {
     length := 2
     loop length <= n {
         angle :: float_sub(Float{0.0}, float_div(c_two_pi(), Float{length}))
-        wlen_re :: math.cos(angle)
-        wlen_im :: math.sin(angle)
+        wlen_re :: profile_round(math.cos(angle), profile) ?? return Err(ComputeError.Arithmetic)
+        wlen_im :: profile_round(math.sin(angle), profile) ?? return Err(ComputeError.Arithmetic)
         start := 0
         half :: length /% 2
         loop start < n {
@@ -1091,16 +1119,16 @@ fn fft_radix2(input: [Float]) -> [Float] {
             loop k in 0..<half {
                 left :: 2 * (start + k)
                 right :: 2 * (start + k + half)
-                vr :: float_sub(float_mul(out[right], w_re), float_mul(out[right + 1], w_im))
-                vi :: float_add(float_mul(out[right], w_im), float_mul(out[right + 1], w_re))
+                vr :: profile_round(float_sub(float_mul(out[right], w_re), float_mul(out[right + 1], w_im)), profile) ?? return Err(ComputeError.Arithmetic)
+                vi :: profile_round(float_add(float_mul(out[right], w_im), float_mul(out[right + 1], w_re)), profile) ?? return Err(ComputeError.Arithmetic)
                 ur := out[left]
                 ui := out[left + 1]
-                out[left] = float_add(ur, vr)
-                out[left + 1] = float_add(ui, vi)
-                out[right] = float_sub(ur, vr)
-                out[right + 1] = float_sub(ui, vi)
-                next_re :: float_sub(float_mul(w_re, wlen_re), float_mul(w_im, wlen_im))
-                w_im = float_add(float_mul(w_re, wlen_im), float_mul(w_im, wlen_re))
+                out[left] = profile_round(float_add(ur, vr), profile) ?? return Err(ComputeError.Arithmetic)
+                out[left + 1] = profile_round(float_add(ui, vi), profile) ?? return Err(ComputeError.Arithmetic)
+                out[right] = profile_round(float_sub(ur, vr), profile) ?? return Err(ComputeError.Arithmetic)
+                out[right + 1] = profile_round(float_sub(ui, vi), profile) ?? return Err(ComputeError.Arithmetic)
+                next_re :: profile_round(float_sub(float_mul(w_re, wlen_re), float_mul(w_im, wlen_im)), profile) ?? return Err(ComputeError.Arithmetic)
+                w_im = profile_round(float_add(float_mul(w_re, wlen_im), float_mul(w_im, wlen_re)), profile) ?? return Err(ComputeError.Arithmetic)
                 w_re = next_re
             }
             start = start + length
@@ -1175,8 +1203,8 @@ fn parse_int(text: String) -> ?Int {
         start = 1
     }
     if start == raw.len() -> return None
-    if text == "-9223372036854775808" -> return Val(c_min_int())
-    limit :: c_max_int()
+    if text == "-9223372036854775808" -> return Val(c_min_int() ?? panic("unreachable !Never minimum integer"))
+    limit :: c_max_int() ?? panic("unreachable !Never maximum integer")
     value := 0
     loop i in start..<raw.len() {
         digit :: raw[i]
@@ -1189,15 +1217,15 @@ fn parse_int(text: String) -> ?Int {
     Val(value)
 }
 
-fn c_max_int() -> Int { 9223372036854775807 }
-fn c_min_int() -> Int { -9223372036854775807 - 1 }
+fn c_max_int() -> Int !Never { 9223372036854775807 }
+fn c_min_int() -> Int !Never { -9223372036854775807 - 1 }
 
-fn wire_checksum(body: String) -> String {
+fn wire_checksum(body: String) -> String !ComputeError {
     hash := 14695981039346656037
     loop byte in body.bytes() {
-        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & @c_mask64
+        hash = ((hash ~| Int.from_u8(byte)) * 1099511628211) & c_mask64
     }
-    fmt.hex(hash, 16)
+    fmt.hex(hash, 16) ?? return Err(ComputeError.Serialization)
 }
 fn finite_or_error(value: Float) -> Bool !ComputeError {
     finite :: core.math.is_finite(value)
@@ -1205,15 +1233,57 @@ fn finite_or_error(value: Float) -> Bool !ComputeError {
     Err(ComputeError.Arithmetic)
 }
 
-fn f32_value_ok(value: Float) -> Bool {
-    if value > @c_f32_max || value < (Float{0.0} - @c_f32_max) -> return false
-    true
+fn f32_round_value(value: Float) -> Float !ComputeError {
+    if value == (Float{0.0}) -> return value
+    negative := value < Float{0.0}
+    magnitude := value
+    if negative -> magnitude = Float{0.0} - value
+    parts :: math.frexp(magnitude) ?? return Err(ComputeError.Arithmetic)
+    exponent := parts.exp - 1
+    scale := 23 - exponent
+    if exponent < -126 -> scale = 149
+    scaled :: math.ldexp(magnitude, scale) ?? return Err(ComputeError.Arithmetic)
+    lower :: math.floor(scaled) ?? return Err(ComputeError.Arithmetic)
+    fraction := scaled - lower
+    rounded := lower
+    round_up := fraction > (Float{0.5})
+    if fraction == (Float{0.5}) {
+        remainder :: math.fmod(lower, (Float{2.0})) ?? return Err(ComputeError.Arithmetic)
+        if remainder != (Float{0.0}) -> round_up = true
+    }
+    if round_up -> rounded = rounded + Float{1.0}
+    result :: math.ldexp(rounded, 0 - scale) ?? return Err(ComputeError.Arithmetic)
+    if negative -> return Float{0.0} - result
+    result
+}
+
+fn f32_range_ok(value: Float) -> Bool !Never {
+    if !core.math.is_finite(value) -> return false
+    value <= c_f32_max() && value >= (Float{0.0} - c_f32_max())
+}
+
+fn f32_value_ok(value: Float) -> Bool !ComputeError {
+    if !f32_range_ok(value) -> return false
+    rounded :: f32_round_value(value)
+    rounded == value
 }
 
 fn profile_value_or_error(value: Float, profile: String) -> Bool !ComputeError {
     _ :: finite_or_error(value)
-    if profile == c_profile_f32() && !f32_value_ok(value) -> return Err(ComputeError.Arithmetic)
+    if profile == c_profile_f32() {
+        value_ok :: f32_value_ok(value) ?? return Err(ComputeError.Arithmetic)
+        if !value_ok -> return Err(ComputeError.Arithmetic)
+    }
     Ok(true)
+}
+
+fn profile_round(value: Float, profile: String) -> Float !ComputeError {
+    _ :: finite_or_error(value)
+    if profile == c_profile_f32() {
+        if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)
+        return f32_round_value(value)
+    }
+    value
 }
 fn float_abs(value: Float) -> Float !ComputeError {
     _ :: finite_or_error(value)
@@ -1276,29 +1346,31 @@ fn require_hex_byte(byte: U8) -> Bool !ComputeError {
     if (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102})) -> return Ok(true)
     Err(ComputeError.Serialization)
 }
-fn float_add(a: Float, b: Float) -> Float {
-    core.math.fma(Float{1.0}, a, b)
+fn float_add(a: Float, b: Float) -> Float !ComputeError {
+    core.math.fma(Float{1.0}, a, b) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_sub(a: Float, b: Float) -> Float {
-    core.math.fma(Float{1.0}, a, core.math.fma(Float{-1.0}, b, Float{0.0}))
+fn float_sub(a: Float, b: Float) -> Float !ComputeError {
+    negative_b :: core.math.fma(Float{-1.0}, b, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
+    core.math.fma(Float{1.0}, a, negative_b) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_mul(a: Float, b: Float) -> Float {
-    core.math.fma(a, b, Float{0.0})
+fn float_mul(a: Float, b: Float) -> Float !ComputeError {
+    core.math.fma(a, b, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn float_div(a: Float, b: Float) -> Float {
-    core.math.fma(a, core.math.inv(b), Float{0.0})
+fn float_div(a: Float, b: Float) -> Float !ComputeError {
+    inverse :: core.math.inv(b) ?? return Err(ComputeError.Arithmetic)
+    core.math.fma(a, inverse, Float{0.0}) ?? return Err(ComputeError.Arithmetic)
 }
 
-fn copy_f(xs: [Float]) -> [Float] {
+fn copy_f(xs: [Float]) -> [Float] !Never {
     out := [Float]{}
     loop value in xs -> out.push(value)
     out
 }
 
-fn copy_i(xs: [Int]) -> [Int] {
+fn copy_i(xs: [Int]) -> [Int] !Never {
     out := [Int]{}
     loop value in xs -> out.push(value)
     out

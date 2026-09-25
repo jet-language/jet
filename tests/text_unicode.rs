@@ -6,6 +6,62 @@ use std::process::Command;
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+const TEXT_PARSER_HELPERS_SOURCE: &str = r#"
+use core.text.parse as parse
+use combinators
+
+fn run() {
+    // Failure fallbacks differ from the expected payload, so None cannot pass.
+    binary :: (parse.parse_int_base("101101", 2) ?? -1) == 45
+    hexadecimal :: (parse.parse_int_base("FF", 16) ?? -1) == 255
+    base36 :: (parse.parse_int_base("z", 36) ?? -1) == 35
+    print("integer valid: base2={binary} base16={hexadecimal} base36={base36}")
+
+    base_low :: parse.parse_int_base("1", 1) == .None
+    base_high :: parse.parse_int_base("1", 37) == .None
+    empty :: parse.parse_int_base("", 10) == .None
+    plus_only :: parse.parse_int_base("+", 10) == .None
+    minus_only :: parse.parse_int_base("-", 10) == .None
+    illegal_digit :: parse.parse_int_base("12z", 10) == .None
+    print("integer invalid: base1={base_low} base37={base_high} empty={empty} plus={plus_only} minus={minus_only} digit={illegal_digit}")
+
+    true_text :: (parse.parse_bool(" \tTrUe\n") ?? false) == true
+    false_text :: (parse.parse_bool("\tOFF ") ?? true) == false
+    invalid_bool :: parse.parse_bool("truthy") == .None
+    print("bool: true={true_text} false={false_text} invalid={invalid_bool}")
+
+    signed :: combinators.int_dec(combinators.input(" \t-42tail"))
+    if signed == .Val(decimal) {
+        rest :: combinators.remaining(decimal.next)
+        print("decimal: value={decimal.n} pos={decimal.next.pos} rest={rest}")
+    } else {
+        print("decimal: missing")
+    }
+    no_digits :: combinators.int_dec(combinators.input(" \t+tail")) == .None
+    print("no digits={no_digits}")
+
+    split_utf8 :: combinators.take_n(combinators.input("é"), 1) == .None
+    print("take split utf8={split_utf8}")
+    if combinators.take_n(combinators.input("jet"), 2) == .Val(taken) {
+        rest :: combinators.remaining(taken.next)
+        print("take valid: chunk={taken.chunk} pos={taken.next.pos} rest={rest}")
+    } else {
+        print("take valid: rejected")
+    }
+}
+"#;
+
+const TEXT_PARSER_HELPERS_GOLDEN: &str = "integer valid: base2=true base16=true base36=true\n\
+integer invalid: base1=true base37=true empty=true plus=true minus=true digit=true\n\
+bool: true=true false=true invalid=true\n\
+decimal: value=-42 pos=5 rest=tail\n\
+no digits=true\n\
+take split utf8=true\n\
+take valid: chunk=je pos=2 rest=t\n";
+
 #[test]
 fn pinned_unicode_tables_regenerate_byte_identically() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -421,6 +477,69 @@ fn main() {
 }
 
 #[test]
+fn unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = r#"
+use core.text as text
+
+fn run() {
+    unrelated := text.graphemes("a‍👨")
+    print(unrelated.len())
+    loop part in unrelated -> print(part)
+
+    pictographic := text.graphemes("👨‍👩")
+    print(pictographic.len())
+    loop part in pictographic -> print(part)
+
+    extended := text.graphemes("👨́‍👩")
+    print(extended.len())
+    loop part in extended -> print(part)
+}
+"#;
+    let scratch = common::Scratch::new("unicode_grapheme_zwj_context");
+    let program = scratch.join("grapheme_zwj_context.jet");
+    fs::write(&program, source).expect("write ZWJ context fixture");
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"grapheme_zwj_context\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .expect("write ZWJ context authority");
+
+    for (tier, release, interpret) in [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg(&program)
+            .current_dir(&scratch.path)
+            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("spawn ZWJ context fixture in {tier} tier: {error}"));
+        assert!(
+            output.status.success(),
+            "ZWJ context fixture failed in {tier} tier:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            "2\na‍\n👨\n1\n👨‍👩\n1\n👨́‍👩\n".as_bytes().to_vec(),
+            "ZWJ context segmentation differed in {tier} tier"
+        );
+    }
+}
+
+#[test]
 fn unicode_text_audit_matches_golden_on_all_run_tiers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let example = root.join("examples/features/text/unicode_text_audit.jet");
@@ -459,4 +578,168 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
             "Unicode audit {tier} tier did not match golden"
         );
     }
+}
+
+#[test]
+fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = root.join("examples/features/text/wrap_semantics_audit.jet");
+    let expected = fs::read(
+        root.join("examples/features/expected/text/wrap_semantics_audit.out"),
+    )
+    .expect("read textwrap semantics audit golden");
+    let scratch = common::Scratch::new("wrap_semantics_audit_tiers");
+
+    for (tier, release, interpret) in [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg(&example)
+            .current_dir(root)
+            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("spawn textwrap semantics audit {tier} tier: {error}"));
+        assert!(
+            output.status.success(),
+            "textwrap semantics audit {tier} tier failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout, expected,
+            "textwrap semantics audit {tier} tier did not match golden"
+        );
+    }
+}
+
+#[test]
+fn string_from_bytes_matches_golden_on_all_run_tiers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = root.join("examples/features/strings/from_bytes.jet");
+    let expected = fs::read(root.join("examples/features/expected/strings/from_bytes.out"))
+        .expect("read String.from_bytes golden");
+    let scratch = common::Scratch::new("string_from_bytes_tiers");
+
+    for (tier, release, interpret) in [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg(&example)
+            .current_dir(root)
+            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("spawn String.from_bytes {tier} tier: {error}"));
+        assert!(
+            output.status.success(),
+            "String.from_bytes {tier} tier failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout, expected,
+            "String.from_bytes {tier} tier did not match golden"
+        );
+    }
+}
+
+#[test]
+fn text_parser_helpers_preserve_optional_failure_across_tiers() {
+    let files = [
+        ("main.jet", TEXT_PARSER_HELPERS_SOURCE),
+        ("combinators.jet", include_str!("../Core/text/combinators.jet")),
+    ];
+    for (tier, result) in [
+        (
+            "AOT",
+            tir_support::build_release_and_run_multi(
+                "text_parser_helpers_aot", "main.jet", &files,
+            ),
+        ),
+        (
+            "default",
+            tir_support::run_default_multi(
+                "text_parser_helpers_default", "main.jet", &files,
+            ),
+        ),
+        (
+            "interpreter",
+            tir_support::run_interpret_multi(
+                "text_parser_helpers_interpreter", "main.jet", &files,
+            ),
+        ),
+    ] {
+        assert_eq!(result.0, 0, "{tier} helper fixture failed:\n{}", result.2);
+        assert_eq!(result.1, TEXT_PARSER_HELPERS_GOLDEN, "{tier} helper output");
+    }
+    let scratch = common::Scratch::new("text_parser_helpers_web");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    for (name, source) in files {
+        fs::write(scratch.path.join(name), source).unwrap();
+    }
+    let entry = scratch.path.join("main.jet");
+    let output = jet::compile_web(&entry.to_string_lossy()).unwrap_or_else(|diagnostics| {
+        panic!("web rejected text parser helper fixture: {diagnostics:#?}")
+    });
+    let web = output.web.expect("web compile must produce web artifacts");
+    let web_root = scratch.path.join("web");
+    let build_dir = web_root.join("build");
+    fs::create_dir_all(&build_dir).unwrap();
+    fs::write(build_dir.join("web.manifest.json"), &web.manifest_json).unwrap();
+    fs::write(build_dir.join("app.js"), &web.js_app).unwrap();
+    fs::write(build_dir.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(build_dir.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    let wasm = Command::new("rustc")
+        .current_dir(&web_root)
+        .args([
+            "--edition", "2021", "--target", "wasm32-unknown-unknown",
+            "--crate-type", "cdylib", "-O", "build/app_wasm.rs",
+            "-o", "build/app.wasm",
+        ])
+        .output()
+        .expect("rustc is required for the web text parser helper regression");
+    assert!(
+        wasm.status.success(),
+        "web text parser helper wasm failed:\n{}",
+        String::from_utf8_lossy(&wasm.stderr),
+    );
+    let node = Command::new("node")
+        .current_dir(&build_dir)
+        .args([
+            "--input-type=module", "-e",
+            "const { jet_main } = await import('./app.js');\n\
+             const result = await jet_main();\n\
+             if (result !== undefined) throw new Error('web entry success result must be undefined');",
+        ])
+        .output()
+        .expect("Node is required for the web text parser helper regression");
+    assert!(
+        node.status.success(),
+        "web text parser helpers failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr),
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), TEXT_PARSER_HELPERS_GOLDEN);
+    assert!(node.stderr.is_empty(), "web helper stderr: {}", String::from_utf8_lossy(&node.stderr));
 }

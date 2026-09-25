@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SELFHOST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -115,14 +115,25 @@ function copyTree(source, destination) {
     throw new Error(`symlink is not an isolated fixture input: ${source}`);
   }
   if (stat.isDirectory()) {
-    mkdirSync(destination, { recursive: true });
+    const target = basename(source) === "fixture-state"
+      ? join(dirname(destination), ".jet")
+      : destination;
+    mkdirSync(target, { recursive: true });
     for (const name of readdirSync(source)) {
-      copyTree(join(source, name), join(destination, name));
+      copyTree(join(source, name), join(target, name));
     }
     return;
   }
   mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, readFileSync(source));
+}
+
+function assertScratchRootOutsideRepository() {
+  const repository = realpathSync(REPO_ROOT);
+  const scratch = realpathSync(SCRATCH_ROOT);
+  if (scratch === repository || scratch.startsWith(`${repository}${sep}`)) {
+    throw new Error(`selfhost scratch must be outside the repository: ${scratch}`);
+  }
 }
 
 function collectFiles(root, current = root) {
@@ -755,6 +766,7 @@ async function main() {
     return;
   }
   mkdirSync(SCRATCH_ROOT, { recursive: true });
+  assertScratchRootOutsideRepository();
   const runRoot = mkdtempSync(join(SCRATCH_ROOT, "run-"));
   const selected = MANIFEST.workloads.filter((workload) => workloadSelected(workload, options));
   const receipt = {

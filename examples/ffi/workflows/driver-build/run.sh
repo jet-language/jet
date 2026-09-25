@@ -6,12 +6,16 @@ jet=${JET:-jet}
 jet_cc=${JET_CC:-jet-cc}
 jet_cxx=${JET_CXX:-jet-c++}
 cmake=${CMAKE_COMMAND:-cmake}
-work=$(mktemp -d "jet-ffi-driver.XXXXXX")
+scratch_root=${HOME:?}/.cache/jet-test-scratch
+mkdir -p "$scratch_root"
+work=$(mktemp -d "$scratch_root/jet-ffi-driver.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 cp -R "$root" "$work/project"
 cd "$work/project"
 
+mkdir -p .jet
+cp fixture-state/lock .jet/lock
 # Driver adoption is an explicit foreign-project mode.  It does not imply
 # that Jet owns the full CMake graph.
 "$cmake" -S . -B build \

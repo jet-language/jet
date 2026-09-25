@@ -17,7 +17,36 @@ const SPEC = "docs/spec/syntax-decisions.md";
 const OPEN = "<!-- BEGIN GENERATED LEXICAL LEDGER -->";
 const CLOSE = "<!-- END GENERATED LEXICAL LEDGER -->";
 const TABLE_RE = /pub const LEXICAL_LEDGER: &\[LexicalEntry\] = &\[[\s\S]*?\n\];/;
-const ROW_RE = /LexicalEntry\s*\{\s*spelling:\s*("(?:\\.|[^"\\])*")\s*,\s*meaning:\s*("(?:\\.|[^"\\])*")\s*,\s*decision:\s*("(?:\\.|[^"\\])*")\s*\}/g;
+const ROW_RE = /LexicalEntry\s*\{\s*spelling:\s*("(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*meaning:\s*("(?:\\.|[^"\\])*")\s*,\s*decision:\s*("(?:\\.|[^"\\])*")\s*\}/g;
+const STRING_CONST_DECL_RE = /^[\t ]*pub\s+const\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*&str\s*=/gm;
+const STRING_CONST_LITERAL_RE = /^[\t ]*pub\s+const\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*&str\s*=\s*("(?:\\.|[^"\\])*")\s*;/gm;
+
+function readStringConstants(source) {
+  const declarationCounts = new Map();
+  STRING_CONST_DECL_RE.lastIndex = 0;
+  for (const match of source.matchAll(STRING_CONST_DECL_RE)) {
+    declarationCounts.set(match[1], (declarationCounts.get(match[1]) ?? 0) + 1);
+  }
+
+  const literals = new Map();
+  STRING_CONST_LITERAL_RE.lastIndex = 0;
+  for (const match of source.matchAll(STRING_CONST_LITERAL_RE)) {
+    const values = literals.get(match[1]) ?? [];
+    values.push(match[2]);
+    literals.set(match[1], values);
+  }
+
+  return (name) => {
+    const count = declarationCounts.get(name) ?? 0;
+    if (count === 0) fail(`unresolved LexicalEntry spelling constant ${name} in ${SYNTAX}`);
+    if (count !== 1) fail(`ambiguous LexicalEntry spelling constant ${name} in ${SYNTAX} (${count} declarations)`);
+    const values = literals.get(name) ?? [];
+    if (values.length !== 1) {
+      fail(`LexicalEntry spelling constant ${name} in ${SYNTAX} must have a quoted string literal initializer`);
+    }
+    return rustString(values[0], `${name} spelling`);
+  };
+}
 
 function fail(message) {
   throw new Error(`lexical ledger: ${message}`);
@@ -44,11 +73,20 @@ export function readLedger() {
   const table = source.match(TABLE_RE)?.[0];
   if (!table) fail(`missing ${SYNTAX}::LEXICAL_LEDGER table`);
 
+  const resolveConstant = readStringConstants(source);
   const rows = [];
+  const spellings = new Set();
   ROW_RE.lastIndex = 0;
   for (const match of table.matchAll(ROW_RE)) {
+    const spelling = match[1].startsWith('"')
+      ? rustString(match[1], "spelling")
+      : resolveConstant(match[1]);
+    if (spellings.has(spelling)) {
+      fail(`duplicate LexicalEntry spelling ${JSON.stringify(spelling)} in ${SYNTAX}`);
+    }
+    spellings.add(spelling);
     rows.push({
-      spelling: rustString(match[1], "spelling"),
+      spelling,
       meaning: rustString(match[2], "meaning"),
       decision: rustString(match[3], "decision"),
     });

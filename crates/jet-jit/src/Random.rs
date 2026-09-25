@@ -732,6 +732,8 @@ host_fns! {
 
     }
     seed: "jet_jit_random_seed" => jet_jit_random_seed: sig_void_i64;
+    float: "jet_jit_random_float" => jet_jit_random_float: sig_noarg_f64;
+    float_prelude: "jet_std_random_float" => jet_jit_random_float: sig_noarg_f64;
     getrandbits: "jet_jit_random_getrandbits" => jet_jit_random_getrandbits: sig_i64_i64;
     split: "jet_jit_random_split" => jet_jit_random_split: sig_i64_i64;
     rng_new: "jet_jit_rng_new" => jet_jit_rng_new: sig_i64_i64;

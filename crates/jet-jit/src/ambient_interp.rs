@@ -1595,9 +1595,17 @@ impl InterpreterAmbientState {
                 let Some(listener) = self.http_transport.listeners.get(&handle) else {
                     return Some(Err(http_router_diag("TCP listener address used an unknown handle", span)));
                 };
-                Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::String(
-                    listener.local_addr().map(|address| address.to_string()).unwrap_or_default(),
-                ))))
+                let address = match listener.local_addr() {
+                    Ok(address) => MirRuntimeValue::String(address.to_string()),
+                    Err(error) => MirRuntimeValue::FailedTold(Box::new(
+                        crate::net_http_rt::jet_net_io_error_mir_value(
+                            "tcp listener local address",
+                            None,
+                            error,
+                        ),
+                    )),
+                };
+                Some(Ok(AmbientMirHandleResult::Value(address)))
             }
             "http_mux.serve_once" => {
                 let Some(listener_id) = handle else {
@@ -1950,6 +1958,22 @@ fn testing_ambient_core_call(
     }
 }
 
+fn sys_getpid_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    _span: Span,
+    _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.sys" && method == "getpid" && args.is_empty() {
+        Some(Ok(CtValue::Int(crate::CoreHost::jet_jit_os_pid())))
+    } else {
+        None
+    }
+}
+
+
 /// Register the selected checked hardware profile for interpreter execution.
 ///
 /// The profile is supplied by bundle facts, not inferred from a target name;
@@ -1998,6 +2022,7 @@ pub fn with_interpreter_ambient<R>(
     crate::Process::with_interpreter_process_state(|| {
         let mut context = InterpreterAmbientContext::default();
         context.register_core_call(crate::Process::ambient_core_call);
+        context.register_core_call(sys_getpid_ambient_core_call);
         context.register_core_call(testing_ambient_core_call);
         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
         context.register_mir_handle(crate::Process::ambient_mir_handle);

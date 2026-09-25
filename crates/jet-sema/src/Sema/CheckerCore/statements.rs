@@ -739,7 +739,6 @@ impl<'a> Checker<'a> {
                     let value_span = e.span();
                     let value = std::mem::replace(e, Expr::Absent(value_span));
                     *e = Expr::Ok(Box::new(value), value_span);
-                    self.expected_type = Some(rt.clone());
                     et = Some(rt.clone());
                 }
                 if et
@@ -1833,19 +1832,10 @@ impl<'a> Checker<'a> {
                                     return;
                                 }
                                 if let Some(vt) = &vt {
-                                    if *vt != ft && ft != Type::Named(String::new()) {
-                                        self.diags.push(Diagnostic::error(
-                                            "E0108",
-                                            format!(
-                                                "field `{}` holds {}, but this value is {}",
-                                                field,
-                                                ft.show(),
-                                                vt.show()
-                                            ),
-                                            "a field keeps one type for its whole life".to_string(),
-                                            type_fix_hint(&ft, vt),
-                                            Some(value.span()),
-                                        ));
+                                    if ft != Type::Named(String::new()) {
+                                        self.check_struct_field_assignable(
+                                            field, &ft, vt, value, value.span(),
+                                        );
                                     }
                                 }
                             }
@@ -2300,7 +2290,6 @@ impl<'a> Checker<'a> {
                                 reactive_local: false,
                                 reactive_shared: false,
                                 single_use_span: None,
-                                constant_value: None,
                                 invalid: false,
                             },
                         );
@@ -3011,7 +3000,6 @@ impl<'a> Checker<'a> {
                         reactive_local: false,
                         reactive_shared: false,
                         single_use_span: None,
-                        constant_value: None,
                         invalid: false,
                     },
                 );
@@ -3059,7 +3047,6 @@ impl<'a> Checker<'a> {
                         reactive_local: false,
                         reactive_shared: false,
                         single_use_span: None,
-                        constant_value: None,
                         invalid: false,
                     },
                 );

@@ -1,5 +1,8 @@
-use std::collections::{HashMap, HashSet, VecDeque};
 use super::helpers::is_pod_uninit_type;
+use crate::AST::{
+    AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt,
+    StrPart, Type,
+};
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures, stmt_refs_name};
 use crate::Sema::Diagnostics::{
@@ -7,10 +10,14 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
-use crate::AST::{
-    AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt,
-    StrPart, Type,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
+fn core_source_target(modules: &[crate::Sema::ModuleState], module: &str) -> Option<usize> {
+    let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
+    modules
+        .iter()
+        .position(|state| state.module_alias == source.alias)
+}
+
 fn canonical_fragment_name(
     owner: usize,
     name: &str,
@@ -26,18 +33,32 @@ fn canonical_fragment_name(
         return Some(identity.clone());
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
-        if let Some(&target) = modules
-            .get(owner)
-            .and_then(|state| state.imports.get(namespace))
-        {
+        let state = modules.get(owner)?;
+        let target = state.imports.get(namespace).copied().or_else(|| {
+            state
+                .core_imports
+                .get(namespace)
+                .and_then(|module| core_source_target(modules, module))
+        });
+        if let Some(target) = target {
             if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
                 return Some(identity.clone());
             }
         }
     }
-    struct_identities
-        .get(&(owner, name.to_string()))
-        .cloned()
+    if let Some(state) = modules.get(owner) {
+        if let Some(original) = state.core_item_imports.get(name) {
+            let module = state.core_imports.get(name)?;
+            let target = core_source_target(modules, module)?;
+            let leaf = original
+                .rsplit_once('.')
+                .map_or(original.as_str(), |(_, leaf)| leaf);
+            if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
+                return Some(identity.clone());
+            }
+        }
+    }
+    struct_identities.get(&(owner, name.to_string())).cloned()
 }
 
 fn canonical_fragment_type(
@@ -357,23 +378,22 @@ impl<'a> Checker<'a> {
             return true;
         }
 
-        let param_names: HashSet<String> =
-            lambda.params.iter().map(|param| param.name.clone()).collect();
-        let take_names: HashSet<String> =
-            lambda.take_names.iter().map(|(capture, _)| capture.clone()).collect();
+        let param_names: HashSet<String> = lambda
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        let take_names: HashSet<String> = lambda
+            .take_names
+            .iter()
+            .map(|(capture, _)| capture.clone())
+            .collect();
         let mut read_caps = HashSet::new();
         let mut mut_caps = HashSet::new();
-        lambda_collect_captures(
-            &lambda.body,
-            &param_names,
-            &mut read_caps,
-            &mut mut_caps,
-        );
+        lambda_collect_captures(&lambda.body, &param_names, &mut read_caps, &mut mut_caps);
         read_caps.extend(lambda.take_names.iter().map(|(capture, _)| capture.clone()));
         for capture in read_caps.iter().chain(mut_caps.iter()) {
-            if param_names.contains(capture)
-                || take_names.contains(capture)
-            {
+            if param_names.contains(capture) || take_names.contains(capture) {
                 continue;
             }
             // A view is already a deliberate borrow window. Keep direct
@@ -405,7 +425,7 @@ impl<'a> Checker<'a> {
     /// comptime fragment. The ordinary bundle context already owns these
     /// rows; the fragment must carry its own projection because it does not
     /// share that context.
-    fn checked_comptime_nominals(
+    pub(super) fn checked_comptime_nominals(
         &self,
     ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
         let modules = self.modules?;
@@ -466,6 +486,13 @@ pub(crate) fn checked_comptime_nominals_for_context(
             queue.push_back(*target);
         }
     }
+    for module in current.core_imports.values() {
+        if let Some(target) = core_source_target(modules, module) {
+            if queued.insert(target) {
+                queue.push_back(target);
+            }
+        }
+    }
 
     let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
     for item in &current.items {
@@ -484,6 +511,15 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 .insert(alias.clone(), state.module_alias.clone());
         }
     }
+    for (alias, module) in &current.core_imports {
+        if let Some(target) = core_source_target(modules, module) {
+            if let Some(state) = modules.get(target) {
+                facts
+                    .import_modules
+                    .insert(alias.clone(), state.module_alias.clone());
+            }
+        }
+    }
 
     while let Some(target) = queue.pop_front() {
         let Some(state) = modules.get(target) else {
@@ -494,12 +530,88 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 queue.push_back(nested);
             }
         }
+        for module in state.core_imports.values() {
+            if let Some(nested) = core_source_target(modules, module) {
+                if queued.insert(nested) {
+                    queue.push_back(nested);
+                }
+            }
+        }
         if target == module_idx {
             continue;
         }
+        let source_module =
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
+        if let Some(source) = source_module {
+            for item in &state.items {
+                let crate::AST::Item::Func(function) = item else {
+                    continue;
+                };
+                if !function.is_pub
+                    || !jet_foundation::CoreModuleExports::core_source_owns(
+                        source.module,
+                        &function.name,
+                    )
+                {
+                    continue;
+                }
+                let params = function
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let ty = if param.variadic {
+                            Type::List(Box::new(param.ty.clone()))
+                        } else {
+                            param.ty.clone()
+                        };
+                        (
+                            param.convention,
+                            canonical_fragment_type(
+                                &ty,
+                                target,
+                                modules,
+                                &source_paths,
+                                &struct_identities,
+                                &known_identities,
+                            ),
+                        )
+                    })
+                    .collect();
+                let return_type = function.return_type.as_ref().map(|ty| {
+                    canonical_fragment_type(
+                        ty,
+                        target,
+                        modules,
+                        &source_paths,
+                        &struct_identities,
+                        &known_identities,
+                    )
+                });
+                facts.core_source_sigs.insert(
+                    (source.module.to_string(), function.name.clone()),
+                    crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+                        type_params: function
+                            .type_params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect(),
+                        params,
+                        return_type,
+                    },
+                );
+            }
+        }
+        let source_leaf_visible = |name: &str| {
+            source_module.map_or_else(
+                || name_ledger.visible(module_idx, target, name),
+                |source| {
+                    jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
+                },
+            )
+        };
         for item in &state.items {
             if let crate::AST::Item::Enum(def) = item {
-                if !name_ledger.visible(module_idx, target, &def.name) {
+                if !source_leaf_visible(&def.name) {
                     continue;
                 }
                 let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned()
@@ -514,7 +626,12 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 for variant in &mut row.variants {
                     let canonicalize = |ty: &mut Type| {
                         *ty = canonical_fragment_type(
-                            ty, target, modules, &source_paths, &struct_identities, &known_identities,
+                            ty,
+                            target,
+                            modules,
+                            &source_paths,
+                            &struct_identities,
+                            &known_identities,
                         );
                     };
                     match &mut variant.payload {
@@ -527,20 +644,19 @@ pub(crate) fn checked_comptime_nominals_for_context(
                         }
                     }
                 }
-                facts.foreign_modules.insert(identity.clone(), state.module_alias.clone());
+                facts
+                    .foreign_modules
+                    .insert(identity.clone(), state.module_alias.clone());
                 facts.enums.entry(identity).or_insert(row);
                 continue;
             }
             let crate::AST::Item::Struct(def) = item else {
                 continue;
             };
-            if !name_ledger.visible(module_idx, target, &def.name) {
+            if !source_leaf_visible(&def.name) {
                 continue;
             }
-            let Some(identity) = struct_identities
-                .get(&(target, def.name.clone()))
-                .cloned()
-            else {
+            let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned() else {
                 continue;
             };
             let mut row = def.clone();
@@ -582,6 +698,36 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 facts
                     .nominal_identities
                     .insert(format!("{alias}.{leaf}"), identity.clone());
+            }
+        }
+    }
+    for (alias, module) in &current.core_imports {
+        let Some(target) = core_source_target(modules, module) else {
+            continue;
+        };
+        for ((owner, leaf), identity) in &struct_identities {
+            if *owner == target && foreign_identities.contains(identity) {
+                facts
+                    .nominal_identities
+                    .insert(format!("{alias}.{leaf}"), identity.clone());
+            }
+        }
+    }
+    for (local, original) in &current.core_item_imports {
+        let Some(module) = current.core_imports.get(local) else {
+            continue;
+        };
+        let Some(target) = core_source_target(modules, module) else {
+            continue;
+        };
+        let leaf = original
+            .rsplit_once('.')
+            .map_or(original.as_str(), |(_, leaf)| leaf);
+        if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
+            if foreign_identities.contains(identity) {
+                facts
+                    .nominal_identities
+                    .insert(local.clone(), identity.clone());
             }
         }
     }
@@ -1097,7 +1243,6 @@ impl<'a> Checker<'a> {
                 reactive_local: false,
                 reactive_shared: false,
                 single_use_span: None,
-                constant_value: None,
                 invalid: false,
             },
         );
@@ -1800,41 +1945,43 @@ impl<'a> Checker<'a> {
             // one guard where the value is minted, not a syntactic
             // pattern match here that a stray `(...)` could dodge.)
             let globals = self.current_ct_globals().into_owned();
-            let binding_types = self.current_ct_binding_types(&globals);
-            let mut mutated = std::collections::HashMap::new();
-            let checked_nominals = self.checked_comptime_nominals();
-            let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-                &b.init,
-                self.ct_checked_funcs,
-                self.ct_externs,
-                self.ct_base_dir,
-                &globals,
-                &binding_types,
-                self.core_imports,
-                self.gates,
-                0,
-                self.ct_items,
-                checked_nominals,
-                Some(&mut mutated),
-            );
-            let changed = Self::ct_mutated_names(&globals, &mutated);
-            if !changed.is_empty() {
-                // The initializer advanced a receiver. Baking either side
-                // would desync the emitted runtime copy, so hand the whole
-                // chain back to run time.
-                self.forget_ct_bindings(&changed);
-            } else if let Ok((v, _)) = folded {
-                // Optional folding must not turn a runtime-sized result into
-                // a giant generated literal.  Keep the checked type/effects
-                // and the original initializer; only the optimization is
-                // declined when the evaluator's result exceeds its generic
-                // structural output budget.
-                let fold_allowed = crate::Comptime::implicit_fold_value_within_budget(&v);
-                if fold_allowed && self.ct_value_fits_binding(&v, &final_ty) {
-                    b.ct = Some(v.clone());
-                }
-                if !is_patch_binding && fold_allowed {
-                    self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+            if self.optional_comptime_fold_is_eligible(&b.init, &globals) {
+                let binding_types = self.current_ct_binding_types(&globals);
+                let mut mutated = std::collections::HashMap::new();
+                let checked_nominals = self.checked_comptime_nominals();
+                let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+                    &b.init,
+                    self.ct_checked_funcs,
+                    self.ct_externs,
+                    self.ct_base_dir,
+                    &globals,
+                    &binding_types,
+                    self.core_imports,
+                    self.gates,
+                    0,
+                    self.ct_items,
+                    checked_nominals,
+                    Some(&mut mutated),
+                );
+                let changed = Self::ct_mutated_names(&globals, &mutated);
+                if !changed.is_empty() {
+                    // The initializer advanced a receiver. Baking either side
+                    // would desync the emitted runtime copy, so hand the whole
+                    // chain back to run time.
+                    self.forget_ct_bindings(&changed);
+                } else if let Ok((v, _)) = folded {
+                    // Optional folding must not turn a runtime-sized result into
+                    // a giant generated literal. Keep the checked type/effects
+                    // and the original initializer; only the optimization is
+                    // declined when the evaluator's result exceeds its generic
+                    // structural output budget.
+                    let fold_allowed = crate::Comptime::implicit_fold_value_within_budget(&v);
+                    if fold_allowed && self.ct_value_fits_binding(&v, &final_ty) {
+                        b.ct = Some(v.clone());
+                    }
+                    if !is_patch_binding && fold_allowed {
+                        self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                    }
                 }
             }
         }
@@ -1866,11 +2013,8 @@ impl<'a> Checker<'a> {
                         )
                 )
             {
-                self.diags.push(Diagnostic::from_row(
-                    "L0531",
-                    &[],
-                    Some(b.name_span),
-                ));
+                self.diags
+                    .push(Diagnostic::from_row("L0531", &[], Some(b.name_span)));
             }
             self.current_binding_name = prev_binding_name;
             return;
@@ -1980,11 +2124,6 @@ impl<'a> Checker<'a> {
         let concrete_unit_value = (!b.mutable)
             .then(|| self.concrete_unit_value(&b.init))
             .flatten();
-        let constant_value = (!b.mutable
-            && !init_has_error
-            && !matches!(&final_ty, Type::Named(name) if name == "Fixed"))
-        .then(|| self.evaluate_constant(&b.init))
-        .flatten();
         let normalized_path_source =
             (!b.mutable && !init_has_error && matches!(&final_ty, Type::String))
                 .then(|| self.normalized_path_string_source(&b.init))
@@ -2003,7 +2142,6 @@ impl<'a> Checker<'a> {
                 reactive_local: b.reactive_local(),
                 reactive_shared: b.reactive_shared(),
                 single_use_span,
-                constant_value,
                 invalid: init_type_unusable,
             },
             binding_sendable,

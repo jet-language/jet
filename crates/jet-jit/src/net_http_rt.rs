@@ -250,6 +250,7 @@ pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
@@ -261,6 +262,56 @@ include!("../../jet-codegen/src/Prelude/Core/NetError.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+
+pub(crate) fn jet_net_io_error_mir_value(
+    operation: &str,
+    address: Option<String>,
+    error: std::io::Error,
+) -> jet_foundation::MIR::MirRuntimeValue {
+    use jet_foundation::MIR::{MirRuntimeValue as Value, MirType, MirTypeKind};
+
+    fn optional_string(value: Option<String>) -> Value {
+        match value {
+            Some(value) => Value::Present(Box::new(Value::String(value))),
+            None => Value::Absent {
+                element: MirType::from_kind(MirTypeKind::String),
+            },
+        }
+    }
+
+    fn optional_int(value: Option<i64>) -> Value {
+        match value {
+            Some(value) => Value::Present(Box::new(Value::Int(value))),
+            None => Value::Absent {
+                element: MirType::from_kind(MirTypeKind::Int),
+            },
+        }
+    }
+
+    let parts = jet_net_error_surface_parts(jet_net_io_error(operation, address, error));
+    let payload = match parts.payload {
+        JetNetErrorSurfacePayload::Detail(detail) => Value::Struct {
+            type_name: "NetErrorDetail".to_string(),
+            fields: vec![
+                ("operation".to_string(), Value::String(detail.operation)),
+                ("address".to_string(), optional_string(detail.address)),
+                ("name".to_string(), optional_string(detail.name)),
+                ("message".to_string(), Value::String(detail.message)),
+                ("os_code".to_string(), optional_int(detail.os_code)),
+            ],
+        },
+        JetNetErrorSurfacePayload::DNS { variant, value, .. } => Value::Enum {
+            type_name: "NetDnsError".to_string(),
+            variant: variant.to_string(),
+            args: vec![(None, Value::String(value))],
+        },
+    };
+    Value::Enum {
+        type_name: "NetError".to_string(),
+        variant: parts.variant.to_string(),
+        args: vec![(None, payload)],
+    }
+}
 thread_local! {
     static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
         std::cell::RefCell::new(None);

@@ -3,8 +3,8 @@ use core as core
 // core.game.raylib — display-gated raylib bridge (D-RAYLIB1=A).
 //
 // This module owns no host fallback.  Window, input, drawing, texture, and
-// audio state are provider-owned; unavailable display/audio capabilities are
-// reported by the provider's typed result rather than fabricated locally.
+// audio state are provider-owned; availability is exposed through the
+// provider's typed handles and status queries rather than fabricated locally.
 pub struct RaylibWindow {
     pub width: Int
     pub height: Int
@@ -35,61 +35,61 @@ pub fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor {
     RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
 }
 
-pub fn window_open(width: Int, height: Int, title: String) -> RaylibWindow {
+pub fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow {
     w := clamp_dimension(width)
     h := clamp_dimension(height)
     core.game.raylib.window_open(w, h, title)
 }
 
-pub fn window_should_close(window: RaylibWindow) -> Bool {
+pub fn window_should_close(window: RaylibWindow) -[GPU]> Bool {
     core.game.raylib.window_should_close(window)
 }
 
-pub fn window_ready(window: RaylibWindow) -> Bool {
+pub fn window_ready(window: RaylibWindow) -[GPU]> Bool {
     core.game.raylib.window_ready(window)
 }
 
-pub fn close_window(window: RaylibWindow) {
+pub fn close_window(window: RaylibWindow) -[GPU]> {
     core.game.raylib.close_window(window)
 }
 
-pub fn begin_drawing(window: RaylibWindow) {
+pub fn begin_drawing(window: RaylibWindow) -[GPU]> {
     core.game.raylib.begin_drawing(window)
 }
 
-pub fn end_drawing() {
+pub fn end_drawing() -[GPU]> {
     core.game.raylib.end_drawing()
 }
 
-pub fn clear_background(color: RaylibColor) {
+pub fn clear_background(color: RaylibColor) -[GPU]> {
     core.game.raylib.clear_background(color)
 }
 
-pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) {
+pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) -[GPU]> {
     core.game.raylib.draw_rectangle(x, y, width, height, color)
 }
 
-pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) {
+pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) -[GPU]> {
     core.game.raylib.draw_text(text, x, y, size, color)
 }
 
-pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) {
+pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) -[GPU]> {
     core.game.raylib.draw_sprite(atlas, source, x, y)
 }
 
-pub fn set_target_fps(fps: Int) {
-    core.game.raylib.set_target_fps(fps)
+pub fn set_target_fps(fps: Int) -[GPU]> {
+    core.game.raylib.set_target_fps(clamp_fps(fps))
 }
 
-pub fn key_down(key: String) -> Bool {
+pub fn key_down(key: String) -[GPU]> Bool {
     core.game.raylib.key_down(key)
 }
 
-pub fn gamepad_down(gamepad: Int, button: String) -> Bool {
+pub fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool {
     core.game.raylib.gamepad_down(gamepad, button)
 }
 
-pub fn gamepad_axis(gamepad: Int, axis: String) -> Float {
+pub fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float {
     core.game.raylib.gamepad_axis(gamepad, axis)
 }
 
@@ -101,7 +101,7 @@ pub fn load_sound(path: String) -[FS, GPU]> RaylibSound {
     core.game.raylib.load_sound(path)
 }
 
-pub fn play_sound(sound: RaylibSound) -> Bool {
+pub fn play_sound(sound: RaylibSound) -[GPU]> Bool {
     core.game.raylib.play_sound(sound)
 }
 
@@ -114,5 +114,11 @@ fn clamp8(value: Int) -> Int {
 fn clamp_dimension(value: Int) -> Int {
     if value < 1 -> return 1
     if value > 2147483647 -> return 2147483647
+    value
+}
+
+fn clamp_fps(value: Int) -> Int {
+    if value < 1 -> return 1
+    if value > 240 -> return 240
     value
 }

@@ -16,6 +16,7 @@
 //! Run: `cargo test --test data_one_kernel`
 
 mod common;
+mod tir_support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -157,4 +158,54 @@ fn every_tier_includes_the_one_kernel() {
             "{how}: {path} no longer names {kernel_name}"
         );
     }
+}
+
+#[test]
+fn rolling_mean_prefix_windows_when_window_exceeds_input() {
+    let source = r#"
+use core.data as data
+
+fn run() {
+    means :: data.rolling_mean([Float]{1.0, 2.0, 3.0}, 5) ?? panic("rolling mean")
+    if means.len() != 3 -> panic("rolling mean length")
+    if means[0] != 1.0 || means[1] != 1.5 || means[2] != 2.0 -> panic("rolling mean prefix")
+    print("rolling prefix windows: ok")
+}
+"#;
+    tir_support::assert_tiers_agree("rolling_mean_prefix_windows", source, "rolling prefix windows: ok\n");
+}
+
+#[test]
+fn sum_preserves_neumaier_cancellation_result() {
+    let source = r#"
+use core.data as data
+
+fn run() {
+    result :: data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("sum")
+    if result != 1.0 -> panic("sum lost the cancellation residual")
+    print("compensated sum: ok")
+}
+"#;
+    tir_support::assert_tiers_agree("sum_cancellation", source, "compensated sum: ok\n");
+}
+
+#[test]
+fn rolling_mean_nonfinite_error_keeps_transform_identity() {
+    let source = r#"
+use core.data as data
+use core.data.[DataErrorKind]
+
+fn run() {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+        .Ok(_) -> panic("rolling mean accepted a non-finite value")
+        .Err(error) -> {
+            if error.kind != DataErrorKind.NonFinite -> panic("wrong rolling mean error kind")
+            if error.operation != "rolling_mean" -> panic("wrong rolling mean operation")
+            if error.index != Val(1) -> panic("wrong rolling mean error index")
+        }
+    }
+    print("rolling error policy: ok")
+}
+"#;
+    tir_support::assert_tiers_agree("rolling_mean_error_policy", source, "rolling error policy: ok\n");
 }

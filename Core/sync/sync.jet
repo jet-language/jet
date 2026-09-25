@@ -150,7 +150,21 @@ pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap {
             _ :: out.add(k, rv)
         } else {
             l :: lv
-            if rv.ts > l.ts || (rv.ts == l.ts && rv.replica > l.replica) -> _ :: out.add(k, rv)
+            // Equal timestamps need a stable order even when a replica forks.
+            // A deletion wins a same-replica fork; otherwise order by value.
+            right_wins := rv.ts > l.ts
+            if rv.ts == l.ts {
+                if rv.replica > l.replica {
+                    right_wins = true
+                } else if rv.replica == l.replica {
+                    if rv.deleted != l.deleted {
+                        right_wins = rv.deleted
+                    } else if rv.value > l.value {
+                        right_wins = true
+                    }
+                }
+            }
+            if right_wins -> _ :: out.add(k, rv)
         }
     }
     clock := left.clock

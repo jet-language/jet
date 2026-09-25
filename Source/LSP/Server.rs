@@ -1541,7 +1541,16 @@ fn signature_help_response(
     let def = match db
         .defs
         .iter()
-        .find(|def| def.name == call.name && matches!(def.kind, SymKind::Function { .. }))
+        .find(|def| {
+            def.name == call.name
+                && matches!(
+                    def.kind,
+                    SymKind::Function {
+                        signature_facts_available: true,
+                        ..
+                    }
+                )
+        })
     {
         Some(def) => def,
         None => return Some(response(id, "null")),
@@ -1552,9 +1561,8 @@ fn signature_help_response(
             params,
             param_contract,
             param_variadic,
-            ret,
+            return_type,
             failure_contract,
-            failure_source,
             effects,
             effect_via,
             ..
@@ -1562,9 +1570,17 @@ fn signature_help_response(
             let parts =
                 jet_semindex::function_parameter_parts(params, param_contract, param_variadic);
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
-            if let Some(ret) = ret {
+            let return_type = match failure_contract {
+                jet_semindex::CallableFactAvailability::Checked(failure) => {
+                    Some(failure.effective_type().name())
+                }
+                jet_semindex::CallableFactAvailability::Unavailable(_) => {
+                    return_type.as_ref().map(|ty| ty.name())
+                }
+            };
+            if let Some(return_type) = return_type {
                 label.push(' ');
-                label.push_str(&ret.name());
+                label.push_str(&return_type);
             }
             if let Some((param, _)) = effect_via {
                 label.push_str(" -[via ");
@@ -1580,12 +1596,23 @@ fn signature_help_response(
                         .join(", "),
                 );
                 label.push_str("]>");
+            } else {
+                label.push_str("\neffects: unavailable");
             }
             label.push_str("\nfailure: ");
-            label.push_str(failure_contract);
-            label.push_str(" (");
-            label.push_str(failure_source);
-            label.push(')');
+            match failure_contract {
+                jet_semindex::CallableFactAvailability::Checked(failure) => {
+                    label.push_str(&failure.effective_type().name());
+                    label.push_str(" (");
+                    label.push_str(&failure.source());
+                    label.push(')');
+                }
+                jet_semindex::CallableFactAvailability::Unavailable(unavailable) => {
+                    label.push_str("unavailable (");
+                    label.push_str(unavailable.reason);
+                    label.push(')');
+                }
+            }
             let parameter_parts: Vec<&String> = parts
                 .iter()
                 .filter(|part| part.as_str() != "/" && part.as_str() != "*")

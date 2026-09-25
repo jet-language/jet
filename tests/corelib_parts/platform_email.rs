@@ -1,8 +1,7 @@
 #[test]
 fn core_email_address_and_mime_are_bounded_and_deterministic() {
-    let dir = std::env::temp_dir().join(format!("jet_corelib_email_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = common::Scratch::new("email-mime");
+    let dir = &scratch.path;
     let src = r#"
 use core.email as email
 
@@ -47,12 +46,22 @@ fn run() {
     assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
     let file = dir.join("email_mime.jet");
     fs::write(&file, src).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
-        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
-            assert_eq!(exit_code, 0, "email MIME failed in default dev: {stderr}");
-            assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
+    for (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
+        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, use_interpreter) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "email MIME failed in {tier}: {stderr}");
+                assert!(
+                    stdout.starts_with(
+                        "address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"
+                    ),
+                    "{tier}: {stdout}"
+                );
+            }
+            other => panic!("email MIME did not run in {tier}: {other:?}"),
         }
-        other => panic!("email MIME did not run in default dev: {other:?}"),
     }
-    let _ = fs::remove_dir_all(&dir);
 }

@@ -791,9 +791,9 @@ impl<'a> Checker<'a> {
                     Type::String => Some(Syntax::TYPE_STRING),
                     _ => None,
                 };
-                if !nominal
-                    .is_some_and(|name| self.trait_reg.implements_trait(name, Syntax::TRAIT_CLOSE))
-                {
+                if !nominal.is_some_and(|name| {
+                    self.type_implements_trait_for_name(name, Syntax::TRAIT_CLOSE)
+                }) {
                     self.diags.push(e0905(
                         &ty.name(),
                         Syntax::TRAIT_CLOSE,

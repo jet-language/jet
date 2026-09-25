@@ -14,7 +14,8 @@ mod Serde;
 
 pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_items_with_auto};
 pub(crate) use Items::{
-    check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,
+    check_strong_shared_cycles, comptime_context_from_items, core_string_source_method,
+    eval_comptime_items, name_defined,
     register_const, register_distinct, register_enum, register_impl_methods,
     register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
     resolve_comptime_declaration_values,
@@ -695,7 +696,6 @@ impl<'a> Checker<'a> {
                             reactive_local: false,
                             reactive_shared: false,
                             single_use_span: None,
-                            constant_value: None,
                             invalid: false,
                         },
                     );
@@ -749,7 +749,6 @@ impl<'a> Checker<'a> {
                         reactive_local: false,
                         reactive_shared: false,
                         single_use_span: None,
-                        constant_value: None,
                         invalid: false,
                     },
                 );
@@ -881,7 +880,6 @@ impl<'a> Checker<'a> {
                     reactive_local: false,
                     reactive_shared: false,
                     single_use_span: None,
-                    constant_value: None,
                     invalid: false,
                 },
             );

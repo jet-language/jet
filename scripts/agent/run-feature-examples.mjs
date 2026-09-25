@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Focused native feature-example runner. Keep warnings separate from failures.
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +17,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FEATURES = join(ROOT, "examples/features");
 const EXPECTED = join(FEATURES, "expected");
 const JET = join(ROOT, "target/debug/jet");
-const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR ?? join(process.env.HOME ?? ".", ".cache/jet-test-scratch");
+const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR
+  ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-test-scratch") : null);
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
 
 export function usage() {
@@ -148,10 +151,67 @@ function gtkLoaderUnavailable(stderr) {
     && /not found|unavailable|could not load|cannot open/u.test(stderr);
 }
 
+function copyFixtureState(source, destination) {
+  mkdirSync(destination, { recursive: true });
+  for (const item of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, item.name);
+    const to = join(destination, item.name);
+    if (item.isDirectory()) {
+      copyFixtureState(from, to);
+    } else if (item.isFile()) {
+      copyFileSync(from, to);
+    }
+  }
+}
+
+function copyFeatureProject(source, destination) {
+  mkdirSync(destination, { recursive: true });
+  for (const item of readdirSync(source, { withFileTypes: true })) {
+    if (item.isDirectory() && item.name === ".jet") continue;
+    const from = join(source, item.name);
+    if (item.isDirectory() && item.name === "fixture-state") {
+      copyFixtureState(from, join(destination, ".jet"));
+    } else if (item.isDirectory()) {
+      copyFeatureProject(from, join(destination, item.name));
+    } else if (item.isFile()) {
+      copyFileSync(from, join(destination, item.name));
+    }
+  }
+}
+
+function featureProjectRoot(entry) {
+  let directory = dirname(entry.path);
+  while (true) {
+    if (existsSync(join(directory, "package.jet")) || existsSync(join(directory, "fixture-state"))) {
+      return directory;
+    }
+    if (directory === FEATURES) return null;
+    const parent = dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+function stageFeatureProject(entry, scratch, slot) {
+  const sourceRoot = featureProjectRoot(entry);
+  if (!sourceRoot) return null;
+  const stageRoot = join(scratch, "projects", `${slot}-${entry.stem.replaceAll("/", "_")}`);
+  const destination = join(stageRoot, relative(ROOT, sourceRoot));
+  copyFeatureProject(sourceRoot, destination);
+  const stagedEntry = join(stageRoot, relative(ROOT, entry.path));
+  if (!existsSync(stagedEntry)) {
+    throw new Error(`staged feature project is missing ${entry.shown}`);
+  }
+  if (relative(stageRoot, stagedEntry).replaceAll("\\", "/") !== entry.shown) {
+    throw new Error(`staged feature path diverged from display path ${entry.shown}`);
+  }
+  return { cwd: stageRoot };
+}
+
 function runJet(args, options) {
   return new Promise((resolveRun) => {
     const child = spawn(JET, args, {
-      cwd: ROOT,
+      cwd: options.cwd ?? ROOT,
       env: {
         ...process.env,
         NO_COLOR: "1",
@@ -242,21 +302,36 @@ function diff(expected, actual) {
   return lines.join("\n");
 }
 
+function isWithin(parent, child) {
+  const path = relative(parent, child);
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) { console.log(usage()); return; }
   const entries = collectFeatureExamples().filter((entry) => !options.filters.length || options.filters.some((needle) => entry.shown.includes(needle) || entry.stem.includes(needle)));
   if (!entries.length) throw new Error(`no examples matched: ${options.filters.join(" ")}`);
   if (options.list) { for (const entry of entries) console.log(entry.shown); console.log(`${entries.length} examples`); return; }
-  if (!existsSync(JET)) throw new Error(`no compiler binary at ${JET}`);
-  const scratch = join(resolve(SCRATCH_BASE), `feature-examples-${process.pid}`);
+  if (!SCRATCH_BASE) throw new Error("HOME is required for feature-example scratch");
+  const requestedBase = resolve(SCRATCH_BASE);
+  mkdirSync(requestedBase, { recursive: true });
+  const scratchBase = realpathSync(requestedBase);
+  const repoRoot = realpathSync(ROOT);
+  const ramTemp = realpathSync("/tmp");
+  if (isWithin(repoRoot, scratchBase) || isWithin(ramTemp, scratchBase)) {
+    throw new Error(`feature-example scratch must be external and disk-backed: ${scratchBase}`);
+  }
+  const scratch = join(scratchBase, `feature-examples-${process.pid}`);
   mkdirSync(scratch, { recursive: true });
   try {
     const results = await mapLimit(entries, options.jobs, async (entry, slot) => {
       const expected = readExpected(entry.stem);
       const skipped = skipReason(entry, expected);
       if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
+      const staged = stageFeatureProject(entry, scratch, slot);
       const run = await runJet(["run", entry.shown], {
+        cwd: staged?.cwd,
         store: join(scratch, "store", String(slot)),
         scratch,
         timeoutMs: options.timeoutSec * 1000,

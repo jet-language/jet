@@ -402,7 +402,6 @@ impl<'a> Fmt<'a> {
             self.write(")");
         }
         self.write(" {");
-        self.newline();
     }
 
     pub(super) fn fmt_stmt(&mut self, stmt: &Stmt) {
@@ -677,33 +676,27 @@ impl<'a> Fmt<'a> {
                 self.fmt_effect_loop_body(inner, 0, *arrow_body);
             }
             Stmt::Unsafe { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-CTEFFECT1: `#Impure("reason") { … }` round-trips verbatim.
             Stmt::Impure { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             Stmt::Switched { marker, body, .. } => self.fmt_statement_switch_attr(marker, body),
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-SHIELDNAME1=A: `#Shield { … }` round-trips verbatim.
             Stmt::Shield { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-BLOCKPLANE1=A: `#Region(r) { … }`.
             Stmt::Region { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             Stmt::Policy { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
             Stmt::TaskGroup {
@@ -757,8 +750,7 @@ impl<'a> Fmt<'a> {
             }
             // D-EFF1 / D-QUAL1: `#FX(Net, DB) { … }` effect-restriction region.
             Stmt::AuthorityScope { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-VERDICT-1308-1: `@ { … }` demand block.
             Stmt::ComptimeBlock {
@@ -810,24 +802,20 @@ impl<'a> Fmt<'a> {
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
             Stmt::ContextBlock { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-BLOCKPLANE1=A: `#Live { … }`.
             Stmt::Live { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-BLOCKPLANE1=A: `#Nondeterministic("reason") { … }`.
             Stmt::AssumeDet { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` (the handle
             // is optional — a bare `#Transact { … }` with no hooks stays legal).
             Stmt::Transact { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-DOTSCOPE1 / D-META-DSL1: a scope-member statement `.name { … }` /
             // `.name(args) { … }`, or a declared `#Name { … }` block.

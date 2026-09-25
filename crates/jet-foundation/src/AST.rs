@@ -1,6 +1,10 @@
 //! AST nodes. Grows with each milestone; keep nodes small and keep spans on
 //! anything an error might need to point at.
 
+#[path = "AST/metaprogramming.rs"]
+mod metaprogramming;
+pub use metaprogramming::*;
+
 #[path = "AST/types.rs"]
 mod types;
 pub use types::{

@@ -10,14 +10,19 @@ package {
 }
 
 use core as core
-use core.http as http
 use core.http.client as provider
-use core.http.server as server_provider
+use core.net.url as http_url
+c_max_body_bytes :: 1048576
+c_max_header_bytes :: 32768
+c_max_header_line_bytes :: 8192
+c_max_header_count :: 100
+c_max_request_line_bytes :: 8192
+c_max_url_bytes :: 8192
 // core.http — bounded HTTP/1.1 message semantics.
 //
-// The host bridge is used only for the already-ratified one-shot GET/POST and
-// server leaves. Method parsing, header/query/cookie codecs, request framing,
-// response parsing, and all deterministic convenience behavior are Jet.
+// The host bridge remains only a typed request/response transport leaf.
+// Method parsing, header/query/cookie codecs, request framing, response
+// parsing, limits, and all deterministic convenience behavior are Jet.
 module client
 module server
 #Error
@@ -260,6 +265,7 @@ pub fn headers_encode(h: Headers) -> [String] {
 
 pub fn headers_parse(lines: [String]) -> Headers {
     h := headers()
+    if !headers_lines_bounded(lines) -> return h
     loop line in lines {
         raw :: line.bytes()
         col := index_byte(raw, 58)
@@ -410,7 +416,6 @@ fn trim(text: String) -> String {
 }
 
 
-
 pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_url(url) -> return Err(.InvalidUrl)
     provider.get(url)
@@ -418,36 +423,46 @@ pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
 
 pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_url(url) -> return Err(.InvalidUrl)
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
     provider.post(url, body)
 }
 
 pub fn put(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    if !valid_url(url) -> return Err(.InvalidUrl)
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
     req := core.http.client.request("PUT", url)
     send_request(req.body(body))
 }
 
 pub fn patch(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    if !valid_url(url) -> return Err(.InvalidUrl)
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
     req := core.http.client.request("PATCH", url)
     send_request(req.body(body))
 }
 
 pub fn delete(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    if !valid_url(url) -> return Err(.InvalidUrl)
     req := core.http.client.request("DELETE", url)
     send_request(req)
 }
 
 pub fn head(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    if !valid_url(url) -> return Err(.InvalidUrl)
     req := core.http.client.request("HEAD", url)
     send_request(req)
 }
 
-pub fn serve(addr: String, mux: HTTPMux) !HTTPError -[Net, Time.Wait]> {
-    core.http.server.serve(addr, mux, tls: None, deadline: None) ?? return
+pub fn serve(addr: String, mux: HTTPMux) !HTTPError {
+    core.http.server.serve(addr, mux) ?? return
 }
 
 
 pub fn exchange(method: String, url: String, body: String, header_lines: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
     if !valid_method_token(method) -> return Err(.InvalidMethod)
+    if !valid_url(url) -> return Err(.InvalidUrl)
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if !headers_lines_bounded(header_lines) || !headers_lines_valid(header_lines) -> return Err(.InvalidHeader)
     parsed :: headers_parse(header_lines)
     send_request(request_with(method_parse(method), url, parsed, body_text(body)))
 }
@@ -459,23 +474,27 @@ pub fn send_request(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse !HTTPError
 pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse !HTTPError {
     split := find_double_crlf(raw)
     if split < 0 -> return Err(.InvalidFraming)
+    if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end :: header_text_end(raw, split)
+    if head_end > c_max_header_bytes -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > 1048576 -> return Err(.BodyTooLarge{limit: 1048576})
+    if body_raw.len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
     lines :: split_lines(head)
-    if lines.len() == 0 -> return Err(.Protocol{version: "HTTP"})
+    if lines.len() == 0 || lines[0].bytes().len() > c_max_request_line_bytes -> return Err(.InvalidStatus)
     parsed :: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
     hdr_lines := [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hdr_lines.push(lines[i])
     }
-    if !headers_lines_valid(hdr_lines) -> return Err(.InvalidHeader)
+    if !headers_lines_bounded(hdr_lines) || !headers_lines_valid(hdr_lines) -> return Err(.InvalidHeader)
     h := headers_parse(hdr_lines)
-    if has_header(h, "transfer-encoding") -> return Err(.UnsupportedEncoding)
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
+    if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
+    if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") -> return Err(.InvalidFraming)
     expected :: content_length(h)
-    if expected > 1048576 || (expected >= 0 && expected != body_raw.len()) -> return Err(.InvalidFraming)
+    if parsed.status.code != 304 && (expected > c_max_body_bytes || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
+    if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
     body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
     response := core.http.server.response(parsed.status.code, body_text)
     loop line in hdr_lines {
@@ -490,27 +509,44 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse !HTTPError {
 pub fn parse_request(raw: [U8]) -> HTTPRequest !HTTPError {
     split := find_double_crlf(raw)
     if split < 0 -> return Err(.InvalidFraming)
+    if !strict_crlf(raw, split) -> return Err(.InvalidFraming)
     head_end :: header_text_end(raw, split)
+    if head_end > c_max_header_bytes -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > 1048576 -> return Err(.BodyTooLarge{limit: 1048576})
+    if body_raw.len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
     lines :: split_lines(head)
-    if lines.len() == 0 -> return Err(.Protocol{version: "HTTP"})
+    if lines.len() == 0 || lines[0].bytes().len() > c_max_request_line_bytes -> return Err(.InvalidMethod)
     parts :: split_space_line(lines[0])
     if parts.len() != 3 -> return Err(.InvalidMethod)
     if !valid_method(parts[0]) -> return Err(.InvalidMethod)
-    if !valid_target(parts[1]) -> return Err(.InvalidUrl)
+    if parts[0] == "CONNECT" {
+        if !valid_connect_target(parts[1]) -> return Err(.InvalidUrl)
+    } else {
+        if !valid_target(parts[1]) -> return Err(.InvalidUrl)
+        if parts[1] == "*" && parts[0] != "OPTIONS" -> return Err(.InvalidUrl)
+    }
     parsed_version :: version_parse(parts[2])
     if version_text(parsed_version) != parts[2] -> return Err(.Protocol{version: parts[2]})
+    if parsed_version == Version.Http2 || parsed_version == Version.Http3 -> return Err(.Protocol{version: parts[2]})
     hlines := [String]{}
     loop i in 1..<lines.len() {
         if lines[i].bytes().len() > 0 -> hlines.push(lines[i])
     }
-    if !headers_lines_valid(hlines) -> return Err(.InvalidHeader)
+    if !headers_lines_bounded(hlines) || !headers_lines_valid(hlines) -> return Err(.InvalidHeader)
     h := headers_parse(hlines)
-    if has_header(h, "transfer-encoding") -> return Err(.UnsupportedEncoding)
+    hosts := headers_all(h, "host")
+    if parsed_version == Version.Http11 {
+        if hosts.len() != 1 || !valid_host_value(hosts[0]) -> return Err(.InvalidHeader)
+    } else {
+        loop host in hosts {
+            if !valid_host_value(host) -> return Err(.InvalidHeader)
+        }
+    }
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
+    if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected :: content_length(h)
+    if expected > c_max_body_bytes || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
     req := core.http.client.request(method_text(method_parse(parts[0])), parts[1])
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
@@ -531,13 +567,15 @@ pub struct StatusLine {
 }
 
 fn parse_status_line(line: String) -> ?StatusLine {
+    if has_line_ctl(line.bytes()) -> return None
     parts :: split_space_line(line)
     if parts.len() < 2 -> return None
-    if !starts(parts[0], "HTTP/") -> return None
     parsed_version :: version_parse(parts[0])
     if version_text(parsed_version) != parts[0] -> return None
+    if parsed_version == Version.Http2 || parsed_version == Version.Http3 -> return None
+    if parts[1].bytes().len() != 3 -> return None
     code :: parse_decimal(parts[1]) ?? return None
-    if code < 100 || code > 999 -> return None
+    if code < 100 || code > 599 -> return None
     reason := reason_phrase(code)
     if parts.len() > 2 {
         reason = parts[2]
@@ -547,46 +585,57 @@ fn parse_status_line(line: String) -> ?StatusLine {
             i = i + 1
         }
     }
-    Val(StatusLine{version: version_parse(parts[0]), status: Status{code: code, reason: reason}})
+    Val(StatusLine{version: parsed_version, status: Status{code: code, reason: reason}})
 }
 
 fn split_space_line(text: String) -> [String] {
     raw :: text.bytes()
     out := [String]{}
+    if raw.len() == 0 -> return out
     start := 0
     i := 0
     loop i < raw.len() {
-        if raw[i] == (U8{32}) {
-            if i > start -> out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
+        n :: Int.from_u8(raw[i])
+        if n == 32 {
+            if i == start -> return [String]{}
+            out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
             start = i + 1
+        } else if n < 32 || n == 127 {
+            return [String]{}
         }
         i = i + 1
     }
-    if start < raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
+    if start == raw.len() -> return [String]{}
+    out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
 
-fn find_double_crlf(raw: [U8]) -> Int {
-    if raw.len() < 4 {
-        if raw.len() >= 2 && raw[raw.len() - 2] == (U8{10}) && raw[raw.len() - 1] == (U8{10}) -> return raw.len()
-        return -1
-    }
+fn find_double_crlf(raw: [U8]) -> Int !Never {
+    if raw.len() < 4 -> return -1
     i := 0
     loop i + 3 < raw.len() {
         if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) && raw[i + 2] == (U8{13}) && raw[i + 3] == (U8{10}) -> return i + 4
         i = i + 1
     }
-    i = 0
-    loop i + 1 < raw.len() {
-        if raw[i] == (U8{10}) && raw[i + 1] == (U8{10}) -> return i + 2
-        i = i + 1
-    }
     -1
 }
 
-fn header_text_end(raw: [U8], split: Int) -> Int {
+
+fn header_text_end(raw: [U8], split: Int) -> Int !Never {
     if split >= 4 && raw[split - 4] == (U8{13}) -> return split - 4
     split - 2
+}
+fn strict_crlf(raw: [U8], end: Int) -> Bool !Never {
+    i := 0
+    loop i < end {
+        if raw[i] == (U8{13}) {
+            if i + 1 >= end || raw[i + 1] != (U8{10}) -> return false
+        } else if raw[i] == (U8{10}) {
+            if i == 0 || raw[i - 1] != (U8{13}) -> return false
+        }
+        i = i + 1
+    }
+    true
 }
 
 fn split_lines(text: String) -> [String] {
@@ -658,14 +707,9 @@ pub fn query_set(q: Query, key: String, value: String) -> Query {
             pairs.push(p)
         }
     }
-    if !replaced -> pairs.push(QueryPair{key: key, value: value})
-    Query{pairs: pairs}
-}
-
-pub fn query_add(q: Query, key: String, value: String) -> Query {
-    pairs := [QueryPair]{}
-    loop p in q.pairs -> pairs.push(p)
-    pairs.push(QueryPair{key: key, value: value})
+    if !replaced {
+        pairs.push(QueryPair{key: key, value: value})
+    }
     Query{pairs: pairs}
 }
 
@@ -674,10 +718,13 @@ pub fn query_encode(q: Query) -> String {
     first := true
     loop p in q.pairs {
         piece :: "{percent_encode(p.key)}={percent_encode(p.value)}"
+        piece_len := piece.bytes().len()
+        if piece_len > c_max_body_bytes -> return ""
         if first {
             s = piece
             first = false
         } else {
+            if s.bytes().len() + piece_len + 1 > c_max_body_bytes -> return ""
             s = "{s}&{piece}"
         }
     }
@@ -687,20 +734,29 @@ pub fn query_encode(q: Query) -> String {
 pub fn query_decode(text: String) -> Query {
     q := query()
     raw :: text.bytes()
-    if raw.len() == 0 -> return q
+    if raw.len() == 0 || raw.len() > c_max_body_bytes -> return q
     start := 0
     if raw[0] == (U8{63}) -> start = 1
     i := start
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{38}) {
-            piece :: String.from_bytes(slice_b(raw, start, i)) ?? ""
-            if piece.bytes().len() > 0 {
-                eq := index_byte_str(piece, 61)
-                if eq >= 0 {
-                    q = query_add(q, percent_decode(slice_str(piece, 0, eq)), percent_decode(slice_str(piece, eq + 1, piece.bytes().len())))
-                } else {
-                    q = query_add(q, percent_decode(piece), "")
+            if i > start {
+                eq := -1
+                j := start
+                loop j < i {
+                    if raw[j] == (U8{61}) {
+                        eq = j
+                        break
+                    }
+                    j = j + 1
                 }
+                key_end := if eq >= 0 -> eq else -> i
+                value_start := if eq >= 0 -> eq + 1 else -> i
+                key :: String.from_bytes(slice_b(raw, start, key_end)) ?? ""
+                value :: String.from_bytes(slice_b(raw, value_start, i)) ?? ""
+                pairs := ~q.pairs
+                pairs.push(QueryPair{key: percent_decode(key), value: percent_decode(value)})
+                q = Query{pairs: pairs}
             }
             start = i + 1
         }
@@ -717,20 +773,28 @@ pub fn cookie(name: String, value: String) -> Cookie {
 }
 
 pub fn cookie_encode(c: Cookie) -> String {
-    if !valid_cookie_token(c.name) -> return ""
+    if !valid_cookie_token(c.name) || !valid_cookie_value(c.value) -> return ""
     s := "{c.name}={c.value}"
-    if c.domain.bytes().len() > 0 && !has_ctl(c.domain.bytes()) -> s = "{s}; Domain={c.domain}"
-    if c.path.bytes().len() > 0 && !has_ctl(c.path.bytes()) -> s = "{s}; Path={c.path}"
+    if c.domain.bytes().len() > 0 {
+        if !valid_cookie_attribute(c.domain) -> return ""
+        s = "{s}; Domain={c.domain}"
+    }
+    if c.path.bytes().len() > 0 {
+        if !valid_cookie_attribute(c.path) -> return ""
+        s = "{s}; Path={c.path}"
+    }
     if c.max_age >= 0 -> s = "{s}; Max-Age={c.max_age}"
     if c.http_only -> s = "{s}; HttpOnly"
     if c.secure -> s = "{s}; Secure"
     if c.same_site == "Strict" || c.same_site == "Lax" || c.same_site == "None" -> s = "{s}; SameSite={c.same_site}"
+    if s.bytes().len() > c_max_header_line_bytes -> return ""
     s
 }
 
 pub fn cookies_parse(header: String) -> [Cookie] {
     out := [Cookie]{}
     raw :: header.bytes()
+    if raw.len() > c_max_header_line_bytes -> return out
     start := 0
     i := 0
     first := true
@@ -743,7 +807,7 @@ pub fn cookies_parse(header: String) -> [Cookie] {
                 v :: trim(slice_str(piece, eq + 1, piece.bytes().len()))
                 lower :: ascii_lower(n)
                 if first || (lower != "domain" && lower != "path" && lower != "max-age" && lower != "expires" && lower != "secure" && lower != "httponly" && lower != "samesite") {
-                    if valid_cookie_token(n) -> out.push(cookie(n, v))
+                    if valid_cookie_token(n) && valid_cookie_value(v) -> out.push(cookie(n, v))
                 }
             }
             first = false
@@ -761,6 +825,7 @@ pub fn basic_auth(user: String, password: String) -> String {
 
 pub fn bearer_auth(token: String) -> String { "Bearer {token}" }
 pub fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest {
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~req
     req.header(name, value)
 }
 
@@ -805,29 +870,76 @@ pub fn has_header(h: Headers, name: String) -> Bool { headers_get(h, name) != No
 pub fn content_length(h: Headers) -> Int {
     values :: headers_all(h, "content-length")
     if values.len() == 0 -> return -1
-    n :: parse_decimal(trim(values[0])) ?? return -1
-    if n < 0 -> return -1
-    n
+    first := -1
+    loop value in values {
+        n :: parse_content_length_value(value) ?? return -1
+        if first >= 0 && n != first -> return -1
+        first = n
+    }
+    first
 }
 
 fn valid_url(url: String) -> Bool {
     raw :: url.bytes()
-    if raw.len() < 8 || has_ctl(raw) -> return false
+    if raw.len() < 8 || raw.len() > c_max_url_bytes || has_url_ctl(raw) -> return false
+    parsed :: http_url.parse(url) ?? return false
+    if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 -> return false
     colon := index_byte(raw, 58)
     if colon <= 0 || colon + 2 >= raw.len() -> return false
-    scheme :: ascii_lower(slice_str(url, 0, colon))
-    if scheme != "http" && scheme != "https" -> return false
     if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false
     start := colon + 3
     end := start
     loop end < raw.len() {
-        if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35})-> break
+        if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
         n :: Int.from_u8(raw[end])
-        if n == 32 || n == 9 -> return false
+        if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
         end = end + 1
     }
-    if end == start -> return false
-    !contains_byte(slice_str(url, start, end), 64)
+    end > start
+}
+
+fn parse_content_length_value(text: String) -> ?Int {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    first := -1
+    start := 0
+    i := 0
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{44}) {
+            token :: trim(String.from_bytes(slice_b(raw, start, i)) ?? "")
+            n :: parse_decimal(token) ?? return None
+            if first >= 0 && first != n -> return None
+            first = n
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if first < 0 -> return None
+    Val(first)
+}
+
+fn has_url_ctl(bytes: [U8]) -> Bool {
+    loop b in bytes {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
+}
+
+fn has_line_ctl(bytes: [U8]) -> Bool {
+    loop b in bytes {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
+}
+
+fn response_forbids_body(code: Int) -> Bool {
+    (code >= 100 && code < 200) || code == 204 || code == 205 || code == 304
+}
+fn response_forbids_content_length(code: Int) -> Bool {
+    (code >= 100 && code < 200) || code == 204
 }
 
 fn valid_method_token(method: String) -> Bool { valid_method(method) }
@@ -836,9 +948,7 @@ fn valid_method(method: String) -> Bool {
     raw :: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n :: Int.from_u8(b)
-        token_char := (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 95
-        if !token_char -> return false
+        if !token_char(Int.from_u8(b)) -> return false
     }
     true
 }
@@ -846,29 +956,60 @@ fn valid_method(method: String) -> Bool {
 fn valid_target(target: String) -> Bool {
     raw :: target.bytes()
     if raw.len() == 0 -> return false
-    if raw[0] == (U8{47}) || target == "*" -> true else -> false
+    if target != "*" && raw[0] != (U8{47}) -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n <= 32 || n == 127 || n == 35 -> return false
+    }
+    true
 }
 
+fn valid_connect_target(target: String) -> Bool {
+    raw :: target.bytes()
+    if raw.len() == 0 || has_url_ctl(raw) || index_byte(raw, 58) <= 0 -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n >= 127 || n == 34 || n == 92 -> return false
+    }
+    parsed :: http_url.parse("http://{target}") ?? return false
+    parsed.host.bytes().len() > 0 && parsed.user.bytes().len() == 0 && parsed.password.bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+}
+
+fn valid_host_value(value: String) -> Bool {
+    raw :: trim(value)
+    if raw.bytes().len() == 0 || has_url_ctl(raw.bytes()) -> return false
+    loop b in raw.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 127 || n == 34 || n == 92 -> return false
+    }
+    parsed :: http_url.parse("http://{raw}") ?? return false
+    parsed.host.bytes().len() > 0 && parsed.user.bytes().len() == 0 && parsed.password.bytes().len() == 0 && parsed.path == "/" && parsed.query.bytes().len() == 0 && parsed.fragment.bytes().len() == 0
+}
+fn token_char(n: Int) -> Bool {
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
+}
 
 fn has_ambiguous_framing(h: Headers) -> Bool {
-    lengths := headers_all(h, "content-length")
-    if lengths.len() > 1 {
-        first :: trim(lengths[0])
-        loop value in lengths {
-            if trim(value) != first -> return true
-        }
+    first := -1
+    loop value in headers_all(h, "content-length") {
+        n :: parse_content_length_value(value) ?? return true
+        if first >= 0 && n != first -> return true
+        first = n
     }
-    if invalid_content_length(h) -> return true
     has_header(h, "content-length") && has_header(h, "transfer-encoding")
 }
 
-fn invalid_content_length(h: Headers) -> Bool {
-    loop value in headers_all(h, "content-length") {
-        n :: parse_decimal(trim(value)) ?? return true
-        if n < 0 -> return true
+fn has_unsupported_encoding(h: Headers) -> Bool {
+    if has_header(h, "transfer-encoding") -> return true
+    loop value in headers_all(h, "content-encoding") {
+        encoding := ascii_lower(trim(value))
+        if encoding != "identity" -> return true
     }
     false
 }
+
+
+
 
 fn valid_header_line(line: String) -> Bool {
     raw :: line.bytes()
@@ -879,7 +1020,20 @@ fn valid_header_line(line: String) -> Bool {
     valid_header_name(name) && !has_ctl(value)
 }
 
+fn headers_lines_bounded(lines: [String]) -> Bool {
+    if lines.len() > c_max_header_count -> return false
+    total := 0
+    loop line in lines {
+        n := line.bytes().len()
+        if n + 2 > c_max_header_bytes || n > c_max_header_line_bytes -> return false
+        total = total + n + 2
+        if total > c_max_header_bytes -> return false
+    }
+    true
+}
+
 fn headers_lines_valid(lines: [String]) -> Bool {
+    if !headers_lines_bounded(lines) -> return false
     loop line in lines {
         if !valid_header_line(line) -> return false
     }
@@ -890,12 +1044,10 @@ fn valid_header_name(name: String) -> Bool {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n :: Int.from_u8(b)
-        if n <= 32 || n >= 127 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+        if !token_char(Int.from_u8(b)) -> return false
     }
     true
 }
-
 fn has_ctl(bytes: [U8]) -> Bool {
     loop b in bytes {
         n :: Int.from_u8(b)
@@ -910,14 +1062,30 @@ fn valid_cookie_token(name: String) -> Bool {
     if raw.len() == 0 -> return false
     loop b in raw {
         n :: Int.from_u8(b)
-        if n <= 32 || n >= 127 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+        if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+    }
+    true
+}
+
+fn valid_cookie_value(value: String) -> Bool {
+    loop b in value.bytes() {
+        n :: Int.from_u8(b)
+        if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
+    }
+    true
+}
+
+fn valid_cookie_attribute(value: String) -> Bool {
+    loop b in value.bytes() {
+        n :: Int.from_u8(b)
+        if n <= 32 || n >= 127 || n == 59 -> return false
     }
     true
 }
 
 fn parse_decimal(text: String) -> ?Int {
     raw :: text.bytes()
-    if raw.len() == 0 -> return None
+    if raw.len() == 0 || raw.len() > 10 -> return None
     n := 0
     loop b in raw {
         d :: Int.from_u8(b)

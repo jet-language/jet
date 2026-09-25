@@ -1,6 +1,8 @@
-// core-conformance: core.service.tree_with_strategy
-use core.service as api
+// typed-service-conformance: ServiceTree.set_restart
+use core.service as service
 
 fn run() {
-    print(api.tree_with_strategy(ServiceTree{}, ServiceRestart{}))
+    tree := service.tree("conformance")
+    tree.set_restart(service.restart_one_for_all()) ?? panic("restart")
+    print(tree.show())
 }

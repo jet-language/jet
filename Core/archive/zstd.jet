@@ -14,19 +14,19 @@ pub enum ZstdFileError {
     Checksum
 }
 
-@c_magic :: 0xFD2FB528
-@c_mask64 :: 18446744073709551615
-@c_mask32 :: 4294967295
-@c_xxh_p1 :: 11400714785074694791
-@c_xxh_p2 :: 14029467366897019727
-@c_xxh_p3 :: 1609587929392839161
-@c_xxh_p4 :: 9650029242287828579
-@c_xxh_p5 :: 2870177450012600261
+c_magic :: 0xFD2FB528
+c_mask64 :: 18446744073709551615
+c_mask32 :: 4294967295
+c_xxh_p1 :: 11400714785074694791
+c_xxh_p2 :: 14029467366897019727
+c_xxh_p3 :: 1609587929392839161
+c_xxh_p4 :: 9650029242287828579
+c_xxh_p5 :: 2870177450012600261
 
 pub fn compress(data: [U8]) -> [U8] {
     if data.len() > 67108864 -> return [U8]{}
     out := [U8]{}
-    put32(&out, @c_magic)
+    put32(&out, c_magic)
     // Frame_Header_Descriptor: FCS_Flag = 11 (8-byte size), single segment, no checksum
     out.push(U8{0xE0})
     n :: data.len()
@@ -58,9 +58,9 @@ pub fn compress(data: [U8]) -> [U8] {
 pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     if data.len() < 5 -> return Err(ZstdFileError.Malformed)
     mag :: u8_int(data[0]) | (u8_int(data[1]) << 8) | (u8_int(data[2]) << 16) | (u8_int(data[3]) << 24)
-    if mag != @c_magic -> return Err(ZstdFileError.Malformed)
+    if mag != c_magic -> return Err(ZstdFileError.Malformed)
     fhd :: u8_int(data[4])
-    if (fhd & 8) != 0 -> return Err(ZstdFileError.Malformed)
+    if (fhd & 24) != 0 -> return Err(ZstdFileError.Malformed)
     i := 5
     fcs_flag :: (fhd >> 6) & 3
     single :: (fhd >> 5) & 1
@@ -76,7 +76,7 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     if i + dict_bytes > data.len() -> return Err(ZstdFileError.Malformed)
     dict_id := 0
     loop k in 0..<dict_bytes -> dict_id = dict_id | (u8_int(data[i + k]) << (k * 8))
-    if dict_id != 0 -> return Err(ZstdFileError.Unsupported)
+    if dict_bytes > 0 || dict_id != 0 -> return Err(ZstdFileError.Unsupported)
     i = i + dict_bytes
     fcs_bytes := 0
     if fcs_flag == 0 {
@@ -127,7 +127,7 @@ pub fn decompress(data: [U8]) -> [U8] !ZstdFileError {
     if expected >= 0 && expected != out.len() -> return Err(ZstdFileError.Malformed)
     if (fhd & 4) != 0 {
         if i + 4 > data.len() -> return Err(ZstdFileError.Malformed)
-        if read_u32le(data, i) != (xxh64(out) & @c_mask32) {
+        if read_u32le(data, i) != (xxh64(out) & c_mask32) {
             return Err(ZstdFileError.Checksum)
         }
         i = i + 4
@@ -161,15 +161,19 @@ fn read_u64le(data: [U8], i: Int) -> Int {
 }
 
 fn rotl64(x: Int, n: Int) -> Int {
-    v :: x & @c_mask64
+    v :: x & c_mask64
     r :: n & 63
     if r == 0 -> return v
-    ((v << r) | (v >> (64 - r))) & @c_mask64
+    ((v << r) | (v >> (64 - r))) & c_mask64
 }
 
 fn xxh_round(acc: Int, input: Int) -> Int {
-    mixed :: (acc + ((input & @c_mask64) * @c_xxh_p2)) & @c_mask64
-    (rotl64(mixed, 31) * @c_xxh_p1) & @c_mask64
+    mixed :: (acc + ((input & c_mask64) * c_xxh_p2)) & c_mask64
+    (rotl64(mixed, 31) * c_xxh_p1) & c_mask64
+}
+fn xxh_merge_round(acc: Int, value: Int) -> Int {
+    mixed :: acc ~| xxh_round(0, value)
+    (mixed * c_xxh_p1 + c_xxh_p4) & c_mask64
 }
 
 fn xxh64(data: [U8]) -> Int {
@@ -177,10 +181,10 @@ fn xxh64(data: [U8]) -> Int {
     i := 0
     h := 0
     if n >= 32 {
-        v1 := (@c_xxh_p1 + @c_xxh_p2) & @c_mask64
-        v2 := @c_xxh_p2
+        v1 := (c_xxh_p1 + c_xxh_p2) & c_mask64
+        v2 := c_xxh_p2
         v3 := 0
-        v4 := (0 - @c_xxh_p1) & @c_mask64
+        v4 := (0 - c_xxh_p1) & c_mask64
         loop i + 32 <= n {
             v1 = xxh_round(v1, read_u64le(data, i))
             v2 = xxh_round(v2, read_u64le(data, i + 8))
@@ -188,30 +192,34 @@ fn xxh64(data: [U8]) -> Int {
             v4 = xxh_round(v4, read_u64le(data, i + 24))
             i = i + 32
         }
-        h = (rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18)) & @c_mask64
+        h = (rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18)) & c_mask64
+        h = xxh_merge_round(h, v1)
+        h = xxh_merge_round(h, v2)
+        h = xxh_merge_round(h, v3)
+        h = xxh_merge_round(h, v4)
     } else {
-        h = @c_xxh_p5
+        h = c_xxh_p5
     }
-    h = (h + n) & @c_mask64
+    h = (h + n) & c_mask64
     loop i + 8 <= n {
         k1 :: xxh_round(0, read_u64le(data, i))
-        h = (rotl64(h ~| k1, 27) * @c_xxh_p1 + @c_xxh_p4) & @c_mask64
+        h = (rotl64(h ~| k1, 27) * c_xxh_p1 + c_xxh_p4) & c_mask64
         i = i + 8
     }
     if i + 4 <= n {
-        k4 :: (read_u32le(data, i) * @c_xxh_p1) & @c_mask64
-        h = (rotl64(h ~| k4, 23) * @c_xxh_p2 + @c_xxh_p3) & @c_mask64
+        k4 :: (read_u32le(data, i) * c_xxh_p1) & c_mask64
+        h = (rotl64(h ~| k4, 23) * c_xxh_p2 + c_xxh_p3) & c_mask64
         i = i + 4
     }
     loop i < n {
-        h = (rotl64(h ~| ((u8_int(data[i]) * @c_xxh_p5) & @c_mask64), 11) * @c_xxh_p1) & @c_mask64
+        h = (rotl64(h ~| ((u8_int(data[i]) * c_xxh_p5) & c_mask64), 11) * c_xxh_p1) & c_mask64
         i = i + 1
     }
     h = h ~| (h >> 33)
-    h = (h * @c_xxh_p2) & @c_mask64
+    h = (h * c_xxh_p2) & c_mask64
     h = h ~| (h >> 29)
-    h = (h * @c_xxh_p3) & @c_mask64
-    (h ~| (h >> 32)) & @c_mask64
+    h = (h * c_xxh_p3) & c_mask64
+    (h ~| (h >> 32)) & c_mask64
 }
 
 pub fn is_zstd(data: [U8]) -> Bool {

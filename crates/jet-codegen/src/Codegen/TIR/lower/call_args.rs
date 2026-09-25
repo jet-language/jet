@@ -1,14 +1,5 @@
-use crate::jet_generated_format as jet_format;
-use crate::Codegen::mangle;
+use crate::AST::{AccessConvention, CtValue, Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::lower_stmts;
-use crate::Codegen::TIR::lower_lambda_expecting;
-use crate::Codegen::TIR::lower_lambda_expecting_callable;
-use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
-use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::with_lambda_body_expr_cache;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TEnumArg;
@@ -19,8 +10,17 @@ use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStrPart;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_lambda_expecting;
+use crate::Codegen::TIR::lower_lambda_expecting_callable;
+use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::with_lambda_body_expr_cache;
+use crate::Codegen::mangle;
 use crate::Diagnostics::Span;
-use crate::AST::{AccessConvention, CtValue, Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
+use crate::jet_generated_format as jet_format;
 
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
 pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
@@ -81,10 +81,7 @@ fn is_opaque_handle_type(ty: &Type, cx: &Cx) -> bool {
         _ => false,
     }
 }
-fn invariant_arg_value(
-    arg: &crate::AST::CallArg,
-    construct: impl Into<String>,
-) -> TExpr {
+fn invariant_arg_value(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TExpr {
     TExpr {
         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
         kind: TExprKind::InvariantViolation {
@@ -94,10 +91,7 @@ fn invariant_arg_value(
     }
 }
 
-fn invariant_call_arg(
-    arg: &crate::AST::CallArg,
-    construct: impl Into<String>,
-) -> TCallArg {
+fn invariant_call_arg(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TCallArg {
     TCallArg {
         value: invariant_arg_value(arg, construct),
         template_items: None,
@@ -112,10 +106,7 @@ fn invariant_call_arg(
     }
 }
 
-fn invariant_extern_arg(
-    arg: &crate::AST::CallArg,
-    construct: impl Into<String>,
-) -> TExternArg {
+fn invariant_extern_arg(arg: &crate::AST::CallArg, construct: impl Into<String>) -> TExternArg {
     TExternArg {
         value: invariant_arg_value(arg, construct),
         clone: false,
@@ -172,9 +163,7 @@ fn lower_template_expr(
         Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
         Expr::ComptimeName { name, .. } => template_reference_expr(name, env),
         Expr::Ident(name, _) if name.starts_with('@') => template_reference_expr(name, env),
-        Expr::Ident(name, _) if template_vars.contains(name) => {
-            template_reference_expr(name, env)
-        }
+        Expr::Ident(name, _) if template_vars.contains(name) => template_reference_expr(name, env),
         Expr::Field(base, member, _)
             if member.starts_with('@')
                 || template_expr_root(base)
@@ -235,9 +224,7 @@ fn lower_template_loop_expr(
                 };
                 Some(TExpr {
                     ty: Type::String,
-                    kind: TExprKind::CtLit(CtValue::Str(
-                        name.trim_start_matches('@').to_string(),
-                    )),
+                    kind: TExprKind::CtLit(CtValue::Str(name.trim_start_matches('@').to_string())),
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -314,16 +301,10 @@ fn scan_template_markers(
                     at += 2;
                     let mut nested = 1usize;
                     while at < bytes.len() && nested > 0 {
-                        if bytes
-                            .get(at..at + 2)
-                            .is_some_and(|pair| pair == b"/*")
-                        {
+                        if bytes.get(at..at + 2).is_some_and(|pair| pair == b"/*") {
                             nested += 1;
                             at += 2;
-                        } else if bytes
-                            .get(at..at + 2)
-                            .is_some_and(|pair| pair == b"*/")
-                        {
+                        } else if bytes.get(at..at + 2).is_some_and(|pair| pair == b"*/") {
                             nested -= 1;
                             at += 2;
                         } else {
@@ -422,10 +403,7 @@ fn scan_template_markers(
                 b'{' if bytes.get(at + 1) == Some(&b'{') => {
                     at += 2;
                     while at < bytes.len() {
-                        if bytes
-                            .get(at..at + 2)
-                            .is_some_and(|pair| pair == b"}}")
-                        {
+                        if bytes.get(at..at + 2).is_some_and(|pair| pair == b"}}") {
                             at += 2;
                             break;
                         }
@@ -459,7 +437,8 @@ fn template_marker_base(source: &str, start: usize) -> Option<String> {
         .char_indices()
         .rev()
         .find_map(|(index, character)| {
-            (!character.is_ascii_alphanumeric() && character != '_').then_some(index + character.len_utf8())
+            (!character.is_ascii_alphanumeric() && character != '_')
+                .then_some(index + character.len_utf8())
         })
         .unwrap_or(0);
     (begin < end).then(|| before[begin..end].trim_start_matches('@').to_string())
@@ -703,7 +682,8 @@ fn lower_template_items(
                 let lowered_item = match template_source(span, cx, env, template_vars) {
                     Some(source) => crate::Comptime::TemplateItem::Item(source),
                     None => crate::Comptime::TemplateItem::Invalid {
-                        construct: "template item source span is outside the source file".to_string(),
+                        construct: "template item source span is outside the source file"
+                            .to_string(),
                         span,
                     },
                 };
@@ -730,8 +710,7 @@ fn lower_template_items(
                 loop_env.bind(var, TLocal::user(var.clone()), element_ty);
                 let mut nested_vars = template_vars.clone();
                 nested_vars.insert(var.clone());
-                let body =
-                    lower_template_items(body, *span, cx, &mut loop_env, &nested_vars).items;
+                let body = lower_template_items(body, *span, cx, &mut loop_env, &nested_vars).items;
                 lowered.push(Box::new(crate::Comptime::TemplateItem::Loop {
                     var: var.clone(),
                     source: Box::new(source),
@@ -766,9 +745,7 @@ fn is_ordering_comparator_expr(expr: &Expr) -> bool {
             method,
             args,
             ..
-        } if method == "then" && args.len() == 1 => {
-            is_ordering_comparator_expr(receiver)
-        }
+        } if method == "then" && args.len() == 1 => is_ordering_comparator_expr(receiver),
         _ => false,
     }
 }
@@ -1005,9 +982,7 @@ pub(crate) fn lambda_body_ty_expecting_with_return(
             if let Some((prefix, tail)) = lambda_block_tail(stmts) {
                 let _ = lower_stmts(prefix, cx, &mut lam_env);
                 match tail {
-                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => {
-                        lower_expr(e, cx, &mut lam_env).ty
-                    }
+                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
                     _ => unit_type(),
                 }
             } else {
@@ -1336,6 +1311,20 @@ pub(crate) fn lower_one_call_arg(
         Some((AccessConvention::Write, _)) => (false, true),
         _ => (false, false),
     };
+    // Argument evaluation can have materialized an explicit move into a
+    // temporary. Preserve the checked parameter convention on that final read.
+    let value = if matches!(conv, Some((AccessConvention::Move, _)))
+        && !clone
+        && !arc_clone
+        && !matches!(&value.kind, TExprKind::Move(_) | TExprKind::ResourceTake(_))
+    {
+        TExpr {
+            ty: value.ty.clone(),
+            kind: TExprKind::Move(Box::new(value)),
+        }
+    } else {
+        value
+    };
     TCallArg {
         value,
         template_items,
@@ -1474,9 +1463,7 @@ pub(crate) fn builtin_dispatch_ty(ty: Type) -> Type {
             Type::Tagged { marker, inner }
         }
         Type::Tagged { inner, .. } => builtin_dispatch_ty(*inner),
-        Type::Apply { name, mut args }
-            if name == crate::Syntax::TYPE_LIST && args.len() == 1 =>
-        {
+        Type::Apply { name, mut args } if name == crate::Syntax::TYPE_LIST && args.len() == 1 => {
             // `List<T>` is the legacy generic spelling. Builtin routes own
             // the canonical `Type::List` carrier, so normalize it at the
             // shared dispatch seam rather than teaching every collection
@@ -1555,16 +1542,14 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                     "params" => {
                         return Some(Type::List(Box::new(Type::Named(
                             crate::Syntax::TYPE_DB_VALUE.to_string(),
-                        ))))
+                        ))));
                     }
                     _ => {}
                 }
             }
             if recv_type.as_deref() == Some("HTTPResponse") {
                 let ret = match method.as_str() {
-                    "cookies" | "redirect_history" => {
-                        Some(Type::List(Box::new(Type::String)))
-                    }
+                    "cookies" | "redirect_history" => Some(Type::List(Box::new(Type::String))),
                     "timings" => Some(Type::List(Box::new(Type::Int))),
                     _ => None,
                 };

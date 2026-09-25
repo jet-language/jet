@@ -344,19 +344,44 @@ impl Parser {
             36 -> return Ok(self.emit("end", "", 0, 0, -1, -1, false))
             else -> { _ := 0 }
         }
-        if n == 40 {
-            inner :: self.parse_alt()
-            group_close :: self.peek() ?? (U8{0})
-            if group_close != (U8{41}) -> return Err(RegexError.Syntax)
-            _ :: self.bump()
-            return Ok(self.emit("group", "", 0, 0, inner, -1, false))
-        }
+        if n == 40 -> return self.parse_group()
         if n == 91 -> return self.parse_class()
         if n == 92 -> return self.parse_escape()
         if n == 41 || n == 124 || n == 42 || n == 43 || n == 63 || n == 123 {
             return Err(RegexError.Syntax)
         }
         Ok(self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
+    }
+
+    fn parse_group(&self) -> Int !RegexError {
+        name := ""
+        marker :: self.peek() ?? (U8{0})
+        if marker == (U8{63}) {
+            _ :: self.bump()
+            kind :: self.bump() ?? return Err(RegexError.Syntax)
+            if kind == (U8{58}) {
+                inner :: self.parse_alt()
+                group_close :: self.peek() ?? (U8{0})
+                if group_close != (U8{41}) -> return Err(RegexError.Syntax)
+                _ :: self.bump()
+                return Ok(inner)
+            }
+            if kind != (U8{60}) -> return Err(RegexError.Syntax)
+            raw_name := [U8]{}
+            loop {
+                c :: self.bump() ?? return Err(RegexError.Syntax)
+                if c == (U8{62}) -> break
+                if !is_group_name_char(c) -> return Err(RegexError.Syntax)
+                raw_name.push(c)
+            }
+            if raw_name.len() == 0 -> return Err(RegexError.Syntax)
+            name = String.from_bytes(raw_name) ?? ""
+        }
+        inner :: self.parse_alt()
+        group_close :: self.peek() ?? (U8{0})
+        if group_close != (U8{41}) -> return Err(RegexError.Syntax)
+        _ :: self.bump()
+        Ok(self.emit("group", name, 0, 0, inner, -1, false))
     }
 
     fn parse_escape(&self) -> Int !RegexError {
@@ -370,6 +395,7 @@ impl Parser {
             115 -> return Ok(self.emit("class", String.from_bytes([U8]{32, 9, 10, 13, 11, 12}) ?? "", 0, 0, -1, -1, false))
             83 -> return Ok(self.emit("class", String.from_bytes([U8]{32, 9, 10, 13, 11, 12}) ?? "", 0, 0, -1, -1, true))
             110 -> return Ok(self.emit("lit", "\n", 0, 0, -1, -1, false))
+            114 -> return Ok(self.emit("lit", String.from_bytes([U8]{13}) ?? "", 0, 0, -1, -1, false))
             116 -> return Ok(self.emit("lit", "\t", 0, 0, -1, -1, false))
             else -> { _ := 0 }
         }
@@ -384,12 +410,36 @@ impl Parser {
             _ :: self.bump()
         }
         body := [U8]{}
+        first := true
+        escaped := false
         loop {
             b :: self.bump() ?? return Err(RegexError.Syntax)
-            if b == (U8{93}) -> break
+            if escaped {
+                body.push(b)
+                escaped = false
+                first = false
+                next
+            }
+            if b == (U8{92}) {
+                body.push(b)
+                escaped = true
+                first = false
+                next
+            }
+            if b == (U8{93}) {
+                // `]` is a literal when it is the first class member, so
+                // `[^]]` is a valid negated class rather than an empty one.
+                if first {
+                    body.push(b)
+                    first = false
+                    next
+                }
+                break
+            }
             body.push(b)
+            first = false
         }
-        if body.len() == 0 -> return Err(RegexError.Syntax)
+        if escaped || body.len() == 0 -> return Err(RegexError.Syntax)
         Ok(self.emit("class", String.from_bytes(body) ?? "", 0, 0, -1, -1, neg))
     }
 
@@ -405,14 +455,18 @@ impl Parser {
             b :: self.peek() ?? break
             d :: b
             if d < 48 || d > 57 -> break
+            // Keep the existing 4096 quantifier limit, but check before
+            // multiplying so an arbitrarily long hostile number cannot
+            // overflow Int and escape validation.
+            if n > 409 || (n == 409 && d > 54) -> return Err(RegexError.Syntax)
             _ :: self.bump()
             n = n * 10 + (d - 48)
-            if n > 4096 -> return Err(RegexError.Syntax)
             got = true
         }
         if !got -> return Err(RegexError.Syntax)
         Ok(n)
     }
+
 
     fn peek(self) -> ?U8 {
         if self.i >= self.bytes.len() -> return None
@@ -653,6 +707,31 @@ fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool {
     raw :: spec.bytes()
     i := 0
     loop i < raw.len() {
+        if raw[i] == (U8{92}) && i + 1 < raw.len() {
+            escaped :: raw[i + 1]
+            if escaped == (U8{100}) {
+                if b >= (U8{48}) && b <= (U8{57}) -> return true
+                i = i + 2
+                next
+            }
+            if escaped == (U8{119}) {
+                if (b >= (U8{48}) && b <= (U8{57}) ||
+                    b >= (U8{65}) && b <= (U8{90}) ||
+                    b >= (U8{97}) && b <= (U8{122}) ||
+                    b == (U8{95})) -> return true
+                i = i + 2
+                next
+            }
+            if escaped == (U8{115}) {
+                if b == (U8{32}) || b == (U8{9}) || b == (U8{10}) ||
+                    b == (U8{13}) || b == (U8{11}) || b == (U8{12}) -> return true
+                i = i + 2
+                next
+            }
+            if fold(escaped, fold_case) == ch -> return true
+            i = i + 2
+            next
+        }
         if i + 2 < raw.len() && raw[i + 1] == (U8{45}) {
             lo :: fold(raw[i], fold_case)
             hi :: fold(raw[i + 2], fold_case)
@@ -702,6 +781,14 @@ fn slice(raw: [U8], start: Int, end: Int) -> String {
         out.push(raw[i])
         i = i + 1
     }
+}
+
+fn is_group_name_char(b: U8) -> Bool {
+    n :: b
+    n == 95 ||
+        (n >= 48 && n <= 57) ||
+        (n >= 65 && n <= 90) ||
+        (n >= 97 && n <= 122)
 }
 
 fn is_meta(b: U8) -> Bool {

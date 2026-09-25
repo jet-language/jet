@@ -1,20 +1,5 @@
-use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
+use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::lambda_body_ty_expecting_with_return;
-use crate::Codegen::TIR::spawn_body_carrier_ty;
-use crate::Codegen::TIR::lower::lambda_block_tail;
-use crate::Codegen::TIR::lower::{
-    lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
-    return_type_has_value, with_lambda_body_expr_cache,
-};
-use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::lower_owned_expr;
-use crate::Codegen::TIR::lower_stmts;
-use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::view_copy_owned_type;
-use crate::Codegen::TIR::view_copy_symbol;
 use crate::Codegen::TIR::JitSpawnCapture;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TExpr;
@@ -25,7 +10,22 @@ use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStmt;
-use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::lambda_body_ty_expecting_with_return;
+use crate::Codegen::TIR::lower::lambda_block_tail;
+use crate::Codegen::TIR::lower::{
+    lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+    return_type_has_value, with_lambda_body_expr_cache,
+};
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_owned_expr;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::spawn_body_carrier_ty;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::view_copy_owned_type;
+use crate::Codegen::TIR::view_copy_symbol;
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -130,12 +130,7 @@ pub(crate) fn lower_lambda_expecting_callable(
     env: &LowerEnv,
     expected: &Type,
 ) -> TLambda {
-    let Type::Fn {
-        params,
-        ret,
-        ..
-    } = expected
-    else {
+    let Type::Fn { params, ret, .. } = expected else {
         return lower_lambda_expecting(lam, cx, env, None);
     };
     // A fn slot with no written return type is still a Unit-returning Rust
@@ -283,13 +278,7 @@ fn lambda_carrier_return_type(body_ty: &Type, carrier: &Type) -> Type {
             err: err.clone(),
         },
         (Type::Option(_), Type::Option(_)) => body_ty.clone(),
-        (
-            _,
-            Type::Result {
-                err,
-                ..
-            },
-        ) => Type::Result {
+        (_, Type::Result { err, .. }) => Type::Result {
             ok: Box::new(body_ty.clone()),
             err: err.clone(),
         },
@@ -549,9 +538,8 @@ fn lower_lambda_expecting_with_host_borrow(
                     lower_stmts(stmts, cx, &mut lam_env)
                 };
                 if lam.meta.fallible_carrier.is_some()
-                    || expected_return.is_some_and(|ty| {
-                        matches!(ty, Type::Result { .. } | Type::Option(_))
-                    })
+                    || expected_return
+                        .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
                 {
                     lift_fallible_lambda_returns(&mut lowered, lam, env, expected_return);
                 }
@@ -724,7 +712,12 @@ fn lift_fallible_lambda_return_stmt(
                 ty: unit_type(),
                 kind: TExprKind::Unit,
             });
-            *value = Some(fallible_lambda_value(return_value, lam, env, expected_return));
+            *value = Some(fallible_lambda_value(
+                return_value,
+                lam,
+                env,
+                expected_return,
+            ));
         }
         TStmt::ContractScope { body, .. }
         | TStmt::TaskGroup { body, .. }
@@ -884,12 +877,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
         .iter()
         .map(|s| s.as_str())
         .collect();
-    let moved: HashSet<&str> = lam
-        .meta
-        .moved_captures
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let moved: HashSet<&str> = lam.meta.moved_captures.iter().map(|s| s.as_str()).collect();
     let (reads, called) = match &lam.body {
         LambdaBody::Block(stmts) => crate::Sema::block_free_reads_and_calls(stmts),
         LambdaBody::Expr(e) => crate::Sema::expr_free_reads_and_calls(e),
@@ -936,7 +924,8 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
                 materialize_at_spawn,
                 // Clone once when the closure owns a retained environment;
                 // an explicit consuming capture takes precedence.
-                clone_at_spawn: cloned.contains(source.as_str()) && !moved.contains(source.as_str()),
+                clone_at_spawn: cloned.contains(source.as_str())
+                    && !moved.contains(source.as_str()),
                 frozen_at_spawn: lam
                     .meta
                     .frozen_captures

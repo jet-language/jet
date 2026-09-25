@@ -668,14 +668,16 @@ pub(crate) fn jet_jit_file_reader_close(handle: i64) {
 pub(crate) fn jet_jit_encoding_limits_safe() -> i64 {
     let limits = runtime::jet_std::EncodingLimits::safe();
     Concurrency::with_runtime_mut(|rt| {
+        let max_total_bytes = match limits.max_total_bytes {
+            Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+            Err(JetAbsent) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+        };
         let handle = rt.heap.alloc_record(6);
         let fields = [
             limits.buffer_bytes,
             limits.max_depth,
             limits.max_item_bytes,
-            limits.max_total_bytes
-                .map(|value| value.wrapping_add(1))
-                .unwrap_or(0),
+            max_total_bytes,
             limits.max_expansion_depth,
             limits.max_expansion_bytes,
         ];
@@ -692,17 +694,23 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
         if handle <= 0 {
             return;
         }
+        let max_total_handle = rt.heap.record_get_int(handle, 3).unwrap_or(0);
+        let max_total_bytes = match crate::runtime_host::jit_result(rt, max_total_handle) {
+            Some(result) if result.ok => Ok(result.bits as i64),
+            Some(_) => Err(JetAbsent),
+            None => {
+                rt.set_host_fault(
+                    "jit EncodingLimits max_total_bytes has an invalid result handle",
+                );
+                Err(JetAbsent)
+            }
+        };
         let get = |i| rt.heap.record_get_int(handle, i).unwrap_or(0);
-        let total = get(3);
         lim = runtime::jet_std::EncodingLimits {
             buffer_bytes: get(0),
             max_depth: get(1),
             max_item_bytes: get(2),
-            max_total_bytes: if total == 0 {
-                Err(JetAbsent)
-            } else {
-                Ok(total - 1)
-            },
+            max_total_bytes,
             max_expansion_depth: get(4),
             max_expansion_bytes: get(5),
         };

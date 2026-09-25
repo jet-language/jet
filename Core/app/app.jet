@@ -8,11 +8,13 @@ package {
         app: .Library{ entry: app }
     }
 }
-
+live_max_payload :: 4194304
+live_max_subscribers :: 1024
+auth_max_providers :: 64
 // app is the headless application boundary.  The compiler/runtime dispatcher
 // owns the shared live registry, sync session registry, and authentication
-// policy; these source bodies are the deterministic value-level projection
-// used by source evaluation and make invalid input observable instead of
+// policy; these source bodies own pure value validation and fail closed for
+// stateful calls when no checked provider route is available, rather than
 // manufacturing a successful empty value.
 
 #Error
@@ -39,13 +41,8 @@ pub struct LiveQuery {
     pub generation: Int
     pub subscribers: Int
 }
-@live_max_payload :: 4194304
-
-
 pub fn auth(users_table: String) -> Auth {
-    table := users_table.trim()
-    if !valid_identifier(users_table) -> table = ""
-    Auth{users_table: table, providers: [String]{}}
+    Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
 
 pub fn auth_oauth(auth: Auth, providers: String) -> Auth {
@@ -53,22 +50,24 @@ pub fn auth_oauth(auth: Auth, providers: String) -> Auth {
     loop comma_group in providers.split(",") {
         loop raw in comma_group.split(" ") {
             provider :: raw.trim()
-            if valid_identifier(provider) && !contains_string(configured, provider) {
+            if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < auth_max_providers {
                 configured.push(~provider)
             }
         }
     }
-    Auth{users_table: auth.users_table, providers: configured}
+    Auth{users_table: canonical_table(auth.users_table), providers: configured}
 }
 
 pub fn auth_routes(auth: Auth) -> String {
+    table := canonical_table(auth.users_table)
     routes := [String]{
-        "POST /login -> password ({auth.users_table})",
+        "POST /login -> password ({table})",
         "POST /logout -> revoke session",
         "GET /magic -> begin magic link",
         "POST /magic -> consume magic link",
     }
-    loop provider in auth.providers {
+    providers := canonical_providers(auth.providers)
+    loop provider in providers {
         routes.push("GET /oauth/{provider}/begin")
         routes.push("GET /oauth/{provider}/callback")
     }
@@ -76,22 +75,40 @@ pub fn auth_routes(auth: Auth) -> String {
 }
 
 pub fn auth_show(auth: Auth) -> String {
-    "Auth(users={auth.users_table}, providers=[{auth.providers.join(",")}])"
+    table := canonical_table(auth.users_table)
+    providers := canonical_providers(auth.providers)
+    "Auth(users={table}, providers=[{providers.join(",")}])"
+}
+fn canonical_table(value: String) -> String {
+    if valid_identifier(value) -> value
+    ""
+}
+
+fn canonical_providers(values: [String]) -> [String] {
+    providers := [String]{}
+    loop provider in values {
+        if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < auth_max_providers {
+            providers.push(~provider)
+        }
+    }
+    providers
 }
 
 pub fn live(key: String, data: String) -> LiveQuery {
     if !valid_footprint(key) -> return live_error("invalid live footprint")
-    if data.bytes().len() > @live_max_payload -> return live_error("live query payload is too large")
+    if data.bytes().len() > live_max_payload -> return live_error("live query payload is too large")
     LiveQuery{key: canonical_footprint(key), data: data, generation: 1, subscribers: 0}
 }
 
 pub fn live_get(q: LiveQuery) -> String {
-    if q.generation <= 0 -> return "LiveError({q.data})"
+    if valid_live_error(q) -> return "LiveError({q.data})"
+    if !valid_live_query(q) -> return "LiveError(invalid live query)"
     q.data
 }
 
 pub fn live_show(q: LiveQuery) -> String {
-    if q.generation <= 0 -> return "LiveQueryError(id=0, reason={q.data})"
+    if valid_live_error(q) -> return "LiveQueryError(id=0, reason={q.data})"
+    if !valid_live_query(q) -> return "LiveQueryError(id=0, reason=invalid live query)"
     source :: if q.key.starts_with("ext:") -> "external" else -> "database"
     "LiveQuery(key={q.key},source={source},footprint={q.key},generation={q.generation},active=true,dirty=false,refreshing=false,observers={q.subscribers},freshness_ms=0,cause=created,value_bytes={q.data.bytes().len()},error_bytes=0)"
 }
@@ -110,26 +127,18 @@ pub fn subscribe(source: String) -> LiveQuery {
 
 pub fn invalidate(footprint: String) -> Int !AppError {
     if !valid_footprint(footprint) -> return Err(AppError.Invalid)
-    Ok(invalidation_token(footprint))
+    Err(AppError.Unsupported)
 }
 
 pub fn transact_invalidate(write_set: String) -> Int !AppError {
-    if write_set.trim() == "" -> return Err(AppError.Invalid)
-    loop comma_group in write_set.split(",") {
-        loop semi_group in comma_group.split(";") {
-            loop raw in semi_group.split(" ") {
-                footprint :: raw.trim()
-                if footprint != "" && !valid_footprint(footprint) -> return Err(AppError.Invalid)
-            }
-        }
-    }
-    Ok(invalidation_token(write_set))
+    if !valid_footprint(write_set) -> return Err(AppError.Invalid)
+    Err(AppError.Unsupported)
 }
 
 pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery {
-    if q.generation <= 0 -> return live_error(q.data)
-    if !valid_footprint(q.key) -> return live_error("live query footprint is invalid")
-    if payload.bytes().len() > @live_max_payload -> return live_error("live query payload is too large")
+    if valid_live_error(q) -> return live_error(q.data)
+    if !valid_live_query(q) -> return live_error("live query is invalid")
+    if payload.bytes().len() > live_max_payload -> return live_error("live query payload is too large")
     if q.generation >= 9223372036854775807 -> return live_error("live query generation exhausted")
     LiveQuery{key: q.key, data: payload, generation: q.generation + 1, subscribers: q.subscribers}
 }
@@ -139,14 +148,34 @@ pub fn sync(doc_show: String, over: String) -> String !AppError {
     if session == "" || session.len() > 512 || has_control(session) || !canonical_document(doc_show) {
         return Err(AppError.Invalid)
     }
-    "SyncOver(session={session}, generation=1, doc={doc_show})"
+    Err(AppError.Unsupported)
+}
+
+fn valid_provider(value: String) -> Bool {
+    if value == "" || value.len() > 64 -> return false
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        allowed ::
+            (n >= 48 && n <= 57) ||
+            (n >= 65 && n <= 90) ||
+            (n >= 97 && n <= 122) ||
+            n == 95 || n == 45
+        if !allowed -> return false
+    }
+    true
 }
 
 fn valid_identifier(value: String) -> Bool {
     trimmed :: value.trim()
     if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
     loop byte in trimmed.bytes() {
-        if byte < (U8{32}) || byte == (U8{127}) -> return false
+        n :: Int.from_u8(byte)
+        allowed ::
+            (n >= 48 && n <= 57) ||
+            (n >= 65 && n <= 90) ||
+            (n >= 97 && n <= 122) ||
+            n == 95
+        if !allowed -> return false
     }
     true
 }
@@ -159,51 +188,62 @@ fn has_control(value: String) -> Bool {
     false
 }
 
-fn canonical_footprint(value: String) -> String {
-    paths := [String]{}
+fn footprint_atoms(value: String) -> [String] {
+    atoms := [String]{}
     loop comma_group in value.split(",") {
         loop semi_group in comma_group.split(";") {
             loop raw in semi_group.split(" ") {
                 atom :: raw.trim()
-                if atom != "" && !contains_string(paths, atom) -> paths.push(~atom)
+                if atom == "" -> return [String]{}
+                atoms.push(~atom)
             }
         }
     }
+    atoms
+}
+
+fn canonical_footprint(value: String) -> String {
+    paths := [String]{}
+    loop atom in footprint_atoms(value) {
+        if !contains_string(paths, atom) -> paths.push(~atom)
+    }
+    paths.sort()
     paths.join(",")
 }
 
-fn invalidation_token(value: String) -> Int {
-    n := 5381
-    loop byte in value.bytes() {
-        n = ((n * 33) + Int.from_u8(byte)) %% 2147483647
-    }
-    if n <= 0 -> return 1
-    n
-}
 
 fn valid_live_source(value: String) -> Bool {
-    if value.trim() == "" || value.len() + 4 > 512 -> return false
-    valid_footprint("ext:{value}")
+    source := value.trim()
+    if source == "" || source.len() + 4 > 512 -> return false
+    loop byte in source.bytes() {
+        if byte == (U8{32}) || byte == (U8{44}) || byte == (U8{59}) -> return false
+    }
+    valid_footprint("ext:{source}")
 }
 
 fn live_error(message: String) -> LiveQuery {
     LiveQuery{key: "", data: message, generation: 0, subscribers: 0}
 }
+fn valid_live_error(q: LiveQuery) -> Bool {
+    q.key == "" && q.generation == 0 && q.subscribers == 0 &&
+        q.data != "" && q.data.bytes().len() <= 512 && !has_control(q.data)
+}
+
+fn valid_live_query(q: LiveQuery) -> Bool {
+    if q.generation <= 0 || q.subscribers < 0 || q.subscribers > live_max_subscribers -> return false
+    if q.data.bytes().len() > live_max_payload || !valid_footprint(q.key) -> return false
+    canonical_footprint(q.key) == q.key
+}
+
 
 fn valid_footprint(value: String) -> Bool {
     if value.trim() == "" || value.len() > 512 -> return false
-    seen := false
-    loop comma_group in value.split(",") {
-        loop semi_group in comma_group.split(";") {
-            loop raw in semi_group.split(" ") {
-                atom :: raw.trim()
-                if atom == "" -> next
-                seen = true
-                if !valid_footprint_atom(atom) -> return false
-            }
-        }
+    atoms := footprint_atoms(value)
+    if atoms.len() == 0 -> return false
+    loop atom in atoms {
+        if !valid_footprint_atom(atom) -> return false
     }
-    seen
+    true
 }
 
 fn valid_footprint_atom(value: String) -> Bool {
@@ -221,7 +261,7 @@ fn valid_footprint_atom(value: String) -> Bool {
 }
 
 fn canonical_document(value: String) -> Bool {
-    if value.len() == 0 || value.len() > @live_max_payload || has_control(value) || !value.ends_with(")") -> return false
+    if value.len() == 0 || value.len() > live_max_payload || value != value.trim() || has_control(value) || !value.ends_with(")") -> return false
     if value.starts_with("SyncText(") -> return true
     if value.starts_with("SyncMap(") -> return true
     if value.starts_with("SyncList(") -> return true

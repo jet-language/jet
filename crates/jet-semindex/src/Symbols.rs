@@ -10,7 +10,10 @@ use jet_foundation::AST::ProgramBundle;
 use jet_foundation::{Collections, AST};
 
 use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
-use crate::Types::{CompilerFact, MemberFact, MemberOrigin, SourceSpan, SymbolDef, TraitContractFact};
+use crate::Types::{
+    CallableFactAvailability, CompilerFact, MemberFact, MemberOrigin, SourceSpan, SymbolDef,
+    TraitContractFact,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticSymbolKind {
@@ -1081,9 +1084,8 @@ fn semantic_shape(
             params,
             param_contract,
             param_variadic,
-            ret,
+            return_type,
             failure_contract,
-            failure_source,
             effects,
             effect_via,
             ..
@@ -1121,7 +1123,13 @@ fn semantic_shape(
                         .collect()
                 })
                 .unwrap_or_default();
-            let result = ret
+            let result_type = match failure_contract {
+                CallableFactAvailability::Checked(failure) => {
+                    Some(failure.effective_type())
+                }
+                CallableFactAvailability::Unavailable(_) => return_type.clone(),
+            };
+            let result = result_type
                 .as_ref()
                 .map(|ty| display_type(&ty.name()))
                 .unwrap_or_default();
@@ -1143,11 +1151,17 @@ fn semantic_shape(
             } else {
                 String::new()
             };
+            let failure = match failure_contract {
+                CallableFactAvailability::Checked(failure) => {
+                    format!("{} ({})", failure.effective_type().name(), failure.source())
+                }
+                CallableFactAvailability::Unavailable(unavailable) => {
+                    format!("unavailable ({})", unavailable.reason)
+                }
+            };
             (
                 SemanticSymbolKind::Function,
-                format!(
-                    "{prefix}({params}){suffix}\nfailure: {failure_contract} ({failure_source})"
-                ),
+                format!("{prefix}({params}){suffix}\nfailure: {failure}"),
             )
         }
         SymKind::Struct { fields, .. } => (

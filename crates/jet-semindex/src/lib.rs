@@ -32,12 +32,13 @@ pub use Symbols::{
     SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 pub use Types::{
-    ArithmeticOperationFact, CallEdge, CallableParameterFact, CallableSignatureFact, CompilerFact, DefinitionAnchor, DefinitionFact,
-    EffectFact, EffectProvenance, ExpandLens, ExpandProjection, ExpandValue,
-    InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
-    OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary,
-    StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TraitContractFact, TypeDossier,
-    ViewProjectionFact,
+    ArithmeticOperationFact, CallEdge, CallableDefaultFact, CallableEffectFact,
+    CallableEffectsFact, CallableFactAvailability, CallableFactUnavailable, CallableParameterFact,
+    CallableSignatureFact, CompilerFact, DefinitionAnchor, DefinitionFact, EffectFact,
+    EffectProvenance, ExpandLens, ExpandProjection, ExpandValue, InstanceApplicationFact,
+    InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
+    SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary, StructuralSlotKind,
+    SymbolDef, SymbolKind, SymbolRef, TraitContractFact, TypeDossier, ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, StateGraphFact, StateNodeFact,
     StateTransitionFact, SCHEMA_VERSION,
 };
@@ -325,7 +326,163 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 18);
+        assert_eq!(SCHEMA_VERSION, 20);
+    }
+
+    #[test]
+    fn callable_signature_facts_keep_typed_and_unavailable_states() {
+        let scratch = PathBuf::from(
+            std::env::var_os("HOME").expect("the semantic-index test needs a home directory"),
+        )
+        .join(".cache")
+        .join("jet-test-scratch")
+        .join(format!(
+            "jet_semindex_typed_callable_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let path = scratch.join("main.jet");
+        std::fs::write(
+            scratch.join("package.jet"),
+            "name: \"jet-semindex-typed-callable\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [FFI] } }\n",
+        )
+        .unwrap();
+        let source = concat!(
+            "fn no_value() {}\n",
+            "fn typed(label: String, value: Int{7}) -[]> Bool { return true }\n",
+            "fn generic<T>(value: T) {}\n",
+            "extern rust \"std\" {\n",
+            "    fn external_drop(value: ^String) = \"std::mem::drop\"\n",
+            "}\n",
+            "fn run() {}\n",
+        );
+        std::fs::write(&path, source).unwrap();
+        let index = open(&path).expect("typed callable fixture should index");
+        let definition = |name: &str| {
+            index
+                .definitions()
+                .iter()
+                .find(|definition| definition.name == name)
+                .expect("callable definition should be indexed")
+        };
+        let typed_definition = definition("typed");
+        let typed = typed_definition
+            .callable_signature
+            .as_ref()
+            .expect("typed callable signature should be present");
+        assert_eq!(
+            typed
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["label", "value"]
+        );
+        assert!(typed.parameters[0].default.is_none());
+        assert_eq!(typed.parameters[1].ty, jet_foundation::AST::Type::Int);
+        assert_eq!(
+            &source[typed.parameters[1].source.start..typed.parameters[1].source.end],
+            "value"
+        );
+        let default = typed.parameters[1]
+            .default
+            .as_ref()
+            .expect("declared default should be present");
+        assert_eq!(&source[default.source.start..default.source.end], "7");
+        assert_eq!(
+            default.value_unavailable.required_stage,
+            jet_foundation::AST::CompilerStage::Prepared
+        );
+        assert!(matches!(
+            &typed.effects,
+            CallableEffectsFact::Checked(effects) if effects.is_empty()
+        ));
+        assert_eq!(typed.return_type, Some(jet_foundation::AST::Type::Bool));
+        assert_eq!(
+            typed.metadata_producer_status,
+            jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension
+        );
+        assert_eq!(
+            typed_definition
+                .declaration_identity_unavailable
+                .required_stage,
+            jet_foundation::AST::CompilerStage::Resolved
+        );
+        assert!(typed_definition
+            .declaration_identity_unavailable
+            .reason
+            .contains("checker-issued DeclarationHandle"));
+        let stable_id = index
+            .definition_facts()
+            .iter()
+            .find(|fact| fact.human_identity.as_str() == typed_definition.identity.as_str())
+            .expect("typed declaration should have a stable semindex identity")
+            .stable_id
+            .clone();
+        let repeated_index = open(&path).expect("same checked fixture should index again");
+        assert_eq!(
+            repeated_index
+                .definition_facts()
+                .iter()
+                .find(|fact| fact.human_identity.as_str() == typed_definition.identity.as_str())
+                .expect("typed declaration should retain its stable semindex identity")
+                .stable_id
+                .as_str(),
+            stable_id.as_str()
+        );
+
+        let no_value = definition("no_value")
+            .callable_signature
+            .as_ref()
+            .expect("no-value callable signature should be present");
+        assert_eq!(no_value.return_type, None);
+
+        let generic = definition("generic")
+            .callable_signature
+            .as_ref()
+            .expect("generic callable signature should be present");
+        match &generic.generic_parameters {
+            CallableFactAvailability::Checked(parameters) => {
+                assert_eq!(
+                    parameters
+                        .iter()
+                        .map(|parameter| parameter.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["T"]
+                );
+            }
+            CallableFactAvailability::Unavailable(_) => {
+                panic!("source generic parameter should be checked")
+            }
+        }
+
+        let external = definition("external_drop")
+            .callable_signature
+            .as_ref()
+            .expect("external callable signature should be present");
+        assert!(matches!(
+            &external.failure_contract,
+            CallableFactAvailability::Unavailable(_)
+        ));
+        assert!(matches!(
+            &external.effects,
+            CallableEffectsFact::Unavailable(_)
+        ));
+        assert!(matches!(
+            &external.generic_parameters,
+            CallableFactAvailability::Unavailable(_)
+        ));
+        let json = index.to_json();
+        assert!(json.contains("\"effects\":[],\"effect_status\":{\"status\":\"checked\"}"));
+        assert!(json.contains(
+            "\"effects\":null,\"effect_status\":{\"status\":\"unavailable\""
+        ));
+        assert!(json.contains(
+            "\"metadata_declaration_identity\":{\"status\":\"unavailable\",\"required_stage\":\"Resolved\",\"reason\":\"the semindex producer does not receive a checker-issued DeclarationHandle\"}"
+        ));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(scratch.join("package.jet")).unwrap();
+        std::fs::remove_dir(&scratch).unwrap();
     }
 
     #[test]

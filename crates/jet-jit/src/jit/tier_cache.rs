@@ -28,22 +28,14 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::resident::{fresh_runtime, publish_runtime_decisions, resident_invoke};
-use super::runtime_host::{new_jit_module, ResidentModule};
+use super::runtime_host::{new_jit_module, EntryErrorType, ResidentModule};
 use super::tiers::{record_trace, Tier, TierRow};
 use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 
-/// On-disk artifact version.
-///
-/// FORMAT 5 added the tier roster: the function names the cold run reported as
-/// tier-1 native. Without it a warm hit printed NOTHING under `--trace-tiers`,
-/// so a native replay was indistinguishable from a run that reached no tier at
-/// all — the exact silence the tier lens exists to prevent.
-///
-/// FORMAT 7 stores the checked MIR function id beside each roster name so a
-/// warm hit reports the same `function_id` rows as the cold run.
-///
-/// FORMAT 8 stores whether the entry's successful App value must be served.
-const FORMAT: u32 = 8;
+/// Current on-disk format: native code and tier roster with checked MIR ids,
+/// the checked entry symbol, App serving policy, and self-contained error rails.
+/// The reader accepts only this format.
+const FORMAT: u32 = 11;
 
 thread_local! {
     static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
@@ -93,23 +85,17 @@ enum StoredTarget {
 
 /// The entry's error rail, as the artifact carries it.
 ///
-/// The rail is decided once, in `resident::ensure_resident_module`, from the TIR
-/// program, and lives on `ResidentModule`. A warm run never sees the program, so
-/// the artifact carries the same decided values; no engine re-derives them.
-///
-/// The error type travels as a NAME. Every consumer of `main_error_type` only
-/// ever tests `Type::Named` — `resident_invoke` renders a packed enum by name —
-/// so a name is the whole payload. An error type that is not `Named` leaves the
-/// name empty, and both booleans that need a name (`returns_default_err`,
-/// `error_is_packed`) are already false in exactly that case, so the reload
-/// takes the same branch the cold run took.
+/// The rail is projected once from the checked MIR failure type. Warm artifacts
+/// can reproduce default Err/packed IOError reporting and !Never entries without a
+/// schema registry. Descriptor-dependent entries are not cacheable until that
+/// registry is part of the artifact; they continue to execute native cold code.
 struct EntryRail {
+    entry_symbol: String,
     returns_result: bool,
     returns_app: bool,
     serves_app: bool,
-    returns_default_err: bool,
-    error_is_packed: bool,
-    error_name: Option<String>,
+    error_type: Option<EntryErrorType>,
+    default_error_type: Option<u64>,
 }
 
 /// Read the rail the cold run already decided, off the live resident module.
@@ -119,13 +105,26 @@ struct EntryRail {
 /// worse than a cold recompile.
 fn capture_rail() -> Option<EntryRail> {
     RESIDENT_MODULE.with(|slot| {
-        slot.borrow().as_ref().map(|resident| EntryRail {
+        let resident = slot.borrow();
+        let resident = resident.as_ref()?;
+        if matches!(resident.main_error_type, Some(EntryErrorType::Descriptor(_))) {
+            return None;
+        }
+        let default_error_type = RESIDENT_RUNTIME.with(|slot| {
+            slot.borrow().as_ref().and_then(|runtime| runtime.default_error_type)
+        });
+        if resident.main_error_type == Some(EntryErrorType::Default)
+            && default_error_type.is_none()
+        {
+            return None;
+        }
+        Some(EntryRail {
+            entry_symbol: resident.module.declarations().get_function_decl(resident.main_id).name.clone()?,
             returns_result: resident.main_returns_result,
             returns_app: resident.main_returns_app,
             serves_app: resident.main_serves_app,
-            returns_default_err: resident.main_returns_default_err,
-            error_is_packed: resident.main_error_is_packed,
-            error_name: resident.main_error_type.clone(),
+            error_type: resident.main_error_type,
+            default_error_type,
         })
     })
 }
@@ -140,12 +139,10 @@ pub(crate) fn abort_capture() {
 
 pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
     let capture = CAPTURE.with(|slot| slot.borrow_mut().take())?;
-    if capture.fns.is_empty()
-        || !capture
-            .fns
-            .iter()
-            .any(|f| f.export_name == "__jet_jit_main")
-    {
+    let entry_id = RESIDENT_MODULE.with(|slot| {
+        slot.borrow().as_ref().map(|resident| resident.main_id.as_u32())
+    })?;
+    if !capture.func_ids.contains(&entry_id) {
         return None;
     }
     if !capture_is_replayable(&capture) {
@@ -165,14 +162,10 @@ pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
 /// * every relocation names a function (namespace 0) that is either a host
 ///   (`index < first`) or one of the captured ones (`index < first + len`).
 ///
-/// Any program that DECLARES a function the capture skips fails one of those,
-/// and that is not hypothetical: `lower_generator_body` and
-/// `lower_generator_wrapper` call `define_function` with no `note_defined`, so a
-/// generator leaves a hole in the captured id range and the consumer's call to
-/// the generator is stored as an index the reload never declares. Replaying it
-/// indexed one past the reloaded table and panicked inside
-/// `Module::get_function_decl` — an ICE with exit 101 on the SECOND `jet run` of
-/// any program containing a generator, while every cold run stayed correct.
+/// Missing definitions or definitions emitted out of declaration order cannot
+/// reproduce that table. Generator bodies, for example, are defined before
+/// their previously-declared wrappers. Reject such captures rather than replay
+/// a relocation against a different function id.
 ///
 /// Refusing the artifact keeps such a program on the cold path: correct, only
 /// slower. Per I2 the guard belongs here, where an inconsistent artifact would
@@ -473,17 +466,22 @@ fn write_str(out: &mut Vec<u8>, s: &str) {
 }
 
 fn write_rail(out: &mut Vec<u8>, rail: &EntryRail) {
+    write_str(out, &rail.entry_symbol);
     out.push(u8::from(rail.returns_result));
     out.push(u8::from(rail.returns_app));
     out.push(u8::from(rail.serves_app));
-    out.push(u8::from(rail.returns_default_err));
-    out.push(u8::from(rail.error_is_packed));
-    match &rail.error_name {
-        Some(name) => {
-            out.push(1);
-            write_str(out, name);
+    out.push(match rail.error_type {
+        None => 0,
+        Some(EntryErrorType::Default) => 1,
+        Some(EntryErrorType::Io) => 2,
+        Some(EntryErrorType::Uninhabited) => 3,
+        Some(EntryErrorType::Descriptor(_)) => {
+            unreachable!("capture_rail excludes entries requiring an absent schema registry")
         }
-        None => out.push(0),
+    });
+    out.push(u8::from(rail.default_error_type.is_some()));
+    if let Some(identity) = rail.default_error_type {
+        out.extend_from_slice(&identity.to_le_bytes());
     }
 }
 
@@ -505,23 +503,37 @@ fn read_bool(data: &[u8], i: &mut usize) -> Option<bool> {
 }
 
 fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
+    let entry_symbol = read_str(data, i)?;
     let returns_result = read_bool(data, i)?;
     let returns_app = read_bool(data, i)?;
     let serves_app = read_bool(data, i)?;
-    let returns_default_err = read_bool(data, i)?;
-    let error_is_packed = read_bool(data, i)?;
-    let error_name = if read_bool(data, i)? {
-        Some(read_str(data, i)?)
+    let tag = *data.get(*i)?;
+    *i += 1;
+    let error_type = match tag {
+        0 => None,
+        1 => Some(EntryErrorType::Default),
+        2 => Some(EntryErrorType::Io),
+        3 => Some(EntryErrorType::Uninhabited),
+        _ => return None,
+    };
+    let default_error_type = if read_bool(data, i)? {
+        Some(read_u64(data, i)?)
     } else {
         None
     };
+    if error_type == Some(EntryErrorType::Default) && default_error_type.is_none() {
+        return None;
+    }
+    if returns_result != error_type.is_some() {
+        return None;
+    }
     Some(EntryRail {
+        entry_symbol,
         returns_result,
         returns_app,
         serves_app,
-        returns_default_err,
-        error_is_packed,
-        error_name,
+        error_type,
+        default_error_type,
     })
 }
 
@@ -685,7 +697,7 @@ pub fn cached_artifact_id(data: &[u8]) -> Option<MirArtifactId> {
     (value != 0).then_some(MirArtifactId(value))
 }
 
-/// Load a previously captured tier-1 module and invoke `__jet_jit_main`.
+/// Load a previously captured tier-1 module and invoke its checked entry.
 ///
 /// A hit is a tier-1 native execution like any other, so it reports the same
 /// rows to `--trace-tiers`. Skipping the compile must not skip the lens: an
@@ -711,6 +723,7 @@ pub fn run_cached_module(
         let mut rt = fresh_runtime(release_devtools_policy.clone());
         rt.heap.install_string_slots(&strings);
         rt.compile_strings = strings.clone();
+        rt.default_error_type = rail.default_error_type;
         *slot.borrow_mut() = Some(rt);
     });
 
@@ -759,8 +772,8 @@ pub fn run_cached_module(
 
     module.finalize_definitions().map_err(|e| e.to_string())?;
     let main_id = *ids
-        .get("__jet_jit_main")
-        .ok_or("tier-cache: missing __jet_jit_main")?;
+        .get(&rail.entry_symbol)
+        .ok_or("tier-cache: missing checked entry symbol")?;
     RESIDENT_MODULE.with(|slot| {
         *slot.borrow_mut() = Some(ResidentModule {
             module,
@@ -771,9 +784,7 @@ pub fn run_cached_module(
             main_returns_result: rail.returns_result,
             main_serves_app: rail.serves_app,
             main_returns_app: rail.returns_app,
-            main_returns_default_err: rail.returns_default_err,
-            main_error_type: rail.error_name,
-            main_error_is_packed: rail.error_is_packed,
+            main_error_type: rail.error_type,
         });
     });
     // The reload is this run's whole tier cost — there is no plan and no

@@ -101,10 +101,15 @@ impl<'a> Checker<'a> {
                 span,
                 type_args,
                 args,
+                resolved_ret_out,
             );
             // D-NAME-WALK1=A: the checked Core return is a sema fact. Carry it
-            // across the re-export hop so TIR never re-derives it.
-            *resolved_ret_out = ret.clone();
+            // across the re-export hop so TIR never re-derives it. Source-owned
+            // calls write the declared return here; native calls keep the
+            // effective type as their fallback metadata.
+            if resolved_ret_out.is_none() {
+                *resolved_ret_out = ret.clone();
+            }
             return ret;
         }
         let Some(sig) = self.funcs.get(mangled).cloned() else {

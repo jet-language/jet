@@ -33,7 +33,6 @@ impl<'a> Checker<'a> {
                 reactive_local: false,
                 reactive_shared: false,
                 single_use_span,
-                constant_value: None,
                 invalid: false,
             },
             sendable,

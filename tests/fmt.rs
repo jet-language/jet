@@ -1812,7 +1812,37 @@ fn open() {
 #[test]
 fn fmt_shield_block_stability() {
     let src = "fn run() {\n    #Shield {\n        print(\"committed\")\n    }\n}\n";
-    assert_fmt_stable(src, "#Shield block");
+    let expected = "fn run() {\n    #Shield { print(\"committed\") }\n}\n";
+    let out = jet::format_source(src).expect("#Shield block should format");
+    assert_eq!(out, expected);
+    assert_eq!(
+        out,
+        jet::format_source(&out).expect("collapsed #Shield block should re-format")
+    );
+}
+
+#[test]
+fn fmt_shield_block_keeps_comment_and_over_width_multiline() {
+    let commented_src =
+        "fn run() {\n    #Shield {\n        // keep this comment\n        print(\"committed\")\n    }\n}\n";
+    let commented_expected = "fn run() {\n    #Shield {\n        // keep this comment\n        print(\"committed\")\n    }\n}\n";
+    let commented =
+        jet::format_source(commented_src).expect("commented #Shield block should format");
+    assert_eq!(commented, commented_expected);
+
+    let body = "x".repeat(80);
+    let wide_src = format!(
+        "fn run() {{\n    #Shield {{\n        print(\"{body}\")\n    }}\n}}\n"
+    );
+    let wide_expected = format!(
+        "fn run() {{\n    #Shield {{\n        print(\"{body}\")\n    }}\n}}\n"
+    );
+    let wide = jet::format_source(&wide_src).expect("over-width #Shield block should format");
+    assert_eq!(wide, wide_expected);
+    assert_eq!(
+        wide,
+        jet::format_source(&wide).expect("over-width #Shield block should re-format")
+    );
 }
 
 #[test]
@@ -2405,16 +2435,13 @@ fn fmt_box_drawing_comment_does_not_panic() {
 
 #[test]
 fn fmt_impure_block_round_trips() {
-    // D-CTEFFECT1: `#Impure("reason") { … }` must survive a format round-trip
-    // with the reason string and body intact.
+    // D-CTEFFECT1: preserve the reason and body while collapsing a fitting block.
     let src = "fn run() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
+    let expected =
+        "fn run() {\n    #Impure(\"reading build config\") { print(\"inside\") }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on #Impure block");
-    assert!(
-        out.contains("#Impure(\"reading build config\")"),
-        "#Impure reason dropped by fmt:\n{out}"
-    );
-    let twice = jet::format_source(&out).expect("#Impure fmt must re-fmt");
-    assert_eq!(out, twice, "#Impure fmt must be idempotent");
+    assert_eq!(out, expected);
+    assert_eq!(out, jet::format_source(&out).expect("#Impure fmt must re-fmt"));
 }
 
 #[test]

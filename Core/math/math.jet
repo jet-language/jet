@@ -9,13 +9,7 @@ package {
     }
 }
 use core as core
-use core.math.[pi]
-fn pi_provider() -> Float { pi }
-fn round_provider(n: Float) -> Int {
-    if n >= (Float{0.0}) -> return Int.parse("{floor(n + Float{0.5})}") ?? 0
-    -(Int.parse("{floor((Float{0.0} - n) + Float{0.5})}") ?? 0)
-}
-
+fn round_provider(n: Float) -> Int { core.math.round(n) }
 pub fn abs(n: Int) -> Int {
     if n < 0 -> return -n
     n
@@ -178,7 +172,7 @@ pub fn ldexp(n: Float, exponent: Int) -> Float { core.math.ldexp(n, exponent) }
 pub fn scaleb(n: Float, exponent: Int) -> Float { ldexp(n, exponent) }
 pub fn radix(n: Float) -> Int { core.math.radix(n) }
 
-pub fn pi() -> Float { pi_provider() }
+pub fn pi() -> Float { Float{3.14159265358979323846264338327950288} }
 pub fn e() -> Float { Float{2.7182818284590452354} }
 pub fn tau() -> Float { Float{6.2831853071795864769} }
 pub fn tau_const() -> Float { tau() }
@@ -200,52 +194,29 @@ pub fn frexp(n: Float) -> (exp: Int, frac: Float) {
     pair :: core.math.frexp(n)
     (exp: pair.exp, frac: pair.frac)
 }
-fn int_min() -> Int { -9223372036854775808 }
-fn int_max() -> Int { 9223372036854775807 }
 
 pub fn checked_abs(n: Int) -> ?Int {
-    if n == int_min() -> return None
     if n < 0 -> return Val(0 - n)
     Val(n)
 }
 
-pub fn checked_neg(n: Int) -> ?Int {
-    if n == int_min() -> return None
-    Val(0 - n)
-}
+pub fn checked_neg(n: Int) -> ?Int { Val(0 - n) }
 
-pub fn checked_add(a: Int, b: Int) -> ?Int {
-    if b > 0 && a > int_max() - b -> return None
-    if b < 0 && a < int_min() - b -> return None
-    Val(a + b)
-}
+pub fn checked_add(a: Int, b: Int) -> ?Int { Val(a + b) }
 
-pub fn checked_sub(a: Int, b: Int) -> ?Int {
-    if b > 0 && a < int_min() + b -> return None
-    if b < 0 && a > int_max() + b -> return None
-    Val(a - b)
-}
+pub fn checked_sub(a: Int, b: Int) -> ?Int { Val(a - b) }
 
-pub fn checked_mul(a: Int, b: Int) -> ?Int {
-    if a == 0 || b == 0 -> return Val(0)
-    if a > 0 {
-        if b > 0 && a > int_max() /% b -> return None
-        if b < 0 && b < int_min() /% a -> return None
-    } else {
-        if b > 0 && a < int_min() /% b -> return None
-        if b < 0 && a < int_max() /% b -> return None
-    }
-    Val(a * b)
-}
+pub fn checked_mul(a: Int, b: Int) -> ?Int { Val(a * b) }
 
 pub fn checked_div(a: Int, b: Int) -> ?Int {
-    if b == 0 || (a == int_min() && b == -1) -> return None
-    Val(a /% b)
+    if b == 0 -> return None
+    remainder :: a %% b
+    Val((a - remainder) /% b)
 }
 
 pub fn checked_rem(a: Int, b: Int) -> ?Int {
-    if b == 0 || (a == int_min() && b == -1) -> return None
-    Val(a % b)
+    if b == 0 -> return None
+    Val(a %% b)
 }
 
 pub fn checked_pow(base: Int, exponent: Int) -> ?Int {
@@ -270,40 +241,19 @@ pub fn int_pow(base: Int, exponent: Int) -> Int {
     power := exponent
     loop power > 0 {
         if (power & 1) != 0 {
-            result = saturating_mul(result, factor)
+            result = result * factor
         }
         power = power /% 2
-        if power > 0 -> factor = saturating_mul(factor, factor)
+        if power > 0 -> factor = factor * factor
     }
     result
 }
 
-pub fn saturating_add(a: Int, b: Int) -> Int {
-    result :: checked_add(a, b)
-    if result == None {
-        if b >= 0 -> return int_max()
-        return int_min()
-    }
-    result
-}
+pub fn saturating_add(a: Int, b: Int) -> Int { a + b }
 
-pub fn saturating_sub(a: Int, b: Int) -> Int {
-    result :: checked_sub(a, b)
-    if result == None {
-        if b >= 0 -> return int_min()
-        return int_max()
-    }
-    result
-}
+pub fn saturating_sub(a: Int, b: Int) -> Int { a - b }
 
-pub fn saturating_mul(a: Int, b: Int) -> Int {
-    result :: checked_mul(a, b)
-    if result == None {
-        if (a < 0) != (b < 0) -> return int_min()
-        return int_max()
-    }
-    result
-}
+pub fn saturating_mul(a: Int, b: Int) -> Int { a * b }
 
 pub fn factorial(n: Int) -> ?Int {
     if n < 0 -> return None
@@ -380,11 +330,17 @@ pub fn powmod(base: Int, exponent: Int, modulus: Int) -> ?Int {
 }
 
 pub fn div_mod(a: Int, b: Int) -> (quot: Int, rem: Int) {
-    core.math.div_mod(a, b)
+    rem := a %% b
+    if rem < 0 {
+        if b > 0 -> rem = rem + b
+        if b < 0 -> rem = rem - b
+    }
+    (quot: (a - rem) /% b, rem: rem)
 }
 
 pub fn div_rem(a: Int, b: Int) -> (quot: Int, rem: Int) {
-    core.math.div_rem(a, b)
+    rem :: a %% b
+    (quot: (a - rem) /% b, rem: rem)
 }
 
 pub fn digits(n: Int) -> Int { core.math.digits(n) }
@@ -393,11 +349,8 @@ pub fn trailing_ones(n: Int) -> Int { core.math.trailing_ones(n) }
 pub fn cmp(a: Float, b: Float) -> Int { core.math.cmp(a, b) }
 
 pub fn abs_diff(a: Int, b: Int) -> Int {
-    if a >= b {
-        checked_sub(a, b) ?? return int_max()
-    } else {
-        checked_sub(b, a) ?? return int_max()
-    }
+    if a >= b -> return a - b
+    b - a
 }
 
 pub fn even(n: Int) -> Bool { is_even(n) }

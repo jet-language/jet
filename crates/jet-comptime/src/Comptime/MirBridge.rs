@@ -5,11 +5,25 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
+use crate::AST::{
+    AccessConvention, ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, ProgramBundle, Stmt,
+    StructDef, Type,
+};
 use crate::Comptime::{CtValue, DebugHook, DevSink, PurityStage, ReplAuthorizer};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, ProgramBundle, Stmt, StructDef, Type};
 use jet_foundation::MIR::{MirConstKey, MirRuntimeValue, MirType, MirTypeKind};
 use jet_foundation::Numeric::CtBigInt;
+
+/// Loaded source-owned Core signature projected into a comptime fragment.
+#[derive(Clone, Debug)]
+pub struct MirFragmentCoreSourceSignature {
+    /// Generic parameter names in declaration order.
+    pub type_params: Vec<String>,
+    /// Checked parameter conventions and types in declaration order.
+    pub params: Vec<(AccessConvention, Type)>,
+    /// Declared return type, if the function returns a value.
+    pub return_type: Option<Type>,
+}
 
 /// Checked nominal facts retained for a comptime fragment.
 ///
@@ -29,6 +43,8 @@ pub struct MirFragmentNominalFacts {
     pub structs: HashMap<String, StructDef>,
     /// Checked enum declarations, including their payload shapes.
     pub enums: HashMap<String, crate::AST::EnumDef>,
+    /// Loaded source signatures for imported source-owned Core members.
+    pub core_source_sigs: HashMap<(String, String), MirFragmentCoreSourceSignature>,
 }
 
 pub struct ExprEvalRequest<'a> {
@@ -166,9 +182,9 @@ pub fn install(hooks: Hooks) {
 }
 
 fn hooks() -> &'static Hooks {
-    HOOKS.get().expect(
-        "MIR eval bridge not installed — call Codegen::MIREval::install_mir_bridge()",
-    )
+    HOOKS
+        .get()
+        .expect("MIR eval bridge not installed — call Codegen::MIREval::install_mir_bridge()")
 }
 
 pub fn run_bundle(
@@ -236,18 +252,17 @@ fn static_ct_value(
             .map(|value| static_ct_value(value, globals, mutated))
             .collect::<Option<Vec<_>>>()
             .map(CtValue::List),
-        Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
-            static_ct_value(inner, globals, mutated)
-        }
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => static_ct_value(inner, globals, mutated),
         Expr::Ident(name, _) => mutated
             .and_then(|values| values.get(name))
             .or_else(|| globals.get(name))
             .cloned(),
         Expr::ComptimeName {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         } => Some(value.clone()),
-        Expr::ComptimeName { name, value: None, .. } => mutated
+        Expr::ComptimeName {
+            name, value: None, ..
+        } => mutated
             .and_then(|values| values.get(name))
             .or_else(|| globals.get(name))
             .cloned(),
@@ -290,13 +305,7 @@ fn static_ct_value(
                 .iter()
                 .map(|arg| static_ct_value(&arg.expr, globals, mutated))
                 .collect::<Option<Vec<_>>>()?;
-            crate::Comptime::Builtins::apply_method(
-                &value,
-                method,
-                args,
-                expr.span(),
-            )
-            .ok()
+            crate::Comptime::Builtins::apply_method(&value, method, args, expr.span()).ok()
         }
         Expr::MethodCall {
             receiver,
@@ -438,9 +447,7 @@ pub fn ast_to_mir_type(ty: &Type) -> MirType {
         Type::TraitObject(bounds) => MirTypeKind::TraitObject(
             bounds
                 .iter()
-                .map(|bound| {
-                    jet_foundation::MIR::MirNominalRef::from_name(bound.clone())
-                })
+                .map(|bound| jet_foundation::MIR::MirNominalRef::from_name(bound.clone()))
                 .collect(),
         ),
         Type::Tuple(fields) => MirTypeKind::Tuple(
@@ -467,9 +474,7 @@ pub fn ast_to_mir_type(ty: &Type) -> MirType {
             marker: ast_to_mir_tag_marker(marker),
             inner: Box::new(ast_to_mir_type(inner)),
         },
-        Type::Union(members) => {
-            MirTypeKind::Union(members.iter().map(ast_to_mir_type).collect())
-        }
+        Type::Union(members) => MirTypeKind::Union(members.iter().map(ast_to_mir_type).collect()),
         Type::Quantity { base, dimension } => MirTypeKind::Quantity {
             base: Box::new(ast_to_mir_type(base)),
             dimension: ast_to_mir_dimension(dimension),
@@ -604,28 +609,22 @@ fn ast_to_mir_view_provenance(
         .collect()
 }
 
-fn ast_to_mir_measure(
-    measure: &crate::AST::Measure,
-) -> jet_foundation::MIR::MirMeasure {
+fn ast_to_mir_measure(measure: &crate::AST::Measure) -> jet_foundation::MIR::MirMeasure {
     match measure {
-        crate::AST::Measure::Literal { kind, value } => {
-            jet_foundation::MIR::MirMeasure::Literal {
-                kind: kind.clone(),
-                value: *value,
-            }
-        }
+        crate::AST::Measure::Literal { kind, value } => jet_foundation::MIR::MirMeasure::Literal {
+            kind: kind.clone(),
+            value: *value,
+        },
         crate::AST::Measure::SignedLiteral { kind, value } => {
             jet_foundation::MIR::MirMeasure::SignedLiteral {
                 kind: kind.clone(),
                 value: *value,
             }
         }
-        crate::AST::Measure::Symbol { kind, name } => {
-            jet_foundation::MIR::MirMeasure::Symbol {
-                kind: kind.clone(),
-                name: name.clone(),
-            }
-        }
+        crate::AST::Measure::Symbol { kind, name } => jet_foundation::MIR::MirMeasure::Symbol {
+            kind: kind.clone(),
+            name: name.clone(),
+        },
         crate::AST::Measure::Combined {
             kind,
             rule,
@@ -644,9 +643,7 @@ fn ast_to_mir_measure(
     }
 }
 
-fn ast_to_mir_dimension(
-    dimension: &crate::AST::Dimension,
-) -> jet_foundation::MIR::MirDimension {
+fn ast_to_mir_dimension(dimension: &crate::AST::Dimension) -> jet_foundation::MIR::MirDimension {
     jet_foundation::MIR::MirDimension {
         axes: dimension
             .measure_exponents()
@@ -655,13 +652,9 @@ fn ast_to_mir_dimension(
     }
 }
 
-fn ast_to_mir_tag_marker(
-    marker: &crate::AST::TagMarker,
-) -> jet_foundation::MIR::MirTagMarker {
+fn ast_to_mir_tag_marker(marker: &crate::AST::TagMarker) -> jet_foundation::MIR::MirTagMarker {
     match marker {
-        crate::AST::TagMarker::User(name) => {
-            jet_foundation::MIR::MirTagMarker::User(name.clone())
-        }
+        crate::AST::TagMarker::User(name) => jet_foundation::MIR::MirTagMarker::User(name.clone()),
         crate::AST::TagMarker::Internal(tag) => {
             jet_foundation::MIR::MirTagMarker::Internal(match tag {
                 crate::AST::InternalTag::CoreCryptoNominal => {
@@ -719,11 +712,7 @@ pub fn mir_to_ast_type(ty: &MirType) -> Type {
         },
         MirTypeKind::Fn(signature) => Type::Fn {
             params: signature.params.iter().map(mir_to_ast_type).collect(),
-            ret: signature
-                .ret
-                .as_deref()
-                .map(mir_to_ast_type)
-                .map(Box::new),
+            ret: signature.ret.as_deref().map(mir_to_ast_type).map(Box::new),
             effect_bound: signature.effect_bound.as_ref().map(|row| {
                 row.iter()
                     .map(|name| (name.clone(), Span::new(0, 0)))
@@ -803,9 +792,7 @@ pub fn mir_to_ast_type(ty: &MirType) -> Type {
             marker: mir_to_ast_tag_marker(marker),
             inner: Box::new(mir_to_ast_type(inner)),
         },
-        MirTypeKind::Union(members) => {
-            Type::Union(members.iter().map(mir_to_ast_type).collect())
-        }
+        MirTypeKind::Union(members) => Type::Union(members.iter().map(mir_to_ast_type).collect()),
         MirTypeKind::Quantity { base, dimension } => Type::Quantity {
             base: Box::new(mir_to_ast_type(base)),
             dimension: mir_to_ast_dimension(dimension),
@@ -906,24 +893,20 @@ fn mir_to_ast_view_provenance(
 
 fn mir_to_ast_measure(measure: &jet_foundation::MIR::MirMeasure) -> crate::AST::Measure {
     match measure {
-        jet_foundation::MIR::MirMeasure::Literal { kind, value } => {
-            crate::AST::Measure::Literal {
-                kind: kind.clone(),
-                value: *value,
-            }
-        }
+        jet_foundation::MIR::MirMeasure::Literal { kind, value } => crate::AST::Measure::Literal {
+            kind: kind.clone(),
+            value: *value,
+        },
         jet_foundation::MIR::MirMeasure::SignedLiteral { kind, value } => {
             crate::AST::Measure::SignedLiteral {
                 kind: kind.clone(),
                 value: *value,
             }
         }
-        jet_foundation::MIR::MirMeasure::Symbol { kind, name } => {
-            crate::AST::Measure::Symbol {
-                kind: kind.clone(),
-                name: name.clone(),
-            }
-        }
+        jet_foundation::MIR::MirMeasure::Symbol { kind, name } => crate::AST::Measure::Symbol {
+            kind: kind.clone(),
+            name: name.clone(),
+        },
         jet_foundation::MIR::MirMeasure::Combined {
             kind,
             rule,
@@ -942,20 +925,14 @@ fn mir_to_ast_measure(measure: &jet_foundation::MIR::MirMeasure) -> crate::AST::
     }
 }
 
-fn mir_to_ast_dimension(
-    dimension: &jet_foundation::MIR::MirDimension,
-) -> crate::AST::Dimension {
+fn mir_to_ast_dimension(dimension: &jet_foundation::MIR::MirDimension) -> crate::AST::Dimension {
     crate::AST::Dimension::from_identity(&dimension.identity())
         .expect("canonical MIR dimensions use concrete exponents")
 }
 
-fn mir_to_ast_tag_marker(
-    marker: &jet_foundation::MIR::MirTagMarker,
-) -> crate::AST::TagMarker {
+fn mir_to_ast_tag_marker(marker: &jet_foundation::MIR::MirTagMarker) -> crate::AST::TagMarker {
     match marker {
-        jet_foundation::MIR::MirTagMarker::User(name) => {
-            crate::AST::TagMarker::User(name.clone())
-        }
+        jet_foundation::MIR::MirTagMarker::User(name) => crate::AST::TagMarker::User(name.clone()),
         jet_foundation::MIR::MirTagMarker::Internal(tag) => {
             crate::AST::TagMarker::Internal(match tag {
                 jet_foundation::MIR::MirInternalTag::CoreCryptoNominal => {
@@ -995,12 +972,13 @@ pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Di
     match value {
         MirRuntimeValue::Int(value) => Ok(CtValue::Int(value)),
         MirRuntimeValue::BigInt(value) => Ok(CtValue::BigInt(
-            CtBigInt::from_str(&value)
-                .map_err(|message| conversion_error(message, span))?,
+            CtBigInt::from_str(&value).map_err(|message| conversion_error(message, span))?,
         )),
-        MirRuntimeValue::Float { value, f32 } => {
-            Ok(CtValue::Float(if f32 { CtFloat::F32(value as f32) } else { CtFloat::F64(value) }))
-        }
+        MirRuntimeValue::Float { value, f32 } => Ok(CtValue::Float(if f32 {
+            CtFloat::F32(value as f32)
+        } else {
+            CtFloat::F64(value)
+        })),
         MirRuntimeValue::Bool(value) => Ok(CtValue::Bool(value)),
         MirRuntimeValue::Char(value) => Ok(CtValue::Char(value)),
         MirRuntimeValue::String(value) => Ok(CtValue::Str(value)),
@@ -1019,7 +997,10 @@ pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Di
             .into_iter()
             .map(|(name, value)| Ok((name, mir_to_ct_value(value, span)?)))
             .collect::<Result<Vec<_>, Diagnostic>>()
-            .map(|fields| CtValue::Struct { type_name: user_type_name(type_name), fields }),
+            .map(|fields| CtValue::Struct {
+                type_name: user_type_name(type_name),
+                fields,
+            }),
         MirRuntimeValue::Enum {
             type_name,
             variant,
@@ -1033,9 +1014,9 @@ pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Di
                 variant,
                 args,
             }),
-        MirRuntimeValue::Present(value) => Ok(CtValue::Present(Box::new(mir_to_ct_value(
-            *value, span,
-        )?))),
+        MirRuntimeValue::Present(value) => {
+            Ok(CtValue::Present(Box::new(mir_to_ct_value(*value, span)?)))
+        }
         MirRuntimeValue::FailedTold(value) => Ok(CtValue::Failed(CtReport::Told(Box::new(
             mir_to_ct_value(*value, span)?,
         )))),
@@ -1051,7 +1032,6 @@ pub fn mir_to_ct_value(value: MirRuntimeValue, span: Span) -> Result<CtValue, Di
         )),
     }
 }
-
 
 fn user_type_name(name: String) -> String {
     let stripped = name.strip_prefix("__comptime::").unwrap_or(&name);

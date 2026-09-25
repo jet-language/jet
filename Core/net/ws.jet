@@ -1,5 +1,5 @@
 use core as core
-
+use core.net.url as url
 #Error
 pub enum WsError {
     InvalidUrl
@@ -13,13 +13,80 @@ pub enum WsError {
     IO(operation: String)
 }
 
-// The native leaf owns the connected socket, handshake, and frame codec.
-// Keep this source boundary typed; do not duplicate provider policy here.
-pub fn connect(url: String) -[Net]> WsConn !WsError {
-    core.net.ws.connect(url)
+// The provider owns socket I/O, entropy, and frame codec. Jet validates the
+// URL and handshake shape before crossing the typed boundary.
+pub fn connect(url_text: String) -[Net]> WsConn !WsError {
+    parsed :: url.parse(url_text) ?? return Err(WsError.InvalidUrl)
+    if parsed.scheme != "ws" -> return Err(WsError.UnsupportedTarget)
+    if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 {
+        return Err(WsError.InvalidUrl)
+    }
+    fragment := parsed.fragment
+    if fragment.bytes().len() > 0 -> return Err(WsError.InvalidUrl)
+    core.net.ws.connect(url.unparse(parsed))
 }
 
 pub fn upgrade(request: HTTPRequest) -[Net]> WsConn !WsError {
+    if request.method() != "GET" -> return Err(WsError.InvalidHandshake)
+    upgrade_header :: request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
+    if !header_has_token(upgrade_header, "websocket") -> return Err(WsError.InvalidHandshake)
+    connection_header :: request.header("connection") ?? return Err(WsError.InvalidHandshake)
+    if !header_has_token(connection_header, "upgrade") -> return Err(WsError.InvalidHandshake)
+    version :: request.header("sec-websocket-version") ?? return Err(WsError.InvalidHandshake)
+    if trim_ascii(version) != "13" -> return Err(WsError.InvalidHandshake)
+    key :: request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
+    if key.bytes().len() == 0 || key.bytes().len() > 256 -> return Err(WsError.InvalidHandshake)
     core.net.ws.upgrade(request)
+}
+
+fn header_has_token(value: String, wanted: String) -> Bool {
+    raw :: ascii_lower(value).bytes()
+    target :: ascii_lower(wanted)
+    start := 0
+    i := 0
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{44}) {
+            piece :: trim_ascii(slice(raw, start, i))
+            if piece == target -> return true
+            start = i + 1
+        }
+        i = i + 1
+    }
+    false
+}
+
+fn trim_ascii(text: String) -> String {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+    }
+    if end <= start -> return ""
+    slice(raw, start, end)
+}
+
+fn ascii_lower(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn slice(raw: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end -> return String.from_bytes(out) ?? ""
+        out.push(raw[i])
+        i = i + 1
+    }
 }
 

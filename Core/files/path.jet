@@ -256,8 +256,12 @@ pub fn relative_to(path: Path, start: Path) -> Path { Path{raw: files.relative(~
 
 
 pub fn is_relative_to(path: Path, start: Path) -> Bool {
-    common :: files.commonpath([String]{~path.raw, ~start.raw})
-    common == files.collapse(~start.raw)
+    target :: files.collapse(~path.raw)
+    base :: files.collapse(~start.raw)
+    common :: files.commonpath([String]{~target, ~base})
+    if common != base -> return false
+    if base == "." && starts_dotdot(~target) -> return false
+    true
 }
 
 
@@ -429,5 +433,6 @@ pub fn equals(a: Path, b: Path) -> Bool { files.collapse(~a.raw) == files.collap
 fn starts_dotdot(text: String) -> Bool {
     raw :: text.bytes()
     if raw.len() < 2 -> return false
-    raw[0] == (U8{46}) && raw[1] == (U8{46})
+    if raw[0] != (U8{46}) || raw[1] != (U8{46}) -> return false
+    raw.len() == 2 || raw[2] == (U8{47})
 }

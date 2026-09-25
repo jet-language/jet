@@ -1280,13 +1280,21 @@ fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex, bundle: &P
         let Some(signature) = &definition.callable_signature else {
             continue;
         };
-        item.failure_contract = Some(signature.failure_contract.clone());
-        item.failure_source = Some(signature.failure_source.clone());
-        item.signature.push_str("\nfailure: ");
-        item.signature.push_str(&signature.failure_contract);
-        item.signature.push_str(" (");
-        item.signature.push_str(&signature.failure_source);
-        item.signature.push(')');
+        item.failure_contract = signature.failure_contract_name();
+        item.failure_source = signature.failure_source_name();
+        match (
+            item.failure_contract.as_deref(),
+            item.failure_source.as_deref(),
+        ) {
+            (Some(contract), Some(source)) => {
+                item.signature.push_str("\nfailure: ");
+                item.signature.push_str(contract);
+                item.signature.push_str(" (");
+                item.signature.push_str(source);
+                item.signature.push(')');
+            }
+            _ => item.signature.push_str("\nfailure: unavailable"),
+        }
     }
 }
 

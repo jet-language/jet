@@ -9,7 +9,6 @@ package {
     }
 }
 use core as core
-use core.text as text
 
 // core.ui — one portable tree consumed by every backend.
 //
@@ -39,7 +38,6 @@ pub enum UiAriaRole {
     Container
     Label
     TextInput
-    Unset
 }
 
 pub enum UiNodeKind {
@@ -75,37 +73,16 @@ pub struct SizeConstraint {
 }
 
 
-pub struct UiPreviewViewport {
-    pub device: UiPreviewDevice
-    pub width: Float
-    pub height: Float
-}
 
 pub struct UiNode {
     pub label: String
     pub width: Float
     pub height: Float
-    pub role: ?UiAriaRole
     pub accessibility: ?UiAccessibility
     pub ime: ?UiImeMode
-    pub color: ?String
-    pub kind: UiNodeKind
-    pub children: [UiNode]
     pub shortcut: ?UiShortcut
 }
 
-pub struct UiPreview {
-    pub name: String
-    pub node: UiNode
-    pub viewport: UiPreviewViewport
-    pub kind: UiPreviewKind
-}
-
-pub struct UiPlayground {
-    pub name: String
-    pub node: UiNode
-    pub viewport: UiPreviewViewport
-}
 pub enum InputEvent {
     Key(code: String)
     Resize(size: Size)
@@ -113,24 +90,6 @@ pub enum InputEvent {
 
 
 
-// These are portable model handles.  The runtime's Null/TUI/GTK backends
-// expose richer methods for mount/event routing; the source values retain
-// enough state for deterministic source-level composition.
-pub struct NullBackend {
-    pub commands: [String]
-    pub focused: String
-}
-
-pub struct TuiBackend {
-    pub commands: [String]
-    pub focused: String
-    pub renders: Int
-}
-
-pub struct GtkBackend {
-    pub commands: [String]
-    pub focused: String
-}
 
 pub fn point(x: Float, y: Float) -> Point { core.ui.point(x, y) }
 pub fn size(width: Float, height: Float) -> Size {
@@ -155,56 +114,19 @@ pub fn text(value: String) -> UiNode {
     core.ui.text(value)
 }
 
-pub fn button(label: String) -> UiNode {
-    core.ui.button(label)
-}
 
-pub fn text_input(value: String, mode: UiImeMode) -> UiNode {
-    core.ui.text_input(value, mode)
-}
 
-trait UiBackend {
-    fn mount(self, root: UiNode, bounds: SizeConstraint)
-}
-
-impl NullBackend.UiBackend {
-    fn mount(self, root: UiNode, bounds: SizeConstraint) {
-        core.ui.mount(self, root, bounds)
-    }
-}
-
-impl TuiBackend.UiBackend {
-    fn mount(self, root: UiNode, bounds: SizeConstraint) {
-        core.ui.mount(self, root, bounds)
-    }
-}
-
-impl GtkBackend.UiBackend {
-    fn mount(self, root: UiNode, bounds: SizeConstraint) {
-        core.ui.mount(self, root, bounds)
-    }
-}
-
-// The checked Core call accepts either two or three arguments and routes the
-// concrete backend through the runtime. This source declaration is the
-// explicit three-value form used by source-level tooling.
-pub fn mount<T: UiBackend>(backend: T, root: UiNode, bounds: SizeConstraint) {
-    backend.mount(root, bounds)
-}
 
 pub fn preview(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
-    selected := viewport ?? desktop()
-    UiPreview{name: name, node: body(), viewport: selected, kind: UiPreviewKind.Preview}
+    core.ui.preview(name, viewport, body)
 }
 
-pub fn previews(items: [UiPreview]) -> [UiPreview] { ~items }
 
 pub fn playground(name: String, viewport: ?UiPreviewViewport, body: fn() -> UiNode) -> UiPreview {
-    selected := viewport ?? desktop()
-    UiPreview{name: name, node: body(), viewport: selected, kind: UiPreviewKind.Playground}
+    core.ui.playground(name, viewport, body)
 }
 
-pub fn playgrounds(items: [UiPreview]) -> [UiPreview] { ~items }
+
 
 pub fn desktop() -> UiPreviewViewport { core.ui.desktop() }
 pub fn phone() -> UiPreviewViewport { core.ui.phone() }
@@ -216,7 +138,7 @@ pub fn resize_event(width: Float, height: Float) -> InputEvent {
 }
 
 pub fn reactive_render(body: fn()) {
-    body()
+    core.ui.reactive_render(body)
 }
 
 pub fn gtk_backend() -> GtkBackend { core.ui.gtk_backend() }

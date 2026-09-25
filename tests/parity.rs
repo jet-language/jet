@@ -1950,10 +1950,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
     }
     for method in [
+        "create",
         "tar_add",
         "tar_get",
         "tar_names_json",
-        "zip_compress",
         "zip_decompress",
     ] {
         assert_eq!(

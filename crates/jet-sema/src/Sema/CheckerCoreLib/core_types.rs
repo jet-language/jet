@@ -400,7 +400,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "UiHostError" | "UiServiceResult" | "UiFileDialogKind" | "UiFsAccess"
         | "UiFsRights" | "UiFsGrant" | "UiGrantedPath" | "UiFileFilter"
         | "UiClipboardWrite" | "UiTextRange" | "UiImeMode"
-        | "UiPlayground" | "UiPreview" | "UiPreviewAccessibility" | "UiPreviewAuthority"
+        | "UiPreview" | "UiPreviewAccessibility" | "UiPreviewAuthority"
         | "UiPreviewContext" | "UiPreviewDevice" | "UiPreviewEffect"
         | "UiPreviewInputOverride" | "UiPreviewInputValue" | "UiPreviewKind"
         | "UiPreviewLifecycle" | "UiPreviewRegistry" | "UiPreviewSource"
@@ -711,6 +711,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "first_difference" => Some(Type::Int),
             "seed" => Some(Type::Option(Box::new(Type::Int))),
+            "case_ids" => Some(Type::List(Box::new(Type::String))),
+            "inputs" | "reference" | "candidate" => Some(Type::List(Box::new(Type::Named(
+                "DataTree".to_string(),
+            )))),
             "status" | "relation" | "source" | "tool" | "target" | "reason" => {
                 Some(Type::String)
             }
@@ -894,6 +898,14 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     {
         return Some(Type::Int);
     }
+    if type_name == "Address" {
+        return match field {
+            "display" => Some(Type::Option(Box::new(Type::String))),
+            "mailbox" => Some(Type::String),
+            _ => None,
+        };
+    }
+
     if type_name == "Envelope" {
         return match field {
             "from" => Some(Type::Named("Address".to_string())),
@@ -1873,7 +1885,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
-        ("TempDir" | "TempFile" | "FileLock", "path") => Some(Type::String),
+        ("FileReader" | "FileWriter" | "TempDir" | "TempFile" | "FileLock", "path") => {
+            Some(Type::String)
+        }
         ("WatchEvent", "path") => Some(Type::String),
         ("WatchEvent", "domain") => Some(Type::Named("WatchDomain".to_string())),
         ("WatchEvent", "kind") => Some(Type::Named("WatchKind".to_string())),
@@ -2865,7 +2879,7 @@ pub(crate) fn core_net_control_variants(
     Some(variants)
 }
 
-pub(crate) fn core_net_error_variants(
+pub fn core_net_error_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
 {
@@ -3451,6 +3465,23 @@ pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
     }
 }
 
+/// Project only the file-handle identities owned by `core.files` onto the
+/// existing leaf-keyed method tables. Bare spellings are retained for the
+/// pre-existing core handle representation; qualified types require the one
+/// canonical source identity so unrelated same-leaf imports stay distinct.
+#[doc(hidden)]
+pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
+    match handle_ty {
+        "FileReader" | "<corelib>/Core/files::Core/files/files.jet::FileReader" => {
+            Some("FileReader")
+        }
+        "FileWriter" | "<corelib>/Core/files::Core/files/files.jet::FileWriter" => {
+            Some("FileWriter")
+        }
+        _ => None,
+    }
+}
+
 /// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).
 /// Returns `Some(return_type)` when the method is valid, or emits E2501 and
 /// returns `None` for an invalid method / wrong-direction call.
@@ -3461,6 +3492,7 @@ pub fn file_handle_method_return(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Type>> {
+    let handle_ty = core_file_handle_dispatch_name(handle_ty).unwrap_or(handle_ty);
     let io = io_error_ty();
     let unit = unit_ty();
     match handle_ty {

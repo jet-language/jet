@@ -13,12 +13,12 @@ impl Base32Error {
     pub fn new(reason: String) -> Base32Error { Base32Error{reason: reason} }
 }
 
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
-@c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-@c_hex_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+c_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+c_hex_alphabet :: "0123456789ABCDEFGHIJKLMNOPQRSTUV"
 
-pub fn encode(data: [U8]) -> String { encode_with_alphabet(data, @c_alphabet) }
+pub fn encode(data: [U8]) -> String { encode_with_alphabet(data, c_alphabet) }
 
 fn encode_with_alphabet(data: [U8], alphabet: String) -> String {
     ab :: alphabet.bytes()
@@ -53,7 +53,7 @@ fn encode_with_alphabet(data: [U8], alphabet: String) -> String {
 }
 
 /// Decode the canonical padded RFC 4648 alphabet.
-pub fn decode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, @c_alphabet) }
+pub fn decode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, c_alphabet) }
 
 fn decode_with_alphabet(text: String, alphabet: String) -> [U8] !Base32Error {
     ab :: alphabet.bytes()
@@ -118,5 +118,5 @@ pub fn is_base32(text: String) -> Bool {
 pub fn b32encode(data: [U8]) -> String { encode(data) }
 pub fn b32decode(text: String) -> [U8] !Base32Error { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String { encode_with_alphabet(data, @c_hex_alphabet) }
-pub fn b32hexdecode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, @c_hex_alphabet) }
+pub fn b32hexencode(data: [U8]) -> String { encode_with_alphabet(data, c_hex_alphabet) }
+pub fn b32hexdecode(text: String) -> [U8] !Base32Error { decode_with_alphabet(text, c_hex_alphabet) }

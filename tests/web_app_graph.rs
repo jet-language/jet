@@ -1,6 +1,7 @@
 //! D-WEBAPP1=D / D-WEBAUTHOR1=D: sema-known application graph facts.
 
 mod common;
+mod tir_support;
 
 use std::fs;
 use std::process::Command;
@@ -181,6 +182,38 @@ fn run() App -> { return web.app().routes(from: "routes").ssr() }
     assert!(paths.contains(&"/"));
     assert!(paths.contains(&"/about"));
     assert!(graph.routes.iter().all(|r| r.render.as_str() == "ssr"));
+}
+
+#[test]
+fn router_path_and_search_plus_decoding_are_distinct() {
+    tir_support::assert_tiers_agree(
+        "router_plus_decoding",
+        r#"use core.web.router as router
+fn page(nav: WebNavigation) -> String { return "" }
+fn rejects_invalid_utf8(r: WebRouter) -> Bool {
+    if router.navigate(r, "/item/%FF") == {
+        .Err(_) -> return true
+        .Ok(_) -> return false
+    }
+}
+fn run() {
+    r :: router.route(
+        router.new(),
+        "/item/:slug",
+        [WebRouterField]{WebRouterField{name: "slug", value: ""}},
+        [WebRouterField]{WebRouterField{name: "q", value: ""}},
+        page
+    ) ?? panic("route")
+    nav :: router.navigate(r, "/item/a+b?q=a+b") ?? panic("navigate")
+    if nav.params[0].value != "a+b" -> panic("path plus changed")
+    if nav.search[0].value != "a b" -> panic("query plus did not decode")
+    rejected :: rejects_invalid_utf8(r)
+    if !rejected -> panic("invalid UTF-8 was accepted")
+    print("ok")
+}
+"#,
+        "ok\n",
+    );
 }
 
 #[test]

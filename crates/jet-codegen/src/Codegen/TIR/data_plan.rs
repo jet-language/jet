@@ -5,13 +5,13 @@
 //! future MIR boundary can attach this value to a typed expression and every
 //! tier can consume the same decisions.
 
+use super::{TExpr, TExprKind};
 use crate::AST::{
     DataPlanCallable, DataPlanFact, DataPlanLogicalNode, DataPlanNodeId, DataPlanOperationKind,
     DataPlanPhysicalNode, DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSourceKind,
     DataPlanStreamMode, DataPlanValidationError, Type,
 };
 use crate::Diagnostics::Span;
-use super::{TExpr, TExprKind};
 
 /// Version of the TIR table-plan carrier.
 pub const TDATA_PLAN_SCHEMA_VERSION: u32 = 1;
@@ -73,7 +73,6 @@ pub struct TDataPlan {
 }
 
 impl TDataPlan {
-
     /// Copy checked sema facts into the total TIR carrier.  Validation occurs
     /// before copying so no later tier needs an optional or fallback path.
     pub fn from_fact(fact: &DataPlanFact) -> Result<Self, DataPlanError> {
@@ -241,7 +240,6 @@ impl TDataPlan {
     }
 }
 
-
 fn result_inner(ty: &Type) -> &Type {
     match ty {
         Type::Result { ok, .. } => result_inner(ok),
@@ -272,18 +270,13 @@ fn chained_fact(args: &[TExpr]) -> Option<DataPlanFact> {
     })
 }
 
-fn callable(
-    arg: Option<&TExpr>,
-    label: &str,
-    span: Span,
-) -> Result<DataPlanCallable, String> {
+fn callable(arg: Option<&TExpr>, label: &str, span: Span) -> Result<DataPlanCallable, String> {
     let Some(TExpr {
-        ty:
-            Type::Fn {
-                params,
-                ret: Some(ret),
-                ..
-            },
+        ty: Type::Fn {
+            params,
+            ret: Some(ret),
+            ..
+        },
         ..
     }) = arg
     else {
@@ -311,39 +304,32 @@ pub(crate) fn data_plan_for_core_call(
     span: Span,
 ) -> Result<Option<TDataPlan>, String> {
     let Some(kind) = crate::Sema::classify_data_call(record.module, record.member)
-        .or_else(|| {
-            crate::Sema::classify_data_receiver_call(record.receiver_types, record.member)
-        })
+        .or_else(|| crate::Sema::classify_data_receiver_call(record.receiver_types, record.member))
     else {
         return Ok(None);
     };
     let fact = chained_fact(args);
     let mut builder = match fact {
-        Some(fact) => crate::Sema::DataPlanBuilder::from_fact(fact)
-            .map_err(|error| error.to_string())?,
+        Some(fact) => {
+            crate::Sema::DataPlanBuilder::from_fact(fact).map_err(|error| error.to_string())?
+        }
         None => {
             let source = match kind {
                 crate::Sema::DataPlanCallKind::Scan(source) => source,
                 _ => DataPlanSourceKind::Table,
             };
-            let row_type = row_type(
-                if matches!(kind, crate::Sema::DataPlanCallKind::Scan(_)) {
-                    result_ty
-                } else {
-                    args.first().map(|arg| &arg.ty).unwrap_or(result_ty)
-                },
-            )
+            let row_type = row_type(if matches!(kind, crate::Sema::DataPlanCallKind::Scan(_)) {
+                result_ty
+            } else {
+                args.first().map(|arg| &arg.ty).unwrap_or(result_ty)
+            })
             .ok_or_else(|| {
                 format!(
                     "checked data call `{}.{}` has no typed row schema",
                     record.module, record.member
                 )
             })?;
-            crate::Sema::DataPlanBuilder::new(
-                source,
-                crate::Sema::scalar_schema(row_type),
-                span,
-            )
+            crate::Sema::DataPlanBuilder::new(source, crate::Sema::scalar_schema(row_type), span)
         }
         .map_err(|error| error.to_string())?,
     };

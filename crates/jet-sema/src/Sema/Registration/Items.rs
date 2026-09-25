@@ -1319,6 +1319,49 @@ pub(crate) fn comptime_context_from_items(
     (funcs, externs, globals)
 }
 
+fn supported_module_array_type(c: &crate::AST::ConstDef) -> Option<Type> {
+    if c.mutable || c.is_comptime {
+        return None;
+    }
+    let Expr::TypedLit {
+        head: Some(Type::List(element)),
+        body,
+        ..
+    } = &c.value
+    else {
+        return None;
+    };
+    if !matches!(
+        element.as_ref(),
+        Type::Int | Type::IntN {
+            signed: false,
+            bits: 8,
+        }
+    ) {
+        return None;
+    }
+    let elements = match body {
+        crate::AST::TypedLitBody::Elements(elements) => elements,
+        crate::AST::TypedLitBody::Empty => return Some(Type::List(element.clone())),
+        _ => return None,
+    };
+    let supported = match element.as_ref() {
+        Type::Int => elements.iter().all(|value| matches!(value, Expr::Int(..))),
+        Type::IntN {
+            signed: false,
+            bits: 8,
+        } => elements.iter().all(|value| {
+            let Expr::Int(number, _, _, raw) = value else {
+                return false;
+            };
+            let exact = crate::Sema::CheckerInfer::exact_integer_literal(*number, raw.as_deref());
+            crate::Sema::CheckerInfer::exact_integer_fits(&exact, 0, 255)
+        }),
+        _ => false,
+    };
+    supported.then(|| Type::List(element.clone()))
+}
+
 pub(crate) fn register_const(
     c: &crate::AST::ConstDef,
     consts: &mut HashMap<String, Type>,
@@ -1357,7 +1400,7 @@ pub(crate) fn register_const(
         {
             Some(Type::String)
         }
-        _ => None,
+        _ => supported_module_array_type(c),
     };
     match ty {
         Some(t) => {
@@ -1366,10 +1409,10 @@ pub(crate) fn register_const(
         None => {
             diags.push(Diagnostic::error(
                 "E0109",
-                "a module binding must use a supported scalar or string literal".to_string(),
+                "a module binding must use a supported scalar, string, or immutable integer-array literal".to_string(),
                 "module globals need a value shape that every execution tier can initialize before `fn run`"
                     .to_string(),
-                "use an integer, float, bool, char, or immutable string literal".to_string(),
+                "use an integer, float, bool, char, or immutable string literal, or an immutable `[Int]`/`[U8]` literal with integer-literal elements".to_string(),
                 Some(c.value.span()),
             ));
         }
@@ -2211,4 +2254,29 @@ pub(crate) fn register_impl_methods(
             }
         }
     }
+}
+
+/// Return the compiler-private receiver function for one String method.
+///
+/// The private source part is not a nominal `String` registry entry and its
+/// functions are never public imports. This registry only admits the
+/// receiver-first, read-only primitive shape; the ordinary String contract
+/// checker remains authoritative for arity, arguments, mutation, and failure.
+pub(crate) fn core_string_source_method<'a>(
+    modules: &'a [ModuleState],
+    method: &str,
+) -> Option<&'a Func> {
+    let module = modules.iter().find(|module| {
+        module.module_alias == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS
+    })?;
+    let function = module.items.iter().find_map(|item| match item {
+        Item::Func(function)
+            if !function.is_pub && function.name == method && function.params.first().is_some() =>
+        {
+            Some(function)
+        }
+        _ => None,
+    })?;
+    let receiver = function.params.first()?;
+    (receiver.convention == AccessConvention::Read && receiver.ty == Type::String).then_some(function)
 }

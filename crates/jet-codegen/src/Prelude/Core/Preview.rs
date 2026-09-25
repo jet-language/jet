@@ -830,7 +830,6 @@ impl JetUiPreviewRegistry {
     }
 }
 
-pub type JetUiPlayground = JetUiPreview;
 
 pub fn jet_ui_preview<F>(name: impl Into<String>, callback: F) -> JetUiPreview
 where

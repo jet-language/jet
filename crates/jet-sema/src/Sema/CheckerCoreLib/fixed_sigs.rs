@@ -1285,10 +1285,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
         )),
-        ("core.files", "close") => Some((
-            vec![(read, Type::Int)],
-            Some(result_ty(unit.clone(), io.clone())),
-        )),
         ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io.clone())))),
         ("core.files", "read_bytes") => Some((
             vec![(
@@ -1928,6 +1924,7 @@ fn core_fixed_sig_impl(
         ("core.math", "sqrt" | "floor" | "ceil" | "fabs" | "expm1") => {
             Some((vec![(read, float.clone())], Some(float)))
         }
+        ("core.math", "round") => Some((vec![(read, float.clone())], Some(int.clone()))),
         ("core.math", "pow") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),

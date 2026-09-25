@@ -857,13 +857,64 @@ fn locked_library_compile_requires_the_lock_stamp() {
     assert!(errors.iter().any(|error| error.code == "E3512"));
 }
 
+fn library_build_scratch(tag: &str) -> Scratch {
+    let mut scratch = Scratch::new(tag);
+    let checkout = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+    if fs::canonicalize(&scratch.path)
+        .unwrap()
+        .starts_with(&checkout)
+    {
+        fs::remove_dir_all(&scratch.path).unwrap();
+        let home = fs::canonicalize(
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .expect("HOME is required for test scratch"),
+        )
+        .expect("canonicalize HOME");
+        let fallback_root = home.join(".cache/jet-test-scratch/scratch");
+        assert!(
+            !fallback_root.starts_with(&checkout),
+            "HOME disk scratch must be outside the repository: {}",
+            fallback_root.display()
+        );
+        common::assert_test_path_on_disk(&fallback_root, "library build scratch");
+        fs::create_dir_all(&fallback_root).unwrap();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = fallback_root.join(format!(
+            "jet-it-{tag}-{}-{nanos}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir(&path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let path = fs::canonicalize(path).unwrap();
+        assert!(
+            !path.starts_with(&checkout),
+            "HOME disk scratch resolved inside the repository: {}",
+            path.display()
+        );
+        scratch.path = path;
+    }
+    scratch
+}
+
 #[test]
 fn locked_named_library_build_selects_the_requested_output() {
     assert!(have_rustc(), "locked Library build proof requires rustc");
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/foreign_build_hosts/cmake");
-    let scratch = Scratch::new("library-locked-build");
+    let scratch = library_build_scratch("library-locked-build");
     copy_tree(&fixture, &scratch.path);
+    let jet_dir = scratch.path.join(".jet");
+    fs::create_dir_all(&jet_dir).unwrap();
+    fs::copy(fixture.join("lock.fixture"), jet_dir.join("lock")).unwrap();
     let build = run_jet(
         &scratch.path,
         &["build", "--lib", "--locked", "--output", "core", "library.jet"],

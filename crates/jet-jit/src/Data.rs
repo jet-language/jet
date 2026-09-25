@@ -948,20 +948,10 @@ fn loader_limits(
             .record_get_int(encoding, index)
             .ok_or_else(|| data_decode_error(operation, "EncodingLimits has an invalid field"))
     };
-    let max_total_packed = rt
-        .heap
-        .record_get_int(encoding, 3)
+    let max_total_handle = get(3)?;
+    let max_total = crate::runtime_host::jit_result(rt, max_total_handle)
         .ok_or_else(|| data_decode_error(operation, "EncodingLimits max_total_bytes is invalid"))?;
-    let max_total_bytes = match max_total_packed {
-        0 => None,
-        value if value > 0 => Some(value - 1),
-        _ => {
-            return Err(data_decode_error(
-                operation,
-                "EncodingLimits max_total_bytes is invalid",
-            ))
-        }
-    };
+    let max_total_bytes = max_total.ok.then_some(max_total.bits as i64);
     let limits = jet_foundation::PreludeDataFlow::Limits {
         buffer_bytes: get(0)?,
         max_depth: get(1)?,

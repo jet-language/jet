@@ -27,6 +27,22 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
 | `@` | compile-time block, name, or fact | `D-ONCE-AT1` |
+| `prep` | explicit shared-preparation block expression | `D-PREP-SURFACE2=A` |
+| `@PHASE` | total evaluation-site phase query | `D-PREP-SURFACE2=A` |
+| `@TYPE` | checked type metadata query | `D-META-REFLECT2=A` |
+| `@FUNCTION` | checked function metadata query | `D-META-REFLECT2=A` |
+| `@METHOD` | checked method metadata query | `D-META-REFLECT2=A` |
+| `@CLOSURE` | checked closure metadata query | `D-META-REFLECT2=A` |
+| `@PROGRAM` | authorized checked-program metadata query | `D-META-REFLECT2=A` |
+| `@PACKAGE` | lexical package metadata query | `D-META-REFLECT2=A` |
+| `@SOURCE` | lexical source-snapshot metadata query | `D-META-REFLECT2=A` |
+| `@VALUE` | retained runtime-value metadata query | `D-META-REFLECT2=A` |
+| `@TYPES` | retained runtime type-catalog query | `D-META-REFLECT2=A` |
+| `compiler.generate` | explicit shared-preparation publication of Generated items | `D-META-PUBLISH2=A` |
+| `compiler.advanced.register` | explicit opt-in provider registration for declared targets | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
+| `compiler.advanced.register_expansion` | explicit opt-in call-expansion provider registration | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
+| `compiler.advanced.register_specialization` | explicit opt-in specialization provider registration | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
+| `compiler.advanced.session` | authorized session within a registered provider | `D-META-CONTROL2=A; D-META-OPTIN2=A` |
 | `-[…]` | effect row on a callable | `D-EFF1` |
 | `!` | error type in a signature; deny-only root | `D-RESULT1; D-EFF4` |
 | `?` | optional type | `D-OPT1` |
@@ -2843,8 +2859,61 @@ spelling: the ruling reverses the same-day plain-`if` ruling. See the explicit
 reverse-amendment links at [S57 line 2561](#L2561) and [the reversal paragraph
 line 2588](#L2588).
 
-**S56** stays open for Epoch 3 (typed-reflection hardening; see Open
-decisions).
+**D-PREP-SURFACE2=A — Shared preparation and phase query** *(ratified
+2026-09-21, card #3520)*: `prep { … }` is always a brace-delimited expression.
+Its final expression supplies its value; without one it returns `Unit`.
+Prepared values use ordinary names. `@PHASE()` is a total compiler-known
+`Phase` with exactly `Preparation`, `Build`, and `Runtime`, selected at the
+expression's evaluation site rather than by optimizer behavior. It adds no
+prep-specific condition or loop form; ordinary Jet control flow remains valid.
+`#Runtime(.NoEager)` and `#Runtime(.Only)` remain scoped to functions, methods,
+or explicit blocks: the first blocks automatic eager evaluation but permits
+explicit prep, while the second rejects prep and build calls.
+
+**D-META-REFLECT2=A — Typed compiler metadata roots** *(ratified 2026-09-21,
+card #3520)*: checked facts use uppercase callable roots and lowercase record
+members: `@TYPE(T) -> TypeInfo`, `@FUNCTION(f) -> FunctionInfo`,
+`@METHOD(T, name) -> MethodInfo`, `@CLOSURE(value) -> ClosureInfo`,
+`@PROGRAM() -> ProgramInfo`, `@PACKAGE() -> PackageInfo`,
+`@SOURCE() -> SourceInfo`, `@VALUE(value) -> ValueInfo`, and
+`@TYPES() -> TypeCatalog`. Each query returns `T !MetadataError`; only
+`@PHASE()` is total. `MetadataError` carries `kind: MetadataFailure`,
+`query: String`, and optional `SourceSpan`. `MetadataFailure` is closed:
+`Unavailable(required_stage: CompilerStage, reason: String)`,
+`Unsupported(capability: String)`,
+`Stale(requested: SnapshotId, current: SnapshotId)`,
+`Invalid(diagnostics: [CompilerDiagnostic])`,
+`Denied(scope: ScopeId, reason: String)`, or
+`Truncated(limit: Int, observed: Int)`. `CompilerStage` is exactly `Parsed`,
+`Resolved`, `Typed`, `Prepared`, or `Emitted`. Missing facts never become
+empty lists or zero; an empty successful collection means checked emptiness.
+Metadata identities are compiler-issued, not constructible from source names
+or casts. `@METHOD` accepts a typed method handle when its name is ambiguous;
+queries of other snapshots require an explicit authorized handle. This root
+contract is the checked reflection surface.
+
+**D-META-PUBLISH2=A — Explicit shared generated-item publication** *(ratified
+2026-09-21, card #3520)*: `compiler.generate(name: String, value: Generated)`
+publishes the existing typed `Generated` value into the current preparation
+program. A generated value is inert until that call. Standard publication is
+additive and cannot replace existing bodies, signatures, or types. Publication
+uses ordinary checking and preserves template, capture, and publication
+provenance.
+
+**D-META-CONTROL2=A — Checked advanced change sets** *(ratified 2026-09-21,
+card #3520)*: type construction, code parsing/capture/insertion, specialization,
+workspace/build control, and existing-program rewrites use an authorized
+`compiler.advanced` session. Changes are explicit, checked against affected
+callers, atomic, and reported by a complete transformation receipt. They do
+not expose mutable compiler AST nodes or manufacture inferred facts.
+
+**D-META-OPTIN2=A — Approved root-package metaprogramming opt-in** *(ratified
+2026-09-21)*: standard mode includes read-only facts and additive `Generated`
+publication. Advanced providers require `metaprogramming: unrestricted` in the
+approved root package and explicit target registration from root preparation.
+Import alone grants no provider or session. This opt-in does not grant host
+permissions.
+
 
 ### Low-level tier
 

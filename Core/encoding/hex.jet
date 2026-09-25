@@ -16,7 +16,7 @@ impl HexError {
 //
 
 // Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
-fn u8_int(b: U8) -> Int { Int.from_u8(b) }
+fn u8_int(b: U8) -> Int !Never { Int.from_u8(b) }
 
 
 /// Encode `data` as lowercase hexadecimal text.
@@ -180,34 +180,61 @@ pub fn a2b_qp(text: String) -> [U8] {
 
 pub fn b2a_uu(data: [U8]) -> String {
     out := ""
-    count :: data.len()
-    out = "{uu_char(count)}"
     i := 0
-    loop i < count {
-        a :: u8_int(data[i])
-        b :: if i + 1 < count -> u8_int(data[i + 1]) else -> 0
-        c :: if i + 2 < count -> u8_int(data[i + 2]) else -> 0
-        out = "{out}{uu_char(a >> 2)}{uu_char(((a << 4) ~| (b >> 4)) & 63)}{uu_char(((b << 2) ~| (c >> 6)) & 63)}{uu_char(c & 63)}"
-        i = i + 3
+    if data.len() == 0 -> return "{uu_char(0)}\n"
+    loop i < data.len() {
+        count := data.len() - i
+        if count > 45 -> count = 45
+        out = "{out}{uu_char(count)}"
+        j := 0
+        loop j < count {
+            pos :: i + j
+            a :: u8_int(data[pos])
+            b :: if j + 1 < count -> u8_int(data[pos + 1]) else -> 0
+            c :: if j + 2 < count -> u8_int(data[pos + 2]) else -> 0
+            out = "{out}{uu_char(a >> 2)}{uu_char(((a << 4) ~| (b >> 4)) & 63)}{uu_char(((b << 2) ~| (c >> 6)) & 63)}{uu_char(c & 63)}"
+            j += 3
+        }
+        out = "{out}\n"
+        i += count
     }
-    "{out}\n"
+    out
 }
 
 pub fn a2b_uu(text: String) -> [U8] {
     raw :: text.bytes()
-    if raw.len() == 0 -> return [U8]{}
-    count :: uu_value(raw[0])
     out := [U8]{}
-    i := 1
-    loop i + 3 < raw.len() && out.len() < count {
-        a :: uu_value(raw[i])
-        b :: uu_value(raw[i + 1])
-        c :: uu_value(raw[i + 2])
-        d :: uu_value(raw[i + 3])
-        out.push(U8{(a << 2) ~| (b >> 4)})
-        if out.len() < count -> out.push(U8{(b << 4) ~| (c >> 2)})
-        if out.len() < count -> out.push(U8{(c << 6) ~| d})
-        i = i + 4
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
+            i += 1
+            next
+        }
+        count := uu_value(raw[i])
+        i += 1
+        if count < 0 || count > 45 -> break
+        groups := (count + 2) /% 3
+        needed := groups * 4
+        if i + needed > raw.len() -> break
+        produced := 0
+        loop produced < count {
+            a :: uu_value(raw[i])
+            b :: uu_value(raw[i + 1])
+            c :: uu_value(raw[i + 2])
+            d :: uu_value(raw[i + 3])
+            out.push(U8{(a << 2) ~| (b >> 4)})
+            produced += 1
+            if produced < count {
+                out.push(U8{(b << 4) ~| (c >> 2)})
+                produced += 1
+            }
+            if produced < count {
+                out.push(U8{(c << 6) ~| d})
+                produced += 1
+            }
+            i += 4
+        }
+        loop i < raw.len() && raw[i] != (U8{10}) && raw[i] != (U8{13}) -> i += 1
     }
     ~out
 }
@@ -292,10 +319,10 @@ fn hex_pad(n: Int, width: Int) -> String {
     }
     String.from_bytes(out) ?? "0"
 }
-@base64_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+base64_alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 fn base64_encode(data: [U8]) -> String {
-    ab :: @base64_alphabet.bytes()
+    ab :: base64_alphabet.bytes()
     out := [U8]{}
     i := 0
     loop i + 3 <= data.len() {
@@ -391,10 +418,10 @@ fn base64_decode(text: String) -> [U8] !HexError {
     Ok(out)
 }
 
-fn base64_decode_table() -> [Int] {
+fn base64_decode_table() -> [Int] !Never {
     table := [Int]{}
     loop _ in 0..<256 -> table.push(-1)
-    ab :: @base64_alphabet.bytes()
+    ab :: base64_alphabet.bytes()
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     table
 }

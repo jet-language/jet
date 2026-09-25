@@ -487,18 +487,23 @@ pub fn apply_impure_core_call_with_type_args(
 
         (
             "core.files",
-            "read" | "read_bytes" | "write" | "append_all" | "exists" | "is_dir"
+            "read" | "read_bytes" | "write" | "write_bytes" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy" | "copy_dir" | "rename" | "glob" | "walk" | "walk_parallel"
+            | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link"
+            | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel"
             | "walk_files" | "stat" | "fsync",
         ) => {
             let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(as_string(value, span)?.to_string())
             };
             let path = path_arg(one(0)?)?;
-            let ignore_name = match args.get(1) {
-                None | Some(CtValue::Failed(CtReport::Clean(_))) => None,
-                Some(_) => Some(as_string(one(1)?, span)?.to_string()),
+            let ignore_name = if matches!(method, "walk" | "walk_parallel" | "walk_files") {
+                match args.get(1) {
+                    None | Some(CtValue::Failed(CtReport::Clean(_))) => None,
+                    Some(_) => Some(as_string(one(1)?, span)?.to_string()),
+                }
+            } else {
+                None
             };
             let unit = |result: Result<(), CtValue>| match result {
                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
@@ -512,6 +517,21 @@ pub fn apply_impure_core_call_with_type_args(
             Ok(match method {
                 "read" => present(files_kernel::fs_read(&path).map(CtValue::Str)),
                 "read_bytes" => present(files_kernel::fs_read_bytes(&path).map(CtValue::Bytes)),
+                "write_bytes" => {
+                    let bytes = match one(1)? {
+                        CtValue::Bytes(bytes) => bytes.clone(),
+                        CtValue::List(values) => values
+                            .iter()
+                            .map(|value| match value {
+                                CtValue::Int(byte) => u8::try_from(*byte)
+                                    .map_err(|_| unsupported("core.files.write_bytes received an invalid U8", span)),
+                                _ => Err(unsupported("core.files.write_bytes expects [U8]", span)),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        _ => return Err(unsupported("core.files.write_bytes expects [U8]", span)),
+                    };
+                    unit(files_kernel::fs_write_bytes(&path, &bytes))
+                }
                 // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not
                 // `append`, which names the streaming handle's method).
                 "write" => unit(files_kernel::fs_write(&path, as_string(one(1)?, span)?)),
@@ -528,6 +548,10 @@ pub fn apply_impure_core_call_with_type_args(
                 "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
                 "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
                 "rename" => unit(files_kernel::fs_rename(&path, &path_arg(one(1)?)?)),
+                "symlink" => unit(files_kernel::fs_symlink(&path, &path_arg(one(1)?)?)),
+                "hard_link" => unit(files_kernel::fs_hard_link(&path, &path_arg(one(1)?)?)),
+                "read_link" => present(files_kernel::fs_read_link(&path).map(CtValue::Str)),
+                "canonicalize" => present(files_kernel::fs_canonicalize(&path).map(CtValue::Str)),
                 "glob" => present(files_kernel::fs_glob(&path).map(|paths| {
                     CtValue::List(paths.into_iter().map(CtValue::Str).collect())
                 })),
@@ -986,7 +1010,7 @@ pub fn apply_impure_core_call_with_type_args(
         }
         // `core.text.fmt` is pure text rendering; at runtime it carries the
         // shared Display route every `"{value}"` and `print(value)` lowers to.
-        ("core.builtin", "len_string")
+        ("core.builtin", "len_string" | "map_keys" | "map_values")
         | ("core.reactive.loadable", _)
         | ("core.time", _)
         | ("core.math", _)

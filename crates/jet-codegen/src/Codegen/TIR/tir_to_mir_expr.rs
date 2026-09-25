@@ -3,31 +3,30 @@
 //! This module is deliberately a projection only. It consumes facts already
 //! present in checked TIR; it never re-derives meaning from AST.
 use jet_foundation::MIR::{
-    stable_id, MirAccess, MirAllocatorKind, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId,
-    MirCallbackAdapter, MirCallbackId, MirCallee, MirCallArg, MirConstKey, MirConstReport,
-    MirConstant, MirCoreCall, MirCoreClosureKind, MirDataPlan, MirDataPlanCallable,
-    MirDataPlanColumn, MirDataPlanNode, MirDataPlanNodeId, MirDataPlanPhysicalNode, MirConversion,
-    MirEnumArg, MirForeignAbi, MirHardwareOp, MirPlace, MirPlaceBase, MirPlaceId,
-    MirGcEditSiteId, MirIndexKind, MirLayoutCompareOp, MirOperation, MirOwnership, MirParam,
-    MirPattern, MirPatternBinding, MirPatternField, MirPatternPosition, MirPatternShape,
-    MirPanicContext, MirPanicLoc, MirPreludeAbi, MirPreludeFamily, MirRequireKind, MirSemanticOp,
-    MirPreludeTypeArg, MirReflectField,
-    MirSelectKind, MirStringPart, MirStructExtra, MirSymbol, MirTaskGroupKind, MirTerminator,
-    MirTextHoleKind, MirTextPatternPart, MirTypeId, MirType, MirCallSignature, MirValueId,
+    MirAccess, MirAllocatorKind, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCallArg,
+    MirCallSignature, MirCallbackAdapter, MirCallbackId, MirCallee, MirConstKey, MirConstReport,
+    MirConstant, MirConversion, MirCoreCall, MirCoreClosureKind, MirDataPlan, MirDataPlanCallable,
+    MirDataPlanColumn, MirDataPlanNode, MirDataPlanNodeId, MirDataPlanPhysicalNode, MirEnumArg,
+    MirForeignAbi, MirGcEditSiteId, MirHardwareOp, MirIndexKind, MirLayoutCompareOp, MirOperation,
+    MirOwnership, MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding,
+    MirPatternField, MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId,
+    MirPreludeAbi, MirPreludeFamily, MirPreludeTypeArg, MirReflectField, MirRequireKind,
+    MirSelectKind, MirSemanticOp, MirStringPart, MirStructExtra, MirSymbol, MirTaskGroupKind,
+    MirTerminator, MirTextHoleKind, MirTextPatternPart, MirType, MirTypeId, MirValueId, stable_id,
 };
 
-use std::collections::BTreeMap;
 use super::{
-    ListSpreadPart, TCallArg, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
-    THostCall, THandleOp, TMethodRef, TOptionProbe, TPattern, TPatternBinding, TPatternField,
-    TPatternPosition, TPatternShape, TStrPart, TTryConvert, TPlace, TLocal, TNumericOp,
-    TEnumArg, TEnumPayload, TTextPatternPart, TBinaryPatternPart, TBuiltinOp, TCoreClosureKind, TLambda,
-    TLambdaBody, TEffectFacts, TGcEditKind, TPreludeRoute, TCaptureFacts,
+    ListSpreadPart, TBinaryPatternPart, TBuiltinOp, TCallArg, TCaptureFacts, TCoreClosureKind,
+    TEffectFacts, TEnumArg, TEnumPayload, TExpr, TExprKind, TFailureCarrier, TFnValueKind,
+    TGcEditKind, THandleOp, THostCall, TLambda, TLambdaBody, TLocal, TMethodRef, TNumericOp,
+    TOptionProbe, TPattern, TPatternBinding, TPatternField, TPatternPosition, TPatternShape,
+    TPlace, TPreludeRoute, TStrPart, TTextPatternPart, TTryConvert,
 };
 use jet_foundation::CanonicalPass;
+use std::collections::BTreeMap;
 
-use crate::AST::{BinOp, Type};
 use super::mir::{LowerCtx, LowerError};
+use crate::AST::{BinOp, Type};
 fn shared_guard_type_name(name: &str) -> bool {
     let leaf = name
         .rsplit("::")
@@ -50,16 +49,43 @@ fn shared_guard_value_type(ty: &Type) -> Option<Type> {
 }
 fn pin_inner_type(ty: &Type) -> Option<Type> {
     match ty.without_user_tags() {
-        Type::Apply { name, args }
-            if name == crate::Syntax::TYPE_PIN && args.len() == 1 =>
-        {
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_PIN && args.len() == 1 => {
             Some(args[0].clone())
         }
         _ => None,
     }
 }
 
-
+fn lower_carrier_payload(
+    ctx: &mut LowerCtx,
+    inner: &TExpr,
+    expected: Option<&Type>,
+) -> Result<MirValueId, LowerError> {
+    let value = ctx.lower_child(inner)?;
+    if ctx.is_terminated() {
+        return Ok(value);
+    }
+    // The checked carrier can widen a fixed-width integer payload to Int.
+    // Keep that conversion in canonical MIR rather than a backend wrapper.
+    if let Some(expected) = expected {
+        if matches!(expected.without_user_tags(), Type::Int)
+            && matches!(inner.ty.without_user_tags(), Type::IntN { .. })
+        {
+            let target = ctx.mir_type(expected)?;
+            return ctx.emit(
+                "carrier-payload-numeric",
+                Some(expected.clone()),
+                MirOperation::Convert {
+                    value,
+                    parameters: Vec::new(),
+                    target,
+                    conversion: MirConversion::NumericCast,
+                },
+            );
+        }
+    }
+    Ok(value)
+}
 
 fn zip_callback(
     ctx: &mut LowerCtx,
@@ -67,7 +93,9 @@ fn zip_callback(
     body: TExpr,
 ) -> Result<MirValueId, LowerError> {
     let lambda = TLambda {
-        source_params: (0..params.len()).map(|index| format!("zip_{index}")).collect(),
+        source_params: (0..params.len())
+            .map(|index| format!("zip_{index}"))
+            .collect(),
         param_types: params,
         ret: Some(body.ty.clone()),
         failure_carrier: TFailureCarrier::Infallible,
@@ -197,16 +225,15 @@ fn zip_closure_call(
     ctx.emit(
         "zip-closure",
         Some(result),
-        MirOperation::Semantic(MirSemanticOp::ClosureMethod { call, receiver, args }),
+        MirOperation::Semantic(MirSemanticOp::ClosureMethod {
+            call,
+            receiver,
+            args,
+        }),
     )
 }
 
-
-fn lower_unzip(
-    ctx: &mut LowerCtx,
-    expr: &TExpr,
-    recv: &TExpr,
-) -> Result<MirValueId, LowerError> {
+fn lower_unzip(ctx: &mut LowerCtx, expr: &TExpr, recv: &TExpr) -> Result<MirValueId, LowerError> {
     let Type::Tuple(fields) = expr.ty.without_user_tags() else {
         return Err(ctx.error(ctx.span(), "checked unzip result is not a tuple"));
     };
@@ -222,7 +249,11 @@ fn lower_unzip(
     let source = if crate::Collections::is_iter_type(&recv.ty) {
         if let TExprKind::Local(local) = &recv.kind {
             let place = lower_local_place(ctx, local, MirAccess::Move)?;
-            ctx.emit("unzip-source", Some(recv.ty.clone()), MirOperation::MovePlace { place })?
+            ctx.emit(
+                "unzip-source",
+                Some(recv.ty.clone()),
+                MirOperation::MovePlace { place },
+            )?
         } else {
             ctx.lower_child(recv)?
         }
@@ -245,7 +276,14 @@ fn lower_unzip(
                 trait_coercion: None,
             },
         )?;
-        ctx.emit("unzip-column", None, MirOperation::WritePlace { place, value: empty })?;
+        ctx.emit(
+            "unzip-column",
+            None,
+            MirOperation::WritePlace {
+                place,
+                value: empty,
+            },
+        )?;
         let input_field = ctx.field_id_for_type(&item_ty, name)?;
         let output_field = ctx.field_id_for_type(&expr.ty, name)?;
         let push = ctx.intern_prelude_route(TBuiltinOp::Push.prelude_route(
@@ -253,7 +291,15 @@ fn lower_unzip(
             &unit_ty,
             &TFailureCarrier::Infallible,
         )?)?;
-        columns.push((local, place, (**column_ty).clone(), (**element).clone(), input_field, output_field, push));
+        columns.push((
+            local,
+            place,
+            (**column_ty).clone(),
+            (**element).clone(),
+            input_field,
+            output_field,
+            push,
+        ));
     }
     let routes = super::loop_route_bundle();
     let init = ctx.intern_prelude_route(routes.iter_init)?;
@@ -279,7 +325,10 @@ fn lower_unzip(
     let condition = ctx.emit(
         "unzip-has-next",
         Some(Type::Bool),
-        MirOperation::LoopIterHasNext { call: has_next, cursor },
+        MirOperation::LoopIterHasNext {
+            call: has_next,
+            cursor,
+        },
     )?;
     ctx.terminate(MirTerminator::Branch {
         condition,
@@ -290,18 +339,27 @@ fn lower_unzip(
     let item = ctx.emit(
         "unzip-row",
         Some(item_ty),
-        MirOperation::LoopIterValue { call: value, cursor },
+        MirOperation::LoopIterValue {
+            call: value,
+            cursor,
+        },
     )?;
     for (_, place, column_ty, element, input_field, _, push) in &columns {
         let value = ctx.emit(
             "unzip-field",
             Some(element.clone()),
-            MirOperation::Field { base: item, field: *input_field },
+            MirOperation::Field {
+                base: item,
+                field: *input_field,
+            },
         )?;
         let receiver = ctx.emit(
             "unzip-column-ref",
             Some(column_ty.clone()),
-            MirOperation::AddressOf { place: *place, access: MirAccess::Write },
+            MirOperation::AddressOf {
+                place: *place,
+                access: MirAccess::Write,
+            },
         )?;
         ctx.emit(
             "unzip-push",
@@ -318,7 +376,10 @@ fn lower_unzip(
     ctx.emit(
         "unzip-advance",
         None,
-        MirOperation::LoopIterAdvance { call: advance, cursor },
+        MirOperation::LoopIterAdvance {
+            call: advance,
+            cursor,
+        },
     )?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(exit);
@@ -334,13 +395,17 @@ fn lower_unzip(
             Ok((field, value))
         })
         .collect::<Result<Vec<_>, LowerError>>()?;
-    let owner = ctx.mir_type(&expr.ty)?.identity.ok_or_else(|| {
-        ctx.error(ctx.span(), "checked unzip tuple has no canonical identity")
-    })?;
+    let owner = ctx
+        .mir_type(&expr.ty)?
+        .identity
+        .ok_or_else(|| ctx.error(ctx.span(), "checked unzip tuple has no canonical identity"))?;
     ctx.emit(
         "unzip-result",
         Some(expr.ty.clone()),
-        MirOperation::Tuple { type_id: owner, fields },
+        MirOperation::Tuple {
+            type_id: owner,
+            fields,
+        },
     )
 }
 
@@ -352,15 +417,24 @@ fn lower_zip(
     args: &[TExpr],
 ) -> Result<MirValueId, LowerError> {
     let TBuiltinOp::Zip {
-        mode, fields, flatten, input_count, fill_mode, field_types, ..
-    } = op else {
+        mode,
+        fields,
+        flatten,
+        input_count,
+        fill_mode,
+        field_types,
+        ..
+    } = op
+    else {
         unreachable!("zip projection receives the checked zip operation")
     };
     let fill_count = usize::from(
         *mode == super::TZipMode::Pad && *fill_mode != super::TZipFillMode::DefaultNone,
     );
-    if *flatten || *input_count < 2
-        || fields.len() != *input_count || field_types.len() != *input_count
+    if *flatten
+        || *input_count < 2
+        || fields.len() != *input_count
+        || field_types.len() != *input_count
         || args.len() != input_count - 1 + fill_count
     {
         return Err(ctx.error(ctx.span(), "checked zip has inconsistent column facts"));
@@ -394,14 +468,19 @@ fn lower_zip(
             value
         } else {
             let route = TBuiltinOp::ListLazy.prelude_route(
-                input_ty, &iter_ty, &TFailureCarrier::Infallible,
+                input_ty,
+                &iter_ty,
+                &TFailureCarrier::Infallible,
             )?;
             let call = ctx.intern_prelude_route(route)?;
             ctx.emit(
                 "zip-source",
                 Some(iter_ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
-                    call, receiver: value, receiver_place: None, args: Vec::new(),
+                    call,
+                    receiver: value,
+                    receiver_place: None,
+                    args: Vec::new(),
                     aggregate_fields: None,
                 }),
             )?
@@ -413,12 +492,17 @@ fn lower_zip(
                     let Type::Tuple(shape) = fill_ty else {
                         return Err(ctx.error(ctx.span(), "checked zip column fills have no tuple"));
                     };
-                    let actual = shape.iter().find(|(name, _)| name == &fields[index])
+                    let actual = shape
+                        .iter()
+                        .find(|(name, _)| name == &fields[index])
                         .map(|(_, ty)| ty.as_ref())
-                        .ok_or_else(|| ctx.error(ctx.span(), "checked zip fill column is missing"))?;
+                        .ok_or_else(|| {
+                            ctx.error(ctx.span(), "checked zip fill column is missing")
+                        })?;
                     let field = ctx.field_id_for_type(fill_ty, &fields[index])?;
                     let fill = ctx.emit(
-                        "zip-fill-column", Some(actual.clone()),
+                        "zip-fill-column",
+                        Some(actual.clone()),
                         MirOperation::Field { base: fill, field },
                     )?;
                     (fill, actual)
@@ -430,9 +514,12 @@ fn lower_zip(
                 } else {
                     let mir_target = ctx.mir_type(target)?;
                     ctx.emit(
-                        "zip-fill-widen", Some(target.clone()),
+                        "zip-fill-widen",
+                        Some(target.clone()),
                         MirOperation::Convert {
-                            value: fill, parameters: Vec::new(), target: mir_target,
+                            value: fill,
+                            parameters: Vec::new(),
+                            target: mir_target,
                             conversion: MirConversion::NumericCast,
                         },
                     )?
@@ -442,16 +529,27 @@ fn lower_zip(
                     ty: element.clone(),
                     kind: TExprKind::Local(TLocal::user("zip_0")),
                 };
-                let callback = zip_callback(ctx, vec![element], TExpr {
-                    ty: target.clone(),
-                    kind: TExprKind::Present(Box::new(local)),
-                })?;
+                let callback = zip_callback(
+                    ctx,
+                    vec![element],
+                    TExpr {
+                        ty: target.clone(),
+                        kind: TExprKind::Present(Box::new(local)),
+                    },
+                )?;
                 let result = crate::Collections::iter_ty(target.clone());
                 let route = super::TClosureOp::Map.prelude_route(
-                    &iter_ty, &result, &TFailureCarrier::Infallible,
+                    &iter_ty,
+                    &result,
+                    &TFailureCarrier::Infallible,
                 )?;
-                value = zip_closure_call(ctx, result, route, value, vec![(callback, MirAccess::Move)])?;
-                ctx.emit("zip-fill-absent", Some(target.clone()), MirOperation::Absent)?
+                value =
+                    zip_closure_call(ctx, result, route, value, vec![(callback, MirAccess::Move)])?;
+                ctx.emit(
+                    "zip-fill-absent",
+                    Some(target.clone()),
+                    MirOperation::Absent,
+                )?
             };
             fills.push(fill_value);
         }
@@ -461,12 +559,20 @@ fn lower_zip(
     let mut left_ty = field_types[0].clone();
     let mut left_fill = fills.first().copied();
     for column in 1..*input_count {
-        let shape: Vec<_> = fields[..=column].iter().cloned()
-            .zip(field_types[..=column].iter().cloned()).collect();
-        let row_ty = Type::Tuple(shape.iter()
-            .map(|(name, ty)| (name.clone(), Box::new(ty.clone()))).collect());
+        let shape: Vec<_> = fields[..=column]
+            .iter()
+            .cloned()
+            .zip(field_types[..=column].iter().cloned())
+            .collect();
+        let row_ty = Type::Tuple(
+            shape
+                .iter()
+                .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                .collect(),
+        );
         let left_local = TExpr {
-            ty: left_ty.clone(), kind: TExprKind::Local(TLocal::user("zip_0")),
+            ty: left_ty.clone(),
+            kind: TExprKind::Local(TLocal::user("zip_0")),
         };
         let mut row_fields = Vec::with_capacity(column + 1);
         for index in 0..column {
@@ -476,18 +582,24 @@ fn lower_zip(
                 TExpr {
                     ty: field_types[index].clone(),
                     kind: TExprKind::Field {
-                        recv: Box::new(left_local.clone()), field: fields[index].clone(), boxed: false,
+                        recv: Box::new(left_local.clone()),
+                        field: fields[index].clone(),
+                        boxed: false,
                     },
                 }
             };
             row_fields.push((fields[index].clone(), value));
         }
-        row_fields.push((fields[column].clone(), TExpr {
-            ty: field_types[column].clone(),
-            kind: TExprKind::Local(TLocal::user("zip_1")),
-        }));
+        row_fields.push((
+            fields[column].clone(),
+            TExpr {
+                ty: field_types[column].clone(),
+                kind: TExprKind::Local(TLocal::user("zip_1")),
+            },
+        ));
         let callback = zip_callback(
-            ctx, vec![left_ty, field_types[column].clone()],
+            ctx,
+            vec![left_ty, field_types[column].clone()],
             TExpr {
                 ty: row_ty.clone(),
                 kind: TExprKind::TupleLit {
@@ -508,14 +620,22 @@ fn lower_zip(
         };
         left = zip_closure_call(ctx, result, super::zip_closure_route(*mode), left, values)?;
         if left_fill.is_some() && column + 1 < *input_count {
-            let owner = ctx.mir_type(&row_ty)?.identity
+            let owner = ctx
+                .mir_type(&row_ty)?
+                .identity
                 .ok_or_else(|| ctx.error(ctx.span(), "zip fill tuple has no type identity"))?;
-            let tuple_fields = fields[..=column].iter().zip(&fills)
+            let tuple_fields = fields[..=column]
+                .iter()
+                .zip(&fills)
                 .map(|(name, value)| Ok((ctx.field_id_for_type(&row_ty, name)?, *value)))
                 .collect::<Result<Vec<_>, LowerError>>()?;
             left_fill = Some(ctx.emit(
-                "zip-fill-prefix", Some(row_ty.clone()),
-                MirOperation::Tuple { type_id: owner, fields: tuple_fields },
+                "zip-fill-prefix",
+                Some(row_ty.clone()),
+                MirOperation::Tuple {
+                    type_id: owner,
+                    fields: tuple_fields,
+                },
             )?);
         }
         left_ty = row_ty;
@@ -548,8 +668,6 @@ fn data_row_type(ty: &Type) -> Option<Type> {
         _ => None,
     }
 }
-
-
 
 fn lower_data_plan_node_id(id: crate::AST::DataPlanNodeId) -> MirDataPlanNodeId {
     MirDataPlanNodeId(id.index() as u64)
@@ -639,10 +757,7 @@ fn mir_const_key(key: &crate::AST::CtKey) -> MirConstKey {
                 .map(|(name, key)| (name.clone(), mir_const_key(key)))
                 .collect(),
         },
-        crate::AST::CtKey::Enum {
-            type_name,
-            variant,
-        } => MirConstKey::Enum {
+        crate::AST::CtKey::Enum { type_name, variant } => MirConstKey::Enum {
             type_name: type_name.clone(),
             variant: variant.clone(),
         },
@@ -714,7 +829,7 @@ fn mir_constant(
             return Err(ctx.error(
                 ctx.span(),
                 "checked comptime closure cannot lower as a neutral MIR constant",
-            ))
+            ));
         }
     })
 }
@@ -852,12 +967,7 @@ pub(super) fn lower_receiver_place(
             } else {
                 base
             };
-            Some(ctx.project_field_place(
-                base,
-                field,
-                expr.ty.clone(),
-                ctx.span(),
-            )?)
+            Some(ctx.project_field_place(base, field, expr.ty.clone(), ctx.span())?)
         }
         TExprKind::SharedGuardValue { guard, .. } => {
             let base = if let Some(base) = lower_receiver_place(ctx, guard, access)? {
@@ -881,19 +991,13 @@ pub(super) fn lower_receiver_place(
             Some(ctx.project_deref_place(base, expr.ty.clone(), ctx.span())?)
         }
         TExprKind::PoolSlot {
-            pool,
-            id,
-            field,
-            ..
+            pool, id, field, ..
         } => {
             let base = ctx.lower_index_place(pool, id, MirIndexKind::Pool, access)?;
             match field {
-                Some(field) => Some(ctx.project_field_place(
-                    base,
-                    field,
-                    expr.ty.clone(),
-                    ctx.span(),
-                )?),
+                Some(field) => {
+                    Some(ctx.project_field_place(base, field, expr.ty.clone(), ctx.span())?)
+                }
                 None => Some(base),
             }
         }
@@ -932,10 +1036,11 @@ fn lower_builtin_receiver(
     // Indexed collection elements are resident handles, not stable Rust
     // addresses. Read the handle while retaining the checked place so the
     // builtin host can mutate the collection object in place.
-    if matches!(
-        recv.kind,
-        TExprKind::Index { .. } | TExprKind::Field { .. }
-    ) && matches!(recv.ty.without_user_tags(), Type::List(_) | Type::Map { .. })
+    if matches!(recv.kind, TExprKind::Index { .. } | TExprKind::Field { .. })
+        && matches!(
+            recv.ty.without_user_tags(),
+            Type::List(_) | Type::Map { .. }
+        )
     {
         let receiver = ctx.emit(
             "builtin-collection-value-receiver",
@@ -976,10 +1081,7 @@ fn lower_list_min_max(
         ));
     }
     let Type::Option(inner) = untagged_type(&expr.ty) else {
-        return Err(ctx.error(
-            ctx.span(),
-            "checked List.min_max result is not optional",
-        ));
+        return Err(ctx.error(ctx.span(), "checked List.min_max result is not optional"));
     };
     let tuple_ty = untagged_type(inner);
     let Type::Tuple(fields) = tuple_ty else {
@@ -1002,9 +1104,9 @@ fn lower_list_min_max(
         .map(|name| ctx.field_id_for_type(tuple_ty, name))
         .collect::<Result<Vec<_>, LowerError>>()?;
     let (receiver, receiver_place) = lower_builtin_receiver(ctx, recv, false)?;
-    let route = op.prelude_route(&recv.ty, &expr.ty, carrier).map_err(|error| {
-        ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}"))
-    })?;
+    let route = op
+        .prelude_route(&recv.ty, &expr.ty, carrier)
+        .map_err(|error| ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}")))?;
     let call = ctx.intern_prelude_route(route)?;
     ctx.emit(
         "list-min-max",
@@ -1019,11 +1121,7 @@ fn lower_list_min_max(
     )
 }
 
-
-fn lower_consuming_task_value(
-    ctx: &mut LowerCtx,
-    value: &TExpr,
-) -> Result<MirValueId, LowerError> {
+fn lower_consuming_task_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
     if let Some(place) = lower_receiver_place(ctx, value, MirAccess::Move)? {
         return ctx.emit(
             "task-consuming-value",
@@ -1110,17 +1208,11 @@ fn lower_math_swizzle_read(
             return Err(ctx.error(
                 ctx.span(),
                 "checked multi-lane swizzle has no vector result type",
-            ))
+            ));
         }
     };
     let type_id = math_builtin_type_id(ctx, result_type)?;
-    let route = super::math_builtin_route(
-        result_type,
-        "new",
-        values.len(),
-        &expr.ty,
-        carrier,
-    )?;
+    let route = super::math_builtin_route(result_type, "new", values.len(), &expr.ty, carrier)?;
     let call = ctx.intern_prelude_route(route)?;
     ctx.emit(
         "math-swizzle-constructor",
@@ -1130,6 +1222,59 @@ fn lower_math_swizzle_read(
             call,
             args: values,
         }),
+    )
+}
+
+fn lower_short_circuit_binary(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    op: BinOp,
+    lhs: &TExpr,
+    rhs: &TExpr,
+) -> Result<MirValueId, LowerError> {
+    let left = ctx.lower_child(lhs)?;
+    if ctx.is_terminated() {
+        return Ok(left);
+    }
+
+    let right_block = ctx.new_block(ctx.span(), "short-circuit-right")?;
+    let short_block = ctx.new_block(ctx.span(), "short-circuit-short")?;
+    let join = ctx.new_block(ctx.span(), "short-circuit-join")?;
+    let (then_target, else_target, short_value) = match op {
+        BinOp::And => (right_block, short_block, false),
+        BinOp::Or => (short_block, right_block, true),
+        _ => return unsupported_expr(ctx, "TExprKind::Binary (invalid short-circuit op)"),
+    };
+    ctx.terminate(MirTerminator::Branch {
+        condition: left,
+        then_target,
+        else_target,
+    });
+
+    let mut incoming = Vec::with_capacity(2);
+    ctx.switch_to(short_block);
+    let short = ctx.emit(
+        "short-circuit-value",
+        Some(expr.ty.clone()),
+        MirOperation::Constant(MirConstant::Bool(short_value)),
+    )?;
+    let source = ctx.current_block();
+    ctx.terminate(MirTerminator::Jump { target: join });
+    incoming.push((source, short));
+
+    ctx.switch_to(right_block);
+    let right = ctx.lower_child(rhs)?;
+    let source = ctx.current_block();
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Jump { target: join });
+        incoming.push((source, right));
+    }
+
+    ctx.switch_to(join);
+    ctx.emit(
+        "short-circuit-phi",
+        Some(expr.ty.clone()),
+        MirOperation::Phi { incoming },
     )
 }
 
@@ -1144,7 +1289,8 @@ pub(super) fn lower_expr(
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
     let value = match &expr.kind {
-        TExprKind::IntLit(value, width) => ctx.emit("int-literal", 
+        TExprKind::IntLit(value, width) => ctx.emit(
+            "int-literal",
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Int {
                 value: *value,
@@ -1152,7 +1298,8 @@ pub(super) fn lower_expr(
                 spelling: None,
             }),
         ),
-        TExprKind::FloatLit(value) => ctx.emit("float-literal", 
+        TExprKind::FloatLit(value) => ctx.emit(
+            "float-literal",
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Float {
                 value: *value,
@@ -1160,11 +1307,13 @@ pub(super) fn lower_expr(
                 spelling: None,
             }),
         ),
-        TExprKind::BoolLit(value) => ctx.emit("bool-literal", 
+        TExprKind::BoolLit(value) => ctx.emit(
+            "bool-literal",
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Bool(*value)),
         ),
-        TExprKind::CharLit(value) => ctx.emit("char-literal", 
+        TExprKind::CharLit(value) => ctx.emit(
+            "char-literal",
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Char(*value)),
         ),
@@ -1178,15 +1327,12 @@ pub(super) fn lower_expr(
                         let formatted = match format {
                             crate::AST::StrFormat::Display
                             | crate::AST::StrFormat::Debug
-                            | crate::AST::StrFormat::Unit(_) => {
-                                lower_direct_string_format(ctx, value_id, &value.ty, format, &expr.ty)?
-                            }
+                            | crate::AST::StrFormat::Unit(_) => lower_direct_string_format(
+                                ctx, value_id, &value.ty, format, &expr.ty,
+                            )?,
                             _ => {
                                 let call = ctx.intern_prelude_route(super::string_format_route(
-                                    format,
-                                    &value.ty,
-                                    &expr.ty,
-                                    &carrier,
+                                    format, &value.ty, &expr.ty, &carrier,
                                 )?)?;
                                 let args = lower_string_format_args(ctx, value_id, format)?;
                                 ctx.emit(
@@ -1205,17 +1351,26 @@ pub(super) fn lower_expr(
                     }
                 }
             }
-            ctx.emit("string-literal", Some(expr.ty.clone()), MirOperation::BuildString { parts: lowered })
+            ctx.emit(
+                "string-literal",
+                Some(expr.ty.clone()),
+                MirOperation::BuildString { parts: lowered },
+            )
         }
         TExprKind::Local(local) => lower_local_value(ctx, local, &expr.ty),
-        TExprKind::Unit => ctx.emit("unit-literal", 
+        TExprKind::Unit => ctx.emit(
+            "unit-literal",
             Some(expr.ty.clone()),
             MirOperation::Constant(MirConstant::Unit),
         ),
         TExprKind::InlineBlock(stmts) => lower_inline_block(ctx, &expr.ty, stmts),
         TExprKind::DefaultLit => {
             let value = mir_constant(ctx, &default_constant(&expr.ty))?;
-            ctx.emit("default-literal", Some(expr.ty.clone()), MirOperation::Constant(value))
+            ctx.emit(
+                "default-literal",
+                Some(expr.ty.clone()),
+                MirOperation::Constant(value),
+            )
         }
         TExprKind::Uninit => unsupported_expr(
             ctx,
@@ -1223,20 +1378,24 @@ pub(super) fn lower_expr(
         ),
         TExprKind::CtLit(value) => {
             let value = mir_constant(ctx, value)?;
-            ctx.emit("constant-literal", Some(expr.ty.clone()), MirOperation::Constant(value))
+            ctx.emit(
+                "constant-literal",
+                Some(expr.ty.clone()),
+                MirOperation::Constant(value),
+            )
         }
         TExprKind::HostCall(host) => lower_host_call(ctx, expr, host),
-        TExprKind::ConstRef(name) => ctx.emit("const-reference", 
+        TExprKind::ConstRef(name) => ctx.emit(
+            "const-reference",
             Some(expr.ty.clone()),
             MirOperation::Global { name: name.clone() },
         ),
         TExprKind::DataEntriesToMap(local) => {
             let local = ctx.local_id_for(local)?;
-            let call = ctx.intern_prelude_route(super::data_entries_to_map_route(
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("data-entries-to-map", 
+            let call =
+                ctx.intern_prelude_route(super::data_entries_to_map_route(&expr.ty, &carrier)?)?;
+            ctx.emit(
+                "data-entries-to-map",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { call, local }),
             )
@@ -1249,7 +1408,8 @@ pub(super) fn lower_expr(
             let args = lower_call_args(ctx, args)?;
             let function = ctx.function_id_for(name)?;
             let type_args = lower_mir_types(ctx, type_args)?;
-            ctx.emit("call", 
+            ctx.emit(
+                "call",
                 Some(expr.ty.clone()),
                 MirOperation::Call {
                     callee: MirCallee::User(function),
@@ -1297,16 +1457,12 @@ pub(super) fn lower_expr(
                     format!("range-checked constructor `{name}` has no checked bounds"),
                 );
             };
-            let parameters = vec![lower_conversion_int(ctx, lo)?, lower_conversion_int(ctx, hi)?];
+            let parameters = vec![
+                lower_conversion_int(ctx, lo)?,
+                lower_conversion_int(ctx, hi)?,
+            ];
             let route = super::range_checked_ctor_route(name, &expr.ty, &carrier)?;
-            lower_prelude_conversion(
-                ctx,
-                value,
-                parameters,
-                &expr.ty,
-                route,
-                &carrier,
-            )
+            lower_prelude_conversion(ctx, value, parameters, &expr.ty, route, &carrier)
         }
         TExprKind::DistinctConvert {
             name,
@@ -1318,7 +1474,10 @@ pub(super) fn lower_expr(
             let value = ctx.lower_child(arg)?;
             if matches!(op, TNumericOp::CastAs { .. }) {
                 let base = ctx.distinct_base(name).ok_or_else(|| {
-                    ctx.error(ctx.span(), format!("distinct conversion `{name}` has no checked base"))
+                    ctx.error(
+                        ctx.span(),
+                        format!("distinct conversion `{name}` has no checked base"),
+                    )
                 })?;
                 let value = if arg.ty == base {
                     value
@@ -1358,24 +1517,21 @@ pub(super) fn lower_expr(
                     },
                 )?;
                 return if *fallible {
-                    ctx.emit("distinct-conversion-ok", Some(expr.ty.clone()), MirOperation::ResultOk { value })
+                    ctx.emit(
+                        "distinct-conversion-ok",
+                        Some(expr.ty.clone()),
+                        MirOperation::ResultOk { value },
+                    )
                 } else {
                     Ok(value)
                 };
             }
-            let route = super::distinct_conversion_route(
-                name,
-                &arg.ty,
-                op,
-                *range,
-                &expr.ty,
-                &carrier,
-            )?;
+            let route =
+                super::distinct_conversion_route(name, &arg.ty, op, *range, &expr.ty, &carrier)?;
             let parameters = match op {
-                TNumericOp::CheckedIntToFloat {
-                    target_f32,
-                    ..
-                } if matches!(arg.ty.without_user_tags(), Type::Int) => {
+                TNumericOp::CheckedIntToFloat { target_f32, .. }
+                    if matches!(arg.ty.without_user_tags(), Type::Int) =>
+                {
                     vec![lower_conversion_bool(ctx, *target_f32)?]
                 }
                 TNumericOp::CheckedIntToFloat {
@@ -1410,14 +1566,7 @@ pub(super) fn lower_expr(
                 ],
                 _ => Vec::new(),
             };
-            lower_prelude_conversion(
-                ctx,
-                value,
-                parameters,
-                &expr.ty,
-                route,
-                &carrier,
-            )
+            lower_prelude_conversion(ctx, value, parameters, &expr.ty, route, &carrier)
         }
         TExprKind::UnitConvert {
             destination,
@@ -1452,39 +1601,23 @@ pub(super) fn lower_expr(
             if let Some(relative_uncertainty) = *relative_uncertainty {
                 parameters.push(lower_conversion_float(ctx, relative_uncertainty)?);
             }
-            lower_prelude_conversion(
-                ctx,
-                value,
-                parameters,
-                &expr.ty,
-                route,
-                &carrier,
-            )
+            lower_prelude_conversion(ctx, value, parameters, &expr.ty, route, &carrier)
         }
         TExprKind::MathBuiltin {
-            type_name, func, args,
+            type_name,
+            func,
+            args,
         } => {
             let args = lower_values(ctx, args)?;
             let type_id = math_builtin_type_id(ctx, type_name)?;
             let route = if crate::Sema::is_geometry_type(type_name) {
-                super::geometry_builtin_route(
-                    type_name,
-                    func,
-                    args.len(),
-                    &expr.ty,
-                    &carrier,
-                )?
+                super::geometry_builtin_route(type_name, func, args.len(), &expr.ty, &carrier)?
             } else {
-                super::math_builtin_route(
-                    type_name,
-                    func,
-                    args.len(),
-                    &expr.ty,
-                    &carrier,
-                )?
+                super::math_builtin_route(type_name, func, args.len(), &expr.ty, &carrier)?
             };
             let call = ctx.intern_prelude_route(route)?;
-            ctx.emit("math-builtin", 
+            ctx.emit(
+                "math-builtin",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::MathBuiltin {
                     type_id,
@@ -1494,7 +1627,9 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::PreciseBuiltin {
-            type_name, func, args,
+            type_name,
+            func,
+            args,
         } => {
             let args = lower_values(ctx, args)?;
             let type_id = ctx.nominal_type_id(type_name)?;
@@ -1505,7 +1640,8 @@ pub(super) fn lower_expr(
                 &expr.ty,
                 &carrier,
             )?)?;
-            ctx.emit("precise-builtin", 
+            ctx.emit(
+                "precise-builtin",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::PreciseBuiltin {
                     type_id,
@@ -1521,7 +1657,8 @@ pub(super) fn lower_expr(
             // adapter before calling the terminal text row.
             let value = ctx.lower_child(inner)?;
             let call = ctx.intern_prelude_route(super::print_route(&expr.ty, &carrier)?)?;
-            ctx.emit("print", 
+            ctx.emit(
+                "print",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::Print { call, value }),
             )
@@ -1529,7 +1666,8 @@ pub(super) fn lower_expr(
         TExprKind::Drop(inner) => {
             let value = ctx.lower_child(inner)?;
             let kind = ctx.ownership_for(&inner.ty).drop;
-            ctx.emit("drop", 
+            ctx.emit(
+                "drop",
                 Some(expr.ty.clone()),
                 MirOperation::Drop { value, kind },
             )
@@ -1538,6 +1676,20 @@ pub(super) fn lower_expr(
             // Allocator close is the terminal ownership operation. Lower it to
             // the same MIR drop edge used by native/AOT values; the interpreter
             // adapter marks only this consumed owner closed.
+            // Core file handles have provider-owned Drop semantics (including
+            // the writer's existing fallible flush at its explicit call site).
+            // Resolve the checked declaration rather than dispatching by leaf
+            // name: a user type called FileReader is not a provider handle.
+            let file_identity = ctx.mir_type(&inner.ty)?.identity;
+            if file_identity.is_some_and(|id| ctx.is_core_file_owner(id)) {
+                let value = ctx.lower_child(inner)?;
+                let kind = ctx.ownership_for(&inner.ty).drop;
+                return ctx.emit(
+                    "file-close",
+                    Some(expr.ty.clone()),
+                    MirOperation::Drop { value, kind },
+                );
+            }
             if matches!(
                 inner.ty.name().as_str(),
                 "Arena" | "Bump" | "Pool" | "Fixed"
@@ -1599,14 +1751,14 @@ pub(super) fn lower_expr(
         }
         TExprKind::ResourceNew(inner) => {
             let value = ctx.lower_child(inner)?;
-            ctx.emit("resource-new", Some(expr.ty.clone()), MirOperation::Move { value })
+            ctx.emit(
+                "resource-new",
+                Some(expr.ty.clone()),
+                MirOperation::Move { value },
+            )
         }
-        TExprKind::ResourceTake(name) => {
-            let place = lower_local_place(
-                ctx,
-                &super::TLocal::user(name.clone()),
-                MirAccess::Move,
-            )?;
+        TExprKind::ResourceTake(local) => {
+            let place = lower_local_place(ctx, local, MirAccess::Move)?;
             ctx.emit(
                 "resource-take",
                 Some(expr.ty.clone()),
@@ -1623,7 +1775,8 @@ pub(super) fn lower_expr(
                 &expr.ty,
                 &carrier,
             )?)?;
-            ctx.emit("ambient-input", 
+            ctx.emit(
+                "ambient-input",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::AmbientInput { call, prompt }),
             )
@@ -1640,27 +1793,24 @@ pub(super) fn lower_expr(
             lhs,
             rhs,
         } => {
-            let left = ctx.lower_child(lhs)?;
-            let right = ctx.lower_child(rhs)?;
-            let dispatch = lower_binary_dispatch(
-                ctx,
-                *op,
-                *overflow,
-                &lhs.ty,
-                &rhs.ty,
-                &expr.ty,
-                *line,
-            )?;
-            ctx.emit(
-                "binary",
-                Some(expr.ty.clone()),
-                MirOperation::Binary {
-                    op: super::mir_binary_op(*op),
-                    left,
-                    right,
-                    dispatch,
-                },
-            )
+            if matches!(op, BinOp::And | BinOp::Or) {
+                lower_short_circuit_binary(ctx, expr, *op, lhs, rhs)
+            } else {
+                let left = ctx.lower_child(lhs)?;
+                let right = ctx.lower_child(rhs)?;
+                let dispatch =
+                    lower_binary_dispatch(ctx, *op, *overflow, &lhs.ty, &rhs.ty, &expr.ty, *line)?;
+                ctx.emit(
+                    "binary",
+                    Some(expr.ty.clone()),
+                    MirOperation::Binary {
+                        op: super::mir_binary_op(*op),
+                        left,
+                        right,
+                        dispatch,
+                    },
+                )
+            }
         }
         TExprKind::CompareChain {
             operands,
@@ -1676,12 +1826,10 @@ pub(super) fn lower_expr(
             };
             let left = ctx.lower_child(lhs)?;
             let right = ctx.lower_child(rhs)?;
-            let call = ctx.intern_prelude_route(super::layout_compare_route(
-                op,
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("layout-compare", 
+            let call =
+                ctx.intern_prelude_route(super::layout_compare_route(op, &expr.ty, &carrier)?)?;
+            ctx.emit(
+                "layout-compare",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::LayoutCompare {
                     call,
@@ -1693,14 +1841,16 @@ pub(super) fn lower_expr(
         }
         TExprKind::LayoutLit { inner } => {
             let value = ctx.lower_child(inner)?;
-            ctx.emit("layout-literal", 
+            ctx.emit(
+                "layout-literal",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::LayoutLiteral { inner: value }),
             )
         }
         TExprKind::Unary { op, operand } => {
             let value = ctx.lower_child(operand)?;
-            ctx.emit("unary", 
+            ctx.emit(
+                "unary",
                 Some(expr.ty.clone()),
                 MirOperation::Unary {
                     op: super::mir_unary_op(*op),
@@ -1709,10 +1859,7 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::IncDec {
-            op,
-            place,
-            postfix,
-            ..
+            op, place, postfix, ..
         } => lower_inc_dec(ctx, expr, op, place, *postfix),
         TExprKind::StructLit {
             fields,
@@ -1741,7 +1888,8 @@ pub(super) fn lower_expr(
                 .filter(|(_, _, boxed)| *boxed)
                 .map(|(name, _, _)| ctx.field_id_for(owner, name))
                 .collect::<Result<Vec<_>, _>>()?;
-            ctx.emit("struct-literal", 
+            ctx.emit(
+                "struct-literal",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::StructLiteral {
                     type_id: owner,
@@ -1751,16 +1899,14 @@ pub(super) fn lower_expr(
                     boxed_fields,
                 }),
             )
-        },
+        }
         TExprKind::Field {
             recv,
             field,
             boxed: _,
         } => {
             let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
-            if recv.ty.without_user_tags()
-                == &Type::Named("HTTPShutdownReport".to_string())
-            {
+            if recv.ty.without_user_tags() == &Type::Named("HTTPShutdownReport".to_string()) {
                 return lower_http_shutdown_report_field(ctx, expr, recv, field);
             }
             if field == "value" {
@@ -1781,6 +1927,19 @@ pub(super) fn lower_expr(
             } else {
                 expr.ty.clone()
             };
+            // A file owner's path is a borrowed view. Project its checked
+            // field place before reading the String, rather than materializing
+            // (and retaining) a hidden clone of the live native owner.
+            if ctx.mir_type(&recv.ty)?.identity.is_some_and(|id| ctx.is_core_file_owner(id)) {
+                if let Some(base) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+                    let place = ctx.project_field_place(base, field, stored_ty.clone(), ctx.span())?;
+                    return ctx.emit(
+                        "file-owner.field.read",
+                        Some(stored_ty),
+                        MirOperation::ReadPlace(place),
+                    );
+                }
+            }
             let field_id = ctx.field_id_for_type(&recv.ty, field)?;
             let mut base = ctx.lower_child(recv)?;
             if let Some(inner) = pin_inner_type(&recv.ty) {
@@ -1790,7 +1949,8 @@ pub(super) fn lower_expr(
                     MirOperation::Deref { value: base },
                 )?;
             }
-            let value = ctx.emit("field",
+            let value = ctx.emit(
+                "field",
                 Some(stored_ty),
                 MirOperation::Field {
                     base,
@@ -1812,7 +1972,11 @@ pub(super) fn lower_expr(
         }
         TExprKind::SharedGuardValue { guard, .. } => {
             let value = ctx.lower_child(guard)?;
-            ctx.emit("shared-guard-deref", Some(expr.ty.clone()), MirOperation::Deref { value })
+            ctx.emit(
+                "shared-guard-deref",
+                Some(expr.ty.clone()),
+                MirOperation::Deref { value },
+            )
         }
         TExprKind::SharedGuardMap {
             guard,
@@ -1822,9 +1986,7 @@ pub(super) fn lower_expr(
             let path = ctx.shared_guard_field_path(&guard.ty, path)?;
             let guard = ctx.lower_child(guard)?;
             let call = ctx.intern_prelude_route(super::shared_guard_map_route(
-                *editable,
-                &expr.ty,
-                &carrier,
+                *editable, &expr.ty, &carrier,
             )?)?;
             ctx.emit(
                 "shared-guard-map",
@@ -1847,14 +2009,10 @@ pub(super) fn lower_expr(
             let second = ctx.shared_guard_field_path(&guard.ty, second)?;
             let guard = ctx.lower_child(guard)?;
             let map_call = ctx.intern_prelude_route(super::shared_guard_map_route(
-                *editable,
-                &expr.ty,
-                &carrier,
+                *editable, &expr.ty, &carrier,
             )?)?;
             let call = ctx.intern_prelude_route(super::shared_guard_split_route(
-                *editable,
-                &expr.ty,
-                &carrier,
+                *editable, &expr.ty, &carrier,
             )?)?;
             ctx.emit(
                 "shared-guard-split",
@@ -1877,11 +2035,10 @@ pub(super) fn lower_expr(
             let guard = ctx.lower_child(guard)?;
             let condition = ctx.lower_child(condition)?;
             let predicate = ctx.lower_lambda(predicate)?;
-            let call = ctx.intern_prelude_route(super::shared_guard_wait_route(
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("shared-guard-wait", 
+            let call =
+                ctx.intern_prelude_route(super::shared_guard_wait_route(&expr.ty, &carrier)?)?;
+            ctx.emit(
+                "shared-guard-wait",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::SharedGuardWait {
                     call,
@@ -1893,12 +2050,10 @@ pub(super) fn lower_expr(
         }
         TExprKind::ConditionNotify { condition, all } => {
             let condition = ctx.lower_child(condition)?;
-            let call = ctx.intern_prelude_route(super::condition_notify_route(
-                *all,
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("condition-notify", 
+            let call =
+                ctx.intern_prelude_route(super::condition_notify_route(*all, &expr.ty, &carrier)?)?;
+            ctx.emit(
+                "condition-notify",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::ConditionNotify {
                     call,
@@ -1910,24 +2065,25 @@ pub(super) fn lower_expr(
         TExprKind::PtrFromAddr { elem, addr } => {
             let addr = ctx.lower_child(addr)?;
             let element = ctx.mir_type(elem)?;
-            ctx.emit("ptr-from-addr", 
+            ctx.emit(
+                "ptr-from-addr",
                 Some(expr.ty.clone()),
-                MirOperation::PtrFromAddr {
-                    addr,
-                    element,
-                },
+                MirOperation::PtrFromAddr { addr, element },
             )
         }
         TExprKind::Deref(inner) => {
             let value = ctx.lower_child(inner)?;
-            ctx.emit("deref", Some(expr.ty.clone()), MirOperation::Deref { value })
+            ctx.emit(
+                "deref",
+                Some(expr.ty.clone()),
+                MirOperation::Deref { value },
+            )
         }
         TExprKind::RawOf(inner) => {
-            let place = ctx.lower_place(
-                &TPlace::Expr(Box::new((**inner).clone())),
-                MirAccess::Read,
-            )?;
-            ctx.emit("raw-of", 
+            let place =
+                ctx.lower_place(&TPlace::Expr(Box::new((**inner).clone())), MirAccess::Read)?;
+            ctx.emit(
+                "raw-of",
                 Some(expr.ty.clone()),
                 MirOperation::RawAddressOf { place },
             )
@@ -1967,7 +2123,8 @@ pub(super) fn lower_expr(
         } => {
             let type_id = ctx.type_id_for(enum_type)?;
             let args = lower_enum_payload(ctx, enum_type, variant, payload)?;
-            ctx.emit("enum-payload", 
+            ctx.emit(
+                "enum-payload",
                 Some(expr.ty.clone()),
                 MirOperation::Enum {
                     type_id,
@@ -1979,7 +2136,10 @@ pub(super) fn lower_expr(
         TExprKind::JSONLit { variant, arg } => {
             if variant == "Object" {
                 let Some((value, _)) = arg.as_deref() else {
-                    return Err(ctx.error(ctx.span(), "DataTree.Object is missing its checked map payload"));
+                    return Err(ctx.error(
+                        ctx.span(),
+                        "DataTree.Object is missing its checked map payload",
+                    ));
                 };
                 if let TExprKind::MapLit(entries) = &value.kind {
                     return lower_ordered_object_encode(ctx, expr, entries);
@@ -2004,7 +2164,8 @@ pub(super) fn lower_expr(
                     boxed: false,
                 })
                 .collect();
-            ctx.emit("enum-present", 
+            ctx.emit(
+                "enum-present",
                 Some(expr.ty.clone()),
                 MirOperation::Enum {
                     type_id,
@@ -2026,7 +2187,8 @@ pub(super) fn lower_expr(
                     boxed: false,
                 })
                 .collect();
-            ctx.emit("enum-absent", 
+            ctx.emit(
+                "enum-absent",
                 Some(expr.ty.clone()),
                 MirOperation::Enum {
                     type_id,
@@ -2108,16 +2270,13 @@ pub(super) fn lower_expr(
         TExprKind::ColumnarGather { base, index, line } => {
             let kind = MirIndexKind::List;
             let access = MirAccess::Read;
-            let call = ctx.intern_prelude_route(super::index_route(
-                kind,
-                access,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call =
+                ctx.intern_prelude_route(super::index_route(kind, access, &expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line);
             let base = ctx.lower_child(base)?;
             let index = ctx.lower_child(index)?;
-            ctx.emit("columnar-gather", 
+            ctx.emit(
+                "columnar-gather",
                 Some(expr.ty.clone()),
                 MirOperation::Index {
                     call,
@@ -2141,15 +2300,12 @@ pub(super) fn lower_expr(
             let owner_id = ctx.type_id_for(owner)?;
             let column_id = ctx.field_id_for(owner_id, field)?;
             let call = ctx.intern_prelude_route(super::columnar_read_route(
-                owner,
-                field,
-                *column,
-                &expr.ty,
-                &carrier,
+                owner, field, *column, &expr.ty, &carrier,
             )?)?;
             let base = ctx.lower_child(base)?;
             let index = ctx.lower_child(index)?;
-            ctx.emit("columnar-column-read", 
+            ctx.emit(
+                "columnar-column-read",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::ColumnarRead {
                     accessor: call,
@@ -2164,17 +2320,20 @@ pub(super) fn lower_expr(
             struct_name: _,
             fields,
         } => {
-            let owner = ctx
-                .mir_type(&expr.ty)?
-                .identity
-                .ok_or_else(|| ctx.error(ctx.span(), "checked tuple type has no canonical identity"))?;
+            let owner = ctx.mir_type(&expr.ty)?.identity.ok_or_else(|| {
+                ctx.error(ctx.span(), "checked tuple type has no canonical identity")
+            })?;
             let fields = fields
                 .iter()
                 .map(|(name, value)| {
-                    Ok((ctx.field_id_for_type(&expr.ty, name)?, ctx.lower_child(value)?))
+                    Ok((
+                        ctx.field_id_for_type(&expr.ty, name)?,
+                        ctx.lower_child(value)?,
+                    ))
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?;
-            ctx.emit("tuple-literal", 
+            ctx.emit(
+                "tuple-literal",
                 Some(expr.ty.clone()),
                 MirOperation::Tuple {
                     type_id: owner,
@@ -2185,9 +2344,7 @@ pub(super) fn lower_expr(
         TExprKind::MapLit(entries) => {
             let entries = entries
                 .iter()
-                .map(|(key, value)| {
-                    Ok((ctx.lower_child(key)?, ctx.lower_child(value)?))
-                })
+                .map(|(key, value)| Ok((ctx.lower_child(key)?, ctx.lower_child(value)?)))
                 .collect::<Result<Vec<_>, LowerError>>()?;
             ctx.emit(
                 "map-literal",
@@ -2230,7 +2387,7 @@ pub(super) fn lower_expr(
                     return unsupported_expr(
                         ctx,
                         "TExprKind::PoolSlot has no checked element type",
-                    )
+                    );
                 }
             };
             let kind = MirIndexKind::Pool;
@@ -2239,16 +2396,13 @@ pub(super) fn lower_expr(
             } else {
                 MirAccess::Read
             };
-            let call = ctx.intern_prelude_route(super::index_route(
-                kind,
-                access,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call =
+                ctx.intern_prelude_route(super::index_route(kind, access, &expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line);
             let pool_value = ctx.lower_child(pool)?;
             let id = ctx.lower_child(id)?;
-            let slot = ctx.emit("pool-slot", 
+            let slot = ctx.emit(
+                "pool-slot",
                 Some(element_ty.clone()),
                 MirOperation::Index {
                     call,
@@ -2285,11 +2439,8 @@ pub(super) fn lower_expr(
         } => {
             let kind = MirIndexKind::Lane;
             let access = MirAccess::Read;
-            let call = ctx.intern_prelude_route(super::lane_index_route(
-                lane_ty,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call =
+                ctx.intern_prelude_route(super::lane_index_route(lane_ty, &expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line as usize);
             let base = ctx.lower_child(base)?;
             let index = ctx.lower_child(index)?;
@@ -2334,7 +2485,8 @@ pub(super) fn lower_expr(
                 .as_deref()
                 .map(|range| ctx.lower_child(range))
                 .transpose()?;
-            ctx.emit("slice", 
+            ctx.emit(
+                "slice",
                 Some(expr.ty.clone()),
                 MirOperation::Slice {
                     call,
@@ -2361,7 +2513,8 @@ pub(super) fn lower_expr(
                     MirAccess::Read
                 },
             )?;
-            ctx.emit("borrow", 
+            ctx.emit(
+                "borrow",
                 Some(expr.ty.clone()),
                 MirOperation::AddressOf {
                     place,
@@ -2385,15 +2538,28 @@ pub(super) fn lower_expr(
                 let trait_name = method.trait_owner.as_deref().ok_or_else(|| {
                     ctx.error(
                         ctx.span(),
-                        format!("trait-object method `{}` is missing its checked trait owner", method.name),
+                        format!(
+                            "trait-object method `{}` is missing its checked trait owner",
+                            method.name
+                        ),
                     )
                 })?;
                 let (trait_ref, method_id, access) =
                     ctx.trait_method_identity(trait_name, &method.name)?;
                 let access = access.ok_or_else(|| {
-                    ctx.error(ctx.span(), "checked instance trait method has no receiver convention")
+                    ctx.error(
+                        ctx.span(),
+                        "checked instance trait method has no receiver convention",
+                    )
                 })?;
-                (MirCallee::TraitMethod { method: method_id, trait_ref, receiver: owner }, access)
+                (
+                    MirCallee::TraitMethod {
+                        method: method_id,
+                        trait_ref,
+                        receiver: owner,
+                    },
+                    access,
+                )
             } else {
                 let function = ctx.function_id_for(&instance_method_lookup(method, &recv.ty))?;
                 let access = ctx
@@ -2402,7 +2568,10 @@ pub(super) fn lower_expr(
                     .get(&function)
                     .copied()
                     .ok_or_else(|| {
-                        ctx.error(ctx.span(), "checked instance method has no receiver convention")
+                        ctx.error(
+                            ctx.span(),
+                            "checked instance method has no receiver convention",
+                        )
                     })?;
                 (MirCallee::Method { function, owner }, access)
             };
@@ -2412,9 +2581,17 @@ pub(super) fn lower_expr(
                 let mut place = lower_receiver_place(ctx, recv, access)?;
                 if place.is_none() && access == MirAccess::Write {
                     let value = ctx.lower_child(recv)?;
-                    let local = TLocal::generated(format!("method_receiver_{}", value.0)).as_mutable();
+                    let local =
+                        TLocal::generated(format!("method_receiver_{}", value.0)).as_mutable();
                     let target = ctx.bind_local(&local, recv.ty.clone(), true, false, false)?;
-                    ctx.emit("method-receiver-temp", None, MirOperation::WritePlace { place: target, value })?;
+                    ctx.emit(
+                        "method-receiver-temp",
+                        None,
+                        MirOperation::WritePlace {
+                            place: target,
+                            value,
+                        },
+                    )?;
                     place = Some(lower_local_place(ctx, &local, access)?);
                 }
                 let value = match place {
@@ -2430,7 +2607,11 @@ pub(super) fn lower_expr(
                     None => ctx.lower_child(recv)?,
                 };
                 let mut argument = mir_value_arg_with_access(ctx, value, access);
-                argument.place = if access == MirAccess::Write { place } else { None };
+                argument.place = if access == MirAccess::Write {
+                    place
+                } else {
+                    None
+                };
                 argument
             };
             let mut lowered = Vec::with_capacity(args.len() + 1);
@@ -2461,9 +2642,10 @@ pub(super) fn lower_expr(
                 } else {
                     ctx.trait_method_traits
                         .get(&(owner.clone(), method.name.clone()))
-                        .map_or_else(|| method_key(method), |trait_name| {
-                            format!("{trait_name}::{}", method.name)
-                        })
+                        .map_or_else(
+                            || method_key(method),
+                            |trait_name| format!("{trait_name}::{}", method.name),
+                        )
                 };
                 let name = if method.operator_identity.is_some() {
                     resolved_method_key
@@ -2478,13 +2660,11 @@ pub(super) fn lower_expr(
                 let args = lower_call_args(ctx, args)?;
                 let owner = ctx.mir_type(&owner_ty)?;
                 let type_args = lower_mir_types(ctx, type_args)?;
-                ctx.emit("static-call", 
+                ctx.emit(
+                    "static-call",
                     Some(expr.ty.clone()),
                     MirOperation::Call {
-                        callee: MirCallee::Associated {
-                            function,
-                            owner,
-                        },
+                        callee: MirCallee::Associated { function, owner },
                         args,
                         type_args,
                     },
@@ -2495,7 +2675,8 @@ pub(super) fn lower_expr(
                 path,
                 generics,
             } => {
-                let borrow_mask = args.iter()
+                let borrow_mask = args
+                    .iter()
                     .map(|arg| arg.borrow || arg.mut_borrow)
                     .collect::<Vec<_>>();
                 let args = lower_call_args(ctx, args)?;
@@ -2637,7 +2818,8 @@ pub(super) fn lower_expr(
                         &expr.ty,
                         &carrier,
                     )?)?;
-                    ctx.emit("static-prelude-call",
+                    ctx.emit(
+                        "static-prelude-call",
                         Some(expr.ty.clone()),
                         MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
                             call,
@@ -2652,11 +2834,9 @@ pub(super) fn lower_expr(
         TExprKind::DecodeUnder { segment, inner } => {
             let segment = ctx.lower_child(segment)?;
             let inner = ctx.lower_child(inner)?;
-            let call = ctx.intern_prelude_route(super::decode_under_route(
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("decode-under", 
+            let call = ctx.intern_prelude_route(super::decode_under_route(&expr.ty, &carrier)?)?;
+            ctx.emit(
+                "decode-under",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::DecodeUnder {
                     call,
@@ -2678,27 +2858,29 @@ pub(super) fn lower_expr(
             if matches!(op, TBuiltinOp::Indexes) {
                 return lower_indexes(ctx, expr, recv, args, &carrier);
             }
-            if matches!(op, TBuiltinOp::Indexed { .. } | TBuiltinOp::IterSplit { .. }) {
+            if matches!(
+                op,
+                TBuiltinOp::Indexed { .. } | TBuiltinOp::IterSplit { .. }
+            ) {
                 return lower_tuple_builtin(ctx, expr, recv, op, args, &carrier);
             }
             if matches!(op, TBuiltinOp::ListMinMax { .. }) {
                 return lower_list_min_max(ctx, expr, recv, op, args, &carrier);
             }
-            let (mut receiver, receiver_place) =
-                if matches!(op, TBuiltinOp::AtomicMethod { .. }) {
-                    if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Write)? {
-                        let receiver = ctx.emit(
-                            "atomic-receiver-place",
-                            Some(recv.ty.clone()),
-                            MirOperation::ReadPlace(place),
-                        )?;
-                        (receiver, None)
-                    } else {
-                        lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?
-                    }
+            let (mut receiver, receiver_place) = if matches!(op, TBuiltinOp::AtomicMethod { .. }) {
+                if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Write)? {
+                    let receiver = ctx.emit(
+                        "atomic-receiver-place",
+                        Some(recv.ty.clone()),
+                        MirOperation::ReadPlace(place),
+                    )?;
+                    (receiver, None)
                 } else {
                     lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?
-                };
+                }
+            } else {
+                lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?
+            };
             let mut lowered_args = lower_values(ctx, args)?;
             if matches!(op, TBuiltinOp::ByteBufferWithCapacity) {
                 receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
@@ -2731,12 +2913,16 @@ pub(super) fn lower_expr(
                 && matches!(recv.ty.without_user_tags(), Type::FixedList { .. })
             {
                 let mut operands = vec![mir_value_arg_with_access(
-                    ctx, receiver, ctx.call_value_access(receiver, false)?,
+                    ctx,
+                    receiver,
+                    ctx.call_value_access(receiver, false)?,
                 )];
                 operands[0].widen_fixed_to_list = true;
                 for value in lowered_args {
                     operands.push(mir_value_arg_with_access(
-                        ctx, value, ctx.call_value_access(value, false)?,
+                        ctx,
+                        value,
+                        ctx.call_value_access(value, false)?,
                     ));
                 }
                 let call = ctx.intern_prelude_route(route)?;
@@ -2752,7 +2938,8 @@ pub(super) fn lower_expr(
                 );
             }
             let call = ctx.intern_prelude_route(route)?;
-            ctx.emit("builtin-method",
+            ctx.emit(
+                "builtin-method",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
                     call,
@@ -2785,16 +2972,15 @@ pub(super) fn lower_expr(
                     .nominal_name()
                     .map(str::to_owned)
                     .unwrap_or_else(|| value_ty.display_name());
-                let source_path = ctx
-                    .reflect_paths
-                    .get(&type_identity)
-                    .or_else(|| {
-                        ctx.nominal_identities.iter().find_map(|(source, identity)| {
+                let source_path = ctx.reflect_paths.get(&type_identity).or_else(|| {
+                    ctx.nominal_identities
+                        .iter()
+                        .find_map(|(source, identity)| {
                             (identity == &type_identity)
                                 .then(|| ctx.reflect_paths.get(source))
                                 .flatten()
                         })
-                    });
+                });
                 let path = source_path
                     .cloned()
                     .or_else(|| ctx.nominal_identities.get(&type_identity).cloned())
@@ -2814,7 +3000,11 @@ pub(super) fn lower_expr(
                     &Type::String,
                 )?;
                 let owner = ctx.field_owner_id_for_type(&arg.ty)?;
-                let fields = match ctx.type_defs.iter().find(|definition| definition.id == owner) {
+                let fields = match ctx
+                    .type_defs
+                    .iter()
+                    .find(|definition| definition.id == owner)
+                {
                     Some(jet_foundation::MIR::MirTypeDef {
                         kind: jet_foundation::MIR::MirTypeDefKind::Struct { fields, .. },
                         ..
@@ -2839,25 +3029,19 @@ pub(super) fn lower_expr(
                             .nominal_name()
                             .map(str::to_owned)
                             .unwrap_or_else(|| stored_mir.display_name());
-                        let source_path = ctx
-                            .reflect_paths
-                            .get(&field_type_identity)
-                            .or_else(|| {
-                                ctx.nominal_identities.iter().find_map(
-                                    |(source, identity)| {
+                        let source_path =
+                            ctx.reflect_paths.get(&field_type_identity).or_else(|| {
+                                ctx.nominal_identities
+                                    .iter()
+                                    .find_map(|(source, identity)| {
                                         (identity == &field_type_identity)
                                             .then(|| ctx.reflect_paths.get(source))
                                             .flatten()
-                                    },
-                                )
+                                    })
                             });
                         let field_path = source_path
                             .cloned()
-                            .or_else(|| {
-                                ctx.nominal_identities
-                                    .get(&field_type_identity)
-                                    .cloned()
-                            })
+                            .or_else(|| ctx.nominal_identities.get(&field_type_identity).cloned())
                             .unwrap_or_else(|| field_type_identity.clone());
                         let field_type_name = source_path
                             .map(|path| {
@@ -2990,12 +3174,8 @@ pub(super) fn lower_expr(
                 } else {
                     crate::AST::StrFormat::Grouped(0)
                 };
-                let mut format_route = super::string_format_route(
-                    &format,
-                    &args[0].ty,
-                    &expr.ty,
-                    &carrier,
-                )?;
+                let mut format_route =
+                    super::string_format_route(&format, &args[0].ty, &expr.ty, &carrier)?;
                 // Keep the CoreCall semantic member for the interpreter/comptime
                 // dispatcher; only the native symbol and ABI come from the
                 // typed format route.
@@ -3082,12 +3262,12 @@ pub(super) fn lower_expr(
                     data_row_type(&expr.ty)
                         .or_else(|| args.first().and_then(|arg| data_row_type(&arg.ty)))
                 }
-                    .ok_or_else(|| {
-                        ctx.error(
-                            ctx.span(),
-                            "typed data CoreCall MIR projection needs one retained row type",
-                        )
-                    })?;
+                .ok_or_else(|| {
+                    ctx.error(
+                        ctx.span(),
+                        "typed data CoreCall MIR projection needs one retained row type",
+                    )
+                })?;
                 vec![ctx.mir_type(&row)?]
             } else if (record.module == "core.args" && matches!(record.member, "decode" | "merge"))
                 || (record.module == "core.sys" && record.member == "decode")
@@ -3135,7 +3315,8 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
-            ctx.emit("core-call", 
+            ctx.emit(
+                "core-call",
                 Some(expr.ty.clone()),
                 MirOperation::CoreCall {
                     call,
@@ -3155,13 +3336,14 @@ pub(super) fn lower_expr(
             else_body,
             else_value,
         } => lower_if_expr(
-            ctx,
-            expr,
-            cond,
-            then_body,
-            then_value,
-            else_body,
-            else_value,
+            ctx, expr, cond, then_body, then_value, else_body, else_value,
+        ),
+        TExprKind::ResultHandler {
+            subject, ok_pattern, ok_body, ok_value,
+            err_pattern, err_body, err_value, terminal,
+        } => lower_result_handler(
+            ctx, expr, subject, ok_pattern, ok_body, ok_value,
+            err_pattern, err_body, err_value, terminal,
         ),
         TExprKind::InvariantViolation { construct, span } => {
             Err(ctx.error(*span, construct.clone()))
@@ -3181,7 +3363,8 @@ pub(super) fn lower_expr(
             let call = ctx.intern_prelude_route(super::todo_route(&expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line);
             let expected_type = Some(ctx.mir_type(&expr.ty)?);
-            ctx.emit("todo", 
+            ctx.emit(
+                "todo",
                 Some(expr.ty.clone()),
                 MirOperation::Todo {
                     call,
@@ -3205,26 +3388,50 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::Present(inner) => {
-            let value = ctx.lower_child(inner)?;
+            let expected = match expr.ty.without_user_tags() {
+                Type::Option(inner) => Some(inner.as_ref()),
+                _ => None,
+            };
+            let value = lower_carrier_payload(ctx, inner, expected)?;
             if ctx.is_terminated() {
                 return Ok(value);
             }
-            ctx.emit("present", Some(expr.ty.clone()), MirOperation::Present { value })
+            ctx.emit(
+                "present",
+                Some(expr.ty.clone()),
+                MirOperation::Present { value },
+            )
         }
         TExprKind::Absent => ctx.emit("absent", Some(expr.ty.clone()), MirOperation::Absent),
         TExprKind::Ok(inner) => {
-            let value = ctx.lower_child(inner)?;
+            let expected = match expr.ty.without_user_tags() {
+                Type::Result { ok, .. } => Some(ok.as_ref()),
+                _ => None,
+            };
+            let value = lower_carrier_payload(ctx, inner, expected)?;
             if ctx.is_terminated() {
                 return Ok(value);
             }
-            ctx.emit("result-ok", Some(expr.ty.clone()), MirOperation::ResultOk { value })
+            ctx.emit(
+                "result-ok",
+                Some(expr.ty.clone()),
+                MirOperation::ResultOk { value },
+            )
         }
         TExprKind::Err(inner) => {
-            let value = ctx.lower_child(inner)?;
+            let expected = match expr.ty.without_user_tags() {
+                Type::Result { err, .. } => Some(err.as_ref()),
+                _ => None,
+            };
+            let value = lower_carrier_payload(ctx, inner, expected)?;
             if ctx.is_terminated() {
                 return Ok(value);
             }
-            ctx.emit("result-err", Some(expr.ty.clone()), MirOperation::ResultErr { value })
+            ctx.emit(
+                "result-err",
+                Some(expr.ty.clone()),
+                MirOperation::ResultErr { value },
+            )
         }
         TExprKind::Try {
             inner,
@@ -3263,9 +3470,7 @@ pub(super) fn lower_expr(
             let pattern = lower_pattern(ctx, pattern)?;
             ctx.lower_pattern_condition(subject, &pattern)
         }
-        TExprKind::OptionLift2 { f, a, b } => {
-            lower_option_lift2(ctx, expr, f, a, b)
-        }
+        TExprKind::OptionLift2 { f, a, b } => lower_option_lift2(ctx, expr, f, a, b),
         TExprKind::TaskGroupAll { tasks } => {
             let call = ctx.intern_prelude_route(task_group_route(
                 MirTaskGroupKind::All,
@@ -3317,12 +3522,12 @@ pub(super) fn lower_expr(
                 }),
             )
         }
-        TExprKind::SelectStart
-        | TExprKind::SelectRecv { .. }
-        | TExprKind::SelectAfter { .. } => Err(ctx.error(
-            ctx.span(),
-            "readiness-table construction is only valid as the operand of select wait",
-        )),
+        TExprKind::SelectStart | TExprKind::SelectRecv { .. } | TExprKind::SelectAfter { .. } => {
+            Err(ctx.error(
+                ctx.span(),
+                "readiness-table construction is only valid as the operand of select wait",
+            ))
+        }
         TExprKind::SelectWait {
             builder,
             nonblocking,
@@ -3370,19 +3575,24 @@ pub(super) fn lower_expr(
                     ctx.span(),
                     format!(
                         "checked closure method has {} operands, route requires {}",
-                        operand_count,
-                        route.signature.arity
+                        operand_count, route.signature.arity
                     ),
                 ));
             }
             for (index, arg) in args.iter_mut().enumerate() {
                 arg.access = ctx.call_value_access(
                     arg.value,
-                    route.signature.borrow_mask.get(index + 1).copied().unwrap_or(false),
+                    route
+                        .signature
+                        .borrow_mask
+                        .get(index + 1)
+                        .copied()
+                        .unwrap_or(false),
                 )?;
             }
             let call = ctx.intern_prelude_route(route)?;
-            ctx.emit("closure-method", 
+            ctx.emit(
+                "closure-method",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::ClosureMethod {
                     receiver,
@@ -3394,17 +3604,13 @@ pub(super) fn lower_expr(
         TExprKind::HostBorrowCallback { callable, params } => {
             let callable = ctx.lower_child(callable)?;
             let params = lower_mir_types(ctx, params)?;
-            ctx.emit("host-borrow-callback", 
+            ctx.emit(
+                "host-borrow-callback",
                 Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::HostBorrowCallback {
-                    callable,
-                    params,
-                }),
+                MirOperation::Semantic(MirSemanticOp::HostBorrowCallback { callable, params }),
             )
         }
-        TExprKind::NumericMethod { recv, op } => {
-            lower_numeric_method(ctx, expr, recv, op)
-        }
+        TExprKind::NumericMethod { recv, op } => lower_numeric_method(ctx, expr, recv, op),
         TExprKind::NumericBinaryMethod { recv, op, arg } => {
             let receiver = ctx.lower_child(recv)?;
             let argument = ctx.lower_child(arg)?;
@@ -3430,8 +3636,8 @@ pub(super) fn lower_expr(
             let left = ctx.lower_child(lhs)?;
             let right = ctx.lower_child(rhs)?;
             let result_ty = expr.ty.without_user_tags();
-            let unbounded_int = matches!(result_ty, Type::Int)
-                && super::fixed_width_name(&lhs.ty).is_none();
+            let unbounded_int =
+                matches!(result_ty, Type::Int) && super::fixed_width_name(&lhs.ty).is_none();
             if unbounded_int && matches!(prefix.as_ref(), "wrapping" | "saturating") {
                 let binop = match op.as_ref() {
                     "add" => BinOp::Add,
@@ -3457,14 +3663,7 @@ pub(super) fn lower_expr(
                     },
                 );
             }
-            let route = super::overflow_opt_route(
-                prefix,
-                op,
-                *line,
-                &lhs.ty,
-                &expr.ty,
-                &carrier,
-            )?;
+            let route = super::overflow_opt_route(prefix, op, *line, &lhs.ty, &expr.ty, &carrier)?;
             let location = if route.signature.arity == 4 && route.signature.max_arity == 4 {
                 Some(ctx.panic_location_at(*line))
             } else {
@@ -3531,7 +3730,12 @@ pub(super) fn lower_expr(
                 for (index, arg) in lowered_args.iter_mut().enumerate() {
                     arg.access = ctx.call_value_access(
                         arg.value,
-                        route.signature.borrow_mask.get(index + 1).copied().unwrap_or(false),
+                        route
+                            .signature
+                            .borrow_mask
+                            .get(index + 1)
+                            .copied()
+                            .unwrap_or(false),
                     )?;
                 }
                 let call = ctx.intern_prelude_route(route)?;
@@ -3684,9 +3888,7 @@ pub(super) fn lower_expr(
                 let lowered = args
                     .iter()
                     .enumerate()
-                    .map(|(index, arg)| {
-                        ctx.lower_core_call_arg(arg, index, record, false)
-                    })
+                    .map(|(index, arg)| ctx.lower_core_call_arg(arg, index, record, false))
                     .collect::<Result<Vec<_>, _>>()?;
                 let payload_ty = ctx.mir_type(&args[0].ty)?;
                 return ctx.emit(
@@ -3797,7 +3999,10 @@ pub(super) fn lower_expr(
             if let Some(receiver) = http_json_method_receiver(&recv.ty, op) {
                 return lower_http_json_method(ctx, expr, recv, args, receiver);
             }
-            if matches!(op, super::THandleOp::TaskJoin | super::THandleOp::TaskDetach) {
+            if matches!(
+                op,
+                super::THandleOp::TaskJoin | super::THandleOp::TaskDetach
+            ) {
                 if !args.is_empty() {
                     return Err(ctx.error(
                         ctx.span(),
@@ -3960,29 +4165,19 @@ pub(super) fn lower_expr(
                 },
             )?;
             match target_return {
-                Some(target @ (Type::Result { .. } | Type::Option(_)))
-                    if target != &expr.ty => lower_try_value(
-                    ctx,
-                    value,
-                    &expr.ty,
-                    target,
-                    None,
-                    &TTryConvert::None,
-                    None,
-                ),
+                Some(target @ (Type::Result { .. } | Type::Option(_))) if target != &expr.ty => {
+                    lower_try_value(ctx, value, &expr.ty, target, None, &TTryConvert::None, None)
+                }
                 _ => Ok(value),
             }
         }
-        TExprKind::ExternCall {
-            symbol,
-            args,
-            ..
-        } => {
+        TExprKind::ExternCall { symbol, args, .. } => {
             let args = args
                 .iter()
                 .map(|arg| lower_extern_arg(ctx, arg))
                 .collect::<Result<Vec<_>, _>>()?;
-            ctx.emit("extern-call", 
+            ctx.emit(
+                "extern-call",
                 Some(expr.ty.clone()),
                 MirOperation::Call {
                     callee: MirCallee::Foreign(ctx.foreign_id_for(symbol)?),
@@ -4014,22 +4209,14 @@ fn lower_values(
     ctx: &mut LowerCtx,
     values: &[TExpr],
 ) -> Result<Vec<jet_foundation::MIR::MirValueId>, LowerError> {
-    values
-        .iter()
-        .map(|value| ctx.lower_child(value))
-        .collect()
+    values.iter().map(|value| ctx.lower_child(value)).collect()
 }
 /// Carry the checked trait element target into MIR list construction.  A
 /// concrete value in a typed list remains its concrete MIR value; each backend
 /// applies this fact at the list boundary rather than guessing from a slot.
-fn list_trait_coercion(
-    ctx: &mut LowerCtx,
-    ty: &Type,
-) -> Result<Option<MirTypeId>, LowerError> {
+fn list_trait_coercion(ctx: &mut LowerCtx, ty: &Type) -> Result<Option<MirTypeId>, LowerError> {
     let element = match ty.without_user_tags() {
-        Type::List(element) | Type::FixedList { elem: element, .. } => {
-            element.without_user_tags()
-        }
+        Type::List(element) | Type::FixedList { elem: element, .. } => element.without_user_tags(),
         _ => return Ok(None),
     };
     let trait_name = match element {
@@ -4043,7 +4230,6 @@ fn list_trait_coercion(
     let target = Type::TraitObject(vec![trait_name]);
     Ok(ctx.mir_type(&target)?.identity)
 }
-
 
 /// Lower `HandleMethod` arguments so every host-borrow callback is created
 /// immediately before the call that borrows it.
@@ -4137,10 +4323,7 @@ fn lower_mir_types(
     ctx: &mut LowerCtx,
     types: &[crate::AST::Type],
 ) -> Result<Vec<MirType>, LowerError> {
-    types
-        .iter()
-        .map(|ty| ctx.mir_type(ty))
-        .collect()
+    types.iter().map(|ty| ctx.mir_type(ty)).collect()
 }
 
 fn lower_require_stop(
@@ -4176,13 +4359,15 @@ fn lower_require_stop(
                     type_args: Vec::new(),
                 }),
             )?;
-            (MirRequireKind::RequireEq, Some(condition), vec![left, right])
+            (
+                MirRequireKind::RequireEq,
+                Some(condition),
+                vec![left, right],
+            )
         }
-        super::TRequireKind::Panic { msg } => (
-            MirRequireKind::Panic,
-            None,
-            vec![ctx.lower_child(msg)?],
-        ),
+        super::TRequireKind::Panic { msg } => {
+            (MirRequireKind::Panic, None, vec![ctx.lower_child(msg)?])
+        }
     };
     let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
     let kind_key = match kind {
@@ -4208,14 +4393,10 @@ fn lower_require_stop(
         locals: loc
             .locals
             .iter()
-            .filter_map(|(name, local)| {
-                ctx.local_id_for(local)
-                    .ok()
-                    .map(|id| (name.clone(), id))
-            })
+            .filter_map(|(name, local)| ctx.local_id_for(local).ok().map(|id| (name.clone(), id)))
             .collect(),
     };
-    ctx.emit(
+    let value = ctx.emit(
         "require-stop",
         Some(expr.ty.clone()),
         MirOperation::Semantic(MirSemanticOp::RequireStop {
@@ -4227,7 +4408,13 @@ fn lower_require_stop(
             values,
             always_stops,
         }),
-    )
+    )?;
+    if always_stops {
+        ctx.terminate(MirTerminator::Unreachable {
+            reason: "checked unconditional stop".to_string(),
+        });
+    }
+    Ok(value)
 }
 
 fn lower_optional_field(
@@ -4242,9 +4429,12 @@ fn lower_optional_field(
         _ => return unsupported_expr(ctx, "TExprKind::OptField (non-optional base)"),
     };
     let field = ctx.field_id_for_type(inner_ty, member)?;
-    let field_ty = ctx
-        .checked_field_type(inner_ty, member)
-        .map_err(|_| ctx.error(ctx.span(), format!("missing checked optional field `{member}`")))?;
+    let field_ty = ctx.checked_field_type(inner_ty, member).map_err(|_| {
+        ctx.error(
+            ctx.span(),
+            format!("missing checked optional field `{member}`"),
+        )
+    })?;
     let subject = ctx.lower_child(base)?;
     let condition = ctx.emit(
         "optional-field-condition",
@@ -4291,7 +4481,11 @@ fn lower_optional_field(
     }
 
     ctx.switch_to(absent_block);
-    let absent = ctx.emit("optional-field-absent-value", Some(expr.ty.clone()), MirOperation::Absent)?;
+    let absent = ctx.emit(
+        "optional-field-absent-value",
+        Some(expr.ty.clone()),
+        MirOperation::Absent,
+    )?;
     let source = ctx.current_block();
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
@@ -4320,10 +4514,16 @@ fn lower_option_lift2(
         return Err(ctx.error(ctx.span(), "checked Option.lift2 result is not optional"));
     };
     let Type::Option(left_inner) = left.ty.without_user_tags() else {
-        return Err(ctx.error(ctx.span(), "checked Option.lift2 left operand is not optional"));
+        return Err(ctx.error(
+            ctx.span(),
+            "checked Option.lift2 left operand is not optional",
+        ));
     };
     let Type::Option(right_inner) = right.ty.without_user_tags() else {
-        return Err(ctx.error(ctx.span(), "checked Option.lift2 right operand is not optional"));
+        return Err(ctx.error(
+            ctx.span(),
+            "checked Option.lift2 right operand is not optional",
+        ));
     };
     let function = ctx.lower_child(function)?;
     let left = ctx.lower_child(left)?;
@@ -4373,7 +4573,10 @@ fn lower_option_lift2(
         Some((**result_inner).clone()),
         MirOperation::IndirectCall {
             callee: function,
-            args: vec![mir_value_arg(ctx, left_value), mir_value_arg(ctx, right_value)],
+            args: vec![
+                mir_value_arg(ctx, left_value),
+                mir_value_arg(ctx, right_value),
+            ],
             type_args: Vec::new(),
         },
     )?;
@@ -4440,10 +4643,12 @@ fn lower_option_zip(
         return Err(ctx.error(ctx.span(), "checked Option.zip tuple shape is inconsistent"));
     }
     let tuple_ty = elem_ty.clone();
-    let owner = ctx
-        .mir_type(&tuple_ty)?
-        .identity
-        .ok_or_else(|| ctx.error(ctx.span(), "checked Option.zip tuple has no canonical identity"))?;
+    let owner = ctx.mir_type(&tuple_ty)?.identity.ok_or_else(|| {
+        ctx.error(
+            ctx.span(),
+            "checked Option.zip tuple has no canonical identity",
+        )
+    })?;
     let left = ctx.lower_child(recv)?;
     let right = ctx.lower_child(&args[0])?;
     let left_condition = ctx.emit(
@@ -4563,7 +4768,6 @@ pub(super) fn lower_binary_dispatch(
     }
 }
 
-
 fn lower_index_hook(
     ctx: &mut LowerCtx,
     expr: &TExpr,
@@ -4637,7 +4841,6 @@ fn lower_index_hook(
     )
 }
 
-
 fn lower_inline_block(
     ctx: &mut LowerCtx,
     result_ty: &Type,
@@ -4664,7 +4867,10 @@ fn lower_inline_block(
                     MirOperation::Constant(MirConstant::Unit),
                 );
             }
-            unsupported_expr(ctx, "TExprKind::InlineBlock (divergent tail did not terminate)")
+            unsupported_expr(
+                ctx,
+                "TExprKind::InlineBlock (divergent tail did not terminate)",
+            )
         }
         _ => unsupported_expr(ctx, "TExprKind::InlineBlock (non-expression tail)"),
     }
@@ -4845,13 +5051,7 @@ fn lower_compare_chain(
                 right,
             )?
         } else {
-            match super::compare_chain_route(
-                *op,
-                false,
-                &operands[index].ty,
-                &expr.ty,
-                &carrier,
-            )? {
+            match super::compare_chain_route(*op, false, &operands[index].ty, &expr.ty, &carrier)? {
                 super::TRoutePlan::Primitive => ctx.emit(
                     "compare-chain-link",
                     Some(crate::AST::Type::Bool),
@@ -4977,14 +5177,92 @@ fn lower_if_expr(
         MirOperation::Phi { incoming },
     )
 }
+/// Result handlers share the single owned SSA carrier across both tests.
+/// Each selected pattern consumes its payload; the other arm never reads a
+/// clone of a non-Clone resource or a second copy of the transport.
+fn lower_result_handler(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    source: &TExpr,
+    ok_pattern: &super::TPattern,
+    ok_body: &[super::TStmt],
+    ok_value: &TExpr,
+    err_pattern: &super::TPattern,
+    err_body: &[super::TStmt],
+    err_value: &TExpr,
+    terminal: &TExpr,
+) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+    let subject = ctx.lower_child(source)?;
+    let ok_block = ctx.new_block(ctx.span(), "result-handler.ok")?;
+    let err_test = ctx.new_block(ctx.span(), "result-handler.err-test")?;
+    let err_block = ctx.new_block(ctx.span(), "result-handler.err")?;
+    let terminal_block = ctx.new_block(ctx.span(), "result-handler.terminal")?;
+    let join = ctx.new_block(ctx.span(), "result-handler.join")?;
+    let ok = ctx.lower_pattern(ok_pattern)?;
+    let ok_test = ctx.lower_pattern_condition(subject, &ok)?;
+    ctx.terminate(MirTerminator::Branch {
+        condition: ok_test,
+        then_target: ok_block,
+        else_target: err_test,
+    });
+
+    let mut incoming = Vec::with_capacity(3);
+    ctx.switch_to(ok_block);
+    ctx.lower_nested_stmts(ok_body)?;
+    if !ctx.is_terminated() {
+        let value = ctx.lower_child(ok_value)?;
+        let from = ctx.current_block();
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: join });
+            incoming.push((from, value));
+        }
+    }
+
+    ctx.switch_to(err_test);
+    let err = ctx.lower_pattern(err_pattern)?;
+    let err_test_value = ctx.lower_pattern_condition(subject, &err)?;
+    ctx.terminate(MirTerminator::Branch {
+        condition: err_test_value,
+        then_target: err_block,
+        else_target: terminal_block,
+    });
+    ctx.switch_to(err_block);
+    ctx.lower_nested_stmts(err_body)?;
+    if !ctx.is_terminated() {
+        let value = ctx.lower_child(err_value)?;
+        let from = ctx.current_block();
+        if !ctx.is_terminated() {
+            ctx.terminate(MirTerminator::Jump { target: join });
+            incoming.push((from, value));
+        }
+    }
+    ctx.switch_to(terminal_block);
+    let value = ctx.lower_child(terminal)?;
+    let from = ctx.current_block();
+    if !ctx.is_terminated() {
+        ctx.terminate(MirTerminator::Jump { target: join });
+        incoming.push((from, value));
+    }
+    if incoming.is_empty() {
+        ctx.block_mut(join)?.terminator = MirTerminator::Unreachable {
+            reason: "every Result handler arm diverges".to_string(),
+        };
+        return ctx.emit(
+            "diverging-result-handler",
+            Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            MirOperation::Constant(MirConstant::Unit),
+        );
+    }
+    ctx.switch_to(join);
+    ctx.emit("result-handler.phi", Some(expr.ty.clone()), MirOperation::Phi { incoming })
+}
+
 fn try_child_already_propagated(inner: &TExpr) -> bool {
     match &inner.kind {
         TExprKind::ModuleCall {
             target_return: Some(target),
             ..
-        } => {
-            matches!(target, Type::Result { .. } | Type::Option(_)) && target != &inner.ty
-        }
+        } => matches!(target, Type::Result { .. } | Type::Option(_)) && target != &inner.ty,
         TExprKind::MethodCall { recv, .. } => {
             matches!(
                 recv.ty.without_user_tags(),
@@ -4992,6 +5270,7 @@ fn try_child_already_propagated(inner: &TExpr) -> bool {
                     if name.ends_with(".Client") || name.ends_with(".Server")
             )
         }
+        TExprKind::HostCall(host) => matches!(host.as_ref(), THostCall::EnvSet { .. }),
         _ => false,
     }
 }
@@ -5006,8 +5285,6 @@ fn checked_failure_return_type(ctx: &LowerCtx, carrier: &TFailureCarrier) -> Opt
         TFailureCarrier::Infallible => None,
     })
 }
-
-
 
 fn lower_if_cond(
     ctx: &mut LowerCtx,
@@ -5167,12 +5444,7 @@ fn lower_try_value(
                     },
                 )?;
                 if matches!(convert, TTryConvert::ProtocolExit) {
-                    let route = super::try_conversion_route(
-                        convert,
-                        input_ty,
-                        result,
-                        &carrier,
-                    )?;
+                    let route = super::try_conversion_route(convert, input_ty, result, &carrier)?;
                     let never_ty = Type::Named(crate::Syntax::TYPE_NEVER.to_string());
                     let _ = emit_static_call(ctx, &never_ty, route, vec![error])?;
                     ctx.terminate(MirTerminator::Unreachable {
@@ -5181,18 +5453,12 @@ fn lower_try_value(
                 } else {
                     let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
                     let converted = lower_try_failure(
-                        ctx,
-                        error,
-                        input_ty,
-                        convert,
-                        note_value,
-                        result,
-                        location,
-                        &carrier,
+                        ctx, error, input_ty, convert, note_value, result, location, &carrier,
                     )?;
-                    let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
-                        ctx.error(ctx.span(), "checked try has no result return type")
-                    })?;
+                    let return_ty =
+                        checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
+                            ctx.error(ctx.span(), "checked try has no result return type")
+                        })?;
                     let failure = ctx.emit(
                         "try-result-error",
                         Some(return_ty),
@@ -5217,20 +5483,13 @@ fn lower_try_value(
             } else {
                 let note_value = note.map(|value| ctx.lower_child(value)).transpose()?;
                 if let Some((file, line, fn_name)) = location {
-                    lower_try_journey(
-                        ctx,
-                        result,
-                        &carrier,
-                        note_value,
-                        file,
-                        line,
-                        fn_name,
-                    )?;
+                    lower_try_journey(ctx, result, &carrier, note_value, file, line, fn_name)?;
                 }
                 let return_ty = checked_failure_return_type(ctx, &carrier).ok_or_else(|| {
                     ctx.error(ctx.span(), "checked try has no optional return type")
                 })?;
-                let failure = ctx.emit("try-optional-absent", Some(return_ty), MirOperation::Absent)?;
+                let failure =
+                    ctx.emit("try-optional-absent", Some(return_ty), MirOperation::Absent)?;
                 ctx.terminate_with_cleanup(
                     MirTerminator::Return {
                         value: Some(failure),
@@ -5260,12 +5519,7 @@ fn lower_try_value(
                         ok: false,
                     },
                 )?;
-                let route = super::try_conversion_route(
-                    convert,
-                    input_ty,
-                    result,
-                    &carrier,
-                )?;
+                let route = super::try_conversion_route(convert, input_ty, result, &carrier)?;
                 let never_ty = Type::Named(crate::Syntax::TYPE_NEVER.to_string());
                 let _ = emit_static_call(ctx, &never_ty, route, vec![error])?;
                 ctx.terminate(MirTerminator::Unreachable {
@@ -5483,10 +5737,16 @@ fn lower_or_fallback_expr(
     let carrier = match &value.ty {
         crate::AST::Type::Option(_) => "option",
         crate::AST::Type::Result { .. } => "result",
-        _ => return unsupported_expr(ctx, &format!(
-            "TExprKind::OrFallback (non-carrier operand type {:?}, operation {:?})",
-            value.ty, std::mem::discriminant(&value.kind),
-        )),
+        _ => {
+            return unsupported_expr(
+                ctx,
+                &format!(
+                    "TExprKind::OrFallback (non-carrier operand type {:?}, operation {:?})",
+                    value.ty,
+                    std::mem::discriminant(&value.kind),
+                ),
+            );
+        }
     };
     let (success_is_never, failure_is_never) = match &value.ty {
         crate::AST::Type::Result { ok, err } => (ok.is_never(), err.is_never()),
@@ -5564,13 +5824,19 @@ fn lower_or_fallback_expr(
         let error = ctx.emit(
             "or-fallback-error-value",
             Some((**err).clone()),
-            MirOperation::ResultValue { subject: value_id, ok: false },
+            MirOperation::ResultValue {
+                subject: value_id,
+                ok: false,
+            },
         )?;
         let place = ctx.bind_local(&local, (**err).clone(), false, false, false)?;
         ctx.emit(
             "or-fallback-error-binding",
             None,
-            MirOperation::WritePlace { place, value: error },
+            MirOperation::WritePlace {
+                place,
+                value: error,
+            },
         )?;
         Some((local.name, previous_type, previous_place, previous_value))
     } else {
@@ -5662,17 +5928,15 @@ fn lower_fallback_block(
                 function: loc.fn_name.clone(),
                 source_line: loc.src_line.clone(),
                 caret: loc.caret,
-            locals: loc
-                .locals
-                .iter()
-                .filter_map(|(name, local)| {
-                    ctx.local_id_for(local)
-                        .ok()
-                        .map(|id| (name.clone(), id))
-                })
-                .collect(),
-        };
-        ctx.emit(
+                locals: loc
+                    .locals
+                    .iter()
+                    .filter_map(|(name, local)| {
+                        ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
+                    })
+                    .collect(),
+            };
+            ctx.emit(
                 "or-fallback-panic",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::RequireStop {
@@ -5786,8 +6050,7 @@ fn lower_enum_payload(
         TEnumPayload::Named(args) => {
             let mut lowered = Vec::with_capacity(args.len());
             for (name, arg) in args {
-                let (field, order) =
-                    ctx.enum_named_payload_field(enum_type, variant, name)?;
+                let (field, order) = ctx.enum_named_payload_field(enum_type, variant, name)?;
                 lowered.push((
                     order,
                     MirEnumArg {
@@ -5798,10 +6061,7 @@ fn lower_enum_payload(
                 ));
             }
             lowered.sort_by_key(|(order, _)| *order);
-            if lowered
-                .windows(2)
-                .any(|pair| pair[0].0 == pair[1].0)
-            {
+            if lowered.windows(2).any(|pair| pair[0].0 == pair[1].0) {
                 return Err(ctx.error(
                     ctx.span(),
                     format!("duplicate checked enum field in `{enum_type}::{variant}`"),
@@ -5811,7 +6071,6 @@ fn lower_enum_payload(
         }
     }
 }
-
 
 fn lower_enum_arg(
     ctx: &mut LowerCtx,
@@ -6015,7 +6274,10 @@ fn lower_select_wait(
         },
     )?;
     let (member, symbol) = if nonblocking {
-        ("select_try_wait_tagged", "jet_std::jet_select_try_wait_tagged")
+        (
+            "select_try_wait_tagged",
+            "jet_std::jet_select_try_wait_tagged",
+        )
     } else {
         ("select_wait_tagged", "jet_std::jet_select_wait_tagged")
     };
@@ -6120,11 +6382,7 @@ fn lower_core_closure_call(
             )?;
             values.extend([site_value, label_value]);
             closure = Some(ctx.lower_spawn_lambda(executable)?);
-            (
-                MirCoreClosureKind::Spawn,
-                group.is_some(),
-                label_text,
-            )
+            (MirCoreClosureKind::Spawn, group.is_some(), label_text)
         }
         TCoreClosureKind::Realtime {
             rate,
@@ -6156,16 +6414,12 @@ fn lower_core_closure_call(
             executable,
             ..
         } => {
-            let handle_ty = ctx
-                .local_types
-                .get(handle_name)
-                .cloned()
-                .ok_or_else(|| {
-                    ctx.error(
-                        ctx.span(),
-                        format!("missing checked transaction handle `{handle_name}`"),
-                    )
-                })?;
+            let handle_ty = ctx.local_types.get(handle_name).cloned().ok_or_else(|| {
+                ctx.error(
+                    ctx.span(),
+                    format!("missing checked transaction handle `{handle_name}`"),
+                )
+            })?;
             values.push(ctx.lower_child(&TExpr {
                 ty: handle_ty,
                 kind: TExprKind::Local(TLocal::user(handle_name.clone())),
@@ -6178,16 +6432,12 @@ fn lower_core_closure_call(
             executable,
             ..
         } => {
-            let handle_ty = ctx
-                .local_types
-                .get(handle_name)
-                .cloned()
-                .ok_or_else(|| {
-                    ctx.error(
-                        ctx.span(),
-                        format!("missing checked transaction handle `{handle_name}`"),
-                    )
-                })?;
+            let handle_ty = ctx.local_types.get(handle_name).cloned().ok_or_else(|| {
+                ctx.error(
+                    ctx.span(),
+                    format!("missing checked transaction handle `{handle_name}`"),
+                )
+            })?;
             values.push(ctx.lower_child(&TExpr {
                 ty: handle_ty,
                 kind: TExprKind::Local(TLocal::user(handle_name.clone())),
@@ -6354,7 +6604,7 @@ fn gc_edit_callback(ctx: &LowerCtx, edit: &TExpr, root_ty: Type) -> TLambda {
             &edit.ty,
             Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
         ))
-            .then_some(edit.ty.clone()),
+        .then_some(edit.ty.clone()),
         is_move: true,
         boxed: false,
         rc: false,
@@ -6365,8 +6615,6 @@ fn gc_edit_callback(ctx: &LowerCtx, edit: &TExpr, root_ty: Type) -> TLambda {
         uses_stack_sentry: false,
     }
 }
-
-
 
 fn lower_pattern_probe(
     ctx: &mut LowerCtx,
@@ -6384,17 +6632,23 @@ fn lower_pattern_probe(
     let Type::Tuple(types) = &expr.ty else {
         return Err(ctx.error(ctx.span(), "checked pattern captures have no tuple type"));
     };
-    let type_id = ctx.mir_type(&expr.ty)?.identity
+    let type_id = ctx
+        .mir_type(&expr.ty)?
+        .identity
         .ok_or_else(|| ctx.error(ctx.span(), "checked pattern tuple has no MIR identity"))?;
-    let fields = types.iter().enumerate().map(|(index, (name, ty))| {
-        let field = ctx.field_id_for_type(&expr.ty, name)?;
-        let value = ctx.emit(
-            "pattern-capture",
-            Some((**ty).clone()),
-            MirOperation::PatternCapture { matched, index },
-        )?;
-        Ok((field, value))
-    }).collect::<Result<Vec<_>, LowerError>>()?;
+    let fields = types
+        .iter()
+        .enumerate()
+        .map(|(index, (name, ty))| {
+            let field = ctx.field_id_for_type(&expr.ty, name)?;
+            let value = ctx.emit(
+                "pattern-capture",
+                Some((**ty).clone()),
+                MirOperation::PatternCapture { matched, index },
+            )?;
+            Ok((field, value))
+        })
+        .collect::<Result<Vec<_>, LowerError>>()?;
     ctx.emit(
         "pattern-captures",
         Some(expr.ty.clone()),
@@ -6419,11 +6673,8 @@ fn lower_host_call(
             let field_id = ctx.field_id_for_type(report_ty, field)?;
             let receiver = ctx.lower_child(recv)?;
             let carrier = super::TFailureCarrier::from_checked_type(&recv.ty);
-            let call = ctx.intern_prelude_route(super::carrier_fact_route(
-                *notes,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call =
+                ctx.intern_prelude_route(super::carrier_fact_route(*notes, &expr.ty, &carrier)?)?;
             ctx.emit(
                 "host-carrier-fact",
                 Some(expr.ty.clone()),
@@ -6435,13 +6686,13 @@ fn lower_host_call(
                 }),
             )
         }
-        THostCall::FixedListIndex { base, index, line: _ } => {
-            let place = ctx.lower_index_place(
-                base,
-                index,
-                MirIndexKind::FixedListProof,
-                MirAccess::Read,
-            )?;
+        THostCall::FixedListIndex {
+            base,
+            index,
+            line: _,
+        } => {
+            let place =
+                ctx.lower_index_place(base, index, MirIndexKind::FixedListProof, MirAccess::Read)?;
             ctx.emit(
                 "host-fixed-list-index",
                 Some(expr.ty.clone()),
@@ -6451,9 +6702,7 @@ fn lower_host_call(
         THostCall::OptionProbe {
             inner,
             kind: TOptionProbe::Field(field),
-        } => {
-            lower_optional_field(ctx, expr, inner, field, false)
-        }
+        } => lower_optional_field(ctx, expr, inner, field, false),
         THostCall::TupleIndex { base, index } => {
             let field = ctx.field_id_for_type(&base.ty, &index.to_string())?;
             let base = ctx.lower_child(base)?;
@@ -6492,7 +6741,10 @@ fn lower_host_call(
             )?;
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let route = super::memo_stats_route(&expr.ty, &carrier)?;
-            let args = vec![mir_value_arg(ctx, name_value), mir_value_arg(ctx, bound_value)];
+            let args = vec![
+                mir_value_arg(ctx, name_value),
+                mir_value_arg(ctx, bound_value),
+            ];
             emit_host_route_call(ctx, expr, route, args)
         }
         THostCall::Helper { kind, args, .. } => {
@@ -6503,16 +6755,17 @@ fn lower_host_call(
         }
         THostCall::Method { recv, method, args } => {
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route =
-                super::host_method_route(&recv.ty, method, args.len(), &expr.ty, &carrier)?;
+            let route = super::host_method_route(&recv.ty, method, args.len(), &expr.ty, &carrier)?;
             let mut lowered = Vec::with_capacity(route.signature.arity);
             let mutates_receiver = matches!(
                 (recv.ty.without_user_tags(), method.as_str()),
                 (Type::Apply { name, .. }, "add" | "remove") if name == "Pool"
             );
             let receiver = if mutates_receiver {
-                let place = lower_receiver_place(ctx, recv, MirAccess::Write)?
-                    .ok_or_else(|| ctx.error(ctx.span(), "mutable host receiver has no checked place"))?;
+                let place =
+                    lower_receiver_place(ctx, recv, MirAccess::Write)?.ok_or_else(|| {
+                        ctx.error(ctx.span(), "mutable host receiver has no checked place")
+                    })?;
                 let value = ctx.emit(
                     "host-call-place",
                     Some(recv.ty.clone()),
@@ -6545,10 +6798,7 @@ fn lower_host_call(
                     ),
                 ));
             }
-            if matches!(
-                method.as_str(),
-                "read_txn" | "edit_txn" | "capture_txn"
-            ) {
+            if matches!(method.as_str(), "read_txn" | "edit_txn" | "capture_txn") {
                 lowered[1].access = MirAccess::Write;
                 lowered[1].place = Some(lower_local_place(ctx, &TLocal::stm(), MirAccess::Write)?);
             }
@@ -6574,15 +6824,11 @@ fn lower_host_call(
             }
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let map_call = ctx.intern_prelude_route(super::cell_guard_map_route(
-                *editable,
-                result_ty,
-                &carrier,
+                *editable, result_ty, &carrier,
             )?)?;
             let split_call = if field_paths.len() == 2 {
                 Some(ctx.intern_prelude_route(super::cell_guard_split_route(
-                    *editable,
-                    result_ty,
-                    &carrier,
+                    *editable, result_ty, &carrier,
                 )?)?)
             } else {
                 None
@@ -6638,11 +6884,8 @@ fn lower_host_call(
                 .transpose()?
                 .map(|arg| arg.value);
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let call = ctx.intern_prelude_route(super::gc_edit_route(
-                *kind,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call =
+                ctx.intern_prelude_route(super::gc_edit_route(*kind, &expr.ty, &carrier)?)?;
             ctx.emit(
                 "host-gc-edit",
                 Some(expr.ty.clone()),
@@ -6695,7 +6938,9 @@ fn lower_host_call(
             let pattern = parts
                 .iter()
                 .map(|part| match part {
-                    crate::AST::StrMatchPart::Lit(text) => Ok(MirTextPatternPart::Literal(text.clone())),
+                    crate::AST::StrMatchPart::Lit(text) => {
+                        Ok(MirTextPatternPart::Literal(text.clone()))
+                    }
                     crate::AST::StrMatchPart::Hole { ty, span, .. } => {
                         let ty = ty.clone().unwrap_or(Type::String);
                         Ok(MirTextPatternPart::Hole {
@@ -6736,7 +6981,10 @@ fn lower_host_call(
                             })
                         }
                         crate::AST::BinSpec::Rest => Ok(MirBinaryPatternPart::Rest {
-                            ty: lower_pattern_type(ctx, &Type::Named(crate::Syntax::TYPE_BYTES.to_string()))?,
+                            ty: lower_pattern_type(
+                                ctx,
+                                &Type::Named(crate::Syntax::TYPE_BYTES.to_string()),
+                            )?,
                             span: *span,
                         }),
                     },
@@ -6782,11 +7030,8 @@ fn lower_host_call(
                 .map(|hole| ctx.lower_plain_arg(hole).map(|arg| arg.value))
                 .collect::<Result<Vec<_>, _>>()?;
             let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let call = ctx.intern_prelude_route(super::typed_text_interp_route(
-                *kind,
-                &expr.ty,
-                &carrier,
-            )?)?;
+            let call = ctx
+                .intern_prelude_route(super::typed_text_interp_route(*kind, &expr.ty, &carrier)?)?;
             ctx.emit(
                 "host-typed-text-interp",
                 Some(expr.ty.clone()),
@@ -6821,11 +7066,20 @@ fn lower_host_call(
         }
         THostCall::EnvSet { name, value, loc } => {
             let record = crate::Syntax::core_call("core.sys", "set").ok_or_else(|| {
-                ctx.error(ctx.span(), "missing checked Core registry row `core.sys.set`")
+                ctx.error(
+                    ctx.span(),
+                    "missing checked Core registry row `core.sys.set`",
+                )
             })?;
             let mut args = vec![ctx.lower_plain_arg(name)?, ctx.lower_plain_arg(value)?];
             for (index, arg) in args.iter_mut().enumerate() {
-                arg.access = if record.signature.borrow_mask.get(index).copied().unwrap_or(false) {
+                arg.access = if record
+                    .signature
+                    .borrow_mask
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false)
+                {
                     MirAccess::Read
                 } else {
                     MirAccess::Move
@@ -6856,6 +7110,14 @@ fn lower_host_call(
                 Some(Type::Bool),
                 MirOperation::ResultIsOk { subject: result },
             )?;
+            let failure = ctx.new_block(ctx.span(), "core-sys-set.failure")?;
+            let join = ctx.new_block(ctx.span(), "core-sys-set.join")?;
+            ctx.terminate(MirTerminator::Branch {
+                condition,
+                then_target: join,
+                else_target: failure,
+            });
+            ctx.switch_to(failure);
             let error = ctx.emit(
                 "core-sys-set-error",
                 Some(Type::Named("EnvError".to_string())),
@@ -6883,17 +7145,15 @@ fn lower_host_call(
                 function: loc.fn_name.clone(),
                 source_line: loc.src_line.clone(),
                 caret: loc.caret,
-            locals: loc
-                .locals
-                .iter()
-                .filter_map(|(name, local)| {
-                    ctx.local_id_for(local)
-                        .ok()
-                        .map(|id| (name.clone(), id))
-                })
-                .collect(),
-        };
-        ctx.emit(
+                locals: loc
+                    .locals
+                    .iter()
+                    .filter_map(|(name, local)| {
+                        ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
+                    })
+                    .collect(),
+            };
+            ctx.emit(
                 "core-sys-set-stop",
                 Some(expr.ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::RequireStop {
@@ -6905,6 +7165,13 @@ fn lower_host_call(
                     values: vec![error],
                     always_stops: false,
                 }),
+            )?;
+            ctx.terminate(MirTerminator::Jump { target: join });
+            ctx.switch_to(join);
+            ctx.emit(
+                "core-sys-set-unit",
+                Some(expr.ty.clone()),
+                MirOperation::Constant(MirConstant::Unit),
             )
         }
         THostCall::NumericBounds { ty, member } => {
@@ -7020,10 +7287,7 @@ fn lower_host_call(
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let return_type = ret
-                .as_ref()
-                .map(|ty| ctx.mir_type(ty))
-                .transpose()?;
+            let return_type = ret.as_ref().map(|ty| ctx.mir_type(ty)).transpose()?;
             let callback = MirCallbackAdapter {
                 id: MirCallbackId(stable_id(
                     "mir-callback",
@@ -7195,7 +7459,12 @@ fn apply_route_access(
         if arg.access != MirAccess::Write {
             arg.access = ctx.call_value_access(
                 arg.value,
-                route.signature.borrow_mask.get(index).copied().unwrap_or(false),
+                route
+                    .signature
+                    .borrow_mask
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false),
             )?;
         }
     }
@@ -7227,19 +7496,20 @@ fn emit_host_route_call(
     )
 }
 
-
 fn lower_string_format_args(
     ctx: &mut LowerCtx,
     value: jet_foundation::MIR::MirValueId,
     format: &crate::AST::StrFormat,
 ) -> Result<Vec<MirCallArg>, LowerError> {
     let mut args = vec![mir_value_arg(ctx, value)];
-    let mut constant =
-        |ty: crate::AST::Type, operation: MirOperation, access: MirAccess| -> Result<(), LowerError> {
-            let value = ctx.emit("string-format-constant", Some(ty), operation)?;
-            args.push(mir_value_arg_with_access(ctx, value, access));
-            Ok(())
-        };
+    let mut constant = |ty: crate::AST::Type,
+                        operation: MirOperation,
+                        access: MirAccess|
+     -> Result<(), LowerError> {
+        let value = ctx.emit("string-format-constant", Some(ty), operation)?;
+        args.push(mir_value_arg_with_access(ctx, value, access));
+        Ok(())
+    };
     match format {
         crate::AST::StrFormat::Fixed(value)
         | crate::AST::StrFormat::Grouped(value)
@@ -7303,23 +7573,16 @@ fn mir_value_arg(ctx: &LowerCtx, value: jet_foundation::MIR::MirValueId) -> MirC
     }
 }
 
-fn http_field_projection<'a>(
-    recv: &Type,
-    op: &'a THandleOp,
-    args: &[TExpr],
-) -> Option<&'a str> {
+fn http_field_projection<'a>(recv: &Type, op: &'a THandleOp, args: &[TExpr]) -> Option<&'a str> {
     let receiver = match recv.without_user_tags() {
         Type::Named(name) => name.as_str(),
         _ => return None,
     };
     match op {
-        THandleOp::HTTPReqField(field) if receiver == "HTTPRequest" => {
-            match (*field, args.len()) {
-                ("method" | "path" | "body" | "body_len", 0)
-                | ("under_limit", 1) => Some(*field),
-                _ => None,
-            }
-        }
+        THandleOp::HTTPReqField(field) if receiver == "HTTPRequest" => match (*field, args.len()) {
+            ("method" | "path" | "body" | "body_len", 0) | ("under_limit", 1) => Some(*field),
+            _ => None,
+        },
         THandleOp::HTTPRespField(field)
             if receiver == "HTTPResponse"
                 && args.is_empty()
@@ -7398,11 +7661,7 @@ fn lower_http_shutdown_report_field(
     emit_static_call(ctx, &expr.ty, route, vec![base, index])
 }
 
-fn http_field_route(
-    receiver: &str,
-    field: &str,
-    args_len: usize,
-) -> Option<TPreludeRoute> {
+fn http_field_route(receiver: &str, field: &str, args_len: usize) -> Option<TPreludeRoute> {
     let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) =
         match (receiver, field, args_len) {
             ("HTTPRequest", "method", 0) => {
@@ -7479,7 +7738,6 @@ fn lower_http_field(
     emit_static_call(ctx, &expr.ty, route, operands)
 }
 
-
 fn http_response_header_route() -> TPreludeRoute {
     TPreludeRoute {
         family: MirPreludeFamily::HandleMethod,
@@ -7529,7 +7787,10 @@ fn lower_http_response_header(
         expr.ty.without_user_tags(),
         Type::Option(value) if matches!(value.as_ref().without_user_tags(), Type::String)
     ) {
-        return unsupported_expr(ctx, "HTTPResponse.header getter does not return Option<String>");
+        return unsupported_expr(
+            ctx,
+            "HTTPResponse.header getter does not return Option<String>",
+        );
     }
     if !matches!(args[0].ty.without_user_tags(), Type::String) {
         return Err(ctx.error(
@@ -7539,7 +7800,12 @@ fn lower_http_response_header(
     }
     let receiver = ctx.lower_child(recv)?;
     let name = ctx.lower_child(&args[0])?;
-    emit_static_call(ctx, &expr.ty, http_response_header_route(), vec![receiver, name])
+    emit_static_call(
+        ctx,
+        &expr.ty,
+        http_response_header_route(),
+        vec![receiver, name],
+    )
 }
 
 fn http_response_header_builder_route() -> TPreludeRoute {
@@ -7589,7 +7855,10 @@ fn lower_http_response_header_builder(
         expr.ty.without_user_tags(),
         Type::Named(name) if name == "HTTPResponse"
     ) {
-        return unsupported_expr(ctx, "HTTPResponse.header builder does not return HTTPResponse");
+        return unsupported_expr(
+            ctx,
+            "HTTPResponse.header builder does not return HTTPResponse",
+        );
     }
     if args
         .iter()
@@ -7611,11 +7880,11 @@ fn lower_http_response_header_builder(
     )
 }
 
-
 fn http_text_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str> {
     let method = match op {
-        THandleOp::HTTPClientMethod { method, .. }
-        | THandleOp::HTTPServerMethod { method, .. } => method.as_str(),
+        THandleOp::HTTPClientMethod { method, .. } | THandleOp::HTTPServerMethod { method, .. } => {
+            method.as_str()
+        }
         _ => return None,
     };
     if method != "text" {
@@ -7686,12 +7955,7 @@ fn lower_http_text_method(
     )
 }
 
-fn http_json_request_builder(
-    recv: &TExpr,
-    op: &THandleOp,
-    args: &[TExpr],
-    result: &Type,
-) -> bool {
+fn http_json_request_builder(recv: &TExpr, op: &THandleOp, args: &[TExpr], result: &Type) -> bool {
     let THandleOp::HTTPClientMethod { method, .. } = op else {
         return false;
     };
@@ -7738,13 +8002,19 @@ fn lower_http_request_builder(
         kind: args[0].kind.clone(),
     };
     let body = lower_serde_encode(ctx, &encoded, &args[0])?;
-    emit_static_call(ctx, &expr.ty, http_request_json_builder_route(), vec![receiver, body])
+    emit_static_call(
+        ctx,
+        &expr.ty,
+        http_request_json_builder_route(),
+        vec![receiver, body],
+    )
 }
 
 fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str> {
     let method = match op {
-        THandleOp::HTTPClientMethod { method, .. }
-        | THandleOp::HTTPServerMethod { method, .. } => method.as_str(),
+        THandleOp::HTTPClientMethod { method, .. } | THandleOp::HTTPServerMethod { method, .. } => {
+            method.as_str()
+        }
         _ => return None,
     };
     if method != "json" {
@@ -7761,9 +8031,15 @@ fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
 fn http_text_route(receiver: &str, with_limit: bool) -> TPreludeRoute {
     let (member, symbol) = match (receiver, with_limit) {
         ("HTTPRequest", false) => ("request_text", "jet_http_request_text"),
-        ("HTTPRequest", true) => ("request_text_with_limit", "jet_http_request_text_with_limit"),
+        ("HTTPRequest", true) => (
+            "request_text_with_limit",
+            "jet_http_request_text_with_limit",
+        ),
         ("HTTPResponse", false) => ("response_text", "jet_http_response_text"),
-        ("HTTPResponse", true) => ("response_text_with_limit", "jet_http_response_text_with_limit"),
+        ("HTTPResponse", true) => (
+            "response_text_with_limit",
+            "jet_http_response_text_with_limit",
+        ),
         ("Body", true) => ("body_text", "jet_http_body_text"),
         _ => unreachable!("checked HTTP JSON receiver has no text route"),
     };
@@ -7872,8 +8148,12 @@ fn lower_http_json_method(
         ok: Box::new(target.clone()),
         err: Box::new(decode_error),
     };
-    let record = crate::Syntax::core_call("core.encoding.json", "decode")
-        .ok_or_else(|| ctx.error(ctx.span(), "typed HTTP JSON decode Core row is not registered"))?;
+    let record = crate::Syntax::core_call("core.encoding.json", "decode").ok_or_else(|| {
+        ctx.error(
+            ctx.span(),
+            "typed HTTP JSON decode Core row is not registered",
+        )
+    })?;
     let decode_carrier = TFailureCarrier::from_checked_type(&decode_ty);
     let decode_type_arg = ctx.mir_type(&target)?;
     let decode_route = ctx.intern_core_route(record, &decode_carrier)?;
@@ -7963,7 +8243,12 @@ fn emit_static_call(
         .map(|(index, value)| {
             let access = ctx.call_value_access(
                 value,
-                route.signature.borrow_mask.get(index).copied().unwrap_or(false),
+                route
+                    .signature
+                    .borrow_mask
+                    .get(index)
+                    .copied()
+                    .unwrap_or(false),
             )?;
             Ok(mir_value_arg_with_access(ctx, value, access))
         })
@@ -7990,7 +8275,7 @@ fn emit_concat_list(
     let route = match TBuiltinOp::ConcatList.route_plan(result, carrier)? {
         super::TRoutePlan::Prelude(route) => route,
         super::TRoutePlan::Primitive => {
-            return unsupported_expr(ctx, "TBuiltinOp::ConcatList has no Prelude route")
+            return unsupported_expr(ctx, "TBuiltinOp::ConcatList has no Prelude route");
         }
     };
     emit_static_call(ctx, result, route, vec![left, right])
@@ -8046,8 +8331,12 @@ fn lower_direct_string_format(
             },
         );
     }
-    let route =
-        super::string_format_route(format, value_ty, result, &super::TFailureCarrier::Infallible)?;
+    let route = super::string_format_route(
+        format,
+        value_ty,
+        result,
+        &super::TFailureCarrier::Infallible,
+    )?;
     let call = ctx.intern_prelude_route(route)?;
     ctx.emit(
         "string-format-prelude-call",
@@ -8085,7 +8374,6 @@ fn mir_value_arg_with_access(
     }
 }
 
-
 /// Marshal an exact Int through the existing checked native-width conversion.
 fn lower_builtin_native_int(
     ctx: &mut LowerCtx,
@@ -8095,12 +8383,21 @@ fn lower_builtin_native_int(
     if !matches!(source.without_user_tags(), Type::Int) {
         return Ok(value);
     }
-    let Some(TNumericOp::TryFrom { host_kind, dst_rust, dst_spelling }) =
-        super::resolve_numeric_conversion_op("I64", "Int")
+    let Some(TNumericOp::TryFrom {
+        host_kind,
+        dst_rust,
+        dst_spelling,
+    }) = super::resolve_numeric_conversion_op("I64", "Int")
     else {
-        return Err(ctx.error(ctx.span(), "native Int operand has no checked I64 conversion"));
+        return Err(ctx.error(
+            ctx.span(),
+            "native Int operand has no checked I64 conversion",
+        ));
     };
-    let target = Type::IntN { signed: true, bits: 64 };
+    let target = Type::IntN {
+        signed: true,
+        bits: 64,
+    };
     let carrier = TFailureCarrier::Infallible;
     let op = TNumericOp::CheckedIntToFixed {
         host_kind,
@@ -8128,16 +8425,12 @@ fn lower_indexes(
     let (receiver, _) = lower_builtin_receiver(ctx, recv, false)?;
     let length_route = TBuiltinOp::LenList
         .prelude_route(&recv.ty, &Type::Int, &TFailureCarrier::Infallible)
-        .map_err(|error| {
-            ctx.error(ctx.span(), format!("builtin method LenList: {error:?}"))
-        })?;
+        .map_err(|error| ctx.error(ctx.span(), format!("builtin method LenList: {error:?}")))?;
     let length = emit_static_call(ctx, &Type::Int, length_route, vec![receiver])?;
     let length = lower_builtin_native_int(ctx, length, &Type::Int)?;
     let route = TBuiltinOp::Indexes
         .prelude_route(&recv.ty, &expr.ty, carrier)
-        .map_err(|error| {
-            ctx.error(ctx.span(), format!("builtin method Indexes: {error:?}"))
-        })?;
+        .map_err(|error| ctx.error(ctx.span(), format!("builtin method Indexes: {error:?}")))?;
     emit_static_call(ctx, &expr.ty, route, vec![length])
 }
 
@@ -8152,7 +8445,11 @@ fn lower_tuple_builtin(
     let (struct_name, row_ty, indexed) = match op {
         TBuiltinOp::Indexed { tuple_struct } => {
             let row = match expr.ty.without_user_tags() {
-                Type::Apply { args, .. } if crate::Collections::is_iter_type(&expr.ty) && args.len() == 1 => &args[0],
+                Type::Apply { args, .. }
+                    if crate::Collections::is_iter_type(&expr.ty) && args.len() == 1 =>
+                {
+                    &args[0]
+                }
                 Type::List(element) => element.as_ref(),
                 _ => return Err(ctx.error(ctx.span(), "checked indexed result has no row type")),
             };
@@ -8165,12 +8462,24 @@ fn lower_tuple_builtin(
         return Err(ctx.error(ctx.span(), "checked tuple builtin has no tuple fields"));
     };
     if fields.len() != 2 || args.len() != usize::from(!indexed) {
-        return Err(ctx.error(ctx.span(), "checked tuple builtin has inconsistent operands"));
+        return Err(ctx.error(
+            ctx.span(),
+            "checked tuple builtin has inconsistent operands",
+        ));
     }
     let element = match recv.ty.without_user_tags() {
         Type::List(element) | Type::FixedList { elem: element, .. } => element.as_ref(),
-        Type::Apply { args, .. } if crate::Collections::is_iter_type(&recv.ty) && args.len() == 1 => &args[0],
-        _ => return Err(ctx.error(ctx.span(), "checked tuple builtin receiver is not a sequence")),
+        Type::Apply { args, .. }
+            if crate::Collections::is_iter_type(&recv.ty) && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => {
+            return Err(ctx.error(
+                ctx.span(),
+                "checked tuple builtin receiver is not a sequence",
+            ));
+        }
     };
     let (mut receiver, _) = lower_builtin_receiver(ctx, recv, false)?;
     let mut operands = lower_values(ctx, args)?;
@@ -8179,8 +8488,10 @@ fn lower_tuple_builtin(
     }
     if !crate::Collections::is_iter_type(&recv.ty) {
         let iter_ty = crate::Collections::iter_ty(element.clone());
-        let route = TBuiltinOp::ListLazy.prelude_route(&recv.ty, &iter_ty, &TFailureCarrier::Infallible)?;
-        let mut arg = mir_value_arg_with_access(ctx, receiver, ctx.call_value_access(receiver, false)?);
+        let route =
+            TBuiltinOp::ListLazy.prelude_route(&recv.ty, &iter_ty, &TFailureCarrier::Infallible)?;
+        let mut arg =
+            mir_value_arg_with_access(ctx, receiver, ctx.call_value_access(receiver, false)?);
         arg.widen_fixed_to_list = matches!(recv.ty.without_user_tags(), Type::FixedList { .. });
         let call = ctx.intern_prelude_route(route)?;
         receiver = ctx.emit(
@@ -8195,35 +8506,61 @@ fn lower_tuple_builtin(
         )?;
     }
     let params = if indexed {
-        vec![Type::IntN { signed: true, bits: 64 }, element.clone()]
+        vec![
+            Type::IntN {
+                signed: true,
+                bits: 64,
+            },
+            element.clone(),
+        ]
     } else {
         fields.iter().map(|(_, ty)| ty.as_ref().clone()).collect()
     };
-    let row_fields = fields.iter().enumerate().map(|(index, (name, ty))| {
-        let local = TExpr {
-            ty: params[index].clone(),
-            kind: TExprKind::Local(TLocal::user(format!("zip_{index}"))),
-        };
-        let value = if indexed && index == 0 {
-            TExpr {
-                ty: ty.as_ref().clone(),
-                kind: TExprKind::NumericMethod {
-                    recv: Box::new(local),
-                    op: TNumericOp::CastAs { dst_rust: "i64".to_string() },
-                },
-            }
-        } else {
-            local
-        };
-        (name.clone(), value)
-    }).collect();
-    let callback = zip_callback(ctx, params, TExpr {
-        ty: row_ty.clone(),
-        kind: TExprKind::TupleLit { struct_name: struct_name.clone(), fields: row_fields },
-    })?;
-    let mut values = operands.into_iter().map(|value| (value, MirAccess::Move)).collect::<Vec<_>>();
+    let row_fields = fields
+        .iter()
+        .enumerate()
+        .map(|(index, (name, ty))| {
+            let local = TExpr {
+                ty: params[index].clone(),
+                kind: TExprKind::Local(TLocal::user(format!("zip_{index}"))),
+            };
+            let value = if indexed && index == 0 {
+                TExpr {
+                    ty: ty.as_ref().clone(),
+                    kind: TExprKind::NumericMethod {
+                        recv: Box::new(local),
+                        op: TNumericOp::CastAs {
+                            dst_rust: "i64".to_string(),
+                        },
+                    },
+                }
+            } else {
+                local
+            };
+            (name.clone(), value)
+        })
+        .collect();
+    let callback = zip_callback(
+        ctx,
+        params,
+        TExpr {
+            ty: row_ty.clone(),
+            kind: TExprKind::TupleLit {
+                struct_name: struct_name.clone(),
+                fields: row_fields,
+            },
+        },
+    )?;
+    let mut values = operands
+        .into_iter()
+        .map(|value| (value, MirAccess::Move))
+        .collect::<Vec<_>>();
     values.push((callback, MirAccess::Move));
-    let call_ty = if indexed { crate::Collections::iter_ty(row_ty.clone()) } else { expr.ty.clone() };
+    let call_ty = if indexed {
+        crate::Collections::iter_ty(row_ty.clone())
+    } else {
+        expr.ty.clone()
+    };
     let route = op.prelude_route(&recv.ty, &call_ty, carrier)?;
     let result = zip_closure_call(ctx, call_ty.clone(), route, receiver, values)?;
     if indexed && matches!(expr.ty.without_user_tags(), Type::List(_)) {
@@ -8268,7 +8605,10 @@ fn lower_numeric_method(
         let receiver = if exact {
             receiver
         } else {
-            let raw_type = Type::IntN { signed: true, bits: 64 };
+            let raw_type = Type::IntN {
+                signed: true,
+                bits: 64,
+            };
             let target = ctx.mir_type(&raw_type)?;
             ctx.emit(
                 "numeric-bits",
@@ -8334,7 +8674,13 @@ fn lower_numeric_method(
             | TNumericOp::InlineRange { .. }
     );
     if conversion {
-        if matches!(op, TNumericOp::InlineRange { fallible: false, .. }) {
+        if matches!(
+            op,
+            TNumericOp::InlineRange {
+                fallible: false,
+                ..
+            }
+        ) {
             return ctx.emit(
                 "proven-range-conversion",
                 Some(expr.ty.clone()),
@@ -8350,10 +8696,9 @@ fn lower_numeric_method(
             &carrier,
         )?;
         let parameters = match op {
-            TNumericOp::CheckedIntToFloat {
-                target_f32,
-                ..
-            } if matches!(recv.ty.without_user_tags(), Type::Int) => {
+            TNumericOp::CheckedIntToFloat { target_f32, .. }
+                if matches!(recv.ty.without_user_tags(), Type::Int) =>
+            {
                 vec![lower_conversion_bool(ctx, *target_f32)?]
             }
             TNumericOp::CheckedIntToFloat {
@@ -8398,7 +8743,6 @@ fn lower_numeric_method(
         Some(expr.ty.clone()),
         MirOperation::Semantic(MirSemanticOp::NumericMethod { call, receiver }),
     )
-
 }
 fn lower_fn_value(
     ctx: &mut LowerCtx,
@@ -8423,7 +8767,8 @@ fn lower_fn_value(
             )
         }
         TFnValueKind::NamedFn {
-            lambda: Some(lambda), ..
+            lambda: Some(lambda),
+            ..
         } => ctx.lower_lambda(lambda),
         TFnValueKind::Call { callee, args } => {
             let callee = ctx.lower_child(callee)?;
@@ -8485,9 +8830,10 @@ fn lower_fn_value(
                     box_as_trait: None,
                 });
             }
-            let return_ty = ret.as_deref().cloned().unwrap_or_else(|| {
-                Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
-            });
+            let return_ty = ret
+                .as_deref()
+                .cloned()
+                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()));
             let body = TExpr {
                 ty: return_ty.clone(),
                 kind: TExprKind::Call {
@@ -8555,9 +8901,11 @@ fn lower_fn_value(
                     },
             } => ctx.lower_named_fn_send(name, &value.ty),
             TExprKind::FnValue {
-                kind: TFnValueKind::NamedFn {
-                    lambda: Some(lambda), ..
-                },
+                kind:
+                    TFnValueKind::NamedFn {
+                        lambda: Some(lambda),
+                        ..
+                    },
             } => ctx.lower_lambda_send(lambda),
             TExprKind::HostBorrowCallback { callable, params } => {
                 let callable = match &callable.kind {
@@ -8577,7 +8925,7 @@ fn lower_fn_value(
                         return unsupported_expr(
                             ctx,
                             "SendFn HostBorrowCallback requires a named function, lambda, or SendFn local",
-                        )
+                        );
                     }
                 };
                 let target = ctx.mir_send_fn_type(&expr.ty)?;
@@ -8591,7 +8939,8 @@ fn lower_fn_value(
                     MirOperation::Semantic(MirSemanticOp::HostBorrowCallback { callable, params }),
                 )
             }
-            TExprKind::Local(_) | TExprKind::FnValue {
+            TExprKind::Local(_)
+            | TExprKind::FnValue {
                 kind: TFnValueKind::Send { .. },
             } => {
                 let value = ctx.lower_child(value)?;
@@ -8607,18 +8956,16 @@ fn lower_fn_value(
                     },
                 )
             }
-            _ => unsupported_expr(ctx, "SendFn requires a named function, lambda, or SendFn local"),
+            _ => unsupported_expr(
+                ctx,
+                "SendFn requires a named function, lambda, or SendFn local",
+            ),
         },
         TFnValueKind::NamedFn { .. } => unsupported_expr(ctx, "TFnValueKind::NamedFn"),
     }
 }
 
-
-
-fn datatree_access_route(
-    op: &THandleOp,
-    carrier: &TFailureCarrier,
-) -> Option<TPreludeRoute> {
+fn datatree_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TPreludeRoute> {
     let (member, symbol, arity, borrow_mask) = match op {
         THandleOp::DataTreeField | THandleOp::JSONField => {
             ("field", "jet_datatree_field", 2, vec![true, true])
@@ -8626,9 +8973,7 @@ fn datatree_access_route(
         THandleOp::DataTreeAt | THandleOp::JSONAt => {
             ("at", "jet_datatree_at", 2, vec![true, false])
         }
-        THandleOp::DataTreeInt | THandleOp::JSONInt => {
-            ("int", "jet_datatree_int", 1, vec![true])
-        }
+        THandleOp::DataTreeInt | THandleOp::JSONInt => ("int", "jet_datatree_int", 1, vec![true]),
         THandleOp::DataTreeText | THandleOp::JSONText => {
             ("text", "jet_datatree_text", 1, vec![true])
         }
@@ -8641,9 +8986,12 @@ fn datatree_access_route(
         THandleOp::DataTreeToText | THandleOp::JSONToText => {
             ("to_text", "jet_datatree_to_text", 1, vec![true])
         }
-        THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => {
-            ("equal_unordered", "jet_datatree_equal_unordered", 2, vec![true, true])
-        }
+        THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => (
+            "equal_unordered",
+            "jet_datatree_equal_unordered",
+            2,
+            vec![true, true],
+        ),
         THandleOp::DBValueInt => ("int", "jet_std::DBValue::int", 1, vec![true]),
         THandleOp::DBValueFloat => ("float", "jet_std::DBValue::float", 1, vec![true]),
         THandleOp::DBValueText => ("text", "jet_std::DBValue::text", 1, vec![true]),
@@ -8702,16 +9050,16 @@ fn lower_datatree_access(
 fn typed_codec_target(ty: &Type) -> bool {
     match ty.without_user_tags() {
         Type::Int
-            | Type::Float
-            | Type::Bool
-            | Type::String
-            | Type::Char
-            | Type::IntN { .. }
-            | Type::Float32
-            | Type::List(_)
-            | Type::FixedList { .. }
-            | Type::Option(_)
-            | Type::InlineRange { .. } => true,
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::List(_)
+        | Type::FixedList { .. }
+        | Type::Option(_)
+        | Type::InlineRange { .. } => true,
         Type::Map { key, .. } => matches!(key.without_user_tags(), Type::String),
         Type::Named(name) => {
             matches!(
@@ -8729,7 +9077,9 @@ fn typed_codec_target(ty: &Type) -> bool {
                     | "U64"
                     | "U128"
             ) || name == "Secret"
-                || name.rsplit_once('.').is_some_and(|(_, leaf)| leaf == "Secret")
+                || name
+                    .rsplit_once('.')
+                    .is_some_and(|(_, leaf)| leaf == "Secret")
         }
         Type::Tagged { inner, .. } => typed_codec_target(inner),
         _ => false,
@@ -8800,7 +9150,10 @@ fn lower_typed_encode(
     // its `T: __jet_Encode` implementation ignores this sentinel.
     let kind_value = ctx.emit(
         "serde-codec-kind",
-        Some(Type::IntN { signed: true, bits: 64 }),
+        Some(Type::IntN {
+            signed: true,
+            bits: 64,
+        }),
         MirOperation::Constant(MirConstant::Int {
             value: 0,
             width: Some((true, 64)),
@@ -8824,7 +9177,6 @@ fn lower_typed_encode(
         }),
     )
 }
-
 
 fn missing_function_target(error: &LowerError) -> bool {
     error.message.starts_with("missing checked function target")
@@ -8871,7 +9223,10 @@ fn lower_builtin_codec(
     let call = ctx.intern_prelude_route(route)?;
     let kind_value = ctx.emit(
         "serde-codec-kind",
-        Some(Type::IntN { signed: true, bits: 64 }),
+        Some(Type::IntN {
+            signed: true,
+            bits: 64,
+        }),
         MirOperation::Constant(MirConstant::Int {
             value: kind,
             width: Some((true, 64)),
@@ -8903,32 +9258,63 @@ fn lower_optional_encode(
     inner: &Type,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
     let subject = ctx.lower_child(recv)?;
-    let condition = ctx.emit("encode-option-present", Some(Type::Bool), MirOperation::OptionIsSome { subject })?;
+    let condition = ctx.emit(
+        "encode-option-present",
+        Some(Type::Bool),
+        MirOperation::OptionIsSome { subject },
+    )?;
     let present = ctx.new_block(ctx.span(), "encode-option-present")?;
     let absent = ctx.new_block(ctx.span(), "encode-option-absent")?;
     let join = ctx.new_block(ctx.span(), "encode-option-join")?;
-    ctx.terminate(MirTerminator::Branch { condition, then_target: present, else_target: absent });
+    ctx.terminate(MirTerminator::Branch {
+        condition,
+        then_target: present,
+        else_target: absent,
+    });
     ctx.switch_to(present);
-    let value = ctx.emit("encode-option-value", Some(inner.clone()), MirOperation::OptionValue { subject })?;
+    let value = ctx.emit(
+        "encode-option-value",
+        Some(inner.clone()),
+        MirOperation::OptionValue { subject },
+    )?;
     let local = TLocal::generated(format!("encode_option_{}", subject.0));
     let place = ctx.bind_local(&local, inner.clone(), false, false, false)?;
-    ctx.emit("encode-option-bind", None, MirOperation::WritePlace { place, value })?;
-    let encoded = lower_serde_encode(ctx, expr, &TExpr { ty: inner.clone(), kind: TExprKind::Local(local) })?;
+    ctx.emit(
+        "encode-option-bind",
+        None,
+        MirOperation::WritePlace { place, value },
+    )?;
+    let encoded = lower_serde_encode(
+        ctx,
+        expr,
+        &TExpr {
+            ty: inner.clone(),
+            kind: TExprKind::Local(local),
+        },
+    )?;
     let present_end = ctx.current_block();
     ctx.terminate(MirTerminator::Jump { target: join });
     ctx.switch_to(absent);
     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
-    let null = ctx.emit("encode-option-null", Some(expr.ty.clone()), MirOperation::Enum {
-        type_id,
-        variant: "Null".to_string(),
-        args: Vec::new(),
-    })?;
+    let null = ctx.emit(
+        "encode-option-null",
+        Some(expr.ty.clone()),
+        MirOperation::Enum {
+            type_id,
+            variant: "Null".to_string(),
+            args: Vec::new(),
+        },
+    )?;
     let absent_end = ctx.current_block();
     ctx.terminate(MirTerminator::Jump { target: join });
     ctx.switch_to(join);
-    ctx.emit("encode-option-result", Some(expr.ty.clone()), MirOperation::Phi {
-        incoming: vec![(present_end, encoded), (absent_end, null)],
-    })
+    ctx.emit(
+        "encode-option-result",
+        Some(expr.ty.clone()),
+        MirOperation::Phi {
+            incoming: vec![(present_end, encoded), (absent_end, null)],
+        },
+    )
 }
 
 fn lower_ordered_object_encode(
@@ -9002,8 +9388,18 @@ fn lower_container_encode(
     let source_value = ctx.lower_child(recv)?;
     let source = TLocal::generated(format!("encode_source_{}", source_value.0));
     let source_place = ctx.bind_local(&source, recv.ty.clone(), false, false, false)?;
-    ctx.emit("encode-source", None, MirOperation::WritePlace { place: source_place, value: source_value })?;
-    let source_expr = TExpr { ty: recv.ty.clone(), kind: TExprKind::Local(source) };
+    ctx.emit(
+        "encode-source",
+        None,
+        MirOperation::WritePlace {
+            place: source_place,
+            value: source_value,
+        },
+    )?;
+    let source_expr = TExpr {
+        ty: recv.ty.clone(),
+        kind: TExprKind::Local(source),
+    };
     let tree_ty = Type::Named(crate::Syntax::TYPE_DATA.to_string());
     let item = TLocal::generated(format!("encode_item_{}", source_value.0));
     let item_ty = if map {
@@ -9014,7 +9410,10 @@ fn lower_container_encode(
     } else {
         element.clone()
     };
-    let item_expr = TExpr { ty: item_ty, kind: TExprKind::Local(item.clone()) };
+    let item_expr = TExpr {
+        ty: item_ty,
+        kind: TExprKind::Local(item.clone()),
+    };
     let item_value = if map {
         TExpr {
             ty: element.clone(),
@@ -9036,20 +9435,31 @@ fn lower_container_encode(
         },
     };
     if map {
-        let shape = vec![("key".to_string(), Type::String), ("value".to_string(), tree_ty.clone())];
+        let shape = vec![
+            ("key".to_string(), Type::String),
+            ("value".to_string(), tree_ty.clone()),
+        ];
         encoded = TExpr {
-            ty: Type::Tuple(shape.iter().map(|(name, ty)| (name.clone(), Box::new(ty.clone()))).collect()),
+            ty: Type::Tuple(
+                shape
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                    .collect(),
+            ),
             kind: TExprKind::TupleLit {
                 struct_name: crate::Codegen::Tuples::tuple_struct_name(&shape),
                 fields: vec![
-                    ("key".to_string(), TExpr {
-                        ty: Type::String,
-                        kind: TExprKind::Field {
-                            recv: Box::new(item_expr),
-                            field: "key".to_string(),
-                            boxed: false,
+                    (
+                        "key".to_string(),
+                        TExpr {
+                            ty: Type::String,
+                            kind: TExprKind::Field {
+                                recv: Box::new(item_expr),
+                                field: "key".to_string(),
+                                boxed: false,
+                            },
                         },
-                    }),
+                    ),
                     ("value".to_string(), encoded),
                 ],
             },
@@ -9074,33 +9484,53 @@ fn lower_container_encode(
             value: empty,
         },
     )?;
-    super::tir_to_mir_stmt::lower_stmt(ctx, &super::TStmt::ForIn {
-        label: None,
-        var: item.name,
-        var2: None,
-        source: source_expr.clone(),
-        collection: source_expr,
-        step: None,
-        method_kind: None,
-        columnar: false,
-        by_value: false,
-        body: vec![super::TStmt::ExprStmt(TExpr {
-            ty: Type::Named("Unit".to_string()),
-            kind: TExprKind::BuiltinMethod {
-                recv: Box::new(TExpr { ty: output_ty.clone(), kind: TExprKind::Local(output.clone()) }),
-                op: TBuiltinOp::Push,
-                args: vec![encoded],
-            },
-        })],
-    })?;
+    super::tir_to_mir_stmt::lower_stmt(
+        ctx,
+        &super::TStmt::ForIn {
+            label: None,
+            var: item.name,
+            var2: None,
+            source: source_expr.clone(),
+            collection: source_expr,
+            step: None,
+            method_kind: None,
+            columnar: false,
+            by_value: false,
+            body: vec![super::TStmt::ExprStmt(TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(TExpr {
+                        ty: output_ty.clone(),
+                        kind: TExprKind::Local(output.clone()),
+                    }),
+                    op: TBuiltinOp::Push,
+                    args: vec![encoded],
+                },
+            })],
+        },
+    )?;
     let output_place = lower_local_place(ctx, &output, MirAccess::Move)?;
-    let payload = ctx.emit("encode-container", Some(output_ty), MirOperation::MovePlace { place: output_place })?;
+    let payload = ctx.emit(
+        "encode-container",
+        Some(output_ty),
+        MirOperation::MovePlace {
+            place: output_place,
+        },
+    )?;
     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
-    ctx.emit("encode-tree", Some(expr.ty.clone()), MirOperation::Enum {
-        type_id,
-        variant: if map { "Object" } else { "Array" }.to_string(),
-        args: vec![MirEnumArg { field: None, value: payload, boxed: false }],
-    })
+    ctx.emit(
+        "encode-tree",
+        Some(expr.ty.clone()),
+        MirOperation::Enum {
+            type_id,
+            variant: if map { "Object" } else { "Array" }.to_string(),
+            args: vec![MirEnumArg {
+                field: None,
+                value: payload,
+                boxed: false,
+            }],
+        },
+    )
 }
 
 fn lower_serde_encode(
@@ -9118,9 +9548,7 @@ fn lower_serde_encode(
     match ctx.function_id_for(&function_name) {
         Ok(function) => {
             let owner_ty = match &ty {
-                Type::Union(members) => {
-                    Type::Named(crate::AST::union_enum_name(members))
-                }
+                Type::Union(members) => Type::Named(crate::AST::union_enum_name(members)),
                 _ => recv.ty.clone(),
             };
             let owner = ctx.mir_type(&owner_ty)?;
@@ -9146,7 +9574,13 @@ fn lower_serde_encode(
     }
     match ty {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
-            if !matches!(inner.without_user_tags(), Type::IntN { signed: false, bits: 8 }) =>
+            if !matches!(
+                inner.without_user_tags(),
+                Type::IntN {
+                    signed: false,
+                    bits: 8
+                }
+            ) =>
         {
             return lower_container_encode(ctx, expr, recv, inner, false);
         }
@@ -9162,7 +9596,10 @@ fn lower_serde_encode(
     let variant = data_tree_encode_variant(ty).ok_or_else(|| {
         ctx.error(
             ctx.span(),
-            format!("serde encode of `{}` requires a checked encode method", ty.name()),
+            format!(
+                "serde encode of `{}` requires a checked encode method",
+                ty.name()
+            ),
         )
     })?;
     let type_id = ctx.type_id_for(crate::Syntax::TYPE_DATA)?;
@@ -9198,9 +9635,7 @@ fn lower_datatree_decode(
     match ctx.function_id_for(&function_name) {
         Ok(function) => {
             let owner_ty = match &target_ty {
-                Type::Union(members) => {
-                    Type::Named(crate::AST::union_enum_name(members))
-                }
+                Type::Union(members) => Type::Named(crate::AST::union_enum_name(members)),
                 _ => target.clone(),
             };
             let owner = ctx.mir_type(&owner_ty)?;
@@ -9226,7 +9661,10 @@ fn lower_datatree_decode(
     }
     Err(ctx.error(
         ctx.span(),
-        format!("serde decode of `{}` requires a checked decode method", target.name()),
+        format!(
+            "serde decode of `{}` requires a checked decode method",
+            target.name()
+        ),
     ))
 }
 
@@ -9243,6 +9681,12 @@ fn data_tree_encode_variant(ty: &Type) -> Option<&'static str> {
 
 fn instance_method_lookup(method: &super::TMethodRef, recv_ty: &Type) -> String {
     let key = method_key(method);
+    // Checked operator identities already include their canonical owner.
+    // A source-facing imported receiver may still carry only its local leaf;
+    // prefixing that leaf would hide the declaring module's method target.
+    if method.operator_identity.is_some() {
+        return key;
+    }
     let owner = match recv_ty.without_user_tags() {
         Type::Named(name) => Some(name.clone()),
         Type::Apply { .. } => Some(recv_ty.name()),
@@ -9270,7 +9714,6 @@ fn method_key(method: &super::TMethodRef) -> String {
     }
 }
 
-
 /// Project the fully checked TIR pattern into canonical MIR.  This mapper
 /// consumes typed pattern shapes and never revisits source AST syntax.
 pub(super) fn lower_pattern(
@@ -9293,7 +9736,10 @@ pub(super) fn lower_pattern(
         TPatternPosition::VariantPath => MirPatternPosition::VariantPath,
         TPatternPosition::DataEntries { temp } => {
             let owner = owner.ok_or_else(|| {
-                ctx.error(ctx.span(), "checked data-entry pattern is missing its owner")
+                ctx.error(
+                    ctx.span(),
+                    "checked data-entry pattern is missing its owner",
+                )
             })?;
             let variant = match &pattern.shape {
                 TPatternShape::Variant { variant, .. } => variant,
@@ -9345,10 +9791,12 @@ fn lower_pattern_shape(
             leading_dot,
             span,
         } => {
-            let bindings = bindings.iter().map(lower_pattern_binding).collect::<Vec<_>>();
+            let bindings = bindings
+                .iter()
+                .map(lower_pattern_binding)
+                .collect::<Vec<_>>();
             if bindings.is_empty() {
-                if let Some(leaves) = owner
-                    .and_then(|owner| ctx.enum_group_leaves(owner, variant))
+                if let Some(leaves) = owner.and_then(|owner| ctx.enum_group_leaves(owner, variant))
                 {
                     MirPatternShape::Or {
                         alternatives: leaves
@@ -9378,7 +9826,7 @@ fn lower_pattern_shape(
                     span: *span,
                 }
             }
-        },
+        }
         TPatternShape::Present {
             binding,
             binding_span,
@@ -9426,11 +9874,7 @@ fn lower_pattern_shape(
             let fields = fields
                 .iter()
                 .map(|field| match field {
-                    TPatternField::Bind {
-                        field,
-                        local,
-                        span,
-                    } => Ok(MirPatternField::Bind {
+                    TPatternField::Bind { field, local, span } => Ok(MirPatternField::Bind {
                         field: ctx.field_id_for(owner, field)?,
                         local: local.clone(),
                         span: *span,
@@ -9483,12 +9927,10 @@ fn lower_pattern_shape(
                         little: !*big_endian,
                         span: *span,
                     }),
-                    TBinaryPatternPart::Rest { ty, span, .. } => {
-                        Ok(MirBinaryPatternPart::Rest {
-                            ty: lower_pattern_type(ctx, ty)?,
-                            span: *span,
-                        })
-                    }
+                    TBinaryPatternPart::Rest { ty, span, .. } => Ok(MirBinaryPatternPart::Rest {
+                        ty: lower_pattern_type(ctx, ty)?,
+                        span: *span,
+                    }),
                 })
                 .collect::<Result<Vec<_>, LowerError>>()?,
             *span,
@@ -9502,9 +9944,9 @@ fn lower_text_hole_kind(
 ) -> Result<MirTextHoleKind, LowerError> {
     Ok(match ty {
         crate::AST::Type::String | crate::AST::Type::Char => MirTextHoleKind::Text,
-        crate::AST::Type::Int
-        | crate::AST::Type::IntN { .. }
-        | crate::AST::Type::Measure(_) => MirTextHoleKind::Int,
+        crate::AST::Type::Int | crate::AST::Type::IntN { .. } | crate::AST::Type::Measure(_) => {
+            MirTextHoleKind::Int
+        }
         crate::AST::Type::Float | crate::AST::Type::Float32 => MirTextHoleKind::Float,
         crate::AST::Type::Bool => MirTextHoleKind::Bool,
         crate::AST::Type::InlineRange { lo, hi, .. } => {
@@ -9524,7 +9966,6 @@ fn lower_pattern_binding(binding: &TPatternBinding) -> MirPatternBinding {
         TPatternBinding::Range { lo, hi } => MirPatternBinding::Range { lo: *lo, hi: *hi },
     }
 }
-
 
 fn default_constant(ty: &crate::AST::Type) -> crate::AST::CtValue {
     use crate::AST::{CtFloat, CtValue, Type};
@@ -9558,19 +9999,13 @@ fn default_constant(ty: &crate::AST::Type) -> crate::AST::CtValue {
     }
 }
 
-fn unsupported_expr<T>(
-    ctx: &mut LowerCtx,
-    variant: impl Into<String>,
-) -> Result<T, LowerError> {
+fn unsupported_expr<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Result<T, LowerError> {
     let span = ctx.span();
     let variant = variant.into();
     Err(ctx.error(span, format!("{variant} has no canonical MIR operation")))
 }
 
-fn unsupported_pattern<T>(
-    ctx: &mut LowerCtx,
-    variant: impl Into<String>,
-) -> Result<T, LowerError> {
+fn unsupported_pattern<T>(ctx: &mut LowerCtx, variant: impl Into<String>) -> Result<T, LowerError> {
     let span = ctx.span();
     let variant = variant.into();
     Err(ctx.error(span, format!("{variant} has no canonical MIR projection")))

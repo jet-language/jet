@@ -3,33 +3,30 @@
 //! This module deliberately knows only the checked TIR shapes and the shared
 //! MIR vocabulary.  It never consults AST nodes or chooses a backend spelling.
 
-use super::tir_to_mir_expr::lower_expr;
 use super::mir::{LowerCtx, LowerError};
+use super::tir_to_mir_expr::lower_expr;
 use crate::AST::{BinOp, Type};
 use crate::Codegen::TIR::{
-    ScopeMemberKind, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFailureCarrier, TForInMethod,
-    TIfCond, TIndexFieldAssign, TLetTy, TLocal, TMatchArm, TMethodRef, TNumericOp, TPattern,
-    TPlace, TPreludeRoute, TStaticOwner, TStmt, TTryConvert, TBuiltinOp,
-};
-use jet_foundation::MIR::{
-    MirAccess, MirBinaryDispatch, MirBlockId, MirConstant, MirDropKind, MirIndexKind,
-    MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirCallSignature,
-    MirScopeId, MirScopeKind, MirSymbol, MirSemanticOp, MirTerminator, MirValueId,
-    MirTestScopeMember,
+    ScopeMemberKind, TBuiltinOp, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFailureCarrier,
+    TForInMethod, TIfCond, TIndexFieldAssign, TLetTy, TLocal, TMatchArm, TMethodRef, TNumericOp,
+    TPattern, TPlace, TPreludeRoute, TStaticOwner, TStmt, TTryConvert,
 };
 use jet_foundation::CanonicalPass;
+use jet_foundation::MIR::{
+    MirAccess, MirBinaryDispatch, MirBlockId, MirCallSignature, MirConstant, MirDropKind,
+    MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirScopeId,
+    MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember, MirValueId,
+};
 
 /// Lower a sequence of checked TIR statements in the current MIR block.
 ///
 /// A terminator ends the current path.  The caller owns creation and selection
 /// of any continuation block, so statements after a terminator are unreachable
 pub(super) fn lower_stmts(ctx: &mut LowerCtx, stmts: &[TStmt]) -> Result<(), LowerError> {
-    let before_payload = CanonicalPass::enabled().then(|| {
-        super::canonical_statements_payload(stmts)
-    });
-    let before_identity = CanonicalPass::enabled().then(|| {
-        super::canonical_statements_identity(stmts)
-    });
+    let before_payload =
+        CanonicalPass::enabled().then(|| super::canonical_statements_payload(stmts));
+    let before_identity =
+        CanonicalPass::enabled().then(|| super::canonical_statements_identity(stmts));
     for stmt in stmts {
         if ctx.is_terminated() {
             break;
@@ -84,13 +81,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 }
             ) || matches!(init.ty, Type::Named(ref name) if name == "EventScope");
             let alias_place = match &init.kind {
-                TExprKind::Borrow {
-                    place,
-                    mutable: true,
-                } => Some(ctx.lower_place(
-                    &TPlace::Expr(Box::new((**place).clone())),
-                    MirAccess::Write,
-                )?),
+                TExprKind::Borrow { place, mutable } => Some((
+                    ctx.lower_place(
+                        &TPlace::Expr(Box::new((**place).clone())),
+                        if *mutable { MirAccess::Write } else { MirAccess::Read },
+                    )?,
+                    *mutable,
+                )),
                 _ => None,
             };
             let is_uninit = matches!(&init.kind, TExprKind::Uninit);
@@ -101,24 +98,12 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             };
             let ty = let_binding_type(let_ty, &init.ty);
             let local = local_for_binding(name, kw);
-            let place = if let Some(alias_place) = alias_place {
-                ctx.bind_local_alias(&local, ty, alias_place, true)?
+            let place = if let Some((alias_place, mutable)) = alias_place {
+                ctx.bind_local_alias(&local, ty, alias_place, mutable)?
             } else if matches!(let_ty, TLetTy::SendFn(_)) {
-                ctx.bind_local_send_fn(
-                    &local,
-                    ty,
-                    local.mutable,
-                    false,
-                    is_uninit,
-                )?
+                ctx.bind_local_send_fn(&local, ty, local.mutable, false, is_uninit)?
             } else {
-                ctx.bind_local(
-                    &local,
-                    ty,
-                    local.mutable,
-                    false,
-                    is_uninit,
-                )?
+                ctx.bind_local(&local, ty, local.mutable, false, is_uninit)?
             };
             if is_uninit {
                 ctx.emit(
@@ -133,8 +118,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     MirOperation::WritePlace { place, value },
                 )?;
             }
-            if scope_guard_binding {
+            if scope_guard_binding && alias_place.is_none() {
                 ctx.register_scope_guard(place)?;
+            }
+            if alias_place.is_none() {
+                if let Some(value) = value {
+                    ctx.register_file_owner_binding(place, value)?;
+                }
             }
             Ok(())
         }
@@ -244,11 +234,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             Ok(())
         }
 
-        TStmt::TaskGroup {
-            group,
-            limit,
-            body,
-        } => {
+        TStmt::TaskGroup { group, limit, body } => {
             let scope = ctx.enter_scope(
                 MirScopeKind::TaskGroup,
                 ctx.span(),
@@ -268,27 +254,37 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             };
             let group_ty = Type::Named(crate::Syntax::TYPE_TASKGROUP.to_string());
             let constructor_args = if let Some(limit) = limit {
-                let Some(TNumericOp::TryFrom { host_kind, dst_rust, dst_spelling }) =
-                    super::resolve_numeric_conversion_op("I64", "Int")
+                let Some(TNumericOp::TryFrom {
+                    host_kind,
+                    dst_rust,
+                    dst_spelling,
+                }) = super::resolve_numeric_conversion_op("I64", "Int")
                 else {
                     return Err(ctx.error(ctx.span(), "missing task group limit conversion"));
                 };
-                let line = ctx.source_texts
+                let line = ctx
+                    .source_texts
                     .get(&ctx.function.source_file)
                     .map(|source| crate::Diagnostics::span_line_col(source, ctx.span().start).0)
                     .unwrap_or(ctx.function.line) as u32;
-                vec![call_arg(TExpr {
-                    ty: Type::IntN { signed: true, bits: 64 },
-                    kind: TExprKind::NumericMethod {
-                        recv: Box::new(limit.clone()),
-                        op: TNumericOp::CheckedIntToFixed {
-                            host_kind,
-                            dst_rust,
-                            dst_spelling,
-                            line,
+                vec![call_arg(
+                    TExpr {
+                        ty: Type::IntN {
+                            signed: true,
+                            bits: 64,
+                        },
+                        kind: TExprKind::NumericMethod {
+                            recv: Box::new(limit.clone()),
+                            op: TNumericOp::CheckedIntToFixed {
+                                host_kind,
+                                dst_rust,
+                                dst_spelling,
+                                line,
+                            },
                         },
                     },
-                }, false)]
+                    false,
+                )]
             } else {
                 Vec::new()
             };
@@ -307,13 +303,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     args: constructor_args,
                 },
             };
-            let group_place = ctx.bind_local(
-                group,
-                group_ty.clone(),
-                group.mutable,
-                false,
-                false,
-            )?;
+            let group_place =
+                ctx.bind_local(group, group_ty.clone(), group.mutable, false, false)?;
             let group_value = lower_expr(ctx, &constructor)?;
             ctx.emit(
                 "stmt.task-group.write",
@@ -330,24 +321,28 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                     owner_type: None,
                     method: TMethodRef::bare("close"),
                     type_args: Vec::new(),
-                    args: vec![call_arg(TExpr {
-                        ty: group_ty,
-                        kind: TExprKind::Local(group.clone()),
-                    }, true)],
+                    args: vec![call_arg(
+                        TExpr {
+                            ty: group_ty,
+                            kind: TExprKind::Local(group.clone()),
+                        },
+                        true,
+                    )],
                 },
             };
-            let thunk = ctx.lower_defer_thunk(
-                &close,
-                &group.name,
-                format!("task-group-{}", scope.0),
-            )?;
+            let thunk =
+                ctx.lower_defer_thunk(&close, &group.name, format!("task-group-{}", scope.0))?;
             ctx.register_defer(thunk)?;
             lower_stmts(ctx, body)?;
             ctx.exit_scope(scope)?;
             Ok(())
         }
 
-        TStmt::DeferClose { close, resource, id } => {
+        TStmt::DeferClose {
+            close,
+            resource,
+            id,
+        } => {
             let thunk = ctx.lower_defer_thunk(close, resource, *id)?;
             ctx.register_defer(thunk)?;
             Ok(())
@@ -438,7 +433,14 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             arms,
             else_body,
             fallthrough,
-        } => lower_enum_match(ctx, scrutinee, *clone_subject, arms, else_body.as_deref(), *fallthrough),
+        } => lower_enum_match(
+            ctx,
+            scrutinee,
+            *clone_subject,
+            arms,
+            else_body.as_deref(),
+            *fallthrough,
+        ),
 
         TStmt::RangeSwitch {
             subject,
@@ -571,11 +573,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         } => lower_mixed_switch(ctx, subject, arms, else_body.as_deref()),
 
         TStmt::Unsafe { gate, body } => {
-            let scope = ctx.enter_scope(
-                MirScopeKind::Unsafe,
-                ctx.span(),
-                Some(gate.reason.clone()),
-            )?;
+            let scope =
+                ctx.enter_scope(MirScopeKind::Unsafe, ctx.span(), Some(gate.reason.clone()))?;
             ctx.set_scope_fact(scope, "sentry_file", gate.file.clone())?;
             ctx.set_scope_fact(scope, "sentry_enabled", gate.enabled.to_string())?;
             ctx.set_scope_fact(scope, "sentry_fenced", gate.fenced.to_string())?;
@@ -592,7 +591,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
             ctx.set_scope_fact(scope, "sentry_enabled", enabled.to_string())?;
             lower_stmts(ctx, body)?;
             ctx.exit_scope(scope)
-        },
+        }
         TStmt::Impure(body) => lower_scoped(ctx, MirScopeKind::Impure, None, body),
 
         TStmt::Reactive { executable } => {
@@ -612,16 +611,14 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
 
         TStmt::Region(body) => lower_scoped(ctx, MirScopeKind::Region, None, body),
 
-        TStmt::Layout { handle, label, body } => {
+        TStmt::Layout {
+            handle,
+            label,
+            body,
+        } => {
             let scope = ctx.enter_scope(MirScopeKind::Layout, ctx.span(), Some(label.clone()))?;
             let handle_ty = Type::Named(crate::Syntax::LAYOUT_TYPE.to_string());
-            let place = ctx.bind_local(
-                handle,
-                handle_ty.clone(),
-                handle.mutable,
-                false,
-                false,
-            )?;
+            let place = ctx.bind_local(handle, handle_ty.clone(), handle.mutable, false, false)?;
             let value = ctx.emit(
                 "stmt.layout.global",
                 Some(handle_ty),
@@ -669,8 +666,9 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
         } => lower_transaction(ctx, handle.as_ref(), snapshots, stm.as_ref(), body),
 
         TStmt::LineMarker(line) => {
-            let line = u32::try_from(*line)
-                .map_err(|_| LowerError::new(ctx.span(), "checked source line exceeds MIR line range"))?;
+            let line = u32::try_from(*line).map_err(|_| {
+                LowerError::new(ctx.span(), "checked source line exceeds MIR line range")
+            })?;
             ctx.set_line_marker(line);
             Ok(())
         }
@@ -712,7 +710,12 @@ fn local_for_binding(name: &str, kw: &str) -> TLocal {
     }
 }
 
-fn lower_let_like(ctx: &mut LowerCtx, name: &str, init: &TExpr, mutable: bool) -> Result<(), LowerError> {
+fn lower_let_like(
+    ctx: &mut LowerCtx,
+    name: &str,
+    init: &TExpr,
+    mutable: bool,
+) -> Result<(), LowerError> {
     let is_uninit = matches!(&init.kind, TExprKind::Uninit);
     let value = if is_uninit {
         None
@@ -724,13 +727,7 @@ fn lower_let_like(ctx: &mut LowerCtx, name: &str, init: &TExpr, mutable: bool) -
     } else {
         TLocal::user(name)
     };
-    let place = ctx.bind_local(
-        &local,
-        init.ty.clone(),
-        mutable,
-        false,
-        is_uninit,
-    )?;
+    let place = ctx.bind_local(&local, init.ty.clone(), mutable, false, is_uninit)?;
     if is_uninit {
         ctx.emit(
             "stmt.let-like.initialize-uninit",
@@ -743,6 +740,9 @@ fn lower_let_like(ctx: &mut LowerCtx, name: &str, init: &TExpr, mutable: bool) -
             None,
             MirOperation::WritePlace { place, value },
         )?;
+    }
+    if let Some(value) = value {
+        ctx.register_file_owner_binding(place, value)?;
     }
     Ok(())
 }
@@ -807,9 +807,12 @@ fn lower_split_view(
     line: usize,
     elem_ty: Option<&Type>,
 ) -> Result<(), LowerError> {
-    let element = elem_ty
-        .cloned()
-        .ok_or_else(|| LowerError::new(ctx.span(), format!("split view `{name}` has no checked element type")))?;
+    let element = elem_ty.cloned().ok_or_else(|| {
+        LowerError::new(
+            ctx.span(),
+            format!("split view `{name}` has no checked element type"),
+        )
+    })?;
     let root_expr = TExpr {
         ty: Type::List(Box::new(element.clone())),
         kind: TExprKind::Local(TLocal::user(root)),
@@ -911,7 +914,9 @@ fn lower_tuple_destructure(
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
     let subject = if move_fields {
-        if let Some(place) = super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)? {
+        if let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
+        {
             ctx.emit(
                 "stmt.tuple.move-source",
                 Some(init.ty.clone()),
@@ -967,12 +972,8 @@ fn lower_tuple_destructure(
     for (index, (local_name, _)) in binds.iter().enumerate() {
         let field_name = ctx.field_name_for_type(&init.ty, index)?;
         let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
-        let field_place = ctx.project_field_place(
-            temp_place,
-            &field_name,
-            field_ty.clone(),
-            ctx.span(),
-        )?;
+        let field_place =
+            ctx.project_field_place(temp_place, &field_name, field_ty.clone(), ctx.span())?;
         let value = ctx.emit(
             "stmt.tuple.move-field",
             Some(field_ty.clone()),
@@ -1002,7 +1003,9 @@ fn lower_struct_destructure(
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
     let subject = if move_fields {
-        if let Some(place) = super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)? {
+        if let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
+        {
             ctx.emit(
                 "stmt.struct.move-source",
                 Some(init.ty.clone()),
@@ -1056,12 +1059,8 @@ fn lower_struct_destructure(
     )?;
     for (local_name, field_name) in binds {
         let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
-        let field_place = ctx.project_field_place(
-            temp_place,
-            field_name,
-            field_ty.clone(),
-            ctx.span(),
-        )?;
+        let field_place =
+            ctx.project_field_place(temp_place, field_name, field_ty.clone(), ctx.span())?;
         let value = ctx.emit(
             "stmt.struct.move-field",
             Some(field_ty.clone()),
@@ -1081,7 +1080,6 @@ fn lower_struct_destructure(
     }
     Ok(())
 }
-
 
 fn lower_list_destructure(
     ctx: &mut LowerCtx,
@@ -1111,17 +1109,14 @@ fn lower_list_destructure(
         } else {
             TLocal::user(local_name)
         };
-        let place = ctx.bind_local(
-            &local,
-            element_ty.clone(),
-            mutable,
-            false,
-            false,
-        )?;
+        let place = ctx.bind_local(&local, element_ty.clone(), mutable, false, false)?;
         ctx.emit(
             "stmt.list-destructure.write",
             None,
-            MirOperation::WritePlace { place, value: projected },
+            MirOperation::WritePlace {
+                place,
+                value: projected,
+            },
         )?;
     }
     Ok(())
@@ -1163,9 +1158,7 @@ fn lower_assign(
 ) -> Result<(), LowerError> {
     // A structured place can evaluate a receiver/index.  TIR's assignment
     // emitter evaluates the RHS before that place, so retain the same order.
-    let place_ty = op
-        .map(|_| assignment_place_type(ctx, place))
-        .transpose()?;
+    let place_ty = op.map(|_| assignment_place_type(ctx, place)).transpose()?;
     let rhs = lower_expr(ctx, value)?;
     let rhs = maybe_copy(ctx, rhs, &value.ty, clone_value)?;
     let place_id = ctx.lower_place(place, MirAccess::Write)?;
@@ -1175,9 +1168,9 @@ fn lower_assign(
             Some(value.ty.clone()),
             MirOperation::ReadPlace(place_id),
         )?;
-        let place_ty = place_ty.as_ref().ok_or_else(|| {
-            ctx.error(ctx.span(), "compound assignment missing place type")
-        })?;
+        let place_ty = place_ty
+            .as_ref()
+            .ok_or_else(|| ctx.error(ctx.span(), "compound assignment missing place type"))?;
         let dispatch = super::tir_to_mir_expr::lower_binary_dispatch(
             ctx,
             op,
@@ -1200,19 +1193,36 @@ fn lower_assign(
     } else {
         rhs
     };
+    let owning_file_slot = ctx
+        .places
+        .iter()
+        .find(|candidate| candidate.id == place_id)
+        .and_then(|candidate| candidate.ty.identity)
+        .is_some_and(|identity| ctx.is_core_file_owner(identity));
+    ctx.emit_file_owner_replacement(place_id)?;
     ctx.emit(
         "stmt.assign.write",
         None,
-        MirOperation::WritePlace {
-            place: place_id,
-            value: assigned,
+        if owning_file_slot {
+            MirOperation::ReplacePlace {
+                place: place_id,
+                value: assigned,
+            }
+        } else {
+            MirOperation::WritePlace {
+                place: place_id,
+                value: assigned,
+            }
         },
     )?;
     ctx.drop_temporary_shared_guard(place_id)?;
     Ok(())
 }
 
-fn lower_index_field_assign(ctx: &mut LowerCtx, assign: &TIndexFieldAssign) -> Result<(), LowerError> {
+fn lower_index_field_assign(
+    ctx: &mut LowerCtx,
+    assign: &TIndexFieldAssign,
+) -> Result<(), LowerError> {
     // Match regular assignment: evaluate the RHS before the indexed field
     // place, whose receiver and index expressions may have effects.
     let rhs = lower_expr(ctx, &assign.value)?;
@@ -1261,10 +1271,25 @@ fn lower_index_field_assign(ctx: &mut LowerCtx, assign: &TIndexFieldAssign) -> R
     } else {
         rhs
     };
+    let owning_file_slot = ctx
+        .mir_type(&assign.field_ty)?
+        .identity
+        .is_some_and(|identity| ctx.is_core_file_owner(identity));
+    ctx.emit_file_owner_replacement(place)?;
     ctx.emit(
         "stmt.index-field.write",
         None,
-        MirOperation::WritePlace { place, value: assigned },
+        if owning_file_slot {
+            MirOperation::ReplacePlace {
+                place,
+                value: assigned,
+            }
+        } else {
+            MirOperation::WritePlace {
+                place,
+                value: assigned,
+            }
+        },
     )?;
     ctx.drop_temporary_shared_guard(place)?;
     Ok(())
@@ -1284,7 +1309,7 @@ fn lower_swizzle_assign(
                 return Err(ctx.error(
                     ctx.span(),
                     "checked multi-lane swizzle assignment has no vector RHS",
-                ))
+                ));
             }
         };
         let scalar_ty = crate::Sema::math_scalar_ty(&rhs_type_name);
@@ -1579,14 +1604,8 @@ fn lower_counted_loop(
     ctx.switch_to(exit);
     if let Some(facts) = auto_vectorization {
         let cursor_place = ctx.loop_cursor_place(cond);
-        let body_blocks =
-            ctx.loop_body_blocks(header, body_block, Some(exit), Some(step_block));
-        let cursor = ctx.checked_loop_cursor(
-            &body_blocks,
-            Some(step_block),
-            cursor_place,
-            None,
-        );
+        let body_blocks = ctx.loop_body_blocks(header, body_block, Some(exit), Some(step_block));
+        let cursor = ctx.checked_loop_cursor(&body_blocks, Some(step_block), cursor_place, None);
         ctx.record_checked_vector_fact(
             header,
             cursor,
@@ -1783,11 +1802,7 @@ fn lower_for_in(
     // the element itself. Reuse the canonical indexed adapter so the cursor
     // receives the same named tuple shape as an explicit `.indexed()` call.
     let (loop_collection, indexed_pair_types) = match (method_kind, &collection.ty, var2) {
-        (
-            None,
-            Type::List(elem) | Type::FixedList { elem, .. },
-            Some(_),
-        ) => {
+        (None, Type::List(elem) | Type::FixedList { elem, .. }, Some(_)) => {
             let elem_ty = (**elem).clone();
             let fields = vec![
                 ("idx".to_string(), Type::Int),
@@ -1914,15 +1929,10 @@ fn lower_for_in(
     if let Some(var2) = var2 {
         let (key_ty, value_ty, key_name, value_name) =
             match (&collection.ty, indexed_pair_types.as_ref()) {
-                (Type::Map { key, value, .. }, _) => (
-                    (**key).clone(),
-                    (**value).clone(),
-                    "key",
-                    "value",
-                ),
-                (_, Some((_, elem_ty))) => {
-                    (Type::Int, elem_ty.clone(), "idx", "item")
+                (Type::Map { key, value, .. }, _) => {
+                    ((**key).clone(), (**value).clone(), "key", "value")
                 }
+                (_, Some((_, elem_ty))) => (Type::Int, elem_ty.clone(), "idx", "item"),
                 _ => (Type::Int, item_ty.clone(), "key", "value"),
             };
         let key_field = ctx.field_id_for_type(&item_ty, key_name)?;
@@ -1986,11 +1996,9 @@ fn loop_source_kind(method_kind: Option<&TForInMethod>) -> MirLoopSourceKind {
         Some(TForInMethod::LinesStdin) => MirLoopSourceKind::LinesStdin,
         Some(TForInMethod::LinesProcessStream) => MirLoopSourceKind::LinesProcessStream,
         Some(TForInMethod::ChannelReceiver) => MirLoopSourceKind::ChannelReceiver,
-        Some(TForInMethod::EncodingReader { reader_type }) => {
-            MirLoopSourceKind::EncodingReader {
-                reader_type: reader_type.clone(),
-            }
-        }
+        Some(TForInMethod::EncodingReader { reader_type }) => MirLoopSourceKind::EncodingReader {
+            reader_type: reader_type.clone(),
+        },
         Some(TForInMethod::Iterable {
             coll_type,
             iter_type,
@@ -2009,7 +2017,10 @@ fn for_item_type(
     collection: &TExpr,
     method_kind: Option<&crate::Codegen::TIR::TForInMethod>,
 ) -> Type {
-    if matches!(method_kind, Some(crate::Codegen::TIR::TForInMethod::ChannelReceiver)) {
+    if matches!(
+        method_kind,
+        Some(crate::Codegen::TIR::TForInMethod::ChannelReceiver)
+    ) {
         if let Type::Apply { name, args } = &collection.ty {
             if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 {
                 return args[0].clone();
@@ -2545,7 +2556,10 @@ fn emit_scope_exits_on_early_paths(
                 ctx.emit(
                     &format!("transaction.snapshot.{index}.restore.write"),
                     None,
-                    MirOperation::WritePlace { place: *place, value },
+                    MirOperation::WritePlace {
+                        place: *place,
+                        value,
+                    },
                 )?;
             }
         }

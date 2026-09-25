@@ -1690,8 +1690,6 @@ fn canonical_shared_include(relative: &str, line: &str) -> bool {
             && line.contains("include!(\"SchedulerHost.rs\")"))
         || (relative == "crates/jet-jit/src/net_http_rt.rs"
             && line.contains("include!(\"net_http_hosts.rs\")"))
-        || (relative == "crates/jet-foundation/src/CoreArchive.rs"
-            && line.contains("include!(\"../../../corelib/core.archive/pkgs/archive/src/lib.rs\")"))
 }
 
 

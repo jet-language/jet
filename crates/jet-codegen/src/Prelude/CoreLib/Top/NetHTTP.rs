@@ -875,6 +875,7 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
     }
 }
 
+
 fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTCPStream, JetNetError> {
     // WASI Preview 2 exposes blocking std::net operations through
     // wasi:sockets. It has no native Jet scheduler/poller to register with;
@@ -1391,6 +1392,34 @@ fn jet_net_tls_io_scheduler_wait(
         _ => "tls I/O",
     };
     jet_net_scheduler_wait(&stream.socket, read, write, label).map_err(jet_net_to_io_error)
+}
+
+// AOT has an owned typed TCP stream and an FFI crate containing the existing
+// rustls state machine. Instantiate the shared scheduler with that provider.
+#[allow(unused_macros)]
+macro_rules! jet_net_tls_client_bridge {
+    ($bridge:ident) => {
+        fn jet_net_tls_client(
+            stream: JetTCPStream,
+            server_name: &String,
+        ) -> Result<JetTLSStream, jet_std::IOError> {
+            jet_net_tls_client_scheduler(
+                stream,
+                server_name,
+                $bridge::jet_net_tls_begin_impl,
+                $bridge::jet_net_tls_handshake_step_impl,
+                $bridge::jet_net_tls_abort_impl,
+                $bridge::jet_net_tls_wants_impl,
+                $bridge::jet_net_tls_read_ready_impl,
+                $bridge::jet_net_tls_read_step_impl,
+                $bridge::jet_net_tls_write_step_impl,
+                $bridge::jet_net_tls_close_step_impl,
+                $bridge::jet_net_tls_close_write_step_impl,
+                $bridge::jet_net_tls_peer_identity_impl,
+            )
+            .map_err(jet_net_to_io_error)
+        }
+    };
 }
 
 fn jet_net_tls_client_scheduler(

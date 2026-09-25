@@ -2,330 +2,47 @@ package {
     name: "core.service"
     version: "0.1.0"
     edition: "2026"
-    description: "Supervision trees, delivery, and workflows."
+    description: "Typed service topology, delivery, and workflow handles."
     license: "MIT"
     outputs: {
         service: .Library{ entry: service }
     }
 }
-// core.service — supervision, delivery policy, and a linear workflow.
-//
-// Trees are names plus a restart strategy. Delivery is an in-memory log
-// with at-most-once / durable kinds. Workflows are a step counter. The
-// process supervisor itself is a host concern; this file is the typed
-// surface the compiler already exports.
-#Error
-pub enum ServiceError {
-    Missing
-    Failed
-    Policy
+
+use core as core
+
+// core.service is the typed Jet facade for the registered service provider.
+// Topology, authority, delivery, state, and workflow values are provider
+// handles; this source module does not recreate their runtime state.
+
+pub fn tree(name: String) -> ServiceTree {
+    core.service.tree(name)
 }
 
-pub enum ServiceRestart {
-    OneForOne
-    OneForAll
-    RestForOne
+pub fn runtime(store: String, retention: Duration) -> ServiceRuntime {
+    core.service.runtime(store, retention: retention)
 }
 
-pub enum DeliveryState {
-    Pending
-    Delivered
-    Failed
+pub fn state_store(path: String) -> ServiceStateStore !ServiceError {
+    core.service.state_store(path)
 }
 
-pub enum TaskStatus {
-    Idle
-    Running
-    Succeeded
-    Failed
+pub fn restart_one_for_one() -> ServiceRestart {
+    core.service.restart_one_for_one()
 }
 
-pub enum TaskOutcome {
-    Ok
-    Err
+pub fn restart_one_for_all() -> ServiceRestart {
+    core.service.restart_one_for_all()
 }
 
-pub struct ServiceRuntime {
-    pub name: String
+pub fn restart_rest_for_one() -> ServiceRestart {
+    core.service.restart_rest_for_one()
 }
 
-pub struct ServiceTree {
-    pub strategy: String
-    pub children: [String]
+pub fn delivery_at_most_once() -> ServiceDelivery {
+    core.service.delivery_at_most_once()
 }
 
-pub struct ServiceStateStore {
-    pub entries: [String:String]
-}
-
-pub struct ServiceWorkflow {
-    pub id: String
-    pub step: Int
-    pub status: TaskStatus
-}
-
-pub struct ServiceEndpoint {
-    pub name: String
-    pub addr: String
-}
-
-pub struct ServiceDelivery {
-    pub kind: String
-}
-
-pub struct ServiceUpgradeReceipt {
-    pub from: String
-    pub to: String
-    pub ok: Bool
-}
-
-pub struct Delivery {
-    pub kind: String
-}
-
-pub struct DeliveryEvent {
-    pub kind: String
-    pub target: String
-}
-
-pub struct DeliveryReceipt {
-    pub id: String
-    pub state: DeliveryState
-}
-
-pub struct DeliveryStateWrap {
-    pub state: DeliveryState
-}
-
-pub fn runtime() -> ServiceRuntime { ServiceRuntime{name: "local"} }
-
-pub fn tree() -> ServiceTree { ServiceTree{strategy: "one-for-one", children: [String]{}} }
-
-pub fn tree_show(t: ServiceTree) -> String {
-    "{canonical_strategy(t.strategy)}:{t.children.len()}"
-}
-
-pub fn state_store() -> ServiceStateStore { {entries: [String:String]{}} }
-
-pub fn tree_add(t: ServiceTree, child: String) -> ServiceTree {
-    if !valid_name(child) || tree_contains(t, child) -> return ~t
-    children := ~t.children
-    children.push(child)
-    ServiceTree{strategy: canonical_strategy(t.strategy), children: children}
-}
-
-pub fn tree_remove(t: ServiceTree, child: String) -> ServiceTree {
-    if !valid_name(child) -> return ~t
-    children := [String]{}
-    loop item in ~t.children {
-        if item != child -> children.push(item)
-    }
-    ServiceTree{strategy: canonical_strategy(t.strategy), children: children}
-}
-
-pub fn tree_contains(t: ServiceTree, child: String) -> Bool {
-    loop item in ~t.children {
-        if item == child -> return true
-    }
-    false
-}
-
-pub fn tree_strategy(t: ServiceTree) -> String { canonical_strategy(t.strategy) }
-
-pub fn tree_with_strategy(t: ServiceTree, strategy: ServiceRestart) -> ServiceTree {
-    label := "one-for-one"
-    if strategy == ServiceRestart.OneForAll -> label = "one-for-all"
-    if strategy == ServiceRestart.RestForOne -> label = "rest-for-one"
-    ServiceTree{strategy: label, children: ~t.children}
-}
-
-pub fn state_set(store: ServiceStateStore, key: String, value: String) -> ServiceStateStore {
-    if !valid_state_key(key) -> return ~store
-    entries := store.entries
-    _ :: entries.add(key, value)
-    ServiceStateStore{entries: entries}
-}
-
-pub fn state_get(store: ServiceStateStore, key: String) -> ?String {
-    store.entries.get(key)
-}
-
-pub fn state_has(store: ServiceStateStore, key: String) -> Bool {
-    store.entries.get(key) != .None
-}
-
-pub fn state_remove(store: ServiceStateStore, key: String) -> ServiceStateStore {
-    entries := [String:String]{}
-    loop item in store.entries.keys() {
-        if item != key -> _ :: entries.add(item, store.entries.get(item) ?? "")
-    }
-    ServiceStateStore{entries: entries}
-}
-
-pub fn state_clear(_store: ServiceStateStore) -> ServiceStateStore {
-    ServiceStateStore{entries: [String:String]{}}
-}
-
-pub fn state_keys(store: ServiceStateStore) -> [String] {
-    out := [String]{}
-    loop key in store.entries.keys() -> out.push(key)
-    out
-}
-
-pub fn workflow_start(name: String) -> ServiceWorkflow !ServiceError {
-    if !valid_name(name) -> return Err(ServiceError.Missing)
-    result :: ServiceWorkflow{id: name, step: 0, status: TaskStatus.Running}
-    result
-}
-
-pub fn delivery_at_most_once() -> Delivery { {kind: "at-most-once"} }
-
-pub fn delivery_durable() -> Delivery { {kind: "durable"} }
-
-pub fn restart_one_for_one() -> ServiceTree { {strategy: "one-for-one", children: [String]{}} }
-
-pub fn restart_one_for_all() -> ServiceTree { {strategy: "one-for-all", children: [String]{}} }
-
-pub fn restart_rest_for_one() -> ServiceTree { {strategy: "rest-for-one", children: [String]{}} }
-
-pub fn endpoint(name: String, addr: String) -> ServiceEndpoint !ServiceError {
-    if !valid_name(name) || !valid_endpoint(addr) -> return Err(ServiceError.Missing)
-    result :: ServiceEndpoint{name: name, addr: addr}
-    result
-}
-
-pub fn delivery(kind: String) -> ServiceDelivery !ServiceError {
-    if kind != "at-most-once" && kind != "durable" -> return Err(ServiceError.Policy)
-    result :: ServiceDelivery{kind: kind}
-    result
-}
-
-/// Delivery creates a pending source receipt. A host dispatcher owns the
-/// endpoint side effect and must explicitly settle this receipt.
-pub fn deliver(target: String, payload: String) -> DeliveryReceipt !ServiceError {
-    if !valid_name(target) -> return Err(ServiceError.Missing)
-    if !valid_payload(payload) -> return Err(ServiceError.Policy)
-    DeliveryReceipt{id: delivery_id(target, payload), state: DeliveryState.Pending}
-}
-
-pub fn delivery_event(kind: String, target: String) -> DeliveryEvent !ServiceError {
-    if !valid_event_kind(kind) || !valid_name(target) -> return Err(ServiceError.Missing)
-
-    result :: DeliveryEvent{kind: kind, target: target}
-    result
-}
-
-pub fn pending(id: String) -> DeliveryReceipt !ServiceError {
-    if !valid_delivery_id(id) -> return Err(ServiceError.Missing)
-    DeliveryReceipt{id: id, state: DeliveryState.Pending}
-}
-
-pub fn mark_delivered(receipt: DeliveryReceipt) -> DeliveryReceipt !ServiceError {
-    if !valid_delivery_id(receipt.id) -> return Err(ServiceError.Missing)
-    if receipt.state != DeliveryState.Pending -> return Err(ServiceError.Failed)
-    DeliveryReceipt{id: receipt.id, state: DeliveryState.Delivered}
-}
-
-pub fn mark_failed(receipt: DeliveryReceipt) -> DeliveryReceipt !ServiceError {
-    if !valid_delivery_id(receipt.id) -> return Err(ServiceError.Missing)
-    if receipt.state != DeliveryState.Pending -> return Err(ServiceError.Failed)
-    DeliveryReceipt{id: receipt.id, state: DeliveryState.Failed}
-}
-
-pub fn delivery_done(receipt: DeliveryReceipt) -> Bool {
-    receipt.state == DeliveryState.Delivered || receipt.state == DeliveryState.Failed
-}
-
-/// The source receipt records a validated generation handoff. The host
-/// performs the actual drain and authority switch around this value.
-pub fn upgrade(from: String, to: String) -> ServiceUpgradeReceipt !ServiceError {
-    if !valid_name(from) || !valid_name(to) || from == to -> return Err(ServiceError.Policy)
-    ServiceUpgradeReceipt{from: from, to: to, ok: true}
-}
-
-pub fn workflow_is_terminal(wf: ServiceWorkflow) -> Bool {
-    wf.status == TaskStatus.Succeeded || wf.status == TaskStatus.Failed
-}
-
-pub fn workflow_can_advance(wf: ServiceWorkflow) -> Bool {
-    wf.status == TaskStatus.Running
-}
-
-pub fn workflow_step(wf: ServiceWorkflow) -> Int { wf.step }
-
-pub fn workflow_advance(wf: ServiceWorkflow) -> ServiceWorkflow !ServiceError {
-    if !valid_name(wf.id) || wf.status != TaskStatus.Running -> return Err(ServiceError.Failed)
-    if wf.step < 0 || wf.step >= 9223372036854775807 -> return Err(ServiceError.Policy)
-    result :: ServiceWorkflow{id: wf.id, step: wf.step + 1, status: TaskStatus.Running}
-    result
-}
-
-pub fn workflow_finish(wf: ServiceWorkflow, ok: Bool) -> ServiceWorkflow !ServiceError {
-    if !valid_name(wf.id) || wf.status != TaskStatus.Running -> return Err(ServiceError.Failed)
-    st := TaskStatus.Succeeded
-    if !ok -> st = TaskStatus.Failed
-    {id: wf.id, step: wf.step, status: st}
-}
-
-pub fn outcome(wf: ServiceWorkflow) -> TaskOutcome !ServiceError {
-    if wf.status == TaskStatus.Succeeded -> return TaskOutcome.Ok
-    if wf.status == TaskStatus.Failed -> return TaskOutcome.Err
-    Err(ServiceError.Failed)
-}
-fn has_control(value: String) -> Bool {
-    loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
-        if n < 32 || n == 127 -> return true
-    }
-    false
-}
-
-fn valid_name(value: String) -> Bool {
-    trimmed :: value.trim()
-    trimmed != "" && trimmed.len() <= 256 && value == trimmed && !has_control(value)
-}
-
-fn valid_state_key(value: String) -> Bool {
-    valid_name(value) && value.len() <= 512
-}
-
-fn valid_endpoint(value: String) -> Bool {
-    value.trim() != "" && value.len() <= 2048 && !has_control(value)
-}
-
-fn valid_payload(value: String) -> Bool {
-    value.len() > 0 && value.len() <= 1048576
-}
-
-fn valid_event_kind(value: String) -> Bool {
-    valid_name(value)
-}
-
-fn canonical_strategy(value: String) -> String {
-    if value == "one-for-all" -> return ~value
-    if value == "rest-for-one" -> return ~value
-    "one-for-one"
-}
-
-fn delivery_id(target: String, payload: String) -> String {
-    n := 5381
-    loop byte in target.bytes() {
-        n = ((n * 33) + Int.from_u8(byte)) %% 2147483647
-    }
-    n = (n * 33 + 58) %% 2147483647
-    loop byte in payload.bytes() {
-        n = ((n * 33) + Int.from_u8(byte)) %% 2147483647
-    }
-    if n <= 0 -> n = 1
-    "delivery-{n}"
-}
-
-fn valid_delivery_id(value: String) -> Bool {
-    raw := value.bytes()
-    if raw.len() <= 9 || raw.len() > 64 || !value.starts_with("delivery-") -> return false
-    loop i in 9..<raw.len() {
-        n :: Int.from_u8(raw[i])
-        if n < 48 || n > 57 -> return false
-    }
-    true
+pub fn delivery_durable() -> ServiceDelivery {
+    core.service.delivery_durable()
 }

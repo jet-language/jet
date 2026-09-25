@@ -7,16 +7,16 @@
 
 #![allow(dead_code)]
 use super::{
-    LowerError, TClosureOp, TFailureCarrier, THandleOp, TTryConvert, TNumericOp, TPreludeRoute,
-    TRoutePlan, TBuiltinOp, ListRemoveMode, THelperKind, TGcEditKind, TTypedTextForm,
+    ListRemoveMode, LowerError, TBuiltinOp, TClosureOp, TFailureCarrier, TGcEditKind, THandleOp,
+    THelperKind, TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
     TTypedTextInterpKind,
 };
 use crate::AST::{BinOp, Type};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::Effects::Effect;
 use jet_foundation::MIR::{
-    MirAccess, MirAuthorityDecision, MirCallSignature, MirCoreClosureKind,
-    MirIndexKind, MirLayoutCompareOp, MirPreludeAbi, MirPreludeFamily, MirSymbol,
+    MirAccess, MirAuthorityDecision, MirCallSignature, MirCoreClosureKind, MirIndexKind,
+    MirLayoutCompareOp, MirPreludeAbi, MirPreludeFamily, MirSymbol,
 };
 use jet_foundation::UnitRoundingMode;
 
@@ -47,23 +47,21 @@ pub(super) struct TLoopRouteBundle {
 /// canonical MIR loop operations.
 pub(super) fn loop_route_bundle() -> TLoopRouteBundle {
     let carrier = TFailureCarrier::Infallible;
-    let row = |member: &str, symbol: &str, arity: usize, borrow_mask: &[bool]| {
-        TPreludeRoute {
-            family: MirPreludeFamily::StaticPrelude,
-            module: "core.prelude".to_string(),
-            member: member.to_string(),
-            symbol: MirSymbol::Prelude(symbol.to_string()),
-            signature: MirCallSignature {
-                arity,
-                max_arity: arity,
-                borrow_mask: borrow_mask.to_vec(),
-            },
-            effect: None,
-            fallibility: carrier.clone(),
-            abi: MirPreludeAbi::Value,
-            authority: None,
-            db_metadata: None,
-        }
+    let row = |member: &str, symbol: &str, arity: usize, borrow_mask: &[bool]| TPreludeRoute {
+        family: MirPreludeFamily::StaticPrelude,
+        module: "core.prelude".to_string(),
+        member: member.to_string(),
+        symbol: MirSymbol::Prelude(symbol.to_string()),
+        signature: MirCallSignature {
+            arity,
+            max_arity: arity,
+            borrow_mask: borrow_mask.to_vec(),
+        },
+        effect: None,
+        fallibility: carrier.clone(),
+        abi: MirPreludeAbi::Value,
+        authority: None,
+        db_metadata: None,
     };
     TLoopRouteBundle {
         range_init: row(
@@ -90,12 +88,7 @@ pub(super) fn loop_route_bundle() -> TLoopRouteBundle {
 pub(super) fn zip_closure_route(mode: super::TZipMode) -> TPreludeRoute {
     let (member, symbol, arity, borrow_mask) = match mode {
         super::TZipMode::Short => ("zip", "jet_iter_zip", 3, vec![false; 3]),
-        super::TZipMode::Strict => (
-            "zip_strict",
-            "jet_iter_zip_strict",
-            10,
-            vec![false; 10],
-        ),
+        super::TZipMode::Strict => ("zip_strict", "jet_iter_zip_strict", 10, vec![false; 10]),
         super::TZipMode::Pad => ("zip_pad", "jet_iter_zip_pad", 5, vec![false; 5]),
     };
     TPreludeRoute {
@@ -115,7 +108,6 @@ pub(super) fn zip_closure_route(mode: super::TZipMode) -> TPreludeRoute {
         db_metadata: None,
     }
 }
-
 
 fn prelude(
     family: MirPreludeFamily,
@@ -195,13 +187,55 @@ fn collection_closure_route(
     let (module, member, symbol, arity, borrow_mask) = match (op, kind) {
         (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[false, false][..]),
         (Map, "iter") => ("core.iter", "map", "jet_iter_map", 2, &[false, false][..]),
-        (MapMut, "list") => ("core.list", "map_mut", "jet_list_map_mut", 2, &[false, false][..]),
-        (MapMut, "iter") => ("core.iter", "map_mut", "jet_iter_map_mut", 2, &[false, false][..]),
-        (TryMap, "list") => ("core.list", "try_map", "jet_list_try_map", 2, &[false, false][..]),
-        (TryMap, "iter") => ("core.iter", "try_map", "jet_iter_try_map", 2, &[false, false][..]),
-        (TryMap, "view") => ("core.view", "try_map", "jet_view_try_map", 2, &[true, false][..]),
-        (Filter, "list") => ("core.list", "filter", "jet_list_filter", 2, &[false, false][..]),
-        (Filter, "iter") => ("core.iter", "filter", "jet_iter_filter", 2, &[false, false][..]),
+        (MapMut, "list") => (
+            "core.list",
+            "map_mut",
+            "jet_list_map_mut",
+            2,
+            &[false, false][..],
+        ),
+        (MapMut, "iter") => (
+            "core.iter",
+            "map_mut",
+            "jet_iter_map_mut",
+            2,
+            &[false, false][..],
+        ),
+        (TryMap, "list") => (
+            "core.list",
+            "try_map",
+            "jet_list_try_map",
+            2,
+            &[false, false][..],
+        ),
+        (TryMap, "iter") => (
+            "core.iter",
+            "try_map",
+            "jet_iter_try_map",
+            2,
+            &[false, false][..],
+        ),
+        (TryMap, "view") => (
+            "core.view",
+            "try_map",
+            "jet_view_try_map",
+            2,
+            &[true, false][..],
+        ),
+        (Filter, "list") => (
+            "core.list",
+            "filter",
+            "jet_list_filter",
+            2,
+            &[false, false][..],
+        ),
+        (Filter, "iter") => (
+            "core.iter",
+            "filter",
+            "jet_iter_filter",
+            2,
+            &[false, false][..],
+        ),
         (FilterMap, "list") => (
             "core.list",
             "filter_map",
@@ -216,20 +250,50 @@ fn collection_closure_route(
             2,
             &[false, false][..],
         ),
-        (TryFilter, "list") => ("core.list", "try_filter", "jet_list_try_filter", 2, &[false, false][..]),
-        (TryFilter, "iter") => ("core.iter", "try_filter", "jet_iter_try_filter", 2, &[false, false][..]),
-        (TryFilter, "view") => ("core.view", "try_filter", "jet_view_try_filter", 2, &[true, false][..]),
+        (TryFilter, "list") => (
+            "core.list",
+            "try_filter",
+            "jet_list_try_filter",
+            2,
+            &[false, false][..],
+        ),
+        (TryFilter, "iter") => (
+            "core.iter",
+            "try_filter",
+            "jet_iter_try_filter",
+            2,
+            &[false, false][..],
+        ),
+        (TryFilter, "view") => (
+            "core.view",
+            "try_filter",
+            "jet_view_try_filter",
+            2,
+            &[true, false][..],
+        ),
         (Each | EachMut, "list" | "iter") => {
             if matches!(op, Each) {
                 ("core.list", "each", "jet_list_each", 2, &[false, false][..])
             } else {
-                ("core.list", "each_mut", "jet_list_each_mut", 2, &[false, false][..])
+                (
+                    "core.list",
+                    "each_mut",
+                    "jet_list_each_mut",
+                    2,
+                    &[false, false][..],
+                )
             }
         }
         (Find, "list" | "iter") => ("core.list", "find", "jet_list_find", 2, &[false, false][..]),
         (Any, "list" | "iter") => ("core.list", "any", "jet_list_any", 2, &[false, false][..]),
         (All, "list" | "iter") => ("core.list", "all", "jet_list_all", 2, &[false, false][..]),
-        (Reduce, "list" | "iter") => ("core.list", "reduce", "jet_list_reduce", 3, &[false, false, false][..]),
+        (Reduce, "list" | "iter") => (
+            "core.list",
+            "reduce",
+            "jet_list_reduce",
+            3,
+            &[false, false, false][..],
+        ),
         (TakeWhile, "list") => (
             "core.list",
             "take_while",
@@ -258,8 +322,20 @@ fn collection_closure_route(
             2,
             &[false, false][..],
         ),
-        (FlatMap, "list") => ("core.list", "flat_map", "jet_list_flat_map", 2, &[false, false][..]),
-        (FlatMap, "iter") => ("core.iter", "flat_map", "jet_iter_flat_map", 2, &[false, false][..]),
+        (FlatMap, "list") => (
+            "core.list",
+            "flat_map",
+            "jet_list_flat_map",
+            2,
+            &[false, false][..],
+        ),
+        (FlatMap, "iter") => (
+            "core.iter",
+            "flat_map",
+            "jet_iter_flat_map",
+            2,
+            &[false, false][..],
+        ),
         (Position, "list" | "iter") => (
             "core.list",
             "position",
@@ -267,8 +343,20 @@ fn collection_closure_route(
             2,
             &[false, false][..],
         ),
-        (MinBy, "list" | "iter") => ("core.list", "min_by", "jet_list_min_by", 2, &[false, false][..]),
-        (MaxBy, "list" | "iter") => ("core.list", "max_by", "jet_list_max_by", 2, &[false, false][..]),
+        (MinBy, "list" | "iter") => (
+            "core.list",
+            "min_by",
+            "jet_list_min_by",
+            2,
+            &[false, false][..],
+        ),
+        (MaxBy, "list" | "iter") => (
+            "core.list",
+            "max_by",
+            "jet_list_max_by",
+            2,
+            &[false, false][..],
+        ),
         (GroupBy, "list" | "iter") => (
             "core.list",
             "group_by",
@@ -283,14 +371,32 @@ fn collection_closure_route(
             2,
             &[false, false][..],
         ),
-        (Scan, "list") => ("core.list", "scan", "jet_list_scan_iter", 3, &[false, false, false][..]),
-        (Scan, "iter") => ("core.iter", "scan", "jet_iter_scan", 3, &[false, false, false][..]),
-        (OptionMap, "option") => ("core.option", "map", "jet_option_map_ref", 2, &[true, false][..]),
+        (Scan, "list") => (
+            "core.list",
+            "scan",
+            "jet_list_scan_iter",
+            3,
+            &[false, false, false][..],
+        ),
+        (Scan, "iter") => (
+            "core.iter",
+            "scan",
+            "jet_iter_scan",
+            3,
+            &[false, false, false][..],
+        ),
+        (OptionMap, "option") => (
+            "core.option",
+            "map",
+            "jet_option_map_ref",
+            2,
+            &[true, false][..],
+        ),
         (BagAny, "bag") => ("core.bag", "any", "jet_bag_any", 2, &[true, false][..]),
         _ => {
             return Err(route_error(format!(
                 "checked closure operation `{op:?}` has no Prelude route for receiver `{kind}`"
-            )))
+            )));
         }
     };
     Ok(prelude(
@@ -306,7 +412,6 @@ fn collection_closure_route(
         MirPreludeAbi::Value,
     ))
 }
-
 
 impl TClosureOp {
     pub(super) fn route_plan(
@@ -712,7 +817,9 @@ impl TClosureOp {
             // before MIR; no route may guess a helper from the enum alone.
             Map | MapMut | TryMap | Filter | TryFilter | Each | EachMut | Find | Any | BagAny
             | All | Reduce | TakeWhile | SkipWhile | FlatMap | Position | MinBy | MaxBy
-            | GroupBy | CountBy | OptionMap => return collection_closure_route(self, receiver, carrier),
+            | GroupBy | CountBy | OptionMap => {
+                return collection_closure_route(self, receiver, carrier);
+            }
         };
         Ok(plan)
     }
@@ -767,11 +874,7 @@ impl TNumericOp {
                     "is_nan" => ("is_nan", "jet_std_math_is_nan"),
                     "is_infinite" => ("is_infinite", "jet_std_math_is_infinite"),
                     "is_finite" => ("is_finite", "jet_std_math_is_finite"),
-                    _ => {
-                        return Err(route_error(format!(
-                            "unknown numeric predicate `{method}`"
-                        )))
-                    }
+                    _ => return Err(route_error(format!("unknown numeric predicate `{method}`"))),
                 };
                 prelude(
                     MirPreludeFamily::BuiltinMethod,
@@ -800,7 +903,6 @@ impl TNumericOp {
     }
 }
 
-
 fn watch_receiver_kind(receiver: &Type) -> Option<&str> {
     match receiver {
         Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
@@ -824,18 +926,42 @@ fn watch_route(
         ))
     })?;
     Ok(match (kind, method) {
-        ("WatchHandle", "poll" | "events") => {
-            h("watch.poll", "jet_jit_watch_poll", 1, 1, &[true], Some(Effect::IO), carrier)
-        }
-        ("WatchHandle", "cancel") => {
-            h("watch.cancel", "jet_jit_watch_cancel", 1, 1, &[true], Some(Effect::IO), carrier)
-        }
-        ("WatchHandle", "is_active") => {
-            h("watch.is_active", "jet_jit_watch_is_active", 1, 1, &[true], None, carrier)
-        }
-        ("WatchHandle", "summary") => {
-            h("watch.summary", "jet_jit_watch_summary", 1, 1, &[true], None, carrier)
-        }
+        ("WatchHandle", "poll" | "events") => h(
+            "watch.poll",
+            "jet_jit_watch_poll",
+            1,
+            1,
+            &[true],
+            Some(Effect::IO),
+            carrier,
+        ),
+        ("WatchHandle", "cancel") => h(
+            "watch.cancel",
+            "jet_jit_watch_cancel",
+            1,
+            1,
+            &[true],
+            Some(Effect::IO),
+            carrier,
+        ),
+        ("WatchHandle", "is_active") => h(
+            "watch.is_active",
+            "jet_jit_watch_is_active",
+            1,
+            1,
+            &[true],
+            None,
+            carrier,
+        ),
+        ("WatchHandle", "summary") => h(
+            "watch.summary",
+            "jet_jit_watch_summary",
+            1,
+            1,
+            &[true],
+            None,
+            carrier,
+        ),
         ("WatchHandle", "on") => prelude(
             MirPreludeFamily::ClosureMethod,
             "core.watcher",
@@ -860,19 +986,37 @@ fn watch_route(
             carrier,
             MirPreludeAbi::Value,
         ),
-        ("WatchSet", "add") => {
-            h("watchset.add", "jet_jit_watchset_add", 2, 2, &[true, true], Some(Effect::IO), carrier)
-        }
-        ("WatchSet", "poll" | "events") => {
-            h("watchset.poll", "jet_jit_watchset_poll", 1, 1, &[true], Some(Effect::IO), carrier)
-        }
-        ("WatchSet", "summary") => {
-            h("watchset.summary", "jet_jit_watchset_summary", 1, 1, &[true], None, carrier)
-        }
+        ("WatchSet", "add") => h(
+            "watchset.add",
+            "jet_jit_watchset_add",
+            2,
+            2,
+            &[true, true],
+            Some(Effect::IO),
+            carrier,
+        ),
+        ("WatchSet", "poll" | "events") => h(
+            "watchset.poll",
+            "jet_jit_watchset_poll",
+            1,
+            1,
+            &[true],
+            Some(Effect::IO),
+            carrier,
+        ),
+        ("WatchSet", "summary") => h(
+            "watchset.summary",
+            "jet_jit_watchset_summary",
+            1,
+            1,
+            &[true],
+            None,
+            carrier,
+        ),
         _ => {
             return Err(route_error(format!(
                 "unknown checked watch method `{kind}.{method}`"
-            )))
+            )));
         }
     })
 }
@@ -914,20 +1058,22 @@ fn event_route(
     let (symbol, arity, max_arity, borrow_mask) = match (kind, method) {
         ("Event", "on") => ("jet_std::JetEvent::on", 3, 3, &[true, true, false][..]),
         ("Event", "once") => ("jet_std::JetEvent::once", 3, 3, &[true, true, false][..]),
-        ("Event", "on_priority") => {
-            ("jet_std::JetEvent::on_priority", 4, 4, &[true, true, false, false][..])
-        }
+        ("Event", "on_priority") => (
+            "jet_std::JetEvent::on_priority",
+            4,
+            4,
+            &[true, true, false, false][..],
+        ),
         ("Event", "emit") => ("jet_std::JetEvent::emit", 2, 2, &[true, false][..]),
-        ("Event", "listener_count") => {
-            ("jet_std::JetEvent::listener_count", 1, 1, &[true][..])
-        }
+        ("Event", "listener_count") => ("jet_std::JetEvent::listener_count", 1, 1, &[true][..]),
         ("Event", "trace") => ("jet_std::JetEvent::trace", 1, 1, &[true][..]),
-        ("AsyncEvent", "on") => {
-            ("jet_std::JetAsyncEvent::on", 3, 3, &[true, true, false][..])
-        }
-        ("AsyncEvent", "once") => {
-            ("jet_std::JetAsyncEvent::once", 3, 3, &[true, true, false][..])
-        }
+        ("AsyncEvent", "on") => ("jet_std::JetAsyncEvent::on", 3, 3, &[true, true, false][..]),
+        ("AsyncEvent", "once") => (
+            "jet_std::JetAsyncEvent::once",
+            3,
+            3,
+            &[true, true, false][..],
+        ),
         ("AsyncEvent", "on_priority") => (
             "jet_std::JetAsyncEvent::on_priority",
             4,
@@ -957,75 +1103,70 @@ fn event_route(
         }
         ("Hook", "on") => ("jet_std::JetHook::on", 3, 3, &[true, true, false][..]),
         ("Hook", "once") => ("jet_std::JetHook::once", 3, 3, &[true, true, false][..]),
-        ("Hook", "on_priority") => {
-            ("jet_std::JetHook::on_priority", 4, 4, &[true, true, false, false][..])
-        }
+        ("Hook", "on_priority") => (
+            "jet_std::JetHook::on_priority",
+            4,
+            4,
+            &[true, true, false, false][..],
+        ),
         ("Hook", "run") => ("jet_std::JetHook::run", 3, 3, &[true, false, false][..]),
-        ("Hook", "listener_count") => {
-            ("jet_std::JetHook::listener_count", 1, 1, &[true][..])
-        }
+        ("Hook", "listener_count") => ("jet_std::JetHook::listener_count", 1, 1, &[true][..]),
         ("Hook", "trace") => ("jet_std::JetHook::trace", 1, 1, &[true][..]),
-        ("DecisionHook", "on") => {
-            ("jet_std::JetDecisionHook::on", 3, 3, &[true, true, false][..])
-        }
-        ("DecisionHook", "once") => {
-            ("jet_std::JetDecisionHook::once", 3, 3, &[true, true, false][..])
-        }
+        ("DecisionHook", "on") => (
+            "jet_std::JetDecisionHook::on",
+            3,
+            3,
+            &[true, true, false][..],
+        ),
+        ("DecisionHook", "once") => (
+            "jet_std::JetDecisionHook::once",
+            3,
+            3,
+            &[true, true, false][..],
+        ),
         ("DecisionHook", "on_priority") => (
             "jet_std::JetDecisionHook::on_priority",
             4,
             4,
             &[true, true, false, false][..],
         ),
-        ("DecisionHook", "run") => {
-            ("jet_std::JetDecisionHook::run", 2, 2, &[true, false][..])
-        }
-        ("DecisionHook", "listener_count") => {
-            ("jet_std::JetDecisionHook::listener_count", 1, 1, &[true][..])
-        }
+        ("DecisionHook", "run") => ("jet_std::JetDecisionHook::run", 2, 2, &[true, false][..]),
+        ("DecisionHook", "listener_count") => (
+            "jet_std::JetDecisionHook::listener_count",
+            1,
+            1,
+            &[true][..],
+        ),
         ("Subscription", "unsubscribe") => {
             ("jet_std::JetSubscription::unsubscribe", 1, 1, &[true][..])
         }
-        ("Subscription", "is_active") => {
-            ("jet_std::JetSubscription::active", 1, 1, &[true][..])
-        }
-        ("EventScope", "cancel") => {
-            ("jet_std::JetEventScope::cancel", 1, 1, &[true][..])
-        }
+        ("Subscription", "is_active") => ("jet_std::JetSubscription::active", 1, 1, &[true][..]),
+        ("EventScope", "cancel") => ("jet_std::JetEventScope::cancel", 1, 1, &[true][..]),
         ("EventScope", "active_count") => {
             ("jet_std::JetEventScope::active_count", 1, 1, &[true][..])
         }
-        ("EventTrace", "summary") => {
-            ("jet_std::JetEventTrace::summary", 1, 1, &[true][..])
-        }
-        ("EventTrace", "delivered") => {
-            ("jet_std::JetEventTrace::delivered", 1, 1, &[true][..])
-        }
-        ("EventTrace", "queued") => {
-            ("jet_std::JetEventTrace::queued", 1, 1, &[true][..])
-        }
-        ("EventTrace", "dropped") => {
-            ("jet_std::JetEventTrace::dropped", 1, 1, &[true][..])
-        }
-        ("DispatchReport", "state") => {
-            ("jet_std::JetDispatchReport::state", 1, 1, &[true][..])
-        }
+        ("EventTrace", "summary") => ("jet_std::JetEventTrace::summary", 1, 1, &[true][..]),
+        ("EventTrace", "delivered") => ("jet_std::JetEventTrace::delivered", 1, 1, &[true][..]),
+        ("EventTrace", "queued") => ("jet_std::JetEventTrace::queued", 1, 1, &[true][..]),
+        ("EventTrace", "dropped") => ("jet_std::JetEventTrace::dropped", 1, 1, &[true][..]),
+        ("DispatchReport", "state") => ("jet_std::JetDispatchReport::state", 1, 1, &[true][..]),
         ("DispatchReport", "accepted") => {
             ("jet_std::JetDispatchReport::accepted", 1, 1, &[true][..])
         }
-        ("DispatchReport", "delivered_handlers") => {
-            ("jet_std::JetDispatchReport::delivered_handlers", 1, 1, &[true][..])
-        }
+        ("DispatchReport", "delivered_handlers") => (
+            "jet_std::JetDispatchReport::delivered_handlers",
+            1,
+            1,
+            &[true][..],
+        ),
         ("DispatchReport", "failures") => {
             ("jet_std::JetDispatchReport::failures", 1, 1, &[true][..])
         }
-        ("DispatchReport", "trace") => {
-            ("jet_std::JetDispatchReport::trace", 1, 1, &[true][..])
-        }
+        ("DispatchReport", "trace") => ("jet_std::JetDispatchReport::trace", 1, 1, &[true][..]),
         _ => {
             return Err(route_error(format!(
                 "unknown checked event method `{kind}.{method}`"
-            )))
+            )));
         }
     };
     Ok(prelude(
@@ -1051,10 +1192,7 @@ fn task_receiver_args(receiver: &Type) -> Option<&[Type]> {
     }
 }
 
-fn task_route(
-    receiver: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
+fn task_route(receiver: &Type, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
     let args = task_receiver_args(receiver)
         .ok_or_else(|| route_error("checked task join has an unsupported receiver type"))?;
     let task_value = args
@@ -1086,118 +1224,116 @@ fn http_client_request_route(
     method: &str,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
-    let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) =
-        match (kind, method) {
-            ("HTTPRequest" | "HTTPClient", "send") => (
-                "http.request_send",
-                "jet_http_client_request_send",
-                1,
-                &[false],
-            ),
-            ("Body", "bytes") => (
-                "http.body_bytes",
-                "jet_http_body_bytes",
-                2,
-                &[true, false],
-            ),
-            ("Body", "chunks") => (
-                "http.body_chunks",
-                "jet_http_body_chunks",
-                2,
-                &[true, false],
-            ),
-            ("HTTPRequest", "body") => (
-                "http.request_body",
-                "jet_http_client_request_body",
-                2,
-                &[false, true],
-            ),
-            ("HTTPRequest", "header") => (
-                "http.request_header",
-                "jet_http_client_request_header",
-                3,
-                &[false, true, true],
-            ),
-            ("HTTPRequest", "timeout") => (
-                "http.request_timeout",
-                "jet_http_client_request_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "connect_timeout") => (
-                "http.request_connect_timeout",
-                "jet_http_client_request_connect_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "read_timeout") => (
-                "http.request_read_timeout",
-                "jet_http_client_request_read_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "total_timeout") => (
-                "http.request_total_timeout",
-                "jet_http_client_request_total_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "dns_timeout") => (
-                "http.request_dns_timeout",
-                "jet_http_client_request_dns_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "tls_timeout") => (
-                "http.request_tls_timeout",
-                "jet_http_client_request_tls_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "write_timeout") => (
-                "http.request_write_timeout",
-                "jet_http_client_request_write_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "first_byte_timeout") => (
-                "http.request_first_byte_timeout",
-                "jet_http_client_request_first_byte_timeout",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "redirects") => (
-                "http.request_redirects",
-                "jet_http_client_request_redirects",
-                2,
-                &[false, false],
-            ),
-            ("HTTPRequest", "proxy") => (
-                "http.request_proxy",
-                "jet_http_client_request_proxy",
-                2,
-                &[false, true],
-            ),
-            ("HTTPRequest", "cookie") => (
-                "http.request_cookie",
-                "jet_http_client_request_cookie",
-                3,
-                &[false, true, true],
-            ),
-            ("HTTPRequest", "form") => (
-                "http.request_form",
-                "jet_http_client_request_form",
-                3,
-                &[false, true, true],
-            ),
-            ("HTTPRequest", "multipart_text") => (
-                "http.request_multipart_text",
-                "jet_http_client_request_multipart_text",
-                3,
-                &[false, true, true],
-            ),
-            _ => return Err(route_error(format!("unhandled HTTP client method `{kind}.{method}`"))),
-        };
+    let (member, symbol, arity, borrow_mask): (&str, &str, usize, &[bool]) = match (kind, method) {
+        ("HTTPRequest" | "HTTPClient", "send") => (
+            "http.request_send",
+            "jet_http_client_request_send",
+            1,
+            &[false],
+        ),
+        ("Body", "bytes") => ("http.body_bytes", "jet_http_body_bytes", 2, &[true, false]),
+        ("Body", "chunks") => (
+            "http.body_chunks",
+            "jet_http_body_chunks",
+            2,
+            &[true, false],
+        ),
+        ("HTTPRequest", "body") => (
+            "http.request_body",
+            "jet_http_client_request_body",
+            2,
+            &[false, true],
+        ),
+        ("HTTPRequest", "header") => (
+            "http.request_header",
+            "jet_http_client_request_header",
+            3,
+            &[false, true, true],
+        ),
+        ("HTTPRequest", "timeout") => (
+            "http.request_timeout",
+            "jet_http_client_request_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "connect_timeout") => (
+            "http.request_connect_timeout",
+            "jet_http_client_request_connect_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "read_timeout") => (
+            "http.request_read_timeout",
+            "jet_http_client_request_read_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "total_timeout") => (
+            "http.request_total_timeout",
+            "jet_http_client_request_total_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "dns_timeout") => (
+            "http.request_dns_timeout",
+            "jet_http_client_request_dns_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "tls_timeout") => (
+            "http.request_tls_timeout",
+            "jet_http_client_request_tls_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "write_timeout") => (
+            "http.request_write_timeout",
+            "jet_http_client_request_write_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "first_byte_timeout") => (
+            "http.request_first_byte_timeout",
+            "jet_http_client_request_first_byte_timeout",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "redirects") => (
+            "http.request_redirects",
+            "jet_http_client_request_redirects",
+            2,
+            &[false, false],
+        ),
+        ("HTTPRequest", "proxy") => (
+            "http.request_proxy",
+            "jet_http_client_request_proxy",
+            2,
+            &[false, true],
+        ),
+        ("HTTPRequest", "cookie") => (
+            "http.request_cookie",
+            "jet_http_client_request_cookie",
+            3,
+            &[false, true, true],
+        ),
+        ("HTTPRequest", "form") => (
+            "http.request_form",
+            "jet_http_client_request_form",
+            3,
+            &[false, true, true],
+        ),
+        ("HTTPRequest", "multipart_text") => (
+            "http.request_multipart_text",
+            "jet_http_client_request_multipart_text",
+            3,
+            &[false, true, true],
+        ),
+        _ => {
+            return Err(route_error(format!(
+                "unhandled HTTP client method `{kind}.{method}`"
+            )));
+        }
+    };
     Ok(h(
         member,
         symbol,
@@ -1208,9 +1344,6 @@ fn http_client_request_route(
         carrier,
     ))
 }
-
-
-
 
 impl THandleOp {
     pub(super) fn route_plan(
@@ -1237,7 +1370,11 @@ impl THandleOp {
                 MirPreludeFamily::HandleMethod,
                 "core.time",
                 "duration_new",
-                if *float { "jet_duration_from_float" } else { "jet_duration_from_int" },
+                if *float {
+                    "jet_duration_from_float"
+                } else {
+                    "jet_duration_from_int"
+                },
                 2,
                 2,
                 &[false, false],
@@ -1245,24 +1382,186 @@ impl THandleOp {
                 carrier,
                 MirPreludeAbi::Value,
             ),
-            FileReaderReadLine => h("file_reader.read_line", "jet_std_file_reader_read_line", 1, 1, &[true], Some(Effect::FS), carrier),
-            MappedFileWindow => h("mapped_file.window", "jet_std_fs_map_window_view", 3, 3, &[true, false, false], Some(Effect::FS), carrier),
-            MappedFileWindowLen => h("mapped_file.window_len", "jet_std_fs_map_window_len_view", 3, 3, &[true, false, false], Some(Effect::FS), carrier),
-            MappedFileLines => h("mapped_file.lines", "jet_std_fs_map_lines_view", 1, 1, &[true], Some(Effect::FS), carrier),
-            MappedFileLen => h("mapped_file.len", "jet_std_fs_map_len", 1, 1, &[true], None, carrier),
-            MappedFileIsEmpty => h("mapped_file.is_empty", "jet_std_fs_map_is_empty", 1, 1, &[true], None, carrier),
-            FileWriterWriteLine => h("file_writer.write_line", "jet_std_file_writer_write_line", 2, 2, &[true, true], Some(Effect::FS), carrier),
-            FileWriterFlush => h("file_writer.flush", "jet_std_file_writer_flush", 1, 1, &[true], Some(Effect::FS), carrier),
-            JSONReaderNext => h("json_reader.next", "jet_enc_json_reader_next", 1, 1, &[true], Some(Effect::IO), carrier),
-            JSONWriterWrite => h("json_writer.write", "jet_enc_json_writer_write", 2, 2, &[true, false], Some(Effect::IO), carrier),
-            JSONWriterFlush => h("json_writer.flush", "jet_enc_json_writer_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            JSONWriterFinish => h("json_writer.finish", "jet_enc_json_writer_finish", 1, 1, &[true], Some(Effect::IO), carrier),
-            JSONLReaderNext => h("jsonl_reader.next", "jet_enc_jsonl_reader_next", 1, 1, &[true], Some(Effect::IO), carrier),
-            JSONLWriterWrite => h("jsonl_writer.write", "jet_enc_jsonl_writer_write", 2, 2, &[true, false], Some(Effect::IO), carrier),
-            JSONLWriterFlush => h("jsonl_writer.flush", "jet_enc_jsonl_writer_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            JSONLWriterFinish => h("jsonl_writer.finish", "jet_enc_jsonl_writer_finish", 1, 1, &[true], Some(Effect::IO), carrier),
-            CSVReaderNext => h("csv_reader.next", "jet_enc_csv_reader_next", 1, 1, &[true], Some(Effect::IO), carrier),
-            DataStreamNext => h("data_stream.next", "jet_data_stream_next", 1, 1, &[true], Some(Effect::IO), carrier),
+            FileReaderReadLine => h(
+                "file_reader.read_line",
+                "jet_std_file_reader_read_line",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileReaderPath => h(
+                "file_reader.path",
+                "jet_std_file_reader_path",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            MappedFileWindow => h(
+                "mapped_file.window",
+                "jet_std_fs_map_window_view",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::FS),
+                carrier,
+            ),
+            MappedFileWindowLen => h(
+                "mapped_file.window_len",
+                "jet_std_fs_map_window_len_view",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::FS),
+                carrier,
+            ),
+            MappedFileLines => h(
+                "mapped_file.lines",
+                "jet_std_fs_map_lines_view",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            MappedFileLen => h(
+                "mapped_file.len",
+                "jet_std_fs_map_len",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            MappedFileIsEmpty => h(
+                "mapped_file.is_empty",
+                "jet_std_fs_map_is_empty",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            FileWriterWriteLine => h(
+                "file_writer.write_line",
+                "jet_std_file_writer_write_line",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterFlush => h(
+                "file_writer.flush",
+                "jet_std_file_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterPath => h(
+                "file_writer.path",
+                "jet_std_file_writer_path",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            JSONReaderNext => h(
+                "json_reader.next",
+                "jet_enc_json_reader_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONWriterWrite => h(
+                "json_writer.write",
+                "jet_enc_json_writer_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONWriterFlush => h(
+                "json_writer.flush",
+                "jet_enc_json_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONWriterFinish => h(
+                "json_writer.finish",
+                "jet_enc_json_writer_finish",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONLReaderNext => h(
+                "jsonl_reader.next",
+                "jet_enc_jsonl_reader_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONLWriterWrite => h(
+                "jsonl_writer.write",
+                "jet_enc_jsonl_writer_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONLWriterFlush => h(
+                "jsonl_writer.flush",
+                "jet_enc_jsonl_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            JSONLWriterFinish => h(
+                "jsonl_writer.finish",
+                "jet_enc_jsonl_writer_finish",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CSVReaderNext => h(
+                "csv_reader.next",
+                "jet_enc_csv_reader_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            DataStreamNext => h(
+                "data_stream.next",
+                "jet_data_stream_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
             StreamWithEventTime => h(
                 "stream.with_event_time",
                 "jet_stream_with_event_time",
@@ -1299,180 +1598,1515 @@ impl THandleOp {
                 Some(Effect::IO),
                 carrier,
             ),
-            XMLReaderNext => h("xml_reader.next", "jet_enc_xml_reader_next", 1, 1, &[true], Some(Effect::IO), carrier),
-            XMLWriterWrite => h("xml_writer.write", "jet_enc_xml_writer_write", 2, 2, &[true, false], Some(Effect::IO), carrier),
-            XMLWriterFlush => h("xml_writer.flush", "jet_enc_xml_writer_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            XMLWriterFinish => h("xml_writer.finish", "jet_enc_xml_writer_finish", 1, 1, &[true], Some(Effect::IO), carrier),
-            CSVWriterWrite => h("csv_writer.write", "jet_enc_csv_writer_write", 2, 2, &[true, false], Some(Effect::IO), carrier),
-            CSVWriterFlush => h("csv_writer.flush", "jet_enc_csv_writer_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            CSVWriterFinish => h("csv_writer.finish", "jet_enc_csv_writer_finish", 1, 1, &[true], Some(Effect::IO), carrier),
-            CBORReaderNext => h("cbor_reader.next", "jet_enc_cbor_reader_next", 1, 1, &[true], Some(Effect::IO), carrier),
-            CBORWriterWrite => h("cbor_writer.write", "jet_enc_cbor_writer_write", 2, 2, &[true, false], Some(Effect::IO), carrier),
-            CBORWriterFlush => h("cbor_writer.flush", "jet_enc_cbor_writer_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            CBORWriterFinish => h("cbor_writer.finish", "jet_enc_cbor_writer_finish", 1, 1, &[true], Some(Effect::IO), carrier),
-            StdinReadLine => h("stdin.read_line", "jet_std_io_stdin_read_line", 1, 1, &[true], Some(Effect::IO), carrier),
-            StdoutWrite => h("stdout.write", "jet_std_io_stdout_write", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StdoutWriteLine => h("stdout.write_line", "jet_std_io_stdout_write_line", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StdoutWriteBytes => h("stdout.write_bytes", "jet_std_io_stdout_write_bytes", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StdoutFlush => h("stdout.flush", "jet_std_io_stdout_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            StdoutIsTty => h("stdout.is_tty", "jet_std_io_stdout_is_tty", 1, 1, &[true], Some(Effect::IO), carrier),
-            StderrWrite => h("stderr.write", "jet_std_io_stderr_write", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StderrWriteLine => h("stderr.write_line", "jet_std_io_stderr_write_line", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StderrWriteBytes => h("stderr.write_bytes", "jet_std_io_stderr_write_bytes", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            StderrFlush => h("stderr.flush", "jet_std_io_stderr_flush", 1, 1, &[true], Some(Effect::IO), carrier),
-            StderrIsTty => h("stderr.is_tty", "jet_std_io_stderr_is_tty", 1, 1, &[true], Some(Effect::IO), carrier),
-            StopwatchElapsedMillis => h("stopwatch.elapsed_millis", "jet_stopwatch_elapsed_millis", 1, 1, &[true], Some(Effect::Time), carrier),
-            TestSuiteRun => h("test_suite.run", "jet_test_suite_run", 1, 1, &[true], None, carrier),
-            ClockNow => h("clock.now", "jet_clock_now", 1, 1, &[true], Some(Effect::Time), carrier),
-            ClockTick => h("clock.tick", "jet_clock_tick", 2, 2, &[true, false], Some(Effect::Time), carrier),
-            ClockAdvance => h("clock.advance", "jet_clock_advance", 2, 2, &[true, false], Some(Effect::Time), carrier),
-            ClockWait => h("clock.wait", "jet_clock_wait", 2, 2, &[true, true], Some(Effect::Time), carrier),
-            WorldNow => h("deterministic_world.now", "jet_world_now", 1, 1, &[true], Some(Effect::Time), carrier),
-            WorldAdvance => h("deterministic_world.advance", "jet_world_advance", 2, 2, &[true, true], Some(Effect::Time), carrier),
-            WorldWaitIdle => h("deterministic_world.wait_idle", "jet_world_wait_idle", 1, 1, &[true], Some(Effect::Time), carrier),
-            WorldHistory => h("deterministic_world.history", "jet_world_history", 1, 1, &[true], None, carrier),
-            RealtimeNextDeadline => h("realtime.next_deadline", "jet_rt_next_deadline", 1, 1, &[true], None, carrier),
-            RealtimeReceipt => h("realtime.receipt", "jet_rt_receipt", 1, 1, &[true], None, carrier),
-            RealtimeCancel => h("realtime.cancel", "jet_rt_cancel", 1, 1, &[false], Some(Effect::Time), carrier),
-            RealtimeIsCancelled => h("realtime.is_cancelled", "jet_rt_is_cancelled", 1, 1, &[true], None, carrier),
-            RngInt => h("rng.int", "jet_rng_int", 3, 3, &[true, false, false], Some(Effect::Rand), carrier),
-            RngFloat => h("rng.float", "jet_rng_float", 1, 1, &[true], Some(Effect::Rand), carrier),
-            RngFloatRange => h("rng.float_range", "jet_rng_float_range", 3, 3, &[true, false, false], Some(Effect::Rand), carrier),
-            RngBool => h("rng.bool", "jet_rng_bool", 1, 1, &[true], Some(Effect::Rand), carrier),
-            RngBoolP => h("rng.bool_p", "jet_rng_bool_p", 2, 2, &[true, false], Some(Effect::Rand), carrier),
-            RngNormal => h("rng.normal", "jet_rng_normal", 3, 3, &[true, false, false], Some(Effect::Rand), carrier),
-            RngExponential => h("rng.exponential", "jet_rng_exponential", 2, 2, &[true, false], Some(Effect::Rand), carrier),
-            RngBytes => h("rng.bytes", "jet_rng_bytes", 2, 2, &[true, false], Some(Effect::Rand), carrier),
-            RngSplit => h("rng.split", "jet_rng_split", 1, 1, &[true], Some(Effect::Rand), carrier),
-            RngPick => h("rng.pick", "jet_rng_pick", 2, 2, &[true, true], Some(Effect::Rand), carrier),
-            RngWeightedPick => h("rng.weighted_pick", "jet_rng_weighted_pick", 3, 3, &[true, true, true], Some(Effect::Rand), carrier),
-            RngSample => h("rng.sample", "jet_rng_sample", 3, 3, &[true, true, false], Some(Effect::Rand), carrier),
-            RngShuffle => h("rng.shuffle", "jet_rng_shuffle", 2, 2, &[true, true], Some(Effect::Rand), carrier),
-            HistoryRngNextU64 => h("history_rng.next_u64", "jet_testing_history_rng_next_u64", 1, 1, &[true], Some(Effect::Rand), carrier),
-            HistoryRngBelow => h("history_rng.below", "jet_testing_history_rng_below", 2, 2, &[true, false], Some(Effect::Rand), carrier),
-            FakeLocale => h("fake.locale", "jet_fake_locale", 2, 2, &[true, true], Some(Effect::Rand), carrier),
-            FakeName => h("fake.name", "jet_fake_name", 1, 1, &[true], Some(Effect::Rand), carrier),
-            FakeEmail => h("fake.email", "jet_fake_email", 1, 1, &[true], Some(Effect::Rand), carrier),
-            FakeHost => h("fake.host", "jet_fake_host", 1, 1, &[true], Some(Effect::Rand), carrier),
-            FakeAddress => h("fake.address", "jet_fake_address", 1, 1, &[true], Some(Effect::Rand), carrier),
-            SolverNew => h("solver.new", "jet_solver_new", 1, 1, &[false], None, carrier),
-            SolverRequire => h("solver.require", "jet_solver_require", 2, 2, &[true, false], None, carrier),
-            SolverFailureCount => h("solver.failure_count", "jet_solver_failure_count", 1, 1, &[true], None, carrier),
-            SolverStatus => h("solver.status", "jet_solver_status", 1, 1, &[true], None, carrier),
-            GameSceneNew => h("game.scene_new", "jet_game_scene_new", 1, 1, &[true], None, carrier),
-            GameReplayRecord => h("game.replay_record", "jet_game_replay_record", 1, 1, &[true], None, carrier),
-            GameBackendHeadless => prelude(MirPreludeFamily::HandleMethod, "core.game", "backend_headless", "jet_game_backend_headless", 0, 0, &[], None, carrier, MirPreludeAbi::Value),
-            GameBackendShouldContinue => h("game.backend_should_continue", "jet_game_backend_should_continue", 1, 1, &[true], None, carrier),
-            GameBackendPresent => h("game.backend_present", "jet_game_backend_present", 1, 1, &[true], None, carrier),
-            GameSceneOnFrame { .. } => h("game.scene_on_frame", "jet_game_scene_on_frame", 4, 4, &[true, false, false, false], None, carrier),
-            GameSceneComponent => h("game.scene_component", "jet_game_scene_component", 2, 2, &[true, true], None, carrier),
-            GameSceneQuery => h("game.scene_query", "jet_game_scene_query", 2, 2, &[true, true], None, carrier),
-            GameAssetsImage => h("game.assets_image", "jet_game_assets_image", 2, 2, &[true, true], Some(Effect::FS), carrier),
-            GameAssetsSound => h("game.assets_sound", "jet_game_assets_sound", 2, 2, &[true, true], Some(Effect::FS), carrier),
-            GameInputBind => h("game.input_bind", "jet_game_input_bind", 3, 3, &[true, true, true], None, carrier),
-            GameInputPressed => h("game.input_pressed", "jet_game_input_pressed", 2, 2, &[true, true], None, carrier),
-            DurationIn { .. } => h("duration.in", "jet_duration_in", 2, 2, &[true, true], None, carrier),
-            DurationIsZero => h("duration.is_zero", "jet_duration_is_zero", 1, 1, &[true], None, carrier),
-            DurationTotalSeconds => h("duration.total_seconds", "jet_duration_total_seconds", 1, 1, &[true], None, carrier),
-            DurationDifference => h("duration.difference", "jet_duration_difference", 2, 2, &[true, true], None, carrier),
-            DurationAbs => h("duration.abs", "jet_duration_abs", 1, 1, &[true], None, carrier),
-            DurationNegated => h("duration.negated", "jet_duration_negated", 1, 1, &[true], None, carrier),
-            DurationSign => h("duration.sign", "jet_duration_sign", 1, 1, &[true], None, carrier),
-            DurationTotalIn => h("duration.total_in", "jet_duration_total_in", 2, 2, &[true, true], None, carrier),
-            DurationRound => h("duration.round", "jet_duration_round", 4, 4, &[true, true, true, true], None, carrier),
-            DurationSecondsValue => h("duration.seconds_value", "jet_duration_seconds_value", 1, 1, &[true], None, carrier),
-            DurationNsValue => h("duration.ns_value", "jet_duration_ns_value", 1, 1, &[true], None, carrier),
-            DurationScale => h("duration.scale", "jet_duration_scale", 2, 2, &[true, true], None, carrier),
-            DurationDivide => h("duration.divide", "jet_duration_divide", 2, 2, &[true, true], None, carrier),
-            TcpListenerAccept => h("tcp_listener.accept", "jet_net_tcp_accept", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpListenerAcceptDeadline => h("tcp_listener.accept_deadline", "jet_net_tcp_accept_deadline", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TcpListenerLocalAddr => h("tcp_listener.local_addr", "jet_net_listener_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamRead => h("tcp_stream.read", "jet_net_tcp_read", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamWrite => h("tcp_stream.write", "jet_net_tcp_write", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamPeerAddr => h("tcp_stream.peer_addr", "jet_net_tcp_peer_addr", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamLocalAddr => h("tcp_stream.local_addr", "jet_net_tcp_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamClose => h("tcp_stream.close", "jet_net_tcp_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            TcpStreamReadBytes => h("tcp_stream.read_bytes", "jet_net_tcp_read_bytes", 2, 2, &[true, false], Some(Effect::Net), carrier),
-            TcpStreamReadBytesDeadline => h("tcp_stream.read_bytes_deadline", "jet_net_tcp_read_bytes_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TcpStreamReadText => h("tcp_stream.read_text", "jet_net_tcp_read_text", 2, 2, &[true, false], Some(Effect::Net), carrier),
-            TcpStreamReadTextDeadline => h("tcp_stream.read_text_deadline", "jet_net_tcp_read_text_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TcpStreamWriteBytes => h("tcp_stream.write_bytes", "jet_net_tcp_write_bytes", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteBytesDeadline => h("tcp_stream.write_bytes_deadline", "jet_net_tcp_write_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteAllBytes => h("tcp_stream.write_all_bytes", "jet_net_tcp_write_all_bytes", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteAllBytesDeadline => h("tcp_stream.write_all_bytes_deadline", "jet_net_tcp_write_all_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteText => h("tcp_stream.write_text", "jet_net_tcp_write_text", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TcpStreamWriteTextDeadline => h("tcp_stream.write_text_deadline", "jet_net_tcp_write_text_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TcpStreamShutdown => h("tcp_stream.shutdown", "jet_net_tcp_shutdown", 2, 2, &[true, false], Some(Effect::Net), carrier),
-            TcpStreamReady => h("tcp_stream.ready", "jet_net_tcp_ready_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            UdpSocketReady => h("udp_socket.ready", "jet_net_udp_ready", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            UdpSocketClose => h("udp_socket.close", "jet_net_udp_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            UdpSocketReceiveDeadline => h("udp_socket.receive_deadline", "jet_net_udp_receive_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            UdpSocketSendToDeadline => h("udp_socket.send_to_deadline", "jet_net_udp_send_bytes_to_deadline", 4, 4, &[true, true, true, true], Some(Effect::Net), carrier),
-            UnixListenerAcceptDeadline => h("unix_listener.accept_deadline", "jet_net_unix_accept_deadline", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            UnixStreamReadDeadline => h("unix_stream.read_deadline", "jet_net_unix_read_bytes_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            UnixStreamWriteAllDeadline => h("unix_stream.write_all_deadline", "jet_net_unix_write_all_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
-            UnixStreamReady => h("unix_stream.ready", "jet_net_unix_ready", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            UnixStreamClose => h("unix_stream.close", "jet_net_unix_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            UnixStreamSetTimeout => h("unix_stream.set_timeout", "jet_net_unix_set_timeout", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TLSStreamReadDeadline => h("tls_stream.read_deadline", "jet_net_tls_read_bytes_deadline", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TLSStreamWriteAllDeadline => h("tls_stream.write_all_deadline", "jet_net_tls_write_all_bytes_deadline", 3, 3, &[true, true, true], Some(Effect::Net), carrier),
-            TLSStreamReady => h("tls_stream.ready", "jet_net_tls_ready", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
-            TLSStreamClose => h("tls_stream.close", "jet_net_tls_close", 1, 1, &[true], Some(Effect::Net), carrier),
-            TLSStreamCloseWrite => h("tls_stream.close_write", "jet_net_tls_close_write", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TLSStreamPeerIdentity => h("tls_stream.peer_identity", "jet_net_tls_peer_identity", 1, 1, &[true], Some(Effect::Net), carrier),
-            TLSClientConfigDefault => h("tls.config_default", "jet_tls_client_config_default", 0, 0, &[], Some(Effect::Net), carrier),
-            TLSClientConfigWithAlpn => h("tls.config_with_alpn", "jet_tls_client_config_with_alpn", 2, 2, &[false, true], Some(Effect::Net), carrier),
-            TLSRootCertificatesFromPem => h("tls.root_certificates_from_pem", "jet_tls_root_certificates_from_pem", 1, 1, &[true], Some(Effect::Net), carrier),
-            TLSClientIdentityFromPem => h("tls.client_identity_from_pem", "jet_tls_client_identity_from_pem", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            TLSClientConfigWithTrust => h("tls.config_with_trust", "jet_tls_client_config_with_trust", 2, 2, &[false, false], Some(Effect::Net), carrier),
-            TLSClientConfigWithIdentity => h("tls.config_with_identity", "jet_tls_client_config_with_client_identity", 2, 2, &[false, true], Some(Effect::Net), carrier),
-            HTTPClientNew => h("http.client_new", "jet_http_client_new_impl", 0, 0, &[], Some(Effect::Net), carrier),
-            TLSClientConfigWithVersionBounds => h("tls.config_with_version_bounds", "jet_tls_client_config_with_version_bounds", 3, 3, &[false, false, false], Some(Effect::Net), carrier),
-            HTTPReqParam => h("http.request_param", "jet_http_srv_req_param", 2, 2, &[true, true], Some(Effect::Net), carrier),
-            HTTPReqHeader => h("http.request_header", "jet_http_srv_req_header", 2, 2, &[true, true], None, carrier),
-            HTTPReqTrailers => h("http.request_trailers", "jet_http_srv_req_trailers", 1, 1, &[true], Some(Effect::Net), carrier),
-            ArgsSpecFlag => h("args.flag", "jet_args_flag", 3, 3, &[false, true, true], Some(Effect::Env), carrier),
-            ArgsSpecFlagShort => h("args.flag_short", "jet_args_flag_short", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOption => h("args.option", "jet_args_option", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionShort => h("args.option_short", "jet_args_option_short", 5, 5, &[false, true, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionDefault => h("args.option_default", "jet_args_option_default", 5, 5, &[false, true, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionEnv => h("args.option_env", "jet_args_option_env", 5, 5, &[false, true, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionInt => h("args.option_int", "jet_args_option_int", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionFloat => h("args.option_float", "jet_args_option_float", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecOptionChoice => h("args.option_choice", "jet_args_option_choice", 5, 5, &[false, true, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecRepeat => h("args.repeat", "jet_args_repeat", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecRequiredOption => h("args.required_option", "jet_args_required_option", 4, 4, &[false, true, true, true], Some(Effect::Env), carrier),
-            ArgsSpecPositional => h("args.positional", "jet_args_positional", 3, 3, &[false, true, true], Some(Effect::Env), carrier),
-            ArgsSpecDescription => h("args.description", "jet_args_description", 2, 2, &[false, true], Some(Effect::Env), carrier),
-            ArgsSpecSubcommand => h("args.subcommand", "jet_args_subcommand", 4, 4, &[false, true, true, false], Some(Effect::Env), carrier),
-            ArgsSpecVersion => h("args.version", "jet_args_version", 2, 2, &[false, true], Some(Effect::Env), carrier),
-            ArgsSpecCompletion => h("args.completion", "jet_args_completion", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ArgsSpecParse => h("args.parse", "jet_args_parse", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ArgsSpecParseOrExit => h("args.parse_or_exit", "jet_args_parse_or_exit", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsFlag => h("parsed.flag", "jet_parsed_flag", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsOption => h("parsed.option", "jet_parsed_option", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsOptionInt => h("parsed.option_int", "jet_parsed_option_int", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsOptionFloat => h("parsed.option_float", "jet_parsed_option_float", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsOptions => h("parsed.options", "jet_parsed_options", 2, 2, &[true, true], Some(Effect::Env), carrier),
-            ParsedArgsPositional => h("parsed.positional", "jet_parsed_positional", 2, 2, &[true, false], Some(Effect::Env), carrier),
-            ParsedArgsSubcommand => h("parsed.subcommand", "jet_parsed_subcommand", 1, 1, &[true], Some(Effect::Env), carrier),
-            TerminalSessionResize => h("terminal.resize", "jet_terminal_session_resize", 2, 2, &[true, true], Some(Effect::IO), carrier),
-            ProcessStdinWrite => h("process.stdin_write", "jet_process_stdin_write", 2, 2, &[true, true], Some(Effect::Exec), carrier),
-            ProcessStdinClose => h("process.stdin_close", "jet_process_stdin_close", 1, 1, &[true], Some(Effect::Exec), carrier),
+            XMLReaderNext => h(
+                "xml_reader.next",
+                "jet_enc_xml_reader_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            XMLWriterWrite => h(
+                "xml_writer.write",
+                "jet_enc_xml_writer_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::IO),
+                carrier,
+            ),
+            XMLWriterFlush => h(
+                "xml_writer.flush",
+                "jet_enc_xml_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            XMLWriterFinish => h(
+                "xml_writer.finish",
+                "jet_enc_xml_writer_finish",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CSVWriterWrite => h(
+                "csv_writer.write",
+                "jet_enc_csv_writer_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CSVWriterFlush => h(
+                "csv_writer.flush",
+                "jet_enc_csv_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CSVWriterFinish => h(
+                "csv_writer.finish",
+                "jet_enc_csv_writer_finish",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CBORReaderNext => h(
+                "cbor_reader.next",
+                "jet_enc_cbor_reader_next",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CBORWriterWrite => h(
+                "cbor_writer.write",
+                "jet_enc_cbor_writer_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CBORWriterFlush => h(
+                "cbor_writer.flush",
+                "jet_enc_cbor_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            CBORWriterFinish => h(
+                "cbor_writer.finish",
+                "jet_enc_cbor_writer_finish",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdinReadLine => h(
+                "stdin.read_line",
+                "jet_std_io_stdin_read_line",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdoutWrite => h(
+                "stdout.write",
+                "jet_std_io_stdout_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdoutWriteLine => h(
+                "stdout.write_line",
+                "jet_std_io_stdout_write_line",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdoutWriteBytes => h(
+                "stdout.write_bytes",
+                "jet_std_io_stdout_write_bytes",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdoutFlush => h(
+                "stdout.flush",
+                "jet_std_io_stdout_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StdoutIsTty => h(
+                "stdout.is_tty",
+                "jet_std_io_stdout_is_tty",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StderrWrite => h(
+                "stderr.write",
+                "jet_std_io_stderr_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StderrWriteLine => h(
+                "stderr.write_line",
+                "jet_std_io_stderr_write_line",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StderrWriteBytes => h(
+                "stderr.write_bytes",
+                "jet_std_io_stderr_write_bytes",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StderrFlush => h(
+                "stderr.flush",
+                "jet_std_io_stderr_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StderrIsTty => h(
+                "stderr.is_tty",
+                "jet_std_io_stderr_is_tty",
+                1,
+                1,
+                &[true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            StopwatchElapsedMillis => h(
+                "stopwatch.elapsed_millis",
+                "jet_stopwatch_elapsed_millis",
+                1,
+                1,
+                &[true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            TestSuiteRun => h(
+                "test_suite.run",
+                "jet_test_suite_run",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ClockNow => h(
+                "clock.now",
+                "jet_clock_now",
+                1,
+                1,
+                &[true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            ClockTick => h(
+                "clock.tick",
+                "jet_clock_tick",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Time),
+                carrier,
+            ),
+            ClockAdvance => h(
+                "clock.advance",
+                "jet_clock_advance",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Time),
+                carrier,
+            ),
+            ClockWait => h(
+                "clock.wait",
+                "jet_clock_wait",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            WorldNow => h(
+                "deterministic_world.now",
+                "jet_world_now",
+                1,
+                1,
+                &[true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            WorldAdvance => h(
+                "deterministic_world.advance",
+                "jet_world_advance",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            WorldWaitIdle => h(
+                "deterministic_world.wait_idle",
+                "jet_world_wait_idle",
+                1,
+                1,
+                &[true],
+                Some(Effect::Time),
+                carrier,
+            ),
+            WorldHistory => h(
+                "deterministic_world.history",
+                "jet_world_history",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            RealtimeNextDeadline => h(
+                "realtime.next_deadline",
+                "jet_rt_next_deadline",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            RealtimeReceipt => h(
+                "realtime.receipt",
+                "jet_rt_receipt",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            RealtimeCancel => h(
+                "realtime.cancel",
+                "jet_rt_cancel",
+                1,
+                1,
+                &[false],
+                Some(Effect::Time),
+                carrier,
+            ),
+            RealtimeIsCancelled => h(
+                "realtime.is_cancelled",
+                "jet_rt_is_cancelled",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            RngInt => h(
+                "rng.int",
+                "jet_rng_int",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngFloat => h(
+                "rng.float",
+                "jet_rng_float",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngFloatRange => h(
+                "rng.float_range",
+                "jet_rng_float_range",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngBool => h(
+                "rng.bool",
+                "jet_rng_bool",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngBoolP => h(
+                "rng.bool_p",
+                "jet_rng_bool_p",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngNormal => h(
+                "rng.normal",
+                "jet_rng_normal",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngExponential => h(
+                "rng.exponential",
+                "jet_rng_exponential",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngBytes => h(
+                "rng.bytes",
+                "jet_rng_bytes",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngSplit => h(
+                "rng.split",
+                "jet_rng_split",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngPick => h(
+                "rng.pick",
+                "jet_rng_pick",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngWeightedPick => h(
+                "rng.weighted_pick",
+                "jet_rng_weighted_pick",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngSample => h(
+                "rng.sample",
+                "jet_rng_sample",
+                3,
+                3,
+                &[true, true, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            RngShuffle => h(
+                "rng.shuffle",
+                "jet_rng_shuffle",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            HistoryRngNextU64 => h(
+                "history_rng.next_u64",
+                "jet_testing_history_rng_next_u64",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            HistoryRngBelow => h(
+                "history_rng.below",
+                "jet_testing_history_rng_below",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            FakeLocale => h(
+                "fake.locale",
+                "jet_fake_locale",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            FakeName => h(
+                "fake.name",
+                "jet_fake_name",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            FakeEmail => h(
+                "fake.email",
+                "jet_fake_email",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            FakeHost => h(
+                "fake.host",
+                "jet_fake_host",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            FakeAddress => h(
+                "fake.address",
+                "jet_fake_address",
+                1,
+                1,
+                &[true],
+                Some(Effect::Rand),
+                carrier,
+            ),
+            SolverNew => h(
+                "solver.new",
+                "jet_solver_new",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
+            SolverRequire => h(
+                "solver.require",
+                "jet_solver_require",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            SolverFailureCount => h(
+                "solver.failure_count",
+                "jet_solver_failure_count",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            SolverStatus => h(
+                "solver.status",
+                "jet_solver_status",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            GameSceneNew => h(
+                "game.scene_new",
+                "jet_game_scene_new",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            GameReplayRecord => h(
+                "game.replay_record",
+                "jet_game_replay_record",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            GameBackendHeadless => prelude(
+                MirPreludeFamily::HandleMethod,
+                "core.game",
+                "backend_headless",
+                "jet_game_backend_headless",
+                0,
+                0,
+                &[],
+                None,
+                carrier,
+                MirPreludeAbi::Value,
+            ),
+            GameBackendShouldContinue => h(
+                "game.backend_should_continue",
+                "jet_game_backend_should_continue",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            GameBackendPresent => h(
+                "game.backend_present",
+                "jet_game_backend_present",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            GameSceneOnFrame { .. } => h(
+                "game.scene_on_frame",
+                "jet_game_scene_on_frame",
+                4,
+                4,
+                &[true, false, false, false],
+                None,
+                carrier,
+            ),
+            GameSceneComponent => h(
+                "game.scene_component",
+                "jet_game_scene_component",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            GameSceneQuery => h(
+                "game.scene_query",
+                "jet_game_scene_query",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            GameAssetsImage => h(
+                "game.assets_image",
+                "jet_game_assets_image",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            GameAssetsSound => h(
+                "game.assets_sound",
+                "jet_game_assets_sound",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            GameInputBind => h(
+                "game.input_bind",
+                "jet_game_input_bind",
+                3,
+                3,
+                &[true, true, true],
+                None,
+                carrier,
+            ),
+            GameInputPressed => h(
+                "game.input_pressed",
+                "jet_game_input_pressed",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DurationIn { .. } => h(
+                "duration.in",
+                "jet_duration_in",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DurationIsZero => h(
+                "duration.is_zero",
+                "jet_duration_is_zero",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationTotalSeconds => h(
+                "duration.total_seconds",
+                "jet_duration_total_seconds",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationDifference => h(
+                "duration.difference",
+                "jet_duration_difference",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DurationAbs => h(
+                "duration.abs",
+                "jet_duration_abs",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationNegated => h(
+                "duration.negated",
+                "jet_duration_negated",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationSign => h(
+                "duration.sign",
+                "jet_duration_sign",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationTotalIn => h(
+                "duration.total_in",
+                "jet_duration_total_in",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DurationRound => h(
+                "duration.round",
+                "jet_duration_round",
+                4,
+                4,
+                &[true, true, true, true],
+                None,
+                carrier,
+            ),
+            DurationSecondsValue => h(
+                "duration.seconds_value",
+                "jet_duration_seconds_value",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationNsValue => h(
+                "duration.ns_value",
+                "jet_duration_ns_value",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DurationScale => h(
+                "duration.scale",
+                "jet_duration_scale",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DurationDivide => h(
+                "duration.divide",
+                "jet_duration_divide",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            TcpListenerAccept => h(
+                "tcp_listener.accept",
+                "jet_net_tcp_accept",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpListenerAcceptDeadline => h(
+                "tcp_listener.accept_deadline",
+                "jet_net_tcp_accept_deadline",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpListenerLocalAddr => h(
+                "tcp_listener.local_addr",
+                "jet_net_listener_local_addr",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamRead => h(
+                "tcp_stream.read",
+                "jet_net_tcp_read",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWrite => h(
+                "tcp_stream.write",
+                "jet_net_tcp_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamPeerAddr => h(
+                "tcp_stream.peer_addr",
+                "jet_net_tcp_peer_addr",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamLocalAddr => h(
+                "tcp_stream.local_addr",
+                "jet_net_tcp_local_addr",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamClose => h(
+                "tcp_stream.close",
+                "jet_net_tcp_close",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamReadBytes => h(
+                "tcp_stream.read_bytes",
+                "jet_net_tcp_read_bytes",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamReadBytesDeadline => h(
+                "tcp_stream.read_bytes_deadline",
+                "jet_net_tcp_read_bytes_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamReadText => h(
+                "tcp_stream.read_text",
+                "jet_net_tcp_read_text",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamReadTextDeadline => h(
+                "tcp_stream.read_text_deadline",
+                "jet_net_tcp_read_text_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteBytes => h(
+                "tcp_stream.write_bytes",
+                "jet_net_tcp_write_bytes",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteBytesDeadline => h(
+                "tcp_stream.write_bytes_deadline",
+                "jet_net_tcp_write_bytes_deadline",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteAllBytes => h(
+                "tcp_stream.write_all_bytes",
+                "jet_net_tcp_write_all_bytes",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteAllBytesDeadline => h(
+                "tcp_stream.write_all_bytes_deadline",
+                "jet_net_tcp_write_all_bytes_deadline",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteText => h(
+                "tcp_stream.write_text",
+                "jet_net_tcp_write_text",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamWriteTextDeadline => h(
+                "tcp_stream.write_text_deadline",
+                "jet_net_tcp_write_text_deadline",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamShutdown => h(
+                "tcp_stream.shutdown",
+                "jet_net_tcp_shutdown",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TcpStreamReady => h(
+                "tcp_stream.ready",
+                "jet_net_tcp_ready_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UdpSocketReady => h(
+                "udp_socket.ready",
+                "jet_net_udp_ready",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UdpSocketClose => h(
+                "udp_socket.close",
+                "jet_net_udp_close",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UdpSocketReceiveDeadline => h(
+                "udp_socket.receive_deadline",
+                "jet_net_udp_receive_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UdpSocketSendToDeadline => h(
+                "udp_socket.send_to_deadline",
+                "jet_net_udp_send_bytes_to_deadline",
+                4,
+                4,
+                &[true, true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixListenerAcceptDeadline => h(
+                "unix_listener.accept_deadline",
+                "jet_net_unix_accept_deadline",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixStreamReadDeadline => h(
+                "unix_stream.read_deadline",
+                "jet_net_unix_read_bytes_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixStreamWriteAllDeadline => h(
+                "unix_stream.write_all_deadline",
+                "jet_net_unix_write_all_bytes_deadline",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixStreamReady => h(
+                "unix_stream.ready",
+                "jet_net_unix_ready",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixStreamClose => h(
+                "unix_stream.close",
+                "jet_net_unix_close",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            UnixStreamSetTimeout => h(
+                "unix_stream.set_timeout",
+                "jet_net_unix_set_timeout",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamReadDeadline => h(
+                "tls_stream.read_deadline",
+                "jet_net_tls_read_bytes_deadline",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamWriteAllDeadline => h(
+                "tls_stream.write_all_deadline",
+                "jet_net_tls_write_all_bytes_deadline",
+                3,
+                3,
+                &[true, true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamReady => h(
+                "tls_stream.ready",
+                "jet_net_tls_ready",
+                3,
+                3,
+                &[true, false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamClose => h(
+                "tls_stream.close",
+                "jet_net_tls_close",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamCloseWrite => h(
+                "tls_stream.close_write",
+                "jet_net_tls_close_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSStreamPeerIdentity => h(
+                "tls_stream.peer_identity",
+                "jet_net_tls_peer_identity",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientConfigDefault => h(
+                "tls.config_default",
+                "jet_tls_client_config_default",
+                0,
+                0,
+                &[],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientConfigWithAlpn => h(
+                "tls.config_with_alpn",
+                "jet_tls_client_config_with_alpn",
+                2,
+                2,
+                &[false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSRootCertificatesFromPem => h(
+                "tls.root_certificates_from_pem",
+                "jet_tls_root_certificates_from_pem",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientIdentityFromPem => h(
+                "tls.client_identity_from_pem",
+                "jet_tls_client_identity_from_pem",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientConfigWithTrust => h(
+                "tls.config_with_trust",
+                "jet_tls_client_config_with_trust",
+                2,
+                2,
+                &[false, false],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientConfigWithIdentity => h(
+                "tls.config_with_identity",
+                "jet_tls_client_config_with_client_identity",
+                2,
+                2,
+                &[false, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            HTTPClientNew => h(
+                "http.client_new",
+                "jet_http_client_new_impl",
+                0,
+                0,
+                &[],
+                Some(Effect::Net),
+                carrier,
+            ),
+            TLSClientConfigWithVersionBounds => h(
+                "tls.config_with_version_bounds",
+                "jet_tls_client_config_with_version_bounds",
+                3,
+                3,
+                &[false, false, false],
+                Some(Effect::Net),
+                carrier,
+            ),
+            HTTPReqParam => h(
+                "http.request_param",
+                "jet_http_srv_req_param",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            HTTPReqHeader => h(
+                "http.request_header",
+                "jet_http_srv_req_header",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            HTTPReqTrailers => h(
+                "http.request_trailers",
+                "jet_http_srv_req_trailers",
+                1,
+                1,
+                &[true],
+                Some(Effect::Net),
+                carrier,
+            ),
+            ArgsSpecFlag => h(
+                "args.flag",
+                "jet_args_flag",
+                3,
+                3,
+                &[false, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecFlagShort => h(
+                "args.flag_short",
+                "jet_args_flag_short",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOption => h(
+                "args.option",
+                "jet_args_option",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionShort => h(
+                "args.option_short",
+                "jet_args_option_short",
+                5,
+                5,
+                &[false, true, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionDefault => h(
+                "args.option_default",
+                "jet_args_option_default",
+                5,
+                5,
+                &[false, true, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionEnv => h(
+                "args.option_env",
+                "jet_args_option_env",
+                5,
+                5,
+                &[false, true, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionInt => h(
+                "args.option_int",
+                "jet_args_option_int",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionFloat => h(
+                "args.option_float",
+                "jet_args_option_float",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecOptionChoice => h(
+                "args.option_choice",
+                "jet_args_option_choice",
+                5,
+                5,
+                &[false, true, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecRepeat => h(
+                "args.repeat",
+                "jet_args_repeat",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecRequiredOption => h(
+                "args.required_option",
+                "jet_args_required_option",
+                4,
+                4,
+                &[false, true, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecPositional => h(
+                "args.positional",
+                "jet_args_positional",
+                3,
+                3,
+                &[false, true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecDescription => h(
+                "args.description",
+                "jet_args_description",
+                2,
+                2,
+                &[false, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecSubcommand => h(
+                "args.subcommand",
+                "jet_args_subcommand",
+                4,
+                4,
+                &[false, true, true, false],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecVersion => h(
+                "args.version",
+                "jet_args_version",
+                2,
+                2,
+                &[false, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecCompletion => h(
+                "args.completion",
+                "jet_args_completion",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecParse => h(
+                "args.parse",
+                "jet_args_parse",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ArgsSpecParseOrExit => h(
+                "args.parse_or_exit",
+                "jet_args_parse_or_exit",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsFlag => h(
+                "parsed.flag",
+                "jet_parsed_flag",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsOption => h(
+                "parsed.option",
+                "jet_parsed_option",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsOptionInt => h(
+                "parsed.option_int",
+                "jet_parsed_option_int",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsOptionFloat => h(
+                "parsed.option_float",
+                "jet_parsed_option_float",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsOptions => h(
+                "parsed.options",
+                "jet_parsed_options",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsPositional => h(
+                "parsed.positional",
+                "jet_parsed_positional",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Env),
+                carrier,
+            ),
+            ParsedArgsSubcommand => h(
+                "parsed.subcommand",
+                "jet_parsed_subcommand",
+                1,
+                1,
+                &[true],
+                Some(Effect::Env),
+                carrier,
+            ),
+            TerminalSessionResize => h(
+                "terminal.resize",
+                "jet_terminal_session_resize",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::IO),
+                carrier,
+            ),
+            ProcessStdinWrite => h(
+                "process.stdin_write",
+                "jet_process_stdin_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Exec),
+                carrier,
+            ),
+            ProcessStdinClose => h(
+                "process.stdin_close",
+                "jet_process_stdin_close",
+                1,
+                1,
+                &[true],
+                Some(Effect::Exec),
+                carrier,
+            ),
             ExpiringMethod { method } => match method.as_str() {
-                "get" => h("expiring.get", "jet_expiring_get", 2, 2, &[true, true], Some(Effect::Time), carrier),
+                "get" => h(
+                    "expiring.get",
+                    "jet_expiring_get",
+                    2,
+                    2,
+                    &[true, true],
+                    Some(Effect::Time),
+                    carrier,
+                ),
                 "is_valid" => primitive(),
-                _ => return Err(route_error(format!("unknown checked ExpiringValue method `{method}`"))),
+                _ => {
+                    return Err(route_error(format!(
+                        "unknown checked ExpiringValue method `{method}`"
+                    )));
+                }
             },
             HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
-                "send_text" => h("ws.send_text", "jet_ws_send_text", 2, 2, &[true, true], Some(Effect::Net), carrier),
-                "recv" => h("ws.recv", "jet_ws_recv", 1, 1, &[true], Some(Effect::Net), carrier),
-                "close" => h("ws.close", "jet_ws_close", 3, 3, &[true, false, true], Some(Effect::Net), carrier),
+                "send_text" => h(
+                    "ws.send_text",
+                    "jet_ws_send_text",
+                    2,
+                    2,
+                    &[true, true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                "recv" => h(
+                    "ws.recv",
+                    "jet_ws_recv",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                "close" => h(
+                    "ws.close",
+                    "jet_ws_close",
+                    3,
+                    3,
+                    &[true, false, true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
                 _ => primitive(),
             },
             HTTPServerMethod { kind, method } if kind == "WsMessage" => match method.as_str() {
-                "is_text" => h("ws.message_is_text", "jet_ws_message_is_text", 1, 1, &[true], None, carrier),
-                "text" => h("ws.message_text", "jet_ws_message_text", 1, 1, &[true], None, carrier),
+                "is_text" => h(
+                    "ws.message_is_text",
+                    "jet_ws_message_is_text",
+                    1,
+                    1,
+                    &[true],
+                    None,
+                    carrier,
+                ),
+                "text" => h(
+                    "ws.message_text",
+                    "jet_ws_message_text",
+                    1,
+                    1,
+                    &[true],
+                    None,
+                    carrier,
+                ),
                 _ => primitive(),
             },
             HTTPServerMethod { kind, method } if kind == "HTTPMux" => match method.as_str() {
@@ -1488,10 +3122,42 @@ impl THandleOp {
                 _ => primitive(),
             },
             HTTPServerMethod { kind, method } if kind == "HTTPServer" => match method.as_str() {
-                "local_addr" => h("http_server.local_addr", "jet_http_server_local_addr", 1, 1, &[true], Some(Effect::Net), carrier),
-                "serve" => h("http_server.serve", "jet_http_server_serve", 1, 1, &[true], Some(Effect::Net), carrier),
-                "wait" => h("http_server.wait", "jet_http_server_wait", 1, 1, &[true], Some(Effect::Net), carrier),
-                "shutdown" => h("http_server.shutdown", "jet_http_server_shutdown", 2, 2, &[true, true], Some(Effect::Net), carrier),
+                "local_addr" => h(
+                    "http_server.local_addr",
+                    "jet_http_server_local_addr",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                "serve" => h(
+                    "http_server.serve",
+                    "jet_http_server_serve",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                "wait" => h(
+                    "http_server.wait",
+                    "jet_http_server_wait",
+                    1,
+                    1,
+                    &[true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
+                "shutdown" => h(
+                    "http_server.shutdown",
+                    "jet_http_server_shutdown",
+                    2,
+                    2,
+                    &[true, true],
+                    Some(Effect::Net),
+                    carrier,
+                ),
                 _ => primitive(),
             },
             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
@@ -1499,13 +3165,30 @@ impl THandleOp {
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
             UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
             SketchMethod { sketch, method } => {
-                let (arity, borrow_mask): (usize, &[bool]) = match (sketch.as_str(), method.as_str()) {
-                    ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => (2, &[true, true]),
-                    ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                    ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => (2, &[true, false]),
-                    _ => return Err(route_error(format!("unknown checked sketch method `{sketch}.{method}`"))),
-                };
-                h(&format!("{sketch}.{method}"), &format!("Jet{sketch}::{method}"), arity, arity, borrow_mask, None, carrier)
+                let (arity, borrow_mask): (usize, &[bool]) =
+                    match (sketch.as_str(), method.as_str()) {
+                        ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
+                            (2, &[true, true])
+                        }
+                        ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
+                        ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
+                            (2, &[true, false])
+                        }
+                        _ => {
+                            return Err(route_error(format!(
+                                "unknown checked sketch method `{sketch}.{method}`"
+                            )));
+                        }
+                    };
+                h(
+                    &format!("{sketch}.{method}"),
+                    &format!("Jet{sketch}::{method}"),
+                    arity,
+                    arity,
+                    borrow_mask,
+                    None,
+                    carrier,
+                )
             }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
@@ -1719,7 +3402,7 @@ impl THandleOp {
                 _ => {
                     return Err(route_error(format!(
                         "unknown checked ProcessSpec method `{method}` with {args_len} argument(s)"
-                    )))
+                    )));
                 }
             },
             ProcessChildMethod { method } => match method.as_str() {
@@ -1777,19 +3460,95 @@ impl THandleOp {
                     Some(Effect::Exec),
                     carrier,
                 ),
-                _ => return Err(route_error(format!("unknown checked ProcessChild method `{method}`"))),
+                _ => {
+                    return Err(route_error(format!(
+                        "unknown checked ProcessChild method `{method}`"
+                    )));
+                }
             },
             PathFrom => h("path.from", "jet_path_from", 1, 1, &[true], None, carrier),
-            PathToString => h("path.to_string", "jet_path_to_string", 1, 1, &[true], None, carrier),
-            PathHome => h("path.home", "jet_path_home", 0, 0, &[], Some(Effect::FS), carrier),
-            PathJoin => h("path.join", "jet_path_join", 2, 2, &[true, true], None, carrier),
-            PathParent => h("path.parent", "jet_path_parent", 1, 1, &[true], None, carrier),
-            PathExtension => h("path.extension", "jet_path_extension", 1, 1, &[true], None, carrier),
+            PathToString => h(
+                "path.to_string",
+                "jet_path_to_string",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PathHome => h(
+                "path.home",
+                "jet_path_home",
+                0,
+                0,
+                &[],
+                Some(Effect::FS),
+                carrier,
+            ),
+            PathJoin => h(
+                "path.join",
+                "jet_path_join",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            PathParent => h(
+                "path.parent",
+                "jet_path_parent",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PathExtension => h(
+                "path.extension",
+                "jet_path_extension",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             PathStem => h("path.stem", "jet_path_stem", 1, 1, &[true], None, carrier),
-            PathNormalize => h("path.normalize", "jet_path_normalize", 1, 1, &[true], None, carrier),
-            PathIsWithin => h("path.is_within", "jet_path_is_within", 2, 2, &[true, true], None, carrier),
-            PathWriteAtomic => h("path.write_atomic", "jet_path_write_atomic", 2, 2, &[true, true], Some(Effect::FS), carrier),
-            PathWalk => h("path.walk", "jet_path_walk", 1, 1, &[true], Some(Effect::FS), carrier),
+            PathNormalize => h(
+                "path.normalize",
+                "jet_path_normalize",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PathIsWithin => h(
+                "path.is_within",
+                "jet_path_is_within",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            PathWriteAtomic => h(
+                "path.write_atomic",
+                "jet_path_write_atomic",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            PathWalk => h(
+                "path.walk",
+                "jet_path_walk",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
             PluginInvoke { .. } => plugin_call_route("plugin.invoke", "jet_plugin_call", carrier),
             ReaderOver { owned } => {
                 if *owned {
@@ -1803,18 +3562,98 @@ impl THandleOp {
                         carrier,
                     )
                 } else {
-                    h("reader.over", "jet_reader_over", 1, 1, &[true], None, carrier)
+                    h(
+                        "reader.over",
+                        "jet_reader_over",
+                        1,
+                        1,
+                        &[true],
+                        None,
+                        carrier,
+                    )
                 }
             }
-            ReaderReadU8 => h("reader.read_u8", "jet_reader_read_u8", 1, 1, &[true], None, carrier),
-            ReaderReadI8 => h("reader.read_i8", "jet_reader_read_i8", 1, 1, &[true], None, carrier),
-            ReaderReadU16Le => h("reader.read_u16_le", "jet_reader_read_u16_le", 1, 1, &[true], None, carrier),
-            ReaderReadU16Be => h("reader.read_u16_be", "jet_reader_read_u16_be", 1, 1, &[true], None, carrier),
-            ReaderReadI16Le => h("reader.read_i16_le", "jet_reader_read_i16_le", 1, 1, &[true], None, carrier),
-            ReaderReadI16Be => h("reader.read_i16_be", "jet_reader_read_i16_be", 1, 1, &[true], None, carrier),
-            ReaderReadU32Le => h("reader.read_u32_le", "jet_reader_read_u32_le", 1, 1, &[true], None, carrier),
-            ReaderReadU32Be => h("reader.read_u32_be", "jet_reader_read_u32_be", 1, 1, &[true], None, carrier),
-            ReaderReadI32Le => h("reader.read_i32_le", "jet_reader_read_i32_le", 1, 1, &[true], None, carrier),
+            ReaderReadU8 => h(
+                "reader.read_u8",
+                "jet_reader_read_u8",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI8 => h(
+                "reader.read_i8",
+                "jet_reader_read_i8",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU16Le => h(
+                "reader.read_u16_le",
+                "jet_reader_read_u16_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU16Be => h(
+                "reader.read_u16_be",
+                "jet_reader_read_u16_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI16Le => h(
+                "reader.read_i16_le",
+                "jet_reader_read_i16_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI16Be => h(
+                "reader.read_i16_be",
+                "jet_reader_read_i16_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU32Le => h(
+                "reader.read_u32_le",
+                "jet_reader_read_u32_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU32Be => h(
+                "reader.read_u32_be",
+                "jet_reader_read_u32_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI32Le => h(
+                "reader.read_i32_le",
+                "jet_reader_read_i32_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             TaskJoin => task_route(receiver, carrier)?,
             TaskDetach => prelude(
                 MirPreludeFamily::HandleMethod,
@@ -1828,26 +3667,178 @@ impl THandleOp {
                 carrier,
                 MirPreludeAbi::Value,
             ),
-            ReaderReadI32Be => h("reader.read_i32_be", "jet_reader_read_i32_be", 1, 1, &[true], None, carrier),
-            ReaderReadU64Le => h("reader.read_u64_le", "jet_reader_read_u64_le", 1, 1, &[true], None, carrier),
-            ReaderReadU64Be => h("reader.read_u64_be", "jet_reader_read_u64_be", 1, 1, &[true], None, carrier),
-            ReaderReadI64Le => h("reader.read_i64_le", "jet_reader_read_i64_le", 1, 1, &[true], None, carrier),
-            ReaderReadI64Be => h("reader.read_i64_be", "jet_reader_read_i64_be", 1, 1, &[true], None, carrier),
-            ReaderReadF32Le => h("reader.read_f32_le", "jet_reader_read_f32_le", 1, 1, &[true], None, carrier),
-            ReaderReadF32Be => h("reader.read_f32_be", "jet_reader_read_f32_be", 1, 1, &[true], None, carrier),
-            ReaderReadF64Le => h("reader.read_f64_le", "jet_reader_read_f64_le", 1, 1, &[true], None, carrier),
-            ReaderReadF64Be => h("reader.read_f64_be", "jet_reader_read_f64_be", 1, 1, &[true], None, carrier),
-            ReaderPeek => h("reader.peek", "jet_reader_peek", 1, 1, &[true], None, carrier),
-            ReaderSeek => h("reader.seek", "jet_reader_seek", 2, 2, &[true, false], None, carrier),
-            ReaderSkip => h("reader.skip", "jet_reader_skip", 2, 2, &[true, false], None, carrier),
-            ReaderTake => h("reader.take", "jet_reader_take", 2, 2, &[true, false], None, carrier),
-            ReaderRemaining => h("reader.remaining", "jet_reader_remaining", 1, 1, &[true], None, carrier),
-            ReaderAtEnd => h("reader.at_end", "jet_reader_at_end", 1, 1, &[true], None, carrier),
-            CursorOver => h("cursor.over", "jet_cursor_over", 1, 1, &[true], None, carrier),
-            CursorTakeUntil => h("cursor.take_until", "jet_cursor_take_until", 2, 2, &[true, true], None, carrier),
-            CursorSkipWs => h("cursor.skip_ws", "jet_cursor_skip_ws", 1, 1, &[true], None, carrier),
+            ReaderReadI32Be => h(
+                "reader.read_i32_be",
+                "jet_reader_read_i32_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU64Le => h(
+                "reader.read_u64_le",
+                "jet_reader_read_u64_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadU64Be => h(
+                "reader.read_u64_be",
+                "jet_reader_read_u64_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI64Le => h(
+                "reader.read_i64_le",
+                "jet_reader_read_i64_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadI64Be => h(
+                "reader.read_i64_be",
+                "jet_reader_read_i64_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadF32Le => h(
+                "reader.read_f32_le",
+                "jet_reader_read_f32_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadF32Be => h(
+                "reader.read_f32_be",
+                "jet_reader_read_f32_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadF64Le => h(
+                "reader.read_f64_le",
+                "jet_reader_read_f64_le",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderReadF64Be => h(
+                "reader.read_f64_be",
+                "jet_reader_read_f64_be",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderPeek => h(
+                "reader.peek",
+                "jet_reader_peek",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderSeek => h(
+                "reader.seek",
+                "jet_reader_seek",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            ReaderSkip => h(
+                "reader.skip",
+                "jet_reader_skip",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            ReaderTake => h(
+                "reader.take",
+                "jet_reader_take",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            ReaderRemaining => h(
+                "reader.remaining",
+                "jet_reader_remaining",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ReaderAtEnd => h(
+                "reader.at_end",
+                "jet_reader_at_end",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            CursorOver => h(
+                "cursor.over",
+                "jet_cursor_over",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            CursorTakeUntil => h(
+                "cursor.take_until",
+                "jet_cursor_take_until",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            CursorSkipWs => h(
+                "cursor.skip_ws",
+                "jet_cursor_skip_ws",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             CursorTakePattern { .. } | ReaderTakePattern { .. } => primitive(),
-            HTTPRespTrailers => h("http.response_trailers", "jet_http_srv_response_trailers", 2, 2, &[true, false], Some(Effect::Net), carrier),
+            HTTPRespTrailers => h(
+                "http.response_trailers",
+                "jet_http_srv_response_trailers",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Net),
+                carrier,
+            ),
             FfiCallbackEventStop => prelude(
                 MirPreludeFamily::HandleMethod,
                 "core.ffi",
@@ -1869,9 +3860,15 @@ impl THandleOp {
                 let arity = match method.as_str() {
                     "add" | "sub" | "mul" | "div" | "equal" | "compare" => 2,
                     "to_string" | "numerator" | "denominator" | "to_float" | "is_zero" => 1,
-                    _ => return Err(route_error(format!("unregistered precise method `{type_name}.{method}`"))),
+                    _ => {
+                        return Err(route_error(format!(
+                            "unregistered precise method `{type_name}.{method}`"
+                        )));
+                    }
                 };
-                TRoutePlan::Prelude(precise_builtin_route(type_name, method, arity, receiver, carrier)?)
+                TRoutePlan::Prelude(precise_builtin_route(
+                    type_name, method, arity, receiver, carrier,
+                )?)
             }
             ReactiveGet => reactive_method_route(receiver, "get", carrier)?,
             ReactiveSet => reactive_method_route(receiver, "set", carrier)?,
@@ -1960,12 +3957,12 @@ impl THandleOp {
                 MirPreludeAbi::Value,
             ),
             ChannelClose => {
-                let (member, symbol) =
-                    if receiver.without_user_tags().base_name() == Some("Sender") {
-                        ("sender.close", "jet_std::JetSender::close")
-                    } else {
-                        ("receiver.close", "jet_std::JetReceiver::close")
-                    };
+                let (member, symbol) = if receiver.without_user_tags().base_name() == Some("Sender")
+                {
+                    ("sender.close", "jet_std::JetSender::close")
+                } else {
+                    ("receiver.close", "jet_std::JetReceiver::close")
+                };
                 prelude(
                     MirPreludeFamily::HandleMethod,
                     "core.channels",
@@ -1993,8 +3990,16 @@ impl THandleOp {
             ),
             AllocAlloc | AllocTryAlloc | AllocReset => {
                 let allocator = match receiver.without_user_tags() {
-                    Type::Named(name) if matches!(name.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") => name,
-                    _ => return Err(route_error("checked allocator method has no allocator receiver")),
+                    Type::Named(name)
+                        if matches!(name.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") =>
+                    {
+                        name
+                    }
+                    _ => {
+                        return Err(route_error(
+                            "checked allocator method has no allocator receiver",
+                        ));
+                    }
                 };
                 let (method, arity, borrow_mask): (&str, usize, &[bool]) = match self {
                     AllocAlloc => ("alloc", 2, &[true, false]),
@@ -2002,11 +4007,43 @@ impl THandleOp {
                     AllocReset => ("reset", 1, &[true]),
                     _ => unreachable!(),
                 };
-                h(&format!("{allocator}.{method}"), &format!("jet_mem::Jet{allocator}::{method}"), arity, arity, borrow_mask, Some(Effect::Mem), carrier)
+                h(
+                    &format!("{allocator}.{method}"),
+                    &format!("jet_mem::Jet{allocator}::{method}"),
+                    arity,
+                    arity,
+                    borrow_mask,
+                    Some(Effect::Mem),
+                    carrier,
+                )
             }
-            TaskPause => h("task.pause", "jet_std::JetTask::pause", 1, 1, &[true], None, carrier),
-            TaskResume => h("task.resume", "jet_std::JetTask::resume", 1, 1, &[true], None, carrier),
-            TaskCancel => h("task.cancel", "jet_std::JetTask::cancel", 1, 1, &[true], None, carrier),
+            TaskPause => h(
+                "task.pause",
+                "jet_std::JetTask::pause",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            TaskResume => h(
+                "task.resume",
+                "jet_std::JetTask::resume",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            TaskCancel => h(
+                "task.cancel",
+                "jet_std::JetTask::cancel",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             ReflectValueTypeName => prelude(
                 MirPreludeFamily::HandleMethod,
                 "core.reflect",
@@ -2079,13 +4116,34 @@ impl THandleOp {
                 carrier,
                 MirPreludeAbi::Value,
             ),
-            HTTPReqField(_) | HTTPRespField(_) | HTTPRespHeader
+            HTTPReqField(_)
+            | HTTPRespField(_)
+            | HTTPRespHeader
             | ArgsSpecHelp
-            | DataTreeField | DataTreeAt | DataTreeInt | DataTreeText
-            | DataTreeBool | DataTreeFloat | DataTreeToText | DataTreeEqualUnordered
-            | DataTreeDecode(_) | SerdeEncode | JSONField | JSONAt | JSONInt | JSONText
-            | JSONBool | JSONFloat | JSONToText | JSONEqualUnordered
-            | DBValueInt | DBValueFloat | DBValueText | DBValueBool | DBValueBlob | DBValueIsNull
+            | DataTreeField
+            | DataTreeAt
+            | DataTreeInt
+            | DataTreeText
+            | DataTreeBool
+            | DataTreeFloat
+            | DataTreeToText
+            | DataTreeEqualUnordered
+            | DataTreeDecode(_)
+            | SerdeEncode
+            | JSONField
+            | JSONAt
+            | JSONInt
+            | JSONText
+            | JSONBool
+            | JSONFloat
+            | JSONToText
+            | JSONEqualUnordered
+            | DBValueInt
+            | DBValueFloat
+            | DBValueText
+            | DBValueBool
+            | DBValueBlob
+            | DBValueIsNull
             | ModOnTick => primitive(),
             DBWithPolicy => h(
                 "db.with_policy",
@@ -2154,31 +4212,31 @@ impl THandleOp {
                 handler_param_names,
                 ..
             } => {
-                let (member, symbol, arity, borrow_mask) =
-                    if matches!(receiver, Type::Named(name) if name == "HTTPMux") {
-                        if handler_param_names.is_empty() {
-                            (
-                                "mux_add_zero",
-                                "jet_http_mux_add_zero_handler",
-                                4,
-                                vec![true, false, false, false],
-                            )
-                        } else {
-                            (
-                                "mux_add",
-                                "jet_http_mux_add_handler",
-                                4,
-                                vec![true, false, false, false],
-                            )
-                        }
+                let (member, symbol, arity, borrow_mask) = if matches!(receiver, Type::Named(name) if name == "HTTPMux")
+                {
+                    if handler_param_names.is_empty() {
+                        (
+                            "mux_add_zero",
+                            "jet_http_mux_add_zero_handler",
+                            4,
+                            vec![true, false, false, false],
+                        )
                     } else {
                         (
-                            "router_register",
-                            "jet_http_router_register",
-                            7,
-                            vec![true, false, false, false, true, false, false],
+                            "mux_add",
+                            "jet_http_mux_add_handler",
+                            4,
+                            vec![true, false, false, false],
                         )
-                    };
+                    }
+                } else {
+                    (
+                        "router_register",
+                        "jet_http_router_register",
+                        7,
+                        vec![true, false, false, false, true, false, false],
+                    )
+                };
                 prelude(
                     MirPreludeFamily::StaticPrelude,
                     "core.http",
@@ -2193,13 +4251,15 @@ impl THandleOp {
                 )
             }
             MathMethod {
-                type_name,
-                method,
-                ..
+                type_name, method, ..
             } if crate::Sema::is_geometry_type(type_name) => {
                 geometry_method_route(type_name, method, receiver, carrier)?
             }
-            MathMethod { type_name, method, reduce_op } => {
+            MathMethod {
+                type_name,
+                method,
+                reduce_op,
+            } => {
                 let (suffix, arity) = match (method.as_str(), reduce_op.as_deref()) {
                     ("reduce", Some("Add")) => ("reduce_add", 1),
                     ("reduce", Some("Mul")) => ("reduce_mul", 1),
@@ -2207,27 +4267,110 @@ impl THandleOp {
                     ("reduce", Some("Max")) => ("reduce_max", 1),
                     ("reduce", Some("Avg")) => ("reduce_avg", 1),
                     ("to_array" | "sum" | "product" | "min" | "max", None)
-                        if crate::Sema::is_simd_lane_type(type_name) => (method.as_str(), 1),
+                        if crate::Sema::is_simd_lane_type(type_name) =>
+                    {
+                        (method.as_str(), 1)
+                    }
                     ("to_array" | "length" | "normalize", None)
-                        if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") => (method.as_str(), 1),
-                    ("dot", None) if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") => ("dot", 2),
+                        if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") =>
+                    {
+                        (method.as_str(), 1)
+                    }
+                    ("dot", None) if matches!(type_name.as_str(), "Vec2" | "Vec3" | "Vec4") => {
+                        ("dot", 2)
+                    }
                     ("cross", None) if type_name == "Vec3" => ("cross", 2),
-                    ("to_array" | "transpose", None) if matches!(type_name.as_str(), "Mat3" | "Mat4") => (method.as_str(), 1),
-                    ("matmul" | "transform", None) if matches!(type_name.as_str(), "Mat3" | "Mat4") => (method.as_str(), 2),
-                    _ => return Err(route_error(format!("checked math method `{type_name}.{method}` requires structural MIR lowering"))),
+                    ("to_array" | "transpose", None)
+                        if matches!(type_name.as_str(), "Mat3" | "Mat4") =>
+                    {
+                        (method.as_str(), 1)
+                    }
+                    ("matmul" | "transform", None)
+                        if matches!(type_name.as_str(), "Mat3" | "Mat4") =>
+                    {
+                        (method.as_str(), 2)
+                    }
+                    _ => {
+                        return Err(route_error(format!(
+                            "checked math method `{type_name}.{method}` requires structural MIR lowering"
+                        )));
+                    }
                 };
-                let borrow_mask = if arity == 1 { vec![true] } else { vec![true, false] };
-                h(&format!("{type_name}.{suffix}"), &format!("jet_math_{type_name}_{suffix}"), arity, arity, &borrow_mask, None, carrier)
+                let borrow_mask = if arity == 1 {
+                    vec![true]
+                } else {
+                    vec![true, false]
+                };
+                h(
+                    &format!("{type_name}.{suffix}"),
+                    &format!("jet_math_{type_name}_{suffix}"),
+                    arity,
+                    arity,
+                    &borrow_mask,
+                    None,
+                    carrier,
+                )
             }
             ReactiveEffectMethod { .. }
-            | ServiceRuntimeSend | ServiceRuntimeRetry | ServiceRuntimeDeadLetter
-            | ServiceRuntimeRetain | ServiceRuntimeCommit => primitive(),
-            DBLeaseClose => h("db_lease.close", "jet_db_lease_close", 1, 1, &[false], Some(Effect::DB), carrier),
-            DBPoolAcquire => h("db_pool.acquire", "jet_db_pool_acquire", 1, 1, &[true], Some(Effect::DB), carrier),
-            DBPoolAcquireDeadline => h("db_pool.acquire_deadline", "jet_db_pool_acquire_deadline", 2, 2, &[true, true], Some(Effect::DB), carrier),
-            DBPoolReady => h("db_pool.ready", "jet_db_pool_ready", 1, 1, &[true], Some(Effect::DB), carrier),
-            DBPoolDrain => h("db_pool.drain", "jet_db_pool_drain", 1, 1, &[true], Some(Effect::DB), carrier),
-            DBPoolReceipt => h("db_pool.receipt", "jet_db_pool_receipt", 1, 1, &[true], Some(Effect::DB), carrier),
+            | ServiceRuntimeSend
+            | ServiceRuntimeRetry
+            | ServiceRuntimeDeadLetter
+            | ServiceRuntimeRetain
+            | ServiceRuntimeCommit => primitive(),
+            DBLeaseClose => h(
+                "db_lease.close",
+                "jet_db_lease_close",
+                1,
+                1,
+                &[false],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBPoolAcquire => h(
+                "db_pool.acquire",
+                "jet_db_pool_acquire",
+                1,
+                1,
+                &[true],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBPoolAcquireDeadline => h(
+                "db_pool.acquire_deadline",
+                "jet_db_pool_acquire_deadline",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBPoolReady => h(
+                "db_pool.ready",
+                "jet_db_pool_ready",
+                1,
+                1,
+                &[true],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBPoolDrain => h(
+                "db_pool.drain",
+                "jet_db_pool_drain",
+                1,
+                1,
+                &[true],
+                Some(Effect::DB),
+                carrier,
+            ),
+            DBPoolReceipt => h(
+                "db_pool.receipt",
+                "jet_db_pool_receipt",
+                1,
+                1,
+                &[true],
+                Some(Effect::DB),
+                carrier,
+            ),
             DBQuery { metadata } => db_h(
                 "query",
                 "jet_db_scope_query_with_metadata",
@@ -2258,43 +4401,28 @@ impl THandleOp {
     ) -> Result<TPreludeRoute, LowerError> {
         as_prelude(
             self.route_plan(receiver, carrier)?,
-            &format!(
-                "handle method variant {:?}",
-                std::mem::discriminant(self)
-            ),
+            &format!("handle method variant {:?}", std::mem::discriminant(self)),
         )
     }
 }
 
-fn hardware_route(
-    op: &super::THardwareCall,
-    carrier: &TFailureCarrier,
-) -> TRoutePlan {
+fn hardware_route(op: &super::THardwareCall, carrier: &TFailureCarrier) -> TRoutePlan {
     let (member, symbol, arity, borrow_mask) = match op {
-        super::THardwareCall::RegisterRead { .. } => (
-            "register_read",
-            "jet_hardware_register_read",
-            0,
-            Vec::new(),
-        ),
+        super::THardwareCall::RegisterRead { .. } => {
+            ("register_read", "jet_hardware_register_read", 0, Vec::new())
+        }
         super::THardwareCall::RegisterWrite { .. } => (
             "register_write",
             "jet_hardware_register_write",
             1,
             vec![false],
         ),
-        super::THardwareCall::DmaStart { .. } => (
-            "dma_start",
-            "jet_hardware_dma_start",
-            1,
-            vec![false],
-        ),
-        super::THardwareCall::DmaWait { .. } => (
-            "dma_wait",
-            "jet_hardware_dma_wait",
-            0,
-            Vec::new(),
-        ),
+        super::THardwareCall::DmaStart { .. } => {
+            ("dma_start", "jet_hardware_dma_start", 1, vec![false])
+        }
+        super::THardwareCall::DmaWait { .. } => {
+            ("dma_wait", "jet_hardware_dma_wait", 0, Vec::new())
+        }
     };
     prelude(
         MirPreludeFamily::HandleMethod,
@@ -2387,12 +4515,7 @@ fn app_route(method: &str, args_len: usize, carrier: &TFailureCarrier) -> TRoute
             vec![true, false],
             Some(Effect::Net),
         ),
-        ("serve_on", 1) => (
-            "jet_app_serve_on",
-            2,
-            vec![true, false],
-            Some(Effect::Net),
-        ),
+        ("serve_on", 1) => ("jet_app_serve_on", 2, vec![true, false], Some(Effect::Net)),
         _ => return primitive(),
     };
     prelude(
@@ -2450,33 +4573,23 @@ fn regex_route(
         ("Regex", "matches") => ("jet_std::JetRegex::matches", &[true, true][..]),
         ("Regex", "split") => ("jet_std::JetRegex::split", &[true, true][..]),
         ("Regex", "replace") => ("jet_std::JetRegex::replace", &[true, true, true][..]),
-        ("Regex", "replace_first") => (
-            "jet_std::JetRegex::replace_first",
-            &[true, true, true][..],
-        ),
+        ("Regex", "replace_first") => ("jet_std::JetRegex::replace_first", &[true, true, true][..]),
         ("Regex", "replace_all_with") => (
             "jet_std::JetRegex::replace_all_with",
             &[true, true, false][..],
         ),
-        ("Regex", "split_limit") => (
-            "jet_std::JetRegex::split_limit",
-            &[true, true, false][..],
-        ),
+        ("Regex", "split_limit") => ("jet_std::JetRegex::split_limit", &[true, true, false][..]),
         ("Match", "start") => ("jet_std::JetRegexMatch::start", &[true][..]),
         ("Match", "end") => ("jet_std::JetRegexMatch::end", &[true][..]),
-        ("Match", "named_captures") => {
-            ("jet_std::JetRegexMatch::named_captures", &[true][..])
-        }
+        ("Match", "named_captures") => ("jet_std::JetRegexMatch::named_captures", &[true][..]),
         ("Match", "group") => ("jet_std::JetRegexMatch::group", &[true, false][..]),
         ("Match", "name") => ("jet_std::JetRegexMatch::name", &[true, true][..]),
-        ("Match", "group_start") => {
-            ("jet_std::JetRegexMatch::group_start", &[true, false][..])
-        }
+        ("Match", "group_start") => ("jet_std::JetRegexMatch::group_start", &[true, false][..]),
         ("Match", "group_end") => ("jet_std::JetRegexMatch::group_end", &[true, false][..]),
         _ => {
             return Err(route_error(format!(
                 "unknown checked regex method `{kind}.{method}`"
-            )))
+            )));
         }
     };
     let member = format!("{kind}.{method}");
@@ -2524,7 +4637,7 @@ fn url_mime_route(
         _ => {
             return Err(route_error(format!(
                 "unknown checked URL/MIME method `{kind}.{method}`"
-            )))
+            )));
         }
     };
     let member = format!("{kind}.{method}");
@@ -2539,10 +4652,7 @@ fn url_mime_route(
     ))
 }
 
-fn measurement_route(
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
+fn measurement_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
     let (symbol, borrow_mask): (&str, &[bool]) = match method {
         "value" => ("jet_std::JetMeasurement::value", &[true][..]),
         "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
@@ -2551,7 +4661,11 @@ fn measurement_route(
         "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
         "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
         "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
-        _ => return Err(route_error(format!("unknown checked measurement method `{method}`"))),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked measurement method `{method}`"
+            )));
+        }
     };
     let member = format!("Measurement.{method}");
     Ok(h(
@@ -2565,7 +4679,6 @@ fn measurement_route(
     ))
 }
 
-
 fn reactive_method_route(
     receiver: &Type,
     method: &str,
@@ -2573,16 +4686,17 @@ fn reactive_method_route(
 ) -> Result<TRoutePlan, LowerError> {
     let (member, symbol, borrow_mask): (&str, &str, &[bool]) =
         match (receiver.without_user_tags().base_name(), method) {
-            (Some("Signal"), "get") =>
-                ("Signal.get", "jet_std::JetSignal::get", &[true]),
-            (Some("Derived" | "Computed"), "get") =>
-                ("Derived.get", "jet_std::JetDerived::get", &[true]),
-            (Some("Signal"), "set") =>
-                ("Signal.set", "jet_std::JetSignal::set", &[true, false]),
-            _ => return Err(route_error(format!(
-                "checked reactive method `{method}` has no receiver route for {}",
-                receiver.name(),
-            ))),
+            (Some("Signal"), "get") => ("Signal.get", "jet_std::JetSignal::get", &[true]),
+            (Some("Derived" | "Computed"), "get") => {
+                ("Derived.get", "jet_std::JetDerived::get", &[true])
+            }
+            (Some("Signal"), "set") => ("Signal.set", "jet_std::JetSignal::set", &[true, false]),
+            _ => {
+                return Err(route_error(format!(
+                    "checked reactive method `{method}` has no receiver route for {}",
+                    receiver.name(),
+                )));
+            }
         };
     Ok(prelude(
         MirPreludeFamily::HandleMethod,
@@ -2598,22 +4712,33 @@ fn reactive_method_route(
     ))
 }
 
-fn layout_method_route(
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
+fn layout_method_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
     let (symbol, arity, borrow_mask) = match method {
-        "h" | "v" => (format!("jet_layout::Handle::{method}"), 3, vec![true, false, false]),
-        "value" => ("jet_layout::Handle::value".to_string(), 2, vec![true, false]),
-        "suggest" => ("jet_layout::Handle::suggest".to_string(), 3, vec![true, false, false]),
+        "h" | "v" => (
+            format!("jet_layout::Handle::{method}"),
+            3,
+            vec![true, false, false],
+        ),
+        "value" => (
+            "jet_layout::Handle::value".to_string(),
+            2,
+            vec![true, false],
+        ),
+        "suggest" => (
+            "jet_layout::Handle::suggest".to_string(),
+            3,
+            vec![true, false, false],
+        ),
         "is_feasible" => ("jet_layout::Handle::is_feasible".to_string(), 1, vec![true]),
         "conflict" => ("jet_layout::Handle::conflict".to_string(), 1, vec![true]),
-        "required" | "strong" | "medium" | "weak" => (
-            format!("jet_layout::Constraint::{method}"),
-            1,
-            vec![false],
-        ),
-        _ => return Err(route_error(format!("unknown checked layout method `{method}`"))),
+        "required" | "strong" | "medium" | "weak" => {
+            (format!("jet_layout::Constraint::{method}"), 1, vec![false])
+        }
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked layout method `{method}`"
+            )));
+        }
     };
     prelude_route_row(
         MirPreludeFamily::HandleMethod,
@@ -2638,7 +4763,11 @@ fn loadable_method_route(
     let (arity, borrow_mask) = match method {
         "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" => (1, vec![true]),
         "or_else" => (2, vec![true, false]),
-        _ => return Err(route_error(format!("unknown checked Loadable method `{method}`"))),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked Loadable method `{method}`"
+            )));
+        }
     };
     let symbol = format!("JetLoadable::{method}");
     prelude_route_row(
@@ -2664,7 +4793,11 @@ fn ui_backend_method_route(
 ) -> Result<TRoutePlan, LowerError> {
     let name = match receiver {
         Type::Named(name) | Type::Apply { name, .. } => name.as_str(),
-        _ => return Err(route_error("checked UI backend receiver has no nominal type")),
+        _ => {
+            return Err(route_error(
+                "checked UI backend receiver has no nominal type",
+            ));
+        }
     };
     let name = name.rsplit("::").next().unwrap_or(name);
     let name = name.rsplit('.').next().unwrap_or(name);
@@ -2672,7 +4805,11 @@ fn ui_backend_method_route(
         "NullBackend" => "JetNullBackend",
         "TuiBackend" => "JetTuiBackend",
         "GtkBackend" => "JetGtkBackend",
-        _ => return Err(route_error(format!("checked UI backend type `{name}` has no Prelude carrier"))),
+        _ => {
+            return Err(route_error(format!(
+                "checked UI backend type `{name}` has no Prelude carrier"
+            )));
+        }
     };
     let (member, borrow_mask): (&str, &[bool]) = match method {
         "measure" => ("measure_node", &[true, false, false]),
@@ -2686,7 +4823,11 @@ fn ui_backend_method_route(
         "commands" if name == "NullBackend" => ("paint_commands", &[true]),
         "frame_lines" | "render_count" if name == "TuiBackend" => (method, &[true]),
         "present" if name == "GtkBackend" => ("present", &[true, false]),
-        _ => return Err(route_error(format!("checked UI backend method `{name}.{method}` has no Prelude route"))),
+        _ => {
+            return Err(route_error(format!(
+                "checked UI backend method `{name}.{method}` has no Prelude route"
+            )));
+        }
     };
     prelude_route_row(
         MirPreludeFamily::HandleMethod,
@@ -2728,7 +4869,6 @@ fn db_h(
     TRoutePlan::Prelude(route)
 }
 
-
 fn plugin_call_route(member: &str, symbol: &str, carrier: &TFailureCarrier) -> TRoutePlan {
     let TRoutePlan::Prelude(mut route) = prelude(
         MirPreludeFamily::HandleMethod,
@@ -2748,7 +4888,6 @@ fn plugin_call_route(member: &str, symbol: &str, carrier: &TFailureCarrier) -> T
     TRoutePlan::Prelude(route)
 }
 
-
 fn is_string_receiver(receiver: &Type) -> bool {
     match receiver {
         Type::Tagged { inner, .. } => is_string_receiver(inner),
@@ -2756,7 +4895,6 @@ fn is_string_receiver(receiver: &Type) -> bool {
         _ => false,
     }
 }
-
 
 fn builtin_collection_route(
     op: &TBuiltinOp,
@@ -2796,9 +4934,7 @@ fn builtin_collection_route(
         (TBuiltinOp::Contains, Type::InlineRange { .. }) => {
             row("contains", "jet_range_contains", 2, &[true, false])
         }
-        (TBuiltinOp::Contains, Type::Named(name))
-            if name == crate::Syntax::TYPE_BITS =>
-        {
+        (TBuiltinOp::Contains, Type::Named(name)) if name == crate::Syntax::TYPE_BITS => {
             row("bit_set_has", "jet_bit_set_has", 2, &[true, false])
         }
         (TBuiltinOp::ListUnion, Type::List(_) | Type::FixedList { .. }) => {
@@ -2828,9 +4964,7 @@ fn builtin_collection_route(
         (TBuiltinOp::ContainsKey, Type::Map { .. }) => {
             row("map_has_key", "jet_map_has_key", 2, &[true, true])
         }
-        (TBuiltinOp::ContainsKey, Type::Apply { name, .. })
-            if name == crate::Syntax::TYPE_LRU =>
-        {
+        (TBuiltinOp::ContainsKey, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
             row("lru_has", "jet_lru_has", 2, &[true, false])
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
@@ -2909,9 +5043,7 @@ fn builtin_collection_route(
         {
             row("get", "jet_list_get_opt", 2, &[true, false])
         }
-        (TBuiltinOp::GetMap, Type::Map { .. }) => {
-            row("get", "jet_map_get_opt", 2, &[true, true])
-        }
+        (TBuiltinOp::GetMap, Type::Map { .. }) => row("get", "jet_map_get_opt", 2, &[true, true]),
         (TBuiltinOp::First, Type::List(_) | Type::FixedList { .. }) => {
             row("first", "jet_list_first", 1, &[true])
         }
@@ -2937,9 +5069,11 @@ fn builtin_collection_route(
         (TBuiltinOp::Last, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_RANK => {
             row("last", "jet_sorted_set_last", 1, &[true])
         }
-        _ => return Err(route_error(format!(
-            "checked builtin operation `{op:?}` has an unsupported receiver type"
-        ))),
+        _ => {
+            return Err(route_error(format!(
+                "checked builtin operation `{op:?}` has an unsupported receiver type"
+            )));
+        }
     };
     Ok(result)
 }
@@ -2959,36 +5093,31 @@ fn iterator_builtin_route(
         b(member, symbol, arity, arity, borrow_mask, None, carrier)
     };
     let plan = match op {
-        TBuiltinOp::IterToList if is_iter => {
-            route("iter_to_list", "jet_iter_to_list", 1, &[false])
-        }
+        TBuiltinOp::IterToList if is_iter => route("iter_to_list", "jet_iter_to_list", 1, &[false]),
         TBuiltinOp::IterCollect if is_iter => {
             route("iter_collect", "jet_iter_collect", 1, &[false])
         }
-        TBuiltinOp::ListLazy if is_list => {
-            route("list_lazy", "jet_iter_from_vec", 1, &[false])
-        }
+        TBuiltinOp::ListLazy if is_list => route("list_lazy", "jet_iter_from_vec", 1, &[false]),
         TBuiltinOp::Take if is_iter => route("iter_take", "jet_iter_take", 2, &[false, false]),
         TBuiltinOp::Skip if is_iter => route("iter_skip", "jet_iter_skip", 2, &[false, false]),
         TBuiltinOp::StepBy if is_iter => {
             route("iter_step_by", "jet_iter_step_by", 2, &[false, false])
         }
-        TBuiltinOp::Dedup if is_iter => {
-            route("iter_dedup", "jet_iter_dedup", 1, &[false])
-        }
+        TBuiltinOp::Dedup if is_iter => route("iter_dedup", "jet_iter_dedup", 1, &[false]),
         TBuiltinOp::Chunks if is_iter => {
             route("iter_chunks", "jet_iter_chunks", 2, &[false, false])
         }
         TBuiltinOp::Windows if is_iter => {
             route("iter_windows", "jet_iter_windows", 2, &[false, false])
         }
-        TBuiltinOp::Flatten if is_iter => {
-            route("iter_flatten", "jet_iter_flatten", 1, &[false])
-        }
+        TBuiltinOp::Flatten if is_iter => route("iter_flatten", "jet_iter_flatten", 1, &[false]),
         TBuiltinOp::Flatten if is_list => route("list_flatten", "jet_list_flatten", 1, &[false]),
-        TBuiltinOp::Intersperse if is_iter => {
-            route("iter_intersperse", "jet_iter_intersperse", 2, &[false, false])
-        }
+        TBuiltinOp::Intersperse if is_iter => route(
+            "iter_intersperse",
+            "jet_iter_intersperse",
+            2,
+            &[false, false],
+        ),
         TBuiltinOp::IterRepeat if is_iter => {
             route("iter_repeat", "jet_iter_repeat", 2, &[false, false])
         }
@@ -3004,9 +5133,12 @@ fn iterator_builtin_route(
         TBuiltinOp::IterIsSorted if is_iter => {
             route("iter_is_sorted", "jet_iter_is_sorted", 1, &[false])
         }
-        TBuiltinOp::IterLastIndexOf if is_iter => {
-            route("iter_last_index_of", "jet_iter_last_index_of", 2, &[false, false])
-        }
+        TBuiltinOp::IterLastIndexOf if is_iter => route(
+            "iter_last_index_of",
+            "jet_iter_last_index_of",
+            2,
+            &[false, false],
+        ),
         TBuiltinOp::IterAverage { float: true } if is_iter => {
             route("iter_average_float", "jet_iter_average_float", 1, &[false])
         }
@@ -3048,152 +5180,1147 @@ impl TBuiltinOp {
         let plan = match self {
             AtomicMethod { method } => atomic_method_route(method, carrier)?,
             LenString => b("len_string", "jet_char_len", 1, 1, &[true], None, carrier),
-            ListTryNew => b("list_try_new", "jet_list_try_new", 1, 1, &[false], Some(Effect::Mem), carrier),
-            ListTryWithCapacity => b("list_try_with_capacity", "jet_list_try_with_capacity", 2, 2, &[false, false], Some(Effect::Mem), carrier),
-            TryPush => b("list_try_push", "jet_list_try_push", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            TryReserve => b("list_try_reserve", "jet_list_try_reserve", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            TryInsertMap => b("map_try_insert", "jet_map_try_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            TryStringPush => b("string_try_push", "jet_string_try_push", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            Pop => b("list_pop", "jet_list_pop_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
-            PriorityQueuePop => b("priority_queue_pop", "jet_priority_queue_pop_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
-            MapUpdate => b("map_update", "jet_map_update_all", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            MapMerge => b("map_merge", "jet_map_merge", 2, 2, &[true, true], None, carrier),
-            MapFromKeys => b("map_from_keys", "jet_map_from_keys_kernel", 2, 2, &[false, false], None, carrier),
-            ListReplace => b("list_replace", "jet_list_replace", 3, 3, &[true, false, false], None, carrier),
-            ListEqual => b("list_equal", "jet_list_equal", 2, 2, &[true, true], None, carrier),
-            ByteBufferWithCapacity => b("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, 1, &[false], None, carrier),
-            MatchGroup => b("match_group", "jet_std::JetRegexMatch::group", 2, 2, &[true, false], None, carrier),
-            IterSplit { .. } => b("iter_split", "jet_iter_split_at", 3, 3, &[false, false, false], None, carrier),
-            Indexed { .. } => b("iter_enumerate", "jet_iter_enumerate", 2, 2, &[false, false], None, carrier),
+            ListTryNew => b(
+                "list_try_new",
+                "jet_list_try_new",
+                1,
+                1,
+                &[false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            ListTryWithCapacity => b(
+                "list_try_with_capacity",
+                "jet_list_try_with_capacity",
+                2,
+                2,
+                &[false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            TryPush => b(
+                "list_try_push",
+                "jet_list_try_push",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            TryReserve => b(
+                "list_try_reserve",
+                "jet_list_try_reserve",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            TryInsertMap => b(
+                "map_try_insert",
+                "jet_map_try_insert",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            TryStringPush => b(
+                "string_try_push",
+                "jet_string_try_push",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            Pop => b(
+                "list_pop",
+                "jet_list_pop_kernel",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            PriorityQueuePop => b(
+                "priority_queue_pop",
+                "jet_priority_queue_pop_kernel",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            MapUpdate => b(
+                "map_update",
+                "jet_map_update_all",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            MapMerge => b(
+                "map_merge",
+                "jet_map_merge",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            MapFromKeys => b(
+                "map_from_keys",
+                "jet_map_from_keys_kernel",
+                2,
+                2,
+                &[false, false],
+                None,
+                carrier,
+            ),
+            ListReplace => b(
+                "list_replace",
+                "jet_list_replace",
+                3,
+                3,
+                &[true, false, false],
+                None,
+                carrier,
+            ),
+            ListEqual => b(
+                "list_equal",
+                "jet_list_equal",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            ByteBufferWithCapacity => b(
+                "byte_buffer_with_capacity",
+                "JetByteBuffer::with_capacity",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
+            MatchGroup => b(
+                "match_group",
+                "jet_std::JetRegexMatch::group",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            IterSplit { .. } => b(
+                "iter_split",
+                "jet_iter_split_at",
+                3,
+                3,
+                &[false, false, false],
+                None,
+                carrier,
+            ),
+            Indexed { .. } => b(
+                "iter_enumerate",
+                "jet_iter_enumerate",
+                2,
+                2,
+                &[false, false],
+                None,
+                carrier,
+            ),
             Indexes => b("indexes", "jet_iter_indexes", 1, 1, &[false], None, carrier),
-            MapMergeWith => b("map_merge_with", "jet_map_merge_with", 3, 3, &[true, true, false], None, carrier),
-            InsertList => b("list_insert", "jet_list_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            RemoveMap => b("map_remove", "jet_map_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            MapMergeWith => b(
+                "map_merge_with",
+                "jet_map_merge_with",
+                3,
+                3,
+                &[true, true, false],
+                None,
+                carrier,
+            ),
+            InsertList => b(
+                "list_insert",
+                "jet_list_insert",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            RemoveMap => b(
+                "map_remove",
+                "jet_map_pop_kernel",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
             SetFrom => b("set_from", "jet_set_from", 1, 1, &[false], None, carrier),
-            SetToList => b("set_to_list", "jet_set_to_list", 1, 1, &[true], None, carrier),
+            SetToList => b(
+                "set_to_list",
+                "jet_set_to_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             SetSort => b("set_sort", "jet_set_sort", 1, 1, &[true], None, carrier),
-            SetShuffle => b("set_shuffle", "jet_set_shuffle", 1, 1, &[true], None, carrier),
-            SetEqual => b("set_equal", "jet_set_equal", 2, 2, &[true, true], None, carrier),
+            SetShuffle => b(
+                "set_shuffle",
+                "jet_set_shuffle",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            SetEqual => b(
+                "set_equal",
+                "jet_set_equal",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
             SetFirst => b("set_first", "jet_set_first", 1, 1, &[true], None, carrier),
-            SortedSetFrom => b("sorted_set_from", "jet_sorted_set_from", 1, 1, &[false], None, carrier),
-            SortedSetToList => b("sorted_set_to_list", "jet_sorted_set_to_list", 1, 1, &[true], None, carrier),
+            SortedSetFrom => b(
+                "sorted_set_from",
+                "jet_sorted_set_from",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
+            SortedSetToList => b(
+                "sorted_set_to_list",
+                "jet_sorted_set_to_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             RemoveList { mode, .. } => match mode {
-                ListRemoveMode::Value => b("list_remove_value", "jet_list_remove_value", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-                ListRemoveMode::Slot => b("list_remove_slot", "jet_list_remove_slot", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+                ListRemoveMode::Value => b(
+                    "list_remove_value",
+                    "jet_list_remove_value",
+                    2,
+                    2,
+                    &[true, false],
+                    Some(Effect::Mem),
+                    carrier,
+                ),
+                ListRemoveMode::Slot => b(
+                    "list_remove_slot",
+                    "jet_list_remove_slot",
+                    2,
+                    2,
+                    &[true, false],
+                    Some(Effect::Mem),
+                    carrier,
+                ),
                 ListRemoveMode::Dynamic => primitive(),
             },
-            Push => b("list_push", "jet_list_push", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            IndexOf => b("list_index_of", "jet_list_index_of", 2, 2, &[true, true], None, carrier),
-            InsertMap => b("map_insert", "jet_map_insert", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            AddNewMap => b("map_add_new", "jet_map_add_new", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            MapSetDefault => b("map_setdefault", "jet_map_setdefault", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            ExtendList => b("list_extend", "jet_list_extend", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            Reverse => b("list_reverse", "jet_list_reverse", 1, 1, &[true], Some(Effect::Mem), carrier),
-            Sort => b("list_sort", "jet_list_sort", 1, 1, &[true], Some(Effect::Mem), carrier),
-            Clear => b("list_clear", "jet_list_clear", 1, 1, &[true], Some(Effect::Mem), carrier),
-            MapPopFirst => b("map_pop_first", "jet_map_pop_first", 1, 1, &[true], Some(Effect::Mem), carrier),
-            CountList => b("list_count", "jet_list_count", 2, 2, &[true, true], None, carrier),
-            Counts => b("list_counts", "jet_list_counts", 1, 1, &[false], None, carrier),
-            ConcatList => b("list_concat", "jet_list_concat", 2, 2, &[true, true], None, carrier),
-            SortDesc => b("list_sort_desc", "jet_list_sort_desc", 1, 1, &[true], Some(Effect::Mem), carrier),
-            OrderingThen => b("ordering_then", "jet_ordering_then", 2, 2, &[true, true], None, carrier),
-            OrderingReverse => b("ordering_reverse", "jet_ordering_reverse", 1, 1, &[true], None, carrier),
-            Flatten => b("list_flatten", "jet_list_flatten", 1, 1, &[false], None, carrier),
-            Intersperse => b("iter_intersperse", "jet_iter_intersperse", 2, 2, &[false, false], None, carrier),
-            StringFromBytes => b("string_from_bytes", "jet_string_from_bytes", 1, 1, &[true], None, carrier),
-            StringFromBytesLossy => b("string_from_bytes_lossy", "jet_string_from_bytes_lossy", 1, 1, &[true], None, carrier),
+            Push => b(
+                "list_push",
+                "jet_list_push",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            IndexOf => b(
+                "list_index_of",
+                "jet_list_index_of",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            InsertMap => b(
+                "map_insert",
+                "jet_map_insert",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            AddNewMap => b(
+                "map_add_new",
+                "jet_map_add_new",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            MapSetDefault => b(
+                "map_setdefault",
+                "jet_map_setdefault",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            ExtendList => b(
+                "list_extend",
+                "jet_list_extend",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            Reverse => b(
+                "list_reverse",
+                "jet_list_reverse",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            Sort => b(
+                "list_sort",
+                "jet_list_sort",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            Clear => b(
+                "list_clear",
+                "jet_list_clear",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            MapPopFirst => b(
+                "map_pop_first",
+                "jet_map_pop_first",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            CountList => b(
+                "list_count",
+                "jet_list_count",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            Counts => b(
+                "list_counts",
+                "jet_list_counts",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
+            ConcatList => b(
+                "list_concat",
+                "jet_list_concat",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortDesc => b(
+                "list_sort_desc",
+                "jet_list_sort_desc",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            OrderingThen => b(
+                "ordering_then",
+                "jet_ordering_then",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            OrderingReverse => b(
+                "ordering_reverse",
+                "jet_ordering_reverse",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            Flatten => b(
+                "list_flatten",
+                "jet_list_flatten",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
+            Intersperse => b(
+                "iter_intersperse",
+                "jet_iter_intersperse",
+                2,
+                2,
+                &[false, false],
+                None,
+                carrier,
+            ),
+            StringFromBytes => b(
+                "string_from_bytes",
+                "jet_string_from_bytes",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            StringFromBytesLossy => b(
+                "string_from_bytes_lossy",
+                "jet_string_from_bytes_lossy",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
             Bytes { owned: true } => b("bytes", "jet_string_bytes", 1, 1, &[false], None, carrier),
             Bytes { owned: false } => b("bytes", "jet_string_bytes", 1, 1, &[true], None, carrier),
-            Trim => b("string_trim", "jet_unicode_trim", 1, 1, &[true], None, carrier),
-            TrimStart => b("string_trim_start", "jet_text_trim_start", 1, 1, &[true], None, carrier),
-            TrimEnd => b("string_trim_end", "jet_text_trim_end", 1, 1, &[true], None, carrier),
-            PadStart => b("string_pad_start", "jet_text_pad_start", 3, 3, &[true, false, true], None, carrier),
-            PadEnd => b("string_pad_end", "jet_text_pad_end", 3, 3, &[true, false, true], None, carrier),
-            StringIndexOf => b("string_index_of", "jet_unicode_index_of", 2, 2, &[true, true], None, carrier),
-            StringCount => b("string_count", "jet_unicode_count", 2, 2, &[true, true], None, carrier),
-            StringIsAlphabetic => b("string_is_alphabetic", "jet_text_is_alphabetic", 1, 1, &[true], None, carrier),
-            StringIsNumeric => b("string_is_numeric", "jet_text_is_numeric", 1, 1, &[true], None, carrier),
-            StringIsWhitespace => b("string_is_whitespace", "jet_text_is_whitespace", 1, 1, &[true], None, carrier),
-            StringIsAscii => b("string_is_ascii", "jet_text_unicode_is_ascii", 1, 1, &[true], None, carrier),
-            StringToTitle => b("string_to_title", "jet_text_title", 1, 1, &[true], None, carrier),
-            Split => b("string_split", "jet_iter_string_split", 2, 2, &[true, true], None, carrier),
-            Lines => b("string_lines", "jet_string_lines", 1, 1, &[true], None, carrier),
-            ParseInt => b("int_parse", "jet_std::jet_int_parse", 1, 1, &[true], None, carrier),
-            IntToRadix { .. } => b("int_to_radix", "jet_std::jet_int_to_radix", 2, 2, &[false, false], None, carrier),
-            IntFromRadix { .. } => b("int_from_radix", "jet_std::jet_int_from_radix", 2, 2, &[true, false], None, carrier),
-            ToUpper => b("string_upper", "jet_unicode_upper", 1, 1, &[true], None, carrier),
-            ToLower => b("string_lower", "jet_unicode_lower", 1, 1, &[true], None, carrier),
-            ToAsciiLower => b("string_ascii_lower", "jet_text_ascii_lower", 1, 1, &[true], None, carrier),
-            ToAsciiUpper => b("string_ascii_upper", "jet_text_ascii_upper", 1, 1, &[true], None, carrier),
-            Slice { .. } => b("string_slice", "jet_string_slice_builtin", 3, 3, &[true, false, false], None, carrier),
-            After => b("string_after", "jet_string_after", 2, 2, &[true, true], None, carrier),
-            Before => b("string_before", "jet_string_before", 2, 2, &[true, true], None, carrier),
-            TrimView => b("string_trim_view", "jet_unicode_trim_view", 1, 1, &[true], None, carrier),
-            AfterView => b("string_after_view", "jet_string_after_view", 2, 2, &[true, true], None, carrier),
-            BeforeView => b("string_before_view", "jet_string_before_view", 2, 2, &[true, true], None, carrier),
+            Trim => b(
+                "string_trim",
+                "jet_unicode_trim",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            TrimStart => b(
+                "string_trim_start",
+                "jet_text_trim_start",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            TrimEnd => b(
+                "string_trim_end",
+                "jet_text_trim_end",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PadStart => b(
+                "string_pad_start",
+                "jet_text_pad_start",
+                3,
+                3,
+                &[true, false, true],
+                None,
+                carrier,
+            ),
+            PadEnd => b(
+                "string_pad_end",
+                "jet_text_pad_end",
+                3,
+                3,
+                &[true, false, true],
+                None,
+                carrier,
+            ),
+            StringIndexOf => b(
+                "string_index_of",
+                "jet_unicode_index_of",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            StringCount => b(
+                "string_count",
+                "jet_unicode_count",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            StringIsAlphabetic => b(
+                "string_is_alphabetic",
+                "jet_text_is_alphabetic",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            StringIsNumeric => b(
+                "string_is_numeric",
+                "jet_text_is_numeric",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            StringIsWhitespace => b(
+                "string_is_whitespace",
+                "jet_text_is_whitespace",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            StringIsAscii => b(
+                "string_is_ascii",
+                "jet_text_unicode_is_ascii",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            StringToTitle => b(
+                "string_to_title",
+                "jet_text_title",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            Split => b(
+                "string_split",
+                "jet_iter_string_split",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            Lines => b(
+                "string_lines",
+                "jet_string_lines",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ParseInt => b(
+                "int_parse",
+                "jet_std::jet_int_parse",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            IntToRadix { .. } => b(
+                "int_to_radix",
+                "jet_std::jet_int_to_radix",
+                2,
+                2,
+                &[false, false],
+                None,
+                carrier,
+            ),
+            IntFromRadix { .. } => b(
+                "int_from_radix",
+                "jet_std::jet_int_from_radix",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            ToUpper => b(
+                "string_upper",
+                "jet_unicode_upper",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ToLower => b(
+                "string_lower",
+                "jet_unicode_lower",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ToAsciiLower => b(
+                "string_ascii_lower",
+                "jet_text_ascii_lower",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            ToAsciiUpper => b(
+                "string_ascii_upper",
+                "jet_text_ascii_upper",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            Slice { .. } => b(
+                "string_slice",
+                "jet_string_slice_builtin",
+                3,
+                3,
+                &[true, false, false],
+                None,
+                carrier,
+            ),
+            After => b(
+                "string_after",
+                "jet_string_after",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            Before => b(
+                "string_before",
+                "jet_string_before",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            TrimView => b(
+                "string_trim_view",
+                "jet_unicode_trim_view",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            AfterView => b(
+                "string_after_view",
+                "jet_string_after_view",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            BeforeView => b(
+                "string_before_view",
+                "jet_string_before_view",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
             Keys => b("map_keys", "jet_map_keys", 1, 1, &[true], None, carrier),
             Values => b("map_values", "jet_map_values", 1, 1, &[true], None, carrier),
-            MapTopN { .. } => b("map_top_n", "jet_map_top_n", 2, 2, &[true, false], None, carrier),
-            MapMin => b("map_min", "jet_map_min_value_kernel", 1, 1, &[true], None, carrier),
-            MapMax => b("map_max", "jet_map_max_value_kernel", 1, 1, &[true], None, carrier),
-            SetUnion => b("set_union", "jet_set_union", 2, 2, &[true, true], None, carrier),
-            SetIntersection => b("set_intersection", "jet_set_intersection", 2, 2, &[true, true], None, carrier),
-            SetDifference => b("set_difference", "jet_set_difference", 2, 2, &[true, true], None, carrier),
-            SetSymmetricDifference => b("set_symmetric_difference", "jet_set_symmetric_difference", 2, 2, &[true, true], None, carrier),
-            SetIsSubset => b("set_is_subset", "jet_set_is_subset", 2, 2, &[true, true], None, carrier),
-            SetIsSuperset => b("set_is_superset", "jet_set_is_superset", 2, 2, &[true, true], None, carrier),
-            SetIsDisjoint => b("set_is_disjoint", "jet_set_is_disjoint", 2, 2, &[true, true], None, carrier),
+            MapTopN { .. } => b(
+                "map_top_n",
+                "jet_map_top_n",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            MapMin => b(
+                "map_min",
+                "jet_map_min_value_kernel",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            MapMax => b(
+                "map_max",
+                "jet_map_max_value_kernel",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            SetUnion => b(
+                "set_union",
+                "jet_set_union",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetIntersection => b(
+                "set_intersection",
+                "jet_set_intersection",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetDifference => b(
+                "set_difference",
+                "jet_set_difference",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetSymmetricDifference => b(
+                "set_symmetric_difference",
+                "jet_set_symmetric_difference",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetIsSubset => b(
+                "set_is_subset",
+                "jet_set_is_subset",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetIsSuperset => b(
+                "set_is_superset",
+                "jet_set_is_superset",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SetIsDisjoint => b(
+                "set_is_disjoint",
+                "jet_set_is_disjoint",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
             SetValues => b("set_values", "jet_set_values", 1, 1, &[true], None, carrier),
-            SetPop => b("set_pop", "jet_set_pop_kernel", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            SetReplace => b("set_replace", "jet_set_replace_kernel", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SetInsert => b("set_insert", "jet_set_insert", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SetUpdate => b("set_update", "jet_set_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            SetDifferenceUpdate => b("set_difference_update", "jet_set_difference_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            SetIntersectionUpdate => b("set_intersection_update", "jet_set_intersection_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            SetSymmetricDifferenceUpdate => b("set_symmetric_difference_update", "jet_set_symmetric_difference_update", 2, 2, &[true, true], Some(Effect::Mem), carrier),
-            SetRemove => b("set_remove", "jet_set_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SortedSetInsert => b("sorted_set_insert", "jet_sorted_set_insert", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SortedSetRemove => b("sorted_set_remove", "jet_sorted_set_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            BitSetAdd => b("bitset_add", "jet_bitset_add", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            BitSetRemove => b("bitset_remove", "jet_bitset_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            BagAdd => b("bag_add", "jet_bag_add", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            BagRemove => b("bag_remove", "jet_bag_remove", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+            SetPop => b(
+                "set_pop",
+                "jet_set_pop_kernel",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetReplace => b(
+                "set_replace",
+                "jet_set_replace_kernel",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetInsert => b(
+                "set_insert",
+                "jet_set_insert",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetUpdate => b(
+                "set_update",
+                "jet_set_update",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetDifferenceUpdate => b(
+                "set_difference_update",
+                "jet_set_difference_update",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetIntersectionUpdate => b(
+                "set_intersection_update",
+                "jet_set_intersection_update",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetSymmetricDifferenceUpdate => b(
+                "set_symmetric_difference_update",
+                "jet_set_symmetric_difference_update",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SetRemove => b(
+                "set_remove",
+                "jet_set_remove",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SortedSetInsert => b(
+                "sorted_set_insert",
+                "jet_sorted_set_insert",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SortedSetRemove => b(
+                "sorted_set_remove",
+                "jet_sorted_set_remove",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            BitSetAdd => b(
+                "bitset_add",
+                "jet_bitset_add",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            BitSetRemove => b(
+                "bitset_remove",
+                "jet_bitset_remove",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            BagAdd => b(
+                "bag_add",
+                "jet_bag_add",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            BagRemove => b(
+                "bag_remove",
+                "jet_bag_remove",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
             PriorityQueueRemove { mode, .. } => match mode {
-                ListRemoveMode::Value => b("priority_queue_remove_value", "jet_priority_queue_remove_value", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-                ListRemoveMode::Slot => b("priority_queue_remove_slot", "jet_priority_queue_remove_slot_canonical", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+                ListRemoveMode::Value => b(
+                    "priority_queue_remove_value",
+                    "jet_priority_queue_remove_value",
+                    2,
+                    2,
+                    &[true, false],
+                    Some(Effect::Mem),
+                    carrier,
+                ),
+                ListRemoveMode::Slot => b(
+                    "priority_queue_remove_slot",
+                    "jet_priority_queue_remove_slot_canonical",
+                    2,
+                    2,
+                    &[true, false],
+                    Some(Effect::Mem),
+                    carrier,
+                ),
                 ListRemoveMode::Dynamic => primitive(),
             },
-            LruPut => b("lru_put", "jet_lru_put", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            LruAddNew => b("lru_add_new", "jet_lru_add_new", 3, 3, &[true, false, false], Some(Effect::Mem), carrier),
-            LruGet => b("lru_get", "jet_lru_get", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            DequePushFront => b("deque_push_front", "jet_deque_push_front", 2, 2, &[true, false], Some(Effect::Mem), carrier),
+            LruPut => b(
+                "lru_put",
+                "jet_lru_put",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            LruAddNew => b(
+                "lru_add_new",
+                "jet_lru_add_new",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            LruGet => b(
+                "lru_get",
+                "jet_lru_get",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequePushFront => b(
+                "deque_push_front",
+                "jet_deque_push_front",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
             ByteBufferMethod { method } => byte_buffer_method_route(method, carrier)?,
             StringMethod { method } => string_method_route(method, result, carrier)?,
             ByteBufferWrite { method } => byte_buffer_write_route(method, carrier)?,
-            DequePushBack => b("deque_push_back", "jet_deque_push_back", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            DequePopFront => b("deque_pop_front", "jet_deque_pop_front_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
-            DequePopBack => b("deque_pop_back", "jet_deque_pop_back_kernel", 1, 1, &[true], Some(Effect::Mem), carrier),
-            DequeDelete => b("deque_delete", "jet_deque_delete", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            DequeReverse => b("deque_reverse", "jet_deque_reverse", 1, 1, &[true], Some(Effect::Mem), carrier),
-            DequeSplit => b("deque_split", "jet_deque_split", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SplitWrite { .. } => b("split_write", "jet_split_write", 2, 2, &[true, false], Some(Effect::Mem), carrier),
-            SortedSetUnion => b("sorted_set_union", "jet_sorted_set_union", 2, 2, &[true, true], None, carrier),
-            SortedSetIntersection => b("sorted_set_intersection", "jet_sorted_set_intersection", 2, 2, &[true, true], None, carrier),
-            SortedSetDifference => b("sorted_set_difference", "jet_sorted_set_difference", 2, 2, &[true, true], None, carrier),
-            SortedSetSymmetricDifference => b("sorted_set_symmetric_difference", "jet_sorted_set_symmetric_difference", 2, 2, &[true, true], None, carrier),
-            SortedSetIsSubset => b("sorted_set_is_subset", "jet_sorted_set_is_subset", 2, 2, &[true, true], None, carrier),
-            SortedSetIsSuperset => b("sorted_set_is_superset", "jet_sorted_set_is_superset", 2, 2, &[true, true], None, carrier),
-            SortedSetIsDisjoint => b("sorted_set_is_disjoint", "jet_sorted_set_is_disjoint", 2, 2, &[true, true], None, carrier),
-            TryCollect => b("try_collect", "jet_list_try_collect", 1, 1, &[false], None, carrier),
+            DequePushBack => b(
+                "deque_push_back",
+                "jet_deque_push_back",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequePopFront => b(
+                "deque_pop_front",
+                "jet_deque_pop_front_kernel",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequePopBack => b(
+                "deque_pop_back",
+                "jet_deque_pop_back_kernel",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequeDelete => b(
+                "deque_delete",
+                "jet_deque_delete",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequeReverse => b(
+                "deque_reverse",
+                "jet_deque_reverse",
+                1,
+                1,
+                &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            DequeSplit => b(
+                "deque_split",
+                "jet_deque_split",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SplitWrite { .. } => b(
+                "split_write",
+                "jet_split_write",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SortedSetUnion => b(
+                "sorted_set_union",
+                "jet_sorted_set_union",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetIntersection => b(
+                "sorted_set_intersection",
+                "jet_sorted_set_intersection",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetDifference => b(
+                "sorted_set_difference",
+                "jet_sorted_set_difference",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetSymmetricDifference => b(
+                "sorted_set_symmetric_difference",
+                "jet_sorted_set_symmetric_difference",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetIsSubset => b(
+                "sorted_set_is_subset",
+                "jet_sorted_set_is_subset",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetIsSuperset => b(
+                "sorted_set_is_superset",
+                "jet_sorted_set_is_superset",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            SortedSetIsDisjoint => b(
+                "sorted_set_is_disjoint",
+                "jet_sorted_set_is_disjoint",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            TryCollect => b(
+                "try_collect",
+                "jet_list_try_collect",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
             BitSetCopy => b("bitset_copy", "jet_bits_copy", 1, 1, &[true], None, carrier),
-            ViewNew { .. } => b("view_new", "jet_view_new", 4, 4, &[true, false, false, false], Some(Effect::Mem), carrier),
-            ViewMutNew { .. } => b("view_mut_new", "jet_view_mut_new", 4, 4, &[true, false, false, false], Some(Effect::Mem), carrier),
-            ComputeViewNew { .. } => b("compute_view_new", "jet_compute_view", 5, 5, &[true, false, false, false, false], Some(Effect::Mem), carrier),
-            ComputeViewMutNew { .. } => b("compute_view_mut_new", "jet_compute_view_mut", 5, 5, &[true, false, false, false, false], Some(Effect::Mem), carrier),
-            GetDisjointWrite => b("get_disjoint_write", "jet_get_disjoint_write", 2, 2, &[true, true], Some(Effect::Mem), carrier),
+            ViewNew { .. } => b(
+                "view_new",
+                "jet_view_new",
+                4,
+                4,
+                &[true, false, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            ViewMutNew { .. } => b(
+                "view_mut_new",
+                "jet_view_mut_new",
+                4,
+                4,
+                &[true, false, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            ComputeViewNew { .. } => b(
+                "compute_view_new",
+                "jet_compute_view",
+                5,
+                5,
+                &[true, false, false, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            ComputeViewMutNew { .. } => b(
+                "compute_view_mut_new",
+                "jet_compute_view_mut",
+                5,
+                5,
+                &[true, false, false, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            GetDisjointWrite => b(
+                "get_disjoint_write",
+                "jet_get_disjoint_write",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::Mem),
+                carrier,
+            ),
             // Receiver-sensitive, native, callback-building, or type-parameterized
             // forms are expanded by the TIR-to-MIR projection.
-            Sum { float: true, f32: true } => b(
+            Sum {
+                float: true,
+                f32: true,
+            } => b(
                 "sum_fixed_f32",
                 "jet_list_sum_fixed_f32",
                 1,
@@ -3202,7 +6329,10 @@ impl TBuiltinOp {
                 None,
                 carrier,
             ),
-            Sum { float: true, f32: false } => b(
+            Sum {
+                float: true,
+                f32: false,
+            } => b(
                 "sum_fixed_f64",
                 "jet_list_sum_fixed_f64",
                 1,
@@ -3226,13 +6356,63 @@ impl TBuiltinOp {
                 carrier,
                 MirPreludeAbi::Aggregate,
             ),
-            Product { float: false, .. } => b("product", "jet_list_product", 1, 1, &[false], None, carrier),
-            StringSplitOnce { .. } => b("string_split_once", "jet_unicode_split_once", 2, 2, &[true, true], None, carrier),
-            StringCutLast { .. } => b("string_cut_last", "jet_unicode_cut_last", 2, 2, &[true, true], None, carrier),
-            ParseFloat => b("float_parse", "jet_std::jet_float_parse", 1, 1, &[true], None, carrier),
-            Repeat => b("string_repeat", "jet_string_repeat", 2, 2, &[true, false], None, carrier),
-            StartsWith => b("list_starts_with", "jet_list_starts_with", 2, 2, &[true, true], None, carrier),
-            ListSlice => b("list_slice", "jet_list_slice", 3, 3, &[true, false, false], None, carrier),
+            Product { float: false, .. } => {
+                b("product", "jet_list_product", 1, 1, &[false], None, carrier)
+            }
+            StringSplitOnce { .. } => b(
+                "string_split_once",
+                "jet_unicode_split_once",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            StringCutLast { .. } => b(
+                "string_cut_last",
+                "jet_unicode_cut_last",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            ParseFloat => b(
+                "float_parse",
+                "jet_std::jet_float_parse",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            Repeat => b(
+                "string_repeat",
+                "jet_string_repeat",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            StartsWith => b(
+                "list_starts_with",
+                "jet_list_starts_with",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            ListSlice => b(
+                "list_slice",
+                "jet_list_slice",
+                3,
+                3,
+                &[true, false, false],
+                None,
+                carrier,
+            ),
             ListBinarySearch => b(
                 "list_binary_search",
                 "jet_list_binary_search",
@@ -3260,23 +6440,151 @@ impl TBuiltinOp {
                 None,
                 carrier,
             ),
-            MapEqual => b("map_equal", "jet_map_equal", 2, 2, &[true, true], None, carrier),
-            MapFirst => b("map_first", "jet_map_first_key", 1, 1, &[true], None, carrier),
-            MapIntersection => b("map_intersection", "jet_map_intersection", 2, 2, &[true, true], None, carrier),
-            MapSliceKeys { .. } => b("map_slice", "jet_map_slice", 2, 2, &[true, false], None, carrier),
-            BagCount => b("bag_count", "jet_bag_count", 2, 2, &[true, true], None, carrier),
-            DequePeekFront => b("deque_peek_front", "jet_deque_peek_front", 1, 1, &[true], None, carrier),
-            PriorityQueuePeek => b("priority_queue_peek", "jet_priority_queue_peek", 1, 1, &[true], None, carrier),
-            PriorityQueueToSortedList => b("priority_queue_to_sorted_list", "jet_priority_queue_to_sorted_list", 1, 1, &[true], None, carrier),
-            PriorityQueueFrom => b("priority_queue_from", "jet_priority_queue_from", 1, 1, &[false], None, carrier),
+            MapEqual => b(
+                "map_equal",
+                "jet_map_equal",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            MapFirst => b(
+                "map_first",
+                "jet_map_first_key",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            MapIntersection => b(
+                "map_intersection",
+                "jet_map_intersection",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            MapSliceKeys { .. } => b(
+                "map_slice",
+                "jet_map_slice",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            BagCount => b(
+                "bag_count",
+                "jet_bag_count",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DequePeekFront => b(
+                "deque_peek_front",
+                "jet_deque_peek_front",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PriorityQueuePeek => b(
+                "priority_queue_peek",
+                "jet_priority_queue_peek",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PriorityQueueToSortedList => b(
+                "priority_queue_to_sorted_list",
+                "jet_priority_queue_to_sorted_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            PriorityQueueFrom => b(
+                "priority_queue_from",
+                "jet_priority_queue_from",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
             BagHas => b("bag_has", "jet_bag_has", 2, 2, &[true, true], None, carrier),
-            DequePeekBack => b("deque_peek_back", "jet_deque_peek_back", 1, 1, &[true], None, carrier),
-            DequeCapacity => b("deque_capacity", "jet_deque_capacity", 1, 1, &[true], None, carrier),
-            DequeContains => b("deque_contains", "jet_deque_contains", 2, 2, &[true, true], None, carrier),
-            DequeGet => b("deque_get", "jet_deque_get", 2, 2, &[true, false], None, carrier),
-            DequeToList => b("deque_to_list", "jet_deque_to_list", 1, 1, &[true], None, carrier),
-            DequeJoin => b("deque_join", "jet_deque_join", 2, 2, &[true, true], None, carrier),
-            DequeFrom => b("deque_from", "jet_deque_from", 1, 1, &[false], None, carrier),
+            DequePeekBack => b(
+                "deque_peek_back",
+                "jet_deque_peek_back",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DequeCapacity => b(
+                "deque_capacity",
+                "jet_deque_capacity",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DequeContains => b(
+                "deque_contains",
+                "jet_deque_contains",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DequeGet => b(
+                "deque_get",
+                "jet_deque_get",
+                2,
+                2,
+                &[true, false],
+                None,
+                carrier,
+            ),
+            DequeToList => b(
+                "deque_to_list",
+                "jet_deque_to_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            DequeJoin => b(
+                "deque_join",
+                "jet_deque_join",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            DequeFrom => b(
+                "deque_from",
+                "jet_deque_from",
+                1,
+                1,
+                &[false],
+                None,
+                carrier,
+            ),
             MapToList { .. } => prelude(
                 MirPreludeFamily::BuiltinMethod,
                 "core.map",
@@ -3289,25 +6597,90 @@ impl TBuiltinOp {
                 carrier,
                 MirPreludeAbi::Aggregate,
             ),
-            MapContainsValue => b("map_contains_value", "jet_map_contains_value", 2, 2, &[true, true], None, carrier),
-            ContainsKey => b("map_has_key", "jet_map_has_key", 2, 2, &[true, true], None, carrier),
+            MapContainsValue => b(
+                "map_contains_value",
+                "jet_map_contains_value",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
+            ContainsKey => b(
+                "map_has_key",
+                "jet_map_has_key",
+                2,
+                2,
+                &[true, true],
+                None,
+                carrier,
+            ),
             LruKeys => b("lru_keys", "jet_lru_keys", 1, 1, &[true], None, carrier),
-            BitSetToList => b("bit_set_to_list", "jet_bit_set_to_list", 1, 1, &[true], None, carrier),
-            BitSetCount => b("bit_set_count", "jet_bit_set_count", 1, 1, &[true], None, carrier),
-            LenList | IsEmpty | GetMap | GetList | First | Last | Contains
-            | JoinSep | Product { .. }
-            | Min { float: true, .. } | Max { float: true, .. } | Unzip { .. } | Chars | EndsWith | Replace
-            | ToString | Take | Skip | IterToList | IterCollect
-            | ListLazy | StepBy | Dedup | Chunks | Windows | IterRepeat | IterCycle
-            | IterDropLast | IterShuffle | IterIsSorted | IterLastIndexOf | IterAverage { .. }
-            | IterCompare | ListCopy
-            | ListUnion | ListIntersection | ListDifference | ListRandom
-            | SetCopy | SetCapacity
+            BitSetToList => b(
+                "bit_set_to_list",
+                "jet_bit_set_to_list",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            BitSetCount => b(
+                "bit_set_count",
+                "jet_bit_set_count",
+                1,
+                1,
+                &[true],
+                None,
+                carrier,
+            ),
+            LenList
+            | IsEmpty
+            | GetMap
+            | GetList
+            | First
+            | Last
+            | Contains
+            | JoinSep
+            | Product { .. }
+            | Min { float: true, .. }
+            | Max { float: true, .. }
+            | Unzip { .. }
+            | Chars
+            | EndsWith
+            | Replace
+            | ToString
+            | Take
+            | Skip
+            | IterToList
+            | IterCollect
+            | ListLazy
+            | StepBy
+            | Dedup
+            | Chunks
+            | Windows
+            | IterRepeat
+            | IterCycle
+            | IterDropLast
+            | IterShuffle
+            | IterIsSorted
+            | IterLastIndexOf
+            | IterAverage { .. }
+            | IterCompare
+            | ListCopy
+            | ListUnion
+            | ListIntersection
+            | ListDifference
+            | ListRandom
+            | SetCopy
+            | SetCapacity
             | MapCopy
             | MapNew
-            | Zip { .. } | OptionZip { .. }
+            | Zip { .. }
+            | OptionZip { .. }
             | LruCapacity
-            | BitSetNew | ByteBufferNew
+            | BitSetNew
+            | ByteBufferNew
             | BagLen => primitive(),
         };
         Ok(plan)
@@ -3323,15 +6696,9 @@ impl TBuiltinOp {
             plan
         } else {
             match self {
-                TBuiltinOp::JoinSep => b(
-                    "join",
-                    "jet_list_join",
-                    2,
-                    2,
-                    &[true, true],
-                    None,
-                    carrier,
-                ),
+                TBuiltinOp::JoinSep => {
+                    b("join", "jet_list_join", 2, 2, &[true, true], None, carrier)
+                }
                 TBuiltinOp::StartsWith if is_string_receiver(receiver) => b(
                     "string_starts_with",
                     "jet_string_starts_with",
@@ -3350,16 +6717,28 @@ impl TBuiltinOp {
                     None,
                     carrier,
                 ),
-                TBuiltinOp::StartsWith | TBuiltinOp::EndsWith if !is_string_receiver(receiver) => b(
-                    if matches!(self, TBuiltinOp::StartsWith) { "list_starts_with" } else { "list_ends_with" },
-                    if matches!(self, TBuiltinOp::StartsWith) { "jet_list_starts_with" } else { "jet_list_ends_with" },
-                    2, 2, &[true, true], None, carrier,
-                ),
-                TBuiltinOp::Max { float: false, .. }
-                    if matches!(receiver, Type::Apply { name, .. } if name == "Set") =>
-                {
+                TBuiltinOp::StartsWith | TBuiltinOp::EndsWith if !is_string_receiver(receiver) => {
+                    b(
+                        if matches!(self, TBuiltinOp::StartsWith) {
+                            "list_starts_with"
+                        } else {
+                            "list_ends_with"
+                        },
+                        if matches!(self, TBuiltinOp::StartsWith) {
+                            "jet_list_starts_with"
+                        } else {
+                            "jet_list_ends_with"
+                        },
+                        2,
+                        2,
+                        &[true, true],
+                        None,
+                        carrier,
+                    )
+                }
+                TBuiltinOp::Max { float: false, .. } if matches!(receiver, Type::Apply { name, .. } if name == "Set") => {
                     builtin_collection_route(self, receiver, carrier)?
-                },
+                }
                 TBuiltinOp::SetShuffle => builtin_collection_route(self, receiver, carrier)?,
                 TBuiltinOp::Contains
                     if matches!(
@@ -3368,7 +6747,7 @@ impl TBuiltinOp {
                     ) =>
                 {
                     builtin_collection_route(self, receiver, carrier)?
-                },
+                }
                 TBuiltinOp::Contains if is_string_receiver(receiver) => b(
                     "contains",
                     "jet_string_contains",
@@ -3431,10 +6810,7 @@ fn b(
     )
 }
 
-fn atomic_method_route(
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
+fn atomic_method_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
     let (member, symbol, arity, borrow_mask, effect) = match method {
         "load" => ("load", "jet_atomic_load", 1, &[true][..], None),
         "store" => ("store", "jet_atomic_store", 2, &[true, false][..], None),
@@ -3455,7 +6831,11 @@ fn atomic_method_route(
         ),
         "publish" => ("publish", "jet_atomic_publish", 2, &[true, false][..], None),
         "observe" => ("observe", "jet_atomic_observe", 1, &[true][..], None),
-        _ => return Err(route_error(format!("unknown checked Atomic method `{method}`"))),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked Atomic method `{method}`"
+            )));
+        }
     };
     Ok(prelude(
         MirPreludeFamily::BuiltinMethod,
@@ -3487,50 +6867,13 @@ fn byte_buffer_method_route(
         ));
     }
     let arity = match method {
-        "len"
-        | "is_empty"
-        | "clear"
-        | "position"
-        | "eof"
-        | "rewind"
-        | "flush"
-        | "close"
-        | "shutdown"
-        | "get_buffer"
-        | "buffer"
-        | "to_string"
-        | "string"
-        | "trim"
-        | "trim_start"
-        | "trim_end"
-        | "to_lower"
-        | "to_upper"
-        | "to_title"
-        | "title"
-        | "clone"
-        | "copy"
-        | "lines"
-        | "first"
-        | "next"
-        | "read_byte"
-        | "read"
-        | "is_ascii" => 1,
-        "get"
-        | "seek"
-        | "read_bytes"
-        | "read_string"
-        | "contains"
-        | "starts_with"
-        | "ends_with"
-        | "index_of"
-        | "last_index_of"
-        | "split"
-        | "partition"
-        | "join"
-        | "equal"
-        | "compare"
-        | "copy_to"
-        | "write_to" => 2,
+        "len" | "is_empty" | "clear" | "position" | "eof" | "rewind" | "flush" | "close"
+        | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim" | "trim_start"
+        | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone" | "copy"
+        | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii" => 1,
+        "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
+        | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal"
+        | "compare" | "copy_to" | "write_to" => 2,
         "replace" => 3,
         _ => return Ok(primitive()),
     };
@@ -3639,10 +6982,22 @@ pub(super) fn string_method_route(
         "ljust" => ("ljust", "jet_text_pad_end_ref", 3),
         "rjust" => ("rjust", "jet_text_pad_start_ref", 3),
         "zfill" => ("zfill", "jet_text_zfill_ref", 2),
-        _ => return Err(route_error(format!("unknown checked String method `{method}`"))),
+        _ => {
+            return Err(route_error(format!(
+                "unknown checked String method `{method}`"
+            )));
+        }
     };
     let _ = result;
-    Ok(b(member, symbol, arity, arity, &vec![true; arity], None, carrier))
+    Ok(b(
+        member,
+        symbol,
+        arity,
+        arity,
+        &vec![true; arity],
+        None,
+        carrier,
+    ))
 }
 
 fn overflow_input_type(ty: &Type) -> &Type {
@@ -3711,7 +7066,7 @@ fn numeric_binary(op: BinOp) -> bool {
     )
 }
 
-fn exact_int_type(ty: &Type) -> bool {
+pub(super) fn exact_int_type(ty: &Type) -> bool {
     match ty.without_user_tags() {
         Type::Int => true,
         Type::InlineRange { base, .. } => exact_int_type(base),
@@ -3719,10 +7074,7 @@ fn exact_int_type(ty: &Type) -> bool {
     }
 }
 
-fn exact_int_binary_route(
-    op: BinOp,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
+fn exact_int_binary_route(op: BinOp, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
     let (member, symbol, arity, effect) = match op {
         BinOp::Add => ("add", "jet_std::jet_int_add", 2, None),
         BinOp::Sub => ("sub", "jet_std::jet_int_sub", 2, None),
@@ -3732,7 +7084,12 @@ fn exact_int_binary_route(
         BinOp::BitXor => ("bit_xor", "jet_std::jet_int_bit_xor", 2, None),
         BinOp::Div => ("div", "jet_std::jet_int_div", 4, Some(Effect::Panic)),
         BinOp::Rem => ("rem", "jet_std::jet_int_rem", 4, Some(Effect::Panic)),
-        BinOp::FloorDiv => ("floor_div", "jet_std::jet_int_floor_div", 4, Some(Effect::Panic)),
+        BinOp::FloorDiv => (
+            "floor_div",
+            "jet_std::jet_int_floor_div",
+            4,
+            Some(Effect::Panic),
+        ),
         BinOp::Mod => ("mod", "jet_std::jet_int_mod", 4, Some(Effect::Panic)),
         BinOp::Pow => ("pow", "jet_std::jet_int_pow", 4, Some(Effect::Panic)),
         BinOp::Shl => ("shl", "jet_std::jet_int_shl", 4, Some(Effect::Panic)),
@@ -3824,7 +7181,8 @@ fn math_binary_route(
     let Some(right_name) = right_math.or_else(|| math_binary_operand_name(rhs)) else {
         return Ok(None);
     };
-    let Some(result_name) = math_type_name(result).or_else(|| math_binary_operand_name(result)) else {
+    let Some(result_name) = math_type_name(result).or_else(|| math_binary_operand_name(result))
+    else {
         return Ok(None);
     };
     let Some(op_name) = (match op {
@@ -3837,9 +7195,7 @@ fn math_binary_route(
         return Ok(None);
     };
     let symbol = match op {
-        BinOp::Add | BinOp::Sub
-            if left_name == right_name && result_name == left_name =>
-        {
+        BinOp::Add | BinOp::Sub if left_name == right_name && result_name == left_name => {
             format!("jet_math_{left_name}_{op_name}")
         }
         BinOp::Div
@@ -3880,7 +7236,10 @@ fn math_binary_route(
     // Math helpers use the first vector/matrix operand by reference and take
     // the second operand by value.  A scalar-left/vector-right helper reverses
     // that ABI, so borrow only the right operand in that case.
-    let borrow_mask = [left_math.is_some(), right_math.is_some() && left_math.is_none()];
+    let borrow_mask = [
+        left_math.is_some(),
+        right_math.is_some() && left_math.is_none(),
+    ];
     let route = prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         "core.math",
@@ -3999,7 +7358,6 @@ pub(super) fn compare_route(
     }
 }
 
-
 fn runtime(
     family: MirPreludeFamily,
     module: &str,
@@ -4048,9 +7406,7 @@ pub(super) fn civil_time_route(
         ("Date" | "LocalDate", "day_of_year") => ("JetDate::day_of_year", 1, &[true][..]),
         ("Date" | "LocalDate", "iso_week") => ("JetDate::iso_week", 1, &[true][..]),
         ("Date" | "LocalDate", "iso_week_year") => ("JetDate::iso_week_year", 1, &[true][..]),
-        ("Date" | "LocalDate", "quarter_of_year") => {
-            ("JetDate::quarter_of_year", 1, &[true][..])
-        }
+        ("Date" | "LocalDate", "quarter_of_year") => ("JetDate::quarter_of_year", 1, &[true][..]),
         ("Date" | "LocalDate", "days_in_month") => ("JetDate::days_in_month", 1, &[true][..]),
         ("Date" | "LocalDate", "is_leap_year") => ("JetDate::is_leap_year", 1, &[true][..]),
         ("Date" | "LocalDate", "to_string") => ("JetDate::to_string_fmt", 1, &[true][..]),
@@ -4062,9 +7418,7 @@ pub(super) fn civil_time_route(
         ("Date" | "LocalDate", "subtract_period") => {
             ("JetDate::subtract_period_value", 2, &[true, false][..])
         }
-        ("Date" | "LocalDate", "diff_days") => {
-            ("JetDate::diff_days_value", 2, &[true, false][..])
-        }
+        ("Date" | "LocalDate", "diff_days") => ("JetDate::diff_days_value", 2, &[true, false][..]),
         ("Date" | "LocalDate", "truncate") => ("JetDate::truncate", 2, &[true, true][..]),
         ("Date" | "LocalDate", "replace") => {
             ("JetDate::replace", 4, &[true, false, false, false][..])
@@ -4100,13 +7454,17 @@ pub(super) fn civil_time_route(
         ("LocalTime", "add_duration") => {
             ("JetLocalTime::add_duration_value", 2, &[true, false][..])
         }
-        ("LocalTime", "subtract_duration") => {
-            ("JetLocalTime::subtract_duration_value", 2, &[true, false][..])
-        }
-        ("LocalTime", "round") => ("JetLocalTime::round_with", 4, &[true, true, false, true][..]),
-        ("LocalTime", "truncate") => {
-            ("JetLocalTime::truncate_with", 3, &[true, true, false][..])
-        }
+        ("LocalTime", "subtract_duration") => (
+            "JetLocalTime::subtract_duration_value",
+            2,
+            &[true, false][..],
+        ),
+        ("LocalTime", "round") => (
+            "JetLocalTime::round_with",
+            4,
+            &[true, true, false, true][..],
+        ),
+        ("LocalTime", "truncate") => ("JetLocalTime::truncate_with", 3, &[true, true, false][..]),
         ("LocalTime", "floor") => ("JetLocalTime::floor_with", 3, &[true, true, false][..]),
         ("LocalTime", "ceil") => ("JetLocalTime::ceil_with", 3, &[true, true, false][..]),
         ("LocalTime", "until") => (
@@ -4134,11 +7492,7 @@ pub(super) fn civil_time_route(
         ("DateTime", "to_timestamp") => ("JetDateTime::to_timestamp", 1, &[true][..]),
         ("DateTime", "to_unix_ms") => ("JetDateTime::to_unix_ms_value", 1, &[true][..]),
         ("DateTime", "to_unix_s") => ("JetDateTime::to_unix_seconds_value", 1, &[true][..]),
-        ("DateTime", "to_unix_us") => (
-            "JetDateTime::to_unix_microseconds_value",
-            1,
-            &[true][..],
-        ),
+        ("DateTime", "to_unix_us") => ("JetDateTime::to_unix_microseconds_value", 1, &[true][..]),
         ("DateTime", "to_unix_ns") => ("JetDateTime::to_unix_nanoseconds_value", 1, &[true][..]),
         ("DateTime", "date") => ("JetDateTime::date", 1, &[true][..]),
         ("DateTime", "time") => ("JetDateTime::time_for_output", 1, &[true][..]),
@@ -4151,18 +7505,14 @@ pub(super) fn civil_time_route(
         ("DateTime", "plus_duration") => {
             ("JetDateTime::plus_duration_value", 2, &[true, false][..])
         }
-        ("DateTime", "subtract_duration") => {
-            ("JetDateTime::subtract_duration_value", 2, &[true, false][..])
-        }
-        ("DateTime", "add_nanoseconds") => {
-            ("JetDateTime::add_nanoseconds", 2, &[true, false][..])
-        }
-        ("DateTime", "difference") => {
-            ("JetDateTime::difference_duration", 2, &[true, false][..])
-        }
-        ("DateTime", "add_period") => {
-            ("JetDateTime::add_period_value", 2, &[true, false][..])
-        }
+        ("DateTime", "subtract_duration") => (
+            "JetDateTime::subtract_duration_value",
+            2,
+            &[true, false][..],
+        ),
+        ("DateTime", "add_nanoseconds") => ("JetDateTime::add_nanoseconds", 2, &[true, false][..]),
+        ("DateTime", "difference") => ("JetDateTime::difference_duration", 2, &[true, false][..]),
+        ("DateTime", "add_period") => ("JetDateTime::add_period_value", 2, &[true, false][..]),
         ("DateTime", "subtract_period") => {
             ("JetDateTime::subtract_period_value", 2, &[true, false][..])
         }
@@ -4176,9 +7526,7 @@ pub(super) fn civil_time_route(
             6,
             &[true, false, true, true, true, false][..],
         ),
-        ("DateTime", "truncate") => {
-            ("JetDateTime::truncate_with", 3, &[true, true, false][..])
-        }
+        ("DateTime", "truncate") => ("JetDateTime::truncate_with", 3, &[true, true, false][..]),
         ("DateTime", "round") => ("JetDateTime::round_with", 4, &[true, true, false, true][..]),
         ("DateTime", "floor") => ("JetDateTime::floor_with", 3, &[true, true, false][..]),
         ("DateTime", "ceil") => ("JetDateTime::ceil_with", 3, &[true, true, false][..]),
@@ -4211,16 +7559,10 @@ pub(super) fn civil_time_route(
         ("Period", "total_in") => ("JetPeriod::total_in_value", 3, &[true, true, true][..]),
         ("Period", "to_string") => ("JetPeriod::to_string_fmt", 1, &[true][..]),
         ("Zone", "name") => ("JetZone::name", 1, &[true][..]),
-        ("Zone", "next_transition") => (
-            "JetZone::next_transition_value",
-            2,
-            &[true, false][..],
-        ),
-        ("Zone", "previous_transition") => (
-            "JetZone::previous_transition_value",
-            2,
-            &[true, false][..],
-        ),
+        ("Zone", "next_transition") => ("JetZone::next_transition_value", 2, &[true, false][..]),
+        ("Zone", "previous_transition") => {
+            ("JetZone::previous_transition_value", 2, &[true, false][..])
+        }
         ("Zone", "start_of_day") => ("JetZone::start_of_day_value", 2, &[true, false][..]),
         ("Zone", "hours_in_day") => ("JetZone::hours_in_day_value", 2, &[true, false][..]),
         ("ZonedDateTime", "date") => ("JetZonedDateTime::date", 1, &[true][..]),
@@ -4231,9 +7573,7 @@ pub(super) fn civil_time_route(
         ("ZonedDateTime", "zone") => ("JetZonedDateTime::zone", 1, &[true][..]),
         ("ZonedDateTime", "to_string") => ("JetZonedDateTime::to_string_fmt", 1, &[true][..]),
         ("ZonedDateTime", "format") => ("JetZonedDateTime::format_pattern", 2, &[true, true][..]),
-        ("ZonedDateTime", "format_rfc9557") => {
-            ("JetZonedDateTime::format_rfc9557", 1, &[true][..])
-        }
+        ("ZonedDateTime", "format_rfc9557") => ("JetZonedDateTime::format_rfc9557", 1, &[true][..]),
         ("ZonedDateTime", "format_checked") => (
             "JetZonedDateTime::format_checked_text",
             2,
@@ -4249,21 +7589,17 @@ pub(super) fn civil_time_route(
             2,
             &[true, false][..],
         ),
-        ("ZonedDateTime", "add_period") => (
-            "JetZonedDateTime::add_period_value",
-            2,
-            &[true, false][..],
-        ),
+        ("ZonedDateTime", "add_period") => {
+            ("JetZonedDateTime::add_period_value", 2, &[true, false][..])
+        }
         ("ZonedDateTime", "subtract_period") => (
             "JetZonedDateTime::subtract_period_value",
             2,
             &[true, false][..],
         ),
-        ("ZonedDateTime", "with_time") => (
-            "JetZonedDateTime::with_time",
-            3,
-            &[true, true, true][..],
-        ),
+        ("ZonedDateTime", "with_time") => {
+            ("JetZonedDateTime::with_time", 3, &[true, true, true][..])
+        }
         ("ZonedDateTime", "with_zone") => ("JetZonedDateTime::with_zone", 2, &[true, true][..]),
         ("ZonedDateTime", "until") => (
             "JetZonedDateTime::until_duration",
@@ -4275,11 +7611,9 @@ pub(super) fn civil_time_route(
             6,
             &[true, false, true, true, true, false][..],
         ),
-        ("ZonedDateTime", "next_transition") => (
-            "JetZonedDateTime::next_transition_value",
-            1,
-            &[true][..],
-        ),
+        ("ZonedDateTime", "next_transition") => {
+            ("JetZonedDateTime::next_transition_value", 1, &[true][..])
+        }
         ("ZonedDateTime", "previous_transition") => (
             "JetZonedDateTime::previous_transition_value",
             1,
@@ -4305,7 +7639,6 @@ pub(super) fn civil_time_route(
         MirPreludeAbi::Value,
     ))
 }
-
 
 fn layout_binary_route(
     op: BinOp,
@@ -4390,13 +7723,9 @@ pub(super) fn alloc_new_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let (member, symbol, arity, max_arity, borrow_mask) = match ctor {
-        super::TAllocCtor::Arena if arg_count == 0 => (
-            "arena.new",
-            "jet_mem::JetArena::new",
-            0,
-            0,
-            &[][..],
-        ),
+        super::TAllocCtor::Arena if arg_count == 0 => {
+            ("arena.new", "jet_mem::JetArena::new", 0, 0, &[][..])
+        }
         super::TAllocCtor::Arena => (
             "arena.new",
             "jet_mem::JetArena::with_capacity",
@@ -4404,13 +7733,9 @@ pub(super) fn alloc_new_route(
             1,
             &[false][..],
         ),
-        super::TAllocCtor::Bump if arg_count == 0 => (
-            "bump.new",
-            "jet_mem::JetBump::new",
-            0,
-            0,
-            &[][..],
-        ),
+        super::TAllocCtor::Bump if arg_count == 0 => {
+            ("bump.new", "jet_mem::JetBump::new", 0, 0, &[][..])
+        }
         super::TAllocCtor::Bump => (
             "bump.new",
             "jet_mem::JetBump::with_capacity",
@@ -4425,20 +7750,12 @@ pub(super) fn alloc_new_route(
             1,
             &[false][..],
         ),
-        super::TAllocCtor::Fixed { .. } => (
-            "fixed.new",
-            "jet_mem::JetFixed::new",
-            1,
-            1,
-            &[false][..],
-        ),
-        super::TAllocCtor::FixedOver => (
-            "fixed.over",
-            "jet_mem::JetFixed::over",
-            1,
-            1,
-            &[true][..],
-        ),
+        super::TAllocCtor::Fixed { .. } => {
+            ("fixed.new", "jet_mem::JetFixed::new", 1, 1, &[false][..])
+        }
+        super::TAllocCtor::FixedOver => {
+            ("fixed.over", "jet_mem::JetFixed::over", 1, 1, &[true][..])
+        }
     };
     if arg_count < arity || arg_count > max_arity {
         return Err(route_error(format!(
@@ -4532,12 +7849,18 @@ pub(super) fn index_route(
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
     let (member, symbol, arity, borrow_mask) = match (kind, access) {
-        (MirIndexKind::List | MirIndexKind::FixedListProof, MirAccess::Read) => {
-            ("index_list", "jet_index_vec", 4, vec![true, false, true, false])
-        }
-        (MirIndexKind::List | MirIndexKind::FixedListProof, MirAccess::Write) => {
-            ("index_list_mut", "jet_index_vec_mut", 4, vec![true, false, true, false])
-        }
+        (MirIndexKind::List | MirIndexKind::FixedListProof, MirAccess::Read) => (
+            "index_list",
+            "jet_index_vec",
+            4,
+            vec![true, false, true, false],
+        ),
+        (MirIndexKind::List | MirIndexKind::FixedListProof, MirAccess::Write) => (
+            "index_list_mut",
+            "jet_index_vec_mut",
+            4,
+            vec![true, false, true, false],
+        ),
         (MirIndexKind::List | MirIndexKind::FixedListProof, MirAccess::Move) => {
             return Err(route_error("index move has no checked Prelude kernel"));
         }
@@ -4748,7 +8071,6 @@ pub(super) fn memo_stats_route(
     )
 }
 
-
 /// Route a task-local Cell guard projection. The field/path descriptors stay
 /// in the structured MIR operation; this row carries only the selected kernel
 /// ABI and never a synthesized member string.
@@ -4830,13 +8152,7 @@ pub(super) fn core_closure_route(
             3,
             vec![false, false, false],
         ),
-        MirCoreClosureKind::Serve => (
-            "core.http",
-            "serve",
-            "jet_http_serve",
-            2,
-            vec![true, false],
-        ),
+        MirCoreClosureKind::Serve => ("core.http", "serve", "jet_http_serve", 2, vec![true, false]),
         MirCoreClosureKind::OnInterrupt => (
             "core.sys",
             "on_interrupt",
@@ -4844,13 +8160,7 @@ pub(super) fn core_closure_route(
             1,
             vec![false],
         ),
-        MirCoreClosureKind::Guard => (
-            "core.mem.scope",
-            "guard",
-            "jet_scope_guard",
-            1,
-            vec![false],
-        ),
+        MirCoreClosureKind::Guard => ("core.mem.scope", "guard", "jet_scope_guard", 1, vec![false]),
         MirCoreClosureKind::OnCommit => (
             "core.transaction",
             "on_commit",
@@ -4964,7 +8274,9 @@ pub(super) fn require_eq_condition_route(
     right: &Type,
 ) -> Result<TPreludeRoute, LowerError> {
     if left != right {
-        return Err(route_error("require_eq operands have different checked types"));
+        return Err(route_error(
+            "require_eq operands have different checked types",
+        ));
     }
     prelude_route_row(
         MirPreludeFamily::BuiltinMethod,
@@ -5005,7 +8317,9 @@ pub(super) fn require_stop_route(
             "require_eq",
             "jet_require_eq",
             10,
-            &[false, true, true, true, false, true, true, false, false, true],
+            &[
+                false, true, true, true, false, true, true, false, false, true,
+            ],
             Some(Effect::Panic),
         ),
         "panic" if value_arity == 1 => (
@@ -5062,7 +8376,6 @@ pub(super) fn index_miss_route(
         "index miss",
     )
 }
-
 
 pub(super) fn lane_index_route(
     lane_ty: &str,
@@ -5363,8 +8676,8 @@ pub(super) fn precise_builtin_route(
         // parts by value, `from_str` and every method borrow.
         format!("jet_{}_{func}", type_name.to_ascii_lowercase())
     };
-    let by_value = matches!(func, "new" | "from_parts")
-        || (func.starts_with("from_") && func != "from_str");
+    let by_value =
+        matches!(func, "new" | "from_parts") || (func.starts_with("from_") && func != "from_str");
     let borrow_mask = vec![!by_value; arity];
     prelude_route_row(
         MirPreludeFamily::PreciseBuiltin,
@@ -5442,7 +8755,6 @@ pub(super) fn data_entries_to_map_route(
     )
 }
 
-
 pub(super) fn todo_route(
     result: &Type,
     _carrier: &TFailureCarrier,
@@ -5465,7 +8777,6 @@ pub(super) fn todo_route(
         "todo",
     )
 }
-
 
 pub(super) fn string_format_route(
     format: &crate::AST::StrFormat,
@@ -5537,9 +8848,7 @@ pub(super) fn string_format_route(
                 vec![false, false]
             },
         ),
-        crate::AST::StrFormat::Pad { .. } => {
-            ("pad", "jet_fmt_pad", 3, vec![true, false, true])
-        }
+        crate::AST::StrFormat::Pad { .. } => ("pad", "jet_fmt_pad", 3, vec![true, false, true]),
         crate::AST::StrFormat::PadLeft { .. } => {
             ("pad_left", "jet_fmt_pad_left", 3, vec![true, false, true])
         }
@@ -5618,7 +8927,6 @@ pub(super) fn quantity_format_route(
         "quantity magnitude formatting",
     )
 }
-
 
 pub(super) fn static_prelude_route(
     module: &str,
@@ -5742,9 +9050,7 @@ pub(super) fn overflow_opt_route(
         ));
     }
     let (mode, op_name, arity, effect) = match (prefix, op) {
-        ("checked", "add" | "sub" | "mul" | "div" | "rem" | "pow") => {
-            ("checked", op, 2, None)
-        }
+        ("checked", "add" | "sub" | "mul" | "div" | "rem" | "pow") => ("checked", op, 2, None),
         ("checked_policy", "add" | "sub" | "mul" | "div" | "rem" | "pow") => {
             ("trap", op, 4, Some(Effect::Panic))
         }
@@ -5752,9 +9058,7 @@ pub(super) fn overflow_opt_route(
         ("wrapping", "div" | "pow") => ("wrapping", op, 4, Some(Effect::Panic)),
         ("saturating", "add" | "sub" | "mul") => ("saturating", op, 2, None),
         ("saturating", "div" | "pow") => ("saturating", op, 4, Some(Effect::Panic)),
-        ("rotate_left" | "rotate_right", "rotate") => {
-            (prefix, "rotate", 4, Some(Effect::Panic))
-        }
+        ("rotate_left" | "rotate_right", "rotate") => (prefix, "rotate", 4, Some(Effect::Panic)),
         _ => {
             return Err(route_error(format!(
                 "unsupported fixed-width overflow operation `{prefix}_{op}`",
@@ -5905,7 +9209,6 @@ pub(super) fn failure_note_route(
         "failure journey frame",
     )
 }
-
 
 pub(super) fn range_checked_ctor_route(
     name: &str,
@@ -6453,13 +9756,31 @@ fn host_recv_borrow_mask(arity: usize) -> &'static [bool] {
         7 => &[true, false, false, false, false, false, false],
         8 => &[true, false, false, false, false, false, false, false],
         9 => &[true, false, false, false, false, false, false, false, false],
-        10 => &[true, false, false, false, false, false, false, false, false, false],
-        11 => &[true, false, false, false, false, false, false, false, false, false, false],
-        12 => &[true, false, false, false, false, false, false, false, false, false, false, false],
-        13 => &[true, false, false, false, false, false, false, false, false, false, false, false, false],
-        14 => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false],
-        15 => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
-        _ => &[true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+        10 => &[
+            true, false, false, false, false, false, false, false, false, false,
+        ],
+        11 => &[
+            true, false, false, false, false, false, false, false, false, false, false,
+        ],
+        12 => &[
+            true, false, false, false, false, false, false, false, false, false, false, false,
+        ],
+        13 => &[
+            true, false, false, false, false, false, false, false, false, false, false, false,
+            false,
+        ],
+        14 => &[
+            true, false, false, false, false, false, false, false, false, false, false, false,
+            false, false,
+        ],
+        15 => &[
+            true, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false,
+        ],
+        _ => &[
+            true, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false,
+        ],
     }
 }
 
@@ -6476,7 +9797,13 @@ pub(super) fn host_method_route(
         shape = inner;
     }
     if let Type::Named(name) = shape {
-        let name = name.rsplit("::").next().unwrap_or(name.as_str()).rsplit('.').next().unwrap_or(name.as_str());
+        let name = name
+            .rsplit("::")
+            .next()
+            .unwrap_or(name.as_str())
+            .rsplit('.')
+            .next()
+            .unwrap_or(name.as_str());
         if matches!(
             name,
             crate::Syntax::TYPE_BUILD_CONTEXT
@@ -6526,7 +9853,7 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked Pool host method `{method}`"
-                )))
+                )));
             }
         },
         Type::Shared(_) => match (method, arg_count) {
@@ -6579,7 +9906,7 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked Shared host method `{method}`"
-                )))
+                )));
             }
         },
         Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_SNAPSHOT => match method {
@@ -6592,24 +9919,17 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked SharedSnapshot host method `{method}`"
-                )))
+                )));
             }
         },
-        Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_WEAK => {
-            match method {
-                "upgrade" => (
-                    "Shared.Weak.upgrade",
-                    "jet_shared_weak_upgrade",
-                    1,
-                    &[true],
-                ),
-                _ => {
-                    return Err(route_error(format!(
-                        "unknown checked Shared.Weak host method `{method}`"
-                    )))
-                }
+        Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_WEAK => match method {
+            "upgrade" => ("Shared.Weak.upgrade", "jet_shared_weak_upgrade", 1, &[true]),
+            _ => {
+                return Err(route_error(format!(
+                    "unknown checked Shared.Weak host method `{method}`"
+                )));
             }
-        }
+        },
         Type::Apply { name, .. } if name == "Cell" => match method {
             "get" => ("Cell.get", "jet_cell_get", 1, &[true]),
             "guard_read" => ("Cell.guard_read", "jet_cell_guard_read", 1, &[true]),
@@ -6622,16 +9942,11 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked Cell host method `{method}`"
-                )))
+                )));
             }
         },
         Type::Apply { name, .. } if name == "CellReadGuard" => match method {
-            "get" => (
-                "CellReadGuard.get",
-                "jet_cell_read_guard_get",
-                1,
-                &[true],
-            ),
+            "get" => ("CellReadGuard.get", "jet_cell_read_guard_get", 1, &[true]),
             "read" => (
                 "CellReadGuard.read",
                 "jet_cell_read_guard_read",
@@ -6641,16 +9956,11 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked CellReadGuard host method `{method}`"
-                )))
+                )));
             }
         },
         Type::Apply { name, .. } if name == "CellEditGuard" => match method {
-            "get" => (
-                "CellEditGuard.get",
-                "jet_cell_edit_guard_get",
-                1,
-                &[true],
-            ),
+            "get" => ("CellEditGuard.get", "jet_cell_edit_guard_get", 1, &[true]),
             "set" => (
                 "CellEditGuard.set",
                 "jet_cell_edit_guard_set",
@@ -6672,7 +9982,7 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked CellEditGuard host method `{method}`"
-                )))
+                )));
             }
         },
         Type::Apply { name, .. } if name == "ExpiringSecret" => match method {
@@ -6685,14 +9995,14 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked ExpiringSecret host method `{method}`"
-                )))
+                )));
             }
         },
         _ => {
             return Err(route_error(format!(
                 "unknown checked host method `{method}` on `{}`",
                 recv.name()
-            )))
+            )));
         }
     };
     prelude_route_row(

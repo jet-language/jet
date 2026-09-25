@@ -130,7 +130,12 @@ fn digest_shape_ok(td: TDigest) -> Bool {
     sum := Float{0.0}
     loop i in 0..<td.means.len() {
         if !math.is_finite(td.means[i]) || !math.is_finite(td.weights[i]) || td.weights[i] <= (Float{0.0}) -> return false
+        if i > 0 && td.means[i] < td.means[i - 1] -> return false
         sum = sum + td.weights[i]
     }
-    sum > (Float{0.0}) && math.is_finite(sum)
+    if !math.is_finite(sum) || sum <= (Float{0.0}) -> return false
+    difference :: math.abs(sum - td.total)
+    scale := math.abs(td.total)
+    if scale < (Float{1.0}) -> scale = Float{1.0}
+    difference <= Float{0.000000001} * scale
 }

@@ -1,10 +1,8 @@
 use super::core_module_path_from_receiver;
 use super::refusal;
-use crate::Codegen::is_db_value_type_name;
-use crate::Codegen::is_json_type_name;
-use crate::Codegen::is_json_variant;
-use crate::Codegen::is_key_variant;
-use crate::Codegen::mangle_generated;
+use crate::AST::{
+    BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type,
+};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
@@ -18,10 +16,12 @@ use crate::Codegen::TIR::is_prelude_struct_name;
 use crate::Codegen::TIR::method_call_in_subset;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_lit_constructible;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::mangle_generated;
 use crate::Syntax;
-use crate::AST::{
-    BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type,
-};
 use std::collections::HashSet;
 
 /// I2 self-report: a refusal records the expression it was about before the
@@ -786,10 +786,16 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 });
             }
             // Shared Prelude unit enums lower through their registered variant names.
-            if matches!(resolved_type,
-                "FontStyle" | "GlyphShaper" | "WebFormValueType" | "WebFormControl"
-                    | "WebFormValidationTiming" | "WebTableSortDirection" | "WebTablePageMode")
-            {
+            if matches!(
+                resolved_type,
+                "FontStyle"
+                    | "GlyphShaper"
+                    | "WebFormValueType"
+                    | "WebFormControl"
+                    | "WebFormValidationTiming"
+                    | "WebTableSortDirection"
+                    | "WebTablePageMode"
+            ) {
                 return args.is_empty()
                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_type)
                         .is_some_and(|variants| variants.contains(&variant.as_str()));

@@ -2588,18 +2588,39 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    let core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
+    let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
             bundle.modules.iter().any(|module| {
                 module.imports.iter().any(|import| {
-                    core_module_path(import).as_deref() == Some(source_module.module)
+                    core_source_import_module(import).as_deref() == Some(source_module.module)
                 })
             })
         })
         .collect::<Vec<_>>();
-    for source_module in core_source_modules {
+    let mut scheduled_core_source_modules = core_source_modules
+        .iter()
+        .map(|source_module| source_module.module)
+        .collect::<HashSet<_>>();
+    // `Core/text/string.jet` is a compiler-private source part of `core.text`.
+    // Schedule it beside its public owner without adding a public module row or
+    // teaching ordinary Core import resolution about the reserved identity.
+    if scheduled_core_source_modules
+        .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
+    {
+        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+        ) {
+            if scheduled_core_source_modules.insert(part.source.module) {
+                core_source_modules.push(part.source);
+            }
+        }
+    }
+    let mut core_source_module_index = 0;
+    while core_source_module_index < core_source_modules.len() {
+        let source_module = core_source_modules[core_source_module_index];
+        core_source_module_index += 1;
         let source = source_module.source.to_string();
         let display = source_module.path.to_string();
         let source_for_parse = crate::Package::mask_inline_package_source(&source)
@@ -2626,6 +2647,30 @@ fn load_entry_with_overlays_mode_on_stack(
                 ));
             }
         };
+        // Source Core packages can call other source-owned Core members.
+        // Include their transitive import closure so lowering has each private
+        // module alias available, rather than falling back to a Core ABI call.
+        for dependency in program.imports.iter().filter_map(core_source_import_module) {
+            if let Some(dependency) =
+                jet_foundation::CoreModuleExports::core_source_module(&dependency)
+            {
+                if scheduled_core_source_modules.insert(dependency.module) {
+                    core_source_modules.push(*dependency);
+                }
+            }
+            // A source package importing `core.text` also schedules the
+            // compiler-private String receiver part. It remains keyed by its
+            // reserved internal module identity, not by `core.text.string`.
+            if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
+                if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+                    jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+                ) {
+                    if scheduled_core_source_modules.insert(part.source.module) {
+                        core_source_modules.push(part.source);
+                    }
+                }
+            }
+        }
         // Source metadata selects the public members that have crossed the
         // Core cutover. Keep private helpers and declarations needed by those
         // members, but do not compile legacy public wrappers that still use
@@ -4159,7 +4204,21 @@ fn load_file(
     let module_idx = modules.len();
     path_to_idx.insert(norm.clone(), module_idx);
 
-    let imports = std::mem::take(&mut prog.imports);
+    let mut imports = std::mem::take(&mut prog.imports);
+    // Sema binds module/file aliases before checking any member imports,
+    // regardless of source order. Classify ambiguous dotted imports against
+    // that same set, without treating an import as its own prefix binding.
+    let mut member_module_aliases: HashMap<String, usize> = HashMap::new();
+    for item in &prog.items {
+        if let Item::CodeModule(module) = item {
+            *member_module_aliases.entry(module.name.clone()).or_default() += 1;
+        }
+    }
+    for imp in &imports {
+        if matches!(imp.kind, ImportKind::File(..) | ImportKind::Module(..)) {
+            *member_module_aliases.entry(imp.import_alias()).or_default() += 1;
+        }
+    }
     for declaration in &mut prog.policy_declarations {
         declaration.source = display.to_string();
     }
@@ -4239,7 +4298,7 @@ fn load_file(
         rule_facts: std::mem::take(&mut prog.rule_facts),
     });
 
-    for imp in &imports {
+    for (import_idx, imp) in imports.iter_mut().enumerate() {
         let is_foreign = is_foreign_namespace_import(imp)
             .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
         // S59: C `use` forms use the reserved `c.` root legitimately.
@@ -4269,6 +4328,46 @@ fn load_file(
             project_part_failures,
         ) {
             Ok(p) => p,
+            Err(d) if d.code == "E0603" => {
+                // An aliased `use alpha.value as local` parses as a dotted
+                // module path. A real module with that full path wins; only
+                // when no such module exists and `alpha` is declared here as
+                // a module can this denote the same member import as
+                // `use alpha.[value as local]`. Keep the member in the
+                // existing Unqualified shape for all checked consumers.
+                if let ImportKind::Module(name, name_span) = &imp.kind {
+                    if let Some((prefix, member)) = name.split_once('.') {
+                        let other_bindings = member_module_aliases
+                            .get(prefix)
+                            .copied()
+                            .unwrap_or_default()
+                            > usize::from(imp.alias == prefix);
+                        if other_bindings {
+                            let prefix_span =
+                                Span::new(name_span.start, name_span.start + prefix.len());
+                            let member_span = Span::new(prefix_span.end + 1, name_span.end);
+                            let local_span = if imp.alias_span.start == imp.span.start {
+                                Span::new(name_span.end - imp.alias.len(), name_span.end)
+                            } else {
+                                imp.alias_span
+                            };
+                            imp.kind = ImportKind::Unqualified {
+                                module_alias: prefix.to_string(),
+                                module_alias_span: prefix_span,
+                                items: vec![(member.to_string(), Some(imp.alias.clone()))],
+                                items_span: member_span,
+                                span: imp.span,
+                            };
+                            imp.item_spans = vec![member_span];
+                            imp.local_spans = vec![local_span];
+                            modules[module_idx].imports[import_idx] = imp.clone();
+                            continue;
+                        }
+                    }
+                }
+                stack.pop();
+                return Err(LoaderError::at(display, &source, vec![d]));
+            }
             Err(d) => {
                 stack.pop();
                 return Err(LoaderError::at(display, &source, vec![d]));
@@ -4528,6 +4627,21 @@ fn resolve_import(
 
 pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
     imp.core_module_path()
+}
+
+/// Resolve Core source package imports, including selective `use core.x.[T]`
+/// imports that `ImportDecl::core_module_path` intentionally leaves unqualified.
+fn core_source_import_module(imp: &ImportDecl) -> Option<String> {
+    core_module_path(imp).or_else(|| {
+        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+            return None;
+        };
+        (module_alias == Syntax::CORE_SHORT
+            || module_alias == Syntax::CORE_CANONICAL
+            || module_alias == "app"
+            || module_alias.starts_with("core."))
+        .then(|| module_alias.clone())
+    })
 }
 
 pub use crate::Syntax::{

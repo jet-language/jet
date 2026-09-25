@@ -40,13 +40,12 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
     let id = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
+    common::test_scratch_root("allocator_families").join(format!(
         "jet_allocator_{label}_{}_{}",
         std::process::id(),
         id
     ))
 }
-
 fn compile_rust_harness(body: &str) -> std::process::Output {
     let dir = temp_dir("runtime");
     std::fs::create_dir_all(&dir).unwrap();
@@ -899,8 +898,9 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     if !common::have_rustc() {
         return;
     }
-    let project =
+    let source_project =
         std::fs::canonicalize("examples/features/memory/program_allocator").unwrap();
+    let staged = common::ProjectScratch::for_project(&source_project, "program-allocator");
     let expected =
         std::fs::read_to_string("examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
@@ -910,7 +910,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(args)
-            .current_dir(&project)
+            .current_dir(&staged.path)
             .env("NO_COLOR", "1")
             .env(
                 "JET_RUN_CACHE_DIR",
@@ -924,5 +924,9 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(String::from_utf8_lossy(&output.stdout), expected, "{name}");
+        assert!(
+            !source_project.join(".jet").exists(),
+            "{name} created `.jet` in the checked-in allocator project"
+        );
     }
 }

@@ -67,6 +67,7 @@ pub fn read_all_input() -[IO, Time.Wait]> String !IOError { core.term.read_all_i
 pub fn readline() -[IO, Time.Wait]> String !IOError { core.term.readline() }
 
 pub fn read_until(delimiter: String) -[IO, Time.Wait]> String !IOError {
+    if delimiter.len() == 0 -> return Err(term_input_error("read_until", delimiter, "delimiter must not be empty"))
     core.term.read_until(delimiter)
 }
 
@@ -81,6 +82,7 @@ pub fn binwrite(path: String, bytes: [U8]) !IOError -[IO, Time.Wait]> {
 pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool { core.term.confirm(prompt) }
 
 pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String !IOError {
+    if options.len() == 0 -> return Err(term_input_error("choose", prompt, "choose needs at least one item"))
     core.term.choose(prompt, options)
 }
 
@@ -112,7 +114,16 @@ pub struct WinSize {
     pub w: Int
     pub h: Int
 }
-pub fn progress(label: String) -[IO, Time.Wait]> { core.term.progress(label) }
+pub fn progress(label: String) !IOError -[IO, Time.Wait]> { core.term.progress(label) }
+
+fn term_input_error(operation: String, resource: String, cause: String) -> IOError {
+    IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: Val(resource),
+        os_code: None,
+        cause: Val("{operation}: {cause}"),
+    })
+}
 fn sgr(spec: String) -> String {
     parts := [String]{}
     cur := [U8]{}
@@ -208,6 +219,7 @@ fn parse_int(text: String) -> ?Int {
     loop b in text.bytes() {
         d :: b
         if d < 48 || d > 57 -> return None
+        if n > 922337203685477580 || (n == 922337203685477580 && d > 7) -> return None
         n = n * 10 + (d - 48)
         any = true
     }

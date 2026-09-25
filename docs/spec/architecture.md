@@ -727,12 +727,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` (and,
   for parts a comptime-reachable seam crate must also call, `crates/jet-foundation`
   prelude modules) are the canonical source for compiler-known Core behavior;
-  rebuild `jet` before
-  smoke-testing any change because `include_str!` snapshots them into the
-  binary. A first-party package with a separately buildable source tree must
-  not maintain a copied fallback template. `core.archive` is the concrete
-  model: `corelib/core.archive/pkgs/archive/src/lib.rs` is consumed directly by
-  both CoreProvider and the hidden bridge fallback.
+  rebuild `jet` before smoke-testing any change because `include_str!` snapshots
+  them into the binary. A source-owned Core module such as `core.archive` is
+  compiled from its canonical `.jet` module through the ordinary frontend; it
+  does not keep a copied fallback template or a hidden Rust semantic bridge.
 - **R11 — Generated code enters the front end.** Every typed build-time
   generation step — a derive body, a comptime splice, or a metaprogram — parses
   its item template with the ordinary grammar, fills typed holes at expansion,

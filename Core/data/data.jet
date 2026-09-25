@@ -14,6 +14,7 @@ use core.files.[FileReader]
 use core.math as math
 use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
+use core.crypto.[sha256]
 module arrow
 
 module loader
@@ -64,7 +65,7 @@ pub struct DataError {
 }
 
 impl DataError {
-    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError {
+    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError !Never {
         return DataError{
             kind: kind,
             operation: ~path,
@@ -76,7 +77,7 @@ impl DataError {
         }
     }
 }
-fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError {
+fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError !Never {
     DataError{
         kind: kind,
         operation: operation,
@@ -88,7 +89,7 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
     }
 }
 
-fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError {
+fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError !Never {
     DataError{
         kind: kind,
         operation: operation,
@@ -513,11 +514,11 @@ pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> !DataError 
 }
 
 pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
-    make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "", limits)
+    make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
 
 pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> !DataError {
-    make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "", limits)
+    make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "local", limits)
 }
 
 pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> !DataError {
@@ -557,6 +558,7 @@ pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStr
 pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> !DataError {
     core.data.json_reader<T>(^reader, limits)
 }
+
 pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> !DataError {
     if loader.cancelled {
         return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
@@ -564,19 +566,28 @@ pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> Dat
     core.data.snapshot<T>(&loader)
 }
 
+
 pub fn schema<T>(rows: [T]) -> [DataColumn] { core.data.schema(rows) }
 
 pub fn count<T>(rows: [T]) -> Int { rows.len() }
 
 pub fn describe(values: [Float]) -> DataSummary !DataError {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
-    total :: compensated_sum(values, "describe") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while describing data", "describe"))
+    total := Float{0.0}
+    if compensated_sum(values, "describe") == {
+        .Ok(value) -> total = value
+        .Err(error) -> return Err(error)
+    }
     mean_value := total / Float{values.len()}
     if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "describe"))
     minimum :: min(values) ?? return Err(data_error(DataErrorKind.NonFinite, "minimum failed while describing data", "describe"))
     maximum :: max(values) ?? return Err(data_error(DataErrorKind.NonFinite, "maximum failed while describing data", "describe"))
     middle :: median(values) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
-    spread :: variance(values) ?? return Err(data_error(DataErrorKind.Overflow, "variance failed while describing data", "describe"))
+    spread := Float{0.0}
+    if variance(values) == {
+        .Ok(value) -> spread = value
+        .Err(error) -> return Err(error)
+    }
     deviation := math.sqrt(spread)
     if nonfinite(deviation) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "describe"))
     Ok(DataSummary{
@@ -591,13 +602,18 @@ pub fn describe(values: [Float]) -> DataSummary !DataError {
     })
 }
 
+
 pub fn sum(values: [Float]) -> Float !DataError {
     compensated_sum(values, "sum")
 }
 
 pub fn mean(values: [Float]) -> Float !DataError {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
-    total :: compensated_sum(values, "mean") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while computing mean", "mean"))
+    total := Float{0.0}
+    if compensated_sum(values, "mean") == {
+        .Ok(value) -> total = value
+        .Err(error) -> return Err(error)
+    }
     mean_value := total / Float{values.len()}
     if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing mean", "mean"))
     Ok(normalize_zero(mean_value))
@@ -606,23 +622,22 @@ pub fn mean(values: [Float]) -> Float !DataError {
 pub fn min(values: [Float]) -> Float !DataError {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
     first :: values[0]
-    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "min"))
+    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
     out := first
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "min"))
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
         if value < out -> out = value
     }
     Ok(normalize_zero(out))
 }
 
-
 pub fn max(values: [Float]) -> Float !DataError {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
     first :: values[0]
-    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "max"))
+    if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
     out := first
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "max"))
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
         if value > out -> out = value
     }
     Ok(normalize_zero(out))
@@ -634,7 +649,7 @@ pub fn variance(values: [Float]) -> Float !DataError {
     m2 := Float{0.0}
     n := Float{0.0}
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "variance"))
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "variance"))
         n = n + Float{1.0}
         delta := value - mean_value
         mean_value = mean_value + delta / n
@@ -649,10 +664,15 @@ pub fn variance(values: [Float]) -> Float !DataError {
 }
 
 pub fn stddev(values: [Float]) -> Float !DataError {
-    value :: variance(values) ?? return Err(data_error(DataErrorKind.Overflow, "variance failed while computing standard deviation", "stddev"))
+    value := Float{0.0}
+    if variance(values) == {
+        .Ok(result) -> value = result
+        .Err(error) -> return Err(error)
+    }
     result := math.sqrt(value)
     if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing standard deviation", "stddev"))
     Ok(normalize_zero(result))
+
 }
 
 pub fn median(values: [Float]) -> Float !DataError {
@@ -667,7 +687,7 @@ pub fn quantile(values: [Float], q: Float) -> Float !DataError {
     limits := DataLimits.safe()
     if values.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows exceeded", "quantile"))
     loop value in values {
-        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "value is not finite", "quantile"))
+        if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "quantile"))
     }
     sorted := sort_floats(values)
     pos := q * Float{sorted.len() - 1}
@@ -686,10 +706,20 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] !DataError {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
     if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
+    loop index in 0..<values.len() {
+        if nonfinite(values[index]) {
+            return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", "rolling_mean", index))
+        }
+    }
     out := [Float]{}
     loop i in 0..<values.len() {
-        start := i - window + 1
-        total :: compensated_sum_range(values, start, i + 1, "rolling_mean") ?? return Err(data_error(DataErrorKind.Overflow, "sum failed while computing rolling mean", "rolling_mean"))
+        start := 0
+        if window < i + 1 -> start = i - window + 1
+        total := Float{0.0}
+        if compensated_sum_range(values, start, i + 1, "rolling_mean") == {
+            .Ok(value) -> total = value
+            .Err(error) -> return Err(error)
+        }
         n := i + 1 - start
         mean_value := total / Float{n}
         if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
@@ -858,8 +888,12 @@ pub fn bar_text(groups: [Group<String, Int>]) -> String !DataError {
         if group.value < 0 {
             return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_text", index))
         }
+        value := Float{group.value}
+        if nonfinite(value) {
+            return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_text", index))
+        }
         labels.push(group.key)
-        values.push(Float{group.value})
+        values.push(value)
     }
     Ok(render_bar_text(labels, values))
 }
@@ -872,8 +906,12 @@ pub fn bar_svg(groups: [Group<String, Int>]) -> String !DataError {
         if group.value < 0 {
             return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_svg", index))
         }
+        value := Float{group.value}
+        if nonfinite(value) {
+            return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_svg", index))
+        }
         labels.push(group.key)
-        values.push(Float{group.value})
+        values.push(value)
     }
     Ok(render_bar_svg(labels, values))
 }
@@ -915,18 +953,38 @@ pub fn require_bridge(provider: String) !DataError {
 }
 
 fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> !DataError {
+    if !valid_encoding_limits(~limits.encoding) {
+        return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "data.loader"))
+    }
     if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
-        return Err(data_error(DataErrorKind.Limit, "data limits must be positive", "data.loader"))
+        return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "data.loader"))
+    }
+    if !valid_public_text(~locator, false) {
+        return Err(data_error(DataErrorKind.InvalidArgument, "source locator is invalid", "data.loader"))
+    }
+    if member.len() > 0 && !valid_public_text(~member, false) {
+        return Err(data_error(DataErrorKind.InvalidArgument, "archive member is invalid", "data.loader"))
+    }
+    if kind != DataLoaderKind.File && member.len() > 0 {
+        return Err(data_error(DataErrorKind.InvalidArgument, "only file loaders may carry an archive member", "data.loader"))
+    }
+    loop parameter in parameters {
+        if !valid_public_text(~parameter, true) {
+            return Err(data_error(DataErrorKind.InvalidArgument, "loader parameter is invalid", "data.loader"))
+        }
+    }
+    if !valid_public_text(~authority_name, false) || !valid_authority(~authority_name) {
+        return Err(data_error(DataErrorKind.InvalidArgument, "loader authority is invalid", "data.loader"))
     }
     format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
-    source := DataSourceIdentity{kind: kind, locator: ~locator, member: member, parameters: parameters}
+    source := DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
     authority := DataAuthority{scope: ~authority_name, revision: ""}
     status := DataLoaderStatus{
-        identity: locator,
+        identity: "",
         freshness: DataFreshness.Pending,
         invalidated_by: .NoCause,
         error: "",
-        cleanup: "",
+        cleanup: "none",
         buffered_bytes: 0,
         backpressure: false,
         last_good: false,
@@ -944,7 +1002,85 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     })
 }
 
-fn parse_format(name: String) -> ?DataFormat {
+fn public_parameters(values: [String]) -> [String] {
+    out := [String]{}
+    loop value in values -> out.push(public_parameter(~value))
+    out
+}
+
+fn public_parameter(value: String) -> String {
+    normalized := trim(value)
+    if normalized.len() == 0 -> return ""
+    parts :: normalized.split("=").to_list()
+    if parts.len() < 2 -> return "value-{sha256(normalized.bytes()).hex()}"
+    key :: trim(parts[0])
+    if key.len() == 0 -> return "value-{sha256(normalized.bytes()).hex()}"
+    parameter_value :: parts[1]
+    upper_key :: upper(~key)
+    upper_value :: upper(~parameter_value)
+    sensitive_key := upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
+    sensitive_value := upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
+    if sensitive_key || sensitive_value -> return "{key}=<redacted>"
+    normalized
+}
+
+fn public_locator(kind: DataLoaderKind, locator: String) -> String {
+    if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
+    if kind != DataLoaderKind.URL -> return ~locator
+    fragment_parts :: locator.split("#").to_list()
+    without_fragment :: fragment_parts[0]
+    query_parts :: without_fragment.split("?").to_list()
+    base := query_parts[0]
+    scheme_parts :: base.split("://").to_list()
+    if scheme_parts.len() > 1 {
+        path_parts :: scheme_parts[1].split("/").to_list()
+        authority_parts :: path_parts[0].split("@").to_list()
+        authority :: authority_parts[authority_parts.len() - 1]
+        base = "{scheme_parts[0]}://{authority}"
+        loop i in 1..<path_parts.len() -> base = "{base}/{path_parts[i]}"
+    }
+    if query_parts.len() == 1 -> return base
+    public_query := [String]{}
+    loop parameter in query_parts[1].split("&") -> public_query.push(public_parameter(~parameter))
+    "{base}?{public_query.join("&")}"
+}
+
+fn valid_encoding_limits(limits: EncodingLimits) -> Bool !Never {
+    if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> return false
+    if limits.max_depth < 1 || limits.max_depth > 4096 -> return false
+    if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> return false
+    if limits.max_total_bytes != None {
+        total :: limits.max_total_bytes ?? 0
+        if total < 0 -> return false
+    }
+    if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> return false
+    if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 -> return false
+    true
+}
+
+fn valid_public_text(text: String, allow_empty: Bool) -> Bool !Never {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return allow_empty
+    if raw.len() > 4096 -> return false
+    has_nonspace := false
+    loop byte in raw {
+        if byte < (U8{32}) || byte == (U8{127}) -> return false
+        if byte != (U8{32}) -> has_nonspace = true
+    }
+    has_nonspace
+}
+
+fn valid_authority(text: String) -> Bool !Never {
+    normalized := upper(~text)
+    if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
+    if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
+    loop byte in text.bytes() {
+        if byte == (U8{61}) || byte == (U8{38}) -> return false
+    }
+    true
+}
+
+fn parse_format(name: String) -> ?DataFormat !Never {
     normalized := upper(trim(name))
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
@@ -972,11 +1108,14 @@ fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: Strin
     loop index in start..<end {
         value :: values[index]
         if nonfinite(value) {
-            return Err(data_error_at(DataErrorKind.NonFinite, "value is not finite", operation, index))
+            return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", operation, index))
         }
-        correction_term := value - correction
-        next_total := total + correction_term
-        correction = (next_total - total) - correction_term
+        next_total := total + value
+        if math.fabs(total) >= math.fabs(value) {
+            correction = correction + (total - next_total) + value
+        } else {
+            correction = correction + (value - next_total) + total
+        }
         total = next_total
         if nonfinite(total) || nonfinite(correction) {
             return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))

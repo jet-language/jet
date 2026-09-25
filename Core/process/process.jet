@@ -50,10 +50,10 @@ pub fn check(receipt: ProcessReceipt) !IOError {
 
 pub fn stdin_text(spec: ProcessSpec, text: String) !IOError -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
-    _ :: child.stdin.write(text)
+    child.stdin.write(text)
     child.stdin.close()
-    _ :: child.wait()
-    return Ok()
+    receipt :: child.wait()
+    check(receipt)
 }
 
 pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String !IOError {
@@ -119,7 +119,8 @@ pub fn which(name: String) -[FS, Env]> ?String {
         return None
     }
     path :: core.sys.get("PATH") ?? return None
-    separator :: path_separator_for_platform(core.sys.family())
+    family :: core.sys.family() ?? return None
+    separator :: path_separator_for_platform(family)
     loop directory in path_parts(path, separator) {
         candidate :: path_join(directory, name)
         if path_is_file(candidate) -> return Val(candidate)

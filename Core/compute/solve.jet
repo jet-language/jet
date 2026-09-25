@@ -4,6 +4,7 @@
 // returns an opaque success marker: malformed, non-square, non-finite, and
 // singular systems are reported through ComputeError.
 use core.math as math
+use core as core
 use core.compute.[Tensor, ComputeError]
 
 pub struct LinearSolver {
@@ -26,7 +27,7 @@ pub fn dense(a: Tensor, b: Tensor) -> Tensor !ComputeError {
     if b.shape[0] != n -> return Err(ComputeError.Shape)
     rhs_cols :: if b.shape.len() == 2 -> b.shape[1] else -> 1
     factors :: factorize(a.data, n, tensor_profile(a))
-    data :: solve_factors(factors.factors, factors.pivots, n, b.data, rhs_cols, b.shape.len() == 1, tensor_profile(a))
+    data :: solve_factors(factors.factors, factors.pivots, n, b.data, rhs_cols, b.shape.len() == 1, tensor_profile(a), factors.pivot_threshold)
     Ok(Tensor{shape: copy_i(b.shape), data: data, device: a_device, numeric_profile: tensor_profile(a)})
 }
 
@@ -42,11 +43,11 @@ pub fn lu(a: Tensor) -> LinearSolver !ComputeError {
 struct Factorization {
     factors: [Float]
     pivots: [Int]
+    pivot_threshold: Float
 }
 
-@c_pivot_tolerance :: Float{0.000000000000001}
 
-@c_max_elements :: 16777216
+c_max_elements :: 16777216
 
 fn validate_matrix(tensor: Tensor) !ComputeError {
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
@@ -60,8 +61,9 @@ fn validate_matrix(tensor: Tensor) !ComputeError {
     }
     loop value in tensor.data {
         if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)
-        if profile == "F32Strict+Reproducible" && !f32_representable(value) {
-            return Err(ComputeError.Arithmetic)
+        if profile == "F32Strict+Reproducible" {
+            representable :: f32_representable(value)
+            if !representable -> return Err(ComputeError.Arithmetic)
         }
     }
     return
@@ -80,8 +82,9 @@ fn validate_rhs(tensor: Tensor) !ComputeError {
     }
     loop value in tensor.data {
         if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)
-        if profile == "F32Strict+Reproducible" && !f32_representable(value) {
-            return Err(ComputeError.Arithmetic)
+        if profile == "F32Strict+Reproducible" {
+            representable :: f32_representable(value)
+            if !representable -> return Err(ComputeError.Arithmetic)
         }
     }
     return
@@ -91,12 +94,12 @@ fn checked_numel(shape: [Int]) -> Int !ComputeError {
     if shape.len() == 0 -> return Err(ComputeError.Shape)
     n := 1
     loop dim in shape {
-        if dim < 0 || dim > @c_max_elements -> return Err(ComputeError.Shape)
+        if dim < 0 || dim > c_max_elements -> return Err(ComputeError.Shape)
         if dim == 0 {
             n = 0
             next
         }
-        if n > @c_max_elements /% dim -> return Err(ComputeError.Shape)
+        if n > c_max_elements /% dim -> return Err(ComputeError.Shape)
         n = n * dim
     }
     Ok(n)
@@ -105,6 +108,13 @@ fn checked_numel(shape: [Int]) -> Int !ComputeError {
 fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeError {
     factors := copy_f(input)
     pivots := [Int]{}
+    matrix_scale := Float{0.0}
+    loop value in input {
+        magnitude :: abs_f(value)
+        if magnitude > matrix_scale -> matrix_scale = magnitude
+    }
+    pivot_tolerance :: Float{0.000000000000001}
+    pivot_threshold :: profile_round(matrix_scale * pivot_tolerance, profile) ?? return Err(ComputeError.Arithmetic)
     loop k in 0..<n {
         pivot := k
         best := abs_f(factors[k * n + k])
@@ -115,7 +125,7 @@ fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeE
                 pivot = i
             }
         }
-        if best < @c_pivot_tolerance -> return Err(ComputeError.Singular)
+        if best <= pivot_threshold -> return Err(ComputeError.Singular)
         pivots.push(pivot)
         if pivot != k {
             loop j in 0..<n {
@@ -124,22 +134,19 @@ fn factorize(input: [Float], n: Int, profile: String) -> Factorization !ComputeE
                 factors[pivot * n + j] = tmp
             }
         }
-        diagonal :: factors[k * n + k]
         loop i in (k + 1)..<n {
-            multiplier :: factors[i * n + k] / diagonal
-            if !profile_value_ok(multiplier, profile) -> return Err(ComputeError.Arithmetic)
+            multiplier :: profile_round(factors[i * n + k] / factors[k * n + k], profile) ?? return Err(ComputeError.Arithmetic)
             factors[i * n + k] = multiplier
             loop j in (k + 1)..<n {
-                value := factors[i * n + j] - multiplier * factors[k * n + j]
-                if !profile_value_ok(value, profile) -> return Err(ComputeError.Arithmetic)
+                value :: profile_round(factors[i * n + j] - multiplier * factors[k * n + j], profile) ?? return Err(ComputeError.Arithmetic)
                 factors[i * n + j] = value
             }
         }
     }
-    Ok(Factorization{factors: factors, pivots: pivots})
+    Ok(Factorization{factors: factors, pivots: pivots, pivot_threshold: pivot_threshold})
 }
 
-fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols: Int, vector_rhs: Bool, profile: String) -> [Float] !ComputeError {
+fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols: Int, vector_rhs: Bool, profile: String, pivot_threshold: Float) -> [Float] !ComputeError {
     work := [Float]{}
     loop i in 0..<n {
         loop j in 0..<rhs_cols {
@@ -162,8 +169,9 @@ fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols
     loop i in 0..<n {
         loop j in 0..<rhs_cols {
             value := work[i * rhs_cols + j]
-            loop k in 0..<i -> value = value - factors[i * n + k] * work[k * rhs_cols + j]
-            if !profile_value_ok(value, profile) -> return Err(ComputeError.Arithmetic)
+            loop k in 0..<i {
+                value = profile_round(value - factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
+            }
             work[i * rhs_cols + j] = value
         }
     }
@@ -172,19 +180,20 @@ fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols
     loop i > 0 {
         i = i - 1
         diagonal :: factors[i * n + i]
-        if abs_f(diagonal) < @c_pivot_tolerance -> return Err(ComputeError.Singular)
+        if abs_f(diagonal) <= pivot_threshold -> return Err(ComputeError.Singular)
         loop j in 0..<rhs_cols {
             value := work[i * rhs_cols + j]
-            loop k in (i + 1)..<n -> value = value - factors[i * n + k] * work[k * rhs_cols + j]
-            value = value / diagonal
-            if !profile_value_ok(value, profile) -> return Err(ComputeError.Arithmetic)
+            loop k in (i + 1)..<n {
+                value = profile_round(value - factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
+            }
+            value = profile_round(value / diagonal, profile) ?? return Err(ComputeError.Arithmetic)
             work[i * rhs_cols + j] = value
         }
     }
     work
 }
 
-fn tensor_profile(tensor: Tensor) -> String {
+fn tensor_profile(tensor: Tensor) -> String !Never {
     if tensor.numeric_profile == "" -> return "F64Strict+Reproducible"
     tensor.numeric_profile
 }
@@ -201,32 +210,65 @@ fn canonical_device(device: String) -> ?String {
     }
 }
 
-fn f32_representable(value: Float) -> Bool {
+fn f32_round_value(value: Float) -> Float !ComputeError {
+    if value == (Float{0.0}) -> return value
+    negative := value < Float{0.0}
+    magnitude := value
+    if negative -> magnitude = Float{0.0} - value
+    parts :: math.frexp(magnitude) ?? return Err(ComputeError.Arithmetic)
+    exponent := parts.exp - 1
+    scale := 23 - exponent
+    if exponent < -126 -> scale = 149
+    scaled :: math.ldexp(magnitude, scale) ?? return Err(ComputeError.Arithmetic)
+    lower :: math.floor(scaled) ?? return Err(ComputeError.Arithmetic)
+    fraction := scaled - lower
+    rounded := lower
+    round_up := fraction > (Float{0.5})
+    if fraction == (Float{0.5}) {
+        remainder :: math.fmod(lower, (Float{2.0})) ?? return Err(ComputeError.Arithmetic)
+        if remainder != (Float{0.0}) -> round_up = true
+    }
+    if round_up -> rounded = rounded + Float{1.0}
+    result :: math.ldexp(rounded, 0 - scale) ?? return Err(ComputeError.Arithmetic)
+    if negative -> return Float{0.0} - result
+    result
+}
+
+fn f32_range_ok(value: Float) -> Bool !Never {
     if !math_is_finite(value) -> return false
     abs_f(value) <= 3.4028234663852886e38
 }
 
-fn copy_f(xs: [Float]) -> [Float] {
+fn f32_representable(value: Float) -> Bool !ComputeError {
+    if !f32_range_ok(value) -> return false
+    rounded :: f32_round_value(value)
+    rounded == value
+}
+
+fn copy_f(xs: [Float]) -> [Float] !Never {
     out := [Float]{}
     loop value in xs -> out.push(value)
     out
 }
 
-fn copy_i(xs: [Int]) -> [Int] {
+fn copy_i(xs: [Int]) -> [Int] !Never {
     out := [Int]{}
     loop value in xs -> out.push(value)
     out
 }
 
-fn abs_f(value: Float) -> Float {
+fn abs_f(value: Float) -> Float !Never {
     if value < 0.0 -> return 0.0 - value
     value
 }
 
-fn math_is_finite(value: Float) -> Bool { math.is_finite(value) }
+fn math_is_finite(value: Float) -> Bool !Never { core.math.isfinite(value) ?? panic("finite check failed") }
 
-fn profile_value_ok(value: Float, profile: String) -> Bool {
-    if !math_is_finite(value) -> return false
-    if profile == "F32Strict+Reproducible" && !f32_representable(value) -> return false
-    true
+fn profile_round(value: Float, profile: String) -> Float !ComputeError {
+    if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)
+    if profile == "F32Strict+Reproducible" {
+        if !f32_range_ok(value) -> return Err(ComputeError.Arithmetic)
+        return f32_round_value(value)
+    }
+    value
 }

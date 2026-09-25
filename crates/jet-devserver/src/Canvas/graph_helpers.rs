@@ -230,20 +230,52 @@ pub(super) fn call_ret(index: &SemIndex, name: &str) -> Option<String> {
     })
 }
 
+fn callable_signature_for_name<'a>(
+    index: &'a SemIndex,
+    function: &str,
+) -> Option<&'a jet_semindex::CallableSignatureFact> {
+    index
+        .definitions()
+        .iter()
+        .find(|definition| {
+            definition.name == function
+                && matches!(&definition.kind, SymbolKind::Function { .. })
+        })
+        .and_then(|definition| definition.callable_signature.as_ref())
+}
+
 pub(super) fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
-    if let Some(effects) = index.effect_of(function) {
-        if !effects.direct.is_empty() || !effects.inferred.is_empty() {
-            return vec!["effects"];
-        }
+    if let Some(signature) = callable_signature_for_name(index, function) {
+        return match &signature.effects {
+            jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty() => {
+                Vec::new()
+            }
+            jet_semindex::CallableEffectsFact::Checked(_) => vec!["effects"],
+            jet_semindex::CallableEffectsFact::Unavailable(_) => {
+                vec!["effects_unavailable"]
+            }
+        };
     }
-    Vec::new()
+    match index.effect_of(function) {
+        Some(effects) if !effects.direct.is_empty() || !effects.inferred.is_empty() => {
+            vec!["effects"]
+        }
+        Some(_) => Vec::new(),
+        None => vec!["effects_unavailable"],
+    }
 }
 
 pub(super) fn call_has_effects(index: &SemIndex, function: &str) -> bool {
+    if let Some(signature) = callable_signature_for_name(index, function) {
+        return match &signature.effects {
+            jet_semindex::CallableEffectsFact::Checked(effects) => !effects.is_empty(),
+            jet_semindex::CallableEffectsFact::Unavailable(_) => true,
+        };
+    }
     index
         .effect_of(function)
         .map(|effects| !effects.direct.is_empty() || !effects.inferred.is_empty())
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 pub(super) fn pure_leaf(expr: &Expr) -> bool {

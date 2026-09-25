@@ -457,6 +457,56 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn core_sys_expand_home_patterns_are_identical_across_tiers() {
+    let inherited_home = std::env::var("HOME").expect("HOME must be present in the test environment");
+    assert!(
+        !inherited_home.is_empty(),
+        "HOME must be nonempty in the test environment"
+    );
+
+    tir_support::assert_tiers_agree(
+        "core_sys_expand_home_patterns",
+        r#"
+use core.sys as sys
+
+fn run() {
+    home :: sys.get("HOME") ?? ""
+    print(home != "")
+    print(sys.expand("$HOME") == home)
+    print(sys.expand("${{HOME}}") == home)
+    print(sys.expand("%HOME%") == home)
+    print(sys.expand("λ<$HOME>🌍") == "λ<{home}>🌍")
+    print(sys.expand("$$HOME") == "$HOME")
+}
+"#,
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
+fn core_sys_set_then_get_mutation_is_identical_across_tiers() {
+    let key = format!("JET_CORE_SYS_SET_GET_{}", std::process::id());
+    let source = format!(
+        r#"
+use core.sys as sys
+
+fn run() {{
+    sys.set("{key}", "set-from-jet")
+    value :: sys.get("{key}") ?? ""
+    print(value == "set-from-jet")
+    print(value)
+}}
+"#
+    );
+
+    tir_support::assert_tiers_agree(
+        "core_sys_set_then_get_mutation",
+        &source,
+        "true\nset-from-jet\n",
+    );
+}
+
 /// SL9 / R10: importing every core module without calling it must not bloat the binary.
 #[test]
 fn importing_all_core_modules_without_calls_stays_hello_world_sized() {

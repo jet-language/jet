@@ -1640,9 +1640,13 @@ fn project_function_catalog_json(
 }
 
 fn symbol_def_is_pure(def: &SymbolDef) -> bool {
-    def.callable_signature
-        .as_ref()
-        .map_or(true, |signature| signature.effects.is_empty())
+    let Some(signature) = def.callable_signature.as_ref() else {
+        return false;
+    };
+    matches!(
+        &signature.effects,
+        jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty()
+    )
 }
 
 fn function_signature_from_parts(

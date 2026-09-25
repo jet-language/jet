@@ -1,49 +1,63 @@
-// core.reactive.loadable — async slot states.
-pub enum Loadable {
+// core.reactive.loadable — bounded async slot states.
+// The provider owns scheduling and transport; this carrier owns the legal
+// state transitions and never manufactures a success value from an error.
+pub enum Loadable<T, E> {
     Idle
     Loading
-    Loaded(Int)
-    Failed(String)
+    Loaded(T)
+    Failed(E)
 }
 
-pub fn idle() -> Loadable { Loadable.Idle }
+pub fn idle<T, E>() -> Loadable<T, E> { Loadable.Idle }
 
-pub fn loading() -> Loadable { Loadable.Loading }
+pub fn loading<T, E>() -> Loadable<T, E> { Loadable.Loading }
 
-pub fn loaded(value: Int) -> Loadable { Loadable.Loaded(value) }
+pub fn loaded<T, E>(value: T) -> Loadable<T, E> { Loadable.Loaded(value) }
 
-pub fn failed(reason: String) -> Loadable { Loadable.Failed(reason) }
+pub fn failed<T, E>(reason: E) -> Loadable<T, E> { Loadable.Failed(reason) }
 
-pub fn is_idle(state: Loadable) -> Bool { state == Loadable.Idle }
-pub fn is_loading(state: Loadable) -> Bool { state == Loadable.Loading }
-pub fn is_loaded(state: Loadable) -> Bool {
+pub fn is_idle<T, E>(state: Loadable<T, E>) -> Bool {
+    if state == {
+        .Idle -> true
+        else -> false
+    }
+}
+pub fn is_loading<T, E>(state: Loadable<T, E>) -> Bool {
+    if state == {
+        .Loading -> true
+        else -> false
+    }
+}
+pub fn is_loaded<T, E>(state: Loadable<T, E>) -> Bool {
     if state == {
         .Loaded(_) -> true
         else -> false
     }
 }
-pub fn is_failed(state: Loadable) -> Bool {
+pub fn is_failed<T, E>(state: Loadable<T, E>) -> Bool {
     if state == {
         .Failed(_) -> true
         else -> false
     }
 }
 
-pub fn value(state: Loadable) -> ?Int {
+pub fn value<T, E>(state: Loadable<T, E>) -> ?T {
     if state == {
         .Loaded(value) -> Val(value)
         else -> None
     }
 }
 
-pub fn reason(state: Loadable) -> ?String {
+pub fn reason<T, E>(state: Loadable<T, E>) -> ?E {
     if state == {
         .Failed(message) -> Val(message)
         else -> None
     }
 }
 
-pub fn retry(state: Loadable) -> Loadable {
+// Retry starts a fresh attempt only from an idle or failed state.  A loaded
+// result is stable, and retrying an in-flight request must not discard it.
+pub fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> {
     if is_failed(state) || is_idle(state) -> return Loadable.Loading
     ~state
 }

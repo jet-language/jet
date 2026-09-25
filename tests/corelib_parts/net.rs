@@ -983,22 +983,19 @@ fn run() {{
 
 #[test]
 fn core_ioerror_preserves_kind_operation_and_resource() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_core_ioerror_tree_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = common::Scratch::new("jet_core_ioerror_tree");
+    let dir = scratch.path.clone();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     let source = r#"
 use core.files as fs
 use core.net as net
 use core.process as process
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] !IOError {
     return stream.read(limit)
 }
 
-fn operation_name(operation: IOOperation) String -[]> {
+fn operation_name(operation: IOOperation) -[]> String {
     if operation == {
         .Read -> return "read"
         .Write -> return "write"
@@ -1083,11 +1080,6 @@ fn run() -[Exec, FS, IO, Net, Time.Wait]> {
     assert_eq!(stdout, expected);
     let file = dir.join("ioerror_tree.jet");
     fs::write(&file, source).unwrap();
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"ioerror_tree\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, FS, IO, Mem.Alloc, Net, Panic] } }\n",
-    )
-    .unwrap();
     match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
@@ -1099,19 +1091,16 @@ fn run() -[Exec, FS, IO, Net, Time.Wait]> {
 
 #[test]
 fn core_ioerror_debug_renders_in_aot_and_dev() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_core_ioerror_debug_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let scratch = common::Scratch::new("jet_core_ioerror_debug");
+    let dir = scratch.path.clone();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     // Direct core values alone do not emit `jet_std`; this unused helper keeps the AOT prelude present.
     let source = r#"
-fn activate_core() String -[IO]> {
+fn activate_core() -[IO]> String {
     return input() ?? ""
 }
 
-fn fail() Int !IOError -[]> {
+fn fail() -[]> Int !IOError {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -1120,7 +1109,7 @@ fn fail() Int !IOError -[]> {
     }))
 }
 
-fn fail_other() Int !IOError -[]> {
+fn fail_other() -[]> Int !IOError {
     return Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),

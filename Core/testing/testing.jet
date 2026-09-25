@@ -128,34 +128,5 @@ pub fn test_suite() -> TestSuite { {name: "default", passed: 0, failed: 0} }
 
 pub fn world(body: fn(DeterministicWorld)) { core.testing.world(body) }
 
-/// Exhaustive interleavings of `ops` labelled operations. The count is
-/// `ops!` for ops <= 8; larger requests cap at 40320 recorded histories
-/// (the 8! bound) so a test cannot explode memory.
-pub fn histories(ops: Int) -> [String] {
-    if ops <= 0 -> return [String]{}
-    n := ops
-    if n > 8 -> n = 8
-    labels := [String]{}
-    loop i in 0..<n -> labels.push("{i}")
-    permute_join(labels)
-}
-
 pub fn status(comparison: TestComparison) -> String { comparison.status }
-
-fn permute_join(items: [String]) -> [String] {
-    if items.len() == 0 -> return [String]{""}
-    if items.len() == 1 -> return [String]{items[0]}
-    out := [String]{}
-    loop i in 0..<items.len() {
-        rest := [String]{}
-        loop j in 0..<items.len() {
-            if j != i -> rest.push(items[j])
-        }
-        tails :: permute_join(rest)
-        loop t in tails {
-            if t.len() == 0 -> out.push(items[i]) else -> out.push("{items[i]} {t}")
-        }
-    }
-    out
-}
 

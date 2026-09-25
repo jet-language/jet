@@ -1064,6 +1064,213 @@ fn hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers() {
     });
 }
 
+const HTTP_SOURCE_FRAMING: &str = r#"
+use core.http as http
+use core.http.client as client
+use core.http.[HTTPError]
+
+fn request_dispatch(raw: [U8]) -> String !HTTPError {
+    if http.parse_request(raw) == {
+        .Ok(request) -> return Ok("dispatched:{request.path()}")
+        .Err(error) -> {
+            if error == {
+                .InvalidFraming -> return Ok("rejected:InvalidFraming")
+                else -> return Ok("rejected:other")
+            }
+        }
+        else -> return Ok("unexpected")
+    }
+}
+
+fn response_result(raw: [U8]) -> String !HTTPError {
+    if http.parse_response("http://example.test/", raw) == {
+        .Ok(response) -> return Ok("accepted:{response.status()}")
+        .Err(error) -> {
+            if error == {
+                .InvalidFraming -> return Ok("rejected:InvalidFraming")
+                else -> return Ok("rejected:other")
+            }
+        }
+        else -> return Ok("unexpected")
+    }
+}
+
+
+fn invalid_request_header(name: String, value: String) -[Net, Time.Wait]> String {
+    req :: client.request("GET", "http://example.test/").header(name, value)
+    if req.send() == {
+        .Err(error) -> {
+            if error == {
+                .InvalidHeader -> return "rejected:InvalidHeader"
+                else -> return "rejected:other"
+            }
+        }
+        else -> return "unexpected"
+    }
+}
+
+fn run() -[IO, Net, Time.Wait]> {
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    bad_request :: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    good_request :: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    bad_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
+    bad_204 :: "HTTP/1.1 204 No Content{crlf}Content-Length: 0{crlf}{crlf}".bytes()
+    valid_304 :: "HTTP/1.1 304 Not Modified{crlf}Content-Length: 17{crlf}{crlf}".bytes()
+    good_response :: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
+    malformed_request :: request_dispatch(bad_request) ?? panic("unexpected typed HTTP error")
+    valid_request :: request_dispatch(good_request) ?? panic("unexpected typed HTTP error")
+    malformed_response :: response_result(bad_response) ?? panic("unexpected typed HTTP error")
+    invalid_204 :: response_result(bad_204) ?? panic("unexpected typed HTTP error")
+    valid_304_result :: response_result(valid_304) ?? panic("unexpected typed HTTP error")
+    valid_response :: response_result(good_response) ?? panic("unexpected typed HTTP error")
+    bad_header_value :: String.from_bytes([U8]{97, 10, 98}) ?? panic("header value")
+    invalid_header_value :: invalid_request_header("X-Test", bad_header_value)
+    invalid_header :: invalid_request_header("bad name", "value")
+    print("malformed-request={malformed_request}")
+    print("valid-request={valid_request}")
+    print("malformed-response={malformed_response}")
+    print("invalid-204={invalid_204}")
+    print("valid-304={valid_304_result}")
+    print("valid-response={valid_response}")
+    print("invalid-header={invalid_header}")
+    print("invalid-header-value={invalid_header_value}")
+}
+"#;
+
+#[test]
+fn source_http_message_framing_is_status_aware_on_all_supported_tiers() {
+    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_rustc = common::have_rustc();
+    let mut modes = vec![(true, false, "http_i9_message_framing_interpreter")];
+    if has_cranelift {
+        modes.insert(0, (false, false, "http_i9_message_framing_jit"));
+    }
+    if has_rustc {
+        modes.push((false, true, "http_i9_message_framing_aot"));
+    }
+    let expected = "malformed-request=rejected:InvalidFraming\n\
+valid-request=dispatched:/safe\n\
+malformed-response=rejected:InvalidFraming\n\
+invalid-204=rejected:InvalidFraming\n\
+valid-304=accepted:304\n\
+valid-response=accepted:200\n\
+invalid-header=rejected:InvalidHeader\n\
+invalid-header-value=rejected:InvalidHeader\n";
+    on_large_stack(|| {
+        for (use_interpreter, use_aot, name) in modes {
+            let output = if use_aot {
+                let (exit_code, stdout, stderr) =
+                    common::build_and_run("http_i9_message_framing", "aot", HTTP_SOURCE_FRAMING);
+                Output {
+                    stdout,
+                    stderr,
+                    exit_code,
+                }
+            } else {
+                let output = run_with_mode(HTTP_SOURCE_FRAMING, name, use_interpreter);
+                if name == "http_i9_message_framing_jit" {
+                    assert!(
+                        jet_jit::jit_executed_for_test(),
+                        "{name} did not execute in resident Cranelift"
+                    );
+                    assert!(
+                        !jet_jit::deopt_invoked_for_test()
+                            && !jet_jit::fallback_invoked_for_test(),
+                        "{name} deopted to the interpreter or used fallback"
+                    );
+                }
+                output
+            };
+            assert_eq!(
+                output.stdout,
+                expected,
+                "{name}: exit_code={} stderr={:?}",
+                output.exit_code,
+                output.stderr
+            );
+            assert_eq!(output.stderr, "");
+            assert_eq!(output.exit_code, 0);
+        }
+    });
+}
+
+const HTTP_SOURCE_SHORT_CIRCUIT: &str = r#"
+fn short_or(raw: [U8]) -> Bool {
+    raw.len() == 0 || raw[0] == (U8{47})
+}
+
+fn short_and(raw: [U8]) -> Bool {
+    raw.len() > 0 && raw[0] == (U8{47})
+}
+
+fn run() {
+    empty_bytes :: "".bytes()
+    slash_bytes :: "/".bytes()
+    other_bytes :: "x".bytes()
+    print("short-or-empty={short_or(empty_bytes)}")
+    print("short-or-slash={short_or(slash_bytes)}")
+    print("short-or-other={short_or(other_bytes)}")
+    print("short-and-empty={short_and(empty_bytes)}")
+    print("short-and-slash={short_and(slash_bytes)}")
+    print("short-and-other={short_and(other_bytes)}")
+}
+"#;
+
+#[test]
+fn source_boolean_short_circuit_guards_are_lazy_on_all_supported_tiers() {
+    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_rustc = common::have_rustc();
+    let mut modes = vec![(true, false, "http_i9_short_circuit_interpreter")];
+    if has_cranelift {
+        modes.insert(0, (false, false, "http_i9_short_circuit_jit"));
+    }
+    if has_rustc {
+        modes.push((false, true, "http_i9_short_circuit_aot"));
+    }
+    let expected = "short-or-empty=true\n\
+short-or-slash=true\n\
+short-or-other=false\n\
+short-and-empty=false\n\
+short-and-slash=true\n\
+short-and-other=false\n";
+    on_large_stack(|| {
+        for (use_interpreter, use_aot, name) in modes {
+            let output = if use_aot {
+                let (exit_code, stdout, stderr) =
+                    common::build_and_run("http_i9_short_circuit", "aot", HTTP_SOURCE_SHORT_CIRCUIT);
+                Output {
+                    stdout,
+                    stderr,
+                    exit_code,
+                }
+            } else {
+                let output = run_with_mode(HTTP_SOURCE_SHORT_CIRCUIT, name, use_interpreter);
+                if name == "http_i9_short_circuit_jit" {
+                    assert!(
+                        jet_jit::jit_executed_for_test(),
+                        "{name} did not execute in resident Cranelift"
+                    );
+                    assert!(
+                        !jet_jit::deopt_invoked_for_test()
+                            && !jet_jit::fallback_invoked_for_test(),
+                        "{name} deopted to the interpreter or used fallback"
+                    );
+                }
+                output
+            };
+            assert_eq!(
+                output.stdout,
+                expected,
+                "{name}: exit_code={} stderr={:?}",
+                output.exit_code,
+                output.stderr
+            );
+            assert_eq!(output.stderr, "");
+            assert_eq!(output.exit_code, 0);
+        }
+    });
+}
+
 #[test]
 fn hostile_http_response_lengths_are_rejected_on_both_dev_tiers() {
     if skip_if_cranelift_host_unsupported() {

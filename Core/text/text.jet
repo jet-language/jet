@@ -349,14 +349,14 @@ pub struct IndexedCp {
     pub cp: Int
 }
 
-fn decode_scalars(text: String) -> [Int] {
+fn decode_scalars(text: String) -> [Int] !Never {
     pairs :: decode_indexed(text)
     out := [Int]{}
     loop p in pairs -> out.push(p.cp)
     out
 }
 
-fn decode_indexed(text: String) -> [IndexedCp] {
+fn decode_indexed(text: String) -> [IndexedCp] !Never {
     raw :: text.bytes()
     out := [IndexedCp]{}
     i := 0
@@ -399,7 +399,7 @@ fn decode_indexed(text: String) -> [IndexedCp] {
     }
 }
 
-fn utf8_width_at(raw: [U8], at: Int) -> Int {
+fn utf8_width_at(raw: [U8], at: Int) -> Int !Never {
     if at < 0 || at >= raw.len() -> return 1
     first :: raw[at]
     if first < 128 -> return 1
@@ -443,17 +443,17 @@ fn encode_cp(cp: Int) -> String {
     if n < 128 {
         out.push(U8{n})
     } else if n < 2048 {
-        out.push(U8{192 | (n >> 6)})
-        out.push(U8{128 | (n & 63)})
+        out.push(U8{Int{192} | (n >> 6)})
+        out.push(U8{Int{128} | (n & Int{63})})
     } else if n < 65536 {
-        out.push(U8{224 | (n >> 12)})
-        out.push(U8{128 | ((n >> 6) & 63)})
-        out.push(U8{128 | (n & 63)})
+        out.push(U8{Int{224} | (n >> 12)})
+        out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        out.push(U8{Int{128} | (n & Int{63})})
     } else {
-        out.push(U8{240 | (n >> 18)})
-        out.push(U8{128 | ((n >> 12) & 63)})
-        out.push(U8{128 | ((n >> 6) & 63)})
-        out.push(U8{128 | (n & 63)})
+        out.push(U8{Int{240} | (n >> 18)})
+        out.push(U8{Int{128} | ((n >> 12) & Int{63})})
+        out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        out.push(U8{Int{128} | (n & Int{63})})
     }
     String.from_bytes(out) ?? ""
 }
@@ -589,36 +589,36 @@ fn combining_class(cp: Int) -> Int {
 
 fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
 
-@c_sbase :: 44032
-@c_lbase :: 4352
-@c_vbase :: 4449
-@c_tbase :: 4519
-@c_lcount :: 19
-@c_vcount :: 21
-@c_tcount :: 28
-@c_ncount :: 588
-@c_scount :: 11172
+c_sbase :: 44032
+c_lbase :: 4352
+c_vbase :: 4449
+c_tbase :: 4519
+c_lcount :: 19
+c_vcount :: 21
+c_tcount :: 28
+c_ncount :: 588
+c_scount :: 11172
 
 fn hangul_decompose(cp: Int) -> [Int] {
-    sindex :: cp - @c_sbase
-    if sindex < 0 || sindex >= @c_scount -> return [Int]{cp}
-    l :: @c_lbase + sindex /% @c_ncount
-    v :: @c_vbase + (sindex % @c_ncount) /% @c_tcount
-    t :: @c_tbase + sindex % @c_tcount
-    if t == @c_tbase -> return [Int]{l, v}
+    sindex :: cp - c_sbase
+    if sindex < 0 || sindex >= c_scount -> return [Int]{cp}
+    l :: c_lbase + sindex /% c_ncount
+    v :: c_vbase + (sindex % c_ncount) /% c_tcount
+    t :: c_tbase + sindex % c_tcount
+    if t == c_tbase -> return [Int]{l, v}
     [Int]{l, v, t}
 }
 
 fn hangul_compose(a: Int, b: Int) -> ?Int {
-    lindex :: a - @c_lbase
-    if lindex >= 0 && lindex < @c_lcount {
-        vindex :: b - @c_vbase
-        if vindex >= 0 && vindex < @c_vcount -> return Val(@c_sbase + (lindex * @c_vcount + vindex) * @c_tcount)
+    lindex :: a - c_lbase
+    if lindex >= 0 && lindex < c_lcount {
+        vindex :: b - c_vbase
+        if vindex >= 0 && vindex < c_vcount -> return Val(c_sbase + (lindex * c_vcount + vindex) * c_tcount)
     }
-    sindex :: a - @c_sbase
-    if sindex >= 0 && sindex < @c_scount && sindex % @c_tcount == 0 {
-        tindex :: b - @c_tbase
-        if tindex > 0 && tindex < @c_tcount -> return Val(a + tindex)
+    sindex :: a - c_sbase
+    if sindex >= 0 && sindex < c_scount && sindex % c_tcount == 0 {
+        tindex :: b - c_tbase
+        if tindex > 0 && tindex < c_tcount -> return Val(a + tindex)
     }
     None
 }
@@ -633,7 +633,7 @@ fn decompose(text: String, compat: Bool) -> [Int] {
 }
 
 fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
-    if cp >= @c_sbase && cp < @c_sbase + @c_scount -> return hangul_decompose(cp)
+    if cp >= c_sbase && cp < c_sbase + c_scount -> return hangul_decompose(cp)
     if cp == 192 -> return [Int]{65, 768}
     if cp == 193 -> return [Int]{65, 769}
     if cp == 194 -> return [Int]{65, 770}
@@ -841,6 +841,8 @@ fn split_graphemes(text: String) -> [String] {
         prev :: cluster[cluster.len() - 1]
         cur :: cps[i]
         break_here := grapheme_break(prev, cur)
+        // GB11 needs a pictographic Extend* prefix before the ZWJ.
+        if prev == 0x200D && is_emoji(cur) -> break_here = !has_emoji_zwj_prefix(cluster)
         if is_ri(prev) && is_ri(cur) && ri_run % 2 == 0 -> break_here = true
         if break_here {
             out.push(encode_cps(cluster))
@@ -868,24 +870,33 @@ fn grapheme_break(prev: Int, cur: Int) -> Bool {
     if is_extend(cur) || cur == 0x200D -> return false
     // GB9a SpacingMark (approx: Mc)
     if cur >= 0x0903 && cur <= 0x0903 -> return false
-    // GB11 ZWJ × Extended_Pictographic (approx: emoji)
-    if prev == 0x200D && is_emoji(cur) -> return false
     // GB12/13 RI × RI
     if is_ri(prev) && is_ri(cur) -> return false
     true
 }
+fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
+    i := cluster.len() - 2
+    loop i >= 0 {
+        cp :: cluster[i]
+        if cp == 0x200D -> return false
+        if !is_extend(cp) -> return is_emoji(cp)
+        i = i - 1
+    }
+    false
+}
+
 
 fn is_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
-fn is_l(cp: Int) -> Bool { cp >= @c_lbase && cp < @c_lbase + @c_lcount }
-fn is_v(cp: Int) -> Bool { cp >= @c_vbase && cp < @c_vbase + @c_vcount }
-fn is_t(cp: Int) -> Bool { cp >= @c_tbase + 1 && cp < @c_tbase + @c_tcount }
+fn is_l(cp: Int) -> Bool { cp >= c_lbase && cp < c_lbase + c_lcount }
+fn is_v(cp: Int) -> Bool { cp >= c_vbase && cp < c_vbase + c_vcount }
+fn is_t(cp: Int) -> Bool { cp >= c_tbase + 1 && cp < c_tbase + c_tcount }
 fn is_lv(cp: Int) -> Bool {
-    s :: cp - @c_sbase
-    s >= 0 && s < @c_scount && s % @c_tcount == 0
+    s :: cp - c_sbase
+    s >= 0 && s < c_scount && s % c_tcount == 0
 }
 fn is_lvt(cp: Int) -> Bool {
-    s :: cp - @c_sbase
-    s >= 0 && s < @c_scount && s % @c_tcount != 0
+    s :: cp - c_sbase
+    s >= 0 && s < c_scount && s % c_tcount != 0
 }
 fn is_ri(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
 fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }

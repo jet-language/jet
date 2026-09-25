@@ -1,8 +1,8 @@
+use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::{LowerEnv, TExpr};
 use crate::Syntax;
-use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use std::collections::HashSet;
 
 pub(crate) fn imported_type_name(owner: &str, leaf: &str) -> String {
@@ -63,6 +63,20 @@ fn module_has_nominal_type(items: &[Item], name: &str) -> bool {
     })
 }
 
+pub(crate) fn nominal_import_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    import: &crate::AST::ImportDecl,
+) -> Option<usize> {
+    if let Some(module) = import.core_module_path() {
+        return crate::Codegen::core_source_target(bundle, &module).map(|(_, target)| target);
+    }
+    bundle
+        .name_ledger
+        .effective_alias(module_idx, &import.import_alias())
+        .and_then(|alias| alias.target_module)
+}
+
 fn canonical_nominal_name(
     bundle: &ProgramBundle,
     module_idx: usize,
@@ -80,10 +94,15 @@ fn canonical_nominal_name(
         return bundle.name_ledger.nominal_identity(module_idx, name);
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
-        let target = bundle
-            .name_ledger
-            .effective_alias(module_idx, namespace)
-            .and_then(|alias| alias.target_module)?;
+        let target = bundle.modules[module_idx]
+            .imports
+            .iter()
+            .find(|import| import.import_alias() == namespace)
+            .and_then(|import| nominal_import_target(bundle, module_idx, import))
+            .or_else(|| {
+                bundle.name_ledger.effective_alias(module_idx, namespace)
+                    .and_then(|alias| alias.target_module)
+            })?;
         return canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen);
     }
     let alias = bundle.name_ledger.effective_alias(module_idx, name)?;
@@ -243,6 +262,23 @@ pub(crate) fn register_imported_struct_shapes(
         }) {
             continue;
         }
+        if let Some(core_module) = import.core_module_path() {
+            if let Some((_, target)) = crate::Codegen::core_source_target(bundle, &core_module) {
+                for item in &bundle.modules[target].items {
+                    if let Item::Struct(definition) = item {
+                        if jet_foundation::CoreModuleExports::core_leaf_kind(
+                            &core_module,
+                            &definition.name,
+                        )
+                        .is_some()
+                        {
+                            imported.push((target, definition.name.clone()));
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         let Some(target) = bundle.name_ledger.import_target(module_idx, import.span) else {
             continue;
         };
@@ -386,8 +422,7 @@ fn qualify_variant_payload(
                 .iter()
                 .map(|field| {
                     let mut qualified = field.clone();
-                    qualified.ty =
-                        qualify_imported_type(bundle, target, owner, binders, &field.ty);
+                    qualified.ty = qualify_imported_type(bundle, target, owner, binders, &field.ty);
                     qualified
                 })
                 .collect(),
@@ -544,15 +579,12 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     // projection and make the resident carrier read a result handle as `T`.
     if let Type::Named(name) = recv_ty {
         if let Some(base_name) = name.strip_suffix(".Patch") {
-            return cx
-                .struct_fields
-                .get(base_name)
-                .and_then(|fields| {
-                    fields
-                        .iter()
-                        .find(|(candidate, _)| candidate == field)
-                        .map(|(_, ty)| Type::Option(Box::new(ty.clone())))
-                });
+            return cx.struct_fields.get(base_name).and_then(|fields| {
+                fields
+                    .iter()
+                    .find(|(candidate, _)| candidate == field)
+                    .map(|(_, ty)| Type::Option(Box::new(ty.clone())))
+            });
         }
     }
     // D-SHAREDGUARD2=A: `SharedGuard.value` is a compiler-known place rather
@@ -611,12 +643,24 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     // type. Without it the miss fell through to the caller's
     // `unwrap_or(Type::Int)` and handed rustc `jet_int_to_string(<String>)` for
     // a `String` field, which is an internal compiler error (I2).
-    let shape_key = |name: &str| -> Option<String> {
+    let shape_key = |name: &str| {
         if cx.struct_fields.contains_key(name) {
             return Some(name.to_string());
         }
+        let core_source_leaf = name
+            .strip_prefix("<corelib>/")
+            .and_then(|identity| identity.rsplit("::").next())
+            .or_else(|| {
+                name.rsplit_once("::")
+                    .filter(|(module, _)| {
+                        cx.core_source_modules.values().any(|alias| alias == module)
+                    })
+                    .map(|(_, leaf)| leaf)
+            });
+        if let Some(leaf) = core_source_leaf.filter(|leaf| cx.struct_fields.contains_key(*leaf)) {
+            return Some(leaf.to_string());
+        }
         cx.imported_type_metadata_name(name)
-            .filter(|identity| cx.struct_fields.contains_key(identity))
     };
     if let Type::Apply { name, args } = recv_ty {
         if let Some(key) = shape_key(name) {
@@ -707,9 +751,9 @@ pub(crate) fn lower_comptime_scalar(
                 _ => None,
             },
         )),
-        crate::AST::CtValue::BigInt(value) => Some(TExprKind::CtLit(
-            crate::AST::CtValue::BigInt(value.clone()),
-        )),
+        crate::AST::CtValue::BigInt(value) => {
+            Some(TExprKind::CtLit(crate::AST::CtValue::BigInt(value.clone())))
+        }
         crate::AST::CtValue::Float(float) => Some(TExprKind::FloatLit(float.as_f64())),
         crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),
@@ -720,9 +764,7 @@ pub(crate) fn lower_comptime_scalar(
         // Prelude carrier, not a generated user struct. Rebuild it through
         // the canonical constructor so AOT receives the same reduced ratio
         // as the comptime and resident engines.
-        crate::AST::CtValue::Struct { type_name, .. }
-            if type_name == Syntax::TYPE_FRACTION =>
-        {
+        crate::AST::CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_FRACTION => {
             let fraction = crate::Numeric::CtFraction::from_value(value?).ok()?;
             let numerator = fraction.numerator.try_i64()?;
             let denominator = fraction.denominator.try_i64()?;
@@ -859,10 +901,7 @@ pub(crate) fn imported_module_call_target_return(
     method: &str,
     resolved_ret: Option<&Type>,
 ) -> Result<Option<Type>, String> {
-    let Some(declared) = cx
-        .import_rets
-        .get(&(alias.to_string(), method.to_string()))
-    else {
+    let Some(declared) = cx.import_rets.get(&(alias.to_string(), method.to_string())) else {
         return Err(format!(
             "checked module call `{alias}.{method}` has no import return fact"
         ));

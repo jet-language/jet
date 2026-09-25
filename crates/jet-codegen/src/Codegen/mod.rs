@@ -1893,31 +1893,6 @@ const CORE_SOURCE_CLOSURE_SCHEMA: &[u8] = b"jet-core-source-closure-v1";
 const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
 
-// The package boundary is part of the compiler's identity. Keep the source,
-// package metadata, and locked dependency graph in one content-addressed
-// record so a changed package cannot reuse an older native artifact.
-const CORE_ARCHIVE_SOURCE_PARTS: &[(&str, &str)] = &[
-    (
-        "module",
-        include_str!("../../../../corelib/core.archive/pkgs/archive/archive.jet"),
-    ),
-    (
-        "package",
-        include_str!("../../../../corelib/core.archive/pkgs/archive/package.jet"),
-    ),
-    (
-        "manifest",
-        include_str!("../../../../corelib/core.archive/pkgs/archive/Cargo.toml"),
-    ),
-    (
-        "lock",
-        include_str!("../../../../corelib/core.archive/pkgs/archive/Cargo.lock"),
-    ),
-    (
-        "abi",
-        include_str!("../../../../corelib/core.archive/pkgs/archive/src/lib.rs"),
-    ),
-];
 
 fn is_internal_core_usage(usage: &str) -> bool {
     usage.starts_with(CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
@@ -1955,10 +1930,9 @@ fn core_source_closure_fingerprint(used_core: &std::collections::HashSet<String>
         append_identity_field(&mut bytes, usage.as_bytes());
     }
     for source_module in jet_foundation::CoreModuleExports::core_source_modules() {
-        if source_module.module == "core.archive"
-            || !used_core
-                .iter()
-                .any(|usage| core_source_usage_matches(usage, source_module.module))
+        if !used_core
+            .iter()
+            .any(|usage| core_source_usage_matches(usage, source_module.module))
         {
             continue;
         }
@@ -1966,11 +1940,20 @@ fn core_source_closure_fingerprint(used_core: &std::collections::HashSet<String>
         append_identity_field(&mut bytes, source_module.path.as_bytes());
         append_identity_field(&mut bytes, source_module.source.as_bytes());
     }
-    if used_core.iter().any(|usage| is_archive_core_usage(usage)) {
-        for (label, source) in CORE_ARCHIVE_SOURCE_PARTS {
-            append_identity_field(&mut bytes, label.as_bytes());
-            append_identity_field(&mut bytes, source.as_bytes());
+    // Private source parts are attached to their public owner for cache
+    // identity, but never enter the public Core source-module registry.
+    for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+        if !used_core
+            .iter()
+            .any(|usage| core_source_usage_matches(usage, part.owner))
+        {
+            continue;
         }
+        append_identity_field(&mut bytes, part.owner.as_bytes());
+        append_identity_field(&mut bytes, part.source.module.as_bytes());
+        append_identity_field(&mut bytes, part.source.alias.as_bytes());
+        append_identity_field(&mut bytes, part.source.path.as_bytes());
+        append_identity_field(&mut bytes, part.source.source.as_bytes());
     }
     crate::SHA256::sha256_hex(&bytes)
 }
@@ -3177,6 +3160,7 @@ fn push_typed_core_optional_parts(
 impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
             );
         }
+        out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
@@ -3184,6 +3168,7 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     } else if runtime_parts.contains(&MirRuntimePartId::WebSocket)
         || runtime_parts.contains(&MirRuntimePartId::Browser)
     {
+        out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::WebSocket)
@@ -3496,6 +3481,10 @@ fn push_corelib_prelude_body(
     let needs_mapped_file = forces.mapped_file || needs_fs_runtime;
     let needs_shared =
         forces.shared || core_usage_matches(used_core, &["core.mem::pool_shared", "core.mem.pool_shared"]);
+    // JetStd CommonTypes re-exports these handles even when filesystem
+    // operations are not selected; keep their canonical owners at crate root.
+    out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
+
     for part in CORELIB_KERNEL_PARTS {
         if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
@@ -3906,6 +3895,7 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
         );
     }
     if needs_http {
+        out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
@@ -3914,6 +3904,7 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
         // Ws.rs shares the canonical HTTP request/header value types even for
         // browser-only programs; keep the reachability split without emitting
         // the full HTTP client/server surface.
+        out.push_str(include_str!("../Prelude/Core/HttpRequestTarget.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
     }
     if needs_ws || needs_http || needs_browser {
@@ -4732,6 +4723,61 @@ mod tests {
             "compute-only Core must not emit HTTP/Browser templates"
         );
     }
+
+    #[test]
+    fn file_handle_owners_are_in_the_common_closure_without_filesystem_runtime() {
+        let used_core = HashSet::from(["core.encoding.base64::is_base64".to_string()]);
+        let owner_source = include_str!("../Prelude/Core/FileHandleOwners.rs");
+        let common_source = include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs");
+        let filesystem_source = include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs");
+        let policy = ReleaseDevtoolsPolicy::development();
+
+        let assert_common_closure = |emitted: &str| {
+            let owners = emitted
+                .find(owner_source)
+                .expect("common file owner carriers must be emitted");
+            let common = emitted
+                .find(common_source)
+                .expect("JetStd CommonTypes must be emitted");
+            assert!(
+                owners < common,
+                "root owner definitions must precede the JetStd re-export"
+            );
+            assert!(
+                !emitted.contains(filesystem_source),
+                "a non-filesystem closure must not pull in FSRuntimeOps"
+            );
+            for owner in [
+                "pub struct JetTempDirOwner",
+                "pub struct JetTempFileOwner",
+                "pub struct JetFileLockOwner",
+            ] {
+                assert_eq!(
+                    emitted.matches(owner).count(),
+                    1,
+                    "the common closure must emit `{owner}` exactly once"
+                );
+            }
+        };
+
+        let mut ordinary = String::new();
+        push_corelib_prelude_with_policy(&mut ordinary, &used_core, false, &policy);
+        assert_common_closure(&ordinary);
+
+        let mut cached = String::new();
+        push_full_corelib_prelude_with_policy(
+            &mut cached,
+            Syntax::OSTarget::Linux,
+            false,
+            "2026",
+            &BTreeSet::new(),
+            false,
+            false,
+            &policy,
+        );
+        assert_common_closure(&cached);
+    }
+
 
     #[test]
     fn simd_core_marker_selects_shared_lane_closure_without_selecting_plain_programs() {

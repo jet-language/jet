@@ -1951,9 +1951,9 @@ impl<'a> Checker<'a> {
         // slot is already a Result, that nested call is still a source value:
         // consume its carrier once here, rather than handing Result<T, E> to
         // the outer display/argument checker.
-        // Both direct and method calls retain the callee's declared return
-        // contract on `resolved_ret`; their checker result may be the
-        // effective Result-shaped ABI carrier.
+        // Before propagation is decided, both direct and method calls retain
+        // the callee's declared return contract on `resolved_ret`; their
+        // checker result may be the effective Result-shaped ABI carrier.
         let declared_call_return = match e.without_parens() {
             Expr::Call(call) => call.resolved_ret.as_ref(),
             Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
@@ -1974,12 +1974,11 @@ impl<'a> Checker<'a> {
         }
         if !declared_never_failure {
             if let Some(ret) = declared_call_return.filter(|ty| !ty.is_fallible()) {
-                // Call checking returns the effective Result-shaped carrier,
-                // but the resolved return records the callee's declared
-                // contract. A plain helper must project its declared success
-                // type instead of entering the failure rail. An open callback
-                // is the exception: retain that checked carrier so its
-                // collection operation can select the fallible callback ABI.
+                // The call node retains its declared return, while `result`
+                // carries the effective failure contract. Keep the declared
+                // success type only when no carrier was produced or an open
+                // callback owns that carrier; ordinary value positions must
+                // propagate an implicit `!Err` just like an explicit `!E`.
                 if self.failure_carrier_inference
                     && result
                         .as_ref()
@@ -1989,8 +1988,11 @@ impl<'a> Checker<'a> {
                         self.failure_carrier = result.clone();
                     }
                     self.task_body_propagates = true;
+                    return Some(ret.clone());
                 }
-                return Some(ret.clone());
+                if !result.as_ref().is_some_and(Type::is_fallible) {
+                    return Some(ret.clone());
+                }
             }
         }
         let propagation_result = match e.without_parens() {
@@ -2060,16 +2062,9 @@ impl<'a> Checker<'a> {
             // `print(f())` still unwraps, because print does not expect Result.
             return result;
         }
-        if let Some(Type::Result { err, .. }) = &propagation_result {
-            // `Never` is the uninhabited failure rail, not a domain that
-            // needs conversion into the caller's error contract. Ordinary
-            // value positions still consume this carrier through the one
-            // canonical `Try` below; explicit Result expectations and the
-            // callback-carrier branch above return before reaching here.
-            if !err.is_never() && !self.error_converts_into_current_return(err) {
-                return result;
-            }
-        }
+        // `infer_try_with_inner_type` owns the compatibility check and E2404
+        // provenance. Returning the unchecked carrier here bypasses that
+        // contract for nested calls whose failure cannot reach this return.
         let span = e.span();
         let inner = std::mem::replace(e, Expr::Absent(span));
         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
@@ -6963,23 +6958,61 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(alias, alias_span) = &**inner {
-            if let Some(module) = self.core_imports.get(alias).cloned() {
-                return self.infer_core_field(alias, &module, member, *alias_span, span);
-            }
-            if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
-                self.record_import_alias_reference(alias, *alias_span);
-                if let Some(sig) = modules[*module_idx].funcs.get(member) {
-                    if sig.c_abi_name.is_some() {
-                        let ty = Type::Fn {
-                            params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
-                            ret: sig.return_type.clone().map(Box::new),
-                            effect_bound: None,
-                            return_view_provenance: None,
-                            param_contract: None,
-                            call_metadata: None,
-                        };
-                        self.diags.push(crate::Sema::FFI::e3203(&ty, span));
-                        return Some(ty);
+            if self.lookup(alias).is_none() {
+                if let Some(module) = self.core_imports.get(alias).cloned() {
+                    return self.infer_core_field(alias, &module, member, *alias_span, span);
+                }
+                if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
+                    if let Some(sig) = modules[*module_idx].funcs.get(member) {
+                        if sig.c_abi_name.is_some() {
+                            let ty = Type::Fn {
+                                params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                                ret: sig.return_type.clone().map(Box::new),
+                                effect_bound: None,
+                                return_view_provenance: None,
+                                param_contract: None,
+                                call_metadata: None,
+                            };
+                            self.record_import_alias_reference(alias, *alias_span);
+                            self.diags.push(crate::Sema::FFI::e3203(&ty, span));
+                            return Some(ty);
+                        }
+                    }
+                    if let Some(ty) = modules[*module_idx].consts.get(member).cloned() {
+                        let definition_span = self
+                            .name_ledger
+                            .declaration(*module_idx, member)
+                            .filter(|declaration| declaration.kind == "const")
+                            .map(|declaration| declaration.span);
+                        if let Some(definition_span) = definition_span {
+                            if !self
+                                .name_ledger
+                                .visible(self.module_idx, *module_idx, member)
+                            {
+                                self.diags
+                                    .push(crate::Sema::Diagnostics::private_item(member, span));
+                                return None;
+                            }
+                            let target_path = self
+                                .name_ledger
+                                .module_path(*module_idx)
+                                .expect("name ledger must track every imported module")
+                                .to_string();
+                            self.record_import_alias_reference(alias, *alias_span);
+                            if *module_idx != self.module_idx
+                                && Syntax::classify_identifier(member)
+                                    == Syntax::IdentifierClass::SoftPublic
+                            {
+                                self.diags.push(soft_public_use(member, span));
+                            }
+                            self.record_reference_anchor(
+                                span,
+                                &target_path,
+                                "const",
+                                definition_span,
+                            );
+                            return Some(ty);
+                        }
                     }
                 }
             }
@@ -7083,11 +7116,49 @@ impl<'a> Checker<'a> {
         self.field_type(&t, member, span)
     }
 
+    fn is_core_files_handle_path(&self, ty: &Type, member: &str) -> bool {
+        if member != "path" {
+            return false;
+        }
+        let type_name = match ty {
+            Type::Named(name) => name.as_str(),
+            Type::Apply { name, .. } => name.as_str(),
+            _ => return false,
+        };
+        let (owner_import_ns, leaf) = self.struct_type_name_parts(type_name);
+        if !matches!(
+            leaf,
+            "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile"
+        ) {
+            return false;
+        }
+        if let Some(owner) = self.struct_owner_module(leaf, owner_import_ns) {
+            let Some(modules) = self.modules else {
+                return false;
+            };
+            let Some(files) = jet_foundation::CoreModuleExports::core_source_modules()
+                .iter()
+                .find(|source| source.module == "core.files")
+            else {
+                return false;
+            };
+            modules
+                .get(owner)
+                .is_some_and(|module| module.module_alias == files.alias)
+        } else {
+            owner_import_ns.is_none()
+                && crate::Sema::CheckerCoreLib::core_struct_field_type(leaf, "path", &[]).is_some()
+        }
+    }
+
     /// D-FIELDPOL1: true when `member` is a computed field on struct type `t`
     /// (`Named` or `Apply`) — used at every WRITE site (`x.field = …`,
     /// `x.field++`) to reject with E0339 before `field_type` would otherwise
     /// resolve it as a normal (settable) field.
     pub(crate) fn field_is_computed(&self, t: &Type, member: &str) -> bool {
+        if self.is_core_files_handle_path(t, member) {
+            return true;
+        }
         let type_name = match t {
             Type::Named(n) => n.as_str(),
             Type::Apply { name, .. } => name.as_str(),
@@ -7119,6 +7190,9 @@ impl<'a> Checker<'a> {
             if name == crate::Syntax::TYPE_PIN && args.len() == 1 {
                 return self.field_type(&args[0], member, span);
             }
+        }
+        if self.is_core_files_handle_path(t, member) {
+            return Some(Type::String);
         }
         // D-SHAREDGUARD2=A: the guard's held value is a compiler-known place,
         // not a stored public struct field. The hidden tag records whether the

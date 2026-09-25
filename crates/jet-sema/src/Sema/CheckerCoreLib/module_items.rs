@@ -82,7 +82,7 @@ pub fn core_module_type_item(module: &str, item: &str) -> bool {
         // D-FOUND-PLATFORM1=A: one typed host/font value vocabulary.
         | ("core.font", "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper")
         | ("core.ui",
-            "UiImeMode" | "UiPlayground" | "UiPreview" | "UiPreviewAccessibility"
+            "UiImeMode" | "UiPreview" | "UiPreviewAccessibility"
             | "UiPreviewAuthority" | "UiPreviewContext" | "UiPreviewDevice"
             | "UiPreviewEffect" | "UiPreviewInputOverride" | "UiPreviewInputValue"
             | "UiPreviewKind" | "UiPreviewLifecycle" | "UiPreviewRegistry"

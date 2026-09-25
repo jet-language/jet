@@ -9,21 +9,15 @@ package {
     }
 }
 
-// core.reflect — a text projection of a value, not a type registry.
-//
-// `of` takes the `Show` text of a value (the compiler's runtime carrier
-// supplies the richer path/field view at the intrinsic boundary). The source
-// twin still classifies portable text deterministically: quoted text, scalar
-// literals, collections, results, and leading nominal identifiers retain
-// distinct categories.
+// core.reflect — typed runtime reflection and explicit text inspection.
+
+// `inspect` classifies caller-supplied text. The compiler-owned `of` intrinsic
+// projects typed values and is intentionally not implemented by this module.
 
 pub struct ReflectValue {
     pub type_name: String
     pub display: String
 }
-
-/// Project `value`'s show-text into a type name.
-pub fn of(value: String) -> String { classify(value).type_name }
 
 pub fn inspect(value: String) -> ReflectValue { classify(value) }
 

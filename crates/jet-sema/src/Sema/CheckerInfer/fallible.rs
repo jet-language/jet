@@ -15,6 +15,23 @@ struct FailureCallProvenance {
     contract: String,
 }
 
+fn publish_try_call_carrier(inner: &mut Expr, carrier: impl FnOnce() -> Type) {
+    let mut carrier_expr = inner;
+    while let Expr::Paren(paren, _) = carrier_expr {
+        carrier_expr = paren.as_mut();
+    }
+    let checked_return = match carrier_expr {
+        Expr::Call(call) => call.resolved_ret.as_mut(),
+        Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_mut(),
+        _ => None,
+    };
+    if let Some(checked_return) = checked_return {
+        if !checked_return.is_fallible() {
+            *checked_return = carrier();
+        }
+    }
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
         let expected_result = self.expected_type.clone().and_then(|expected| {
@@ -436,30 +453,6 @@ impl<'a> Checker<'a> {
         self.diags.push(diagnostic);
     }
 
-    pub(crate) fn error_converts_into_current_return(&mut self, err: &Type) -> bool {
-        let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
-        let Type::Result { err: ret_err, .. } = ret else {
-            let err_name = err.name();
-            return !self.no_prelude && is_core_error_family_type(&err_name)
-                || matches!(err, Type::String);
-        };
-        if *ret_err == *err {
-            return true;
-        }
-        let err_name = err.name();
-        let ret_err_name = ret_err.name();
-        if self.trait_reg.has_error_conv(&err_name, &ret_err_name) {
-            return true;
-        }
-        if is_default_error(&ret_err) && matches!(err, Type::String) {
-            return true;
-        }
-        if is_default_error(&ret_err) && !self.no_prelude && is_core_error_family_type(&err_name) {
-            return true;
-        }
-        false
-    }
-
     pub(crate) fn infer_try(
         &mut self,
         inner: &mut Box<Expr>,
@@ -506,17 +499,21 @@ impl<'a> Checker<'a> {
             }
         };
         let inner_ty = inner_ty?;
+        // The source-return fact remains untouched through all sema diagnostics;
+        // successful Try propagation publishes its effective carrier below for
+        // TIR to lower as the Try operand.
         match inner_ty {
             Type::Result { ok, err } => {
                 let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
-                // D-FAILURE-FOUNDATION1: `Never` is an uninhabited error
-                // side, not a conversion into the caller's default domain.
-                // Record that proof on the existing semantic conversion fact
-                // so every lowering tier unwraps the one carrier identically.
-                if matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-                    && matches!(&ret, Type::Result { .. })
-                {
+                // `Never` is uninhabited regardless of the caller's return
+                // rail. Unwrap this carrier directly; every backend lowers
+                // its impossible error arm as unreachable.
+                if matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) {
                     *convert = TryConvert::Never;
+                    publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                        ok: Box::new((*ok).clone()),
+                        err: Box::new((*err).clone()),
+                    });
                     return Some((*ok).clone());
                 }
                 match &ret {
@@ -542,6 +539,10 @@ impl<'a> Checker<'a> {
                     // type (it is bound by the caller, not returned unchanged).
                     Type::Result { err: ret_err, .. } if *ret_err == err => {
                         self.task_body_propagates = true;
+                        publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                            ok: Box::new((*ok).clone()),
+                            err: Box::new((*err).clone()),
+                        });
                         Some((*ok).clone())
                     }
                     // D-FAIL-ERROR1=A: older String-returning callees cross into
@@ -551,6 +552,10 @@ impl<'a> Checker<'a> {
                     {
                         *convert = TryConvert::DefaultErr;
                         self.task_body_propagates = true;
+                        publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                            ok: Box::new((*ok).clone()),
+                            err: Box::new((*err).clone()),
+                        });
                         Some((*ok).clone())
                     }
                     // D-UNIONTYPE1=A: member error widens into the return's union.
@@ -563,6 +568,10 @@ impl<'a> Checker<'a> {
                             tag: crate::AST::union_member_tag(&err),
                         };
                         self.task_body_propagates = true;
+                        publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                            ok: Box::new((*ok).clone()),
+                            err: Box::new((*err).clone()),
+                        });
                         Some((*ok).clone())
                     }
                     Type::Result { err: ret_err, .. } => {
@@ -580,6 +589,10 @@ impl<'a> Checker<'a> {
                                 target,
                             };
                             self.task_body_propagates = true;
+                            publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                                ok: Box::new((*ok).clone()),
+                                err: Box::new((*err).clone()),
+                            });
                             return Some((*ok).clone());
                         }
 
@@ -596,6 +609,10 @@ impl<'a> Checker<'a> {
                                     target,
                                 };
                                 self.task_body_propagates = true;
+                                publish_try_call_carrier(inner.as_mut(), || Type::Result {
+                                    ok: Box::new((*ok).clone()),
+                                    err: Box::new((*err).clone()),
+                                });
                                 return Some((*ok).clone());
                             }
                             let (what, why, fix) = if implicit_propagation {
@@ -685,12 +702,15 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Type::Option(ref inner) => {
+            Type::Option(ref optional_inner) => {
                 let ret = self.ret.clone().unwrap_or(Type::Int);
                 if let Type::Option(ret_inner) = &ret {
-                    if **ret_inner == **inner {
+                    if **ret_inner == **optional_inner {
                         self.task_body_propagates = true;
-                        return Some((**inner).clone());
+                        publish_try_call_carrier(inner.as_mut(), || {
+                            Type::Option(optional_inner.clone())
+                        });
+                        return Some((**optional_inner).clone());
                     }
                 }
                 self.diags.push(Diagnostic::error(
@@ -1135,7 +1155,6 @@ impl<'a> Checker<'a> {
                     reactive_local: false,
                     reactive_shared: false,
                     single_use_span: None,
-                    constant_value: None,
                     invalid: false,
                 },
             );
@@ -1365,7 +1384,6 @@ impl<'a> Checker<'a> {
                     reactive_local: false,
                     reactive_shared: false,
                     single_use_span: None,
-                    constant_value: None,
                     invalid: false,
                 },
             );

@@ -1,6 +1,7 @@
 use super::refusal;
-use crate::Codegen::is_json_variant;
-use crate::Codegen::is_key_variant;
+use crate::AST::{
+    BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm,
+};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::add_bin_match_pattern_binding_names;
 use crate::Codegen::TIR::add_pattern_binding_names;
@@ -14,8 +15,8 @@ use crate::Codegen::TIR::arm_is_plain_cond;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
-use crate::Codegen::TIR::enum_tag_is_covered;
 use crate::Codegen::TIR::enum_is_covered;
+use crate::Codegen::TIR::enum_tag_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
 use crate::Codegen::TIR::is_data_event_variant;
@@ -25,11 +26,10 @@ use crate::Codegen::TIR::pattern_is_variant_or_orvariant;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Codegen::TIR::variant_pattern_uses_payload;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
 use crate::Diagnostics::Span;
 use crate::Syntax;
-use crate::AST::{
-    BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm,
-};
 use std::collections::HashSet;
 
 fn scoped_stmts_in_subset(body: &[Stmt], cx: &Cx, locals: &HashSet<String>) -> bool {
@@ -562,8 +562,7 @@ pub(crate) fn if_cond_in_subset(
         }
         if matches!(pattern, Pattern::Or(..))
             && pattern_is_variant_or_orvariant(pattern)
-            && variant_pattern_enum(cx, pattern)
-                .is_some_and(|owner| enum_is_covered(&owner, cx))
+            && variant_pattern_enum(cx, pattern).is_some_and(|owner| enum_is_covered(&owner, cx))
         {
             return Some(
                 pattern
@@ -596,7 +595,6 @@ pub(crate) fn if_cond_in_subset(
             // HookOutcome/DataEvent are prelude enums. They may also appear in
             // `variant_owner`; the typed if-let lowering still owns both shapes.
             if is_data_event_variant(variant) || is_hook_outcome_variant(variant) {
-
                 if bindings.is_empty() || matches!(bindings.first(), Some(PatSlot::Wildcard)) {
                     return Some(Vec::new());
                 }

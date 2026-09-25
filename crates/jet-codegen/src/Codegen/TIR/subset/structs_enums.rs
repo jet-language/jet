@@ -1,19 +1,19 @@
-use crate::Codegen::alloc_handle_rust_type;
-use crate::Codegen::is_db_value_type_name;
-use crate::Codegen::is_json_type_name;
-use crate::Codegen::net_handle_rust_type;
+use crate::AST::{Type, VariantPayload};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_cell_ty;
+use crate::Codegen::TIR::is_covered_compute_ty;
 use crate::Codegen::TIR::is_covered_distinct_ty;
 use crate::Codegen::TIR::is_covered_fallible_ty;
-use crate::Codegen::TIR::is_covered_compute_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
 use crate::Codegen::TIR::is_covered_shared_guard_ty;
 use crate::Codegen::TIR::is_covered_shared_ty;
 use crate::Codegen::TIR::is_covered_shared_weak_ty;
 use crate::Codegen::TIR::is_type_var_param_ty;
-use crate::AST::{Type, VariantPayload};
+use crate::Codegen::alloc_handle_rust_type;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::net_handle_rust_type;
 use std::collections::HashSet;
 
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
@@ -50,9 +50,7 @@ pub(crate) fn enum_tag_is_covered(name: &str, cx: &Cx) -> bool {
         .unwrap_or_else(|| name.to_string());
     let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
     cx.enum_variants.contains_key(&canonical_name)
-        && (is_foreign
-            || cx.cloneable.contains(name)
-            || cx.cloneable.contains(&canonical_name))
+        && (is_foreign || cx.cloneable.contains(name) || cx.cloneable.contains(&canonical_name))
 }
 
 /// Core enum values with a concrete `PartialEq` representation in the shared
@@ -65,6 +63,7 @@ pub(crate) fn core_enum_equal_type(name: &str) -> bool {
             | "ProcessResourceLimit"
             | "TerminalMode"
             | "EncodingFormat"
+            | "EncodingErrorKind"
             | "DataEvent"
             | "CBORErrorKind"
             | "XMLReason"
@@ -498,8 +497,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         // D-PLACE1: Atomic fields are compiler-owned inline scalar carriers;
         // their literal payload is wrapped by TIR after this coverage gate.
         Type::Apply { name, args } if name == "Atomic" => {
-            args.len() == 1
-                && jet_foundation::Layout::atomic_scalar_type(&args[0])
+            args.len() == 1 && jet_foundation::Layout::atomic_scalar_type(&args[0])
         }
         // D-MEM1 S6 / D-LOCALCELL1=A: a bare core memory-handle field.
         Type::Apply { .. } => {

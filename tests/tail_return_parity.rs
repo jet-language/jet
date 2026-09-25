@@ -13,14 +13,14 @@ authority: { holds: { allow: [IO] } }
 "#;
 
 const COMPTIME_SOURCE: &str = r#"
-fn label(value: Int) String -> {
+fn label(value: Int) -> String !Never {
     if value == {
         1 -> { "one" }
         else -> { "other" }
     }
 }
 
-fn early(flag: Bool) String -> {
+fn early(flag: Bool) -> String !Never {
     if flag { return "early" }
     "late"
 }
@@ -32,7 +32,7 @@ enum Packet {
     Ignore(Int)
 }
 
-fn packet_value(packet: Packet) Int -> {
+fn packet_value(packet: Packet) -> Int !Never {
     if packet == {
         .Data(10..19) -> { 100 }
         .Data(value) | .Retry(value) -> {
@@ -80,7 +80,7 @@ fn run() {
 const WEB_SOURCE: &str = r#"#Target(Web)
 
 #Target(JS)
-fn js_block(flag: Bool) Int -[]> {
+fn js_block(flag: Bool) -[]> Int {
     if flag -> {
         value :: 6
         value + 1
@@ -88,7 +88,7 @@ fn js_block(flag: Bool) Int -[]> {
 }
 
 #Target(JS)
-fn js_arm(value: Int) Int -[]> {
+fn js_arm(value: Int) -[]> Int {
     if value == {
         1 -> { 10 }
         else -> { 20 }
@@ -96,7 +96,7 @@ fn js_arm(value: Int) Int -[]> {
 }
 
 #Target(JS)
-fn js_early(flag: Bool) Int -[]> {
+fn js_early(flag: Bool) -[]> Int {
     if flag { return 30 }
     40
 }
@@ -109,7 +109,7 @@ enum Packet {
 }
 
 #Target(JS)
-fn packet_value(packet: Packet) Int -[]> {
+fn packet_value(packet: Packet) -[]> Int {
     if packet == {
         .Data(10..19) -> { 100 }
         .Data(value) | .Retry(value) -> {
@@ -123,12 +123,12 @@ fn packet_value(packet: Packet) Int -[]> {
 }
 
 #WasmExport
-fn wasm_block(flag: Bool) Int -[]> {
+fn wasm_block(flag: Bool) -[]> Int {
     if flag -> { 7 } else -> { 3 }
 }
 
 #WasmExport
-fn wasm_arm(value: Int) Int -[]> {
+fn wasm_arm(value: Int) -[]> Int {
     if value == {
         1 -> { 10 }
         else -> { 20 }
@@ -136,7 +136,7 @@ fn wasm_arm(value: Int) Int -[]> {
 }
 
 #WasmExport
-fn wasm_early(flag: Bool) Int -[]> {
+fn wasm_early(flag: Bool) -[]> Int {
     if flag { return 30 }
     40
 }

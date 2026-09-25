@@ -77,10 +77,11 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest 
 }
 
 fn jet_http_client_request_new_owned(method: String, url: String) -> JetHTTPRequest {
+    let path = jet_http_request_target_path(&url);
     JetHTTPRequest {
         method,
         url,
-        path: String::new(),
+        path,
         version: "HTTP/1.1".to_string(),
         headers: JetHTTPHeaders::new(),
         trailers: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new())),

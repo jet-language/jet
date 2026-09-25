@@ -1,5 +1,6 @@
 use core as core
 use core.crypto.[CryptoError]
+use core.crypto as crypto
 
 // core.crypto.random - fail-closed CSPRNG.
 //
@@ -48,7 +49,13 @@ pub fn int_range(lo: Int, hi: Int) -[Rand]> Int !CryptoError {
     // instead of reducing it modulo `span` (which biases most ranges).
     if span > 18446744073709551616 -> return Err(.Length)
     limit :: 18446744073709551616 - (18446744073709551616 %% span)
+    // A hostile or wedged provider must not turn rejection sampling into an
+    // unbounded wait. 128 draws leaves a negligible false-rejection chance
+    // for the accepted range sizes while preserving fail-closed behavior.
+    attempts := 0
     loop {
+        if attempts >= 128 -> return Err(.Unavailable)
+        attempts += 1
         n :: random_word64() ?? return Err(.Unavailable)
         if n < limit -> return Ok(lo + (n %% span))
     }
@@ -60,10 +67,9 @@ fn random_word64() -[Rand]> Int !CryptoError {
     loop x in b -> n = n * 256 + Int.from_u8(x)
     n
 }
- 
 
 pub fn token_hex(n: Int) -[Rand]> String !CryptoError {
-    b :: bytes(n) ?? return Err(.Unavailable)
+    b :: bytes(n)
     s := ""
     loop x in b {
         d :: Int.from_u8(x)
@@ -75,7 +81,7 @@ pub fn token_hex(n: Int) -[Rand]> String !CryptoError {
 }
 
 pub fn token_urlsafe(n: Int) -[Rand]> String !CryptoError {
-    b :: bytes(n) ?? return Err(.Unavailable)
+    b :: bytes(n)
     alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
     raw :: alphabet.bytes()
     out := [U8]{}
@@ -155,21 +161,7 @@ pub fn randbits(k: Int) -[Rand]> Int !CryptoError {
 
 
 pub fn compare_digest(a: [U8], b: [U8]) -> Bool {
-    n :: a.len()
-    m :: b.len()
-    max :: if {
-        n > m -> n
-        else -> m
-    }
-    diff := n ~| m
-    loop i in 0..<max {
-        left := 0
-        right := 0
-        if i < n -> left = Int.from_u8(a[i])
-        if i < m -> right = Int.from_u8(b[i])
-        diff = diff | (left ~| right)
-    }
-    diff == 0
+    crypto.constant_time_equal_bytes(a, b)
 }
 
 pub fn choice_int(items: [Int]) -[Rand]> Int !CryptoError {

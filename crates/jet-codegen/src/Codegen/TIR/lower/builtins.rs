@@ -1,15 +1,15 @@
+use crate::AST::{Expr, IndexKind, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ListRemoveMode;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TClosureOp;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Diagnostics::Span;
-use crate::AST::{Expr, IndexKind, Type};
 
 fn invariant_expr(span: Span, construct: impl Into<String>) -> TExpr {
     TExpr {
@@ -26,7 +26,6 @@ fn base_receiver_ty(ty: &Type) -> &Type {
         _ => ty,
     }
 }
-
 
 fn sequence_elem_ty(ty: &Type) -> Option<Type> {
     match ty {
@@ -89,9 +88,7 @@ fn remove_mode_variant(variant: &str) -> Option<ListRemoveMode> {
 /// which stay on the native Set API and must NOT be wrapped.
 pub(crate) fn wrap_set_receiver_as_list(recv: TExpr, span: Span) -> TExpr {
     let (op, elem) = match &recv.ty {
-        Type::Apply { name, args }
-            if name == "Set" || name == crate::Syntax::TYPE_RANK =>
-        {
+        Type::Apply { name, args } if name == "Set" || name == crate::Syntax::TYPE_RANK => {
             let Some(elem) = args.as_slice().first() else {
                 return invariant_expr(span, "set receiver missing element type");
             };
@@ -189,7 +186,8 @@ pub(crate) fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Typ
     match e {
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => declared_field_ty(inner, cx, env),
         Expr::Index { base, .. } => {
-            let base_ty = tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
+            let base_ty =
+                tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
             match base_ty {
                 Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(*inner),
                 _ => None,
@@ -273,8 +271,7 @@ fn builtin_recv_ty(
             if !env.locals.contains_key(alias) {
                 if let Some(module) = cx.core_import_module_for_function(&env.fn_name, alias) {
                     let ty = resolved_ret.clone().or_else(|| {
-                        crate::Sema::core_fixed_sig(module, call_method)
-                            .and_then(|(_, ret)| ret)
+                        crate::Sema::core_fixed_sig(module, call_method).and_then(|(_, ret)| ret)
                     });
                     if let Some(ty) = ty {
                         return Some(if unwrap_carrier {
@@ -429,8 +426,8 @@ pub(crate) fn resolve_builtin_op(
             )
             | (
                 "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
-                | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal"
-                | "compare" | "copy_to" | "write_to",
+                | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join"
+                | "equal" | "compare" | "copy_to" | "write_to",
                 1,
             )
             | ("replace", 2) => TBuiltinOp::ByteBufferMethod {
@@ -528,9 +525,7 @@ pub(crate) fn resolve_builtin_op(
             Some(Expr::Ident(name, _)) => match cx.const_values.get(name) {
                 Some(crate::AST::CtValue::Enum {
                     type_name, variant, ..
-                }) if type_name == crate::Syntax::TYPE_REMOVE_BY => {
-                    remove_mode_variant(variant)
-                }
+                }) if type_name == crate::Syntax::TYPE_REMOVE_BY => remove_mode_variant(variant),
                 _ => match &rty {
                     Some(Type::List(inner)) if **inner == Type::Int => {
                         Some(ListRemoveMode::Dynamic)
@@ -539,9 +534,7 @@ pub(crate) fn resolve_builtin_op(
                 },
             },
             _ => match &rty {
-                Some(Type::List(inner)) if **inner == Type::Int => {
-                    Some(ListRemoveMode::Dynamic)
-                }
+                Some(Type::List(inner)) if **inner == Type::Int => Some(ListRemoveMode::Dynamic),
                 _ => None,
             },
         },
@@ -761,52 +754,21 @@ pub(crate) fn resolve_builtin_op(
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
         (
-            "count_bytes"
-                | "is_lower"
-                | "is_upper"
-                | "capitalize"
-                | "swapcase"
-                | "copy"
-                | "normalize"
-                | "isalnum"
-                | "isalpha"
-                | "isascii"
-                | "isdecimal"
-                | "isdigit"
-                | "isidentifier"
-                | "isnumeric"
-                | "isprintable"
-                | "isspace"
-                | "istitle"
-                | "islower"
-                | "isupper"
-                | "lower"
-                | "upper"
-                | "title"
-                | "casefold",
+            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
+            | "normalize" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit"
+            | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower"
+            | "isupper" | "lower" | "upper" | "title" | "casefold",
             0,
-        ) if is_string =>
-        {
-            TBuiltinOp::StringMethod {
-                method: method.to_string(),
-            }
-        }
+        ) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
         (
-            "remove_prefix"
-                | "remove_suffix"
-                | "removeprefix"
-                | "removesuffix"
-                | "equal"
-                | "rsplit"
-                | "matches"
-                | "match",
+            "remove_prefix" | "remove_suffix" | "removeprefix" | "removesuffix" | "equal"
+            | "rsplit" | "matches" | "match",
             1,
-        ) if is_string =>
-        {
-            TBuiltinOp::StringMethod {
-                method: method.to_string(),
-            }
-        }
+        ) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
         // D-STR-DECLINE1=C: `s.parse()`/`s.to_int()` share the canonical
         // integer parser; `to_float()` keeps the corresponding float route.
         ("parse" | "to_int", 0) if is_string => TBuiltinOp::ParseInt,
@@ -1162,7 +1124,6 @@ pub(crate) fn resolve_builtin_op(
 /// from `Collections::builtin_method_return` (the sema table). `Some(Unit)` means
 /// the canonical row is a genuinely void method; `None` means no canonical row.
 
-
 /// c109 Phase 11: resolve a closure-taking collection method into a total
 /// `TClosureOp`. Every receiver and callback-dispatch fact is explicit; a missing
 /// fact returns `None` so the caller can emit an invariant violation for a checked
@@ -1191,8 +1152,7 @@ pub(crate) fn resolve_closure_op(
     );
     let is_map = matches!(recv_ty, Type::Map { .. });
     let is_option = matches!(recv_ty, Type::Option(_));
-    let is_bag =
-        matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY);
+    let is_bag = matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY);
     let is_view = view_receiver(recv_ty);
     let has_args = |count: usize| args.len() == count;
     let op = match method {
@@ -1213,10 +1173,11 @@ pub(crate) fn resolve_closure_op(
         "filter" => TClosureOp::Filter,
         "each" if is_map && has_args(1) => TClosureOp::EachMap,
         "each" if !is_sequence || !has_args(1) => return None,
-        "each" if is_list
-            && elem_ty
-                .as_ref()
-                .is_some_and(|elem| list_carries_trait(cx, elem)) =>
+        "each"
+            if is_list
+                && elem_ty
+                    .as_ref()
+                    .is_some_and(|elem| list_carries_trait(cx, elem)) =>
         {
             TClosureOp::EachRef
         }

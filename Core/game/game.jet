@@ -8,7 +8,6 @@ package {
         game: .Library{ entry: game }
     }
 }
-use core as core
 
 // core.game — canonical scene/replay/backend handles.
 //
@@ -23,14 +22,8 @@ pub struct Scene {
     pub tick: Int
 }
 
-pub struct ReplayFrame {
-    pub tick: Int
-    pub keys: [String]
-}
-
 pub struct Replay {
     pub path: String
-    pub frames: [ReplayFrame]
 }
 
 pub struct Backend {
@@ -38,26 +31,18 @@ pub struct Backend {
     pub running: Bool
 }
 
-pub fn scene(name: String) -> Scene {
-    Scene{name: name, max_frames: 0, tick: 0}
-}
-
-pub fn backend_null() -> Backend {
-    Backend{name: "headless", running: true}
-}
-
-pub fn backend_raylib() -> Backend {
-    Backend{name: "raylib", running: true}
-}
-
 impl Scene {
-    pub fn new(name: String) -> Scene { scene(name) }
+    pub fn new(name: String) -> Scene {
+        Scene{name: name, max_frames: 0, tick: 0}
+    }
 }
 
 impl Replay {
-    pub fn record(path: String) -> Replay { Replay{path: path, frames: [ReplayFrame]{}} }
+    pub fn record(path: String) -> Replay { Replay{path: path} }
 }
 
 impl Backend {
-    pub fn headless() -> Backend { backend_null() }
+    pub fn headless() -> Backend {
+        Backend{name: "headless", running: true}
+    }
 }

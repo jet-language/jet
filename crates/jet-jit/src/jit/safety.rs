@@ -123,6 +123,7 @@ fn check_operation(function: &MirFunction, operation: &MirOperation) -> Result<(
         | MirOperation::Phi { .. }
         | MirOperation::ReadPlace(_)
         | MirOperation::WritePlace { .. }
+        | MirOperation::ReplacePlace { .. }
         | MirOperation::InitializeUninit { .. }
         | MirOperation::Copy { .. }
         | MirOperation::Move { .. }

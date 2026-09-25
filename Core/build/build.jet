@@ -9,6 +9,11 @@ package {
     }
 }
 
+build_max_targets :: 65536
+build_max_actions :: 262144
+build_max_files :: 524288
+build_max_nodes :: 524288
+
 // core.build is the read-only boundary for checked BuildPlan facts.  The
 // compiler owns graph(plan); receipt_diff is also available to the source
 // evaluator for already-materialized graph values.  Neither operation reads
@@ -113,8 +118,11 @@ pub fn graph(_plan: BuildPlan) -> BuildGraph {
 /// action keys compare recipe identity, while affected files follow changed
 /// actions through declared outputs, consumers, and target dependencies.
 pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff {
-    file_deltas :: diff_files(before, after)
+    if !valid_graph(before) || !valid_graph(after) {
+        panic("core.build.receipt_diff requires canonical BuildGraph values")
+    }
 
+    file_deltas :: diff_files(before, after)
     action_names := [String]{}
     loop action in before.actions -> append_unique(&action_names, action.name)
     loop action in after.actions -> append_unique(&action_names, action.name)
@@ -296,6 +304,124 @@ fn target_name(graph: BuildGraph, id: Int) -> String {
         if target.id == id -> return target.name
     }
     ""
+}
+
+fn valid_graph(graph: BuildGraph) -> Bool {
+    if graph.targets.len() > build_max_targets ||
+        graph.actions.len() > build_max_actions ||
+        graph.files.len() > build_max_files ||
+        graph.nodes.len() > build_max_nodes -> return false
+
+    target_ids := [Int]{}
+    target_names := [String]{}
+    loop target in graph.targets {
+        if target.id < 0 || !valid_graph_text(target.name, 1024) -> return false
+        if contains_int(target_ids, target.id) || contains_string(target_names, target.name) -> return false
+        target_ids.push(target.id)
+        target_names.push(~target.name)
+        if target.deps.len() > build_max_targets || target.actions.len() > build_max_actions || target.files.len() > build_max_files -> return false
+        loop path in target.files {
+            if !valid_graph_path(path) -> return false
+        }
+    }
+
+    action_ids := [Int]{}
+    action_names := [String]{}
+    loop action in graph.actions {
+        if action.id < 0 || !valid_graph_text(action.name, 1024) -> return false
+        if contains_int(action_ids, action.id) || contains_string(action_names, action.name) -> return false
+        action_ids.push(action.id)
+        action_names.push(~action.name)
+        if action.inputs.len() > build_max_files || action.outputs.len() > build_max_files -> return false
+        loop path in action.inputs {
+            if !valid_graph_path(path) -> return false
+        }
+        loop path in action.outputs {
+            if !valid_graph_path(path) -> return false
+        }
+        loop cap in action.caps {
+            if !valid_graph_text(cap, 128) -> return false
+        }
+        loop pool in action.pools {
+            if !valid_graph_text(pool, 128) -> return false
+        }
+        if action.legacy_wrapper != .None {
+            wrapper :: action.legacy_wrapper ?? ""
+            if !valid_graph_text(wrapper, 1024) -> return false
+        }
+        if action.target != .None {
+            target_id :: action.target ?? -1
+            if !contains_int(target_ids, target_id) -> return false
+        }
+    }
+
+    file_paths := [String]{}
+    loop file in graph.files {
+        if !valid_graph_path(file.path) || contains_string(file_paths, file.path) -> return false
+        file_paths.push(~file.path)
+        if file.owner != .None {
+            owner_id :: file.owner ?? -1
+            if !contains_int(action_ids, owner_id) -> return false
+        }
+        loop consumer_id in file.consumers {
+            if !contains_int(action_ids, consumer_id) -> return false
+        }
+        loop target_id in file.targets {
+            if !contains_int(target_ids, target_id) -> return false
+        }
+    }
+
+    loop target in graph.targets {
+        loop dep_id in target.deps {
+            if !contains_int(target_ids, dep_id) -> return false
+        }
+        loop action_id in target.actions {
+            if !contains_int(action_ids, action_id) -> return false
+        }
+    }
+
+    loop action_key in graph.action_keys {
+        if !valid_graph_text(action_key.action, 1024) || !valid_graph_text(action_key.key, 1024) -> return false
+        if !contains_string(action_names, action_key.action) -> return false
+    }
+
+    loop cached in graph.cache_hits {
+        if cached.id < 0 || !valid_graph_text(cached.name, 1024) -> return false
+        if !contains_int(action_ids, cached.id) || !contains_string(action_names, cached.name) -> return false
+    }
+
+    affected_paths := [String]{}
+    loop file in graph.affected_files {
+        if !valid_graph_path(file.path) || contains_string(affected_paths, file.path) -> return false
+        affected_paths.push(~file.path)
+    }
+
+    loop node in graph.nodes {
+        if !valid_graph_text(node.kind, 128) ||
+            !valid_graph_text(node.key, 1024) ||
+            !valid_graph_text(node.subject, 4096) -> return false
+        if node.inputs.len() > build_max_files || node.input_digests.len() > build_max_files -> return false
+        loop path in node.inputs {
+            if !valid_graph_path(path) -> return false
+        }
+        loop digest in node.input_digests {
+            if !valid_graph_text(digest.name, 4096) || !valid_graph_text(digest.digest, 1024) -> return false
+        }
+    }
+    true
+}
+
+fn valid_graph_path(value: String) -> Bool {
+    valid_graph_text(value, 4096)
+}
+
+fn valid_graph_text(value: String, max: Int) -> Bool {
+    if value == "" || value.len() > max -> return false
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        if n < 32 || n == 127 -> return false
+    }
+    true
 }
 
 fn contains_string(values: [String], value: String) -> Bool {

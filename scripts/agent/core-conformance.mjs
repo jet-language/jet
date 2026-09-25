@@ -396,6 +396,8 @@ const FIXTURE_BINDINGS = new Map([
     "core/data/sort_by_selector.jet",
     "core/data/sort_by_view.jet",
   ]],
+  ["core.service.ServiceTree.show", ["core/service/tree_show.jet"]],
+  ["core.service.ServiceTree.set_restart", ["core/service/tree_with_strategy.jet"]],
 ]);
 
 // Calls whose checked result is exactly Unit must still be observed without

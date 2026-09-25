@@ -31,13 +31,6 @@ pub(crate) mod runtime {
     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
 
-    pub fn digest256_hex_from_bytes(bytes: &[u8]) -> Option<String> {
-        Some(jet_crypto_digest256_hex_impl(&JetDigest256(bytes.try_into().ok()?)))
-    }
-
-    pub fn digest512_hex_from_bytes(bytes: &[u8]) -> Option<String> {
-        Some(jet_crypto_digest512_hex_impl(&JetDigest512(bytes.try_into().ok()?)))
-    }
 
     use crate::Encoding::json_rt as jet_std;
     #[allow(unused_imports)]
@@ -569,57 +562,6 @@ fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
     }
 }
 
-fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
-    match with_crypto(handle, |value| match value {
-        CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_hex_impl(digest)),
-        _ => None,
-    }) {
-        Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
-        None => {
-            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-256 digest handle"));
-            0
-        }
-    }
-}
-
-fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
-    match with_crypto(handle, |value| match value {
-        CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_bytes_impl(digest)),
-        _ => None,
-    }) {
-        Some(bytes) => alloc_bytes(&bytes),
-        None => {
-            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-256 digest handle"));
-            0
-        }
-    }
-}
-
-fn jet_jit_crypto_digest512_hex(handle: i64) -> i64 {
-    match with_crypto(handle, |value| match value {
-        CryptoValue::Digest512(digest) => Some(runtime::jet_crypto_digest512_hex_impl(digest)),
-        _ => None,
-    }) {
-        Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
-        None => {
-            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-512 digest handle"));
-            0
-        }
-    }
-}
-
-fn jet_jit_crypto_digest512_bytes(handle: i64) -> i64 {
-    match with_crypto(handle, |value| match value {
-        CryptoValue::Digest512(digest) => Some(runtime::jet_crypto_digest512_bytes_impl(digest)),
-        _ => None,
-    }) {
-        Some(bytes) => alloc_bytes(&bytes),
-        None => {
-            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid SHA-512 digest handle"));
-            0
-        }
-    }
-}
 
 fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
@@ -2509,24 +2451,6 @@ fn ambient_core_call(
                     CtValue::Bool,
                 ))
             }
-            "__digest256_hex" | "__digest512_hex" => {
-                let [digest] = args.as_slice() else {
-                    return Some(Err(vault_diag("malformed digest hexadecimal arguments", span)));
-                };
-                let type_name = if method == "__digest256_hex" { "Digest256" } else { "Digest512" };
-                let bytes = match vault_nominal_bytes(digest, type_name, span) {
-                    Ok(bytes) => bytes,
-                    Err(error) => return Some(Err(error)),
-                };
-                let text = if method == "__digest256_hex" {
-                    runtime::digest256_hex_from_bytes(&bytes)
-                } else {
-                    runtime::digest512_hex_from_bytes(&bytes)
-                };
-                Some(text.map(CtValue::Str).ok_or_else(|| {
-                    vault_diag(format!("malformed {type_name} byte length"), span)
-                }))
-            }
             "__vault_wrapped_from_bytes" => {
                 let [bytes] = args.as_slice() else {
                     return Some(Err(vault_diag(
@@ -3832,10 +3756,6 @@ host_fns! {
     hasher_new: "jet_jit_crypto_hasher_new" => jet_jit_crypto_hasher_new: nullary;
     hasher_update: "jet_jit_crypto_hasher_update" => jet_jit_crypto_hasher_update: binary;
     hasher_digest: "jet_jit_crypto_hasher_digest" => jet_jit_crypto_hasher_digest: unary;
-    digest256_hex: "jet_jit_crypto_digest256_hex" => jet_jit_crypto_digest256_hex: unary;
-    digest256_bytes: "jet_jit_crypto_digest256_bytes" => jet_jit_crypto_digest256_bytes: unary;
-    digest512_hex: "jet_jit_crypto_digest512_hex" => jet_jit_crypto_digest512_hex: unary;
-    digest512_bytes: "jet_jit_crypto_digest512_bytes" => jet_jit_crypto_digest512_bytes: unary;
     signature_bytes: "jet_jit_crypto_signature_bytes" => jet_jit_crypto_signature_bytes: unary;
     verify_key_bytes: "jet_jit_crypto_verify_key_bytes" => jet_jit_crypto_verify_key_bytes: unary;
     wrapped_bytes: "jet_jit_crypto_wrapped_bytes" => jet_jit_crypto_wrapped_bytes: unary;

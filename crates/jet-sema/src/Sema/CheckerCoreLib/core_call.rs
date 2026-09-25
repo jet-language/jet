@@ -60,14 +60,6 @@ fn source_owned_http_carrier(module: &str, name: &str) -> bool {
     )
 }
 
-/// These public math wrappers are direct aliases to fixed Core primitives.
-/// Keep their source-declared value signatures at cross-module call sites;
-/// routing through an ordinary imported function adds the default `Err`
-/// carrier to operations that are infallible at the primitive boundary.
-fn source_owned_math_primitive(module: &str, name: &str) -> bool {
-    module == "core.math"
-        && matches!(name, "cmp" | "cos" | "exp" | "fabs" | "is_finite" | "ln" | "sin" | "sqrt")
-}
 fn unit_callback_type() -> Type {
     Type::Fn {
         params: Vec::new(),
@@ -2654,6 +2646,7 @@ impl<'a> Checker<'a> {
         span: Span,
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
+        resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
@@ -2671,7 +2664,6 @@ impl<'a> Checker<'a> {
         {
             if jet_foundation::CoreModuleExports::core_source_owns(module, name)
                 && !source_owned_http_carrier(module, name)
-                && !source_owned_math_primitive(module, name)
                 && source.path != self.module_path
                 && !source.path.ends_with(&format!("/{path}", path = self.module_path))
             {
@@ -2681,7 +2673,6 @@ impl<'a> Checker<'a> {
                         .position(|candidate| candidate.module_alias == source.alias)
                 });
                 if let (Some(alias), Some(source_idx)) = (alias, source_idx) {
-                    let mut resolved_ret = None;
                     return self.infer_import_call(
                         alias,
                         source_idx,
@@ -2690,7 +2681,7 @@ impl<'a> Checker<'a> {
                         span,
                         type_args,
                         args,
-                        &mut resolved_ret,
+                        resolved_ret_out,
                     );
                 }
             }

@@ -1862,6 +1862,15 @@ fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOErro
 fn jet_std_fs_exists(path: &String) -> bool {
     std::path::Path::new(path).exists()
 }
+pub(crate) fn jet_fs_remove_entry(path: &str) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_dir() {
+        std::fs::remove_dir(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
 fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
@@ -1870,7 +1879,8 @@ fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
             "fault injected: FS.Write",
         ));
     }
-    std::fs::remove_file(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_fs_remove_entry(path)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
 }
 // D-LSDIR1=A: returns DirEntry values with name, full path, and is_dir flag.
 fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {

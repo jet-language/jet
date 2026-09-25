@@ -11,43 +11,73 @@ package {
 
 use core as core
 
+c_max_policy_text :: 1048576
+
 // core.db keeps the checked SQL and policy model in Jet's core call layer. The
 // provider owns connection state and executes only the typed operations exposed
 // here; this source module is the stable facade used by applications.
 
-pub fn open(url: String) -[DB]> { core.db.open(url) }
+pub fn open(url: String) -[DB]> DBConnection {
+    core.db.open(url)
+}
 
-pub fn open_memory() -[DB]> { core.db.open_memory() }
+pub fn open_memory() -[DB]> DBConnection {
+    core.db.open_memory()
+}
 
-pub fn pool(url: String, max: Int) -[DB]> {
+pub fn pool(url: String, max: Int) -[DB]> DbPool !DBError {
     core.db.pool(url, max: max)
 }
 
 pub fn policy(table: String, expression: String) -[DB]> {
-    core.db.policy(table, expression)
+    table_value := table.trim()
+    table_raw := table_value.bytes()
+    if table_raw.len() == 0 || table_raw.len() > c_max_policy_text || has_policy_control(~table_value) {
+        return Err("row policy needs a table and expression")
+    }
+    if !is_policy_identifier_start(Int.from_u8(table_raw[0])) {
+        return Err("row policy table must be a simple identifier")
+    }
+    i := 1
+    loop i < table_raw.len() {
+        if !is_policy_identifier_continue(Int.from_u8(table_raw[i])) {
+            return Err("row policy table must be a simple identifier")
+        }
+        i += 1
+    }
+
+    expression_value := expression.trim()
+    expression_bytes := expression_value.bytes()
+    if expression_bytes.len() == 0 || expression_bytes.len() > c_max_policy_text || has_policy_control(~expression_value) {
+        return Err("row policy needs a table and expression")
+    }
+    if expression_value != "true" && expression_value != "owner == user" {
+        return Err("unsupported row policy expression `{expression_value}`; supported forms are `true` and `owner == user`")
+    }
+    core.db.policy(table_value, expression_value)
 }
 
-pub fn policy_audit(scope: DBScope) -[DB]> {
+pub fn policy_audit(scope: DBScope) -[DB]> String {
     core.db.policy_audit(scope)
 }
 
-pub fn row_value(row: [String: DBValue], column: String) -[DB]> {
+pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue !String {
     core.db.row_value(row, column)
 }
 
-pub fn row_int(row: [String: DBValue], column: String) -[DB]> {
+pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int !String {
     core.db.row_int(row, column)
 }
 
-pub fn row_float(row: [String: DBValue], column: String) -[DB]> {
+pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float !String {
     core.db.row_float(row, column)
 }
 
-pub fn row_text(row: [String: DBValue], column: String) -[DB]> {
+pub fn row_text(row: [String: DBValue], column: String) -[DB]> String !String {
     core.db.row_text(row, column)
 }
 
-pub fn row_bool(row: [String: DBValue], column: String) -[DB]> {
+pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool !String {
     core.db.row_bool(row, column)
 }
 
@@ -58,10 +88,31 @@ pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T ![FieldError] {
     return core.db.decode<T>(row)
 }
 
-pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> {
+pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError {
     core.db.transaction(scope, name, steps)
 }
 
-pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> {
+pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int !DBError {
     core.db.migrate(scope, name, steps)
+}
+
+fn has_policy_control(text: String) -> Bool {
+    raw := text.bytes()
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n < 32 || n == 127 -> return true
+        if n == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return true
+        }
+    }
+    false
+}
+
+fn is_policy_identifier_start(value: Int) -> Bool {
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95
+}
+
+fn is_policy_identifier_continue(value: Int) -> Bool {
+    is_policy_identifier_start(value) || (value >= 48 && value <= 57)
 }

@@ -436,7 +436,7 @@ pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree {
         if d.default_text.bytes().len() == 0 -> next
         if ~out == {
             .Object(entries) -> {
-                if entries.get(d.dest) == .None {
+                if entries.get(d.dest) == .None && entries.get(d.name) == .None {
                     next_entries := ~entries
                     _ :: next_entries.add(d.dest, parse_atom(d.default_text))
                     out = DataTree.Object(next_entries)

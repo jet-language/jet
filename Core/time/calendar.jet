@@ -4,19 +4,19 @@ use core.time as time
 // Weeks start on Monday (`MONDAY = 0`) unless a function takes `firstweekday`.
 // Day `0` in a month matrix is a slot outside the month. Names are English
 // and fixed; there is no locale override.
-@monday :: 0
+monday :: 0
 
-@tuesday :: 1
+tuesday :: 1
 
-@wednesday :: 2
+wednesday :: 2
 
-@thursday :: 3
+thursday :: 3
 
-@friday :: 4
+friday :: 4
 
-@saturday :: 5
+saturday :: 5
 
-@sunday :: 6
+sunday :: 6
 fn floor_div(a: Int, b: Int) -> Int {
     q := a /% b
     r :: a %% b
@@ -35,13 +35,26 @@ pub fn leapdays(y1: Int, y2: Int) -> Int {
         a = b
         b = t
     }
-    n := 0
-    y := a
-    loop y < b {
-        if isleap(y) -> n = n + 1
-        y = y + 1
+    by4 :: leap_multiple_count(a, b, 4)
+    by100 :: leap_multiple_count(a, b, 100)
+    by400 :: leap_multiple_count(a, b, 400)
+    by4 - by100 + by400
+}
+
+fn leap_multiple_count(start: Int, end: Int, divisor: Int) -> Int {
+    floor_before(end, divisor) - floor_before(start, divisor)
+}
+
+fn floor_before(value: Int, divisor: Int) -> Int {
+    // `value - 1` is not representable at Int's lower bound.  floor_div
+    // already accounts for the negative remainder; only an exact multiple
+    // needs one additional step for the exclusive upper bound.
+    if value == -9223372036854775808 {
+        q :: floor_div(value, divisor)
+        if value %% divisor == 0 -> return q - 1
+        return q
     }
-    n
+    floor_div(value - 1, divisor)
 }
 pub fn weekday(year: Int, month: Int, day: Int) -> Int {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.

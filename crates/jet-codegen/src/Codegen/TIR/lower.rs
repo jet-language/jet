@@ -2,7 +2,6 @@
 //!
 //! Split out of the original `TIR.rs` for maintainability; behavior unchanged.
 
-
 mod builtins;
 mod call_args;
 mod control_flow;

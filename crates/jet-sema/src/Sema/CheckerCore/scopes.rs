@@ -1,7 +1,7 @@
+use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::Span;
 use crate::Sema::Registration::already_defined;
 use crate::Sema::{Checker, LocalInfo};
-use crate::AST::{AccessConvention, Expr, Type};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -151,6 +151,39 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Check optional fold reads against the live compile-time frame. Stateful folds invalidate
+    /// `ct_scopes` entries, so later folds cannot reuse pre-fold values.
+    pub(crate) fn optional_comptime_fold_is_eligible(
+        &self,
+        expr: &crate::AST::Expr,
+        values: &HashMap<String, crate::Comptime::CtValue>,
+    ) -> bool {
+        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(expr);
+        for name in reads.iter().chain(calls.iter()) {
+            if self.lookup(name).is_none() {
+                // Imported module qualifiers and module-level callables are
+                // resolved by the fragment context, not the lexical frame.
+                continue;
+            }
+            let Some(depth) = self.flow.bindings.depth_of(name) else {
+                return false;
+            };
+            let Some(local_value) = self
+                .ct_scopes
+                .get(depth)
+                .and_then(|scope| scope.get(name))
+            else {
+                // This lexical local shadows any same-named outer value, but
+                // no live compile-time value belongs to this binding.
+                return false;
+            };
+            if values.get(name) != Some(local_value) {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn evaluate_constant(
         &self,
         expr: &crate::AST::Expr,
@@ -158,24 +191,30 @@ impl<'a> Checker<'a> {
         if self.defer_ct_evaluation {
             return None;
         }
-        let mut globals = self.current_ct_globals().into_owned();
-        for (name, info) in self.flow.bindings.all() {
-            if let Some(value) = &info.constant_value {
-                globals.insert(name.to_string(), value.clone());
-            }
+        let globals = self.current_ct_globals().into_owned();
+        if !self.optional_comptime_fold_is_eligible(expr, &globals) {
+            return None;
         }
-        crate::Comptime::evaluate_owned_with_imports_opts(
+        let binding_types = self.current_ct_binding_types(&globals);
+        let checked_nominals = self.checked_comptime_nominals();
+        crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
             expr,
             self.ct_checked_funcs,
             self.ct_externs,
             self.ct_base_dir,
             &globals,
+            &binding_types,
             self.core_imports,
             self.gates,
             0,
+            &[],
+            checked_nominals,
+            None,
         )
         .ok()
+        .map(|(value, _)| value)
     }
+
 
     /// What the checker knows about a name here: the innermost declaration,
     /// or the flow-narrowed refinement of it when a proven test recorded one
@@ -359,7 +398,6 @@ impl<'a> Checker<'a> {
                     reactive_local: false,
                     reactive_shared: false,
                     single_use_span: None,
-                    constant_value: None,
                     invalid: false,
                 },
             );

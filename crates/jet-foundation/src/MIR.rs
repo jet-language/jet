@@ -5166,6 +5166,10 @@ pub enum MirOperation {
     ReadPlace(MirPlaceId),
     MovePlace { place: MirPlaceId },
     WritePlace { place: MirPlaceId, value: MirValueId },
+    /// Replace a checked owned slot after its new value has been evaluated.
+    /// Release an initialized displaced owner before the next instruction;
+    /// reinitializing a moved slot has no displaced value.
+    ReplacePlace { place: MirPlaceId, value: MirValueId },
     InitializeUninit { place: MirPlaceId },
     Copy { value: MirValueId },
     Move { value: MirValueId },
@@ -5335,6 +5339,7 @@ impl MirOperation {
             Self::Phi { incoming } => out.extend(incoming.iter().map(|(_, value)| *value)),
             Self::ReadPlace(_) | Self::MovePlace { .. } | Self::InitializeUninit { .. } => {}
             Self::WritePlace { value, .. }
+            | Self::ReplacePlace { value, .. }
             | Self::Copy { value }
             | Self::Move { value }
             | Self::Unary { value, .. }
@@ -6865,6 +6870,7 @@ fn operation_kind(operation: &MirOperation) -> &'static str {
         MirOperation::ReadPlace(_) => "ReadPlace",
         MirOperation::MovePlace { .. } => "MovePlace",
         MirOperation::WritePlace { .. } => "WritePlace",
+        MirOperation::ReplacePlace { .. } => "ReplacePlace",
         MirOperation::InitializeUninit { .. } => "InitializeUninit",
         MirOperation::Copy { .. } => "Copy",
         MirOperation::Move { .. } => "Move",
@@ -8318,7 +8324,8 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
         | MirOperation::InitializeUninit { place }
         | MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. }
-        | MirOperation::WritePlace { place, .. } => vec![*place],
+        | MirOperation::WritePlace { place, .. }
+        | MirOperation::ReplacePlace { place, .. } => vec![*place],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {

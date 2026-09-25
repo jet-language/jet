@@ -1,6 +1,24 @@
 // core-conformance: core.testing.histories
 use core.testing as api
 
+fn reference_size(commands: [DataTree]) -> DataTree {
+    DataTree.Int(commands.len())
+}
+
+fn candidate_size(commands: [DataTree]) -> DataTree {
+    DataTree.Int(commands.len())
+}
+
+fn observe(value: DataTree) -> DataTree { ~value }
+
 fn run() {
-    print(api.histories(1))
+    comparison :: api.histories<DataTree>(
+        seed: 1,
+        cases: 1,
+        strategy: None,
+        model: reference_size,
+        actual: candidate_size,
+        observe: observe,
+    )
+    print(comparison.status)
 }

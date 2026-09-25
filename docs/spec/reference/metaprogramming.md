@@ -12,12 +12,15 @@ Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
 
 ## 1. Glossary
 
-- **comptime** — evaluation during compilation. Value-level only (S26): it
-  computes values, it never creates types.
-- **derive** — code generated from a type's shape (`#Codable`, user
-  `derive T.Wire`). The boilerplate killer.
-- **reflection** — reading a type's shape at compile time (`T.reflect()` →
-  `TypeInfo`). The read half of derives.
+- **preparation** — ordinary Jet code evaluated before program execution by
+  `prep { … }`; its final expression supplies the value.
+- **phase** — the total evaluation-site value from `@PHASE()`: `Preparation`,
+  `Build`, or `Runtime`.
+- **reflection** — typed compiler metadata queried through uppercase callable
+  roots such as `@TYPE(T)` and `@FUNCTION(f)`, with lowercase record members.
+- **metadata failure** — a typed `MetadataError`; an unavailable fact names its
+  required `CompilerStage` instead of appearing as an empty list or zero.
+
 - **splice** — `@name`, a typed hole filled in an item template during
   expansion (D-CTMARKER1).
 - **build entry** — the compile-time `fn main` equivalent: one function per
@@ -58,31 +61,69 @@ The test an enterprise security team must pass without reading prose: *what
 code ran at build time, what authority did it have, what did it read or
 write, and can I reproduce it offline?*
 
-## 3. The ladder — one mechanism per job
+### Selected shared preparation and metadata syntax
 
-Five rungs. Each rung is opt-in; the one below always suffices for simpler
-jobs (I8). A beginner lives on rungs 0–1 and never learns the rest exist.
+Preparation has one visible brace-delimited boundary. Its value uses an
+ordinary name afterward; the phase query reports where its own expression is
+evaluated:
 
-| Rung | Job | Mechanism |
+```jet
+lanes :: prep { calculate_lanes() + 0 }
+phase :: @PHASE()
+fn run() { print(lanes) }
+```
+
+The read-only metadata roots are `@TYPE(T)`, `@FUNCTION(f)`,
+`@METHOD(T, name)`, `@CLOSURE(value)`, `@PROGRAM()`, `@PACKAGE()`,
+`@SOURCE()`, `@VALUE(value)`, and `@TYPES()`. They return their typed records
+through `T !MetadataError`; `?` propagates that failure. The closed failure
+cases are `Unavailable`, `Unsupported`, `Stale`, `Invalid`, `Denied`, and
+`Truncated`. A successful empty collection means checked emptiness.
+
+Standard mode permits those lawful read-only facts and explicit additive
+publication with `compiler.generate(name, value)`, where `value` is the
+existing `Generated` item value. A generated value does nothing until this
+explicit call. Type/code construction, caller-code insertion, explicit code
+parsing, and changes to existing contracts require the approved root package's
+`metaprogramming: unrestricted` opt-in and an explicit provider registration
+with target handles. That grant is not host permission.
+
+Runtime barriers remain scoped `#Runtime(.NoEager)` or `#Runtime(.Only)`
+markers on functions, methods, or explicit blocks. `NoEager` blocks automatic
+eager evaluation but permits an explicit `prep` call; `Only` rejects prep and
+build calls. Neither marker disables ordinary runtime optimization.
+
+Compiling a value does not add another metadata spelling: bind it with an
+ordinary name and use ordinary type/value positions afterward.
+
+## 3. Default and advanced modes
+
+Standard mode retains levels 0–5: ordinary shared preparation, typed
+read-only compiler facts, existing derivation and build facilities, and
+explicit additive `Generated` publication. The extra powers ratified above
+level 5 are available only after root-package opt-in and explicit provider
+registration:
+
+| Mode | Job | Mechanism |
 |---|---|---|
-| 0 | type-driven boilerplate | built-in derives (`#Codable`, …) |
-| 1 | compile-time values | `comptime x = f();`, `comptime if`, `comptime { }` |
-| 2 | pure eval + data embedding | whitelist Core, `embed_file`/`embed_bytes`, `find`, `fetch(url, sha256:)` |
-| 3 | user derives | `T.reflect()` + typed `derive T.Trait { … }` item templates |
-| 4 | whole-program build metaprogramming | **`fn build`** |
+| Standard | type-driven boilerplate | built-in derives (`#Codable`, …) |
+| Standard | prepared values and phase inspection | `prep { … }` and `@PHASE()` |
+| Standard | checked compiler facts | uppercase `@TYPE`, `@FUNCTION`, `@METHOD`, `@CLOSURE`, `@PROGRAM`, `@PACKAGE`, `@SOURCE`, `@VALUE`, and `@TYPES` roots |
+| Standard | additive generated declarations | `compiler.generate(name, value)` with a `Generated` value |
+| Advanced | first-class types, code values, caller capture/insertion, specialization, and checked rewrites | registered `compiler.advanced` providers |
 
-Rejected forever (D-METADEPTH1, load-bearing): token/AST macros, custom
-syntax, attribute macros, comptime types. **One law spans every rung:
-comptime never creates types.** Build code supplies typed item blocks that are
-checked by the ordinary front end. Type creation happens where it always does:
-in sema, over checked Jet items.
+Advanced changes still pass the ordinary language checker and publish
+atomically with a receipt. An import alone cannot register a provider or obtain
+a session. The metaprogramming opt-in does not grant filesystem, process, FFI,
+or other host permissions.
+
 
 ## 4. `fn build` — the auditable bottleneck
 
-The owner's seed idea, kept whole: a compile-time entry point symmetric with
-runtime `main`, mapping cleanly to `jet build`. One per unit. It is the
-**only** place whole-program metaprogramming exists — everything below it
-stays pure and value-level, so there is exactly one place to audit.
+The explicit `fn build` entry remains the package's build-plan boundary.
+Shared `prep { … }` is an expression in standard mode. Read-only
+whole-program facts use `@PROGRAM()` with ordinary typed members; checked
+program edits require the separate approved-provider contract.
 
 ```jet
 fn build(b: BuildContext) BuildPlan -[FS]> {
@@ -185,9 +226,10 @@ This vision adds three surface rules (home/addressing balloted as
    committed). Open one, read it, set a breakpoint in it, let the LSP
    go-to-def into it. Jai cannot do this; Rust's cargo-expand is a forensic
    tool, not a surface.
-2. **Additive only.** Generation may ADD modules; it may never mutate or
-   shadow user-written source. What you wrote is what compiles. Local
-   reasoning survives; code review reviews the truth.
+2. **Standard publication is additive.** `compiler.generate(name, value)` can
+   add declarations from the existing `Generated` value, but cannot replace
+   existing bodies, signatures, or types. Advanced transactions use their
+   separate opt-in path.
 3. **Bounded staging.** Generation rounds run in declared, deterministic
    order; a later round may observe an earlier round's output; a cycle is a
    compile error naming the chain. No loop-until-quiescent.
@@ -196,37 +238,31 @@ This vision adds three surface rules (home/addressing balloted as
 are cleaned by graph ownership. This closes Make/Ninja missing-dependency
 bugs and the Jai injection risk with one rule.
 
-## 7. Observe + enforce — policy as code (D-METADEPTH2)
+## 7. Observe + enforce — policy as code (D-METADEPTH2 and D-META-REFLECT2)
 
-D-METADEPTH1 ratified the ceiling at reflection + derives and said rung B —
-a read-only, lint-style rejection pass — "rises only by a future vote."
-**D-METADEPTH2 is that vote**, scoped to the build entry:
+D-METADEPTH2 keeps the read-only rule and structured-diagnostic path at the
+selected root build entry. The current authorized checked-program snapshot is
+queried through `@PROGRAM()`; other uppercase roots return typed records for
+types, callables, source, packages, and retained runtime values. Ordinary
+lowercase member access reads those records.
 
-- the entry receives a **post-sema, read-only snapshot** of the whole program
-  through the existing `TypeInfo` surface scaled up (program → packages →
-  types/functions);
-- it emits diagnostics through an API whose signature structurally requires
-  code + what/why/fix — I4 quality by construction;
-- it runs only at the selected root entry, never at import time; a
-  dependency's rules do not run in your build.
+Every metadata query returns its record through `T !MetadataError`. The
+`Unavailable` case names the required `CompilerStage` and a reason; other
+closed cases are `Unsupported`, `Stale`, `Invalid`, `Denied`, and `Truncated`.
+An empty collection means checked emptiness, not missing analysis. `@PHASE()`
+is a total value and reports `Preparation`, `Build`, or `Runtime` at the
+evaluation site.
 
 ```jet
-for ty in b.program.types() {
-    if ty.implements("Entity") and not ty.has_method("archive") {
-        b.error(ty.span, code: "ORG01",
-            what: "entity type {ty.name} has no archive method",
-            why:  "company policy: every entity must be archivable for GDPR export",
-            fix:  "add `fn archive(self) Archived ->` to {ty.name}")
-    }
-}
+program :: @PROGRAM()?
+declarations :: program.declarations
 ```
 
-This is the Roslyn-analyzer shape — the one industry success story of typed
-read-only compiler APIs — and it is Blow's own message-loop showcase
-(whole-program domain rules) with the mutation removed. Teams write org rules
-in Jet, with the compiler's error quality, against a stable reflection API
-instead of compiler internals. Rung C (mutation, message loop, user macros)
-stays frozen on c154 (e7) and would need its own future vote.
+Advanced type/code construction and existing-program changes are not part of
+that standard read-only path. They require an approved root package and
+explicit target-registered provider. A change set is checked against affected
+callers and publishes atomically with a receipt; this compiler grant does not
+grant host permissions or expose mutable compiler AST nodes.
 
 ## 8. Scale ladder — solo to enterprise, one model
 

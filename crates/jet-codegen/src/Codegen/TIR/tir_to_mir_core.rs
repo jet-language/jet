@@ -7,8 +7,6 @@
 use jet_foundation::MIR::MirCoreCall;
 use jet_foundation::Syntax::CoreCallRecord;
 
-
-
 /// Project the exact checked Core-call records used by a TIR program.
 ///
 /// The registry record, rather than a reconstructed `(module, member)` pair,

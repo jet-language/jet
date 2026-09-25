@@ -52,6 +52,125 @@ impl Drop for GoldenScratch {
     }
 }
 
+struct FeatureFixtureScratch {
+    root: PathBuf,
+    entry: PathBuf,
+}
+
+impl FeatureFixtureScratch {
+    fn for_entry(entry: &Path) -> Option<Self> {
+        let project_root = entry.parent()?;
+        if !contains_fixture_state(project_root) {
+            return None;
+        }
+
+        let base = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .or_else(|| std::env::var_os("JET_TEST_SCRATCH"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+                    .join(".cache/jet-test-scratch")
+            });
+        fs::create_dir_all(&base).expect("create golden fixture scratch root");
+        let base = fs::canonicalize(base).expect("canonicalize golden fixture scratch root");
+        let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("canonicalize repo root");
+        assert!(
+            !base.starts_with(&repo) && !base.starts_with("/tmp"),
+            "golden fixture scratch must be outside the repository and disk-backed: {}",
+            base.display()
+        );
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let root = base.join(format!("golden-fixture-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&root).expect("create golden fixture project");
+        copy_feature_project(project_root, &root);
+        Some(Self {
+            entry: root.join(entry.file_name()?),
+            root,
+        })
+    }
+}
+
+impl Drop for FeatureFixtureScratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn contains_fixture_state(root: &Path) -> bool {
+    fs::read_dir(root)
+        .unwrap_or_else(|error| panic!("read example project {}: {error}", root.display()))
+        .flatten()
+        .any(|item| {
+            let path = item.path();
+            let name = item.file_name();
+            if !item.file_type().is_ok_and(|kind| kind.is_dir()) {
+                return false;
+            }
+            if name == "fixture-state" {
+                return true;
+            }
+            name != ".jet" && contains_fixture_state(&path)
+        })
+}
+
+fn copy_feature_project(source: &Path, destination: &Path) {
+    for item in fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read example project {}: {error}", source.display()))
+        .flatten()
+    {
+        let name = item.file_name();
+        let kind = item.file_type().expect("read example fixture entry type");
+        let from = item.path();
+        if kind.is_dir() && name == ".jet" {
+            continue;
+        }
+        if kind.is_dir() && name == "fixture-state" {
+            let state = destination.join(".jet");
+            fs::create_dir_all(&state).expect("create staged example .jet state");
+            copy_feature_state(&from, &state);
+        } else if kind.is_dir() {
+            let to = destination.join(&name);
+            fs::create_dir_all(&to).expect("create copied example directory");
+            copy_feature_project(&from, &to);
+        } else if kind.is_file() {
+            fs::copy(&from, destination.join(&name)).unwrap_or_else(|error| {
+                panic!(
+                    "copy example fixture {} into {}: {error}",
+                    from.display(),
+                    destination.display()
+                )
+            });
+        }
+    }
+}
+
+fn copy_feature_state(source: &Path, destination: &Path) {
+    for item in fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read fixture state {}: {error}", source.display()))
+        .flatten()
+    {
+        let from = item.path();
+        let to = destination.join(item.file_name());
+        let kind = item.file_type().expect("read fixture state entry type");
+        if kind.is_dir() {
+            fs::create_dir_all(&to).expect("create staged fixture state directory");
+            copy_feature_state(&from, &to);
+        } else if kind.is_file() {
+            fs::copy(&from, &to).unwrap_or_else(|error| {
+                panic!(
+                    "copy fixture state {} into {}: {error}",
+                    from.display(),
+                    destination.display()
+                )
+            });
+        }
+    }
+}
+
 fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
     let stderr = String::from_utf8_lossy(stderr);
     stderr.contains("symbol lookup error")
@@ -468,8 +587,16 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         check_polyglot_binder_example(entry, env);
         return;
     }
-
     let src = fs::read_to_string(&entry.path).unwrap();
+    // Fixture state has one canonical, non-dot source tree. Materialize it as
+    // project `.jet` state only in the disk-backed test scratch directory.
+    let staged_fixture = FeatureFixtureScratch::for_entry(&entry.path);
+    let compile_path = staged_fixture
+        .as_ref()
+        .map(|scratch| scratch.entry.to_string_lossy().into_owned())
+        .unwrap_or_else(|| entry.shown.clone());
+
+
     let stem = entry.stem.as_str();
     let needs_gtk = stem == "ui/ui_native_linux";
     if needs_gtk && !env.have_gtk {
@@ -502,21 +629,16 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
-    // Both compile entry points must name the example with ONE spelling: the
-    // repo-relative `entry.shown` every golden was authored against. `entry.path`
-    // is absolute (`root.join("examples/features")`), and Loader gives the entry
-    // module `display = entry_path` verbatim, so passing it here baked an absolute
-    // Jet path into `cx.file` for all 59 examples that `has_package_build_entry`
-    // routes this way — every file directly in `examples/features/tooling/` and
-    // `examples/features/comptime/`, because those directories have no manifest and
-    // a SIBLING (`tooling/compiler_api.jet`, `comptime/build_stamp.jet`) supplies
-    // the discovered `fn build`. Examples that print their own source location then
-    // disagreed with their golden: `tooling/provenance_track` (`@origin`,
-    // D-TRACK-ORIGIN1) and `tooling/panic_report` (E3001 `--> file:line`).
-    let compiled_result = if has_package_build_entry(&entry.path, &src) {
-        jet::compile_programmable_build(&entry.shown, &[])
+    // Ordinary examples use the repo-relative `entry.shown` path, not the
+    // absolute `entry.path`: Loader stores this value as the entry display path
+    // and observable source-location examples pin it in their goldens. Projects
+    // with canonical `fixture-state` are staged under safe scratch so their
+    // required `.jet` state is never created in the checkout; their diagnostics
+    // and output goldens still use `entry.shown`.
+    let compiled_result = if has_package_build_entry(Path::new(&compile_path), &src) {
+        jet::compile_programmable_build(&compile_path, &[])
     } else {
-        jet::compile_with_path(&src, &entry.shown)
+        jet::compile_with_path(&src, &compile_path)
     };
     let compiled = match compiled_result {
         Ok(c) => c,

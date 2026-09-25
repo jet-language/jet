@@ -1,5 +1,11 @@
 // core.web.router — typed routes, navigation, and cache state.
 
+c_max_router_path :: 4096
+
+c_max_router_routes :: 1024
+c_max_router_fields :: 256
+
+
 #Error
 pub enum WebRouterError {
     NotFound
@@ -85,27 +91,32 @@ pub fn route_with_search_codec(router: WebRouter, pattern: String, fields: [WebR
 }
 
 pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter !WebRouterError {
+    loop existing in router.routes {
+        if existing.pattern == "*" -> return Err(WebRouterError.Invalid)
+    }
     fields := [WebRouterField]{}
     search := [WebRouterField]{}
     body :: handler("*") ?? return Err(WebRouterError.Callback)
     route := WebRoute{pattern: "*", name: "not_found", fields: fields, search_fields: search, codec: WebRouterSearchCodec.Query, response: body, not_found: true}
-    routes := copy_routes(router.routes)
-    if routes.len() >= 1024 -> return Err(WebRouterError.Invalid)
+    routes := copy_routes(router.routes) ?? panic("copy_routes failed")
+    if routes.len() >= c_max_router_routes -> return Err(WebRouterError.Invalid)
     routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
 
 pub fn navigate(router: WebRouter, path: String) -> WebNavigation !WebRouterError {
-    if path.len() == 0 -> return Err(WebRouterError.Invalid)
+    if path.len() == 0 || path.len() > c_max_router_path || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav :: match_path(router, path) ?? return Err(WebRouterError.NotFound)
     Ok(nav)
 }
 
 pub fn preload(router: &WebRouter, path: String) -> WebNavigation !WebRouterError {
-    if path.len() == 0 -> return Err(WebRouterError.Invalid)
+    if path.len() == 0 || path.len() > c_max_router_path || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav := match_path(~router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
-    _ :: cache_path(router, path, WebRouterCacheStatus.Stale)
+    router.current = ~path
+    router.status = WebNavigationStatus.Preloading
+    if cache_path(router, path, WebRouterCacheStatus.Stale) < 0 -> return Err(WebRouterError.Invalid)
     Ok(nav)
 }
 
@@ -121,14 +132,16 @@ pub fn stale(router: WebRouter, path: String) -> Int {
 }
 
 pub fn invalidate(router: &WebRouter, path: String) -> Int {
-    idx := cache_path(router, path, WebRouterCacheStatus.Invalidated)
+    idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
+    _ :: cache_path(router, path, WebRouterCacheStatus.Invalidated)
     1
 }
 
 pub fn collect(router: &WebRouter, path: String) -> Int {
-    idx := cache_path(router, path, WebRouterCacheStatus.Collected)
+    idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
+    _ :: cache_path(router, path, WebRouterCacheStatus.Collected)
     1
 }
 
@@ -138,6 +151,7 @@ pub fn current(router: WebRouter) -> WebNavigationState {
 }
 
 pub fn link(router: WebRouter, name: String, params: [String:String], search: [String:String]) -> String !WebRouterError {
+    if name.len() == 0 -> return Err(WebRouterError.Invalid)
     loop r in router.routes {
         if r.name == name {
             loop field in r.fields {
@@ -146,14 +160,12 @@ pub fn link(router: WebRouter, name: String, params: [String:String], search: [S
             loop key in params.keys() {
                 if !field_name_allowed(r.fields, key) -> return Err(WebRouterError.Invalid)
             }
-            loop field in r.search_fields {
-                if !map_has(search, field.name) -> return Err(WebRouterError.Invalid)
-            }
             loop key in search.keys() {
                 if !field_name_allowed(r.search_fields, key) -> return Err(WebRouterError.Invalid)
             }
-            if r.codec == WebRouterSearchCodec.JSON && search.len() > 0 -> return Err(WebRouterError.Invalid)
-            return Ok(fill_pattern(r.pattern, params, search, r.codec))
+            out := fill_pattern(r.pattern, params, search, r.codec)
+            if out.len() > c_max_router_path -> return Err(WebRouterError.Invalid)
+            return Ok(out)
         }
     }
     Err(WebRouterError.NotFound)
@@ -175,13 +187,16 @@ pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus {
 }
 
 fn add_route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String, fallback: Bool) -> WebRouter !WebRouterError {
-    if pattern.len() == 0 || pattern.len() > 4096 -> return Err(WebRouterError.Invalid)
-    if !route_fields_valid(pattern, fields, search) -> return Err(WebRouterError.Invalid)
+    if pattern.len() == 0 || pattern.len() > c_max_router_path || !(valid_percent_encoding(pattern) ?? false) -> return Err(WebRouterError.Invalid)
+    if !(route_fields_valid(pattern, fields, search) ?? false) -> return Err(WebRouterError.Invalid)
+    loop existing in router.routes {
+        if existing.pattern == pattern -> return Err(WebRouterError.Invalid)
+    }
     nav := WebNavigation{path: pattern, name: "", params: fields, search: search, status: WebNavigationStatus.Pending}
     body :: handler(nav) ?? return Err(WebRouterError.Callback)
     route := WebRoute{pattern: pattern, name: pattern, fields: fields, search_fields: search, codec: codec, response: body, not_found: fallback}
-    routes := copy_routes(router.routes)
-    if routes.len() >= 1024 -> return Err(WebRouterError.Invalid)
+    routes := copy_routes(router.routes) ?? panic("copy_routes failed")
+    if routes.len() >= c_max_router_routes -> return Err(WebRouterError.Invalid)
     routes.push(route)
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
@@ -192,12 +207,14 @@ fn match_path(router: WebRouter, path: String) -> ?WebNavigation {
     found := false
     clean := path_only(path)
     loop r in router.routes {
-        values :: match_pattern(r.pattern, clean)
-        if values == None -> next
-        search :: query_fields(path, r.search_fields, r.codec) ?? next
+        params :: match_pattern(r.pattern, clean) ?? next
+        search := [WebRouterField]{}
+        if !r.not_found {
+            parsed :: query_fields(path, r.search_fields, r.codec) ?? next
+            search = parsed
+        }
         score := route_score(r.pattern)
         if score > best_score {
-            params :: values
             best = WebNavigation{path: path, name: r.name, params: params, search: search, status: WebNavigationStatus.Ready}
             best_score = score
             found = true
@@ -223,13 +240,15 @@ fn match_pattern(pattern: String, path: String) -> ?[WebRouterField] {
     loop i in 0..<limit {
         p :: segs_p[i]
         u :: segs_u[i]
-        if !valid_percent_encoding(u) -> return None
+        if !(valid_percent_encoding(u) ?? false) -> return None
         raw :: p.bytes()
         if raw.len() > 0 && raw[0] == (U8{58}) {
-            decoded :: percent_decode(u)
+            decoded :: percent_decode(u, false) ?? return None
+            if has_control_text(decoded) -> return None
             params.push(WebRouterField{name: slice_text(p, 1, p.len()), value: decoded})
         } else {
-            if p != percent_decode(u) -> return None
+            literal :: percent_decode(u, false) ?? return None
+            if has_control_text(literal) || p != literal -> return None
         }
     }
     Val(params)
@@ -277,29 +296,153 @@ fn fill_pattern(pattern: String, params: [String:String], search: [String:String
             }
             out = "{out}{percent_encode(key)}={percent_encode(value)}"
         }
+    } else if search.len() > 0 {
+        out = "{out}?{{"
+        first := true
+        loop key in search.keys() {
+            value :: search.get(key) ?? ""
+            if first -> first = false else -> out = "{out},"
+            out = "{out}\"{json_escape(key)}\":\"{json_escape(value)}\""
+        }
+        out = "{out}}}"
     }
     out
 }
+
 fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCodec) -> ?[WebRouterField] {
     out := [WebRouterField]{}
     query :: query_text(path)
     if query.len() == 0 -> return Val(out)
-    if codec == WebRouterSearchCodec.JSON -> return None
+    if codec == WebRouterSearchCodec.JSON -> return parse_json_query(query, fields)
     if fields.len() == 0 -> return None
     seen := [String]{}
     loop piece in split_amp(query) {
         if piece.len() == 0 -> return None
         eq :: find_byte(~piece, 61)
-        if eq < 1 || !valid_percent_encoding(~piece) -> return None
-        key := percent_decode(slice_text(~piece, 0, eq))
-        value := percent_decode(slice_text(~piece, eq + 1, piece.len()))
-        if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) -> return None
+        if eq < 1 || !(valid_percent_encoding(~piece) ?? false) -> return None
+        key :: percent_decode(slice_text(~piece, 0, eq), true) ?? return None
+        value :: percent_decode(slice_text(~piece, eq + 1, piece.len()), true) ?? return None
+        if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
         seen.push(~key)
         out.push(WebRouterField{name: key, value: value})
     }
     Val(out)
 }
+fn parse_json_query(text: String, fields: [WebRouterField]) -> ?[WebRouterField] {
+    raw := text.bytes()
+    if raw.len() < 2 || raw[0] != (U8{123}) || raw[raw.len() - 1] != (U8{125}) -> return None
+    inner := slice_text(text, 1, text.len() - 1)
+    if trim_json(inner).len() == 0 -> return Val([WebRouterField]{})
+    seen := [String]{}
+    out := [WebRouterField]{}
+    loop member in split_json_members(inner) {
+        piece := trim_json(~member)
+        if piece.len() == 0 -> return None
+        colon := find_byte(~piece, 58)
+        if colon <= 0 -> return None
+        key_text := trim_json(slice_text(~piece, 0, colon))
+        value_text := trim_json(slice_text(~piece, colon + 1, piece.len()))
+        key :: json_unquote(key_text) ?? return None
+        value :: json_unquote(value_text) ?? return None
+        if !valid_router_name(~key) || !field_name_allowed(fields, ~key) || contains_text(seen, ~key) || has_control_text(~value) -> return None
+        seen.push(~key)
+        out.push(WebRouterField{name: ~key, value: ~value})
+    }
+    Val(out)
+}
+
+fn split_json_members(text: String) -> [String] {
+    raw := text.bytes()
+    out := [String]{}
+    start := 0
+    quoted := false
+    escaped := false
+    loop i in 0..<raw.len() {
+        b :: raw[i]
+        if b == (U8{92}) && quoted {
+            escaped = !escaped
+            next
+        }
+        if b == (U8{34}) && !escaped -> quoted = !quoted
+        if b == (U8{44}) && !quoted {
+            out.push(slice_text(text, start, i))
+            start = i + 1
+        }
+        escaped = false
+    }
+    out.push(slice_text(text, start, raw.len()))
+    out
+}
+
+fn json_unquote(text: String) -> ?String {
+    raw := text.bytes()
+    if raw.len() < 2 || raw[0] != (U8{34}) || raw[raw.len() - 1] != (U8{34}) -> return None
+    out := [U8]{}
+    i := 1
+    limit := raw.len() - 1
+    loop i < limit {
+        b :: raw[i]
+        if b == (U8{92}) {
+            if i + 1 >= limit -> return None
+            escaped :: raw[i + 1]
+            if escaped == (U8{34}) || escaped == (U8{92}) || escaped == (U8{47}) {
+                out.push(escaped)
+            } else if escaped == (U8{110}) {
+                out.push(U8{10})
+            } else if escaped == (U8{114}) {
+                out.push(U8{13})
+            } else if escaped == (U8{116}) {
+                out.push(U8{9})
+            } else {
+                return None
+            }
+            i = i + 2
+            next
+        }
+        if b < 32 -> return None
+        out.push(b)
+        i = i + 1
+    }
+    decoded :: String.from_bytes(out) ?? return None
+    Val(decoded)
+}
+
+fn json_escape(text: String) -> String {
+    out := ""
+    loop b in text.bytes() {
+        if b == (U8{34}) {
+            out = "{out}\\\""
+        } else if b == (U8{92}) {
+            out = "{out}\\\\"
+        } else if b == (U8{10}) {
+            out = "{out}\\n"
+        } else if b == (U8{13}) {
+            out = "{out}\\r"
+        } else if b == (U8{9}) {
+            out = "{out}\\t"
+        } else {
+            out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        }
+    }
+    out
+}
+
+fn trim_json(text: String) -> String {
+    raw := text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
+    }
+    slice_text(text, start, end)
+}
 fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRouterField]) -> Bool {
+    if fields.len() > c_max_router_fields || search.len() > c_max_router_fields -> return false
     path_names := [String]{}
     loop segment in split_slash(pattern) {
         raw :: segment.bytes()
@@ -346,6 +489,14 @@ fn contains_text(items: [String], value: String) -> Bool {
     }
     false
 }
+fn has_control_text(text: String) -> Bool {
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
+}
+
 
 fn valid_percent_encoding(text: String) -> Bool {
     raw := text.bytes()
@@ -370,24 +521,27 @@ fn field_name_allowed(fields: [WebRouterField], name: String) -> Bool {
 }
 
 fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> Int {
-    if path.len() == 0 -> return -1
+    if path.len() == 0 || path.len() > c_max_router_path || !valid_percent_encoding(path) -> return -1
     idx := cache_index(router.cache, path)
     if idx >= 0 {
         if idx < router.cache_status.len() -> router.cache_status[idx] = state
         return idx
     }
     if router.cache.len() >= 256 -> return -1
-    router.cache.push(path)
+    router.cache.push(~path)
     router.cache_status.push(state)
     router.cache.len() - 1
 }
 
-fn percent_decode(text: String) -> String {
+fn percent_decode(text: String, plus_as_space: Bool) -> ?String {
     out := [U8]{}
     raw := text.bytes()
     i := 0
     loop {
-        if i >= raw.len() -> return String.from_bytes(out) ?? text
+        if i >= raw.len() {
+            decoded :: String.from_bytes(out) ?? return None
+            return Val(decoded)
+        }
         if raw[i] == (U8{37}) && i + 2 < raw.len() {
             hi := hex_value(raw[i + 1])
             lo := hex_value(raw[i + 2])
@@ -397,7 +551,7 @@ fn percent_decode(text: String) -> String {
                 next
             }
         }
-        if raw[i] == (U8{43}) -> out.push(U8{32}) else -> out.push(raw[i])
+        if raw[i] == (U8{43}) && plus_as_space -> out.push(U8{32}) else -> out.push(raw[i])
         i = i + 1
     }
 }
@@ -407,20 +561,20 @@ fn hex_value(b: U8) -> Int {
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
-    -1
+    return -1
 }
 
 fn copy_routes(routes: [WebRoute]) -> [WebRoute] {
     out := [WebRoute]{}
     loop r in routes -> out.push(r)
-    out
+    return out
 }
 
 fn cache_index(xs: [String], value: String) -> Int {
     loop i in 0..<xs.len() {
         if xs[i] == value -> return i
     }
-    -1
+    return -1
 }
 
 fn split_slash(text: String) -> [String] {

@@ -156,6 +156,14 @@ mod text_kernel {
         pub(crate) inner: std::io::BufWriter<std::fs::File>,
         pub(crate) path: String,
     }
+    pub(crate) struct JetStdinReader {
+        inner: std::io::BufReader<std::io::Stdin>,
+    }
+    fn jet_std_io_stdin() -> JetStdinReader {
+        JetStdinReader {
+            inner: std::io::BufReader::new(std::io::stdin()),
+        }
+    }
 
     // TextLite keeps the same runtime Authority/FileScope carrier as AOT; only
     // the CtValue adapter differs at this boundary.
@@ -170,7 +178,9 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
 
     pub(super) fn nfd(s: &str) -> String {
@@ -445,6 +455,54 @@ mod text_kernel {
     }
 }
 
+#[derive(Clone, Debug)]
+enum MirFileOwnerKind {
+    TempDir(text_kernel::JetTempDirOwner),
+    TempFile(text_kernel::JetTempFileOwner),
+    FileLock(text_kernel::JetFileLockOwner),
+}
+
+/// Private runtime carrier used by the MIR interpreter to retain the same
+/// provider-owned cleanup value as AOT.
+#[derive(Clone, Debug)]
+pub struct MirFileOwner {
+    inner: MirFileOwnerKind,
+}
+
+impl MirFileOwner {
+    pub fn path(&self) -> &str {
+        match &self.inner {
+            MirFileOwnerKind::TempDir(owner) => &owner.path,
+            MirFileOwnerKind::TempFile(owner) => &owner.path,
+            MirFileOwnerKind::FileLock(owner) => &owner.path,
+        }
+    }
+}
+
+pub fn mir_fs_temp_dir(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_dir(&prefix.to_string())
+        .map(|owner| MirFileOwner {
+            inner: MirFileOwnerKind::TempDir(owner),
+        })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_temp_file(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_file(&prefix.to_string())
+        .map(|owner| MirFileOwner {
+            inner: MirFileOwnerKind::TempFile(owner),
+        })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_lock(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_lock(&path.to_string())
+        .map(|owner| MirFileOwner {
+            inner: MirFileOwnerKind::FileLock(owner),
+        })
+        .map_err(io_error_ct)
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum IoErrorOperation {
     Read,
@@ -650,8 +708,10 @@ fn writer_flush(handle: &FileWriterHandle) -> Result<(), crate::AST::CtValue> {
 
 fn reader_line_value(handle: &FileReaderHandle) -> crate::AST::CtValue {
     match reader_line(handle) {
-        Ok(Some(line)) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(line))),
-        Ok(None) => crate::AST::CtValue::absent(crate::AST::Type::String),
+        Ok(line) => crate::AST::CtValue::Present(Box::new(match line {
+            Some(line) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(line))),
+            None => crate::AST::CtValue::absent(crate::AST::Type::String),
+        })),
         Err(error) => crate::AST::CtValue::failed(Box::new(error)),
     }
 }
@@ -709,6 +769,24 @@ pub(crate) fn apply_file_handle(
 ) -> Option<Result<crate::AST::CtValue, crate::Diagnostics::Diagnostic>> {
     if let Some(handle) = file_reader_handle(receiver) {
         return Some(match method {
+            "file_reader.path" if args.is_empty() => {
+                let path = handle
+                    .0
+                    .lock()
+                    .ok()
+                    .and_then(|reader| reader.as_ref().map(|reader| reader.path.clone()));
+                match path {
+                    Some(path) => Ok(crate::AST::CtValue::Str(path)),
+                    None => Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileReader.path requires a live handle",
+                        span,
+                    )),
+                }
+            }
+            "file_reader.path" => Err(crate::Comptime::Diagnostics::unsupported(
+                "FileReader.path takes no arguments",
+                span,
+            )),
             "file_reader.read_line" | "read_line" if args.is_empty() => {
                 Ok(reader_line_value(handle))
             }
@@ -726,6 +804,24 @@ pub(crate) fn apply_file_handle(
     }
     if let Some(handle) = file_writer_handle(receiver) {
         return Some(match method {
+            "file_writer.path" if args.is_empty() => {
+                let path = handle
+                    .0
+                    .lock()
+                    .ok()
+                    .and_then(|writer| writer.as_ref().map(|writer| writer.path.clone()));
+                match path {
+                    Some(path) => Ok(crate::AST::CtValue::Str(path)),
+                    None => Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileWriter.path requires a live handle",
+                        span,
+                    )),
+                }
+            }
+            "file_writer.path" => Err(crate::Comptime::Diagnostics::unsupported(
+                "FileWriter.path takes no arguments",
+                span,
+            )),
             "file_writer.write_line" | "write_line" => {
                 let [line] = args else {
                     return Some(Err(crate::Comptime::Diagnostics::unsupported(
@@ -776,6 +872,9 @@ pub(super) fn fs_read(path: &str) -> FsResult<String> {
 pub(super) fn fs_read_bytes(path: &str) -> FsResult<Vec<u8>> {
     text_kernel::fs_read_bytes(path).map_err(io_error_ct)
 }
+pub(super) fn fs_write_bytes(path: &str, bytes: &[u8]) -> FsResult<()> {
+    text_kernel::jet_std_fs_write_bytes(&path.to_string(), &bytes.to_vec()).map_err(io_error_ct)
+}
 pub(super) fn fs_write(path: &str, text: &str) -> FsResult<()> {
     text_kernel::fs_write(path, text).map_err(io_error_ct)
 }
@@ -820,6 +919,18 @@ pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
             error,
         ))
     })
+}
+pub(super) fn fs_symlink(from: &str, to: &str) -> FsResult<()> {
+    text_kernel::jet_std_fs_symlink(&from.to_string(), &to.to_string()).map_err(io_error_ct)
+}
+pub(super) fn fs_hard_link(from: &str, to: &str) -> FsResult<()> {
+    text_kernel::jet_std_fs_hard_link_path(&from.to_string(), &to.to_string()).map_err(io_error_ct)
+}
+pub(super) fn fs_read_link(path: &str) -> FsResult<String> {
+    text_kernel::jet_std_fs_read_link_path(&path.to_string()).map_err(io_error_ct)
+}
+pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
+    text_kernel::jet_std_fs_canonicalize(&path.to_string()).map_err(io_error_ct)
 }
 pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
     text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)

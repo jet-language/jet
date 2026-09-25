@@ -81,7 +81,9 @@ secret_type!(JetSharedSecret);
 #[derive(Clone, PartialEq, Eq)] pub struct JetSealed(Vec<u8>);
 #[derive(Clone, PartialEq, Eq)] pub struct JetWrappedKey(Vec<u8>);
 #[derive(Clone, PartialEq, Eq)] pub struct JetPasswordHash(String);
-#[derive(Clone, PartialEq, Eq)] pub struct JetDigest256([u8; 32]);
+// Preserve the source `Digest256.bytes: [U8]` carrier on native tiers.
+
+#[derive(Clone, PartialEq, Eq)] pub struct JetDigest256(Vec<u8>);
 #[derive(Clone, PartialEq, Eq)] pub struct JetDigest512([u8; 64]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -345,9 +347,10 @@ pub fn jet_crypto_unwrap_typed_impl(recipient: &JetX25519SecretKey, wrapped: Jet
     let mut ki=b"JETW1 key".to_vec();ki.extend_from_slice(&ephemeral);ki.extend_from_slice(&recipient_public);let mut ni=b"JETW1 nonce".to_vec();ni.extend_from_slice(&ephemeral);ni.extend_from_slice(&recipient_public);let mut kek=hkdf32(&shared,salt,&ki).map_err(|_|JetCryptoError::OpenFailed)?;let nonce=hkdf24(&shared,salt,&ni).map_err(|_|JetCryptoError::OpenFailed)?;let mut aad=b"JETW1 wrap".to_vec();aad.extend_from_slice(&b[..92]);let plain=XChaCha20Poly1305::new_from_slice(&kek).map_err(|_|JetCryptoError::OpenFailed)?.decrypt(XNonce::from_slice(&nonce),Payload{msg:&b[92..],aad:&aad}).map_err(|_|JetCryptoError::OpenFailed)?;zeroize(&mut shared);zeroize(&mut kek);Ok(Secret(plain))
 }
 
-pub fn jet_crypto_sha256_typed_impl(data:&Vec<u8>)->JetDigest256 { use sha2::Sha256; JetDigest256(Sha256::digest(data).into()) }
-pub fn jet_crypto_blake3_typed_impl(data:&Vec<u8>)->JetDigest256 { JetDigest256(*blake3::hash(data).as_bytes()) }
+pub fn jet_crypto_sha256_typed_impl(data:&Vec<u8>)->JetDigest256 { use sha2::Sha256; JetDigest256(Sha256::digest(data).to_vec()) }
+pub fn jet_crypto_blake3_typed_impl(data:&Vec<u8>)->JetDigest256 { JetDigest256(blake3::hash(data).as_bytes().to_vec()) }
 pub fn jet_crypto_sha512_typed_impl(data:&Vec<u8>)->JetDigest512 { JetDigest512(Sha512::digest(data).into()) }
+pub fn jet_crypto_digest256_from_bytes_impl(bytes: Vec<u8>) -> JetDigest256 { JetDigest256(bytes) }
 pub fn jet_crypto_digest256_bytes_impl(d:&JetDigest256)->Vec<u8>{d.0.to_vec()} pub fn jet_crypto_digest512_bytes_impl(d:&JetDigest512)->Vec<u8>{d.0.to_vec()}
 pub fn jet_crypto_digest256_hex_impl(d:&JetDigest256)->String{hex_encode(&d.0)} pub fn jet_crypto_digest512_hex_impl(d:&JetDigest512)->String{hex_encode(&d.0)}
 pub fn jet_crypto_hkdf_typed_impl(ikm:&Secret,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"hkdf_sha256",minimum:0,maximum:8160,actual:length})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),&ikm.0).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"hkdf-expand"})?;Ok(Secret(out))}

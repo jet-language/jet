@@ -1891,7 +1891,7 @@ fn verify_static_mutable_place(
             place.id
         ));
     }
-    if matches!(operation, MirOperation::WritePlace { .. })
+    if matches!(operation, MirOperation::WritePlace { .. } | MirOperation::ReplacePlace { .. })
         && matches!(&place.base, MirPlaceBase::Static(_))
         && !place.projections.is_empty()
     {
@@ -3682,7 +3682,8 @@ fn operation_place_refs(operation: &MirOperation) -> Vec<crate::MIR::MirPlaceId>
         | MirOperation::InitializeUninit { place }
         | MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. }
-        | MirOperation::WritePlace { place, .. } => vec![*place],
+        | MirOperation::WritePlace { place, .. }
+        | MirOperation::ReplacePlace { place, .. } => vec![*place],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -3808,7 +3809,8 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
         MirOperation::InitializeUninit { place } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. } => vec![(*place, MirPlaceUse::Borrow)],
-        MirOperation::WritePlace { place, .. } => vec![(*place, MirPlaceUse::Reinitialize)],
+        MirOperation::WritePlace { place, .. }
+        | MirOperation::ReplacePlace { place, .. } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -3850,6 +3852,117 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
 }
 
 
+/// Ownership cleanup uses ordinary boolean locals to guard moves. Track those
+/// locals through CFG joins so a provably false cleanup edge is not mistaken
+/// for a second move. Only unaliased scalar locals participate; unknown values
+/// and disagreeing loop/backedge facts always retain both branch successors.
+fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId> {
+    #[derive(Clone, Default)]
+    struct Facts {
+        places: HashMap<MirLocalId, bool>,
+        values: HashMap<MirValueId, bool>,
+    }
+    let mut tracked: HashMap<_, _> = function.places.iter()
+        .filter_map(|place| match place.base {
+            MirPlaceBase::Local(local) if place.ty.is_bool() && place.projections.is_empty() =>
+                Some((place.id, local)),
+            _ => None,
+        })
+        .collect();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            for (place, usage) in operation_place_uses(&instruction.operation) {
+                if usage == MirPlaceUse::Borrow {
+                    if let Some(MirPlaceBase::Local(local)) = function.places.iter()
+                        .find(|candidate| candidate.id == place).map(|place| &place.base)
+                    {
+                        tracked.retain(|_, candidate| candidate != local);
+                    }
+                }
+            }
+        }
+    }
+    if tracked.is_empty() {
+        return reachable_blocks(function);
+    }
+    let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
+    let mut incoming = HashMap::<MirBlockId, Facts>::new();
+    let mut work = vec![function.entry];
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            work.push(target);
+        }
+    }
+    for root in &work {
+        incoming.insert(*root, Facts::default());
+    }
+    while let Some(id) = work.pop() {
+        let Some(block) = blocks.get(&id) else { continue };
+        let mut facts = incoming[&id].clone();
+        for instruction in &block.instructions {
+            let known = match &instruction.operation {
+                MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
+                MirOperation::ReadPlace(place) =>
+                    tracked.get(place).and_then(|local| facts.places.get(local)).copied(),
+                MirOperation::Copy { value } | MirOperation::Move { value } =>
+                    facts.values.get(value).copied(),
+                MirOperation::Unary { op: MirUnaryOp::Not, value } =>
+                    facts.values.get(value).map(|value| !value),
+                _ => None,
+            };
+            if let Some(result) = instruction.result {
+                if let Some(value) = known {
+                    facts.values.insert(result, value);
+                } else {
+                    facts.values.remove(&result);
+                }
+            }
+            match &instruction.operation {
+                MirOperation::WritePlace { place, value }
+                | MirOperation::ReplacePlace { place, value } => {
+                    if let Some(local) = tracked.get(place) {
+                        if let Some(value) = facts.values.get(value).copied() {
+                            facts.places.insert(*local, value);
+                        } else {
+                            facts.places.remove(local);
+                        }
+                    }
+                }
+                MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
+                    if let Some(local) = tracked.get(place) {
+                        facts.places.remove(local);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let targets = match &block.terminator {
+            MirTerminator::Branch { condition, then_target, else_target } => {
+                match facts.values.get(condition) {
+                    Some(true) => vec![*then_target],
+                    Some(false) => vec![*else_target],
+                    None => vec![*then_target, *else_target],
+                }
+            }
+            other => other.targets(),
+        };
+        for target in targets {
+            if let Some(previous) = incoming.get_mut(&target) {
+                let before = previous.places.len() + previous.values.len();
+                previous.places.retain(|place, value| facts.places.get(place) == Some(value));
+                previous.values.retain(|id, value| facts.values.get(id) == Some(value));
+                if previous.places.len() + previous.values.len() != before {
+                    work.push(target);
+                }
+            } else {
+                incoming.insert(target, facts.clone());
+                work.push(target);
+            }
+        }
+    }
+    incoming.into_keys().collect()
+}
+
 fn verify_moves_and_borrows(
     function: &MirFunction,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
@@ -3858,9 +3971,37 @@ fn verify_moves_and_borrows(
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
 ) -> Result<(), MirLegalityError> {
     let mut consumed: Vec<(MirValueId, MirBlockId, usize, Span)> = Vec::new();
-    let mut moved_places: Vec<(MirPlacePath, MirBlockId, usize, Span)> = Vec::new();
+    let feasible = reachable_with_boolean_locals(function);
+    let mut moved_places = Vec::new();
+    let mut reinitialized_places = Vec::new();
     for block in &function.blocks {
-        if !reachable.contains(&block.id) {
+        if !reachable.contains(&block.id) || !feasible.contains(&block.id) {
+            continue;
+        }
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            for (place, use_kind) in operation_place_uses(&instruction.operation) {
+                let events = match use_kind {
+                    MirPlaceUse::Move => &mut moved_places,
+                    MirPlaceUse::Reinitialize => &mut reinitialized_places,
+                    _ => continue,
+                };
+                if let Some(place) = place_map.get(&place) {
+                    events.push((mir_place_path(place), block.id, index));
+                }
+            }
+        }
+    }
+    let precedes = |first_block, first_index, second_block, second_index| {
+        if first_block == second_block {
+            first_index < second_index
+        } else {
+            dominators
+                .get(&second_block)
+                .is_some_and(|set| set.contains(&first_block))
+        }
+    };
+    for block in &function.blocks {
+        if !reachable.contains(&block.id) || !feasible.contains(&block.id) {
             continue;
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
@@ -3938,57 +4079,30 @@ fn verify_moves_and_borrows(
                     });
                 }
                 let path = mir_place_path(place);
-                let moved_span = moved_places
-                    .iter()
-                    .find(|(moved_path, moved_block, moved_index, _)| {
-                        let dominates = *moved_block == block.id && *moved_index < index
-                            || *moved_block != block.id
-                                && dominators
-                                    .get(&block.id)
-                                    .is_some_and(|set| set.contains(moved_block));
-                        dominates && mir_place_paths_overlap(moved_path, &path)
-                    })
-                    .map(|(_, _, _, span)| *span);
-
-                match use_kind {
-                    MirPlaceUse::Read | MirPlaceUse::Borrow | MirPlaceUse::Move => {
-                        if moved_span.is_some() {
-                            return Err(MirLegalityError::InvalidMovedPlace {
-                                function: function.id,
-                                place: place_id.0,
-                                span: instruction.span,
-                            });
+                // Block storage order is not execution order. A move remains
+                // live at this use only if no intervening dominating write
+                // reinitialized its whole path.
+                let has_live_move = moved_places.iter().any(|(moved_path, moved_block, moved_index)| {
+                    let conflicts = match use_kind {
+                        MirPlaceUse::Reinitialize => {
+                            mir_place_path_is_prefix(moved_path, &path) && moved_path != &path
                         }
-                        if matches!(use_kind, MirPlaceUse::Move) {
-                            moved_places.push((path, block.id, index, instruction.span));
-                        }
-                    }
-                    MirPlaceUse::Reinitialize => {
-                        if moved_places.iter().any(|(moved_path, moved_block, moved_index, _)| {
-                            let dominates = *moved_block == block.id && *moved_index < index
-                                || *moved_block != block.id
-                                    && dominators
-                                        .get(&block.id)
-                                        .is_some_and(|set| set.contains(moved_block));
-                            dominates
-                                && mir_place_path_is_prefix(moved_path, &path)
-                                && moved_path != &path
-                        }) {
-                            return Err(MirLegalityError::InvalidMovedPlace {
-                                function: function.id,
-                                place: place_id.0,
-                                span: instruction.span,
-                            });
-                        }
-                        moved_places.retain(|(moved_path, moved_block, moved_index, _)| {
-                            let dominates = *moved_block == block.id && *moved_index < index
-                                || *moved_block != block.id
-                                    && dominators
-                                        .get(&block.id)
-                                        .is_some_and(|set| set.contains(moved_block));
-                            !(dominates && mir_place_path_is_prefix(&path, moved_path))
-                        });
-                    }
+                        _ => mir_place_paths_overlap(moved_path, &path),
+                    };
+                    conflicts
+                        && precedes(*moved_block, *moved_index, block.id, index)
+                        && !reinitialized_places.iter().any(|(written_path, written_block, written_index)| {
+                            mir_place_path_is_prefix(written_path, moved_path)
+                                && precedes(*moved_block, *moved_index, *written_block, *written_index)
+                                && precedes(*written_block, *written_index, block.id, index)
+                        })
+                });
+                if has_live_move {
+                    return Err(MirLegalityError::InvalidMovedPlace {
+                        function: function.id,
+                        place: place_id.0,
+                        span: instruction.span,
+                    });
                 }
             }
             let mut moved = Vec::new();
@@ -5633,6 +5747,10 @@ fn inline_operation(
             place: inline_place(ids, *place),
         },
         MirOperation::WritePlace { place, value } => MirOperation::WritePlace {
+            place: inline_place(ids, *place),
+            value: inline_value(ids, *value),
+        },
+        MirOperation::ReplacePlace { place, value } => MirOperation::ReplacePlace {
             place: inline_place(ids, *place),
             value: inline_value(ids, *value),
         },
@@ -11473,6 +11591,7 @@ fn vector_memory_facts(
                     }
                     MirOperation::MovePlace { .. }
                     | MirOperation::WritePlace { .. }
+                    | MirOperation::ReplacePlace { .. }
                     | MirOperation::InitializeUninit { .. } => {
                         writes.insert(root.clone());
                         if indexed {
@@ -15201,5 +15320,196 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
             writer.str(type_name);
             writer.str(variant);
         }
+    }
+}
+
+#[cfg(test)]
+mod ownership_guard_tests {
+    use super::*;
+
+    const OWNER: MirPlaceId = MirPlaceId(0);
+    const FLAG: MirPlaceId = MirPlaceId(1);
+
+    fn instruction(id: u64, operation: MirOperation, kind: Option<MirTypeKind>) -> MirInstruction {
+        MirInstruction {
+            id: MirOpId(id),
+            span: Span::new(id as usize, id as usize + 1),
+            source_line: None,
+            result: kind.as_ref().map(|_| MirValueId(id)),
+            ty: kind.map(MirType::from_kind),
+            operation,
+        }
+    }
+
+    fn write_flag(id: u64, place: MirPlaceId, value: bool) -> Vec<MirInstruction> {
+        vec![
+            instruction(id, MirOperation::Constant(MirConstant::Bool(value)), Some(MirTypeKind::Bool)),
+            instruction(id + 1, MirOperation::WritePlace { place, value: MirValueId(id) }, None),
+        ]
+    }
+
+    fn block(id: u64, instructions: Vec<MirInstruction>, terminator: MirTerminator) -> MirBasicBlock {
+        MirBasicBlock { id: MirBlockId(id), span: Span::new(0, 100), instructions, terminator }
+    }
+
+    fn cleanup_function(live: bool) -> MirFunction {
+        let mut entry = write_flag(10, FLAG, live);
+        entry.extend([
+            instruction(12, MirOperation::Constant(MirConstant::String("owned".into())), Some(MirTypeKind::String)),
+            instruction(13, MirOperation::WritePlace { place: OWNER, value: MirValueId(12) }, None),
+            instruction(14, MirOperation::MovePlace { place: OWNER }, Some(MirTypeKind::String)),
+            instruction(15, MirOperation::Parameter { index: 0, name: "condition".into() }, Some(MirTypeKind::Bool)),
+        ]);
+        let places = [(OWNER, MirTypeKind::String), (FLAG, MirTypeKind::Bool)]
+            .into_iter()
+            .map(|(id, kind)| MirPlace {
+                id, span: Span::new(0, 100), ty: MirType::from_kind(kind),
+                base: MirPlaceBase::Local(MirLocalId(id.0)),
+                projections: Vec::new(), access: MirAccess::Move, persist_key: None,
+            })
+            .collect::<Vec<_>>();
+        let locals = places.iter().map(|place| MirLocal {
+            id: MirLocalId(place.id.0), name: format!("local{}", place.id.0),
+            span: place.span, ty: place.ty.clone(), place: place.id, mutable: true,
+            ownership: if place.ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned },
+            comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false,
+        }).collect();
+        MirFunction {
+            id: MirFunctionId(0), module_id: crate::MIR::MirModuleId(0),
+            key: "ownership_guard".into(), module: "test".into(), name: "ownership_guard".into(),
+            span: Span::new(0, 100), kind: crate::MIR::MirFunctionKind::Jet,
+            form: crate::MIR::MirFunctionForm::TopLevel,
+            visibility: crate::MIR::MirVisibility::Private,
+            target_applicability: Default::default(), web_bucket: None, web_marker: None,
+            generic_params: Vec::new(), capture_params: Vec::new(),
+            params: vec![crate::MIR::MirParam {
+                index: 0, name: "condition".into(), span: Span::new(0, 1),
+                ty: MirType::from_kind(MirTypeKind::Bool), access: MirAccess::Read,
+                ownership: MirOwnership::copy(), public_label: "condition".into(),
+                variadic: false, default_present: false,
+            }],
+            declared_return: None, return_type: MirType::from_kind(MirTypeKind::Tuple(Vec::new())),
+            failure: MirFailureCarrier::Infallible, effects: Default::default(),
+            captures: None, generator: None, optimization: Default::default(),
+            is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None,
+            is_reactive: false, reactive_upgrades: Vec::new(), is_inline: false,
+            is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false,
+            return_view_provenance: None, web_param_reconstructions: Vec::new(),
+            blocks: vec![
+                block(0, entry, MirTerminator::Jump { target: MirBlockId(1) }),
+                block(1, vec![instruction(20, MirOperation::ReadPlace(FLAG), Some(MirTypeKind::Bool))],
+                    MirTerminator::Branch {
+                        condition: MirValueId(20), then_target: MirBlockId(2), else_target: MirBlockId(3),
+                    }),
+                block(2, vec![instruction(30, MirOperation::MovePlace { place: OWNER }, Some(MirTypeKind::String))],
+                    MirTerminator::Return { value: None }),
+                block(3, Vec::new(), MirTerminator::Return { value: None }),
+            ],
+            entry: MirBlockId(0), locals, values: Vec::new(), places,
+            scopes: Vec::new(), drops: Vec::new(), foreign_language: None,
+        }
+    }
+
+    // Exercise the ownership verifier itself, deriving its CFG inputs through
+    // the same predecessor/dominator routines used by whole-program legality.
+    fn verify(function: &MirFunction) -> Result<(), MirLegalityError> {
+        let reachable = reachable_blocks(function);
+        let dominators = dominator_map(function, &reachable, &predecessor_map(function));
+        let places = function.places.iter().map(|place| (place.id, place)).collect();
+        let defs = function.blocks.iter().flat_map(|block| {
+            block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
+                let ty = instruction.ty.clone()?;
+                let ownership = if ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned };
+                Some((instruction.result?, (block.id, index, ty, ownership)))
+            })
+        }).collect();
+        verify_moves_and_borrows(function, &defs, &dominators, &reachable, &places)
+    }
+
+    fn rejects_second_move(function: &MirFunction) {
+        assert!(matches!(
+            verify(function),
+            Err(MirLegalityError::InvalidMovedPlace { place: 0, span, .. })
+                if span == Span::new(30, 31)
+        ));
+    }
+
+    #[test]
+    fn dead_cleanup_edge_accepts_prior_move() {
+        assert!(matches!(verify(&cleanup_function(false)), Ok(())));
+        assert!(!reachable_with_boolean_locals(&cleanup_function(false)).contains(&MirBlockId(2)));
+    }
+
+    #[test]
+    fn reachable_cleanup_edge_rejects_second_move() {
+        rejects_second_move(&cleanup_function(true));
+    }
+
+    #[test]
+    fn reinitialization_dominates_use_despite_block_storage_order() {
+        let mut function = cleanup_function(true);
+        function.blocks[1].instructions.splice(0..0, [
+            instruction(16, MirOperation::Constant(MirConstant::String("replacement".into())), Some(MirTypeKind::String)),
+            instruction(17, MirOperation::ReplacePlace { place: OWNER, value: MirValueId(16) }, None),
+        ]);
+        function.blocks.swap(1, 2);
+        assert!(matches!(verify(&function), Ok(())));
+    }
+
+    #[test]
+    fn reinitialization_on_one_branch_does_not_restore_other_branch() {
+        let mut function = cleanup_function(true);
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(1),
+        };
+        function.blocks.insert(1, block(4, vec![
+            instruction(16, MirOperation::Constant(MirConstant::String("replacement".into())), Some(MirTypeKind::String)),
+            instruction(17, MirOperation::ReplacePlace { place: OWNER, value: MirValueId(16) }, None),
+        ], MirTerminator::Jump { target: MirBlockId(1) }));
+        rejects_second_move(&function);
+    }
+
+    #[test]
+    fn conflicting_boolean_predecessors_keep_cleanup_reachable() {
+        let mut function = cleanup_function(false);
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(5),
+        };
+        function.blocks.extend([
+            block(4, write_flag(40, FLAG, false), MirTerminator::Jump { target: MirBlockId(1) }),
+            block(5, write_flag(50, FLAG, true), MirTerminator::Jump { target: MirBlockId(1) }),
+        ]);
+        rejects_second_move(&function);
+    }
+
+    #[test]
+    fn conflicting_boolean_backedge_keeps_cleanup_reachable() {
+        let mut function = cleanup_function(false);
+        function.blocks[3].instructions = write_flag(40, FLAG, true);
+        function.blocks[3].terminator = MirTerminator::Jump { target: MirBlockId(1) };
+        rejects_second_move(&function);
+    }
+
+    #[test]
+    fn borrowed_boolean_alias_is_not_treated_as_constant() {
+        let mut function = cleanup_function(false);
+        let mut alias = function.places[1].clone();
+        alias.id = MirPlaceId(2);
+        alias.access = MirAccess::Write;
+        function.places.push(alias);
+        function.blocks[0].instructions.push(instruction(16,
+            MirOperation::AddressOf { place: MirPlaceId(2), access: MirAccess::Write },
+            Some(MirTypeKind::Bool)));
+        rejects_second_move(&function);
+    }
+
+    #[test]
+    fn boolean_write_through_duplicate_place_updates_local_fact() {
+        let mut function = cleanup_function(false);
+        let mut alias = function.places[1].clone();
+        alias.id = MirPlaceId(2);
+        function.places.push(alias);
+        function.blocks[0].instructions.extend(write_flag(16, MirPlaceId(2), true));
+        rejects_second_move(&function);
     }
 }

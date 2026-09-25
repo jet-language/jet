@@ -1,3 +1,8 @@
+use crate::AST::Type;
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::is_covered_enum_ty;
+use crate::Codegen::TIR::is_covered_struct_ty;
+use crate::Codegen::TIR::struct_is_covered;
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::core_rust_type_name;
 use crate::Codegen::file_handle_rust_type;
@@ -6,11 +11,6 @@ use crate::Codegen::layout_handle_rust_type;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::root_prelude_rust_type_name;
 use crate::Codegen::service_handle_rust_type;
-use crate::Codegen::Cx;
-use crate::Codegen::TIR::is_covered_enum_ty;
-use crate::Codegen::TIR::is_covered_struct_ty;
-use crate::Codegen::TIR::struct_is_covered;
-use crate::AST::Type;
 use std::collections::HashSet;
 
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
@@ -83,7 +83,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"
         // D-UI-PREVIEW1=A: preview descriptors remain host-owned opaque values.
-        | "UiPreview" | "UiPlayground" | "UiPreviewRegistry"
+        | "UiPreview" | "UiPreviewRegistry"
         | "UiPreviewAccessibility" | "UiPreviewAuthority" | "UiPreviewContext"
         | "UiPreviewDevice" | "UiPreviewEffect" | "UiPreviewInputOverride"
         | "UiPreviewInputValue" | "UiPreviewKind" | "UiPreviewLifecycle"
@@ -152,7 +152,6 @@ pub(crate) fn is_covered_atomic_ty(ty: &Type) -> bool {
                 && jet_foundation::Layout::atomic_scalar_type(&args[0])
     )
 }
-
 
 /// Unit has no value representation for parameters or bindings, but it is a
 /// valid function result. Keep that distinction explicit so a Unit-returning

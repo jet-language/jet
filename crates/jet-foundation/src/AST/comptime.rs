@@ -34,7 +34,7 @@ pub struct ViewSourcePath {
 /// D-FAILURE-FOUNDATION1=A: the effective failure contract carried by a
 /// callable signature. The source spelling is intentionally projected into
 /// this fact instead of being rediscovered by each consumer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FailureContract {
     /// No error domain was written. The callable still has the shared default
     /// route, with `success` describing the value side of the carrier.

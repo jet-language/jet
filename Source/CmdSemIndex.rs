@@ -59,12 +59,16 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
                     let Some(signature) = &definition.callable_signature else {
                         continue;
                     };
-                    println!(
-                        "  {}: {} ({})",
-                        definition.qualified_name,
-                        signature.failure_contract,
-                        signature.failure_source
-                    );
+                    match (
+                        signature.failure_contract_name(),
+                        signature.failure_source_name(),
+                    ) {
+                        (Some(failure), Some(source)) => println!(
+                            "  {}: {} ({})",
+                            definition.qualified_name, failure, source
+                        ),
+                        _ => println!("  {}: unavailable", definition.qualified_name),
+                    }
                 }
                 println!("nominal type contracts:");
                 for definition in idx.definitions() {

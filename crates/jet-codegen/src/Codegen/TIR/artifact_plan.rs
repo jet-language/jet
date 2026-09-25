@@ -7,19 +7,20 @@
 
 #![allow(dead_code)]
 use crate::AST::{
-    AccessConvention, CtValue, EverySchedule, Expr, Func, ImportDecl, ImportKind, Item, JobCachePolicy,
-    JobScope, JobSkip, OutputKind, Param, ParamZone, ProgramBundle, TestDef, Type,
+    AccessConvention, CtValue, EverySchedule, Expr, Func, ImportDecl, ImportKind, Item,
+    JobCachePolicy, JobScope, JobSkip, OutputKind, Param, ParamZone, ProgramBundle, TestDef, Type,
 };
-use jet_foundation::Names::{NameAlias, NameDeclaration, NameModule, NameReference, NameVisibility, StructureFact};
 use crate::AST::{FfiCloseAdapter, FfiCloseSource, FfiHandleFact, FfiThreadSafety};
 use crate::Diagnostics::Span;
-use jet_foundation::MIR::{
-    MirArtifactBuildMode, MirArtifactRequest,
+use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest};
+use jet_foundation::Names::{
+    NameAlias, NameDeclaration, NameModule, NameReference, NameVisibility, StructureFact,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-pub(super) use jet_foundation::MIR::{MirArtifactKind as TirArtifactKind, MirArtifactTarget as TirArtifactTarget};
-
+pub(super) use jet_foundation::MIR::{
+    MirArtifactKind as TirArtifactKind, MirArtifactTarget as TirArtifactTarget,
+};
 
 /// The requested execution target is an input to artifact lowering rather than
 /// a value rediscovered from emitted source.
@@ -174,8 +175,12 @@ pub(super) struct TirImportFact {
 
 #[derive(Debug, Clone)]
 pub(super) enum TirImportKind {
-    File { path: String },
-    Module { path: String },
+    File {
+        path: String,
+    },
+    Module {
+        path: String,
+    },
     Unqualified {
         module: String,
         items: Vec<TirImportItem>,
@@ -233,7 +238,6 @@ pub(super) struct TirLinkUnit {
     pub dependency_dirs: Vec<String>,
     pub link_closure: Vec<String>,
 }
-
 
 #[derive(Debug, Clone)]
 pub(super) struct TirCallbackFact {
@@ -619,7 +623,10 @@ fn item_ref(module: &str, item: &Item) -> Option<TirItemRef> {
 
 pub(super) fn test_key(module: &str, test: &TestDef) -> String {
     let name = test.name.as_deref().unwrap_or("anonymous");
-    key(module, &format!("test::{name}@{}..{}", test.span.start, test.span.end))
+    key(
+        module,
+        &format!("test::{name}@{}..{}", test.span.start, test.span.end),
+    )
 }
 pub(super) fn contract_key(module: &str, function: &Func) -> String {
     key(
@@ -810,7 +817,10 @@ fn lower_import(
         visibility: NameVisibility::from_flags(import.is_pub, import.is_package_pub),
         kind,
         span: import.span,
-        version: import.inline_version.as_ref().map(|version| version.text.clone()),
+        version: import
+            .inline_version
+            .as_ref()
+            .map(|version| version.text.clone()),
     }
 }
 
@@ -835,7 +845,9 @@ fn collect_imports(
         imports: &mut Vec<TirImportFact>,
     ) {
         for item in items {
-            let Item::CodeModule(code_module) = item else { continue };
+            let Item::CodeModule(code_module) = item else {
+                continue;
+            };
             let child = key(module, &code_module.name);
             imports.extend(
                 code_module
@@ -959,11 +971,17 @@ fn lower_cli_entry(
 }
 
 fn output_entry(bundle: &ProgramBundle) -> Option<crate::AST::ResolvedOutput> {
-    bundle.modules.iter().flat_map(|module| module.items.iter()).find_map(|item| {
-        let Item::Const(constant) = item else { return None };
-        let output = constant.resolved_output.as_ref()?;
-        output.selected.then(|| output.clone())
-    })
+    bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .find_map(|item| {
+            let Item::Const(constant) = item else {
+                return None;
+            };
+            let output = constant.resolved_output.as_ref()?;
+            output.selected.then(|| output.clone())
+        })
 }
 
 fn entry_kind(kind: OutputKind) -> TirArtifactEntryKind {
@@ -982,7 +1000,9 @@ fn entry_kind(kind: OutputKind) -> TirArtifactEntryKind {
 
 fn entry_output(kind: OutputKind) -> TirEntryOutput {
     match kind {
-        OutputKind::Executable | OutputKind::Service | OutputKind::Check => TirEntryOutput::ReturnValue,
+        OutputKind::Executable | OutputKind::Service | OutputKind::Check => {
+            TirEntryOutput::ReturnValue
+        }
         OutputKind::Library
         | OutputKind::Environment
         | OutputKind::Image
@@ -1002,8 +1022,10 @@ fn no_os_profile(bundle: &ProgramBundle) -> bool {
 }
 
 fn initialize_environment(bundle: &ProgramBundle, target: TirArtifactTarget) -> bool {
-    matches!(target, TirArtifactTarget::RustAot | TirArtifactTarget::Cranelift)
-        && !no_os_profile(bundle)
+    matches!(
+        target,
+        TirArtifactTarget::RustAot | TirArtifactTarget::Cranelift
+    ) && !no_os_profile(bundle)
 }
 
 fn lower_entry(
@@ -1034,13 +1056,19 @@ fn lower_entry(
     }
     // Sema has checked `run`; retain typed entries with their canonical CLI
     // decoder just as we retain parameterless entries.
-    let function = bundle.modules.get(bundle.entry)?.items.iter().find_map(|item| match item {
-        Item::Func(function)
-            if function.name == "run" && (function.params.is_empty() || cli.is_some()) => {
-            Some(function)
-        }
-        _ => None,
-    })?;
+    let function = bundle
+        .modules
+        .get(bundle.entry)?
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Func(function)
+                if function.name == "run" && (function.params.is_empty() || cli.is_some()) =>
+            {
+                Some(function)
+            }
+            _ => None,
+        })?;
     let module = module_identity(bundle, bundle.entry);
     Some(TirEntrySpec {
         kind: TirArtifactEntryKind::Command,
@@ -1158,14 +1186,8 @@ fn lower_foreign(
         link_key: Some(key(module, crate_spec)),
         callback_key: None,
         handle_key: None,
-        close_function_key: function
-            .close
-            .as_ref()
-            .map(|(name, _)| key(module, name)),
-        undo_function_key: function
-            .undo
-            .as_ref()
-            .map(|(name, _)| key(module, name)),
+        close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
+        undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
     }
 }
 
@@ -1225,14 +1247,8 @@ fn lower_c_foreign(
         link_key: Some(format!("c::{lib}")),
         callback_key: None,
         handle_key,
-        close_function_key: function
-            .close
-            .as_ref()
-            .map(|(name, _)| key(module, name)),
-        undo_function_key: function
-            .undo
-            .as_ref()
-            .map(|(name, _)| key(module, name)),
+        close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
+        undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
     }
 }
 
@@ -1298,11 +1314,7 @@ fn lower_guest_import_foreign(
     let wraps_default_failure = function
         .return_type
         .as_ref()
-        .map(|ty| {
-            crate::AST::FailureContract::from_return_type(Some(ty))
-                .effective_type()
-                != *ty
-        })
+        .map(|ty| crate::AST::FailureContract::from_return_type(Some(ty)).effective_type() != *ty)
         .unwrap_or(false);
     Some(TirForeignFact {
         key: wrapper.clone(),
@@ -1440,9 +1452,7 @@ fn collect_items(
             }
             Item::CModule(c_module) => {
                 for function in c_module.functions.iter().filter(|function| {
-                    function.hidden_c_bridge_compatible_with_handles(
-                        &bundle.cffi.handle_facts,
-                    )
+                    function.hidden_c_bridge_compatible_with_handles(&bundle.cffi.handle_facts)
                 }) {
                     facts.foreign.push(lower_c_foreign(
                         function,
@@ -1471,7 +1481,15 @@ fn collect_items(
                             .filter_map(|item| item_ref(&child, item))
                             .collect(),
                     });
-                    collect_items(bundle, module_index, &child, body, facts, target, contract_rows);
+                    collect_items(
+                        bundle,
+                        module_index,
+                        &child,
+                        body,
+                        facts,
+                        target,
+                        contract_rows,
+                    );
                 }
             }
             _ => {}
@@ -1559,12 +1577,7 @@ fn lower_cffi(bundle: &ProgramBundle) -> TirCffiFacts {
             })
             .collect(),
         boundaries: bundle.cffi.boundaries.clone(),
-        handle_facts: bundle
-            .cffi
-            .handle_facts
-            .iter()
-            .map(lower_handle)
-            .collect(),
+        handle_facts: bundle.cffi.handle_facts.iter().map(lower_handle).collect(),
         direct_links: bundle.cffi.link_closure.direct.clone(),
         transitive_links: bundle.cffi.link_closure.transitive.clone(),
         close_adapters: bundle
@@ -1616,7 +1629,12 @@ fn lower_links(bundle: &ProgramBundle, target: TirArtifactTarget) -> Vec<TirLink
             cache_identity: cache_identity.clone(),
             applicability,
             dependency_dirs: Vec::new(),
-            link_closure: bundle.cffi.link_closure.libraries().map(str::to_string).collect(),
+            link_closure: bundle
+                .cffi
+                .link_closure
+                .libraries()
+                .map(str::to_string)
+                .collect(),
         })
         .collect::<Vec<_>>();
     if links.is_empty() && !cache_identity.is_empty() {
@@ -1626,7 +1644,12 @@ fn lower_links(bundle: &ProgramBundle, target: TirArtifactTarget) -> Vec<TirLink
             cache_identity,
             applicability,
             dependency_dirs: Vec::new(),
-            link_closure: bundle.cffi.link_closure.libraries().map(str::to_string).collect(),
+            link_closure: bundle
+                .cffi
+                .link_closure
+                .libraries()
+                .map(str::to_string)
+                .collect(),
         });
     }
     links
@@ -1675,7 +1698,9 @@ fn lower_output_checks(bundle: &ProgramBundle, facts: &TirArtifactFacts) -> Vec<
             .unwrap_or(bundle.entry);
         let module_key = module_identity(bundle, module_index);
         for item in &module.items {
-            let Item::Const(constant) = item else { continue };
+            let Item::Const(constant) = item else {
+                continue;
+            };
             let Some(output) = constant
                 .resolved_output
                 .as_ref()
@@ -1749,11 +1774,8 @@ fn lower_coverage_points(facts: &TirArtifactFacts) -> Vec<TirCoveragePoint> {
     rows
 }
 
-
 fn lower_harness(facts: &TirArtifactFacts) -> Option<TirHarnessPlan> {
-    if facts.tests.is_empty()
-        && facts.output_checks.is_empty()
-        && facts.coverage_points.is_empty()
+    if facts.tests.is_empty() && facts.output_checks.is_empty() && facts.coverage_points.is_empty()
     {
         return None;
     }
@@ -1828,7 +1850,11 @@ fn lower_artifact_plan(
         kind,
         name: facts.package_identity.clone(),
         target,
-        modules: facts.modules.iter().map(|module| module.key.clone()).collect(),
+        modules: facts
+            .modules
+            .iter()
+            .map(|module| module.key.clone())
+            .collect(),
         links: facts.links.iter().map(|link| link.key.clone()).collect(),
         jobs: facts.jobs.iter().map(|job| job.key.clone()).collect(),
         runtime_parts: bundle.used_core.iter().cloned().collect(),
@@ -1837,7 +1863,9 @@ fn lower_artifact_plan(
         closure_identity: dossier.closure_identity.clone(),
         artifact_identity: format!(
             "{}:{}:{}",
-            dossier.compiler_identity, dossier.environment_identity, bundle.build_facts.target_triple
+            dossier.compiler_identity,
+            dossier.environment_identity,
+            bundle.build_facts.target_triple
         ),
         entry,
         harness: facts.harnesses.first().map(|harness| harness.key.clone()),
@@ -1870,7 +1898,10 @@ pub(super) fn lower_tir_artifact_facts_for_request(
         plan.kind = kind;
         plan.exports = exports;
     }
-    if matches!(kind, TirArtifactKind::TestExecutable | TirArtifactKind::FuzzExecutable) {
+    if matches!(
+        kind,
+        TirArtifactKind::TestExecutable | TirArtifactKind::FuzzExecutable
+    ) {
         facts.entry = None;
         if let Some(plan) = facts.artifacts.first_mut() {
             plan.entry = None;
@@ -2001,7 +2032,9 @@ pub(super) fn lower_tir_artifact_facts_for_target(
     if let Some(harness) = lower_harness(&facts) {
         facts.harnesses.push(harness);
     }
-    facts.artifacts.push(lower_artifact_plan(bundle, target, &facts));
+    facts
+        .artifacts
+        .push(lower_artifact_plan(bundle, target, &facts));
     facts.callbacks = lower_callbacks(bundle, &facts);
     facts
 }

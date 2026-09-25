@@ -640,18 +640,120 @@ pub fn assert_test_environment_is_safe() {
     }
 }
 
-/// Persistent, gitignored test scratch root. `JET_TEST_SCRATCH_DIR` is an
+/// Persistent, disk-backed test scratch root. `JET_TEST_SCRATCH_DIR` is an
 /// explicit override for CI or a local measurement, but it must stay off `/tmp`.
 pub fn test_scratch_root(scope: &str) -> PathBuf {
     assert_test_environment_is_safe();
     let root = std::env::var_os("JET_TEST_SCRATCH_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp/jet-test-scratch"));
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+                .join(".cache/jet-test-scratch")
+        });
     assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR");
     let path = root.join(scope);
     fs::create_dir_all(&path)
         .unwrap_or_else(|error| panic!("create test scratch root `{}`: {error}", path.display()));
     path
+}
+
+/// An external copy of a checked-in project, with canonical fixture state
+/// materialized as `.jet` only inside the copy.
+pub struct ProjectScratch {
+    pub path: PathBuf,
+}
+
+impl ProjectScratch {
+    pub fn for_project(source: &Path, tag: &str) -> ProjectScratch {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = test_scratch_root("projects").join(format!(
+            "jet-project-{tag}-{}-{nanos}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path)
+            .unwrap_or_else(|error| panic!("create staged project `{}`: {error}", path.display()));
+        let path = fs::canonicalize(&path)
+            .unwrap_or_else(|error| panic!("canonicalize staged project: {error}"));
+        let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR"))
+            .expect("canonicalize repository root");
+        assert!(
+            !path.starts_with(&repo),
+            "staged project scratch must be outside the repository: {}",
+            path.display()
+        );
+        copy_staged_project(source, &path);
+        ProjectScratch { path }
+    }
+}
+
+impl Drop for ProjectScratch {
+    fn drop(&mut self) {
+        make_tree_writable(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn copy_staged_project(source: &Path, destination: &Path) {
+    for item in fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read project {}: {error}", source.display()))
+        .flatten()
+    {
+        let name = item.file_name();
+        let kind = item.file_type().expect("read project entry type");
+        let from = item.path();
+        if kind.is_dir() && name == ".jet" {
+            continue;
+        }
+        if kind.is_dir() {
+            let is_fixture_state = name == "fixture-state";
+            let to = if is_fixture_state {
+                destination.join(".jet")
+            } else {
+                destination.join(&name)
+            };
+            fs::create_dir_all(&to).expect("create staged project directory");
+            if is_fixture_state {
+                copy_fixture_state(&from, &to);
+            } else {
+                copy_staged_project(&from, &to);
+            }
+        } else if kind.is_file() {
+            fs::copy(&from, destination.join(&name)).unwrap_or_else(|error| {
+                panic!(
+                    "copy project file {} into {}: {error}",
+                    from.display(),
+                    destination.display()
+                )
+            });
+        }
+    }
+}
+
+fn copy_fixture_state(source: &Path, destination: &Path) {
+    for item in fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read fixture state {}: {error}", source.display()))
+        .flatten()
+    {
+        let from = item.path();
+        let to = destination.join(item.file_name());
+        let kind = item.file_type().expect("read fixture-state entry type");
+        if kind.is_dir() {
+            fs::create_dir_all(&to).expect("create staged fixture-state directory");
+            copy_fixture_state(&from, &to);
+        } else if kind.is_file() {
+            fs::copy(&from, &to).unwrap_or_else(|error| {
+                panic!(
+                    "copy fixture state {} into {}: {error}",
+                    from.display(),
+                    destination.display()
+                )
+            });
+        }
+    }
 }
 
 /// Collision-safe throwaway dir under the configured Jet scratch root: prefix

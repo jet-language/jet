@@ -365,7 +365,8 @@ impl TomlParser {
             .Ok(n) -> return Ok(DataTree.Float(n))
             else -> { _ := 0 }
         }
-        Ok(DataTree.Text(token))
+        if looks_toml_datetime(clean) -> return Ok(DataTree.Text(token))
+        return Err(self.fail("unsupported TOML bare value; quote text or use a TOML number, boolean, or datetime"))
     }
 
     fn ensure_table(&self, keys: [String]) {
@@ -394,6 +395,84 @@ fn remove_underscores(text: String) -> String {
     String.from_bytes(out) ?? text
 }
 
+fn looks_toml_datetime(text: String) -> Bool {
+    raw :: text.bytes()
+    if valid_toml_date(raw, 0, raw.len()) -> return true
+    if valid_toml_time(raw, 0, raw.len()) -> return true
+    if raw.len() < 19 || !valid_toml_date(raw, 0, 10) -> return false
+    if raw[10] != (U8{84}) && raw[10] != (U8{116}) -> return false
+
+    time_end := 19
+    if raw.len() > time_end && raw[time_end] == (U8{46}) {
+        time_end += 1
+        fraction_start := time_end
+        loop time_end < raw.len() {
+            n :: raw[time_end]
+            if n < 48 || n > 57 -> break
+            time_end += 1
+        }
+        if time_end == fraction_start -> return false
+    }
+    if !valid_toml_time(raw, 11, time_end) -> return false
+    if time_end == raw.len() -> return true
+    if time_end + 1 == raw.len() && raw[time_end] == (U8{90}) -> return true
+    if time_end + 6 != raw.len() || (raw[time_end] != (U8{43}) && raw[time_end] != (U8{45})) || raw[time_end + 3] != (U8{58}) {
+        return false
+    }
+    hour :: toml_two_digits(raw, time_end + 1, raw.len()) ?? return false
+    minute :: toml_two_digits(raw, time_end + 4, raw.len()) ?? return false
+    hour <= 23 && minute <= 59
+}
+
+fn valid_toml_date(raw: [U8], start: Int, end: Int) -> Bool {
+    if start < 0 || end > raw.len() || start + 10 != end -> return false
+    if raw[start + 4] != (U8{45}) || raw[start + 7] != (U8{45}) -> return false
+    year :: toml_four_digits(raw, start, end) ?? return false
+    month :: toml_two_digits(raw, start + 5, end) ?? return false
+    day :: toml_two_digits(raw, start + 8, end) ?? return false
+    if month < 1 || month > 12 || day < 1 -> return false
+    max_day := 31
+    if month == 4 || month == 6 || month == 9 || month == 11 -> max_day = 30
+    if month == 2 {
+        max_day = 28
+        if year %% 4 == 0 && (year %% 100 != 0 || year %% 400 == 0) -> max_day = 29
+    }
+    day <= max_day
+}
+
+fn valid_toml_time(raw: [U8], start: Int, end: Int) -> Bool {
+    if start < 0 || end > raw.len() || start + 8 > end -> return false
+    if raw[start + 2] != (U8{58}) || raw[start + 5] != (U8{58}) -> return false
+    hour :: toml_two_digits(raw, start, end) ?? return false
+    minute :: toml_two_digits(raw, start + 3, end) ?? return false
+    second :: toml_two_digits(raw, start + 6, end) ?? return false
+    if hour > 23 || minute > 59 || second > 59 -> return false
+    if start + 8 == end -> return true
+    if raw[start + 8] != (U8{46}) || start + 9 >= end -> return false
+    loop i in (start + 9)..<end {
+        if raw[i] < 48 || raw[i] > 57 -> return false
+    }
+    true
+}
+
+fn toml_two_digits(raw: [U8], start: Int, end: Int) -> ?Int {
+    if start < 0 || end > raw.len() || start + 2 > end -> return None
+    a :: Int.from_u8(raw[start])
+    b :: Int.from_u8(raw[start + 1])
+    if a < 48 || a > 57 || b < 48 || b > 57 -> return None
+    Val((a - 48) * 10 + (b - 48))
+}
+
+fn toml_four_digits(raw: [U8], start: Int, end: Int) -> ?Int {
+    if start < 0 || end > raw.len() || start + 4 > end -> return None
+    value := 0
+    loop i in start..<(start + 4) {
+        n :: raw[i]
+        if n < 48 || n > 57 -> return None
+        value = value * 10 + (n - 48)
+    }
+    Val(value)
+}
 fn parse_radix_int(text: String) -> ?Int {
     raw :: text.bytes()
     if raw.len() < 3 -> return None

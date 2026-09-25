@@ -79,7 +79,7 @@ pub fn is_unspecified(addr: IPv4) -> Bool {
 }
 
 pub fn is_global(addr: IPv4) -> Bool {
-    !is_private(addr) && !is_loopback(addr) && !is_link_local(addr) && !is_multicast(addr) && !is_unspecified(addr)
+    !is_private(addr) && !is_loopback(addr) && !is_link_local(addr) && !is_multicast(addr) && !is_reserved(addr) && !is_unspecified(addr)
 }
 
 pub fn network(cidr: String) -> Network !IOError {
@@ -87,13 +87,13 @@ pub fn network(cidr: String) -> Network !IOError {
     raw :: cidr.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{47}) {
+            if slash >= 0 -> return Err(net_err("CIDR may contain only one prefix slash"))
             slash = i
-            break
         }
     }
     if slash < 0 -> return Err(net_err("CIDR needs prefix /n"))
     host :: String.from_bytes(slice_u(raw, 0, slash)) ?? ""
-    pref :: parse_oct(String.from_bytes(slice_u(raw, slash + 1, raw.len())) ?? "") ?? return Err(net_err("bad prefix"))
+    pref :: parse_int(String.from_bytes(slice_u(raw, slash + 1, raw.len())) ?? "") ?? return Err(net_err("bad prefix"))
     if pref < 0 || pref > 32 -> return Err(net_err("prefix must be 0..=32"))
     addr :: parse_ipv4(host) ?? return Err(net_err("bad IPv4 address"))
     masked :: ipv4_from_int(ipv4_int(addr) & prefix_mask(pref)) ?? return Err(net_err("bad network address"))
@@ -101,18 +101,20 @@ pub fn network(cidr: String) -> Network !IOError {
 }
 
 pub fn network_contains(net: Network, addr: IPv4) -> Bool {
+    if net.prefix < 0 || net.prefix > 32 -> return false
     mask :: prefix_mask(net.prefix)
     (ipv4_int(addr) & mask) == (ipv4_int(net.addr) & mask)
 }
 
 pub fn network_broadcast(net: Network) -> IPv4 {
+    if net.prefix < 0 || net.prefix > 32 -> return net.addr
     mask :: prefix_mask(net.prefix)
     bcast :: (ipv4_int(net.addr) & mask) | (4294967295 - mask)
     ipv4_from_int(bcast) ?? net.addr
 }
 
 pub fn network_hosts(net: Network) -> Int {
-    if net.prefix >= 31 -> return 0
+    if net.prefix < 0 || net.prefix > 32 || net.prefix >= 31 -> return 0
     int_pow2(32 - net.prefix) - 2
 }
 
@@ -251,7 +253,9 @@ fn parse_int(text: String) -> ?Int {
     loop b in raw {
         d :: Int.from_u8(b)
         if d < 48 || d > 57 -> return None
-        n = n * 10 + (d - 48)
+        digit :: d - 48
+        if n > (9223372036854775807 - digit) / 10 -> return None
+        n = n * 10 + digit
     }
     Val(n)
 }
@@ -349,8 +353,10 @@ pub fn with_hostmask(net: Network) -> String {
     return "{ipv4_to_string(net.addr)}/{ipv4_to_string(host)}"
 }
 
-pub fn num_addresses(net: Network) -> Int { int_pow2(32 - net.prefix) }
-
+pub fn num_addresses(net: Network) -> Int {
+    if net.prefix < 0 || net.prefix > 32 -> return 0
+    int_pow2(32 - net.prefix)
+}
 pub fn network_first(net: Network) -> IPv4 { net.addr }
 
 pub fn network_last(net: Network) -> IPv4 { network_broadcast(net) }
@@ -375,7 +381,7 @@ pub fn supernet(net: Network) -> Network {
 
 pub fn subnets(net: Network, new_prefix: Int) -> [Network] {
     out := [Network]{}
-    if new_prefix <= net.prefix || new_prefix > 32 -> return out
+    if net.prefix < 0 || net.prefix > 32 || new_prefix <= net.prefix || new_prefix > 32 -> return out
     step :: int_pow2(32 - new_prefix)
     start :: ipv4_int(net.addr)
     end :: start + int_pow2(32 - net.prefix)
@@ -390,6 +396,7 @@ pub fn subnets(net: Network, new_prefix: Int) -> [Network] {
 
 pub fn hosts(net: Network) -> [IPv4] {
     out := [IPv4]{}
+    if net.prefix < 0 || net.prefix > 32 -> return out
     if net.prefix >= 31 {
         out.push(net.addr)
         if net.prefix == 31 -> out.push(network_broadcast(net))

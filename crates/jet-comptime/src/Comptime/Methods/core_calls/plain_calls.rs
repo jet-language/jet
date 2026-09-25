@@ -269,29 +269,11 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.builtin", "len_string") => {
             Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
         }
+        ("core.builtin", "map_keys" | "map_values") => {
+            let member = if method == "map_keys" { "keys" } else { "values" };
+            crate::Comptime::Builtins::apply_method(one(0)?, member, Vec::new(), span)
+        }
         ("jet.unit", "magnitude") => Ok(CtValue::Str(as_float(one(0)?, span)?.to_string())),
-        // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
-        // tier-0. No native bridge, Boundary classification, or AOT fallback.
-        ("core.archive.gzip", "compress") => Ok(CtValue::Bytes(
-            crate::Comptime::ArchiveLite::gzip_compress(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive.gzip", "decompress") => Ok(
-            match crate::Comptime::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            },
-        ),
-        // The std-only resident codec accepts ordinary dictionaryless zstd
-        // frames. The encoder deliberately chooses interoperable raw blocks.
-        ("core.archive.zstd", "compress") => Ok(CtValue::Bytes(
-            crate::Comptime::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive.zstd", "decompress") => Ok(
-            match crate::Comptime::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            },
-        ),
         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
         ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
             type_name: "Loadable".to_string(),
@@ -350,6 +332,10 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             }
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
+        ("core.math", "fabs") => Ok(CtValue::Float(core_math_float_abs(as_ct_float(
+            one(0)?,
+            span,
+        )?))),
         ("core.math", "pow") => {
             let a = as_ct_float(one(0)?, span)?;
             let b = as_ct_float(one(1)?, span)?;

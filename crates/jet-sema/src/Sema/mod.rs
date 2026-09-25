@@ -1110,9 +1110,6 @@ pub(crate) struct LocalInfo {
     /// for `view`/`&` borrows (which never own). When still in scope and not in
     /// `moved` at scope end, E0140 fires.
     single_use_span: Option<Span>,
-    /// Pure compile-time value for immutable-local diagnostics and folding.
-    /// This does not make an ordinary local available to `comptime` code.
-    constant_value: Option<crate::Comptime::CtValue>,
     /// The initializer reported a type error, so this name has no usable
     /// meaning, even when inference supplied a recovery type. Reads stop here
     /// so the original diagnostic stays paired with the required use-site

@@ -69,7 +69,7 @@ pub fn digit(src: Input) -> ?Digit {
 }
 
 pub fn int_dec(src: Input) -> ?Digit {
-    cur := skip_ws(src)
+    cur := skip_ws(src) ?? return None
     sign := 1
     b :: peek(cur) ?? return None
     if b == 45 || b == 43 {
@@ -107,7 +107,7 @@ fn utf8_width(raw: [U8], at: Int) -> Int {
     1
 }
 
-fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_range(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     lo := start
     hi := end

@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2c15cc7424db65f511e8235cc017c884dfd07a28fed3579269a8d90ba3e44977
+// Source SHA-256: 16121662cb88d638928f4003ff4875867b3cd6e37d50de4d1b3e8fe07ab49df6
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -28,8 +28,8 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.compiler.lang", &["core.compiler"]),
     ("core.collections.set", &["core.collections"]),
     ("core.compute", &["core.math", "core.text.fmt"]),
-    ("core.compute.solve", &["core.compute"]),
-    ("core.crypto", &["core"]),
+    ("core.compute.solve", &["core.compute", "core.math"]),
+    ("core.crypto", &["core", "core.files", "core.files.path"]),
     ("core.crypto.expert", &["core.crypto"]),
     ("core.crypto.random", &["core.crypto"]),
     ("core.crypto.uuid", &["core.crypto"]),
@@ -73,7 +73,8 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.mem", &["core"]),
     ("core.mod", &["core.compiler", "core.files"]),
     ("core.net.tls", &["core.crypto.random", "core.net"]),
-    ("core.net.ws", &["core.net"]),
+    ("core.net.url", &["core.net.mime"]),
+    ("core.net.ws", &["core.net", "core.net.url"]),
     ("core.prelude", &["core"]),
     ("core.process", &["core.files", "core.sys", "core.text"]),
     ("core.reactive", &["core.mem"]),

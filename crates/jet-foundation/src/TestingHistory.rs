@@ -64,6 +64,18 @@ const MAX_DISTRIBUTIONS: usize = 256;
 const MAX_SHRINK_ATTEMPTS: usize = 1_000_000;
 const MAX_STRING_BYTES: usize = 4_096;
 
+pub const HISTORY_SEED_INVALID_REASON: &str = "history seed is invalid";
+pub const HISTORY_CASE_BOUND_INVALID_REASON: &str = "history case bound is invalid";
+
+/// Convert the source-level history bounds once for every execution tier.
+/// Cases are checked first to preserve the provider's error precedence.
+pub fn validate_history_bounds(seed: i64, cases: i64) -> Result<(u64, usize), &'static str> {
+    let cases =
+        usize::try_from(cases).map_err(|_| HISTORY_CASE_BOUND_INVALID_REASON)?;
+    let seed = u64::try_from(seed).map_err(|_| HISTORY_SEED_INVALID_REASON)?;
+    Ok((seed, cases))
+}
+
 /// Errors returned before a history can be claimed as evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HistoryError {

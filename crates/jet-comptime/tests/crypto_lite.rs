@@ -55,3 +55,10 @@ fn argon2id_matches_the_canonical_expert_known_answer() {
         "the standard address generator must be wired into the block loop"
     );
 }
+
+#[test]
+fn argon2id_parallel_lanes_match_the_expert_known_answer() {
+    let actual = argon2id::hash(b"password", b"somesalt", 8_192, 2, 2, 32).unwrap();
+    let expected = hex("d1e83aa7383f70873a171b453206a00daca5340f3505542e17b41ed62d3b110e");
+    assert_eq!(actual, expected);
+}

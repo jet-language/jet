@@ -683,23 +683,9 @@ pub struct WatchEvent {
     pub port: i64,
 }
 
-#[derive(Clone, Debug)]
-pub struct TempDir {
-    pub path: String,
-    pub cleanup: std::rc::Rc<()>,
-}
-
-#[derive(Clone, Debug)]
-pub struct TempFile {
-    pub path: String,
-    pub cleanup: std::rc::Rc<()>,
-}
-
-#[derive(Clone, Debug)]
-pub struct FileLock {
-    pub path: String,
-    pub cleanup: std::rc::Rc<()>,
-}
+pub use super::{
+    JetFileLockOwner as FileLock, JetTempDirOwner as TempDir, JetTempFileOwner as TempFile,
+};
 
 /// D-QUERY-RETAIN1=A: grouped query results retain both the nominal key and
 /// the reducer's exact value type.
@@ -6637,27 +6623,6 @@ impl super::JetShow for TempFile {
 impl super::JetShow for FileLock {
     fn jet_show(&self) -> String {
         self.path.clone()
-    }
-}
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        if std::rc::Rc::strong_count(&self.cleanup) == 1 {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
-}
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        if std::rc::Rc::strong_count(&self.cleanup) == 1 {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        if std::rc::Rc::strong_count(&self.cleanup) == 1 {
-            let _ = std::fs::remove_file(&self.path);
-        }
     }
 }
 impl super::JetShow for Stopwatch {

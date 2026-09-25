@@ -1,10 +1,6 @@
-use crate::Codegen::foreign_binding_method_key;
-use crate::Codegen::is_db_value_type_name;
-use crate::Codegen::is_db_value_variant;
-use crate::Codegen::is_json_type_name;
-use crate::Codegen::is_json_variant;
-use crate::Codegen::is_key_variant;
+use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::allocator_constructor_owner;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
@@ -44,9 +40,13 @@ use crate::Codegen::TIR::service_method_route;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
 use crate::Codegen::TIR::tls_static_op;
-use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::foreign_binding_method_key;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_db_value_variant;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
 use crate::Syntax;
-use crate::AST::{Expr, Type};
 use std::collections::HashSet;
 
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
@@ -70,8 +70,7 @@ pub(crate) fn method_call_in_subset(
     // implements the trait, including `[U8]` / list / bytes. Exclusive
     // handle gates below (Shared/Cell/…) must not swallow that operator.
     if matches!(method, "equal" | "compare") && args.len() == 1 {
-        return expr_in_subset(receiver, cx, locals)
-            && expr_in_subset(&args[0].expr, cx, locals);
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
     }
     if crate::Codegen::TIR::web_receiver_projection(recv_type.as_deref(), method, args.len())
         .is_some()
@@ -404,10 +403,7 @@ pub(crate) fn method_call_in_subset(
             };
         }
         if method == "try_replace" {
-            return args.len() == 2
-                && args
-                    .iter()
-                    .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            return args.len() == 2 && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
         }
     }
     // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids` and
@@ -652,8 +648,7 @@ pub(crate) fn method_call_in_subset(
     // siblings) to a nominal sentinel before TIR, so source-shape inspection
     // would be both stale and unsound here.
     if let Some(alloc_type) = allocator_constructor_owner(recv_type.as_deref(), method) {
-        let return_ok =
-            matches!(resolved_ret, Some(Type::Named(name)) if name == alloc_type);
+        let return_ok = matches!(resolved_ret, Some(Type::Named(name)) if name == alloc_type);
         let arity_ok = if alloc_type == "Fixed" {
             args.len() == 1
         } else {
@@ -1433,9 +1428,8 @@ pub(crate) fn method_call_in_subset(
     let recv_ty = Type::Named(ty.clone());
     // D-OPMIX1: `impl Int.Mul(Price)` is a user method on a builtin. Admit it
     // when method_sigs has the hook, so mixed arithmetic stays in TIR.
-    let operator_hook = sig.is_some()
-        && matches!(method, "add" | "sub" | "mul" | "div")
-        && args.len() == 1;
+    let operator_hook =
+        sig.is_some() && matches!(method, "add" | "sub" | "mul" | "div") && args.len() == 1;
     if !is_covered_struct_ty(&recv_ty, cx)
         && !is_covered_enum_ty(&recv_ty, cx)
         && !is_covered_foreign_value_ty(&recv_ty, cx)
@@ -1609,7 +1603,9 @@ pub(crate) fn static_method_call_in_subset(
         && cx.struct_fields.contains_key(type_name)
         && !cx.sigs.contains_key(&format!("{type_name}::merge"))
     {
-        return args.iter().all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
+        return args
+            .iter()
+            .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
         (type_name, method, args.len()),

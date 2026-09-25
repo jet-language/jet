@@ -67,17 +67,20 @@ fn scratch_root(name: &str) -> PathBuf {
 }
 
 fn copy_receipt_fixture(root: &Path) {
-    for relative in [
-        "workspace.jet",
-        ".jet/lock",
-        "packages/app/package.jet",
-        "packages/app/entry.jet",
-        "packages/app/app/main.jet",
-        "packages/app/.jet/lock",
-        "packages/app/.jet/generated/input.jet",
+    for (source_relative, destination_relative) in [
+        ("workspace.jet", "workspace.jet"),
+        ("lock.fixture", ".jet/lock"),
+        ("packages/app/package.jet", "packages/app/package.jet"),
+        ("packages/app/entry.jet", "packages/app/entry.jet"),
+        ("packages/app/app/main.jet", "packages/app/app/main.jet"),
+        ("packages/app/lock.fixture", "packages/app/.jet/lock"),
+        (
+            "packages/app/fixtures/generated/input.jet",
+            "packages/app/.jet/generated/input.jet",
+        ),
     ] {
-        let source = fixture("receipt_invalidation").join(relative);
-        let destination = root.join(relative);
+        let source = fixture("receipt_invalidation").join(source_relative);
+        let destination = root.join(destination_relative);
         fs::create_dir_all(
             destination
                 .parent()
@@ -91,6 +94,48 @@ fn copy_receipt_fixture(root: &Path) {
                 destination.display()
             )
         });
+    }
+}
+
+fn copy_fixture_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap_or_else(|error| {
+        panic!(
+            "create staged fixture {}: {error}",
+            destination.display()
+        )
+    });
+    let entries = fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read fixture {}: {error}", source.display()));
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|error| {
+            panic!("read entry in fixture {}: {error}", source.display())
+        });
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type().unwrap_or_else(|error| {
+            panic!("inspect fixture entry {}: {error}", source_path.display())
+        });
+        if file_type.is_dir() {
+            copy_fixture_tree(&source_path, &destination_path);
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &destination_path).unwrap_or_else(|error| {
+                panic!(
+                    "copy fixture {} -> {}: {error}",
+                    source_path.display(),
+                    destination_path.display()
+                )
+            });
+        } else {
+            panic!("unsupported fixture entry {}", source_path.display());
+        }
+    }
+}
+
+fn clear_receipt_store(path: &Path) {
+    match fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("clear receipt store {}: {error}", path.display()),
     }
 }
 
@@ -420,16 +465,10 @@ fn explicit_file_uses_owning_project_context() {
 
 #[test]
 fn extension_optional_check_replays_receipt() {
-    let dir = fixture("frozen_dogfood");
-    let receipt_dir = std::env::temp_dir().join(format!(
-        "jet-project-check-replay-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before Unix epoch")
-            .as_nanos()
-    ));
-    let _ = fs::remove_dir_all(&receipt_dir);
+    let scratch = scratch_root("extension-optional-receipt");
+    let dir = scratch.join("frozen_dogfood");
+    copy_fixture_tree(&fixture("frozen_dogfood"), &dir);
+    let receipt_dir = dir.join(".jet/receipts");
 
     let run = || {
         Command::new(jet_bin())
@@ -463,7 +502,7 @@ fn extension_optional_check_replays_receipt() {
         "extension-optional invocation did not replay its receipt:\n{}",
         String::from_utf8_lossy(&second.stderr)
     );
-    let _ = fs::remove_dir_all(&receipt_dir);
+    let _ = fs::remove_dir_all(&scratch);
 }
 
 #[test]
@@ -471,7 +510,7 @@ fn project_check_receipt_tracks_entry_and_authority_changes() {
     let root = scratch_root("receipt-invalidation");
     copy_receipt_fixture(&root);
     let package_root = root.join("packages/app");
-    let receipt_dir = root.join("receipts");
+    let receipt_dir = root.join(".jet/receipts");
     let check = || run_project_check(&package_root, &receipt_dir, &["check"]);
 
     let first = check();
@@ -517,9 +556,9 @@ fn project_check_receipt_tracks_entry_and_authority_changes() {
     for (label, path, replacement) in mutations {
         let original = fs::read(&path)
             .unwrap_or_else(|error| panic!("read {label} fixture {}: {error}", path.display()));
-        let mutation_receipt_dir = root.join(format!("receipts-{label}"));
         let mutation_check =
-            || run_project_check(&package_root, &mutation_receipt_dir, &["check"]);
+            || run_project_check(&package_root, &receipt_dir, &["check"]);
+        clear_receipt_store(&receipt_dir);
 
         let baseline = mutation_check();
         assert_project_check_passed(&baseline, &format!("baseline {label} project check"));
@@ -546,7 +585,7 @@ fn project_check_receipt_tracks_entry_and_authority_changes() {
 
         fs::write(&path, original)
             .unwrap_or_else(|error| panic!("restore {label} fixture {}: {error}", path.display()));
-        let _ = fs::remove_dir_all(mutation_receipt_dir);
+        clear_receipt_store(&receipt_dir);
     }
 
     let _ = fs::remove_dir_all(root);
@@ -555,8 +594,9 @@ fn project_check_receipt_tracks_entry_and_authority_changes() {
 #[test]
 fn project_check_json_rows_are_versioned_and_warm_stable() {
     let scratch = scratch_root("json-warm");
-    let receipt_dir = scratch.join("receipts");
-    let dir = fixture("entry_resolution");
+    copy_fixture_tree(&fixture("entry_resolution"), &scratch);
+    let receipt_dir = scratch.join(".jet/receipts");
+    let dir = scratch.as_path();
 
     let cold_started = Instant::now();
     let cold = run_project_check(&dir, &receipt_dir, &["check", "--json"]);

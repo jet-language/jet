@@ -314,13 +314,13 @@ fn jet_testing_history_observation(
 }
 
 fn jet_testing_history_apply<Input>(
-    callback: &dyn Fn(Input) -> jet_std::DataTree,
+    callback: &dyn Fn(&Input) -> JetOutcome<jet_std::DataTree, JetErr>,
     input: Input,
     role: &str,
 ) -> Result<jet_std::DataTree, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(input))).map_err(|_| {
-        format!("{role} callback crashed while replaying a typed history")
-    })
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&input)))
+        .map_err(|_| format!("{role} callback crashed while replaying a typed history"))?;
+    result.map_err(|error| format!("{role} callback failed: {error}"))
 }
 
 pub(crate) fn jet_testing_history_rng_next_u64(
@@ -337,9 +337,9 @@ pub(crate) fn jet_testing_history_rng_below(
 }
 
 fn jet_testing_history_execute<Command>(
-    model: &dyn Fn(Vec<Command>) -> jet_std::DataTree,
-    actual: &dyn Fn(Vec<Command>) -> jet_std::DataTree,
-    observe: &dyn Fn(jet_std::DataTree) -> jet_std::DataTree,
+    model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
+    actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
+    observe: &dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr>,
     commands: &[Command],
 ) -> Result<
     (
@@ -423,6 +423,15 @@ pub(crate) fn jet_testing_histories<Command>(
 where
     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
 {
+    let model = Box::new(move |commands: &Vec<Command>| {
+        Ok::<_, JetErr>(model(commands.clone()))
+    });
+    let actual = Box::new(move |commands: &Vec<Command>| {
+        Ok::<_, JetErr>(actual(commands.clone()))
+    });
+    let observe = Box::new(move |value: &jet_std::DataTree| {
+        Ok::<_, JetErr>(observe(value.clone()))
+    });
     jet_testing_histories_with_provenance(
         seed,
         cases,
@@ -436,13 +445,19 @@ where
 
 /// Compiler-private entrypoint used when the checked caller carries selected
 /// artifact/callback provenance outside the six Jet-visible history values.
-pub(crate) fn jet_testing_histories_with_provenance<Command>(
+pub(crate) fn jet_testing_histories_with_provenance<'callback, Command>(
     seed: i64,
     cases: i64,
     strategy: Option<JetHistoryStrategy<Command>>,
-    model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+    model: Box<
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
+    actual: Box<
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
+    observe: Box<
+        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> Result<jet_std::JetTestComparison, String>
 where
@@ -513,12 +528,19 @@ pub(crate) fn jet_testing_histories_schema(
     jet_testing_histories::<jet_std::DataTree>(seed, cases, None, model, actual, observe)
 }
 
-fn jet_testing_histories_result_with_strategy<Command, Strategy>(
+
+fn jet_testing_histories_result_with_strategy<'callback, Command, Strategy>(
     seed: i64,
     cases: i64,
-    model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+    model: Box<
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
+    actual: Box<
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
+    observe: Box<
+        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+    >,
     strategy: Strategy,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> Result<jet_std::JetTestComparison, String>
@@ -526,8 +548,9 @@ where
     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
     Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
 {
-    let cases = usize::try_from(cases).map_err(|_| "history case bound is invalid".to_string())?;
-    let seed = u64::try_from(seed).map_err(|_| "history seed is invalid".to_string())?;
+    let (seed, cases) =
+        crate::jet_testing_history_foundation::validate_history_bounds(seed, cases)
+            .map_err(|message| message.to_string())?;
     let bounds = strategy.bounds();
     let relation =
         crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality;

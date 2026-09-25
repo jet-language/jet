@@ -14,27 +14,27 @@ use core.crypto.expert.[secret_bytes]
 use core.encoding.base64 as base64
 use core.encoding.hex as hex
 
-@c_max_recipients :: 100
+c_max_recipients :: 100
 
-@c_max_attachments :: 64
+c_max_attachments :: 64
 
-@c_max_header_bytes :: 998
+c_max_header_bytes :: 998
 
-@c_max_header_value_bytes :: 65536
+c_max_header_value_bytes :: 65536
 
-@c_max_body_bytes :: 1048576
+c_max_body_bytes :: 1048576
 
-@c_max_attachment_bytes :: 26214400
+c_max_attachment_bytes :: 26214400
 
-@c_max_message_bytes :: 33554432
+c_max_message_bytes :: 33554432
 
-@c_max_reply_line_bytes :: 512
+c_max_reply_line_bytes :: 512
 
-@c_max_reply_lines :: 100
+c_max_reply_lines :: 100
 
-@c_max_capabilities :: 100
+c_max_capabilities :: 100
 
-@c_max_auth_challenge_bytes :: 4096
+c_max_auth_challenge_bytes :: 4096
 
 // Jet owns deterministic address, MIME, and message policy. Only the
 // transport-facing SMTP provider calls below cross the native boundary.
@@ -150,12 +150,12 @@ pub struct SendReport {
 
 pub fn limits() -> Limits {
     Limits{
-        max_reply_line_bytes: @c_max_reply_line_bytes,
-        max_reply_lines: @c_max_reply_lines,
-        max_capabilities: @c_max_capabilities,
-        max_recipients: @c_max_recipients,
-        max_message_bytes: @c_max_message_bytes,
-        max_auth_challenge_bytes: @c_max_auth_challenge_bytes,
+        max_reply_line_bytes: c_max_reply_line_bytes,
+        max_reply_lines: c_max_reply_lines,
+        max_capabilities: c_max_capabilities,
+        max_recipients: c_max_recipients,
+        max_message_bytes: c_max_message_bytes,
+        max_auth_challenge_bytes: c_max_auth_challenge_bytes,
     }
 }
 
@@ -184,17 +184,17 @@ pub fn address(text: String) -> Address !EmailError {
     if value.bytes().len() == 0 || value.bytes().len() > 512 {
         return Err(invalid_address("email address must contain 1 to 512 bytes"))
     }
-    opens := count_byte(~value, 60)
-    closes := count_byte(~value, 62)
+    opens := count_byte(~value, 60) ?? panic("count_byte failed")
+    closes := count_byte(~value, 62) ?? panic("count_byte failed")
     display := no_display()
     mailbox := ~value
-    if opens == 0 && closes == 0 -> mailbox = ~value else if opens == 1 && closes == 1 && ends_with_byte(~value, 62) {
-        open := last_byte(~value, 60)
-        shown := slice_text(~value, 0, open).trim()
+    if opens == 0 && closes == 0 -> mailbox = ~value else if opens == 1 && closes == 1 && (ends_with_byte(~value, 62) ?? panic("ends_with_byte failed")) {
+        open := last_byte(~value, 60) ?? panic("last_byte failed")
+        shown := (slice_text(~value, 0, open) ?? panic("slice_text failed")).trim()
         if shown.bytes().len() == 0 -> return Err(invalid_address("display name cannot be empty"))
         parsed :: parse_display(~shown) ?? return Err(invalid_address("invalid display name"))
         display = Val(parsed)
-        mailbox = slice_text(~value, open + 1, value.bytes().len() - 1).trim()
+        mailbox = (slice_text(~value, open + 1, value.bytes().len() - 1) ?? panic("slice_text failed")).trim()
     } else { return Err(invalid_address("display address must have one final `<mailbox>`")) }
     validate_mailbox(~mailbox) ?? return Err(invalid_address("invalid mailbox"))
     Ok(Address{display: display, mailbox: mailbox})
@@ -202,7 +202,7 @@ pub fn address(text: String) -> Address !EmailError {
 
 pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment !EmailError {
     validate_attachment_parts(~name, ~mime, ~bytes) ?? return Err(invalid_attachment("invalid attachment"))
-    if bytes.len() > @c_max_attachment_bytes {
+    if bytes.len() > c_max_attachment_bytes {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(Attachment{filename: name, mime: ascii_lower(mime), bytes: bytes})
@@ -212,7 +212,7 @@ pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, te
     html_text :: html.text()
     validate_message_parts(from, to, bcc, subject, text, html_text, attachments) ?? return Err(invalid_message("message contains invalid fields"))
     upper :: prospective_wire_upper(from, to, subject, text, html_text, attachments)
-    if upper > @c_max_message_bytes {
+    if upper > c_max_message_bytes {
         return Err(limit_error("message", "serialized message exceeds 33554432 bytes"))
     }
     validate_rendered_headers(from, to, subject) ?? return Err(invalid_message("message headers are invalid"))
@@ -237,7 +237,7 @@ pub fn envelope(from: Address, recipients: [Address]) -> Envelope !EmailError {
     if recipients.len() == 0 {
         return Err(invalid_message("email envelope needs at least one recipient"))
     }
-    if recipients.len() > @c_max_recipients {
+    if recipients.len() > c_max_recipients {
         return Err(limit_error("envelope", "email envelope exceeds 100 recipients"))
     }
     loop recipient in recipients {
@@ -281,7 +281,7 @@ pub fn serialize(message: Message) -> [U8] !EmailError {
         push_text(&out, "--{mixed}--")
         push_crlf(&out)
     }
-    if out.len() > message.wire_upper || out.len() > @c_max_message_bytes {
+    if out.len() > message.wire_upper || out.len() > c_max_message_bytes {
         return Err(limit_error("serialize", "serialized message exceeded its checked wire bound"))
     }
     Ok(out)
@@ -470,49 +470,54 @@ fn push_crlf(out: &[U8]) !Never {
 }
 
 fn validate_smtp_config(config: SMTPConfig) -> ?EmailError {
+    auth_error :: validate_smtp_auth(config.auth)
+    if auth_error == {
+        .None -> { _ := 0 }
+        .Val(error) -> return Val(error)
+    }
     limits := ~config.limits
     if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 {
-        return Val(email_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}"))
+        return Val(email_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}") ?? panic("total email error"))
     }
     if limits.max_reply_lines < 1 || limits.max_reply_lines > 1000 {
-        return Val(email_error("smtp", "max_reply_lines must be between 1 and 1000; got {limits.max_reply_lines}"))
+        return Val(email_error("smtp", "max_reply_lines must be between 1 and 1000; got {limits.max_reply_lines}") ?? panic("total email error"))
     }
     if limits.max_capabilities < 1 || limits.max_capabilities > 1000 {
-        return Val(email_error("smtp", "max_capabilities must be between 1 and 1000; got {limits.max_capabilities}"))
+        return Val(email_error("smtp", "max_capabilities must be between 1 and 1000; got {limits.max_capabilities}") ?? panic("total email error"))
     }
     if limits.max_recipients < 1 || limits.max_recipients > 10000 {
-        return Val(email_error("smtp", "max_recipients must be between 1 and 10000; got {limits.max_recipients}"))
+        return Val(email_error("smtp", "max_recipients must be between 1 and 10000; got {limits.max_recipients}") ?? panic("total email error"))
     }
     if limits.max_message_bytes < 1 || limits.max_message_bytes > 1073741824 {
-        return Val(email_error("smtp", "max_message_bytes must be between 1 and 1073741824; got {limits.max_message_bytes}"))
+        return Val(email_error("smtp", "max_message_bytes must be between 1 and 1073741824; got {limits.max_message_bytes}") ?? panic("total email error"))
     }
     if limits.max_auth_challenge_bytes < 1 || limits.max_auth_challenge_bytes > 65536 {
-        return Val(email_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}"))
+        return Val(email_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}") ?? panic("total email error"))
     }
 
     host := ~config.host
     host_bytes := host.bytes()
     if host_bytes.len() == 0 || host_bytes.len() > 253 || !is_ascii(host) {
-        return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+        return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
     }
     loop byte in host_bytes {
         n :: Int.from_u8(byte)
         if n < 33 || n == 127 {
-            return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+            return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
         }
     }
     if config.port < 1 || config.port > 65535 {
-        return Val(email_error("smtp", "port must be between 1 and 65535"))
+        return Val(email_error("smtp", "port must be between 1 and 65535") ?? panic("total email error"))
     }
     if config.security == {
         .StartTls -> {
             if config.port == 465 {
-                return Val(email_error("smtp", "port 465 requires TLS from connect"))
+                return Val(email_error("smtp", "port 465 requires TLS from connect") ?? panic("total email error"))
             }
         }
         .TLS -> {
             if config.port == 587 {
-                return Val(email_error("smtp", "port 587 requires verified STARTTLS"))
+                return Val(email_error("smtp", "port 587 requires verified STARTTLS") ?? panic("total email error"))
             }
         }
     }
@@ -523,7 +528,7 @@ fn validate_smtp_config(config: SMTPConfig) -> ?EmailError {
             pem_error :: validate_ca_pem(~pem)
             if pem_error == {
                 .None -> { _ := 0 }
-                .Val(reason) -> return Val(email_error("smtp", reason))
+                .Val(reason) -> return Val(email_error("smtp", reason) ?? panic("total email error"))
             }
         }
     }
@@ -543,7 +548,19 @@ fn validate_smtp_config(config: SMTPConfig) -> ?EmailError {
                 loop i in 0..<key_bytes.len() -> key_bytes[i] = U8{0}
             }
             if key_length != 32 {
-                return Val(email_error("dkim", "private_key must contain exactly 32 bytes"))
+                return Val(email_error("dkim", "private_key must contain exactly 32 bytes") ?? panic("total email error"))
+            }
+        }
+    }
+    None
+}
+
+fn validate_smtp_auth(auth: SMTPAuth) -> ?EmailError {
+    if auth == {
+        .None -> { _ := 0 }
+        .Password(username, _) -> {
+            if username.bytes().len() == 0 || username.bytes().len() > 512 || has_control(username) {
+                return Val(email_error("smtp", "SMTP username must contain 1 to 512 bytes without controls") ?? panic("total email error"))
             }
         }
     }
@@ -611,16 +628,16 @@ fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool {
 
 fn validate_dkim_config(dkim: DkimConfig) -> ?EmailError {
     if !valid_dns_name(~dkim.domain) {
-        return Val(email_error("dkim", "domain must be a valid ASCII DNS name"))
+        return Val(email_error("dkim", "domain must be a valid ASCII DNS name") ?? panic("total email error"))
     }
     if dkim.selector.contains(".") || !valid_dns_name(~dkim.selector) {
-        return Val(email_error("dkim", "selector must be one valid ASCII DNS label"))
+        return Val(email_error("dkim", "selector must be one valid ASCII DNS label") ?? panic("total email error"))
     }
     if dkim.signed_headers.len() == 0 {
-        return Val(email_error("dkim", "signed_headers must not be empty"))
+        return Val(email_error("dkim", "signed_headers must not be empty") ?? panic("total email error"))
     }
     if dkim.signed_headers.len() > 64 {
-        return Val(email_error("dkim", "signed_headers must contain at most 64 names"))
+        return Val(email_error("dkim", "signed_headers must contain at most 64 names") ?? panic("total email error"))
     }
 
     normalized := [String]{}
@@ -629,31 +646,31 @@ fn validate_dkim_config(dkim: DkimConfig) -> ?EmailError {
     loop name in dkim.signed_headers {
         raw := name.bytes()
         if raw.len() == 0 || !is_ascii(name) {
-            return Val(email_error("dkim", "signed_headers must contain valid header names"))
+            return Val(email_error("dkim", "signed_headers must contain valid header names") ?? panic("total email error"))
         }
         loop byte in raw {
             n :: Int.from_u8(byte)
             if n < 33 || n > 126 || n == 58 {
-                return Val(email_error("dkim", "signed_headers must contain valid header names"))
+                return Val(email_error("dkim", "signed_headers must contain valid header names") ?? panic("total email error"))
             }
         }
         lower :: ascii_lower(~name)
         if lower == "received" || lower == "return-path" || lower == "dkim-signature" || lower == "authentication-results" || lower == "arc-authentication-results" || lower == "arc-message-signature" || lower == "arc-seal" {
-            return Val(email_error("dkim", "signed_headers contains forbidden hop header `{lower}`"))
+            return Val(email_error("dkim", "signed_headers contains forbidden hop header `{lower}`") ?? panic("total email error"))
         }
         loop existing in normalized {
             if existing == lower {
-                return Val(email_error("dkim", "signed_headers contains duplicate `{lower}`"))
+                return Val(email_error("dkim", "signed_headers contains duplicate `{lower}`") ?? panic("total email error"))
             }
         }
         if lower == "from" -> has_from = true
         list_bytes += lower.bytes().len()
         normalized.push(lower)
     }
-    if !has_from -> return Val(email_error("dkim", "signed_headers must include `from`"))
+    if !has_from -> return Val(email_error("dkim", "signed_headers must include `from`") ?? panic("total email error"))
     list_bytes += normalized.len() - 1
-    if list_bytes + 6 > @c_max_header_bytes {
-        return Val(email_error("dkim", "signed_headers exceeds the DKIM header line bound"))
+    if list_bytes + 6 > c_max_header_bytes {
+        return Val(email_error("dkim", "signed_headers exceeds the DKIM header line bound") ?? panic("total email error"))
     }
     None
 }
@@ -680,21 +697,21 @@ fn valid_dns_name(text: String) -> Bool {
     true
 }
 
-fn email_error(operation: String, reason: String) -> EmailError {
-    EmailError.Configuration{operation: operation, server: None, code: None, reason: reason}
+fn email_error(operation: String, reason: String) -> EmailError !Never {
+    EmailError.Configuration{operation: operation, server: no_display(), code: None, reason: reason}
 }
 
-fn invalid_address(reason: String) -> EmailError { email_error("InvalidAddress", reason) }
+fn invalid_address(reason: String) -> EmailError !Never { email_error("InvalidAddress", reason) }
 
-fn invalid_attachment(reason: String) -> EmailError { email_error("InvalidAttachment", reason) }
+fn invalid_attachment(reason: String) -> EmailError !Never { email_error("InvalidAttachment", reason) }
 
-fn invalid_message(reason: String) -> EmailError { email_error("InvalidMessage", reason) }
+fn invalid_message(reason: String) -> EmailError !Never { email_error("InvalidMessage", reason) }
 
-fn invalid_header(reason: String) -> EmailError { email_error("InvalidHeader", reason) }
+fn invalid_header(reason: String) -> EmailError !Never { email_error("InvalidHeader", reason) }
 
-fn invalid_smtp(reason: String) -> EmailError { email_error("smtp", reason) }
+fn invalid_smtp(reason: String) -> EmailError !Never { email_error("smtp", reason) }
 
-fn limit_error(operation: String, reason: String) -> EmailError { email_error(operation, reason) }
+fn limit_error(operation: String, reason: String) -> EmailError !Never { email_error(operation, reason) }
 
 fn no_display() -> ?String { None }
 
@@ -742,7 +759,7 @@ fn has_control(text: String) -> Bool {
 }
 
 fn reject_controls(text: String, what: String) -> Bool !EmailError {
-    if has_control(text) {
+    if has_control(text) ?? panic("has_control failed") {
         return Err(invalid_header("{what} contains a forbidden control character"))
     }
     Ok(true)
@@ -836,14 +853,16 @@ fn validate_mailbox(text: String) -> Bool !EmailError {
         if n >= 128 -> return Err(invalid_address("mailbox must be 1 to 254 ASCII bytes"))
     }
     at :: mailbox_separator(~text) ?? return Err(invalid_address("mailbox needs one unquoted `@`"))
-    local := slice_text(~text, 0, at)
-    domain := slice_text(~text, at + 1, raw.len())
-    if local.len() == 0 || domain.len() == 0 || local.len() > 64 || domain.len() > 253 {
+    local := slice_text(~text, 0, at) ?? panic("slice_text failed")
+    domain := slice_text(~text, at + 1, raw.len()) ?? panic("slice_text failed")
+    local_len :: local.bytes().len()
+    domain_len :: domain.bytes().len()
+    if local_len == 0 || domain_len == 0 || local_len > 64 || domain_len > 253 {
         return Err(invalid_address("mailbox local part or domain has an invalid length"))
     }
     local_raw := local.bytes()
     if local_raw[0] == (U8{34}) {
-        if !validate_quoted_local(~local) {
+        if !(validate_quoted_local(~local) ?? panic("validate_quoted_local failed")) {
             return Err(invalid_address("quoted mailbox local part contains an invalid byte"))
         }
     } else {
@@ -851,7 +870,7 @@ fn validate_mailbox(text: String) -> Bool !EmailError {
             return Err(invalid_address("mailbox local part is not dot-atom or quoted-string"))
         }
         loop i in 0..<local_raw.len() {
-            if !is_atext(local_raw[i]) {
+            if !(is_atext(local_raw[i]) ?? panic("is_atext failed")) {
                 return Err(invalid_address("mailbox local part is not dot-atom or quoted-string"))
             }
             if i > 0 && local_raw[i] == (U8{46}) && local_raw[i - 1] == (U8{46}) {
@@ -859,18 +878,21 @@ fn validate_mailbox(text: String) -> Bool !EmailError {
             }
         }
     }
-    if !valid_domain(~domain) -> return Err(invalid_address("mailbox domain has an invalid label"))
+    if !(valid_domain(~domain) ?? panic("valid_domain failed")) -> return Err(invalid_address("mailbox domain has an invalid label"))
     Ok(true)
 }
 
 fn valid_domain(text: String) -> Bool {
     raw := text.bytes()
-    if raw.len() == 0 || raw[0] == (U8{46}) || raw[raw.len() - 1] == (U8{46}) -> return false
+    if raw.len() == 0 -> return false
+    if raw[0] == (U8{46}) || raw[raw.len() - 1] == (U8{46}) -> return false
     start := 0
     i := 0
     loop i <= raw.len() {
-        if i == raw.len() || raw[i] == (U8{46}) {
-            if i == start -> return false
+        is_separator := i == raw.len()
+        if i < raw.len() -> is_separator = raw[i] == (U8{46})
+        if is_separator {
+            if i == start || i - start > 63 -> return false
             if raw[start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
             loop j in start..<i {
                 n :: Int.from_u8(raw[j])
@@ -901,7 +923,7 @@ fn validate_attachment_parts(name: String, mime: String, bytes: [U8]) -> Bool !E
     if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
-    if bytes.len() > @c_max_attachment_bytes {
+    if bytes.len() > c_max_attachment_bytes {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(true)
@@ -924,7 +946,7 @@ fn valid_mime(text: String) -> Bool {
 }
 
 fn physical_header_fits(name: String, value_bytes: Int) -> Bool {
-    name.bytes().len() + 2 + value_bytes + 2 <= @c_max_header_bytes
+    name.bytes().len() + 2 + value_bytes + 2 <= c_max_header_bytes
 }
 
 fn percent_encoded_len(text: String) -> Int {
@@ -956,6 +978,7 @@ fn validate_address(address: Address) -> Bool !EmailError {
             if display.bytes().len() == 0 || has_control(display) {
                 return Err(invalid_address("display name is empty or contains a forbidden control character"))
             }
+            parse_display(~display) ?? return Err(invalid_address("invalid display name"))
         }
     }
     validate_mailbox(~address.mailbox) ?? return Err(invalid_address("invalid mailbox"))
@@ -972,20 +995,20 @@ html: String,
 attachments: [Attachment],
 ) -> Bool !EmailError {
     reject_controls(~subject, "subject") ?? return Err(invalid_header("subject contains a forbidden control character"))
-    if subject.bytes().len() > @c_max_header_value_bytes {
+    if subject.bytes().len() > c_max_header_value_bytes {
         return Err(limit_error("message", "subject exceeds 65536 bytes"))
     }
     if to.len() == 0 -> return Err(invalid_message("message needs at least one visible recipient"))
-    if to.len() + bcc.len() > @c_max_recipients {
+    if to.len() + bcc.len() > c_max_recipients {
         return Err(limit_error("message", "message exceeds 100 recipients"))
     }
-    if attachments.len() > @c_max_attachments {
+    if attachments.len() > c_max_attachments {
         return Err(limit_error("message", "message exceeds 64 attachments"))
     }
     if text.bytes().len() == 0 && html.bytes().len() == 0 {
         return Err(invalid_message("message needs text or HTML content"))
     }
-    if text.bytes().len() > @c_max_body_bytes || html.bytes().len() > @c_max_body_bytes {
+    if text.bytes().len() > c_max_body_bytes || html.bytes().len() > c_max_body_bytes {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
     validate_address(from) ?? return Err(invalid_address("invalid sender address"))
@@ -1046,13 +1069,13 @@ fn default_envelope(from: Address, to: [Address], bcc: [Address]) -> Envelope !E
 fn validate_message_value(message: Message) -> Bool !EmailError {
     validate_message_record(message) ?? return Err(invalid_message("message contains invalid fields"))
     upper :: prospective_message_wire_upper(message)
-    if message.wire_upper < upper || message.wire_upper > @c_max_message_bytes {
+    if message.wire_upper < upper || message.wire_upper > c_max_message_bytes {
         return Err(limit_error("serialize", "serialized message size bound is invalid"))
     }
     validate_message_headers(message) ?? return Err(invalid_message("message headers are invalid"))
     sender := ~message.envelope.from
     validate_address(sender) ?? return Err(invalid_message("message envelope sender is invalid"))
-    if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > @c_max_recipients {
+    if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > c_max_recipients {
         return Err(invalid_message("message envelope recipient count is outside the supported range"))
     }
     loop recipient in message.envelope.recipients {
@@ -1079,7 +1102,7 @@ fn validate_attachment_record(item: Attachment) -> Bool !EmailError {
     if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
         return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
     }
-    if item.bytes.len() > @c_max_attachment_bytes {
+    if item.bytes.len() > c_max_attachment_bytes {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
     }
     Ok(true)
@@ -1090,22 +1113,22 @@ fn validate_message_record(message: Message) -> Bool !EmailError {
     if has_control(subject) {
         return Err(invalid_header("subject contains a forbidden control character"))
     }
-    if subject.bytes().len() > @c_max_header_value_bytes {
+    if subject.bytes().len() > c_max_header_value_bytes {
         return Err(limit_error("message", "subject exceeds 65536 bytes"))
     }
     if message.to.len() == 0 {
         return Err(invalid_message("message needs at least one visible recipient"))
     }
-    if message.to.len() + message.bcc.len() > @c_max_recipients {
+    if message.to.len() + message.bcc.len() > c_max_recipients {
         return Err(limit_error("message", "message exceeds 100 recipients"))
     }
-    if message.attachments.len() > @c_max_attachments {
+    if message.attachments.len() > c_max_attachments {
         return Err(limit_error("message", "message exceeds 64 attachments"))
     }
     if message.text.bytes().len() == 0 && message.html.bytes().len() == 0 {
         return Err(invalid_message("message needs text or HTML content"))
     }
-    if message.text.bytes().len() > @c_max_body_bytes || message.html.bytes().len() > @c_max_body_bytes {
+    if message.text.bytes().len() > c_max_body_bytes || message.html.bytes().len() > c_max_body_bytes {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
     sender := ~message.from
@@ -1267,7 +1290,7 @@ fn render_addresses(addresses: [Address], name: String) -> String {
         rendered :: render_address(address)
         if item_index > 0 {
             first_line :: first_line_len(~rendered)
-            if physical + 2 + first_line + 2 > @c_max_header_bytes {
+            if physical + 2 + first_line + 2 > c_max_header_bytes {
                 out.push(U8{44})
                 push_crlf(&out)
                 out.push(U8{32})
@@ -1390,7 +1413,7 @@ fn validate_folded_header(name: String, value: String) -> Bool {
         if i == raw.len() || (i + 1 < raw.len() && raw[i] == (U8{13}) && raw[i + 1] == (U8{10})) {
             prefix := 0
             if first -> prefix = name.bytes().len() + 2
-            if prefix + i - start + 2 > @c_max_header_bytes -> return false
+            if prefix + i - start + 2 > c_max_header_bytes -> return false
             first = false
             if i < raw.len() {
                 i += 2

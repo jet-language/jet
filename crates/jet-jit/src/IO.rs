@@ -1272,6 +1272,30 @@ fn jet_jit_file_lines(handle: i64) -> i64 {
     });
     list_from_lines(lines)
 }
+fn jet_jit_file_reader_path(handle: i64) -> i64 {
+    use super::enc_stream::FileReaderSlot;
+    let path = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = usize::try_from(handle)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        else {
+            rt.set_host_fault("FileReader.path requires a live provider handle");
+            return None;
+        };
+        match rt.file_readers.get(index) {
+            Some(FileReaderSlot::Live(reader)) => Some(reader.path.clone()),
+            _ => {
+                rt.set_host_fault("FileReader.path requires a live provider handle");
+                None
+            }
+        }
+    });
+    match path {
+        Some(path) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path)),
+        None => 0,
+    }
+}
+
 fn jet_jit_file_reader_read_line(handle: i64) -> i64 {
     use super::enc_stream::FileReaderSlot;
     use std::io::BufRead;
@@ -1302,10 +1326,35 @@ fn jet_jit_file_reader_read_line(handle: i64) -> i64 {
     match outcome.unwrap_or_else(|| Err("no active JIT runtime".to_string())) {
         Ok(Some(line)) => {
             let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line));
-            result_ok(handle.saturating_add(1) as u64)
+            let some = result_ok(handle as u64);
+            result_ok(some as u64)
         }
         Ok(None) => result_ok(0),
         Err(error) => result_err_msg(&error),
+    }
+}
+
+fn jet_jit_file_writer_path(handle: i64) -> i64 {
+    use super::enc_stream::FileWriterSlot;
+    let path = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = usize::try_from(handle)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+        else {
+            rt.set_host_fault("FileWriter.path requires a live provider handle");
+            return None;
+        };
+        match rt.file_writers.get(index) {
+            Some(FileWriterSlot::Live(writer)) => Some(writer.path.clone()),
+            _ => {
+                rt.set_host_fault("FileWriter.path requires a live provider handle");
+                None
+            }
+        }
+    });
+    match path {
+        Some(path) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path)),
+        None => 0,
     }
 }
 
@@ -1496,8 +1545,10 @@ host_fns! {
     input: "jet_std_io_input" => io_line_stream::jet_jit_io_input: unary;
     readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
     read_all_input: "jet_jit_io_read_all_input" => io_line_stream::jet_jit_io_read_all_input: nullary;
+    file_reader_path: "jet_std_file_reader_path" => jet_jit_file_reader_path: unary;
     file_reader_read_line: "jet_std_file_reader_read_line" => jet_jit_file_reader_read_line: unary;
     file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
+    file_writer_path: "jet_std_file_writer_path" => jet_jit_file_writer_path: unary;
     file_writer_write_line: "jet_std_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
     file_writer_flush: "jet_std_file_writer_flush" => jet_jit_file_writer_flush: unary;
     file_writer_close: "jet_jit_file_writer_close" => super::enc_stream::jet_jit_file_writer_close: unary_void;

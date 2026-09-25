@@ -118,18 +118,15 @@ pub fn horizontal() -> TuiDirection { core.tui.horizontal() }
 pub fn vertical() -> TuiDirection { core.tui.vertical() }
 
 pub fn layout(area: Rect, direction: TuiDirection, constraints: [TuiConstraint]) -> [Rect] {
-    owned_constraints :: ~constraints
-    core.tui.layout(area, direction, ^owned_constraints)
+    core.tui.layout(area, direction, ^constraints)
 }
 
 pub fn list(items: [String]) -> UiNode {
-    owned_items :: ~items
-    core.tui.list(^owned_items)
+    core.tui.list(^items)
 }
+
 pub fn table(headers: [String], rows: [[String]]) -> ui.UiNode {
-    owned_headers :: ~headers
-    owned_rows :: ~rows
-    core.tui.table(^owned_headers, ^owned_rows)
+    core.tui.table(^headers, ^rows)
 }
 
 pub fn list_state() -> TuiListState { core.tui.list_state() }
@@ -154,8 +151,7 @@ pub fn timer_event(id: String, elapsed_ms: Int) -> TuiEvent {
     core.tui.timer_event(id, elapsed_ms)
 }
 pub fn io_event(channel: String, payload: [U8]) -> TuiEvent {
-    owned_payload :: ~payload
-    core.tui.io_event(channel, ^owned_payload)
+    core.tui.io_event(channel, ^payload)
 }
 pub fn focus_event(focused: Bool) -> TuiEvent { core.tui.focus_event(focused) }
 pub fn interrupt_event() -> TuiEvent { core.tui.interrupt_event() }

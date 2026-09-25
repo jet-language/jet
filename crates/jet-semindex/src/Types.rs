@@ -1,14 +1,15 @@
 //! D-SEMINDEX1: stable public query types (versioned independently of LSP internals).
 
+use jet_foundation::AST::{self, AccessConvention, ParamZone};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::Facts::DerivationRecord;
-use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::EffectBudget::EffectProjection;
+use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 18;
+pub const SCHEMA_VERSION: u32 = 20;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -64,31 +65,160 @@ pub struct ViewProvenanceFact {
     pub mutable: bool,
 }
 
-/// One checked parameter row for the callable-signature inspection lens.
+/// One typed semindex parameter projection. `ty` is the checked AST type, not
+/// a compiler-issued metadata `TypeId`; this record is not a complete metadata
+/// `ParameterInfo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableParameterFact {
     pub name: String,
     pub label: String,
-    pub default: Option<String>,
-    pub access: String,
-    pub zone: String,
-    pub ty: String,
+    /// Source range naming this parameter in the indexed module.
+    pub source: SourceSpan,
+    /// Absent means no default was declared. A present expression carries an
+    /// explicit unavailable value status; the semindex never evaluates it.
+    pub default: Option<CallableDefaultFact>,
+    pub access: AccessConvention,
+    pub zone: ParamZone,
+    pub ty: AST::Type,
     pub variadic: bool,
 }
 
-/// The complete semindex projection of a checked callable contract.
+/// A source-text projection for a declared default, not a metadata `CodeRef`.
+/// Its prepared value has the distinct availability required by
+/// D-META-REFLECT2. `source` is a semindex-local byte range, not the full
+/// snapshot-bound metadata `SourceSpan`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableDefaultFact {
+    pub source_text: String,
+    pub source: SourceSpan,
+    pub value_unavailable: CallableFactUnavailable,
+}
+
+/// Typed reason a checked semindex projection cannot supply a later metadata
+/// value. The shape mirrors the ratified Unavailable payload without claiming
+/// that this producer implements a metadata query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableFactUnavailable {
+    pub required_stage: AST::CompilerStage,
+    pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallableFactAvailability<T> {
+    Checked(T),
+    Unavailable(CallableFactUnavailable),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallableEffectFact {
+    Named { name: String, source: SourceSpan },
+    ViaParameter { name: String, source: SourceSpan },
+}
+
+/// `Checked([])` is a proven empty effect row. Missing sema output remains
+/// unavailable rather than being projected as an empty list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallableEffectsFact {
+    Checked(Vec<CallableEffectFact>),
+    Unavailable(CallableFactUnavailable),
+}
+
+/// One typed semindex projection of checked callable facts. This is not a
+/// complete D-META-REFLECT2 `CallableSignature`: parameter/return/error TypeIds
+/// and `CallingConvention` have no producer. The containing `SymbolDef` separately
+/// records its unavailable metadata `DeclarationHandle`; its semindex identity
+/// is not that handle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableSignatureFact {
     pub parameters: Vec<CallableParameterFact>,
-    pub effects: Vec<String>,
-    pub errors: Vec<String>,
-    /// The one effective Result-shaped carrier shown to tooling consumers.
-    pub failure_contract: String,
-    /// The sema fact that explains the carrier: implicit, explicit,
-    /// converted, or proven unreachable.
-    pub failure_source: String,
+    /// None is a known no-value return, not unavailable type checking.
+    pub return_type: Option<AST::Type>,
+    pub effects: CallableEffectsFact,
+    pub failure_contract: CallableFactAvailability<AST::FailureContract>,
     pub returned_views: Vec<ViewProvenanceFact>,
-    pub policies: Vec<String>,
+    pub policies: Vec<AST::CallablePolicy>,
+    /// Declaration parameters are available; concrete generic bindings and
+    /// their compiler-issued identities are not.
+    pub generic_parameters: CallableFactAvailability<Vec<AST::TypeParam>>,
+    pub metadata_producer_status: AST::MetadataProducerStatus,
+}
+impl CallableParameterFact {
+    pub fn access_name(&self) -> &'static str {
+        match self.access {
+            AccessConvention::Read => "read",
+            AccessConvention::Write => "write",
+            AccessConvention::Move => "move",
+        }
+    }
+
+    pub fn zone_name(&self) -> &'static str {
+        match self.zone {
+            ParamZone::PositionalOnly => "positional_only",
+            ParamZone::Either => "either",
+            ParamZone::LabelOnly => "label_only",
+        }
+    }
+
+    pub fn type_name(&self) -> String {
+        self.ty.name()
+    }
+}
+
+impl CallableEffectFact {
+    pub fn display_name(&self) -> String {
+        match self {
+            Self::Named { name, .. } => name.clone(),
+            Self::ViaParameter { name, .. } => format!("via {name}"),
+        }
+    }
+}
+
+impl CallableSignatureFact {
+    pub fn effect_names(&self) -> Option<Vec<String>> {
+        match &self.effects {
+            CallableEffectsFact::Checked(effects) => {
+                Some(effects.iter().map(CallableEffectFact::display_name).collect())
+            }
+            CallableEffectsFact::Unavailable(_) => None,
+        }
+    }
+
+    pub fn error_names(&self) -> Option<Vec<String>> {
+        self.error_types()
+            .map(|errors| errors.iter().map(AST::Type::name).collect())
+    }
+
+    pub fn error_types(&self) -> Option<Vec<AST::Type>> {
+        match &self.failure_contract {
+            CallableFactAvailability::Checked(contract) => {
+                match contract.effective_type() {
+                    AST::Type::Result { err, .. } => Some(vec![*err]),
+                    _ => Some(Vec::new()),
+                }
+            }
+            CallableFactAvailability::Unavailable(_) => None,
+        }
+    }
+
+    pub fn failure_contract_name(&self) -> Option<String> {
+        match &self.failure_contract {
+            CallableFactAvailability::Checked(contract) => {
+                Some(contract.effective_type().name())
+            }
+            CallableFactAvailability::Unavailable(_) => None,
+        }
+    }
+
+    pub fn failure_source_name(&self) -> Option<String> {
+        match &self.failure_contract {
+            CallableFactAvailability::Checked(contract) => Some(contract.source()),
+            CallableFactAvailability::Unavailable(_) => None,
+        }
+    }
+
+    pub fn policy_names(&self) -> Vec<String> {
+        self.policies.iter().map(AST::CallablePolicy::display).collect()
+    }
 }
 
 /// One fixed-width operation selected by a lexical `#Arithmetic` policy.
@@ -336,6 +466,9 @@ pub struct TraitContractFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolDef {
     pub identity: String,
+    /// Explicitly unavailable ratified metadata identity. This source-derived
+    /// semindex key is not a compiler-issued `DeclarationHandle`.
+    pub declaration_identity_unavailable: CallableFactUnavailable,
     pub name: String,
     /// Canonical typeable spelling from the sema name ledger.
     pub qualified_name: String,

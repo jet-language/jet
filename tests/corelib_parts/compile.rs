@@ -521,6 +521,20 @@ fn run() {
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
 }
 
+#[test]
+fn source_core_plain_return_can_be_passed_as_argument() {
+    let src = r#"
+use core.sys as sys
+
+fn consume(value: String) {}
+
+fn run() {
+    consume(sys.family())
+}
+"#;
+    let _ = compile_temp("source_core_plain_return_argument.jet", src);
+}
+
 #[cfg(unix)]
 #[test]
 fn core_os_interrupt_callback_forms_match_dev_tiers() {

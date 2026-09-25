@@ -49,8 +49,18 @@ fn run_jet(
     cwd: Option<&Path>,
     extra_env: &[(&str, &str)],
 ) -> (i32, String, String) {
+    run_jet_with_args(cache, file, cwd, extra_env, &[])
+}
+
+fn run_jet_with_args(
+    cache: &Path,
+    file: &Path,
+    cwd: Option<&Path>,
+    extra_env: &[(&str, &str)],
+    args: &[&str],
+) -> (i32, String, String) {
     let mut cmd = Command::new(jet_bin());
-    cmd.arg("run").arg(file).env("JET_RUN_CACHE_DIR", cache);
+    cmd.arg("run").arg(file).args(args).env("JET_RUN_CACHE_DIR", cache);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -138,7 +148,7 @@ fn machine_meta() -> String {
 #[test]
 fn warm_hit_skips_front_end_and_matches_stdout() {
     let _guard = lock_run_cache_tests();
-    let root = std::env::temp_dir().join(format!("jet_run_cache_{}", unique()));
+    let root = common::test_scratch_root("run_cache").join(format!("jet_run_cache_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("hi.jet");
@@ -169,17 +179,24 @@ fn warm_hit_skips_front_end_and_matches_stdout() {
 fn named_job_warm_hit_preserves_selection_and_arguments() {
     let _guard = lock_run_cache_tests();
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let file = repo.join("examples/features/devloop/job_runner.jet");
+    let source_project = repo.join("examples/features/devloop");
+    assert!(
+        !source_project.join(".jet").exists(),
+        "checked-in job example already has generated `.jet` state"
+    );
+    let staged = common::ProjectScratch::for_project(&source_project, "run-cache-job");
+    let file = staged.path.join("job_runner.jet");
     let expected =
         std::fs::read(repo.join("examples/features/expected/devloop/job_runner.greet.out"))
             .unwrap();
-    let cache = std::env::temp_dir().join(format!("jet_run_job_cache_{}", unique()));
+    let cache = common::test_scratch_root("run_cache")
+        .join(format!("jet_run_job_cache_{}", unique()));
     let _ = std::fs::remove_dir_all(&cache);
 
     let run = || {
         Command::new(jet_bin())
             .args(["run", file.to_str().unwrap(), "--", "greet"])
-            .current_dir(&repo)
+            .current_dir(&staged.path)
             .env("JET_RUN_CACHE_DIR", &cache)
             .env("JET_RUN_TRACE", "1")
             .env("NO_COLOR", "1")
@@ -212,12 +229,17 @@ fn named_job_warm_hit_preserves_selection_and_arguments() {
         "{}",
         String::from_utf8_lossy(&warm.stderr)
     );
+    assert!(
+        !source_project.join(".jet").exists(),
+        "named-job execution created `.jet` in the checked-in example project"
+    );
 }
 
 #[test]
 fn warm_runtime_stop_preserves_source_location() {
     let _guard = lock_run_cache_tests();
-    let root = std::env::temp_dir().join(format!("jet_run_stop_location_{}", unique()));
+    let root = common::test_scratch_root("run_cache")
+        .join(format!("jet_run_stop_location_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("bounds.jet");
@@ -242,7 +264,7 @@ fn dependency_and_argv_invalidate_cache_key() {
     let _guard = lock_run_cache_tests();
     // WatchService discover folds import deps into the key even when ModuleCall
     // still gaps at run time — content / argv change must flip the key.
-    let root = std::env::temp_dir().join(format!("jet_run_dep_{}", unique()));
+    let root = common::test_scratch_root("run_cache").join(format!("jet_run_dep_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let dep = root.join("dep.jet");
@@ -262,7 +284,7 @@ fn dependency_and_argv_invalidate_cache_key() {
 #[test]
 fn argv_change_misses_cache() {
     let _guard = lock_run_cache_tests();
-    let root = std::env::temp_dir().join(format!("jet_run_argv_{}", unique()));
+    let root = common::test_scratch_root("run_cache").join(format!("jet_run_argv_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("a.jet");
@@ -309,7 +331,7 @@ fn argv_change_misses_cache() {
 #[test]
 fn phases_zero_on_inprocess_warm_hit() {
     let _guard = lock_run_cache_tests();
-    let root = std::env::temp_dir().join(format!("jet_run_phases_{}", unique()));
+    let root = common::test_scratch_root("run_cache").join(format!("jet_run_phases_{}", unique()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("p.jet");
@@ -401,7 +423,8 @@ fn tty_run_does_not_promote_to_dev() {
 #[test]
 fn default_run_stays_jit_module_cache_not_aot() {
     let _guard = lock_run_cache_tests();
-    let root = std::env::temp_dir().join(format!("jet_jit_not_aot_{}", unique()));
+    let root =
+        common::test_scratch_root("run_cache").join(format!("jet_jit_not_aot_{}", unique()));
     std::fs::create_dir_all(&root).unwrap();
     let file = root.join("x.jet");
     std::fs::write(&file, "fn run() {\n    print(\"jit\")\n}\n").unwrap();
@@ -463,14 +486,25 @@ fn example_stems_replay_identically_on_a_second_run() {
     ];
 
     for (stem, must_warm_hit, must_exit_nonzero) in rows {
-        let file = repo.join(stem);
-        assert!(file.is_file(), "matrix row is not a file: {stem}");
-        // One cache directory per row: a leaked artifact is worse than no test.
+        let source_file = repo.join(stem);
+        assert!(source_file.is_file(), "matrix row is not a file: {stem}");
+        let source_project = source_file.parent().expect("feature example has a project root");
+        assert!(
+            !source_project.join(".jet").exists(),
+            "{stem}: checked-in example already has generated `.jet` state"
+        );
+        // One external project and one cache directory per row: a leaked
+        // artifact is worse than no test.
+        let staged = common::ProjectScratch::for_project(source_project, "run-cache-replay");
+        let file = staged
+            .path
+            .join(source_file.file_name().expect("feature entry has a name"));
+        let project = staged.path.as_path();
         let row_cache = cache.join(stem.replace('/', "_"));
         let _ = std::fs::remove_dir_all(&row_cache);
 
-        let (cold_code, cold_out, cold_err) = run_jet(&row_cache, &file, Some(&repo), &[]);
-        let (warm_code, warm_out, warm_err) = run_jet(&row_cache, &file, Some(&repo), &[]);
+        let (cold_code, cold_out, cold_err) = run_jet(&row_cache, &file, Some(project), &[]);
+        let (warm_code, warm_out, warm_err) = run_jet(&row_cache, &file, Some(project), &[]);
 
         assert_eq!(
             cold_code, warm_code,
@@ -497,7 +531,7 @@ fn example_stems_replay_identically_on_a_second_run() {
             // recompiles cold and answers correctly from the path under test.
             // Trace a third run to prove the replay really reloaded the module.
             let (trace_code, trace_out, trace_err) =
-                run_jet(&row_cache, &file, Some(&repo), &[("JET_RUN_TRACE", "1")]);
+                run_jet(&row_cache, &file, Some(project), &[("JET_RUN_TRACE", "1")]);
             assert!(
                 trace_err.contains("[run-cache] hit"),
                 "{stem}: expected a warm hit, so the replay path is what ran: {trace_err}"
@@ -508,15 +542,271 @@ fn example_stems_replay_identically_on_a_second_run() {
             );
             assert_eq!(trace_out, cold_out, "{stem}: traced replay changed stdout");
         }
+        assert!(
+            !source_project.join(".jet").exists(),
+            "{stem}: replay created `.jet` in the checked-in feature directory"
+        );
+    }
+}
+
+struct RestoreCacheEnv(Option<std::ffi::OsString>);
+
+impl Drop for RestoreCacheEnv {
+    fn drop(&mut self) {
+        match &self.0 {
+            Some(value) => std::env::set_var("JET_RUN_CACHE_DIR", value),
+            None => std::env::remove_var("JET_RUN_CACHE_DIR"),
+        }
+    }
+}
+
+const ENTRY_ERROR_CASES: [(&str, &str, i32, &[&str], bool); 4] = [
+        (
+            "default",
+            "fn run() {\n    return Err(\"default-payload\")\n}\n",
+            1,
+            &["default-payload"],
+            true,
+        ),
+        (
+            "io",
+            r#"fn run() !IOError {
+    context :: IOContext{operation: .Connect, resource: Val("entry-resource"), os_code: None, cause: Val("entry-cause")}
+    return Err(IOError.InvalidInput(context))
+}
+"#,
+            1,
+            &["invalid input during connect `entry-resource`: entry-cause"],
+            true,
+        ),
+        ("never", "fn run() !Never {}\n", 0, &[], true),
+        (
+            "custom",
+            r#"#Error
+struct EntryFailure { message: String, code: Int }
+
+fn run() !EntryFailure {
+    return Err(EntryFailure{message: "custom-payload", code: 41})
+}
+"#,
+            1,
+            &["custom-payload", "41"],
+            false,
+        ),
+];
+
+#[test]
+fn checked_entry_error_rails_preserve_native_cli_reports() {
+    let _guard = lock_run_cache_tests();
+    for (name, source, expected_exit, payloads, _) in ENTRY_ERROR_CASES {
+        let scratch = common::Scratch::new(&format!("checked-entry-rail-{name}"));
+        let project = scratch.path.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("package.jet"),
+            "name: \"checked_entry_rail\"\nversion: \"0.1.0\"\n",
+        ).unwrap();
+        let entry = project.join("run.jet");
+        std::fs::write(&entry, source).unwrap();
+        let cache = scratch.path.join("cache");
+        let store = scratch.path.join("store");
+        let jetpack = scratch.path.join("jetpack");
+        let store = store.to_string_lossy();
+        let jetpack = jetpack.to_string_lossy();
+        let environment = [
+            ("NO_COLOR", "1"),
+            ("JETPACK_ENV", "1"),
+            ("JET_STORE_DIR", store.as_ref()),
+            ("JETPACK_ROOT", jetpack.as_ref()),
+        ];
+        let cold = run_jet(&cache, &entry, Some(&project), &environment);
+        let repeated = run_jet(&cache, &entry, Some(&project), &environment);
+        assert_eq!(cold.0, expected_exit, "{name}: wrong cold exit: {}", cold.2);
+        assert_eq!(repeated, cold, "{name}: repeated execution changed its report");
+        assert!(cold.1.is_empty(), "{name}: unexpected stdout: {:?}", cold.1);
+        for &payload in payloads {
+            assert!(cold.2.contains(payload), "{name}: lost payload {payload:?}: {}", cold.2);
+        }
+        if expected_exit == 0 {
+            assert!(cold.2.is_empty(), "{name}: successful entry emitted a report: {}", cold.2);
+        }
+
+        // Exercise the real CLI twice. Its immutable-source-closure path
+        // currently bypasses the cache; codec coverage belongs below.
+        for _ in 0..2 {
+            let traced = run_jet_with_args(
+                &cache, &entry, Some(&project), &environment, &["--trace-tiers"],
+            );
+            assert_eq!(traced.0, expected_exit, "{name}: traced exit changed: {}", traced.2);
+            assert_eq!(traced.1, cold.1, "{name}: traced stdout changed");
+            for &payload in payloads {
+                assert!(traced.2.contains(payload), "{name}: traced report lost {payload:?}: {}", traced.2);
+            }
+            assert!(
+                traced.2.lines().any(|line| {
+                    let mut fields = line.split_whitespace();
+                    fields.next().is_some_and(|symbol| symbol.rsplit("::").next() == Some("run"))
+                        && fields.next() == Some("tier1")
+                        && fields.next() == Some("native")
+                }),
+                "{name}: entry did not execute natively: {}", traced.2,
+            );
+            assert!(
+                !traced.2.contains("tier0 interp") && !traced.2.contains("deopt"),
+                "{name}: native entry fell back: {}", traced.2,
+            );
+        }
+    }
+}
+
+#[test]
+fn checked_entry_error_rails_preserve_cache_payload_and_eligibility() {
+    let _guard = lock_run_cache_tests();
+    let _restore = RestoreCacheEnv(std::env::var_os("JET_RUN_CACHE_DIR"));
+
+    for (name, source, expected_exit, payloads, cacheable) in ENTRY_ERROR_CASES {
+        let scratch = common::Scratch::new(&format!("checked-entry-codec-{name}"));
+        let project = scratch.path.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("package.jet"),
+            "name: \"checked_entry_codec\"\nversion: \"0.1.0\"\n",
+        ).unwrap();
+        let entry = project.join("run.jet");
+        std::fs::write(&entry, source).unwrap();
+        let cache = scratch.path.join("cache");
+        std::env::set_var("JET_RUN_CACHE_DIR", &cache);
+        let artifact = cache.join(jet::RunCache::run_cache_key(&entry, &[])).join("module.bin");
+        let mut cold = None;
+
+        for execution in 0..2 {
+            jet::RunCache::reset_phases();
+            let _ = jet_jit::take_last_trace();
+            let result = match jet::Interpreter::run_jit_once(entry.to_str().unwrap()) {
+                jet::Interpreter::RunOutcome::Ran { exit_code, stdout, stderr } => {
+                    (exit_code, stdout, stderr)
+                }
+                other => panic!("{name}: entry did not execute: {other:?}"),
+            };
+            let phases = jet::RunCache::phases();
+            let rows = jet_jit::take_last_trace();
+            assert_eq!(result.0, expected_exit, "{name}: wrong exit: {}", result.2);
+            assert!(result.1.is_empty(), "{name}: unexpected stdout: {:?}", result.1);
+            for &payload in payloads {
+                assert!(result.2.contains(payload), "{name}: lost {payload:?}: {}", result.2);
+            }
+            if expected_exit == 0 {
+                assert!(result.2.is_empty(), "{name}: successful entry emitted a report: {}", result.2);
+            }
+            assert!(
+                rows.iter().any(|row| row.function_name.rsplit("::").next() == Some("run")
+                    && row.tier == jet_jit::Tier::Native)
+                    && rows.iter().all(|row| row.tier == jet_jit::Tier::Native),
+                "{name}: entry must execute natively without deopt: {rows:?}",
+            );
+            assert_eq!(artifact.exists(), cacheable, "{name}: wrong artifact eligibility");
+            if execution == 1 && cacheable {
+                assert_eq!(phases.cache_hits, 1, "{name}: actual warm load required: {phases:?}");
+                assert_eq!(phases.cache_misses, 0, "{name}: warm load missed: {phases:?}");
+                assert_eq!(
+                    (phases.parse, phases.check, phases.lower, phases.codegen, phases.link),
+                    (0, 0, 0, 0, 0),
+                    "{name}: cached execution recompiled: {phases:?}",
+                );
+            } else {
+                assert_eq!(phases.cache_hits, 0, "{name}: unexpected cache hit: {phases:?}");
+                assert_eq!(phases.cache_misses, 1, "{name}: cold execution must reach artifact capture: {phases:?}");
+                assert_eq!(phases.codegen, 1, "{name}: uncached execution must compile native code: {phases:?}");
+            }
+            if let Some(cold) = &cold {
+                assert_eq!(&result, cold, "{name}: repeated cache-boundary execution changed its report");
+            } else {
+                cold = Some(result);
+            }
+        }
+    }
+}
+
+#[test]
+fn cache_admission_preserves_native_results_without_unserialized_compile_state() {
+    let _guard = lock_run_cache_tests();
+    let _restore = RestoreCacheEnv(std::env::var_os("JET_RUN_CACHE_DIR"));
+    let cases = [
+        ("strings_and_small_ints", "fn run() {\n    print(\"cache-string\")\n    print(7)\n}", "cache-string\n7\n", true),
+        // Keep the blob live across a runtime call instead of projecting only
+        // comptime scalar properties such as @bytes.len() and @bytes[0].
+        ("bytes", "@bytes :: embed_bytes(\"payload.bin\")\nfn inspect(bytes: [U8]) {\n    print(bytes.len())\n    print(bytes[0])\n}\nfn run() { inspect(@bytes) }", "3\n65\n", false),
+        ("large_i64", "fn run() { print(9223372036854775807) }", "9223372036854775807\n", false),
+        ("big_int", "fn run() { print(184467440737095516160) }", "184467440737095516160\n", false),
+        ("schema", "fn equal(left: [Int], right: [Int]) -> Bool !Never { left == right }\nfn run() { print(equal([1, 2], [1, 2])) }", "true\n", false),
+    ];
+    for (name, source, expected, cacheable) in cases {
+        let scratch = common::Scratch::new(&format!("cache-admission-{name}"));
+        std::fs::write(
+            scratch.path.join("package.jet"),
+            "name: \"cache_admission\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+        ).unwrap();
+        std::fs::write(scratch.path.join("payload.bin"), b"ABC").unwrap();
+        let entry = scratch.path.join("run.jet");
+        std::fs::write(&entry, source).unwrap();
+        let cache = scratch.path.join("cache");
+        std::env::set_var("JET_RUN_CACHE_DIR", &cache);
+        let artifact = cache.join(jet::RunCache::run_cache_key(&entry, &[])).join("module.bin");
+        for execution in 0..if cacheable { 3 } else { 2 } {
+            if execution == 2 {
+                // A pre-admission-policy blob must miss even when its source
+                // cache key and otherwise valid native payload are unchanged.
+                let mut stale = std::fs::read(&artifact).unwrap();
+                stale[..4].copy_from_slice(&10u32.to_le_bytes());
+                std::fs::write(&artifact, stale).unwrap();
+            }
+            jet::RunCache::reset_phases();
+            let _ = jet_jit::take_last_trace();
+            let result = match jet::Interpreter::run_jit_once(entry.to_str().unwrap()) {
+                jet::Interpreter::RunOutcome::Ran { exit_code, stdout, stderr } => {
+                    (exit_code, stdout, stderr)
+                }
+                other => panic!("{name}: native execution failed: {other:?}"),
+            };
+            assert_eq!(result, (0, expected.to_string(), String::new()), "{name}: changed native result");
+            let rows = jet_jit::take_last_trace();
+            assert!(
+                rows.iter().any(|row| row.function_name.rsplit("::").next() == Some("run")
+                    && row.tier == jet_jit::Tier::Native)
+                    && rows.iter().all(|row| row.tier == jet_jit::Tier::Native),
+                "{name}: cache refusal must not cause interpreter fallback: {rows:?}",
+            );
+            assert_eq!(artifact.exists(), cacheable, "{name}: wrong cache admission");
+            let phases = jet::RunCache::phases();
+            if cacheable && execution == 1 {
+                assert_eq!(
+                    (phases.cache_hits, phases.cache_misses, phases.parse, phases.check, phases.lower, phases.codegen, phases.link),
+                    (1, 0, 0, 0, 0, 0, 0),
+                    "{name}: supported compile state must actually replay: {phases:?}",
+                );
+            } else {
+                assert_eq!(
+                    (phases.cache_hits, phases.cache_misses, phases.codegen),
+                    (0, 1, 1),
+                    "{name}: unsupported compile state must compile native code: {phases:?}",
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn script_start_budget_fixtures_and_peers() {
     let _guard = lock_run_cache_tests();
-    let fix = fixture_dir();
-    let cache = std::env::temp_dir().join(format!("jet_run_fix_{}", unique()));
-    let _ = std::fs::remove_dir_all(&cache);
+    let source_fix = fixture_dir();
+    assert!(
+        !source_fix.join(".jet").exists(),
+        "checked-in script-speed fixture already has generated `.jet` state"
+    );
+    let staged = common::ProjectScratch::for_project(&source_fix, "script-speed");
+    let fix = staged.path.as_path();
+    let cache =
+        common::test_scratch_root("run_cache").join(format!("jet_run_fix_{}", unique()));
 
     let hello = fix.join("hello.jet");
     let (c1, out1, err1) = run_jet(&cache, &hello, Some(&fix), &[("JET_RUN_TRACE", "1")]);
@@ -618,6 +908,10 @@ fn script_start_budget_fixtures_and_peers() {
     assert!(
         bash_sub.is_some() || node_sub.is_some(),
         "subprocess peers must be measurable"
+    );
+    assert!(
+        !source_fix.join(".jet").exists(),
+        "script-speed fixture run created `.jet` in the checked-in source directory"
     );
     if using_product {
         let peer = fastest_us.expect("peer sample present");

@@ -1394,7 +1394,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2c15cc7424db65f511e8235cc017c884dfd07a28fed3579269a8d90ba3e44977
+// Source SHA-256: 16121662cb88d638928f4003ff4875867b3cd6e37d50de4d1b3e8fe07ab49df6
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1427,6 +1427,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.reactive", "signal"),
     ("core.event", "scope"),
     ("core.event", "decision_hook"),
+    ("core.event", "hook"),
     ("core.event", "policy_sync"),
     ("core.event", "new"),
     ("core.event", "with_policy"),
@@ -1657,6 +1658,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.ui", "tui_backend"),
     ("core.ui", "button"),
     ("core.ui", "key_event"),
+    ("core.ui", "reactive_render"),
     ("app", "live_get"),
     ("core.web", "live_get"),
     ("app", "live_show"),
@@ -1752,6 +1754,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reactive.loadable", "failed", "jet_loadable_failed", false, &[false]).with_jit_symbol("jet_jit_loadable_failed"),
     CoreCallRecord::new( "core.event", "scope", "jet_std::JetEventScope::new", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.event", "decision_hook", "jet_std::JetDecisionHook::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .without_direct_jit(),
+    CoreCallRecord::new("core.event", "hook", "jet_std::JetHook::new", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_hook_new"),
     CoreCallRecord::new( "core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.event", "new", "jet_std::JetEvent::new", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.event", "with_policy", "jet_std::JetEvent::with_policy", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1777,8 +1780,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], ) .with_jit_symbol("jet_jit_fs_copy_dir"),
     CoreCallRecord::new( "core.files", "rename", "jet_std_fs_rename", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "symlink", "jet_std_fs_symlink", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.files", "read_link", "jet_std_fs_read_link", true, &[true], ) .with_jit_symbol("jet_jit_fs_read_link").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.files", "hard_link", "jet_std_fs_hard_link", true, &[true, true], ) .with_jit_symbol("jet_jit_fs_hard_link").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.files", "read_link", "jet_std_fs_read_link", true, &[true], ) .with_jit_symbol("jet_jit_fs_read_link") .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.files", "hard_link", "jet_std_fs_hard_link", true, &[true, true], ) .with_jit_symbol("jet_jit_fs_hard_link") .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "stat", "jet_std_fs_stat", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "lstat", "jet_std_fs_stat", true, &[true]) .with_jit_symbol("jet_jit_fs_stat") .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "is_fifo", "jet_std_fs_is_fifo", true, &[true]) .with_jit_symbol("jet_jit_fs_is_fifo") .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2754,8 +2757,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.log", "set_level", "jet_ring_log_set_level", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.crypto", "__digest256_hex", "jet_ffi::jet_crypto_digest256_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest256_hex"),
-    CoreCallRecord::new("core.crypto", "__digest512_hex", "jet_ffi::jet_crypto_digest512_hex_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_digest512_hex"),
     CoreCallRecord::new( "core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_show", "jet_auth_session_show", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_user", "jet_auth_session_user", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2848,6 +2849,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net", "dns_srv", "jet_net_dns_srv", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_net_dns_srv"),
     CoreCallRecord::new( "core.net", "dns_srv_at", "jet_net_dns_srv_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_net_dns_srv_at"),
     CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(2) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_tls_client"),
+    CoreCallRecord::new("core.net.tls", "read", "jet_net_tls_read_bytes", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_tls_read_bytes"),
+    CoreCallRecord::new("core.net.tls", "write", "jet_net_tls_write_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_tls_write_bytes"),
+    CoreCallRecord::new("core.net.tls", "write_all", "jet_net_tls_write_all_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_tls_write_all_bytes"),
+    CoreCallRecord::new("core.net.tls", "write_text", "jet_net_tls_write_text", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_tls_write_text"),
     CoreCallRecord::new( "core.net", "getservbyname", "jet_net_getservbyname", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "getservbyport", "jet_net_getservbyport", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "dns_srv_target", "jet_net_dns_srv_target", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net),
@@ -2969,6 +2974,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.ui", "node_accessibility", "jet_ui_node_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "node_shortcut", "jet_ui_node_shortcut", true, &[false, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "text_input", "jet_ui_text_input", true, &[true, false]) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.ui", "reactive_render", "jet_ui_reactive_render", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_jit_symbol("jet_jit_core_ui_reactive_render"),
     CoreCallRecord::new("core.tui", "ascii", "jet_tui_ascii", true, &[true]) .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.tui", "close_event", "jet_tui_close_event", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
@@ -3273,8 +3279,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.crypto", "__wrapped_bytes", "jet_crypto_wrapped_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_wrapped_bytes"),
     CoreCallRecord::new( "core.crypto", "__x25519_public_bytes", "jet_crypto_x25519_public_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_public_bytes"),
     CoreCallRecord::new( "core.crypto", "__sealed_bytes", "jet_crypto_sealed_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_sealed_bytes"),
-    CoreCallRecord::new( "core.crypto", "__digest256_bytes", "jet_ffi::jet_crypto_digest256_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest256_bytes"),
-    CoreCallRecord::new( "core.crypto", "__digest512_bytes", "jet_ffi::jet_crypto_digest512_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_digest512_bytes"),
     CoreCallRecord::new( "core.encoding.xml", "decode", "jet_enc_xml_decode", true, &[true], ) .with_pure_route(CoreCallPureRoute::EncodingXml) .with_max_arity(2) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "with_column", &[false], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),
     CoreCallRecord::receiver_with_coverage( &["WebTable"], "paginate", &[true, true], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA), ),

@@ -555,8 +555,11 @@ impl<'a> Checker<'a> {
                 method_span,
                 type_args,
                 &mut call_args,
+                resolved_ret_out,
             );
-            *resolved_ret_out = ret.clone();
+            if resolved_ret_out.is_none() {
+                *resolved_ret_out = ret.clone();
+            }
             ret
         } else if let Some(module_idx) = target.module_idx {
             self.infer_import_call(
@@ -2097,10 +2100,13 @@ impl<'a> Checker<'a> {
                 span,
                 type_args,
                 args,
+                resolved_ret_out,
             );
-            // The checked return type is carried on the node for every Core
-            // call; TIR reads it before any fixed-signature table.
-            *resolved_ret_out = ret.clone();
+            // A source-owned call returns its effective carrier for expression
+            // inference and publishes its plain declared return separately.
+            if resolved_ret_out.is_none() {
+                *resolved_ret_out = ret.clone();
+            }
             return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
@@ -2113,8 +2119,11 @@ impl<'a> Checker<'a> {
                     span,
                     type_args,
                     args,
+                    resolved_ret_out,
                 );
-                *resolved_ret_out = ret.clone();
+                if resolved_ret_out.is_none() {
+                    *resolved_ret_out = ret.clone();
+                }
                 return ret;
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
@@ -2564,7 +2573,7 @@ impl<'a> Checker<'a> {
             // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
             // remains accepted as the existing module-alias path.
             if type_name == "Perf" && !self.registry.contains("Perf") {
-                return self.infer_core_call(
+                let ret = self.infer_core_call(
                     "core.perf",
                     method,
                     None,
@@ -2572,7 +2581,12 @@ impl<'a> Checker<'a> {
                     span,
                     type_args,
                     args,
+                    resolved_ret_out,
                 );
+                if resolved_ret_out.is_none() {
+                    *resolved_ret_out = ret.clone();
+                }
+                return ret;
             }
             // A value binding wins over an ambient built-in type spelling.
             // Keep this aligned with TIR's static-call shadow check so sema
@@ -7762,6 +7776,28 @@ impl<'a> Checker<'a> {
             if method == "zip" {
                 let a_inner = (**a_inner).clone();
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
+            }
+        }
+        // Compiler-private String source methods keep the existing primitive
+        // contract and borrow/mutation checks, but mark the call for typed
+        // source lowering. The source registry is intentionally consulted only
+        // for the canonical primitive, never for user nominal types.
+        if matches!(&recv_ty, Type::String)
+            && self.modules.map_or(false, |modules| {
+                crate::Sema::Registration::core_string_source_method(modules, method)
+                    .is_some()
+            })
+        {
+            if let Some(ret) =
+                Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+            {
+                *recv_type_out = Some(Syntax::TYPE_STRING.to_string());
+                let result =
+                    self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                if let Some(ty) = &result {
+                    *resolved_ret_out = Some(ty.clone());
+                }
+                return result;
             }
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {

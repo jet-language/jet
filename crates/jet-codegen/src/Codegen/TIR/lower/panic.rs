@@ -1,13 +1,12 @@
+use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPanicLoc;
 use crate::Codegen::TIR::TRequireKind;
+use crate::Codegen::TIR::lower_expr;
 use crate::Diagnostics::Span;
-use crate::AST::{Expr, Type};
-
 
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     env.clone()

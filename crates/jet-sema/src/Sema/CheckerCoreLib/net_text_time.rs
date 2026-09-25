@@ -50,6 +50,17 @@ pub(crate) fn http_nominal_leaf(name: &str) -> Option<&str> {
 }
 
 
+/// Project only the canonical `core.net` TCP handle identities (and their
+/// existing bare sema spellings) onto the networking method table.
+#[doc(hidden)]
+pub fn core_net_handle_dispatch_name(type_name: &str) -> Option<&'static str> {
+    match type_name {
+        "TCPStream" | "<corelib>/Core/net::Core/net/net.jet::TCPStream" => Some("TCPStream"),
+        "TCPListener" | "<corelib>/Core/net::Core/net/net.jet::TCPListener" => Some("TCPListener"),
+        _ => None,
+    }
+}
+
 /// The default-bearing HTTP message methods expose one sema identity. The
 /// lower-level `Body.text(limit)` call has no default of its own; a lint
 /// may compare its constant argument with this exact identity.
@@ -208,6 +219,7 @@ pub fn net_method_return(
     let str_ty = Type::String;
     let unit = unit_ty();
     let err = Type::Named("NetError".to_string());
+    let type_name = core_net_handle_dispatch_name(type_name).unwrap_or(type_name);
     let type_name = http_nominal_leaf(type_name).unwrap_or(type_name);
     match (type_name, method) {
         // D-HTTP-CORE2=A: one request/response model for both HTTP roles.

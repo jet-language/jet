@@ -1,4 +1,5 @@
 use super::refusal;
+use crate::AST::{Func, Param, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -8,7 +9,6 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_is_generic;
 use crate::Syntax;
-use crate::AST::{Func, Param, Stmt, Type};
 use std::collections::HashSet;
 
 /// Conservative structural test: `true` only if `f` is a top-level plain

@@ -435,7 +435,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         "missing executable allocator example: {}",
         source.display()
     );
-    let (_scratch, run_source) = if let Some(package_source) = package_source {
+    let (scratch, run_source) = if let Some(package_source) = package_source {
         let scratch = crate::common::Scratch::new("jet_example_policy");
         let run_source = scratch.join(
             source
@@ -450,7 +450,9 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
     } else {
         (None, source.clone())
     };
-    let run_cwd = run_source.parent().unwrap_or(root.as_path());
+    let run_cwd = scratch
+        .as_ref()
+        .map_or(root.as_path(), |scratch| scratch.path.as_path());
 
     let modes = [
         ("release", true, false),
@@ -509,30 +511,6 @@ fn normalize_workspace_root_paths(stderr: &str, root: &std::path::Path) -> Strin
     stderr
         .replace(&format!("{root}/"), "")
         .replace(&format!("{root}\\"), "")
-}
-
-/// Render compile-time Jet lints exactly as the non-interactive CLI does.
-fn render_compile_lints(
-    file: &str,
-    src: &str,
-    lints: &[jet::Diagnostics::Diagnostic],
-) -> String {
-    if lints.is_empty() {
-        return String::new();
-    }
-    let mut rendered = jet::render_all_linked(file, src, lints, false, false);
-    rendered.push_str(&format!(
-        "\n{} problem{} found\n",
-        lints.len(),
-        if lints.len() == 1 { "" } else { "s" }
-    ));
-    if let Some(first) = lints.first() {
-        rendered.push_str(&format!(
-            "{}\n",
-            jet::Explain::pointer_line(&first.code, false)
-        ));
-    }
-    rendered
 }
 
 /// Run an executable error example through debug/release AOT, default jet run,
@@ -630,7 +608,8 @@ fn build_and_run_full_inner(
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    let compile_stderr = render_compile_lints(&shown, src, &out.lints);
+    // Compare runtime stderr across tiers. Compile-time lints are checked
+    // separately; `jet run` does not emit them as program stderr.
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
@@ -663,10 +642,7 @@ fn build_and_run_full_inner(
     );
     let run = Command::new(&bin).output().unwrap();
     let run_stderr = String::from_utf8_lossy(&run.stderr);
-    let stderr = normalize_workspace_root_paths(
-        &format!("{compile_stderr}{run_stderr}"),
-        &dir,
-    );
+    let stderr = normalize_workspace_root_paths(&run_stderr, &dir);
     (
         run.status.code().unwrap_or(0),
         String::from_utf8_lossy(&run.stdout).into_owned(),

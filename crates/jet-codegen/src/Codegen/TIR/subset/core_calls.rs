@@ -1,7 +1,7 @@
+use crate::AST::Expr;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::lambda_in_subset;
-use crate::AST::Expr;
 use std::collections::HashSet;
 
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
@@ -308,10 +308,7 @@ pub(super) fn core_call_args_in_subset(
     // D-FOUND-LIFECYCLE1: the shared Core binder materializes both optional
     // labeled server controls before TIR sees the call. Present values are
     // wrapped as typed options by lowering; absent slots remain `None`.
-    if module == "core.http.server"
-        && matches!(method, "serve" | "bind")
-        && args.len() == 4
-    {
+    if module == "core.http.server" && matches!(method, "serve" | "bind") && args.len() == 4 {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = match idx {
                 2 => matches!(

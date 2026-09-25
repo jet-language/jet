@@ -32,11 +32,6 @@ members = [
 # dependencies out of its compiler-linked library; default build still ships
 # all three binaries.
 default-members = [".", "crates/jet-driver", "crates/jetpack-bin", "crates/jetos"]
-# This is first-party package source, not a compiler workspace member. It has
-# its own `[workspace]` and external `zip`/`tar` dependencies so CoreProvider
-# can build it into the hangar without importing those dependencies into the
-# I6-governed compiler workspace. `jet run` embeds the same canonical src/lib.rs.
-exclude = ["corelib/core.archive/pkgs/archive"]
 resolver = "2"
 
 # Dev builds must not turn content-addressed hashing into the product's
@@ -125,3 +120,6 @@ rustls-pemfile = "2"
 # runtime; this is already locked as a tool-only dev dependency elsewhere in
 # the workspace.
 wat = "1"
+
+[patch.crates-io]
+cranelift-jit = { path = "vendor/cranelift-jit-0.112.3" }

@@ -10,9 +10,10 @@
 //! grammar (§0.4 DO-NOT).
 //!
 //! Attribution: sema already computes a whole-program per-function effect fixpoint
-//! (`Sema::Effects::solve`, keyed by `Sema::effect_key`). This module attributes
-//! each function's solved effect set to the package (root, or a dependency)
-//! whose module defines it, by matching the module's on-disk path against
+//! (`Sema::Effects::solve`, keyed by `Sema::effect_key`). This module first walks
+//! the existing `EffectSummary` graph from the driver's selected entry, then
+//! attributes only reached functions to the package (root, or a dependency)
+//! whose module defines them, by matching the module's on-disk path against
 //! `ProgramBundle::dep_roots` — the same name→source-root map `Loader` builds
 //! for both `deps:` (path/git/provider) entries and hangar-realized
 //! `use <pkg>` libraries (U17).
@@ -227,14 +228,18 @@ fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<
         })
 }
 
-/// Attribute every function's solved effect set (`Sema::check_bundle_with_effect_facts`
-/// output) to the package whose module defines it. Functions with no entry in
-/// `solved` (never reached / no effects) contribute nothing.
+/// Attribute only functions reachable from the selected program entry to the
+/// package whose module defines them. Sema solves every loaded declaration so
+/// that function-local checks remain complete; package budgets are narrower:
+/// loaded helpers that the selected driver never calls must not become
+/// application provenance. Functions with no entry in `solved` contribute
+/// nothing even when a reachable summary exists.
 pub fn compute_package_effects(
     bundle: &ProgramBundle,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
 ) -> Vec<PackageEffects> {
+    let reachable = entry_reachable_keys(bundle, summaries, "run");
     let mut by_pkg: BTreeMap<String, PackageEffectAggregate> = BTreeMap::new();
 
     for module in &bundle.modules {
@@ -257,6 +262,7 @@ pub fn compute_package_effects(
             collect_item_effects(
                 item,
                 &module.alias,
+                &reachable,
                 solved,
                 summaries,
                 &mut out.effects,
@@ -277,15 +283,113 @@ pub fn compute_package_effects(
         })
         .collect()
 }
+fn selected_output_identity(bundle: &ProgramBundle) -> Option<(String, String)> {
+    let entry_module = bundle.modules.get(bundle.entry)?;
+    for item in &entry_module.items {
+        let Item::Const(constant) = item else {
+            continue;
+        };
+        let Some(output) = constant
+            .resolved_output
+            .as_ref()
+            .filter(|output| output.selected)
+        else {
+            continue;
+        };
+        let alias = bundle.modules.get(output.module)?.alias.clone();
+        return Some((alias, output.semantic_name.clone()));
+    }
+    None
+}
+
+/// Return the semantic roots the driver can select for this checked bundle.
+/// Runnable output facts identify a module explicitly; ordinary native builds
+/// use the canonical `run` wrapper (including `swap_entry_point`'s wrapper).
+/// The build-entry fallback is limited to the compiler-host function so its
+/// pre-runtime budget is not silently dropped.
+fn entry_candidates(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+) -> Vec<String> {
+    if let Some((alias, name)) = selected_output_identity(bundle) {
+        return [format!("{alias}::{name}"), name]
+            .into_iter()
+            .find(|candidate| summaries.contains_key(candidate))
+            .into_iter()
+            .collect();
+    }
+
+    let Some(module) = bundle.modules.get(bundle.entry) else {
+        return [default_entry.to_string()]
+            .into_iter()
+            .filter(|candidate| summaries.contains_key(candidate))
+            .collect();
+    };
+    let mut candidates = vec![
+        format!("{}::{default_entry}", module.alias),
+        default_entry.to_string(),
+    ];
+    if default_entry == "run"
+        && module.items.iter().any(|item| {
+            matches!(
+                item,
+                Item::Func(function) if crate::Sema::is_build_entry(function)
+            )
+        })
+    {
+        candidates.push(format!("{}::build", module.alias));
+        candidates.push("build".to_string());
+    }
+    // Prefer the qualified spelling, then a unique short spelling. The build
+    // fallback is considered only when no ordinary runtime root exists.
+    candidates
+        .into_iter()
+        .find(|candidate| summaries.contains_key(candidate))
+        .into_iter()
+        .collect()
+}
+
+
+fn entry_reachable_keys(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+) -> HashSet<String> {
+    let mut pending = entry_candidates(bundle, summaries, default_entry);
+    let mut reachable = HashSet::new();
+    while let Some(key) = pending.pop() {
+        let Some(summary) = summaries.get(&key) else {
+            continue;
+        };
+        if !reachable.insert(key) {
+            continue;
+        }
+        pending.extend(summary.edges.iter().cloned());
+    }
+    reachable
+}
+
+fn key_is_reachable(key: &str, reachable: &HashSet<String>) -> bool {
+    reachable.contains(key)
+        || key
+            .rsplit_once("::")
+            .is_some_and(|(_, local)| reachable.contains(local))
+}
+
 
 fn collect_effects_for_key(
     key: String,
+    reachable: &HashSet<String>,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     out: &mut EffectSet,
     effect_sites: &mut BTreeMap<String, String>,
     panic_sites: &mut BTreeSet<String>,
 ) {
+    if !key_is_reachable(&key, reachable) {
+        return;
+    }
     let Some(set) = solved.get(&key) else {
         return;
     };
@@ -359,81 +463,61 @@ fn panic_site(
 fn collect_item_effects(
     item: &Item,
     module_alias: &str,
+    reachable: &HashSet<String>,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     out: &mut EffectSet,
     effect_sites: &mut BTreeMap<String, String>,
     panic_sites: &mut BTreeSet<String>,
 ) {
+    let mut collect = |key: String| {
+        collect_effects_for_key(
+            key,
+            reachable,
+            solved,
+            summaries,
+            out,
+            effect_sites,
+            panic_sites,
+        );
+    };
     match item {
         Item::Func(f) => {
-            collect_effects_for_key(
-                format!("{module_alias}::{}", crate::Sema::effect_key(None, &f.name)),
-                solved,
-                summaries,
-                out,
-                effect_sites,
-                panic_sites,
-            );
+            collect(format!(
+                "{module_alias}::{}",
+                crate::Sema::effect_key(None, &f.name)
+            ));
         }
         Item::Impl(im) => {
             for m in &im.methods {
-                collect_effects_for_key(
-                    format!(
-                        "{module_alias}::{}",
-                        crate::Sema::effect_key(Some(&im.type_name), &m.name)
-                    ),
-                    solved,
-                    summaries,
-                    out,
-                    effect_sites,
-                    panic_sites,
-                );
+                collect(format!(
+                    "{module_alias}::{}",
+                    crate::Sema::effect_key(Some(&im.type_name), &m.name)
+                ));
             }
         }
         Item::Struct(s) => {
             for m in &s.methods {
-                collect_effects_for_key(
-                    format!(
-                        "{module_alias}::{}",
-                        crate::Sema::effect_key(Some(&s.name), &m.name)
-                    ),
-                    solved,
-                    summaries,
-                    out,
-                    effect_sites,
-                    panic_sites,
-                );
+                collect(format!(
+                    "{module_alias}::{}",
+                    crate::Sema::effect_key(Some(&s.name), &m.name)
+                ));
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
-                    collect_effects_for_key(
-                        format!(
-                            "{module_alias}::{}",
-                            crate::Sema::effect_key(Some(&s.name), &m.name)
-                        ),
-                        solved,
-                        summaries,
-                        out,
-                        effect_sites,
-                        panic_sites,
-                    );
+                    collect(format!(
+                        "{module_alias}::{}",
+                        crate::Sema::effect_key(Some(&s.name), &m.name)
+                    ));
                 }
             }
         }
         Item::Enum(e) => {
             for m in &e.methods {
-                collect_effects_for_key(
-                    format!(
-                        "{module_alias}::{}",
-                        crate::Sema::effect_key(Some(&e.name), &m.name)
-                    ),
-                    solved,
-                    summaries,
-                    out,
-                    effect_sites,
-                    panic_sites,
-                );
+                collect(format!(
+                    "{module_alias}::{}",
+                    crate::Sema::effect_key(Some(&e.name), &m.name)
+                ));
             }
         }
         _ => {}
@@ -487,19 +571,13 @@ fn program_effects(
     summaries: &HashMap<String, EffectSummary>,
     default_entry: &str,
 ) -> EffectSet {
-    bundle
-        .modules
-        .iter()
-        .flat_map(|module| &module.items)
-        .find_map(|item| match item {
-            Item::Const(constant) => constant
-                .resolved_output
-                .as_ref()
-                .filter(|output| output.selected)
-                .map(|output| entry_effects(summaries, &output.semantic_name)),
-            _ => None,
-        })
-        .unwrap_or_else(|| entry_effects(summaries, default_entry))
+    let Some(entry) = entry_candidates(bundle, summaries, default_entry)
+        .into_iter()
+        .next()
+    else {
+        return EffectSet::new();
+    };
+    entry_effects(summaries, &entry)
 }
 
 pub fn summary_line_for_program(
@@ -847,6 +925,162 @@ pub fn e1220_panic(dep: &str, panic_site: &str, span: Option<Span>) -> Diagnosti
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_module(path: &str, alias: &str, source: &str) -> crate::AST::LoadedModule {
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("test source parses");
+        crate::AST::LoadedModule {
+            path: std::path::PathBuf::from(path),
+            display: path.to_string(),
+            source: source.to_string(),
+            alias: alias.to_string(),
+            imports: std::mem::take(&mut program.imports),
+            items: std::mem::take(&mut program.items),
+            script_body: std::mem::take(&mut program.script_body),
+            block_spans: std::mem::take(&mut program.block_spans),
+            web_target_ceiling: program.web_target_ceiling,
+            pub_file: program.pub_file,
+            no_prelude: program.no_prelude,
+            default_target: program.default_target,
+            html_path: program.html_path,
+            policy_declarations: program.policy_declarations,
+            user_policy_declarations: program.user_policy_declarations,
+            rule_facts: program.rule_facts,
+        }
+    }
+
+    fn effect_fixture(root_calls_migrate: bool) -> (
+        crate::AST::ProgramBundle,
+        HashMap<String, EffectSet>,
+        HashMap<String, EffectSummary>,
+    ) {
+        let bundle = crate::AST::ProgramBundle {
+            entry: 0,
+            project_root: std::path::PathBuf::from("/workspace/app"),
+            modules: vec![
+                test_module("/workspace/app/run.jet", "run", "fn run() {}\n"),
+                test_module(
+                    "/workspace/deps/email/src/crypto.jet",
+                    "crypto",
+                    "fn migrate_v1() {}\nfn seal() {}\nfn unused() {}\n",
+                ),
+            ],
+            devtools_registry: crate::AST::DevtoolsRegistry::default(),
+            parse_teaching: Vec::new(),
+            used_core: HashSet::new(),
+            ffi_callback_fns: HashSet::new(),
+            cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(),
+            name_ledger: jet_foundation::Names::NameLedger::default(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
+            dep_roots: HashMap::from([(
+                "email".to_string(),
+                std::path::PathBuf::from("/workspace/deps/email"),
+            )]),
+            package_guarantees: Default::default(),
+            program_allocator: Default::default(),
+            active_os: crate::Syntax::OSTarget::host(),
+            build_facts: Default::default(),
+            edition: "2027".to_string(),
+        };
+
+        let mut summaries = HashMap::new();
+        summaries.insert(
+            "run::run".to_string(),
+            EffectSummary {
+                edges: root_calls_migrate
+                    .then(|| BTreeSet::from(["crypto::migrate_v1".to_string()]))
+                    .unwrap_or_default(),
+                ..EffectSummary::default()
+            },
+        );
+        summaries.insert(
+            "crypto::migrate_v1".to_string(),
+            EffectSummary {
+                edges: BTreeSet::from(["crypto::seal".to_string()]),
+                ..EffectSummary::default()
+            },
+        );
+        summaries.insert(
+            "crypto::seal".to_string(),
+            EffectSummary {
+                direct: EffectSet::from(["Rand".to_string()]),
+                ..EffectSummary::default()
+            },
+        );
+        summaries.insert(
+            "crypto::unused".to_string(),
+            EffectSummary {
+                direct: EffectSet::from(["Rand".to_string()]),
+                ..EffectSummary::default()
+            },
+        );
+
+        let solved = HashMap::from([
+            ("run::run".to_string(), EffectSet::new()),
+            (
+                "crypto::migrate_v1".to_string(),
+                EffectSet::from(["Rand".to_string()]),
+            ),
+            (
+                "crypto::seal".to_string(),
+                EffectSet::from(["Rand".to_string()]),
+            ),
+            (
+                "crypto::unused".to_string(),
+                EffectSet::from(["Rand".to_string()]),
+            ),
+        ]);
+        (bundle, solved, summaries)
+    }
+
+    fn package<'a>(entries: &'a [PackageEffects], name: &str) -> &'a PackageEffects {
+        entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("fixture package entry")
+    }
+
+
+    #[test]
+    fn package_budget_ignores_unreachable_loaded_rand_helper() {
+        let (bundle, solved, summaries) = effect_fixture(false);
+        let entries = compute_package_effects(&bundle, &solved, &summaries);
+
+        let email = package(&entries, "email");
+        assert!(email.effects.is_empty());
+        assert!(email.effect_sites.is_empty());
+
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        assert!(enforce(&entries, &manifest).is_empty());
+    }
+
+    #[test]
+    fn package_budget_keeps_reachable_rand_at_dependency_boundary() {
+        let (bundle, solved, summaries) = effect_fixture(true);
+        let entries = compute_package_effects(&bundle, &solved, &summaries);
+
+        let email = package(&entries, "email");
+        assert!(email.effects.contains("Rand"));
+        assert_eq!(
+            email.effect_sites.get("Rand").map(String::as_str),
+            Some("crypto::seal")
+        );
+
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.what.contains("`email`") && diagnostic.what.contains("Rand")
+        }));
+    }
 
     #[test]
     fn authority_block_is_the_e1220_source() {

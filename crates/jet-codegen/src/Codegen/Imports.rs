@@ -172,6 +172,10 @@ pub(crate) fn selective_nominal_targets(
                 .name_ledger
                 .alias(module_idx, &local)
                 .and_then(|alias| alias.target_module)
+                .or_else(|| {
+                    crate::AST::core_list_prefix(binding.module_alias)
+                        .and_then(|path| core_source_target(bundle, &path).map(|(_, target)| target))
+                })
             else {
                 continue;
             };
@@ -507,7 +511,11 @@ pub(crate) fn register_foreign_enum_variants(
                     (
                         variant.name.clone(),
                         qualify_imported_variant_payload(
-                            bundle, target, &identity, &binders, &variant.payload,
+                            bundle,
+                            target,
+                            &identity,
+                            &binders,
+                            &variant.payload,
                         ),
                     )
                 })
@@ -549,6 +557,18 @@ fn qualify_imported_variant_payload(
     }
 }
 
+pub(crate) fn core_source_target(
+    bundle: &ProgramBundle,
+    module: &str,
+) -> Option<(jet_foundation::CoreModuleExports::CoreSourceModule, usize)> {
+    let source = *jet_foundation::CoreModuleExports::core_source_module(module)?;
+    let target = bundle
+        .modules
+        .iter()
+        .position(|loaded| loaded.alias == source.alias)?;
+    Some((source, target))
+}
+
 pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -568,7 +588,13 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
             map.insert(alias, mangle(stem));
             continue;
         }
-        if matches!(imp.kind, ImportKind::Unqualified { .. }) || imp.core_module_path().is_some() {
+        if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+            continue;
+        }
+        if let Some(core_module) = imp.core_module_path() {
+            if let Some((source, _)) = core_source_target(bundle, &core_module) {
+                map.insert(alias, mangle(source.alias));
+            }
             continue;
         }
         let target = required_import_target(bundle, module_idx, imp);
@@ -1456,6 +1482,125 @@ fn nested_file_function_entries(
         }
     }
     entries
+}
+
+pub(crate) fn core_source_sig_map(
+    bundle: &ProgramBundle,
+) -> HashMap<(String, String), super::CoreSourceFunctionSignature> {
+    let mut map = HashMap::new();
+    // Qualified calls can reach any loaded Core source module, not only a
+    // module imported directly by the caller.
+    for (target, module) in bundle.modules.iter().enumerate() {
+        let Some(source) =
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
+        else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            let Item::Func(function) = item else {
+                continue;
+            };
+            if !function.is_pub
+                || !jet_foundation::CoreModuleExports::core_source_owns(
+                    source.module,
+                    &function.name,
+                )
+            {
+                continue;
+            }
+            let params = function
+                .params
+                .iter()
+                .map(|param| {
+                    let ty = if param.variadic {
+                        Type::List(Box::new(param.ty.clone()))
+                    } else {
+                        param.ty.clone()
+                    };
+                    (
+                        param.convention,
+                        qualify_imported_call_type(bundle, target, source.alias, &ty),
+                    )
+                })
+                .collect();
+            let return_type = function
+                .return_type
+                .as_ref()
+                .map(|ty| qualify_imported_call_type(bundle, target, source.alias, ty));
+            map.insert(
+                (source.module.to_string(), function.name.clone()),
+                super::CoreSourceFunctionSignature {
+                    module_identity: Some(super::Context::module_identity(bundle, target)),
+                    type_params: function
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect(),
+                    params,
+                    return_type,
+                },
+            );
+        }
+    }
+    // Compiler-private Core source parts do not have public imports or
+    // `CoreSourceModule` rows. Their receiver-first functions still need the
+    // same typed signature map so source String methods can emit a checked
+    // `ModuleCall` rather than an inherent Rust impl.
+    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+        jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+    ) {
+        if let Some(target) = bundle
+            .modules
+            .iter()
+            .position(|loaded| loaded.alias == part.source.alias)
+        {
+            for item in &bundle.modules[target].items {
+                let Item::Func(function) = item else {
+                    continue;
+                };
+                if function.is_pub {
+                    continue;
+                }
+                let params = function
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let ty = if param.variadic {
+                            Type::List(Box::new(param.ty.clone()))
+                        } else {
+                            param.ty.clone()
+                        };
+                        (
+                            param.convention,
+                            qualify_imported_call_type(
+                                bundle,
+                                target,
+                                part.source.alias,
+                                &ty,
+                            ),
+                        )
+                    })
+                    .collect();
+                let return_type = function.return_type.as_ref().map(|ty| {
+                    qualify_imported_call_type(bundle, target, part.source.alias, ty)
+                });
+                map.insert(
+                    (part.source.module.to_string(), function.name.clone()),
+                    super::CoreSourceFunctionSignature {
+                        module_identity: Some(super::Context::module_identity(bundle, target)),
+                        type_params: function
+                            .type_params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect(),
+                        params,
+                        return_type,
+                    },
+                );
+            }
+        }
+    }
+    map
 }
 
 pub(crate) fn import_sig_map(

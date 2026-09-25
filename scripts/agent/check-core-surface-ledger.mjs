@@ -1446,9 +1446,7 @@ function parseCoreSource(source) {
         throw new Error("duplicate Core source alias `" + alias + "` at line " + sourceLine);
       }
       const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
-      if (!ownedMembers.length) {
-        throw new Error("Core source module owns no members at line " + sourceLine);
-      }
+      // Type-only Core sources may own nominals and static methods without free functions.
       if (!existsSync(join(ROOT, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
       }

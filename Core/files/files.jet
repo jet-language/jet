@@ -30,6 +30,11 @@ use core.sys as sys
 // The OS door is the typed `core.files` provider: open/read/write/stat,
 // directory, link, temp, lock, and metadata calls route through it. Walk,
 // glob, copy composition, and path math remain Jet.
+// Open readers, writers, temporary files and directories, and locks own their
+// provider resources until their lexical scope exits or they are consumed by
+// `close(^handle)`. A writer's explicit `flush()` remains fallible.
+// Directory copies preserve that boundary: only regular files are copied;
+// symlink and other special entries are never dereferenced.
 
 
 pub struct DirEntry {
@@ -40,11 +45,14 @@ pub struct DirEntry {
 
 pub struct Stat {
     pub size: Int
-    pub is_dir: Bool
+    pub modified_ms: Int
+    pub created_ms: Int
+    pub readonly: Bool
     pub is_file: Bool
+    pub is_dir: Bool
     pub is_symlink: Bool
+    pub kind: String
     pub mode: Int
-    pub mtime: Int
 }
 
 pub struct WalkEntry {
@@ -62,26 +70,23 @@ pub struct MappedFile {
 }
 
 pub struct TempDir {
-    pub path: String
+    path: String
 }
 
 pub struct TempFile {
-    pub path: String
+    path: String
 }
 
 pub struct FileLock {
-    pub path: String
-    pub fd: Int
+    path: String
 }
 
 pub struct FileReader {
-    pub path: String
-    pub fd: Int
+    path: String
 }
 
 pub struct FileWriter {
-    pub path: String
-    pub fd: Int
+    path: String
 }
 
 
@@ -97,9 +102,8 @@ pub fn create(path: String) -[FS]> FileWriter !IOError { core.files.create(path)
 pub fn append(path: String) -[FS]> FileWriter !IOError { core.files.append(path) }
 
 
-pub fn close(fd: Int) !IOError -[FS]> { core.files.close(fd) }
 
-fn io_err(operation: String, path: String, message: String) -> IOError {
+fn io_err(operation: String, path: String, message: String) -> IOError !Never {
     if operation == "write" || operation == "mkdir" || operation == "truncate" {
         return IOError.InvalidInput(IOContext{
             operation: .Write,
@@ -164,7 +168,10 @@ pub fn write_at(path: String, offset: Int, bytes: [U8]) !IOError -[FS]> {
 pub fn fsync(path: String) !IOError -[FS]> { core.files.fsync(path) }
 
 
-pub fn exists(path: String) -[FS]> Bool { core.files.exists(path) }
+fn exists_impl(path: String) -> Bool !Never { core.files.exists(path) }
+
+
+pub fn exists(path: String) -[FS]> Bool { exists_impl(path) }
 
 
 pub fn is_dir(path: String) -[FS]> Bool { core.files.is_dir(path) }
@@ -176,14 +183,14 @@ pub fn stat(path: String) -[FS]> Stat !IOError { core.files.stat(path) }
 pub fn set_mode(path: String, mode: Int) !IOError -[FS]> { core.files.set_mode(path, mode) }
 
 
-fn anchor_for_parts(drive: String, absolute: Bool) -> String {
+fn anchor_for_parts(drive: String, absolute: Bool) -> String !Never {
     if drive.bytes().len() > 0 -> return ~drive
     if absolute -> return "/"
     ""
 }
 
 
-fn join_parts(parts: [String]) -> String {
+fn join_parts(parts: [String]) -> String !Never {
     s := ""
     first := true
     loop p in parts {
@@ -197,7 +204,7 @@ fn join_parts(parts: [String]) -> String {
 }
 
 
-fn compose(anchor: String, parts: [String]) -> String {
+fn compose(anchor: String, parts: [String]) -> String !Never {
     s :: join_parts(parts)
     if anchor == "/" {
         if s.bytes().len() == 0 -> return "/"
@@ -212,24 +219,26 @@ fn compose(anchor: String, parts: [String]) -> String {
 }
 
 
-fn is_letter(b: U8) -> Bool {
+fn is_letter(b: U8) -> Bool !Never {
     n :: b
     (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
 }
 
 
-pub fn is_abs(path: String) -> Bool {
+fn is_abs_impl(path: String) -> Bool !Never {
     raw :: (~path).bytes()
     if raw.len() == 0 -> return false
     if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
     raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58})
 }
 
+pub fn is_abs(path: String) -> Bool { is_abs_impl(path) }
 
-fn is_separator(b: U8) -> Bool { b == (U8{47}) || b == (U8{92}) }
+
+fn is_separator(b: U8) -> Bool !Never { b == (U8{47}) || b == (U8{92}) }
 
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     out := [U8]{}
     i := start
     loop {
@@ -240,7 +249,7 @@ fn slice(raw: [U8], start: Int, end: Int) -> String {
 }
 
 
-pub fn split_slash(path: String) -> [String] {
+fn split_slash_impl(path: String) -> [String] !Never {
     raw :: (~path).bytes()
     out := [String]{}
     start := 0
@@ -257,11 +266,13 @@ pub fn split_slash(path: String) -> [String] {
     out
 }
 
+pub fn split_slash(path: String) -> [String] { split_slash_impl(path) }
 
-pub fn collapse(path: String) -> String {
+
+fn collapse_impl(path: String) -> String !Never {
     raw :: (~path).bytes()
     if raw.len() == 0 -> return "."
-    absolute := is_abs(path)
+    absolute := is_abs_impl(path)
     drive := ""
     start := 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
@@ -274,7 +285,7 @@ pub fn collapse(path: String) -> String {
     }
     tail :: slice(raw, start, raw.len())
     out := [String]{}
-    loop p in split_slash(tail) {
+    loop p in split_slash_impl(tail) {
         if p == "" || p == "." -> next
         if p == ".." {
             if out.len() > 0 {
@@ -292,8 +303,10 @@ pub fn collapse(path: String) -> String {
     compose(anchor_for_parts(drive, absolute), out)
 }
 
+pub fn collapse(path: String) -> String { collapse_impl(path) }
 
-fn strip_leading_separators(path: String) -> String {
+
+fn strip_leading_separators(path: String) -> String !Never {
     raw :: (~path).bytes()
     i := 0
     loop i < raw.len() && is_separator(raw[i]) -> i = i + 1
@@ -301,9 +314,9 @@ fn strip_leading_separators(path: String) -> String {
 }
 
 
-pub fn join(a: String, b: String) -> String {
+fn join_impl(a: String, b: String) -> String !Never {
     if b.bytes().len() == 0 -> return ~a
-    if is_abs(b) -> return ~b
+    if is_abs_impl(b) -> return ~b
     if a.bytes().len() == 0 -> return ~b
     clean_b :: strip_leading_separators(b)
     if clean_b.bytes().len() == 0 -> return ~a
@@ -312,17 +325,18 @@ pub fn join(a: String, b: String) -> String {
     "{a}/{clean_b}"
 }
 
+pub fn join(a: String, b: String) -> String { join_impl(a, b) }
+
 
 pub fn absolute(path: String) -[FS, Env]> String !IOError {
-    if is_abs(~path) -> return Ok(collapse(~path))
+    if is_abs_impl(~path) -> return Ok(collapse_impl(~path))
     cwd :: sys.current_dir()
-    Ok(collapse(join(cwd, path)))
+    Ok(collapse_impl(join_impl(cwd, path)))
 }
 
 
 pub fn canonicalize(path: String) -[FS, Env]> String !IOError {
-    abs :: absolute(path)
-    Ok(collapse(abs))
+    core.files.canonicalize(path)
 }
 
 
@@ -332,7 +346,7 @@ pub fn list_dir(path: String) -[FS]> [DirEntry] !IOError { core.files.list_dir(p
 pub fn create_dir(path: String) !IOError -[FS]> { core.files.create_dir(path) }
 
 
-pub fn dirname(path: String) -> String {
+fn dirname_impl(path: String) -> String !Never {
     raw :: (~path).bytes()
     if raw.len() == 0 -> return ""
     end := raw.len()
@@ -356,17 +370,19 @@ pub fn dirname(path: String) -> String {
     ""
 }
 
+pub fn dirname(path: String) -> String { dirname_impl(path) }
+
 
 pub fn create_dir_all(path: String) !IOError -[FS]> {
     if (~path).bytes().len() == 0 -> return Ok()
-    if exists(~path) {
+    if exists(~path) ?? panic("exists failed") {
         info :: stat(~path)
         if info.is_dir -> return Ok()
         return Err(io_err("mkdir", path, "path exists and is not a directory"))
     }
-    parent :: dirname(~path)
+    parent :: dirname_impl(~path)
     if parent.bytes().len() > 0 && parent != path -> create_dir_all(parent)
-    if !exists(~path) -> core.files.create_dir(path)
+    if !(exists(~path) ?? panic("exists failed")) -> core.files.create_dir(path)
     return Ok()
 }
 
@@ -378,18 +394,18 @@ pub fn remove_dir(path: String) !IOError -[FS]> { core.files.remove_dir(path) }
 
 
 pub fn remove_all(path: String) !IOError -[FS]> {
-    if is_dir(~path) {
+    if is_dir(~path) ?? panic("is_dir failed") {
         entries :: list_dir(~path)
         loop e in entries -> remove_all(e.path)
     }
-    if exists(~path) -> core.files.remove(path)
+    if lexists(~path) ?? panic("lexists failed") -> core.files.remove(path)
     return Ok()
 }
 
 
 fn copy_file_impl(from: String, to: String) !IOError -[FS]> {
     bytes :: read_bytes(from)
-    parent :: dirname(~to)
+    parent :: dirname_impl(~to)
     if parent.bytes().len() > 0 -> create_dir_all(parent)
     write_bytes(~to, bytes)
 }
@@ -399,8 +415,13 @@ pub fn copy_dir(from: String, to: String) !IOError -[FS]> {
     create_dir_all(~to)
     entries :: list_dir(from)
     loop e in entries {
-        dest :: join(~to, e.name)
-        if e.is_dir -> copy_dir(e.path, dest) else -> copy_file_impl(e.path, dest)
+        dest :: join_impl(~to, e.name)
+        if e.is_dir {
+            copy_dir(e.path, dest)
+        } else {
+            info :: stat(e.path)
+            if info.is_file && !info.is_symlink -> copy_file_impl(e.path, dest)
+        }
     }
     return Ok()
 }
@@ -418,7 +439,7 @@ pub fn hard_link(original: String, link: String) !IOError -[FS]> { core.files.ha
 pub fn read_link(path: String) -[FS]> String !IOError { core.files.read_link(path) }
 
 
-fn split_lines(text: String) -> [String] {
+fn split_lines(text: String) -> [String] !Never {
     raw :: (~text).bytes()
     out := [String]{}
     start := 0
@@ -439,7 +460,7 @@ fn split_lines(text: String) -> [String] {
 }
 
 
-fn trim(text: String) -> String {
+fn trim(text: String) -> String !Never {
     raw :: (~text).bytes()
     a := 0
     b := raw.len()
@@ -455,7 +476,7 @@ fn trim(text: String) -> String {
 }
 
 
-fn glob_bytes(pat: [U8], pi: Int, name: [U8], ni: Int) -> Bool {
+fn glob_bytes(pat: [U8], pi: Int, name: [U8], ni: Int) -> Bool !Never {
     if pi >= pat.len() -> return ni >= name.len()
     if pat[pi] == (U8{42}) {
         if glob_bytes(pat, pi + 1, name, ni) -> return true
@@ -496,10 +517,10 @@ fn glob_bytes(pat: [U8], pi: Int, name: [U8], ni: Int) -> Bool {
 }
 
 
-fn glob_seg(pat: String, name: String) -> Bool { glob_bytes(pat.bytes(), 0, name.bytes(), 0) }
+fn glob_seg(pat: String, name: String) -> Bool !Never { glob_bytes(pat.bytes(), 0, name.bytes(), 0) }
 
 
-fn glob_parts(pat: [String], pi: Int, tgt: [String], ti: Int) -> Bool {
+fn glob_parts(pat: [String], pi: Int, tgt: [String], ti: Int) -> Bool !Never {
     if pi >= pat.len() -> return ti >= tgt.len()
     if pat[pi] == "**" {
         if glob_parts(pat, pi + 1, tgt, ti) -> return true
@@ -512,11 +533,11 @@ fn glob_parts(pat: [String], pi: Int, tgt: [String], ti: Int) -> Bool {
 }
 
 
-fn glob_parts_for(path: String) -> [String] {
+fn glob_parts_for(path: String) -> [String] !Never {
     raw :: (~path).bytes()
     out := [String]{}
     drive := ""
-    absolute := is_abs(path)
+    absolute := is_abs_impl(path)
     start := 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         drive = slice(raw, 0, 2)
@@ -528,21 +549,23 @@ fn glob_parts_for(path: String) -> [String] {
         loop start < raw.len() && is_separator(raw[start]) -> start = start + 1
     }
     if drive.bytes().len() > 0 -> out.push(drive)
-    loop p in split_slash(slice(raw, start, raw.len())) {
+    loop p in split_slash_impl(slice(raw, start, raw.len())) {
         if p.bytes().len() > 0 -> out.push(p)
     }
     out
 }
 
 
-pub fn glob_match(pattern: String, path: String) -> Bool {
+fn glob_match_impl(pattern: String, path: String) -> Bool !Never {
     pp :: glob_parts_for(pattern)
     tt :: glob_parts_for(path)
     glob_parts(pp, 0, tt, 0)
 }
 
+pub fn glob_match(pattern: String, path: String) -> Bool { glob_match_impl(pattern, path) }
 
-fn has_separator(path: String) -> Bool {
+
+fn has_separator(path: String) -> Bool !Never {
     loop b in (~path).bytes() {
         if is_separator(b) -> return true
     }
@@ -550,7 +573,7 @@ fn has_separator(path: String) -> Bool {
 }
 
 
-fn anchor_of(path: String) -> String {
+fn anchor_of(path: String) -> String !Never {
     raw :: (~path).bytes()
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) -> return slice(raw, 0, 2)
     if raw.len() > 0 && is_separator(raw[0]) -> return "/"
@@ -558,7 +581,7 @@ fn anchor_of(path: String) -> String {
 }
 
 
-fn path_parts(path: String) -> [String] {
+fn path_parts(path: String) -> [String] !Never {
     raw :: (~path).bytes()
     start := 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
@@ -569,16 +592,16 @@ fn path_parts(path: String) -> [String] {
         loop start < raw.len() && is_separator(raw[start]) -> start = start + 1
     }
     out := [String]{}
-    loop p in split_slash(slice(raw, start, raw.len())) {
+    loop p in split_slash_impl(slice(raw, start, raw.len())) {
         if p.bytes().len() > 0 -> out.push(p)
     }
     out
 }
 
 
-pub fn relative(path: String, start: String) -> String {
-    a :: collapse(path)
-    b :: collapse(start)
+fn relative_impl(path: String, start: String) -> String !Never {
+    a :: collapse_impl(path)
+    b :: collapse_impl(start)
     if anchor_of(a) != anchor_of(b) -> return a
     ap :: path_parts(a)
     bp :: path_parts(b)
@@ -602,12 +625,14 @@ pub fn relative(path: String, start: String) -> String {
     s
 }
 
+pub fn relative(path: String, start: String) -> String { relative_impl(path, start) }
 
-fn ignored(name: String, path: String, root: String, skip: [String]) -> Bool {
-    rel :: relative(path, root)
+
+fn ignored(name: String, path: String, root: String, skip: [String]) -> Bool !Never {
+    rel :: relative_impl(path, root)
     loop pat in skip {
         if has_separator(pat) {
-            if glob_match(pat, rel) -> return true
+            if glob_match_impl(pat, rel) -> return true
         } else if glob_seg(pat, name) -> return true
     }
     false
@@ -635,7 +660,7 @@ fn walk_impl(root: String, ignore: ?String, files_only: Bool) -[FS]> [WalkEntry]
     skip := [String]{}
     ign :: ignore ?? ""
     if ign.bytes().len() > 0 {
-        text :: read(join(~root, ~ign))
+        text :: read(join_impl(~root, ~ign))
         loop line in split_lines(text) {
             t :: trim(line)
             if t.bytes().len() == 0 -> next
@@ -665,7 +690,7 @@ pub fn walk_files(root: String, ignore: ?String) -[FS]> [WalkEntry] !IOError {
 }
 
 
-fn has_meta(seg: String) -> Bool {
+fn has_meta(seg: String) -> Bool !Never {
     loop b in seg.bytes() {
         n :: b
         if n == 42 || n == 63 || n == 91 -> return true
@@ -674,8 +699,8 @@ fn has_meta(seg: String) -> Bool {
 }
 
 
-fn glob_root(pattern: String) -> String {
-    parts :: split_slash(pattern)
+fn glob_root(pattern: String) -> String !Never {
+    parts :: split_slash_impl(pattern)
     static := [String]{}
     i := 0
     loop i < parts.len() {
@@ -683,7 +708,7 @@ fn glob_root(pattern: String) -> String {
         static.push(parts[i])
         i = i + 1
     }
-    if !is_abs(pattern) {
+    if !is_abs_impl(pattern) {
         root :: join_parts(static)
         if root.bytes().len() == 0 -> return "."
         return root
@@ -704,7 +729,7 @@ fn glob_root(pattern: String) -> String {
 
 pub fn glob(pattern: String) -[FS]> [String] !IOError {
     if !has_meta(~pattern) {
-        if exists(~pattern) -> return Ok([String]{~pattern})
+        if exists_impl(~pattern) -> return Ok([String]{~pattern})
         return Ok([String]{})
     }
     root :: glob_root(~pattern)
@@ -717,7 +742,7 @@ pub fn glob(pattern: String) -[FS]> [String] !IOError {
         if cbytes.len() >= 2 && cbytes[0] == (U8{46}) && is_separator(cbytes[1]) {
             relative_candidate = slice(cbytes, 2, cbytes.len())
         }
-        if glob_match(~pattern, ~candidate) || glob_match(~pattern, relative_candidate) {
+        if glob_match_impl(~pattern, ~candidate) || glob_match_impl(~pattern, relative_candidate) {
             out.push(candidate)
         }
     }
@@ -788,10 +813,12 @@ pub fn with_name(path: String, name: String) -> String {
 pub fn is_absolute(path: String) -> Bool { is_abs(path) }
 
 
-pub fn is_file(path: String) -[FS]> Bool {
+fn is_file_impl(path: String) -> Bool !Never {
     info :: stat(path) ?? return false
     info.is_file
 }
+
+pub fn is_file(path: String) -[FS]> Bool { is_file_impl(path) }
 
 
 pub fn is_symlink(path: String) -[FS]> Bool {
@@ -813,17 +840,17 @@ pub fn expanduser(path: String) -[FS, Env]> String !IOError {
     if raw.len() == 0 || raw[0] != (U8{126}) -> return Ok(~path)
     h :: home()
     if raw.len() == 1 -> return Ok(h)
-    if raw[1] == (U8{47}) || raw[1] == (U8{92}) -> return Ok(join(h, slice(raw, 2, raw.len())))
+    if raw[1] == (U8{47}) || raw[1] == (U8{92}) -> return Ok(join_impl(h, slice(raw, 2, raw.len())))
     Ok(~path)
 }
 
 
 pub fn touch(path: String) !IOError -[FS]> {
-    if exists(~path) {
+    if exists_impl(~path) {
         core.files.fsync(path)
         return Ok()
     }
-    parent :: dirname(~path)
+    parent :: dirname_impl(~path)
     if parent.bytes().len() > 0 -> create_dir_all(parent)
     write_bytes(path, [U8]{})
 }
@@ -898,11 +925,11 @@ pub fn write_lines(path: String, lines: [String]) !IOError -[FS]> {
 
 pub fn commonpath(paths: [String]) -> String {
     if paths.len() == 0 -> return ""
-    first :: collapse(paths[0])
+    first :: collapse_impl(paths[0])
     anchor := anchor_of(first)
     parts := path_parts(first)
     loop p in paths {
-        cur :: collapse(p)
+        cur :: collapse_impl(p)
         if anchor_of(cur) != anchor -> return ""
         next :: path_parts(cur)
         n := parts.len()
@@ -927,7 +954,7 @@ pub fn commonpath(paths: [String]) -> String {
 pub fn fnmatch(name: String, pattern: String) -> Bool { glob_match(pattern, name) }
 
 
-fn split_path_env(text: String) -> [String] {
+fn split_path_env(text: String) -> [String] !Never {
     raw :: (~text).bytes()
     out := [String]{}
     start := 0
@@ -953,22 +980,22 @@ fn split_path_env(text: String) -> [String] {
 
 
 pub fn which(name: String) -[FS, Env]> ?String {
-    if is_abs(~name) {
-        if is_file(~name) -> return Val(~name)
+    if is_abs_impl(~name) {
+        if is_file_impl(~name) -> return Val(~name)
         return None
     }
     path_var :: sys.get("PATH") ?? ""
     loop dir in split_path_env(path_var) {
         base := dir
         if base.bytes().len() == 0 -> base = "."
-        cand :: join(~base, ~name)
-        if is_file(cand) -> return Val(cand)
+        cand :: join_impl(~base, ~name)
+        if is_file_impl(cand) -> return Val(cand)
     }
     None
 }
 
 
-fn slice_path(text: String, start: Int, end: Int) -> String {
+fn slice_path(text: String, start: Int, end: Int) -> String !Never {
     raw :: (~text).bytes()
     out := [U8]{}
     i := start
@@ -1004,7 +1031,7 @@ pub fn getsize(path: String) -[FS]> Int !IOError {
 
 pub fn getmtime(path: String) -[FS]> Int !IOError {
     s :: stat(path)
-    Ok(s.mtime)
+    Ok(s.modified_ms)
 }
 
 
@@ -1107,10 +1134,10 @@ pub fn is_mount(path: String) -[FS]> Bool {
 }
 
 
-pub fn ensure_parent(path: String) !IOError -[FS]> { create_dir_all(dirname(path)) }
+pub fn ensure_parent(path: String) !IOError -[FS]> { create_dir_all(dirname_impl(path)) }
 
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     i := start
     loop {

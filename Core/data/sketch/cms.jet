@@ -29,13 +29,17 @@ pub fn add(sketch: CountMin, key: String, n: Int) -> CountMin {
 
 pub fn estimate(sketch: CountMin, key: String) -> Int {
     if !shape_ok(sketch) -> return 0
-    min := 9223372036854775807
+    min := 0
+    first := true
     loop d in 0..<sketch.depth {
         h :: bucket(key, d, sketch.width)
         v :: sketch.table[d * sketch.width + h]
-        if v < min -> min = v
+        if first || v < min {
+            min = v
+            first = false
+        }
     }
-    if min == 9223372036854775807 -> return 0
+    if first -> return 0
     min
 }
 

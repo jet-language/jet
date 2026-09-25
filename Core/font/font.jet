@@ -31,9 +31,6 @@ pub struct FontFace {
     pub family: String
     pub size: Float
     pub style: FontStyle
-    // Kept on the source model so shape_with can make the fallback choice
-    // explicit.  Runtime FontFace values use the canonical three fields.
-    pub shaper: GlyphShaper
 }
 
 pub struct Glyph {
@@ -55,13 +52,7 @@ pub struct GlyphRun {
 }
 
 pub fn system(style: FontStyle) -> FontFace {
-    if style == FontStyle.Title {
-        return FontFace{family: "system-ui", size: 24.0, style: style, shaper: GlyphShaper.HarfBuzz}
-    }
-    if style == FontStyle.Monospace {
-        return FontFace{family: "monospace", size: 14.0, style: style, shaper: GlyphShaper.HarfBuzz}
-    }
-    FontFace{family: "system-ui", size: 14.0, style: FontStyle.Body, shaper: GlyphShaper.HarfBuzz}
+    core.font.system(style)
 }
 
 pub fn shape(text: String, face: FontFace) -> GlyphRun {
@@ -69,7 +60,8 @@ pub fn shape(text: String, face: FontFace) -> GlyphRun {
 }
 
 pub fn shape_with(face: FontFace, text: String) -> GlyphRun {
-    if face.shaper == GlyphShaper.HarfBuzz -> return core.font.shape(text, face)
+    // This is the explicit opt-in for deterministic approximate metrics.
+    // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)
 }
 

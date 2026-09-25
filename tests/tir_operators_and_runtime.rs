@@ -89,6 +89,25 @@ fn run() {
 }
 
 #[test]
+fn derived_nested_struct_equality_uses_raw_protocol_return_on_all_tiers() {
+    let src = r#"
+#Comparable
+struct Inner { value: Int }
+#Comparable
+struct Outer { inner: Inner }
+
+fn run() {
+    first :: Outer{ inner: Inner{ value: 1 } }
+    same :: Outer{ inner: Inner{ value: 1 } }
+    different :: Outer{ inner: Inner{ value: 2 } }
+    print(first == same)
+    print(first == different)
+}
+"#;
+    assert_tiers_agree("derived_nested_struct_equality", src, "true\nfalse\n");
+}
+
+#[test]
 fn infallible_operator_method_can_call_ordinary_helper() {
     let src = r#"
 struct D {

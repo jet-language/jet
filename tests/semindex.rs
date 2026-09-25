@@ -361,8 +361,8 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 
 #[test]
 fn semindex_schema_version() {
-    // D-TEXTHEAD-TYPE1 adds nominal type and ordinary trait-contract facts.
-    assert_eq!(SCHEMA_VERSION, 17);
+    // D-META-REFLECT2 adds availability states to callable facts.
+    assert_eq!(SCHEMA_VERSION, 20);
 }
 
 #[test]

@@ -82,7 +82,7 @@ const LENSES: &[Lens] = &[
     },
     Lens {
         name: "callable-signature",
-        summary: "complete checked callable signatures and policy chains (D-CALLPOLICY1)",
+        summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable",
         render: render_callable_signature,
         render_json: render_callable_signature_json,
     },
@@ -1479,10 +1479,29 @@ fn render_templates_json(
         .collect()
 }
 
+fn callable_unavailable_value(unavailable: &jet_semindex::CallableFactUnavailable) -> ExpandValue {
+    expand_object(vec![
+        ("status", expand_string("unavailable")),
+        (
+            "required_stage",
+            expand_string(unavailable.required_stage.as_str()),
+        ),
+        ("reason", expand_string(unavailable.reason)),
+    ])
+}
+
+fn callable_source_span(span: jet_semindex::SourceSpan) -> ExpandValue {
+    expand_object(vec![
+        ("start", ExpandValue::Number(span.start)),
+        ("end", ExpandValue::Number(span.end)),
+    ])
+}
+
 fn callable_parameter_text(parameter: &jet_semindex::CallableParameterFact) -> String {
-    let access = match parameter.access.as_str() {
-        "read" => "".to_string(),
-        other => format!("{other} "),
+    let access = if parameter.access_name() == "read" {
+        String::new()
+    } else {
+        format!("{} ", parameter.access_name())
     };
     let label = if parameter.label.is_empty() || parameter.label == parameter.name {
         parameter.name.clone()
@@ -1492,11 +1511,12 @@ fn callable_parameter_text(parameter: &jet_semindex::CallableParameterFact) -> S
     let default = parameter
         .default
         .as_ref()
-        .map_or_else(String::new, |value| format!("{{{value}}}"));
+        .map_or_else(String::new, |value| format!("{{{}}}", value.source_text));
     let variadic = if parameter.variadic { "..." } else { "" };
     format!(
         "{access}{variadic}{label}{default}: {} [{}]",
-        parameter.ty, parameter.zone
+        parameter.type_name(),
+        parameter.zone_name()
     )
 }
 
@@ -1510,15 +1530,36 @@ fn callable_signature_text(
         .map(callable_parameter_text)
         .collect::<Vec<_>>()
         .join(", ");
-    let effects = if signature.effects.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[{}]", signature.effects.join(", "))
+    let effects = signature
+        .effect_names()
+        .map(|values| format!("[{}]", values.join(", ")))
+        .unwrap_or_else(|| "unavailable".to_string());
+    let errors = signature
+        .error_names()
+        .map(|values| format!("[{}]", values.join(", ")))
+        .unwrap_or_else(|| "unavailable".to_string());
+    let return_type = signature
+        .return_type
+        .as_ref()
+        .map(jet::AST::Type::name)
+        .unwrap_or_else(|| "no value".to_string());
+    let (failure_contract, failure_source) = match &signature.failure_contract {
+        jet_semindex::CallableFactAvailability::Checked(failure) => (
+            failure.effective_type().name(),
+            failure.source(),
+        ),
+        jet_semindex::CallableFactAvailability::Unavailable(unavailable) => (
+            "unavailable".to_string(),
+            unavailable.reason.to_string(),
+        ),
     };
-    let errors = if signature.errors.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[{}]", signature.errors.join(", "))
+    let generic_parameters = match &signature.generic_parameters {
+        jet_semindex::CallableFactAvailability::Checked(parameters) => parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect::<Vec<_>>()
+            .join(", "),
+        jet_semindex::CallableFactAvailability::Unavailable(_) => "unavailable".to_string(),
     };
     let views = signature
         .returned_views
@@ -1526,32 +1567,80 @@ fn callable_signature_text(
         .map(jet_semindex::ViewProvenanceFact::canonical)
         .collect::<Vec<_>>();
     format!(
-        "{} [{}] ({parameters}) effects={effects} errors={errors} failure={} ({}) views=[{}] policies=[{}]",
+        "{} [{}] ({parameters}) -> {return_type} effects={effects} errors={errors} failure={failure_contract} ({failure_source}) views=[{}] policies=[{}] generics=[{generic_parameters}]",
         definition.name,
         definition.identity,
-        signature.failure_contract,
-        signature.failure_source,
         views.join(" | "),
-        signature.policies.join(", ")
+        signature.policy_names().join(", ")
     )
 }
 
 fn callable_parameter_json(parameter: &jet_semindex::CallableParameterFact) -> ExpandValue {
+    let default = parameter.default.as_ref();
     expand_object(vec![
         ("name", expand_string(&parameter.name)),
         ("label", expand_string(&parameter.label)),
+        ("source", callable_source_span(parameter.source)),
         (
             "default",
-            parameter
-                .default
-                .as_ref()
-                .map_or(ExpandValue::Null, |value| expand_string(value)),
+            default.map_or(ExpandValue::Null, |value| expand_string(&value.source_text)),
         ),
-        ("access", expand_string(&parameter.access)),
-        ("zone", expand_string(&parameter.zone)),
-        ("type", expand_string(&parameter.ty)),
+        (
+            "default_source",
+            default.map_or(ExpandValue::Null, |value| callable_source_span(value.source)),
+        ),
+        (
+            "default_value",
+            default.map_or(ExpandValue::Null, |value| {
+                callable_unavailable_value(&value.value_unavailable)
+            }),
+        ),
+        ("access", expand_string(parameter.access_name())),
+        ("zone", expand_string(parameter.zone_name())),
+        ("type", expand_string(parameter.type_name())),
         ("variadic", ExpandValue::Bool(parameter.variadic)),
     ])
+}
+
+fn callable_effects_json(
+    effects: &jet_semindex::CallableEffectsFact,
+) -> (ExpandValue, ExpandValue, ExpandValue) {
+    match effects {
+        jet_semindex::CallableEffectsFact::Checked(effects) => {
+            let names = effects
+                .iter()
+                .map(jet_semindex::CallableEffectFact::display_name)
+                .collect::<Vec<_>>();
+            let facts = effects
+                .iter()
+                .map(|effect| {
+                    let (kind, name, source) = match effect {
+                        jet_semindex::CallableEffectFact::Named { name, source } => {
+                            ("named", name, *source)
+                        }
+                        jet_semindex::CallableEffectFact::ViaParameter { name, source } => {
+                            ("via_parameter", name, *source)
+                        }
+                    };
+                    expand_object(vec![
+                        ("kind", expand_string(kind)),
+                        ("name", expand_string(name)),
+                        ("source", callable_source_span(source)),
+                    ])
+                })
+                .collect();
+            (
+                expand_string_list(&names),
+                expand_object(vec![("status", expand_string("checked"))]),
+                ExpandValue::Array(facts),
+            )
+        }
+        jet_semindex::CallableEffectsFact::Unavailable(unavailable) => (
+            ExpandValue::Null,
+            callable_unavailable_value(unavailable),
+            ExpandValue::Null,
+        ),
+    }
 }
 
 fn callable_view_json(view: &jet_semindex::ViewProvenanceFact) -> ExpandValue {
@@ -1630,6 +1719,53 @@ fn render_callable_signature_json(
         .into_iter()
         .filter_map(|definition| {
             let signature = definition.callable_signature.as_ref()?;
+            let (effects, effect_status, effect_facts) =
+                callable_effects_json(&signature.effects);
+            let errors = signature
+                .error_names()
+                .map_or(ExpandValue::Null, |values| expand_string_list(&values));
+            let (failure_contract, failure_source, failure_status) =
+                match &signature.failure_contract {
+                    jet_semindex::CallableFactAvailability::Checked(failure) => (
+                        expand_string(failure.effective_type().name()),
+                        expand_string(failure.source()),
+                        expand_object(vec![("status", expand_string("checked"))]),
+                    ),
+                    jet_semindex::CallableFactAvailability::Unavailable(unavailable) => (
+                        ExpandValue::Null,
+                        ExpandValue::Null,
+                        callable_unavailable_value(unavailable),
+                    ),
+                };
+            let (generic_parameters, generic_parameters_status) =
+                match &signature.generic_parameters {
+                    jet_semindex::CallableFactAvailability::Checked(parameters) => (
+                        expand_string_list(
+                            &parameters
+                                .iter()
+                                .map(|parameter| parameter.name.clone())
+                                .collect::<Vec<_>>(),
+                        ),
+                        expand_object(vec![("status", expand_string("checked"))]),
+                    ),
+                    jet_semindex::CallableFactAvailability::Unavailable(unavailable) => (
+                        ExpandValue::Null,
+                        callable_unavailable_value(unavailable),
+                    ),
+                };
+            let return_type = signature
+                .return_type
+                .as_ref()
+                .map(|ty| expand_string(ty.name()))
+                .unwrap_or(ExpandValue::Null);
+            let policies = signature.policy_names();
+            let producer_status = match signature.metadata_producer_status {
+                jet_foundation::AST::MetadataProducerStatus::ContractOnly => "ContractOnly",
+                jet_foundation::AST::MetadataProducerStatus::NotImplemented => "NotImplemented",
+                jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension => {
+                    "ExistingCallableProducerNeedsExtension"
+                }
+            };
             Some(expand_object(vec![
                 ("name", expand_string(&definition.name)),
                 ("identity", expand_string(&definition.identity)),
@@ -1656,13 +1792,15 @@ fn render_callable_signature_json(
                             .collect(),
                     ),
                 ),
-                ("effects", expand_string_list(&signature.effects)),
-                ("errors", expand_string_list(&signature.errors)),
-                (
-                    "failure_contract",
-                    expand_string(&signature.failure_contract),
-                ),
-                ("failure_source", expand_string(&signature.failure_source)),
+                ("return_type", return_type),
+                ("return_type_status", expand_string("checked")),
+                ("effects", effects),
+                ("effect_status", effect_status),
+                ("effect_facts", effect_facts),
+                ("errors", errors),
+                ("failure_contract", failure_contract),
+                ("failure_source", failure_source),
+                ("failure_status", failure_status),
                 (
                     "returned_views",
                     ExpandValue::Array(
@@ -1673,7 +1811,10 @@ fn render_callable_signature_json(
                             .collect(),
                     ),
                 ),
-                ("policies", expand_string_list(&signature.policies)),
+                ("policies", expand_string_list(&policies)),
+                ("generic_parameters", generic_parameters),
+                ("generic_parameters_status", generic_parameters_status),
+                ("metadata_producer_status", expand_string(producer_status)),
             ]))
         })
         .collect()

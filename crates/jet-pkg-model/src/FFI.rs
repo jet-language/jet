@@ -244,20 +244,34 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
-/// program has no foreign declarations and does not use `core.archive`,
-/// `core.db`, or `core.archive.{gzip,zstd}`.
+/// program has no foreign declarations and uses no bridge-backed Core surface.
 ///
-/// `core.archive` (zip/tar; D-CORE-COMPRESS1), `core.db` (D-DEP-DB1), and
-/// `core.archive.gzip` / `.zstd` (D-CORE-COMPRESS1) are delivered through this
-/// same hidden-cargo bridge: when a program imports any of them, the bridge
-/// crate gains the matching dependency and an audited runtime. Archive embeds
-/// the canonical dependency-free vendored package source; the other bridges live under
-/// `crates/jet-pkg-model/src/Prelude/`. The compiler crate
-/// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
-/// bootstrap exceptions, to be native-ized before the end of Epoch 3.
+/// Archive containers and stream codecs are compiled from their canonical Jet
+/// source modules and do not activate this bridge. `core.db` and the other
+/// explicitly bridge-backed Core surfaces are selected below and receive their
+/// matching hidden provider. The compiler crate (`Source/`) stays
+/// zero-dependency (I6).
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let target = host_target();
     prepare_for_target(bundle, &target)
+}
+
+fn needs_parquet_provider(usage: &str) -> bool {
+    usage
+        .split_once("::")
+        .is_some_and(|(module, _)| module == "core.data" || module.starts_with("core.data."))
+}
+
+fn needs_net_tls_provider(usage: &str) -> bool {
+    let usage = usage
+        .strip_prefix("__core_source::")
+        .or_else(|| usage.strip_prefix("__core_intrinsic::"))
+        .unwrap_or(usage);
+    usage == "core.net::tls_connect"
+        || usage == "core.net.tls"
+        || usage.starts_with("core.net.tls::")
+        || usage == "core.email"
+        || usage.starts_with("core.email::")
 }
 
 /// Whether the native whole-program cache can skip Rust code generation for
@@ -268,16 +282,9 @@ pub fn native_cacheable(bundle: &ProgramBundle) -> bool {
         return false;
     }
     !bundle.used_core.iter().any(|u| {
-        u == "core.archive"
-            || u.starts_with("core.archive::")
-            || u == "core.db"
+        u == "core.db"
             || u.starts_with("core.db::")
-            || u == "core.data"
-            || u.starts_with("core.data::")
-            || u == "core.archive.gzip"
-            || u.starts_with("core.archive.gzip::")
-            || u == "core.archive.zstd"
-            || u.starts_with("core.archive.zstd::")
+            || needs_parquet_provider(u)
             || u == "core.http.client"
             || u.starts_with("core.http.client::")
             || matches!(
@@ -285,11 +292,7 @@ pub fn native_cacheable(bundle: &ProgramBundle) -> bool {
                 "core.http::get" | "core.http::post" | "core.http::request"
             )
             || u == "core.http.server::tls"
-            || u == "core.net::tls_connect"
-            || u == "core.net.tls"
-            || u.starts_with("core.net.tls::")
-            || u == "core.email"
-            || u.starts_with("core.email::")
+            || needs_net_tls_provider(u)
             || u == "core.crypto"
             || u.starts_with("core.crypto::")
             || u == "core.crypto.expert"
@@ -331,28 +334,20 @@ pub fn prepare_for_target(
     // The regex runtime is std-only in the generated prelude, so
     // this bridge never asks for a hidden regex dependency.
     let needs_regex = false;
-    let needs_archive = bundle
-        .used_core
-        .iter()
-        .any(|u| u == "core.archive" || u.starts_with("core.archive::"));
+    // Core archive semantics are compiled from the canonical Jet source modules.
+    let needs_archive = false;
     let needs_db = bundle
         .used_core
         .iter()
         .any(|u| u == "core.db" || u.starts_with("core.db::"));
-    // D-DATA-READER1=A: all byte-source loader calls share the Foundation
-    // provider boundary; the concrete Parquet/Arrow closure stays hidden here.
-    let needs_parquet = bundle
-        .used_core
-        .iter()
-        .any(|u| u == "core.data" || u.starts_with("core.data::"));
+    // D-DATA-READER1=A: byte-source loader calls select the hidden
+    // Parquet/Arrow provider. Bare module rows also arise from the semantic
+    // dependency closure (for example core.sync -> core.data), and must not
+    // pull a foreign bridge into a program that never calls a data loader.
+    let needs_parquet = bundle.used_core.iter().any(|usage| needs_parquet_provider(usage));
 
-    // D-CODECS1: standalone `core.archive.gzip` / `core.archive.zstd` codecs.
-    let needs_compress = bundle.used_core.iter().any(|u| {
-        u == "core.archive.gzip"
-            || u.starts_with("core.archive.gzip::")
-            || u == "core.archive.zstd"
-            || u.starts_with("core.archive.zstd::")
-    });
+    // Core stream codecs are compiled from their canonical Jet source modules.
+    let needs_compress = false;
     // D-HTTP-CLIENT2=A / D-DEP-HTTP2=B: the native HTTP client uses only the
     // separately-ratified rustls/system-root TLS bridge.
     let needs_http_client = bundle.used_core.iter().any(|u| {
@@ -369,15 +364,10 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.http.server::tls");
-    // D-NETSOCKET1=A / D-TLS1=A: `core.net.tls_connect` upgrades an existing
-    // TcpStream through the same hidden rustls bridge family as HTTP TLS.
-    let needs_net_tls = bundle.used_core.iter().any(|u| {
-        u == "core.net::tls_connect"
-            || u == "core.net.tls"
-            || u.starts_with("core.net.tls::")
-            || u == "core.email"
-            || u.starts_with("core.email::")
-    });
+    // D-NETSOCKET1=A / D-TLS1=A: client stream TLS (including
+    // `core.net.tls.client`) and the legacy `core.net::tls_connect` path share
+    // the existing hidden rustls callback bridge.
+    let needs_net_tls = bundle.used_core.iter().any(|usage| needs_net_tls_provider(usage));
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "core.crypto"
@@ -822,6 +812,8 @@ pub const RUSTLS_NATIVE_CERTS_CRATE_SPEC: (&str, &str) = ("rustls-native-certs",
 /// Hand-written HTTP server TLS runtime emitted into the bridge crate when
 /// `core.http.server.tls` is used.
 const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HTTPServerTLS.rs");
+/// Hand-written rustls client stream runtime for `core.net.tls` and related native TLS consumers.
+const NET_TLS_RUNTIME: &str = include_str!("Prelude/NetTls.rs");
 
 #[cfg(test)]
 mod http_server_tls_persist_tests {
@@ -1177,8 +1169,6 @@ mod http_server_tls_persist_tests {
     }
 }
 
-/// Hand-written client TLS stream runtime emitted when `core.net.tls_connect` is used.
-const NET_TLS_RUNTIME: &str = include_str!("Prelude/NetTls.rs");
 
 #[cfg(test)]
 mod net_tls_close_tests {
@@ -2075,10 +2065,6 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Dependency-free `core.archive` ABI kernel used by the source package's
-/// internal boundary and the hidden bridge. Keeping one kernel prevents the
-/// offline ring package and direct `jet run` path from drifting apart.
-const ARCHIVE_SOURCE: &str = include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
 
 /// Hand-written database runtime emitted into the bridge crate when `core.db`
 /// is used. This is the only code that touches the `rusqlite` crate.
@@ -2168,13 +2154,12 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
 /// identity through the dependency map rather than duplicating its limits.
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
-const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v1";
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v2";
 const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
-const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../corelib/core.archive/pkgs/archive/src"
-);
+const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/archive");
+const JET_FOUNDATION_TEXT_SOURCE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/text");
 const JET_FOUNDATION_TESTS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests");
 const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
     "Effects.jet",
@@ -2187,7 +2172,8 @@ const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
     "Core/MapKey.rs",
     "Markers.jet",
 ];
-const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["lib.rs"];
+const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
+const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
 const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt"];
 
 #[derive(Debug)]
@@ -2195,6 +2181,7 @@ struct JetFoundationSources {
     foundation: PathBuf,
     codegen_prelude: PathBuf,
     archive_source: PathBuf,
+    text_source: PathBuf,
     tests: PathBuf,
     digest: String,
 }
@@ -2247,6 +2234,8 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
         verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
     let archive_source =
         verified_source_directory(Path::new(JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")?;
+    let text_source =
+        verified_source_directory(Path::new(JET_FOUNDATION_TEXT_SOURCE_PATH), "text")?;
     let tests = verified_source_directory(Path::new(JET_FOUNDATION_TESTS_PATH), "tests")?;
 
     let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
@@ -2268,6 +2257,10 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
             format!("{relative}\0{digest}").as_bytes(),
         );
     }
+    for relative in JET_FOUNDATION_TEXT_INPUTS {
+        let digest = foundation_input_digest(&text_source, relative, "text")?;
+        identity.field("text-input", format!("{relative}\0{digest}").as_bytes());
+    }
     for relative in JET_FOUNDATION_TEST_INPUTS {
         let digest = foundation_input_digest(&tests, relative, "tests")?;
         identity.field("tests-input", format!("{relative}\0{digest}").as_bytes());
@@ -2277,6 +2270,7 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
         foundation,
         codegen_prelude,
         archive_source,
+        text_source,
         tests,
         digest: identity.finish(),
     })
@@ -2341,6 +2335,7 @@ fn jet_foundation_mounts(
         }
         let codegen_stage = closure_root.join("codegen/src/Prelude");
         let archive_stage = closure_root.join("archive/src");
+        let text_stage = closure_root.join("Core/text");
         let tests_stage = closure_root.join("tests");
         for relative in JET_FOUNDATION_CODEGEN_INPUTS {
             stage_foundation_input(
@@ -2358,6 +2353,9 @@ fn jet_foundation_mounts(
                 "archive",
             )?;
         }
+        for relative in JET_FOUNDATION_TEXT_INPUTS {
+            stage_foundation_input(&sources.text_source, relative, &text_stage, "text")?;
+        }
         for relative in JET_FOUNDATION_TEST_INPUTS {
             stage_foundation_input(&sources.tests, relative, &tests_stage, "tests")?;
         }
@@ -2370,6 +2368,7 @@ fn jet_foundation_mounts(
                 archive_stage,
                 sources.archive_source.clone(),
             ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(text_stage, sources.text_source.clone()),
             jet_sema::Comptime::Build::ReadOnlyMount::new(tests_stage, sources.tests.clone()),
         ]);
     }
@@ -2383,6 +2382,10 @@ fn jet_foundation_mounts(
             jet_sema::Comptime::Build::ReadOnlyMount::new(
                 sources.archive_source.clone(),
                 sources.archive_source.clone(),
+            ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                sources.text_source.clone(),
+                sources.text_source.clone(),
             ),
             jet_sema::Comptime::Build::ReadOnlyMount::new(
                 sources.tests.clone(),
@@ -2418,23 +2421,6 @@ const VAULT_NFC_RUNTIME: &str = include_str!("Prelude/VaultNfc.rs");
 const UNICODE_TABLES_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
 
-/// The `flate2` crate version that backs canonical `core.archive.gzip`
-/// (D-CORE-COMPRESS1=A / D-CODECS1). Lives only here — never in the compiler's
-/// Cargo.toml (I6).
-pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ("flate2", "1");
-
-/// The `zstd` crate version that backs `core.archive.zstd` (D-CODECS1). Pure
-/// bootstrap dep: the `zstd` crate is a Rust binding that vendors/builds the C
-/// zstd source via `zstd-sys` at compile time (same I6 bootstrap-exception
-/// posture as `rusqlite`'s bundled SQLite, `DB_CRATE_SPEC`). Lives only here —
-/// never in the compiler's Cargo.toml (I6).
-pub const COMPRESS_ZSTD_CRATE_SPEC: (&str, &str) = ("zstd", "0.13");
-
-/// Hand-written compression runtime emitted into the bridge crate when
-/// `core.archive.gzip` or `core.archive.zstd` is used (D-CODECS1). This is
-/// the only place the standalone codec paths touch `flate2` / `zstd`.
-const COMPRESS_RUNTIME: &str = include_str!("Prelude/Compress.rs");
-const GZIP_KERNEL: &str = include_str!("../../jet-foundation/src/GzipKernel.rs");
 
 pub fn build_bridge(
     entries: &[ExternEntry],
@@ -2626,17 +2612,6 @@ fn build_bridge_full(
         deps.insert(
             AGE_CRATE_SPEC.0.to_string(),
             AGE_CRATE_SPEC.1.to_string(),
-        );
-    }
-    if needs_compress {
-        // D-CORE-COMPRESS1=A: only archive codec children pull stream-codec deps.
-        deps.insert(
-            COMPRESS_GZIP_CRATE_SPEC.0.to_string(),
-            COMPRESS_GZIP_CRATE_SPEC.1.to_string(),
-        );
-        deps.insert(
-            COMPRESS_ZSTD_CRATE_SPEC.0.to_string(),
-            COMPRESS_ZSTD_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_plugin {
@@ -3599,9 +3574,6 @@ fn cache_key_full(
         identity.field("regex_runtime", b"ring");
     }
     identity.field("needs_archive", &[needs_archive as u8]);
-    if needs_archive {
-        identity.field("archive_runtime", ARCHIVE_SOURCE.as_bytes());
-    }
     identity.field("needs_db", &[needs_db as u8]);
     if needs_db {
         identity.field("db_runtime", DB_RUNTIME.as_bytes());
@@ -3663,10 +3635,6 @@ fn cache_key_full(
         );
     }
     identity.field("needs_compress", &[needs_compress as u8]);
-    if needs_compress {
-        identity.field("compress_runtime", COMPRESS_RUNTIME.as_bytes());
-        identity.field("gzip_kernel", GZIP_KERNEL.as_bytes());
-    }
     identity.field("needs_plugin", &[needs_plugin as u8]);
     let mut sorted_authority_needs = authority_needs.to_vec();
     sorted_authority_needs.sort();
@@ -4966,14 +4934,14 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native
 fn emit_wrapper_lib(
     entries: &[ExternEntry],
     _needs_regex: bool,
-    needs_archive: bool,
+    _needs_archive: bool,
     needs_db: bool,
     needs_parquet: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
     needs_net_tls: bool,
     needs_crypto: bool,
-    needs_compress: bool,
+    _needs_compress: bool,
     needs_plugin: bool,
     needs_secrets: bool,
 ) -> String {
@@ -5013,13 +4981,6 @@ fn emit_wrapper_lib(
         out.push_str("}\npub use ");
         out.push_str(name);
         out.push_str("::*;\n");
-    }
-    if needs_archive {
-        // D-CORE-COMPRESS1=A: archive runtime touches only zip/tar containers.
-        push_runtime_mod(&mut out, "__jet_archive", |out| {
-            out.push_str(ARCHIVE_SOURCE);
-            out.push('\n');
-        });
     }
     if needs_db {
         // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
@@ -5110,16 +5071,6 @@ fn emit_wrapper_lib(
                 out.push_str(VAULT_KEY_WRAP_RUNTIME);
                 out.push('\n');
             }
-        });
-    }
-    if needs_compress {
-        // D-CODECS1: the compress runtime is the only place the standalone
-        // `core.archive.gzip` / `core.archive.zstd` codec paths are touched.
-        push_runtime_mod(&mut out, "__jet_compress", |out| {
-            out.push_str(GZIP_KERNEL);
-            out.push('\n');
-            out.push_str(COMPRESS_RUNTIME);
-            out.push('\n');
         });
     }
     if needs_plugin {
@@ -6259,6 +6210,15 @@ mod tests {
     use super::*;
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
+
+    #[test]
+    fn data_provider_requires_direct_call_not_dependency_closure() {
+        assert!(!needs_parquet_provider("core.data"));
+        assert!(!needs_parquet_provider("__core_data"));
+        assert!(!needs_parquet_provider("core.sync::map_merge"));
+        assert!(needs_parquet_provider("core.data::read_parquet"));
+        assert!(needs_parquet_provider("core.data.arrow::from_parquet"));
+    }
     #[test]
     fn cargo_metadata_detects_transitive_compile_time_targets() {
         let root_only =

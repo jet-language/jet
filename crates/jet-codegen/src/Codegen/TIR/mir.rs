@@ -17,8 +17,8 @@ use super::tir_to_mir_core::lower_core_records;
 use super::tir_to_mir_expr::{lower_expr, lower_pattern};
 use super::tir_to_mir_stmt::lower_stmts;
 use super::tir_to_mir_types::{
-    lower_mir_access, lower_mir_convention, lower_param_zone, lower_type, lower_type_defs,
-    lower_view_provenance, TirAccess, TirDeclarations, TirParam,
+    TirAccess, TirDeclarations, TirParam, lower_mir_access, lower_mir_convention, lower_param_zone,
+    lower_type, lower_type_defs, lower_view_provenance,
 };
 use super::{
     TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
@@ -26,41 +26,37 @@ use super::{
     TPlace, TPreludeRoute, TRoutePlan, TStmt, TTargetApplicability, TVisibility, TirErasureReason,
     TirProgram,
 };
-use jet_foundation::Diagnostics::Span;
 use jet_foundation::AST::{AccessConvention, CtKey, CtReport, CtValue, Type};
+use jet_foundation::Diagnostics::Span;
 use jet_foundation::MIR::{
-    stable_id, MirAbi, MirAccess, MirArtifactId, MirArtifactKind, MirArtifactPlan, MirArtifactRequest,
-    MirArtifactTarget, MirAssociatedTypeDecl, MirAssociatedTypeValue, MirBasicBlock,
-    MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCImportLink, MirCLib,
+    MIR_SCHEMA_VERSION, MirAbi, MirAccess, MirArtifactId, MirArtifactKind, MirArtifactPlan,
+    MirArtifactRequest, MirArtifactTarget, MirAssociatedTypeDecl, MirAssociatedTypeValue,
+    MirBasicBlock, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCImportLink, MirCLib,
     MirCOverlayOverride, MirCallArg, MirCallFallibility, MirCallSignature, MirCallbackAdapter,
     MirCallbackId, MirCallee, MirCaptureFacts, MirCaptureOperand, MirCaptureParam, MirCffiFacts,
     MirCliCommand, MirCliDefault, MirCliEntry, MirCliInput, MirCliInputShape, MirCliValueKind,
     MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCoreCallId, MirCoreClosureKind,
-    MirCoveragePoint, MirDropAction, MirDropEdge, MirDropKind, MirEffectFacts, MirEntryKind, MirEntryOutput,
-    MirEntrySpec, MirFailureCarrier, MirFieldId, MirForeign, MirForeignAbi, MirForeignId,
-    MirForeignLanguage, MirFunction, MirFunctionForm, MirFunctionId, MirFunctionKind, MirGeneratorFacts,
-    MirHandleId, MirHandleLifecycle, MirHandleOwnership, MirHandlePayload,
-    MirHardwareSetup, MirHarnessId, MirHarnessKind, MirHarnessPlan, MirImplDef, MirImplId,
-
-    MirImport, MirImportId, MirImportItem, MirImportKind, MirIndexKind, MirInstruction, MirJob,
-    MirJobCachePolicy, MirJobDispatch, MirJobId, MirJobSchedule, MirJobScope, MirJobSkip,
-    MirKernelFacts, MirLinkArtifact, MirLinkArtifactKind, MirLinkUnit, MirLinkUnitId, MirLocal,
-    MirLocalId, MirNameFacts, MirNominalRef, MirOpId, MirOperation, MirOptimizationFacts,
-    MirOptimizationDecision, MirOptimizationRejection, MirOutputCheck, MirOutputCheckId,
-    MirOwnership, MirOwnershipMode, MirPackageFacts, MirPanicContext, MirPanicLoc, MirParam, MirPattern,
-    MirPatternBinding, MirPatternField, MirPatternPosition, MirPatternShape,
-    MirDbQueryMetadata, MirDbTableFact,
-    MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi, MirPreludeCall, MirPreludeCallId,
-    MirPreludeFamily, MirProgram, MirProjection, MirRequireKind, MirRuntimePartId, MirScope,
-    MirScopeId, MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId, MirSourceFile,
-    MirSourceFileId,
-    MirSymbol, MirTargetApplicability, MirTerminator, MirTestCase, MirTestId, MirTestKind,
-    MirTextPatternPart, MirTraitDef, MirTraitId, MirTraitMethod, MirTraitMethodId, MirTraitRef,
-    MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind, MirUnsafeGate, MirValueId,
-    MirVariant, MirVariantPayload, MirVectorAccess, MirVectorAccessRoot, MirVectorFact,
-    MirVectorLayout, MirVectorRule, MirVisibility,
-    MirWebParamField, MirWebParamReconstruction,
-    MIR_SCHEMA_VERSION,
+    MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropEdge, MirDropKind,
+    MirEffectFacts, MirEntryKind, MirEntryOutput, MirEntrySpec, MirFailureCarrier, MirFieldId,
+    MirForeign, MirForeignAbi, MirForeignId, MirForeignLanguage, MirFunction, MirFunctionForm,
+    MirFunctionId, MirFunctionKind, MirGeneratorFacts, MirHandleId, MirHandleLifecycle,
+    MirHandleOwnership, MirHandlePayload, MirHardwareSetup, MirHarnessId, MirHarnessKind,
+    MirHarnessPlan, MirImplDef, MirImplId, MirImport, MirImportId, MirImportItem, MirImportKind,
+    MirIndexKind, MirInstruction, MirJob, MirJobCachePolicy, MirJobDispatch, MirJobId,
+    MirJobSchedule, MirJobScope, MirJobSkip, MirKernelFacts, MirLinkArtifact, MirLinkArtifactKind,
+    MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirNameFacts, MirNominalRef, MirOpId,
+    MirOperation, MirOptimizationDecision, MirOptimizationFacts, MirOptimizationRejection,
+    MirOutputCheck, MirOutputCheckId, MirOwnership, MirOwnershipMode, MirPackageFacts,
+    MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField,
+    MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi,
+    MirPreludeCall, MirPreludeCallId, MirPreludeFamily, MirProgram, MirProjection, MirRequireKind,
+    MirRuntimePartId, MirScope, MirScopeId, MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId,
+    MirSourceFile, MirSourceFileId, MirSymbol, MirTargetApplicability, MirTerminator, MirTestCase,
+    MirTestId, MirTestKind, MirTextPatternPart, MirTraitDef, MirTraitId, MirTraitMethod,
+    MirTraitMethodId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind,
+    MirUnsafeGate, MirValueId, MirVariant, MirVariantPayload, MirVectorAccess, MirVectorAccessRoot,
+    MirVectorFact, MirVectorLayout, MirVectorRule, MirVisibility, MirWebParamField,
+    MirWebParamReconstruction, stable_id,
 };
 /// Keep only derive requests whose implementation is part of this target's
 /// checked program. Type-site markers are broader than Rust trait conformance:
@@ -112,10 +108,7 @@ fn is_native_rust_derive(derive: MirTraitId) -> bool {
     .any(|name| MirTraitId(stable_id("mir-trait", name)) == derive)
 }
 
-fn target_supports_impl(
-    applicability: MirTargetApplicability,
-    target: MirArtifactTarget,
-) -> bool {
+fn target_supports_impl(applicability: MirTargetApplicability, target: MirArtifactTarget) -> bool {
     match target {
         MirArtifactTarget::RustAot => applicability.rust_aot,
         MirArtifactTarget::Cranelift => applicability.cranelift,
@@ -462,9 +455,7 @@ impl FunctionRegistry {
                         let expected = canonical_target_type(&target.module, rhs);
                         target.rhs.as_deref() == Some(expected.as_str())
                     }
-                    None => {
-                        target.rhs.is_none() || target.rhs.as_deref() == Some(owner.as_str())
-                    }
+                    None => target.rhs.is_none() || target.rhs.as_deref() == Some(owner.as_str()),
                 };
                 target.owner == owner
                     && target.trait_name.as_deref() == Some(trait_name)
@@ -696,8 +687,7 @@ fn lower_anonymous_union_type_defs(
         .map(|module| module.key.as_str())
         .unwrap_or_default()
         .to_string();
-    let module_id =
-        jet_foundation::MIR::MirModuleId(stable_id("mir-module", &module));
+    let module_id = jet_foundation::MIR::MirModuleId(stable_id("mir-module", &module));
     let span = Span::new(0, 0);
     let mut names = program
         .enum_variants
@@ -708,10 +698,9 @@ fn lower_anonymous_union_type_defs(
     names.sort_unstable();
 
     for name in names {
-        let variant_names = program
-            .enum_variants
-            .get(&name)
-            .ok_or_else(|| LowerError::new(span, format!("anonymous union `{name}` has no variants")))?;
+        let variant_names = program.enum_variants.get(&name).ok_or_else(|| {
+            LowerError::new(span, format!("anonymous union `{name}` has no variants"))
+        })?;
         let mut members = Vec::with_capacity(variant_names.len());
         for variant in variant_names {
             let payload_key = format!(
@@ -723,12 +712,10 @@ fn lower_anonymous_union_type_defs(
                 .enum_variant_payload_types
                 .get(&payload_key)
                 .or_else(|| {
-                    program
-                        .enum_variant_payload_types
-                        .get(&format!(
-                            "{}::{variant}",
-                            crate::Codegen::mangle_path(&name)
-                        ))
+                    program.enum_variant_payload_types.get(&format!(
+                        "{}::{variant}",
+                        crate::Codegen::mangle_path(&name)
+                    ))
                 })
                 .or_else(|| {
                     program
@@ -746,15 +733,11 @@ fn lower_anonymous_union_type_defs(
             let [member] = payloads.as_slice() else {
                 return Err(LowerError::new(
                     span,
-                    format!(
-                        "anonymous union `{name}` variant `{variant}` must have one payload"
-                    ),
+                    format!("anonymous union `{name}` variant `{variant}` must have one payload"),
                 ));
             };
             let member_tag = crate::AST::union_member_tag(member);
-            if variant != &member_tag
-                && variant != &crate::Codegen::mangle_path(&member_tag)
-            {
+            if variant != &member_tag && variant != &crate::Codegen::mangle_path(&member_tag) {
                 return Err(LowerError::new(
                     span,
                     format!("anonymous union `{name}` has a mismatched variant tag"),
@@ -902,6 +885,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             &program.declarations.traits,
             &function_registry,
             &program.source_files,
+            &program.artifact_facts.modules,
             None,
             None,
             None,
@@ -1074,8 +1058,9 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
     let tests = lower_test_rows(
         &program.artifact_facts.tests,
         &program.funcs,
+        &functions,
         &function_registry,
-    );
+    )?;
     let harnesses = lower_harness_rows(
         &program.artifact_facts.harnesses,
         &program.artifact_facts.tests,
@@ -1417,9 +1402,9 @@ fn append_core_process_handle_rows(
         row.module == "core.handle"
             && (row.member == "process.spec.spawn" || row.member.starts_with("process.child."))
     });
-    let needs_stdin = prelude_calls.iter().any(|row| {
-        row.module == "core.handle" && row.member.starts_with("process.stdin_")
-    });
+    let needs_stdin = prelude_calls
+        .iter()
+        .any(|row| row.module == "core.handle" && row.member.starts_with("process.stdin_"));
     let rows = [
         (needs_child, "ProcessChild", "process.child.close"),
         (needs_stdin, "ProcessStdin", "process.stdin_close"),
@@ -1427,8 +1412,7 @@ fn append_core_process_handle_rows(
     for (needed, typedef_name, close) in rows {
         if !needed
             || handles.iter().any(|row| {
-                row.payload.library == "core.process"
-                    && row.payload.typedef_name == typedef_name
+                row.payload.library == "core.process" && row.payload.typedef_name == typedef_name
             })
         {
             continue;
@@ -1833,10 +1817,7 @@ fn lower_impl_rows(
                 .filter(|function| impl_method_matches(function, row, method_key))
             {
                 let id = registry.id_for(function)?;
-                if !candidates
-                    .iter()
-                    .any(|(candidate, _)| *candidate == id)
-                {
+                if !candidates.iter().any(|(candidate, _)| *candidate == id) {
                     candidates.push((id, function));
                 }
             }
@@ -1866,6 +1847,15 @@ fn lower_impl_rows(
                     .collect(),
             ));
         }
+        // A source impl that lost every method to Core reachability is not an
+        // executable implementation. Preserve genuinely empty impl rows (for
+        // example, traits implemented entirely by defaults).
+        if !row.methods.is_empty()
+            && method_groups.iter().all(|(_, methods)| methods.is_empty())
+        {
+            continue;
+        }
+
         for (self_type, methods) in method_groups {
             let key = canonical_impl_key(&row.module, &self_type, trait_name.map(String::as_str));
             result.push(MirImplDef {
@@ -1944,9 +1934,9 @@ fn lower_impl_rows(
     // executable TIR cannot be represented as a valid MIR edge.
     result.retain(|row| {
         row.methods.iter().all(|id| {
-            functions.iter().any(|function| {
-                registry.id_for(function).ok() == Some(*id)
-            })
+            functions
+                .iter()
+                .any(|function| registry.id_for(function).ok() == Some(*id))
         })
     });
     result.sort_unstable_by_key(|row| row.id);
@@ -1979,7 +1969,6 @@ fn canonical_impl_key(module: &str, owner: &MirType, trait_name: Option<&str>) -
         None => owner,
     }
 }
-
 
 fn same_impl_owner(row: &MirType, owner: &MirType) -> bool {
     row.same_checked_type(owner)
@@ -2307,35 +2296,53 @@ fn lower_job_argument(argument: &TirJobArgument, index: usize) -> MirCliInput {
 fn lower_test_rows(
     rows: &[TirTestFact],
     functions: &[TFunc],
+    checked_functions: &[MirFunction],
     registry: &FunctionRegistry,
-) -> Vec<MirTestCase> {
-    let mut result = rows
-        .iter()
-        .filter_map(|row| {
-            let function = resolve_function_ref(&row.function, functions, registry)?;
-            Some(MirTestCase {
-                id: jet_foundation::MIR::MirTestId(stable_id("mir-test", &row.key)),
-                function,
-                name: row.name.clone(),
-                span: row.span,
-                kind: match row.kind {
-                    TirTestKind::Unit => MirTestKind::Unit,
-                    TirTestKind::Property => MirTestKind::Property,
-                },
-                parameters: row.parameters.iter().map(lower_artifact_param).collect(),
-                faults: row.faults.clone(),
-                expected_failure: row.expected_failure,
-                contract_generated: row.contract_generated,
-                eligibility: row
-                    .eligibility
-                    .as_ref()
-                    .and_then(|reference| resolve_function_ref(reference, functions, registry)),
-                generation_unavailable_reason: row.generation_unavailable_reason.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
+) -> Result<Vec<MirTestCase>, LowerError> {
+    let mut result = Vec::new();
+    for row in rows {
+        let Some(function) = resolve_function_ref(&row.function, functions, registry) else {
+            continue;
+        };
+        let checked = checked_functions.iter().find(|candidate| candidate.id == function)
+            .ok_or_else(|| LowerError::new(row.span, "test target has no checked MIR signature"))?;
+        let mut parameters = Vec::with_capacity(row.parameters.len());
+        for parameter in &row.parameters {
+            let checked_parameter = checked.params.iter()
+                .find(|candidate| candidate.index == parameter.index)
+                .ok_or_else(|| LowerError::new(parameter.span, "test parameter has no checked MIR signature slot"))?;
+            parameters.push(MirParam {
+                index: checked_parameter.index,
+                name: parameter.name.clone(),
+                span: parameter.span,
+                ty: checked_parameter.ty.clone(),
+                access: checked_parameter.access,
+                ownership: checked_parameter.ownership,
+                public_label: parameter.label.clone(),
+                variadic: checked_parameter.variadic,
+                default_present: checked_parameter.default_present,
+            });
+        }
+        result.push(MirTestCase {
+            id: jet_foundation::MIR::MirTestId(stable_id("mir-test", &row.key)),
+            function,
+            name: row.name.clone(),
+            span: row.span,
+            kind: match row.kind {
+                TirTestKind::Unit => MirTestKind::Unit,
+                TirTestKind::Property => MirTestKind::Property,
+            },
+            parameters,
+            faults: row.faults.clone(),
+            expected_failure: row.expected_failure,
+            contract_generated: row.contract_generated,
+            eligibility: row.eligibility.as_ref()
+                .and_then(|reference| resolve_function_ref(reference, functions, registry)),
+            generation_unavailable_reason: row.generation_unavailable_reason.clone(),
+        });
+    }
     result.sort_unstable_by_key(|row| row.id);
-    result
+    Ok(result)
 }
 
 fn function_block_id(
@@ -2392,13 +2399,12 @@ fn lower_harness_rows(
                 .coverage_points
                 .iter()
                 .filter_map(|point| {
-                    let (function, block) =
-                        function_block_id(
-                            &point.function,
-                            point.block.as_deref(),
-                            functions,
-                            registry,
-                        )?;
+                    let (function, block) = function_block_id(
+                        &point.function,
+                        point.block.as_deref(),
+                        functions,
+                        registry,
+                    )?;
                     Some(MirCoveragePoint {
                         id: jet_foundation::MIR::MirCoveragePointId(stable_id(
                             "mir-coverage",
@@ -2809,15 +2815,17 @@ fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) ->
         return target.to_string();
     }
 
-    let qualified = target.split('.').fold(owner.to_string(), |mut key, segment| {
-        if !segment.is_empty() {
-            if !key.is_empty() {
-                key.push_str("::");
+    let qualified = target
+        .split('.')
+        .fold(owner.to_string(), |mut key, segment| {
+            if !segment.is_empty() {
+                if !key.is_empty() {
+                    key.push_str("::");
+                }
+                key.push_str(segment);
             }
-            key.push_str(segment);
-        }
-        key
-    });
+            key
+        });
     if modules.iter().any(|row| row.key == qualified) {
         return qualified;
     }
@@ -2937,7 +2945,7 @@ fn lower_module_rows(
                             })
                             .collect(),
                     }
-                },
+                }
             };
             MirImport {
                 id,
@@ -3091,8 +3099,7 @@ pub fn lower_checked_mir_program_for_with_debug(
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
     let target = request.target;
     let kind = request.kind;
-    let tir =
-        super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
+    let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
     let mir = lower_tir_to_mir(&tir)?;
     let mir = jet_foundation::MIR::optimize_mir_program(
         &mir,
@@ -3546,6 +3553,7 @@ fn lower_function(
     trait_defs: &[super::tir_to_mir_types::TirTraitDef],
     function_registry: &FunctionRegistry,
     source_texts: &BTreeMap<String, String>,
+    modules: &[TirModuleFact],
     body: Option<&TLambdaBody>,
     expression: Option<&TExpr>,
     lambda: Option<&TLambda>,
@@ -3559,6 +3567,7 @@ fn lower_function(
         trait_defs,
         function_registry,
         source_texts,
+        modules,
     );
     ctx.source_file_id_for(&f.source_file);
 
@@ -3910,12 +3919,10 @@ fn canonical_nominal_name(
     match matches.as_slice() {
         [ty] => Ok(ty.key.clone()),
         [] => Ok(name.to_string()),
-        _ => {
-            Err(LowerError::new(
-                span,
-                format!("ambiguous checked MIR type name `{name}`"),
-            ))
-        }
+        _ => Err(LowerError::new(
+            span,
+            format!("ambiguous checked MIR type name `{name}`"),
+        )),
     }
 }
 
@@ -4162,6 +4169,7 @@ struct ContractScopeState {
 enum DeferredCleanup {
     Call(MirValueId),
     Guard(MirPlaceId),
+    FileOwner { place: MirPlaceId, live: MirPlaceId },
 }
 
 #[derive(Debug, Default)]
@@ -4177,7 +4185,8 @@ fn checked_operation_place_refs(operation: &MirOperation) -> Vec<MirPlaceId> {
         | MirOperation::InitializeUninit { place }
         | MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. }
-        | MirOperation::WritePlace { place, .. } => vec![*place],
+        | MirOperation::WritePlace { place, .. }
+        | MirOperation::ReplacePlace { place, .. } => vec![*place],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -4219,6 +4228,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) function_registry: &'a FunctionRegistry,
     pub(super) trait_method_traits: HashMap<(String, String), String>,
     pub(super) source_texts: &'a BTreeMap<String, String>,
+    pub(super) modules: &'a [TirModuleFact],
     pub(super) entry: MirBlockId,
     pub(super) current: MirBlockId,
     pub(super) blocks: Vec<MirBasicBlock>,
@@ -4308,13 +4318,10 @@ fn field_owner_mir_type(ty: &MirType) -> &MirType {
 fn is_shared_guard_mir_type(ty: &MirType) -> bool {
     match ty.kind() {
         MirTypeKind::Tagged { inner, .. } => is_shared_guard_mir_type(inner),
-        MirTypeKind::Apply { name, .. } => {
-            name.name.as_str() == crate::Syntax::TYPE_SHARED_GUARD
-        }
+        MirTypeKind::Apply { name, .. } => name.name.as_str() == crate::Syntax::TYPE_SHARED_GUARD,
         _ => false,
     }
 }
-
 
 fn tuple_field_name<'a, T>(fields: &'a [(String, T)], key: &str) -> Option<&'a str> {
     if let Ok(index) = key.parse::<usize>() {
@@ -4362,6 +4369,7 @@ impl<'a> LowerCtx<'a> {
         trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
         function_registry: &'a FunctionRegistry,
         source_texts: &'a BTreeMap<String, String>,
+        modules: &'a [TirModuleFact],
     ) -> Self {
         let entry_identity =
             construct_identity(function, "block", function.source_span, "entry", "");
@@ -4385,6 +4393,7 @@ impl<'a> LowerCtx<'a> {
             function_registry,
             trait_method_traits: HashMap::new(),
             source_texts,
+            modules,
             entry,
             current: entry,
             blocks: vec![block],
@@ -4463,7 +4472,6 @@ impl<'a> LowerCtx<'a> {
             .iter()
             .any(|row| row.key == name || row.name == name)
     }
-
 
     fn reserve_identity_occurrence(&mut self, base: &str) -> usize {
         let ordinal = self.identity_counts.entry(base.to_string()).or_insert(0);
@@ -4576,31 +4584,35 @@ impl<'a> LowerCtx<'a> {
         advance: Option<MirBlockId>,
         cursor: MirValueId,
     ) -> bool {
-        body_blocks.iter().filter(|block_id| advance != Some(**block_id)).any(|block_id| {
-            let Some(block) = self.blocks.iter().find(|block| block.id == *block_id) else {
-                return false;
-            };
-            block.instructions.iter().any(|instruction| {
-                match &instruction.operation {
-                    MirOperation::Index { index, .. } => *index == cursor,
-                    _ => checked_operation_place_refs(&instruction.operation)
-                        .into_iter()
-                        .any(|place_id| {
-                            self.places
-                                .iter()
-                                .find(|place| place.id == place_id)
-                                .is_some_and(|place| {
-                                    place.projections.iter().any(|projection| {
+        body_blocks
+            .iter()
+            .filter(|block_id| advance != Some(**block_id))
+            .any(|block_id| {
+                let Some(block) = self.blocks.iter().find(|block| block.id == *block_id) else {
+                    return false;
+                };
+                block
+                    .instructions
+                    .iter()
+                    .any(|instruction| match &instruction.operation {
+                        MirOperation::Index { index, .. } => *index == cursor,
+                        _ => checked_operation_place_refs(&instruction.operation)
+                            .into_iter()
+                            .any(|place_id| {
+                                self.places
+                                    .iter()
+                                    .find(|place| place.id == place_id)
+                                    .is_some_and(|place| {
+                                        place.projections.iter().any(|projection| {
                                         matches!(
                                             projection,
                                             MirProjection::Index { index, .. } if *index == cursor
                                         )
                                     })
-                                })
-                        }),
-                }
+                                    })
+                            }),
+                    })
             })
-        })
     }
 
     fn checked_cursor_matches(
@@ -4657,7 +4669,9 @@ impl<'a> LowerCtx<'a> {
             | MirOperation::Move { value }
             | MirOperation::AttachTag { value, .. }
             | MirOperation::Field { base: value, .. }
-            | MirOperation::Index { base: value, .. } => self.checked_value_access_root(*value, seen),
+            | MirOperation::Index { base: value, .. } => {
+                self.checked_value_access_root(*value, seen)
+            }
             MirOperation::Semantic(MirSemanticOp::ColumnarRead { base, .. }) => {
                 self.checked_value_access_root(*base, seen)
             }
@@ -4700,7 +4714,9 @@ impl<'a> LowerCtx<'a> {
         let element = match base_type.kind() {
             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
             MirTypeKind::Tagged { inner, .. } => match inner.kind() {
-                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
+                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                    inner.as_ref()
+                }
                 _ => return (MirVectorLayout::AosStrided, None),
             },
             _ => return (MirVectorLayout::AosStrided, None),
@@ -4711,7 +4727,11 @@ impl<'a> LowerCtx<'a> {
         }) else {
             return (MirVectorLayout::AosStrided, None);
         };
-        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == identity) else {
+        let Some(definition) = self
+            .type_defs
+            .iter()
+            .find(|definition| definition.id == identity)
+        else {
             return (MirVectorLayout::AosStrided, None);
         };
         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
@@ -4722,9 +4742,7 @@ impl<'a> LowerCtx<'a> {
         }
         (
             MirVectorLayout::ColumnarDirect,
-            fields
-                .iter()
-                .position(|candidate| candidate.id == field),
+            fields.iter().position(|candidate| candidate.id == field),
         )
     }
 
@@ -4757,7 +4775,9 @@ impl<'a> LowerCtx<'a> {
         let element = match collection_type.kind() {
             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
             MirTypeKind::Tagged { inner, .. } => match inner.kind() {
-                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => inner.as_ref(),
+                MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                    inner.as_ref()
+                }
                 _ => return None,
             },
             _ => return None,
@@ -4766,7 +4786,10 @@ impl<'a> LowerCtx<'a> {
             MirTypeKind::Apply { name, .. } => Some(name.id),
             _ => None,
         })?;
-        let definition = self.type_defs.iter().find(|definition| definition.id == identity)?;
+        let definition = self
+            .type_defs
+            .iter()
+            .find(|definition| definition.id == identity)?;
         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
             return None;
         };
@@ -4800,10 +4823,15 @@ impl<'a> LowerCtx<'a> {
                     let Some(place) = self.places.iter().find(|place| place.id == place_id) else {
                         continue;
                     };
-                    let field = place.projections.iter().rev().find_map(|projection| match projection {
-                        MirProjection::Field { field, .. } => Some(*field),
-                        _ => None,
-                    });
+                    let field =
+                        place
+                            .projections
+                            .iter()
+                            .rev()
+                            .find_map(|projection| match projection {
+                                MirProjection::Field { field, .. } => Some(*field),
+                                _ => None,
+                            });
                     let (layout, column_index) = self.checked_vector_place_layout(place, field);
                     accesses.push(MirVectorAccess {
                         root: MirVectorAccessRoot::Place(place_id),
@@ -4843,12 +4871,7 @@ impl<'a> LowerCtx<'a> {
                     }),
                     MirOperation::Field { base, field } => {
                         if let Some((root, layout, column_index)) =
-                            self.checked_indexed_field_access(
-                                *base,
-                                *field,
-                                cursor,
-                                cursor_place,
-                            )
+                            self.checked_indexed_field_access(*base, *field, cursor, cursor_place)
                         {
                             accesses.push(MirVectorAccess {
                                 root,
@@ -4999,10 +5022,7 @@ impl<'a> LowerCtx<'a> {
         self.source_files.insert(file.to_string(), id);
         id
     }
-    fn lower_db_query_metadata(
-        &mut self,
-        metadata: super::TDbQueryMetadata,
-    ) -> MirDbQueryMetadata {
+    fn lower_db_query_metadata(&mut self, metadata: super::TDbQueryMetadata) -> MirDbQueryMetadata {
         let source_path = metadata.source_file;
         MirDbQueryMetadata {
             source_file: self.source_file_id_for(&source_path),
@@ -5049,10 +5069,7 @@ impl<'a> LowerCtx<'a> {
                 .count()
             {
                 0 => Ok(MirTypeId(stable_id("mir-type", &canonical_key))),
-                1 => Ok(MirTypeId(stable_id(
-                    "mir-type",
-                    &format!("Trait({key})"),
-                ))),
+                1 => Ok(MirTypeId(stable_id("mir-type", &format!("Trait({key})")))),
                 _ => Err(self.error(
                     self.span(),
                     format!("ambiguous checked MIR trait key `{key}`"),
@@ -5068,11 +5085,7 @@ impl<'a> LowerCtx<'a> {
     ///
     /// Groups are a source/TIR pattern convenience.  Canonical MIR stores only
     /// their dotted leaf variants, so consumers must test each descendant leaf.
-    pub(super) fn enum_group_leaves(
-        &self,
-        owner: MirTypeId,
-        group: &str,
-    ) -> Option<Vec<String>> {
+    pub(super) fn enum_group_leaves(&self, owner: MirTypeId, group: &str) -> Option<Vec<String>> {
         let row = self.type_defs.iter().find(|row| row.id == owner)?;
         let MirTypeDefKind::Enum { variants, .. } = &row.kind else {
             return None;
@@ -5086,7 +5099,6 @@ impl<'a> LowerCtx<'a> {
         (!leaves.is_empty()).then_some(leaves)
     }
 
-
     fn normalize_contextual_type(&self, ty: &Type) -> Type {
         ty.map_named_types(&|name| {
             if self
@@ -5097,14 +5109,18 @@ impl<'a> LowerCtx<'a> {
             {
                 return None;
             }
-            self.nominal_identities.get(name).cloned().or_else(|| {
-                let qualified = (!self.function.module.is_empty())
-                    .then(|| format!("{}::{name}", self.function.module))?;
-                self.type_defs
-                    .iter()
-                    .any(|definition| definition.key == qualified && definition.name == name)
-                    .then_some(qualified)
-            })
+            let scoped = format!("{}::{name}", self.function.module);
+            self.nominal_identities
+                .get(&scoped)
+                .or_else(|| self.nominal_identities.get(name))
+                .cloned()
+                .or_else(|| {
+                    let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
+                    self.type_defs
+                        .iter()
+                        .any(|definition| definition.key == qualified && definition.name == name)
+                        .then_some(qualified)
+                })
         })
     }
 
@@ -5115,20 +5131,25 @@ impl<'a> LowerCtx<'a> {
             Type::Named(name) => {
                 let owner_name = match &self.function.kind {
                     super::TFuncKind::Method { owner_type, .. }
-                    | super::TFuncKind::TraitMethod { owner_type, .. } => {
-                        Some(owner_type.name())
-                    }
+                    | super::TFuncKind::TraitMethod { owner_type, .. } => Some(owner_type.name()),
                     super::TFuncKind::TopLevel => None,
                 };
                 owner_name.and_then(|owner_name| {
-                    let same_leaf =
-                        owner_name.rsplit("::").next().unwrap_or(owner_name.as_str()) == name;
+                    let same_leaf = owner_name
+                        .rsplit("::")
+                        .next()
+                        .unwrap_or(owner_name.as_str())
+                        == name;
                     let ambiguous = self
                         .type_defs
                         .iter()
                         .filter(|definition| {
                             definition.name == *name
-                                || definition.key.rsplit("::").next().unwrap_or(&definition.key)
+                                || definition
+                                    .key
+                                    .rsplit("::")
+                                    .next()
+                                    .unwrap_or(&definition.key)
                                     == name.as_str()
                         })
                         .count()
@@ -5270,7 +5291,7 @@ impl<'a> LowerCtx<'a> {
                 return Err(self.error(
                     self.span(),
                     format!("checked MIR type {owner:?} has no ordered fields"),
-                ))
+                ));
             }
         };
         fields
@@ -5637,6 +5658,9 @@ impl<'a> LowerCtx<'a> {
                             },
                         )?;
                     }
+                    DeferredCleanup::FileOwner { place, live } => {
+                        self.emit_file_owner_cleanup(place, live)?;
+                    }
                 }
             }
         }
@@ -5670,8 +5694,15 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn register_scope_guard(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
-        let Some(row) = self.places.iter_mut().find(|candidate| candidate.id == place) else {
-            return Err(self.error(self.span(), "scope guard cleanup targets an unavailable place"));
+        let Some(row) = self
+            .places
+            .iter_mut()
+            .find(|candidate| candidate.id == place)
+        else {
+            return Err(self.error(
+                self.span(),
+                "scope guard cleanup targets an unavailable place",
+            ));
         };
         if !matches!(
             row.ty.nominal_name(),
@@ -5690,6 +5721,212 @@ impl<'a> LowerCtx<'a> {
         frame.actions.push(DeferredCleanup::Guard(place));
         Ok(())
     }
+    pub(super) fn is_core_file_owner(&self, identity: MirTypeId) -> bool {
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.files") else {
+            return false;
+        };
+        self.type_defs.iter().any(|definition| {
+            definition.id == identity
+                && matches!(definition.name.as_str(), "FileReader" | "FileWriter" | "TempDir" | "TempFile" | "FileLock")
+                && self.modules.iter().any(|module| {
+                    module.path == source.path
+                        && definition.module == jet_foundation::MIR::MirModuleId(stable_id("mir-module", &module.key))
+                        && definition.key == format!("{}::{}", module.key, definition.name)
+                })
+        })
+    }
+
+    fn owned_file_paths(
+        &mut self,
+        ty: &MirType,
+        path: &mut Vec<(String, Type)>,
+        visiting: &mut Vec<MirTypeId>,
+        output: &mut Vec<Vec<(String, Type)>>,
+    ) -> Result<(), LowerError> {
+        if ty.identity.is_some_and(|identity| self.is_core_file_owner(identity)) {
+            output.push(path.clone());
+            return Ok(());
+        }
+        if let Some(fields) = ty.tuple_fields() {
+            for (name, field_ty) in fields {
+                path.push((name.clone(), mir_type_as_ast(field_ty)));
+                self.owned_file_paths(field_ty, path, visiting, output)?;
+                path.pop();
+            }
+            return Ok(());
+        }
+        let Some(identity) = ty.identity else { return Ok(()) };
+        if visiting.contains(&identity) {
+            return Ok(());
+        }
+        let definitions = self.type_defs;
+        let Some(definition) = definitions.iter().find(|row| row.id == identity) else {
+            return Ok(());
+        };
+        if !matches!(definition.ownership, MirOwnershipMode::Owned | MirOwnershipMode::Move) {
+            return Ok(());
+        }
+        let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+            return Ok(());
+        };
+        visiting.push(identity);
+        let owner = mir_type_as_ast(ty);
+        for field in fields.iter().filter(|field| !field.computed) {
+            let field_ty = self.field_type_for_type(&owner, &field.name)?;
+            let checked = self.mir_type(&field_ty)?;
+            path.push((field.name.clone(), field_ty));
+            self.owned_file_paths(&checked, path, visiting, output)?;
+            path.pop();
+        }
+        visiting.pop();
+        Ok(())
+    }
+
+    fn binding_borrow_access(&self, value: MirValueId, seen: &mut Vec<MirValueId>) -> Option<MirAccess> {
+        if seen.contains(&value) {
+            return None;
+        }
+        seen.push(value);
+        let operation = self.blocks.iter().flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == Some(value))
+            .map(|instruction| &instruction.operation)?;
+        match operation {
+            MirOperation::ReadPlace(_) => Some(MirAccess::Read),
+            MirOperation::AddressOf { access: MirAccess::Read, .. } => Some(MirAccess::Read),
+            MirOperation::AddressOf { access: MirAccess::Write, .. } => Some(MirAccess::Write),
+            MirOperation::Move { value } | MirOperation::AttachTag { value, .. } =>
+                self.binding_borrow_access(*value, seen),
+            MirOperation::Field { base, .. } | MirOperation::ProjectMembers { base, .. }
+            | MirOperation::Index { base, .. } => self.binding_borrow_access(*base, seen),
+            MirOperation::Phi { incoming } => incoming.iter()
+                .find_map(|(_, value)| self.binding_borrow_access(*value, seen)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn register_file_owner_binding(
+        &mut self,
+        place: MirPlaceId,
+        initializer: MirValueId,
+    ) -> Result<(), LowerError> {
+        if self.binding_borrow_access(initializer, &mut Vec::new()).is_some() {
+            return Ok(());
+        }
+        self.register_file_owner(place)
+    }
+
+    /// Only owned record/tuple storage participates; views, shared storage,
+    /// containers and recursive back-edges retain their existing lifecycle.
+    pub(super) fn register_file_owner(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
+        let row = self.places.iter().find(|row| row.id == place)
+            .ok_or_else(|| self.error(self.span(), "file owner cleanup has no place"))?;
+        let owned = row.projections.is_empty() && match row.base {
+            MirPlaceBase::Local(id) => self.locals.iter().any(|local| {
+                local.id == id && local.place == place
+                    && matches!(local.ownership.mode, MirOwnershipMode::Owned | MirOwnershipMode::Move)
+            }),
+            MirPlaceBase::Parameter(value) => self.blocks.iter().flat_map(|block| &block.instructions)
+                .find(|instruction| instruction.result == Some(value))
+                .and_then(|instruction| match instruction.operation {
+                    MirOperation::Parameter { index, .. } => self.params.get(index),
+                    _ => None,
+                })
+                .is_some_and(|parameter| parameter.access == MirAccess::Move),
+            _ => false,
+        };
+        if !owned {
+            return Ok(());
+        }
+        let ty = row.ty.clone();
+        let mut paths = Vec::new();
+        self.owned_file_paths(&ty, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+        // Deferred bindings unwind in reverse order; record fields unwind in
+        // declaration order within each binding.
+        for path in paths.into_iter().rev() {
+            let mut leaf = place;
+            for (name, ty) in path {
+                leaf = self.project_field_place(leaf, &name, ty, self.span())?;
+            }
+            self.register_file_owner_leaf(leaf)?;
+        }
+        Ok(())
+    }
+
+    fn register_file_owner_leaf(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
+        let name = format!("file_owner_live_{}", place.0);
+        let flag = self.bind_local(&TLocal::generated(name), Type::Bool, true, false, false)?;
+        let initialized = self.emit(
+            "file.owner.initialized",
+            Some(Type::Bool),
+            MirOperation::Constant(MirConstant::Bool(true)),
+        )?;
+        self.emit(
+            "file.owner.live.write",
+            None,
+            MirOperation::WritePlace {
+                place: flag,
+                value: initialized,
+            },
+        )?;
+        if let Some(row) = self.places.iter_mut().find(|row| row.id == place) {
+            retain_place_access(row, MirAccess::Move);
+        }
+        self.defer_stack
+            .last_mut()
+            .expect("function always has a lexical cleanup frame")
+            .actions
+            .push(DeferredCleanup::FileOwner { place, live: flag });
+        Ok(())
+    }
+
+    fn file_owner_leaves(&self, place: MirPlaceId) -> Vec<(MirPlaceId, MirPlaceId)> {
+        let Some(root) = self.places.iter().find(|row| row.id == place) else {
+            return Vec::new();
+        };
+        self.defer_stack.iter().rev().flat_map(|frame| frame.actions.iter().rev())
+            .filter_map(|action| {
+                let DeferredCleanup::FileOwner { place: owner, live } = action else {
+                    return None;
+                };
+                let leaf = self.places.iter().find(|row| row.id == *owner)?;
+                (root.base == leaf.base
+                    && root.projections.len() <= leaf.projections.len()
+                    && root.projections.iter().zip(&leaf.projections).all(|(a, b)| {
+                        matches!((a, b),
+                            (MirProjection::Field { field: a, .. }, MirProjection::Field { field: b, .. }) if a == b)
+                    }))
+                    .then_some((*owner, *live))
+            })
+            .collect()
+    }
+
+    fn emit_file_owner_cleanup(&mut self, place: MirPlaceId, live: MirPlaceId) -> Result<(), LowerError> {
+        let condition = self.emit("file.owner.live", Some(Type::Bool), MirOperation::ReadPlace(live))?;
+        let drop_block = self.new_block(self.span(), "file.owner.drop")?;
+        let after = self.new_block(self.span(), "file.owner.after-drop")?;
+        self.terminate(MirTerminator::Branch {
+            condition,
+            then_target: drop_block,
+            else_target: after,
+        });
+        self.switch_to(drop_block);
+        let ty = self.places.iter().find(|row| row.id == place)
+            .map(|row| row.ty.clone())
+            .ok_or_else(|| self.error(self.span(), "file owner cleanup has no place"))?;
+        let value = self.emit_mir_type("file.owner.cleanup.move", Some(ty), MirOperation::MovePlace { place })?;
+        self.emit("file.owner.cleanup.drop", None, MirOperation::Drop { value, kind: MirDropKind::Value })?;
+        self.terminate(MirTerminator::Jump { target: after });
+        self.switch_to(after);
+        Ok(())
+    }
+
+    pub(super) fn emit_file_owner_replacement(&mut self, place: MirPlaceId) -> Result<(), LowerError> {
+        for (owner, live) in self.file_owner_leaves(place) {
+            self.emit_file_owner_cleanup(owner, live)?;
+        }
+        Ok(())
+    }
+
 
     pub(super) fn emit(
         &mut self,
@@ -5735,6 +5972,12 @@ impl<'a> LowerCtx<'a> {
         forced_ownership: Option<MirOwnership>,
     ) -> Result<MirValueId, LowerError> {
         self.promote_spawn_closure_to_send(&operation)?;
+        let (live_places, live) = match &operation {
+            MirOperation::MovePlace { place } => (self.file_owner_leaves(*place), false),
+            MirOperation::WritePlace { place, .. }
+            | MirOperation::ReplacePlace { place, .. } => (self.file_owner_leaves(*place), true),
+            _ => (Vec::new(), false),
+        };
         let span = self.span();
         let source_line = self.current_line;
         let detail = format!("{operation:?}");
@@ -5763,6 +6006,18 @@ impl<'a> LowerCtx<'a> {
                 ty: value_type,
                 operation,
             });
+        }
+        for (_, flag) in live_places {
+            let next = self.emit(
+                "file.owner.live.state",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(live)),
+            )?;
+            self.emit(
+                "file.owner.live.update",
+                None,
+                MirOperation::WritePlace { place: flag, value: next },
+            )?;
         }
         Ok(value)
     }
@@ -5831,10 +6086,7 @@ impl<'a> LowerCtx<'a> {
         place: MirPlaceId,
     ) -> Result<(), LowerError> {
         let Some((value, kind)) = (|| {
-            let place = self
-                .places
-                .iter()
-                .find(|candidate| candidate.id == place)?;
+            let place = self.places.iter().find(|candidate| candidate.id == place)?;
             let MirPlaceBase::Temporary(value) = &place.base else {
                 return None;
             };
@@ -6035,10 +6287,7 @@ impl<'a> LowerCtx<'a> {
             self.intern_prelude_route(super::index_route(kind, access, &result_ty, &carrier)?)?;
         let write_call = if access == MirAccess::Write {
             Some(self.intern_prelude_route(super::index_write_route(
-                kind,
-                &base.ty,
-                &result_ty,
-                &carrier,
+                kind, &base.ty, &result_ty, &carrier,
             )?)?)
         } else {
             None
@@ -6212,6 +6461,9 @@ impl<'a> LowerCtx<'a> {
         {
             mir_place.base = MirPlaceBase::Parameter(param_value);
         }
+        if matches!(access, MirAccess::Move) {
+            self.register_file_owner(place)?;
+        }
         Ok(())
     }
 
@@ -6281,7 +6533,7 @@ impl<'a> LowerCtx<'a> {
             ty: mir_ty,
             place,
             mutable,
-            ownership: self.ownership_for(&ty),
+            ownership: MirOwnership::from_access(if mutable { MirAccess::Write } else { MirAccess::Read }),
             comptime: false,
             uninit: false,
             arena_view: false,
@@ -6397,6 +6649,45 @@ impl<'a> LowerCtx<'a> {
             MirPatternShape::Variant {
                 variant, bindings, ..
             } => {
+                // A checked Result may arrive as an enum-style `.Ok(value)` or
+                // `.Err(error)` pattern. It is still the same owning carrier as
+                // Pattern::Ok/Err: test by reference and extract only on the
+                // selected arm with ResultValue, never EnumPayload's clone.
+                if matches!(subject_ty.without_user_tags(), Type::Result { .. })
+                    && matches!(variant.as_str(), "Ok" | "Err")
+                {
+                    let (binding, binding_span) = match bindings.as_slice() {
+                        [] | [MirPatternBinding::Wildcard] => ("", self.span()),
+                        [MirPatternBinding::Bind { name, span }] => (name.as_str(), *span),
+                        _ => {
+                            return Err(self.error(
+                                self.span(),
+                                "checked Result variant requires one payload binding",
+                            ))
+                        }
+                    };
+                    let shape = if variant == "Ok" {
+                        MirPatternShape::Ok {
+                            binding: binding.to_string(),
+                            binding_span,
+                            span: self.span(),
+                        }
+                    } else {
+                        MirPatternShape::Err {
+                            binding: binding.to_string(),
+                            binding_span,
+                            span: self.span(),
+                        }
+                    };
+                    return self.lower_pattern_shape_condition(
+                        subject,
+                        subject_ty,
+                        None,
+                        &shape,
+                        mutable,
+                        reuse_bindings,
+                    );
+                }
                 let owner = owner.ok_or_else(|| {
                     self.error(self.span(), "checked variant pattern is missing its owner")
                 })?;
@@ -6460,7 +6751,7 @@ impl<'a> LowerCtx<'a> {
                         return Err(self.error(
                             self.span(),
                             "checked present pattern has a non-optional subject",
-                        ))
+                        ));
                     }
                 };
                 let test = self.emit_checked(
@@ -6504,7 +6795,7 @@ impl<'a> LowerCtx<'a> {
                         return Err(self.error(
                             self.span(),
                             "checked result pattern has a non-result subject",
-                        ))
+                        ));
                     }
                 };
                 let test = self.emit_checked(
@@ -6830,7 +7121,7 @@ impl<'a> LowerCtx<'a> {
                         return Err(self.error(
                             self.span(),
                             "checked present pattern has a non-optional subject",
-                        ))
+                        ));
                     }
                 };
                 let value = self.emit_checked(
@@ -6851,7 +7142,7 @@ impl<'a> LowerCtx<'a> {
                         return Err(self.error(
                             self.span(),
                             "checked result pattern has a non-result subject",
-                        ))
+                        ));
                     }
                 };
                 let value_ty = if ok { success } else { error };
@@ -7085,13 +7376,11 @@ impl<'a> LowerCtx<'a> {
         let Some(row) = self.places.iter().find(|candidate| candidate.id == place) else {
             return false;
         };
-        matches!(
-            row.projections.last(),
-            Some(MirProjection::Index { .. })
-        ) && matches!(
-            row.ty.layout.abi,
-            MirAbi::Nominal | MirAbi::Aggregate | MirAbi::Sequence | MirAbi::Dynamic
-        )
+        matches!(row.projections.last(), Some(MirProjection::Index { .. }))
+            && matches!(
+                row.ty.layout.abi,
+                MirAbi::Nominal | MirAbi::Aggregate | MirAbi::Sequence | MirAbi::Dynamic
+            )
     }
 
     fn bind_captures(&mut self, lambda: &TLambda) -> Result<(), LowerError> {
@@ -7293,6 +7582,7 @@ impl<'a> LowerCtx<'a> {
             self.trait_defs,
             self.function_registry,
             self.source_texts,
+            self.modules,
             Some(&lambda.executable),
             None,
             Some(lambda),
@@ -7382,13 +7672,12 @@ impl<'a> LowerCtx<'a> {
             ret: lambda.ret.clone().map(Box::new),
             effect_bound: None,
             param_contract: None,
-            call_metadata: lambda
-                .host_param_conventions
-                .as_ref()
-                .map(|conventions| crate::AST::FunctionCallMetadata {
+            call_metadata: lambda.host_param_conventions.as_ref().map(|conventions| {
+                crate::AST::FunctionCallMetadata {
                     conventions: conventions.clone(),
                     ..Default::default()
-                }),
+                }
+            }),
             return_view_provenance: None,
         };
         let role = format!("closure.lambda.{start}.{end}");
@@ -7482,6 +7771,7 @@ impl<'a> LowerCtx<'a> {
             self.trait_defs,
             self.function_registry,
             self.source_texts,
+            self.modules,
             None,
             Some(close),
             None,
@@ -7623,8 +7913,11 @@ impl<'a> LowerCtx<'a> {
         // A checked concrete-to-trait coercion transfers the concrete value to
         // the box even when the trait parameter's convention is Read. Keep the
         // ordinary borrow path for already-boxed or genuinely borrowed values.
-        let consumes_trait_box =
-            arg.box_as_trait.is_some() && arg.borrow && !arg.mut_borrow && !arg.clone && !arg.arc_clone;
+        let consumes_trait_box = arg.box_as_trait.is_some()
+            && arg.borrow
+            && !arg.mut_borrow
+            && !arg.clone
+            && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
             && !arg.mut_borrow
             && !arg.clone
@@ -7639,7 +7932,10 @@ impl<'a> LowerCtx<'a> {
             MirAccess::Move
         } else if arg.borrow {
             MirAccess::Read
-        } else if arg.clone || arg.arc_clone {
+        } else if arg.clone
+            || arg.arc_clone
+            || matches!(arg.fact_channel().exclusivity, super::TExclusivity::Move)
+        {
             MirAccess::Move
         } else {
             MirAccess::Read
@@ -7654,9 +7950,9 @@ impl<'a> LowerCtx<'a> {
                 None if arg.mut_borrow => {
                     // A checked mutable argument may be an rvalue (for example, a freshly-created runtime handle). Materialize it in a mutable temporary before taking the call borrow; rejecting it here turns a valid checked program into an ICE.
                     let value = self.lower_child(&arg.value)?;
-                    let local =
-                        TLocal::generated(format!("call_arg_{}", value.0)).as_mutable();
-                    let place = self.bind_local(&local, arg.value.ty.clone(), true, false, false)?;
+                    let local = TLocal::generated(format!("call_arg_{}", value.0)).as_mutable();
+                    let place =
+                        self.bind_local(&local, arg.value.ty.clone(), true, false, false)?;
                     self.emit(
                         "call-arg-temp",
                         None,
@@ -7679,7 +7975,11 @@ impl<'a> LowerCtx<'a> {
         } else {
             self.lower_child(&arg.value)?
         };
-        let call_place = if consumes_trait_box || consumes_union { None } else { place };
+        let call_place = if consumes_trait_box || consumes_union {
+            None
+        } else {
+            place
+        };
         Ok(MirCallArg {
             value,
             access,
@@ -7868,7 +8168,11 @@ impl<'a> LowerCtx<'a> {
         key: impl Into<String>,
         value: impl Into<String>,
     ) -> Result<(), LowerError> {
-        let Some(row) = self.scopes.iter_mut().find(|candidate| candidate.id == scope) else {
+        let Some(row) = self
+            .scopes
+            .iter_mut()
+            .find(|candidate| candidate.id == scope)
+        else {
             return Err(self.error(
                 self.span(),
                 format!("missing MIR scope row {scope:?} for scope fact"),
@@ -7882,7 +8186,11 @@ impl<'a> LowerCtx<'a> {
         scope: MirScopeId,
         value: jet_foundation::MIR::MirValueId,
     ) -> Result<(), LowerError> {
-        let Some(row) = self.scopes.iter_mut().find(|candidate| candidate.id == scope) else {
+        let Some(row) = self
+            .scopes
+            .iter_mut()
+            .find(|candidate| candidate.id == scope)
+        else {
             return Err(self.error(
                 self.span(),
                 format!("missing MIR scope row {scope:?} for deadline operand"),
@@ -7906,11 +8214,7 @@ impl<'a> LowerCtx<'a> {
         }
         self.defer_stack.pop();
         if !self.is_terminated() {
-            self.emit(
-                "scope.exit",
-                None,
-                MirOperation::ScopeExit { scope },
-            )?;
+            self.emit("scope.exit", None, MirOperation::ScopeExit { scope })?;
         }
         Ok(())
     }
@@ -7923,7 +8227,12 @@ impl<'a> LowerCtx<'a> {
         if self.defer_stack.len() <= 1 {
             return Err(self.error(self.span(), "lexical defer frame underflow"));
         }
-        if self.defer_stack.last().and_then(|frame| frame.owner).is_some() {
+        if self
+            .defer_stack
+            .last()
+            .and_then(|frame| frame.owner)
+            .is_some()
+        {
             return Err(self.error(
                 self.span(),
                 "lexical defer frame cannot pop an active MIR scope",
@@ -8010,10 +8319,7 @@ impl<'a> LowerCtx<'a> {
         state: &ContractScopeState,
     ) -> Result<(), LowerError> {
         if !Self::contract_is_unit_type(&state.result.binding_ty) {
-            return Err(self.error(
-                self.span(),
-                "checked contract return is missing its value",
-            ));
+            return Err(self.error(self.span(), "checked contract return is missing its value"));
         }
         let binding_value = self.emit(
             "contract.return.unit",
@@ -8030,8 +8336,7 @@ impl<'a> LowerCtx<'a> {
         )?;
         if matches!(
             state.result.mode,
-            super::TContractResultMode::ResultPayload
-                | super::TContractResultMode::OptionPayload
+            super::TContractResultMode::ResultPayload | super::TContractResultMode::OptionPayload
         ) {
             let carrier_payload = self.emit(
                 "contract.return.carrier.unit",
@@ -8042,16 +8347,12 @@ impl<'a> LowerCtx<'a> {
                 "contract.return.carrier",
                 Some(state.result.carrier_ty.clone()),
                 match state.result.mode {
-                    super::TContractResultMode::ResultPayload => {
-                        MirOperation::ResultOk {
-                            value: carrier_payload,
-                        }
-                    }
-                    super::TContractResultMode::OptionPayload => {
-                        MirOperation::Present {
-                            value: carrier_payload,
-                        }
-                    }
+                    super::TContractResultMode::ResultPayload => MirOperation::ResultOk {
+                        value: carrier_payload,
+                    },
+                    super::TContractResultMode::OptionPayload => MirOperation::Present {
+                        value: carrier_payload,
+                    },
                     super::TContractResultMode::Direct => unreachable!(),
                 },
             )?;
@@ -8160,17 +8461,13 @@ impl<'a> LowerCtx<'a> {
                     "contract.return.binding.extract",
                     Some(state.result.binding_ty.clone()),
                     match state.result.mode {
-                        super::TContractResultMode::ResultPayload => {
-                            MirOperation::ResultValue {
-                                subject: carrier_copy,
-                                ok: true,
-                            }
-                        }
-                        super::TContractResultMode::OptionPayload => {
-                            MirOperation::OptionValue {
-                                subject: carrier_copy,
-                            }
-                        }
+                        super::TContractResultMode::ResultPayload => MirOperation::ResultValue {
+                            subject: carrier_copy,
+                            ok: true,
+                        },
+                        super::TContractResultMode::OptionPayload => MirOperation::OptionValue {
+                            subject: carrier_copy,
+                        },
                         super::TContractResultMode::Direct => unreachable!(),
                     },
                 )?;
@@ -8240,42 +8537,37 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn lower_contract(&mut self, contract: &TContract) -> Result<(), LowerError> {
         let previous_span = self.span();
         self.set_span(contract.span);
-        let lowered = (|| {
-            match contract.disposition {
-                TContractDisposition::Check => {
-                    let condition = self.lower_child(&contract.condition)?;
-                    let message = self.lower_child(&contract.message)?;
-                    let unit = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
-                    let carrier = TFailureCarrier::Infallible;
-                    let call = self.intern_prelude_route(super::require_stop_route(
-                        "require",
-                        1,
-                        &unit,
-                        &carrier,
-                    )?)?;
-                    let location = MirPanicLoc {
-                        file: self.source_file_id_for(&contract.file),
-                        line: contract.line,
-                        column: 0,
-                    };
-                    let context = self.panic_context_at(contract.line, None);
-                    self.emit(
-                        "contract.require",
-                        Some(unit),
-                        MirOperation::Semantic(MirSemanticOp::RequireStop {
-                            call,
-                            kind: MirRequireKind::Require,
-                            condition: Some(condition),
-                            location,
-                            context,
-                            values: vec![message],
-                            always_stops: false,
-                        }),
-                    )?;
-                    Ok(())
-                }
-                TContractDisposition::Proven | TContractDisposition::Stripped => Ok(()),
+        let lowered = (|| match contract.disposition {
+            TContractDisposition::Check => {
+                let condition = self.lower_child(&contract.condition)?;
+                let message = self.lower_child(&contract.message)?;
+                let unit = Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string());
+                let carrier = TFailureCarrier::Infallible;
+                let call = self.intern_prelude_route(super::require_stop_route(
+                    "require", 1, &unit, &carrier,
+                )?)?;
+                let location = MirPanicLoc {
+                    file: self.source_file_id_for(&contract.file),
+                    line: contract.line,
+                    column: 0,
+                };
+                let context = self.panic_context_at(contract.line, None);
+                self.emit(
+                    "contract.require",
+                    Some(unit),
+                    MirOperation::Semantic(MirSemanticOp::RequireStop {
+                        call,
+                        kind: MirRequireKind::Require,
+                        condition: Some(condition),
+                        location,
+                        context,
+                        values: vec![message],
+                        always_stops: false,
+                    }),
+                )?;
+                Ok(())
             }
+            TContractDisposition::Proven | TContractDisposition::Stripped => Ok(()),
         })();
         self.set_span(previous_span);
         lowered
@@ -8341,10 +8633,7 @@ impl<'a> LowerCtx<'a> {
         let type_name = match base.ty.without_user_tags() {
             Type::Named(name) => name,
             _ => {
-                return Err(self.error(
-                    self.span(),
-                    "checked swizzle place has no named lane type",
-                ))
+                return Err(self.error(self.span(), "checked swizzle place has no named lane type"));
             }
         };
         let scalar_ty = crate::Sema::math_scalar_ty(&type_name);
@@ -8371,14 +8660,10 @@ impl<'a> LowerCtx<'a> {
                     }),
                 )?;
                 let call = self.intern_prelude_route(super::lane_index_route(
-                    &type_name,
-                    &scalar_ty,
-                    &carrier,
+                    &type_name, &scalar_ty, &carrier,
                 )?)?;
                 let write_call = self.intern_prelude_route(super::lane_index_write_route(
-                    &type_name,
-                    &scalar_ty,
-                    &carrier,
+                    &type_name, &scalar_ty, &carrier,
                 )?)?;
                 let id = self.place_id(
                     "lane",
@@ -8423,10 +8708,7 @@ impl<'a> LowerCtx<'a> {
                 } else {
                     MirAccess::Read
                 };
-                let place = self.lower_place(
-                    &TPlace::Expr(Box::new((**place).clone())),
-                    access,
-                )?;
+                let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
             TExprKind::Clone(_)
@@ -8437,15 +8719,25 @@ impl<'a> LowerCtx<'a> {
             _ if crate::Collections::is_iter_type(&arg.ty) => (MirAccess::Move, None),
             _ => (MirAccess::Read, None),
         };
+        // Copy values cannot be consumed, even when an explicit copy or clone
+        // expression provides an owned argument to a Core provider.
+        let access = if matches!(access, MirAccess::Move)
+            && matches!(
+                self.ownership_for(&arg.ty).mode,
+                jet_foundation::MIR::MirOwnershipMode::Copy
+            )
+        {
+            MirAccess::Read
+        } else {
+            access
+        };
         let value = if let Some(place) = place {
             self.emit(
                 "core-call-place",
                 Some(arg.ty.clone()),
                 MirOperation::ReadPlace(place),
             )?
-        } else if matches!(access, MirAccess::Move)
-            && crate::Collections::is_iter_type(&arg.ty)
-        {
+        } else if matches!(access, MirAccess::Move) && crate::Collections::is_iter_type(&arg.ty) {
             if let Some(place) =
                 super::tir_to_mir_expr::lower_receiver_place(self, arg, MirAccess::Move)?
             {

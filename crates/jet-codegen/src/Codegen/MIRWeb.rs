@@ -563,6 +563,7 @@ fn check_operation_types(
         | MirOperation::ReadPlace(_)
         | MirOperation::MovePlace { .. }
         | MirOperation::WritePlace { .. }
+        | MirOperation::ReplacePlace { .. }
         | MirOperation::InitializeUninit { .. }
         | MirOperation::Copy { .. }
         | MirOperation::Move { .. }
@@ -2634,10 +2635,7 @@ fn js_operation_expression(
                 let key = program
                     .constants
                     .iter()
-                    .find(|constant| {
-                        constant.key.as_str() == name.as_str()
-                            || constant.name.as_str() == name.as_str()
-                    })
+                    .find(|constant| constant.key.as_str() == name.as_str())
                     .map(|constant| constant.key.as_str())
                     .unwrap_or(name);
                 format!("globalThis[{}]", js_string(key))
@@ -2670,7 +2668,8 @@ fn js_operation_expression(
             };
             js_write_place_expression(program, function, *place, &expression)?
         }
-        MirOperation::WritePlace { place, value: id } => {
+        MirOperation::WritePlace { place, value: id }
+        | MirOperation::ReplacePlace { place, value: id } => {
             let transferred = js_value_transfer_expression(program, function, *id)?;
             js_write_place_expression(program, function, *place, &transferred)?
         }

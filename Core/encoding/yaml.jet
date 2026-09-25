@@ -318,6 +318,7 @@ fn strip_inline_comment(text: String) -> String {
         } else if n == 34 || n == 39 {
             quote = n
         } else if n == 35 && (i == 0 || raw[i - 1] == 32 || raw[i - 1] == 9) {
+            if i == 0 -> return ""
             return String.from_bytes(raw[0..i - 1]) ?? ""
         }
         i += 1
@@ -388,8 +389,10 @@ fn split_once(text: String, sep: U8) -> (after: String, before: String) {
     raw :: text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == sep {
-            before :: String.from_bytes(raw[0..i - 1]) ?? ""
-            after :: String.from_bytes(raw[i + 1..raw.len() - 1]) ?? ""
+            before := ""
+            if i > 0 -> before = String.from_bytes(raw[0..i - 1]) ?? ""
+            after := ""
+            if i + 1 < raw.len() -> after = String.from_bytes(raw[i + 1..raw.len() - 1]) ?? ""
             return (before: before, after: after)
         }
     }

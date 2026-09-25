@@ -299,6 +299,52 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: KW_VALIDATE_BLOCK,
         class: HighlightClass::KeywordDeclaration,
     },
+    // D-PREP-SURFACE2=A / D-META-REFLECT2=A: contextual prep and exact
+    // sigil-bearing metadata query roots.
+    HighlightToken {
+        text: KW_PREP,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_PHASE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_TYPE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_FUNCTION,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_METHOD,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_CLOSURE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_PROGRAM,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_PACKAGE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_SOURCE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_VALUE,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: META_QUERY_TYPES,
+        class: HighlightClass::KeywordOther,
+    },
     // Ownership / builtins.
     HighlightToken {
         text: KW_SELF,
@@ -1286,10 +1332,12 @@ use super::{
     COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
     KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
     KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
-    KW_MODULE, KW_POLICY, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
+    KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
     KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,
     KW_TEST, KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE,
     KW_VALIDATE_BLOCK, KW_VIA, KW_WRAP, LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, MARKER_PREFIX,
+    META_QUERY_CLOSURE, META_QUERY_FUNCTION, META_QUERY_METHOD, META_QUERY_PACKAGE, META_QUERY_PHASE,
+    META_QUERY_PROGRAM, META_QUERY_SOURCE, META_QUERY_TYPE, META_QUERY_TYPES, META_QUERY_VALUE,
     OP_AMP_EQ, OP_AND, OP_CARET_EQ, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LE, OP_LT,
     OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_MINUS_MINUS, OP_NAMED_CTOR, OP_NE, OP_NOT,
     OP_OPTIONAL_CHAIN, OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT, OP_PERCENT_PERCENT_EQ,

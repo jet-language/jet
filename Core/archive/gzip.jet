@@ -1,4 +1,5 @@
 use core as core
+use core.archive.[ArchiveError, crc32]
 
 // core.archive.gzip — RFC 1952 gzip members as whole-buffer codecs.
 //
@@ -24,7 +25,7 @@ pub fn compress(data: [U8]) -> [U8] {
     out.push(U8{255})
     payload :: core.archive.deflate(data)
     loop b in payload -> out.push(b)
-    crc :: core.archive.crc32(data)
+    crc :: crc32(data)
     loop k in 0..<4 -> out.push(to_u8(crc >> (k * 8)))
     n :: data.len()
     loop k in 0..<4 -> out.push(to_u8(n >> (k * 8)))
@@ -38,7 +39,7 @@ pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
         return Err(GzipFileError.Malformed)
     }
     flags :: u8_int(data[3])
-    if (flags & 224) != 0 -> return Err(GzipFileError.Unsupported)
+    if (flags & 224) != 0 -> return Err(GzipFileError.Malformed)
     trailer := data.len() - 8
     i := 10
     if (flags & 4) != 0 {
@@ -75,7 +76,7 @@ pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
     if (flags & 2) != 0 {
         if i + 2 > trailer -> return Err(GzipFileError.Malformed)
         header_crc :: read_u16le(data, i)
-        if (core.archive.crc32(slice_u8(data, 0, i)) & 65535) != header_crc {
+        if (crc32(slice_u8(data, 0, i)) & 65535) != header_crc {
             return Err(GzipFileError.Checksum)
         }
         i = i + 2
@@ -85,8 +86,15 @@ pub fn decompress(data: [U8]) -> [U8] !GzipFileError {
     if expected_size > 67108864 -> return Err(GzipFileError.Unsupported)
     payload := [U8]{}
     loop k in i..<trailer -> payload.push(data[k])
-    body :: core.archive.inflate(payload) ?? return Err(GzipFileError.Malformed)
-    if core.archive.crc32(body) != read_u32le(data, trailer) {
+    inflated :: core.archive.inflate(payload)
+    body := if inflated == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if error == ArchiveError.Unsupported -> return Err(GzipFileError.Unsupported)
+            return Err(GzipFileError.Malformed)
+        }
+    }
+    if crc32(body) != read_u32le(data, trailer) {
         return Err(GzipFileError.Checksum)
     }
     if (body.len() & 4294967295) != read_u32le(data, trailer + 4) {
@@ -113,7 +121,7 @@ pub fn isize(data: [U8]) -> Int {
 
 pub fn magic() -> [U8] { [U8]{(U8{31}), (U8{139}), (U8{8})} }
 
-pub fn crc(data: [U8]) -> Int { core.archive.crc32(data) }
+pub fn crc(data: [U8]) -> Int { crc32(data) }
 
 pub fn compress_text(text: String) -> [U8] { compress(text.bytes()) }
 pub fn decompress_text(data: [U8]) -> String !GzipFileError {

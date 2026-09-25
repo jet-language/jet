@@ -151,6 +151,118 @@ fn run() {
 
 #[cfg(unix)]
 #[test]
+fn process_stdin_text_propagates_child_status_across_execution_tiers() {
+    let shell = jet_string_path(
+        &std::fs::canonicalize("/bin/sh").expect("canonicalize Unix shell"),
+    );
+    let source = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    process.stdin_text(
+        process.cmd(["{shell}", "-c", "read input; [ \"$input\" = expected ]"]),
+        "expected\n",
+    ) ?? panic("stdin_text positive failed")
+    print("stdin:accepted")
+
+    if process.stdin_text(
+        process.cmd(["{shell}", "-c", "cat >/dev/null; exit 7"]),
+        "payload",
+    ) == {{
+        .Err(error) -> {{
+            if error == {{
+                .Other(context) -> {{
+                    if context.operation == .Resolve &&
+                        (context.resource ?? "") == "{shell}" &&
+                        context.os_code == None &&
+                        (context.cause ?? "") == "process exited unsuccessfully: code=7" {{
+                        print("nonzero:typed")
+                    }} else {{
+                        print("nonzero:wrong-context")
+                }}
+                }}
+                else -> print("nonzero:wrong-category")
+            }}
+        }}
+        .Ok(_) -> print("nonzero:accepted")
+    }}
+}}
+"#
+    );
+    tir_support::assert_tiers_agree(
+        "process_stdin_text_child_status",
+        &source,
+        "stdin:accepted\nnonzero:typed\n",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn process_stdin_text_preserves_input_and_io_error_all_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_stdin_text_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let output_prefix = jet_string_path(&dir.join("stdin"));
+    let payload = "x".repeat(131072);
+    let source = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    session :: process.current_pid()
+    path := "{output_prefix}-{{session}}.txt"
+    process.stdin_text(
+        process.cmd(["sh", "-c", "cat > \"$1\"", "sh", path]),
+        "exact stdin\nbytes\n"
+    ) ?? panic("stdin text failed")
+    print("stdin:sent")
+
+    if process.stdin_text(process.cmd(["sh", "-c", "exit 0"]), "{payload}") == {{
+        .Ok(_) -> print("write:missed")
+        .Err(error) -> {{
+            if error == {{
+                .Closed(_) -> print("write:closed")
+                else -> print("write:wrong")
+            }}
+        }}
+    }}
+}}
+"#,
+        output_prefix = output_prefix,
+        payload = payload,
+    );
+    tir_support::assert_tiers_agree(
+        "process_stdin_text_carriers",
+        &source,
+        "stdin:sent\nwrite:closed\n",
+    );
+
+    let output_files: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("txt"))
+        .collect();
+    assert_eq!(
+        output_files.len(),
+        if tir_support::have_rustc() { 3 } else { 2 },
+        "each available execution tier must write its own input file"
+    );
+    for path in output_files {
+        assert_eq!(
+            fs::read(path).unwrap(),
+            b"exact stdin\nbytes\n",
+            "stdin_text must close the stream after writing the exact payload"
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn process_pipeline_streaming_lifecycle_matches_all_execution_tiers() {
     let source = r#"
 use core.process as process
@@ -162,11 +274,10 @@ fn run() {
     ]) ?? panic("stream pipeline failed")
     print("stream:{streamed.output.trim()}")
 
-    bounded :: process.pipeline([
+    if process.pipeline([
         process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]).output_limit(4096),
         process.cmd(["cat"])
-    ])
-    if bounded == {
+    ]) == {
         .Err(error) -> {
             if error == {
                 .ResourceLimit(limit) -> print(if limit == .Output -> "bounded:output" else -> "bounded:wrong")
@@ -176,11 +287,10 @@ fn run() {
         .Ok(_) -> print("bounded:accepted")
     }
 
-    early :: process.pipeline([
+    if process.pipeline([
         process.cmd(["yes", "x"]),
         process.cmd(["head", "-c", "4"])
-    ])
-    if early == {
+    ]) == {
         .Ok(receipt) -> print("early:{receipt.output.len()}:{receipt.success}")
         .Err(_) -> print("early:error")
     }
@@ -444,13 +554,8 @@ fn native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let fixture = compile_native_fixture(&dir);
-    let fixture = jet_string_path(&fixture);
-    let pid_files = ["interrupt", "terminate", "kill", "timeout", "drop"]
-        .map(|name| dir.join(format!("{name}.pid")));
-    for path in &pid_files {
-        let _ = fs::remove_file(path);
-    }
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let pid_prefix = jet_string_path(&dir.join("session"));
     let src = format!(
         r#"
 use core.process as process
@@ -462,7 +567,10 @@ fn dropped(fixture: String, pid: String) {{
 }}
 
 fn run() {{
-    interrupt :: process.cmd(["{fixture}", "tree", "{interrupt}"]).terminal().spawn() ?? panic("interrupt spawn failed")
+    session :: process.current_pid()
+
+    interrupt_pid := "{pid_prefix}-{{session}}-interrupt.pid"
+    interrupt :: process.cmd(["{fixture}", "tree", interrupt_pid]).terminal().spawn() ?? panic("interrupt spawn failed")
     time.sleep(100ms)
     interrupt.interrupt() ?? panic("interrupt failed")
     interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
@@ -474,7 +582,8 @@ fn run() {{
         }}
     }}
 
-    terminate :: process.cmd(["{fixture}", "tree", "{terminate}"]).terminal().spawn() ?? panic("terminate spawn failed")
+    terminate_pid := "{pid_prefix}-{{session}}-terminate.pid"
+    terminate :: process.cmd(["{fixture}", "tree", terminate_pid]).terminal().spawn() ?? panic("terminate spawn failed")
     time.sleep(100ms)
     terminate.terminate() ?? panic("terminate failed")
     terminate_result :: terminate.wait() ?? panic("terminate wait failed")
@@ -486,7 +595,8 @@ fn run() {{
         }}
     }}
 
-    kill :: process.cmd(["{fixture}", "tree", "{kill}"]).terminal().spawn() ?? panic("kill spawn failed")
+    kill_pid := "{pid_prefix}-{{session}}-kill.pid"
+    kill :: process.cmd(["{fixture}", "tree", kill_pid]).terminal().spawn() ?? panic("kill spawn failed")
     time.sleep(100ms)
     kill.kill() ?? panic("kill failed")
     kill_result :: kill.wait() ?? panic("kill wait failed")
@@ -499,24 +609,34 @@ fn run() {{
     }}
 
     timeout :: Duration.milliseconds(100) ?? panic("duration failed")
-    timed :: process.cmd(["{fixture}", "tree", "{timeout}"]).terminal().timeout(timeout).run() ?? panic("timeout failed")
+    timeout_pid := "{pid_prefix}-{{session}}-timeout.pid"
+    timed :: process.cmd(["{fixture}", "tree", timeout_pid]).terminal().timeout(timeout).run() ?? panic("timeout failed")
     print(timed.timed_out)
 
-    dropped("{fixture}", "{drop}")
+    drop_pid := "{pid_prefix}-{{session}}-drop.pid"
+    dropped("{fixture}", drop_pid)
     print("drop returned")
 }}
 "#,
         fixture = fixture,
-        interrupt = jet_string_path(&pid_files[0]),
-        terminate = jet_string_path(&pid_files[1]),
-        kill = jet_string_path(&pid_files[2]),
-        timeout = jet_string_path(&pid_files[3]),
-        drop = jet_string_path(&pid_files[4]),
+        pid_prefix = pid_prefix,
     );
-    let (code, stdout, stderr) = build_and_run(&dir, "native_tree", &src, &[], None);
-    assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "false\nfalse\nfalse\ntrue\ndrop returned\n");
+    tir_support::assert_tiers_agree(
+        "native_process_session_full_tree_cleanup",
+        &src,
+        "false\nfalse\nfalse\ntrue\ndrop returned\n",
+    );
 
+    let pid_files: Vec<_> = fs::read_dir(&dir)
+        .expect("read native process-session PID files")
+        .map(|entry| entry.expect("read native process-session directory entry").path())
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("pid"))
+        .collect();
+    assert_eq!(
+        pid_files.len(),
+        15,
+        "all five cleanup paths must be exercised by AOT, JIT, and interpreter"
+    );
     for path in pid_files {
         let pid = fs::read_to_string(&path).expect("native fixture wrote descendant pid");
         let pid = pid.trim();

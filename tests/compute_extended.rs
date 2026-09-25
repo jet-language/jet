@@ -27,10 +27,15 @@ fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
 
 #[test]
 fn linalg_and_fft_use_the_cpu_oracle() {
-    assert_aot_and_default_parity(
-        "compute_linalg_targeted",
-        include_str!("../examples/features/tooling/compute_linalg.jet"),
-        &["det:10", "solve:", "fft_len:8"],
+    assert_example_cli_tiers_agree_with_package(
+        "tooling/compute_linalg",
+        None,
+        |stdout| {
+            assert_eq!(
+                stdout,
+                include_str!("../examples/features/expected/tooling/compute_linalg.out")
+            );
+        },
     );
 }
 

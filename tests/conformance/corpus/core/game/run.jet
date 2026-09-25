@@ -3,12 +3,15 @@ use core.game as game
 
 fn run() {
     scene := game.Scene.new("conformance")
+    assert((scene.name == "conformance" && scene.max_frames == 0 && scene.tick == 0))
     scene.input.bind("tick", "Space")
     scene.on_frame((frame) -> {
         if frame.input.pressed("tick") -> print(frame.index)
     })
     replay :: game.Replay.record("runs/conformance.jetreplay")
     backend :: game.Backend.headless()
+    assert((replay.path == "runs/conformance.jetreplay"))
+    assert((backend.name == "headless" && backend.running))
     result :: game.run(scene, replay: replay, backend: backend)
     print(result)
 }

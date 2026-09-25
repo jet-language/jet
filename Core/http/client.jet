@@ -8,6 +8,11 @@ use core as core
 use core.http as http
 use core.http.[HTTPError, HTTPRequest, HTTPResponse]
 use core.http.client as provider
+use core.net.url as http_url
+c_max_body_bytes :: 1048576
+c_max_url_bytes :: 8192
+c_max_redirects :: 10
+c_max_retries :: 1
 
 pub struct Client {
     pub method: String
@@ -35,11 +40,11 @@ pub struct Session {
     pub proxy: String
 }
 pub fn get(url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
-    core.http.client.get(url)
+    http.get(url)
 }
 
 pub fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
-    core.http.client.post(url, body)
+    http.post(url, body)
 }
 
 pub fn request(method: String, url: String) -> HTTPRequest {
@@ -51,7 +56,8 @@ pub fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse !HTTPError {
 }
 
 pub fn header(client: Client, line: String) -> Client {
-    if header_name(line) == None -> return ~client
+    _ :: header_name(line) ?? return ~client
+    _ :: header_value(line) ?? return ~client
     Client{
         method: ~client.method,
         url: ~client.url,
@@ -70,10 +76,15 @@ pub fn set_header(client: Client, name: String, value: String) -> Client {
         proxy: ~client.proxy,
     }
 }
+pub fn with_proxy(client: Client, proxy: Proxy) -> Client {
+    Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: client.redirects, proxy: ~proxy.url}
+}
+
 
 pub fn timeout_redirects(client: Client, n: Int) -> Client {
     limit := n
     if limit < 0 -> limit = 0
+    if limit > c_max_redirects -> limit = c_max_redirects
     Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: limit, proxy: ~client.proxy}
 }
 
@@ -83,7 +94,7 @@ pub fn session() -> Session {
         cookies: [String]{},
         timeout_ms: 30000,
         retries: 0,
-        redirects: 5,
+        redirects: c_max_redirects,
         user: "",
         password: "",
         proxy: "",
@@ -112,12 +123,14 @@ pub fn session_timeout(s: Session, ms: Int) -> Session {
 pub fn session_retries(s: Session, n: Int) -> Session {
     r := n
     if r < 0 -> r = 0
+    if r > c_max_retries -> r = c_max_retries
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
 pub fn session_redirects(s: Session, n: Int) -> Session {
     r := n
     if r < 0 -> r = 0
+    if r > c_max_redirects -> r = c_max_redirects
     Session{headers: ~s.headers, cookies: ~s.cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: ~s.user, password: ~s.password, proxy: ~s.proxy}
 }
 
@@ -163,23 +176,18 @@ pub fn cookie_header(cookies: [String]) -> String {
 }
 
 pub fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError {
-    if s.proxy.bytes().len() > 0 -> return Err(.Policy{reason: "proxy"})
+    if !valid_method(method) -> return Err(.InvalidMethod)
+    if !valid_url(url) -> return Err(.InvalidUrl)
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if s.proxy.bytes().len() > 0 && !valid_url(s.proxy) -> return Err(.Proxy{stage: "invalid proxy"})
     h := session_headers(s)
-    resp :: request_once(method, url, body, h)
+    resp :: request_with_retries(s, method, url, body, h)
     session_follow(s, method, url, body, h, resp)
 }
 
 fn session_follow(s: Session, method: String, url: String, body: String, h: [String], first: HTTPResponse) -[Net, Time.Wait]> HTTPResponse !HTTPError {
-    attempt := 0
-    resp := first
-    loop {
-        code := resp.status()
-        if code < 500 || code >= 600 || attempt >= s.retries -> break
-        attempt = attempt + 1
-        retry :: request_once(method, url, body, h)
-        resp = retry
-    }
     hops := 0
+    resp := first
     current_method := method
     current_url := url
     current_body := body
@@ -187,22 +195,62 @@ fn session_follow(s: Session, method: String, url: String, body: String, h: [Str
     loop {
         code := resp.status()
         if code < 300 || code >= 400 -> return Ok(~resp)
+        if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(~resp)
         if hops >= s.redirects -> return Ok(~resp)
         loc :: resp.header("Location") ?? return Ok(~resp)
         next :: resolve_location(current_url, loc) ?? return Err(.InvalidUrl)
+        if is_https_downgrade(current_url, next) -> return Err(.Redirect{reason: "https downgrade"})
+        on_same_origin := same_origin(current_url, next)
         preserve := code == 307 || code == 308
         if !preserve {
             current_method = "GET"
             current_body = ""
-            headers = redirect_headers(headers)
+            headers = redirect_headers(headers, !on_same_origin)
+        } else if !on_same_origin {
+            headers = redirect_headers(headers, true)
         }
-        retry :: request_once(current_method, next, current_body, headers)
+        retry :: request_with_retries(s, current_method, next, current_body, headers)
         resp = retry
         current_url = next
         hops = hops + 1
     }
 }
 
+fn request_with_retries(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    attempts := 0
+    loop {
+        if request_once(s, method, url, body, headers) == {
+            .Ok(response) -> return Ok(response)
+            .Err(error) -> {
+                if attempts >= s.retries || !retryable_method(method) || !retryable_error(error) -> return Err(error)
+                attempts = attempts + 1
+            }
+        }
+    }
+}
+
+fn retryable_method(method: String) -> Bool {
+    u :: ascii_upper(method)
+    u == "GET" || u == "HEAD" || u == "OPTIONS" || u == "TRACE" || u == "PUT" || u == "DELETE"
+}
+
+fn retryable_error(error: HTTPError) -> Bool {
+    if error == {
+        .IO(_) -> true
+        else -> false
+    }
+}
+
+pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
+    if policy == {
+        RedirectPolicy.Disabled -> return 0
+        RedirectPolicy.All -> return c_max_redirects
+        else -> { _ := 0 }
+    }
+    if fallback < 0 -> return 0
+    if fallback > c_max_redirects -> return c_max_redirects
+    fallback
+}
 pub fn session_get(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "GET", url, "") }
 pub fn session_post(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "POST", url, body) }
 pub fn session_put(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse !HTTPError { session_request(s, "PUT", url, body) }
@@ -221,18 +269,19 @@ pub fn session_form(s: Session, url: String, body: String) -[Net, Time.Wait]> HT
     session_post(h, url, body)
 }
 
-pub fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int {
-    if policy == {
-        RedirectPolicy.Disabled -> return 0
-        RedirectPolicy.All -> return 20
-        else -> { _ := 0 }
+fn request_once(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
+    req := provider.request(method, url)
+    req = req.redirects(0)
+    req = req.timeout(s.timeout_ms)
+    if s.proxy.bytes().len() > 0 -> req = req.proxy(s.proxy)
+    loop line in headers {
+        name :: header_name(line) ?? return Err(.InvalidHeader)
+        value :: header_value(line) ?? return Err(.InvalidHeader)
+        req = req.header(name, value)
     }
-    if fallback < 0 -> return 0
-    fallback
-}
-
-pub fn with_proxy(client: Client, proxy: Proxy) -> Client {
-    Client{method: ~client.method, url: ~client.url, headers: ~client.headers, redirects: client.redirects, proxy: ~proxy.url}
+    if body.bytes().len() > c_max_body_bytes -> return Err(.BodyTooLarge{limit: c_max_body_bytes})
+    if body.bytes().len() > 0 -> req = req.body(body)
+    req.send()
 }
 
 pub fn user_agent(client: Client, name: String) -> Client { set_header(client, "User-Agent", name) }
@@ -240,16 +289,6 @@ pub fn bearer(client: Client, token: String) -> Client { set_header(client, "Aut
 pub fn accept(client: Client, mime: String) -> Client { set_header(client, "Accept", mime) }
 pub fn content_type(client: Client, mime: String) -> Client { set_header(client, "Content-Type", mime) }
 
-fn request_once(method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse !HTTPError {
-    req := provider.request(method, url)
-    loop line in headers {
-        name :: header_name(line) ?? next
-        value :: header_value(line) ?? next
-        req = req.header(name, value)
-    }
-    if body.bytes().len() > 0 -> req = req.body(body)
-    req.send()
-}
 
 fn session_headers(s: Session) -> [String] {
     h := ~s.headers
@@ -303,12 +342,14 @@ fn set_header_line(headers: [String], name: String, value: String) -> [String] {
     out
 }
 
-fn redirect_headers(headers: [String]) -> [String] {
+fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] {
     out := [String]{}
     loop line in headers {
         name :: header_name(line) ?? next
         lower :: ascii_lower(name)
-        if lower != "content-length" && lower != "content-type" && lower != "authorization" && lower != "cookie" -> out.push(line)
+        credential := lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "host"
+        body_header := lower == "content-length" || lower == "content-type" || lower == "content-encoding" || lower == "transfer-encoding" || lower == "expect"
+        if !body_header && (!strip_credentials || !credential) -> out.push(line)
     }
     out
 }
@@ -318,7 +359,7 @@ fn valid_cookie_pair(cookie: String) -> Bool {
     if eq <= 0 -> return false
     name :: slice_text(cookie, 0, eq)
     value :: slice_text(cookie, eq + 1, cookie.bytes().len())
-    valid_cookie_token(name) && !has_ctl(value.bytes()) && !contains_byte(value, 59)
+    valid_cookie_token(name) && valid_cookie_value(value)
 }
 
 fn cookie_name(cookie: String) -> ?String {
@@ -337,89 +378,33 @@ fn valid_cookie_token(name: String) -> Bool {
     true
 }
 
-fn resolve_location(base: String, location: String) -> ?String {
-    if location.bytes().len() == 0 -> return None
-    if starts_with(location, "http://") || starts_with(location, "https://") -> return Val(location)
-    origin :: url_origin(base) ?? return None
-    if location.bytes()[0] == (U8{47}) {
-        if location.bytes().len() > 1 && location.bytes()[1] == (U8{47}) {
-            scheme :: url_scheme(base) ?? return None
-            return Val("{scheme}:{location}")
-        }
-        return Val("{origin}{location}")
-    }
-    current :: url_path(base)
-    slash := last_slash(current)
-    if slash < 0 -> return Val("{origin}/{location}")
-    dir :: slice_text(current, 0, slash + 1)
-    Val("{origin}{dir}{location}")
-}
-
-fn url_scheme(url: String) -> ?String {
-    raw :: url.bytes()
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{58}) {
-            if i == 0 -> return None
-            return Val(slice_text(url, 0, i))
-        }
-    }
-    None
-}
-
-fn url_origin(url: String) -> ?String {
-    raw :: url.bytes()
-    colon := -1
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{58}) {
-            colon = i
-            break
-        }
-    }
-    if colon <= 0 || colon + 2 >= raw.len() -> return None
-    if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return None
-    end := colon + 3
-    loop end < raw.len() {
-        if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
-        end = end + 1
-    }
-    if end <= colon + 3 -> return None
-    Val(slice_text(url, 0, end))
-}
-
-fn url_path(url: String) -> String {
-    origin :: url_origin(url) ?? return "/"
-    start := origin.bytes().len()
-    raw :: url.bytes()
-    end := raw.len()
-    loop i in start..<raw.len() {
-        if raw[i] == (U8{63}) || raw[i] == (U8{35}) {
-            end = i
-            break
-        }
-    }
-    path := slice_text(url, start, end)
-    if path.len() == 0 -> return "/"
-    path
-}
-
-fn last_slash(text: String) -> Int {
-    raw :: text.bytes()
-    i := raw.len() - 1
-    loop i >= 0 {
-        if raw[i] == (U8{47}) -> return i
-        i = i - 1
-    }
-    -1
-}
-
-fn starts_with(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
-    if b.len() > a.len() -> return false
-    loop i in 0..<b.len() {
-        if a[i] != b[i] -> return false
+fn valid_cookie_value(value: String) -> Bool {
+    loop b in value.bytes() {
+        n :: Int.from_u8(b)
+        if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
     }
     true
+}
+
+fn resolve_location(base: String, location: String) -> ?String {
+    if location.bytes().len() == 0 -> return None
+    joined :: http_url.urljoin(base, location) ?? return None
+    hash := index_byte(joined.bytes(), 35)
+    clean := if hash >= 0 -> slice_text(joined, 0, hash) else -> joined
+    if !valid_url(clean) -> return None
+    Val(clean)
+}
+
+fn is_https_downgrade(base: String, next: String) -> Bool {
+    from :: http_url.parse(base) ?? return false
+    to :: http_url.parse(next) ?? return false
+    from.scheme == "https" && to.scheme == "http"
+}
+
+fn same_origin(left: String, right: String) -> Bool {
+    a :: http_url.parse(left) ?? return false
+    b :: http_url.parse(right) ?? return false
+    a.scheme == b.scheme && a.host == b.host && a.port == b.port
 }
 
 fn slice_text(text: String, start: Int, end: Int) -> String {
@@ -433,6 +418,15 @@ fn slice_text(text: String, start: Int, end: Int) -> String {
     }
 }
 
+
+fn ascii_upper(text: String) -> String {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
 fn ascii_lower(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
@@ -469,8 +463,20 @@ fn valid_header_name(name: String) -> Bool {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n :: Int.from_u8(b)
-        if n <= 32 || n >= 127 || n == 58 || n == 40 || n == 41 || n == 60 || n == 62 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+        if !token_char(Int.from_u8(b)) -> return false
+    }
+    true
+}
+
+fn token_char(n: Int) -> Bool {
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
+}
+
+fn valid_method(method: String) -> Bool {
+    raw :: method.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        if !token_char(Int.from_u8(b)) -> return false
     }
     true
 }
@@ -483,6 +489,30 @@ fn has_ctl(raw: [U8]) -> Bool {
     false
 }
 
-fn contains_byte(text: String, target: Int) -> Bool {
-    index_byte(text.bytes(), target) >= 0
+fn valid_url(url: String) -> Bool {
+    raw :: url.bytes()
+    if raw.len() < 8 || raw.len() > c_max_url_bytes || has_url_ctl(raw) -> return false
+    parsed :: http_url.parse(url) ?? return false
+    if parsed.scheme != "http" && parsed.scheme != "https" -> return false
+    if parsed.host.bytes().len() == 0 || parsed.user.bytes().len() > 0 || parsed.password.bytes().len() > 0 -> return false
+    colon := index_byte(raw, 58)
+    if colon <= 0 || colon + 2 >= raw.len() -> return false
+    if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false
+    start := colon + 3
+    end := start
+    loop end < raw.len() {
+        if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
+        n :: Int.from_u8(raw[end])
+        if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
+        end = end + 1
+    }
+    end > start
+}
+
+fn has_url_ctl(raw: [U8]) -> Bool {
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
 }

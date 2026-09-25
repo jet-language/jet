@@ -7,7 +7,6 @@
 
 #![allow(dead_code)]
 use super::{TirErasure, TirErasureReason};
-use crate::Diagnostics::Span;
 use crate::AST::{
     AccessConvention, CLICommandBinding, ConstDef, CtValue, Dimension, DistinctDef, EnumDef, Expr,
     Field, Func, FunctionCallMetadata, ImplDef, InternalTag, Item, Marker, Measure, MeasureRule,
@@ -15,20 +14,21 @@ use crate::AST::{
     Type, TypeAliasDef, UnitFamilyDef, Variant, VariantPayload, ViewProvenanceMap, ViewSource,
     ViewSourceProjection,
 };
+use crate::Diagnostics::Span;
 use jet_foundation::CanonicalPass;
 use jet_foundation::Layout::{LayoutAlignmentFact, TargetLayoutEngine};
-use jet_foundation::Shape::ShapeFieldNames;
 use jet_foundation::MIR::{
-    stable_id, MirAccess, MirCallContractRow, MirCallMetadata, MirCallablePolicy,
-    MirCallablePolicyChain, MirCliBinding, MirCliCommand, MirCliEntry,
-    MirDimension, MirDropKind, MirErasureReason, MirField,
-    MirFieldId, MirFunctionId, MirFunctionSignature, MirGenericParam, MirInternalTag, MirMeasure,
-    MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership, MirOwnershipMode, MirParam,
-    MirParamZone, MirSerdeAttribute, MirSerdeAttributeKind, MirStructLayout, MirTagMarker,
-    MirTraitId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirVariant,
-    MirVariantPayload, MirViewProjection, MirViewProvenance, MirViewSource, MirViewSourcePath,
+    MirAccess, MirCallContractRow, MirCallMetadata, MirCallablePolicy, MirCallablePolicyChain,
+    MirCliBinding, MirCliCommand, MirCliEntry, MirDimension, MirDropKind, MirErasureReason,
+    MirField, MirFieldId, MirFunctionId, MirFunctionSignature, MirGenericParam, MirInternalTag,
+    MirMeasure, MirMeasureRule, MirModuleId, MirNominalRef, MirOwnership, MirOwnershipMode,
+    MirParam, MirParamZone, MirSerdeAttribute, MirSerdeAttributeKind, MirStructLayout,
+    MirTagMarker, MirTraitId, MirTraitRef, MirType, MirTypeDef, MirTypeDefKind, MirTypeId,
+    MirVariant, MirVariantPayload, MirViewProjection, MirViewProvenance, MirViewSource,
+    MirViewSourcePath, stable_id,
 };
-use std::collections::{BTreeMap, HashSet};
+use jet_foundation::Shape::ShapeFieldNames;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// All declaration rows projected from one checked program.  The executable
 /// function table remains owned by the sibling TIR lowering.
@@ -63,12 +63,9 @@ pub(crate) fn canonicalize_checked_trait_types(
             {
                 Type::TraitObject(vec![name.clone()])
             }
-            Type::List(inner) => Type::List(Box::new(visit(
-                inner,
-                trait_names,
-                nominal_names,
-                binders,
-            ))),
+            Type::List(inner) => {
+                Type::List(Box::new(visit(inner, trait_names, nominal_names, binders)))
+            }
             Type::Map {
                 key,
                 key_span,
@@ -78,18 +75,12 @@ pub(crate) fn canonicalize_checked_trait_types(
                 key_span: *key_span,
                 value: Box::new(visit(value, trait_names, nominal_names, binders)),
             },
-            Type::Shared(inner) => Type::Shared(Box::new(visit(
-                inner,
-                trait_names,
-                nominal_names,
-                binders,
-            ))),
-            Type::Option(inner) => Type::Option(Box::new(visit(
-                inner,
-                trait_names,
-                nominal_names,
-                binders,
-            ))),
+            Type::Shared(inner) => {
+                Type::Shared(Box::new(visit(inner, trait_names, nominal_names, binders)))
+            }
+            Type::Option(inner) => {
+                Type::Option(Box::new(visit(inner, trait_names, nominal_names, binders)))
+            }
             Type::Result { ok, err } => Type::Result {
                 ok: Box::new(visit(ok, trait_names, nominal_names, binders)),
                 err: Box::new(visit(err, trait_names, nominal_names, binders)),
@@ -106,9 +97,9 @@ pub(crate) fn canonicalize_checked_trait_types(
                     .iter()
                     .map(|param| visit(param, trait_names, nominal_names, binders))
                     .collect(),
-                ret: ret.as_ref().map(|ret| {
-                    Box::new(visit(ret, trait_names, nominal_names, binders))
-                }),
+                ret: ret
+                    .as_ref()
+                    .map(|ret| Box::new(visit(ret, trait_names, nominal_names, binders))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
                 call_metadata: call_metadata.clone(),
@@ -474,12 +465,9 @@ fn lower_type_kind(ty: &Type) -> jet_foundation::MIR::MirTypeKind {
             call_metadata: call_metadata.as_ref().map(lower_call_metadata),
             return_view_provenance: return_view_provenance.as_ref().map(lower_view_provenance),
         }),
-        Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => {
-            lower_type_kind(
-                &crate::AST::numeric_type_from_name(name)
-                    .expect("numeric type name was checked"),
-            )
-        }
+        Type::Named(name) if crate::AST::numeric_type_from_name(name).is_some() => lower_type_kind(
+            &crate::AST::numeric_type_from_name(name).expect("numeric type name was checked"),
+        ),
         Type::Named(name) => MirTypeKind::Apply {
             name: MirNominalRef {
                 id: MirTypeId(stable_id("mir-type", name)),
@@ -895,9 +883,7 @@ fn lower_variant(
         span: variant.name_span,
         payload: match &variant.payload {
             VariantPayload::Unit => TirVariantPayload::Unit,
-            VariantPayload::Single(ty, _) => {
-                TirVariantPayload::Single(qualify_type(ty, binders))
-            }
+            VariantPayload::Single(ty, _) => TirVariantPayload::Single(qualify_type(ty, binders)),
             VariantPayload::Named(fields) => TirVariantPayload::Named(
                 fields
                     .iter()
@@ -1043,6 +1029,31 @@ pub(super) fn lower_type_defs(
     Ok(rows)
 }
 
+fn resolve_type_methods(
+    definition: &TirTypeDef,
+    methods: &[String],
+    registry: &super::mir::FunctionRegistry,
+) -> Result<Vec<MirFunctionId>, super::LowerError> {
+    methods
+        .iter()
+        .filter_map(|key| {
+            match resolve_function_id(registry, key, &definition.module, definition.span) {
+                Ok(id) => Some(Ok(id)),
+                // Imported Core type metadata retains all declared methods,
+                // but only reachable bodies are emitted. Calls to omitted
+                // methods still fail at their checked callsite.
+                Err(error)
+                    if definition.key.starts_with("<corelib>/")
+                        && error.message.starts_with("missing checked function target") =>
+                {
+                    None
+                }
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect()
+}
+
 impl TirTypeDef {
     pub(super) fn to_mir(
         &self,
@@ -1054,10 +1065,7 @@ impl TirTypeDef {
                     .iter()
                     .map(|field| lower_mir_field(&self.key, field))
                     .collect(),
-                methods: methods
-                    .iter()
-                    .map(|key| resolve_function_id(registry, key, &self.module, self.span))
-                    .collect::<Result<Vec<_>, _>>()?,
+                methods: resolve_type_methods(self, methods, registry)?,
             },
             TirTypeDefKind::Enum { variants, methods } => MirTypeDefKind::Enum {
                 variants: variants
@@ -1088,10 +1096,7 @@ impl TirTypeDef {
                         discriminant: variant.discriminant,
                     })
                     .collect(),
-                methods: methods
-                    .iter()
-                    .map(|key| resolve_function_id(registry, key, &self.module, self.span))
-                    .collect::<Result<Vec<_>, _>>()?,
+                methods: resolve_type_methods(self, methods, registry)?,
             },
             TirTypeDefKind::Distinct { base, range } => MirTypeDefKind::Distinct {
                 base: lower_type(base),
@@ -1266,12 +1271,12 @@ pub(super) fn lower_tir_declarations(
             boxed_edges,
             auto_printable,
             auto_debug,
-            &|ty, binders| {
-                super::qualify_imported_type(bundle, index, &module_name, binders, ty)
-            },
+            &|ty, binders| super::qualify_imported_type(bundle, index, &module_name, binders, ty),
             seed_parse_error,
+            None,
         );
     }
+    discard_duplicate_core_enum_fallbacks(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
 }
@@ -1283,6 +1288,7 @@ pub(super) fn lower_declarations_from_items(items: &[Item], module: &str) -> Tir
         &HashSet::new(),
         &HashSet::new(),
         &HashSet::new(),
+        None,
     )
 }
 
@@ -1292,6 +1298,7 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
+    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
     collect_items(
@@ -1303,9 +1310,32 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
         auto_debug,
         &|ty, _| ty.clone(),
         !super::module_owned_type_names(items).contains("ParseError"),
+        checked_nominals,
     );
+    discard_duplicate_core_enum_fallbacks(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
+}
+
+// Loaded Core source enums own their canonical identity. A synthetic plain
+// Core export row is needed only when no source declaration is available;
+// otherwise it shadows the checked enum in MIR and creates a second Rust type.
+fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
+    let mut source_enum_counts = HashMap::<String, usize>::new();
+    for row in &declarations.type_defs {
+        if row.key.starts_with("<corelib>/")
+            && row.key != row.name
+            && matches!(&row.kind, TirTypeDefKind::Enum { .. })
+        {
+            *source_enum_counts.entry(row.name.clone()).or_default() += 1;
+        }
+    }
+    declarations.type_defs.retain(|row| {
+        row.key != row.name
+            || !matches!(&row.kind, TirTypeDefKind::Enum { .. })
+            || compiler_owned_enum_variants(&row.name).is_some()
+            || source_enum_counts.get(&row.name) != Some(&1)
+    });
 }
 
 fn collect_items(
@@ -1317,6 +1347,7 @@ fn collect_items(
     auto_debug: &HashSet<String>,
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
     seed_parse_error: bool,
+    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 ) {
     let layout_engine = TargetLayoutEngine::host(items);
     for item in items {
@@ -1380,7 +1411,7 @@ fn collect_items(
             _ => {}
         }
     }
-    for row in compiler_owned_type_defs(module, seed_parse_error) {
+    for row in compiler_owned_type_defs(module, seed_parse_error, checked_nominals) {
         if !out.type_defs.iter().any(|existing| existing.key == row.key) {
             out.type_defs.push(row);
         }
@@ -1587,9 +1618,7 @@ fn lower_enum(
             variants: definition
                 .variants
                 .iter()
-                .map(|variant| {
-                    lower_variant(variant, style.as_deref(), qualify_type, &binders)
-                })
+                .map(|variant| lower_variant(variant, style.as_deref(), qualify_type, &binders))
                 .collect(),
             methods: method_keys(module, &definition.name, None, None, &definition.methods),
         },
@@ -1770,10 +1799,7 @@ fn lower_trait(
                     span: method.span,
                     self_access,
                     params,
-                    declared_return: method
-                        .return_type
-                        .as_ref()
-                        .map(|ty| qualify_type(ty, &[])),
+                    declared_return: method.return_type.as_ref().map(|ty| qualify_type(ty, &[])),
                     return_type: qualify_type(&method.effective_return_type(), &[]),
                     failure: super::TFailureCarrier::from_contract(&method.failure_contract()),
                     is_pure: method.is_pure,
@@ -1890,10 +1916,7 @@ fn lower_impl(definition: &ImplDef, module: &str) -> TirImplDef {
 
 fn lower_constant(definition: &ConstDef, module: &str) -> TirConstantDef {
     let value = super::source_constant_value(definition).unwrap_or(CtValue::Unit);
-    let ty = definition
-        .ty
-        .clone()
-        .or_else(|| definition.ct.as_ref().map(crate::AST::CtValue::jet_type))
+    let ty = super::source_constant_type(definition)
         .or_else(|| (!matches!(value, CtValue::Unit)).then(|| value.jet_type()))
         .unwrap_or(Type::Named("Unit".into()));
     TirConstantDef {
@@ -1931,10 +1954,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         crate::Syntax::TYPE_ORDERING,
         crate::Syntax::ORDERING_VARIANTS,
     ),
-    (
-        crate::Syntax::TYPE_REMOVE_BY,
-        &["Val", "Slot"],
-    ),
+    (crate::Syntax::TYPE_REMOVE_BY, &["Val", "Slot"]),
     (
         crate::Syntax::TYPE_TASK_FAILURE,
         &[
@@ -1989,14 +2009,8 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT,
         crate::Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS,
     ),
-    (
-        "ProcessStreamMode",
-        &["Stream", "Inherit", "Capture"],
-    ),
-    (
-        crate::Syntax::TYPE_TERMINAL_MODE,
-        &["Raw", "Cooked"],
-    ),
+    ("ProcessStreamMode", &["Stream", "Inherit", "Capture"]),
+    (crate::Syntax::TYPE_TERMINAL_MODE, &["Raw", "Cooked"]),
     (
         crate::Syntax::DURATION_UNIT_TYPE,
         crate::Syntax::DURATION_UNITS,
@@ -2004,7 +2018,12 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("FontStyle", &["Body", "Title", "Monospace"]),
     ("GlyphShaper", &["HarfBuzz", "HeadlessFallback"]),
     ("WebFormValueType", &["String", "Int", "Bool", "Float"]),
-    ("WebFormControl", &["Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden"]),
+    (
+        "WebFormControl",
+        &[
+            "Text", "Email", "Url", "Password", "Number", "Date", "Checkbox", "Hidden",
+        ],
+    ),
     // D-DX-LOADERS1: the native Prelude carrier still needs a checked MIR
     // owner row so tag-only `DataLoaderKind` patterns lower on every tier.
     ("DataLoaderKind", &["File", "URL", "Database", "Value"]),
@@ -2096,20 +2115,39 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "DeliveryUnknown",
         ],
     ),
-
-
     ("SMTPSecurity", &["StartTls", "TLS"]),
     ("RecipientPolicy", &["RequireAll", "DeliverAccepted"]),
     ("SMTPAuth", &["None", "Password"]),
     ("TLSTrust", &["System", "SystemPlusCa"]),
     ("TLSVersion", &["Tls12", "Tls13"]),
+    ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
+    ("NetDnsError", &["NotFound", "Failure"]),
     (
-        "TLSClientTrust",
-        &["System", "SystemPlus", "CustomOnly"],
+        "NetError",
+        &[
+            "InvalidInput",
+            "PermissionDenied",
+            "AddressInUse",
+            "AddressUnavailable",
+            "ConnectionRefused",
+            "ConnectionReset",
+            "NotConnected",
+            "Closed",
+            "Timeout",
+            "Cancelled",
+            "Unsupported",
+            "TLS",
+            "Protocol",
+            "Other",
+            "DNS",
+        ],
     ),
     ("NetShutdown", &["Read", "Write", "Both"]),
     ("WatchDomain", &["File", "Process", "Port"]),
-    ("WatchKind", &["Created", "Modified", "Removed", "Error", "Exited", "Ready"]),
+    (
+        "WatchKind",
+        &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
+    ),
     ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
     (
         "WsError",
@@ -2125,7 +2163,6 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "IO",
         ],
     ),
-
 ];
 // Compiler-owned Core records are checked values, not user declarations. Keep
 // their owner rows in the checked declaration table so a field projection can
@@ -2136,6 +2173,10 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     (
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,
+    ),
+    (
+        "NetErrorDetail",
+        &["operation", "address", "name", "message", "os_code"],
     ),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
@@ -2162,14 +2203,53 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "max_output_rows",
         ],
     ),
-    ("DataSourceIdentity", &["kind", "locator", "member", "parameters"]),
+    (
+        "DataSourceIdentity",
+        &["kind", "locator", "member", "parameters"],
+    ),
     ("DataAuthority", &["scope", "revision"]),
     (
         "DataError",
-        &["kind", "operation", "row", "column", "index", "reason", "cause"],
+        &[
+            "kind",
+            "operation",
+            "row",
+            "column",
+            "index",
+            "reason",
+            "cause",
+        ],
+    ),
+    ("EncodingCause", &["kind", "os_code", "message"]),
+    (
+        "EncodingError",
+        &[
+            "format",
+            "kind",
+            "byte_offset",
+            "line",
+            "column",
+            "path",
+            "reason",
+            "cause",
+        ],
+    ),
+    (
+        "EncodingLimits",
+        &[
+            "buffer_bytes",
+            "max_depth",
+            "max_item_bytes",
+            "max_total_bytes",
+            "max_expansion_depth",
+            "max_expansion_bytes",
+        ],
     ),
     ("DataProvenance", &["source", "format", "authority"]),
-    ("DataSchema", &["identity", "format", "columns", "projection"]),
+    (
+        "DataSchema",
+        &["identity", "format", "columns", "projection"],
+    ),
     (
         "DataSnapshotIdentity",
         &["id", "source", "content", "schema", "format"],
@@ -2198,25 +2278,73 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "issued_at",
         ],
     ),
-    ("WebFormFieldSpec", &["name", "value_type", "required", "default", "label", "control", "group", "wire_name"]),
-    ("WebFormFieldState", &["name", "value_type", "required", "value", "touched", "validating", "errors"]),
-    ("WebTableState", &["sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"]),
-    ("WebTablePage", &["rows", "row_keys", "total_rows", "page_index", "page_size", "page_count"]),
-    ("WebVirtualPlan", &[
-        "total_count",
-        "scroll_offset",
-        "viewport_width",
-        "viewport_height",
-        "estimated_item_size",
-        "overscan",
-        "start",
-        "end",
-        "total_size",
-        "measured_count",
-        "anchor_index",
-        "anchor_offset",
-        "measurements",
-    ]),
+    (
+        "WebFormFieldSpec",
+        &[
+            "name",
+            "value_type",
+            "required",
+            "default",
+            "label",
+            "control",
+            "group",
+            "wire_name",
+        ],
+    ),
+    (
+        "WebFormFieldState",
+        &[
+            "name",
+            "value_type",
+            "required",
+            "value",
+            "touched",
+            "validating",
+            "errors",
+        ],
+    ),
+    (
+        "WebTableState",
+        &[
+            "sort",
+            "filter",
+            "page_index",
+            "page_size",
+            "selected_keys",
+            "selection_anchor",
+            "focus_key",
+            "page_mode",
+        ],
+    ),
+    (
+        "WebTablePage",
+        &[
+            "rows",
+            "row_keys",
+            "total_rows",
+            "page_index",
+            "page_size",
+            "page_count",
+        ],
+    ),
+    (
+        "WebVirtualPlan",
+        &[
+            "total_count",
+            "scroll_offset",
+            "viewport_width",
+            "viewport_height",
+            "estimated_item_size",
+            "overscan",
+            "start",
+            "end",
+            "total_size",
+            "measured_count",
+            "anchor_index",
+            "anchor_offset",
+            "measurements",
+        ],
+    ),
     (
         crate::Syntax::TYPE_MEMO_STATS,
         &["hits", "misses", "size", "bound"],
@@ -2231,6 +2359,24 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("GameImage", &[]),
     ("GameSound", &[]),
     ("TestSuite", &["iteration", "result"]),
+    (
+        "TestComparison",
+        &[
+            "status",
+            "relation",
+            "source",
+            "tool",
+            "target",
+            "seed",
+            "case_ids",
+            "inputs",
+            "reference",
+            "candidate",
+            "first_difference",
+            "reason",
+            "universal_proof",
+        ],
+    ),
     (
         "ProcessReceipt",
         &[
@@ -2268,22 +2414,16 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "outputs",
         ],
     ),
-    (
-        "ProcessChild",
-        &["stdin", "stdout", "stderr", "terminal"],
-    ),
-    (
-        crate::Syntax::TYPE_TERMINAL_SIZE,
-        &["cols", "rows"],
-    ),
-    (
-        crate::Syntax::TYPE_TERMINAL_POLICY,
-        &["size", "mode"],
-    ),
+    ("ProcessChild", &["stdin", "stdout", "stderr", "terminal"]),
+    (crate::Syntax::TYPE_TERMINAL_SIZE, &["cols", "rows"]),
+    (crate::Syntax::TYPE_TERMINAL_POLICY, &["size", "mode"]),
     ("Address", &[]),
     ("Message", &[]),
     ("Attachment", &[]),
-    ("RecipientReport", &["address", "accepted", "code", "message"]),
+    (
+        "RecipientReport",
+        &["address", "accepted", "code", "message"],
+    ),
     (
         "SendReport",
         &[
@@ -2325,14 +2465,18 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "dkim",
         ],
     ),
-    (
-        "XMLCanonical",
-        &["mode", "comments", "inclusive_prefixes"],
-    ),
+    ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
     ("Size", &["width", "height"]),
     (
         "UiNode",
-        &["label", "width", "height", "accessibility", "ime", "shortcut"],
+        &[
+            "label",
+            "width",
+            "height",
+            "accessibility",
+            "ime",
+            "shortcut",
+        ],
     ),
     ("JSONWriter", &[]),
     ("JSONReader", &[]),
@@ -2410,10 +2554,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("UiClipboardText", &["text", "selection"]),
     ("UiClipboardWrite", &["characters"]),
     ("UiTextRange", &["start", "end"]),
-    (
-        "UiImeComposition",
-        &["text", "selection", "marked"],
-    ),
+    ("UiImeComposition", &["text", "selection", "marked"]),
     ("UiImeEvent", &["target", "phase", "composition"]),
     ("UiDragEvent", &["target", "phase", "operation", "items"]),
     ("UiShortcut", &["key", "modifiers"]),
@@ -2634,10 +2775,13 @@ const COMPILER_OWNED_GEOMETRY_RECORDS: &[(&str, &[&str], &[&str])] = &[
     ),
 ];
 
-
 pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
+    let source_name = name;
+    let name = crate::Codegen::core_source_type_leaf(name);
     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
-        || jet_foundation::CoreModuleExports::core_enum_variants(name).is_some()
+        || (jet_foundation::CoreModuleExports::core_enum_variants(name).is_some()
+            && (!source_name.starts_with("<corelib>/")
+                || crate::Codegen::core_rust_type_name(source_name).is_some()))
         || COMPILER_OWNED_CORE_RECORDS
             .iter()
             .any(|(owned, _)| *owned == name)
@@ -2648,6 +2792,13 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
             .iter()
             .any(|(owned, _, _)| *owned == name)
         || crate::Codegen::core_email_rust_type_name(name).is_some()
+        || crate::Codegen::core_crypto_rust_type_name(name).is_some()
+        || crate::Codegen::core_rust_type_name(name) == Some("JetMappedFile")
+        || (source_name.starts_with("<corelib>/Core/files::")
+            && matches!(
+                crate::Codegen::file_handle_rust_type(source_name),
+                Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
+            ))
         || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
         || matches!(
@@ -2675,15 +2826,25 @@ pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'sta
         .map(|(_, variants)| *variants)
 }
 
-/// Project generated unit-variant Core enums into checked MIR declarations.
-/// Explicit compiler-owned rows above retain their specialized payload shapes.
-fn compiler_owned_core_unit_enums(module: &str) -> Vec<TirTypeDef> {
+/// Project Core enums into checked MIR declarations. Non-unit payloads are
+/// retained from sema's checked source enum facts when that source is loaded.
+fn compiler_owned_core_enums(
+    module: &str,
+    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+) -> Vec<TirTypeDef> {
     let span = Span::new(0, 0);
     let mut seen = HashSet::new();
+    let checked_payloads = checked_core_enum_payloads(checked_nominals);
     jet_foundation::CoreModuleExports::core_modules()
         .iter()
-        .flat_map(|entry| entry.type_exports.iter().map(|&(name, _)| name))
-        .filter_map(|name| {
+        .flat_map(|entry| {
+            let module = entry.module;
+            entry
+                .type_exports
+                .iter()
+                .map(move |&(name, _)| (module, name))
+        })
+        .filter_map(|(source_module, name)| {
             if compiler_owned_enum_variants(name).is_some() {
                 return None;
             }
@@ -2691,6 +2852,25 @@ fn compiler_owned_core_unit_enums(module: &str) -> Vec<TirTypeDef> {
             if !seen.insert(name) {
                 return None;
             }
+
+            if let Some(definition) = checked_payloads.get(&(source_module, name)) {
+                let mut definition = (**definition).clone();
+                definition.name = name.to_string();
+                let identity = |ty: &Type, _: &[String]| ty.clone();
+                let mut row = lower_enum(
+                    &definition,
+                    module,
+                    &identity,
+                    &HashSet::new(),
+                    false,
+                    false,
+                );
+                // Compiler-owned Core rows are looked up by their canonical
+                // leaf, not by the importing module's qualified key.
+                row.key = name.to_string();
+                return Some(row);
+            }
+
             Some(TirTypeDef {
                 module: module.to_string(),
                 key: name.to_string(),
@@ -2728,6 +2908,38 @@ fn compiler_owned_core_unit_enums(module: &str) -> Vec<TirTypeDef> {
             })
         })
         .collect()
+}
+
+fn checked_core_enum_payloads<'a>(
+    checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+) -> HashMap<(&'a str, &'a str), &'a EnumDef> {
+    let mut payloads = HashMap::new();
+    let Some(checked_nominals) = checked_nominals else {
+        return payloads;
+    };
+    for (identity, definition) in &checked_nominals.enums {
+        let Some(module_alias) = checked_nominals.foreign_modules.get(identity) else {
+            continue;
+        };
+        let Some(source) =
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(module_alias)
+        else {
+            continue;
+        };
+        let name = crate::Codegen::core_source_type_leaf(identity);
+        if !matches!(
+            jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name),
+            Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+        ) || !definition
+            .variants
+            .iter()
+            .any(|variant| !matches!(&variant.payload, VariantPayload::Unit))
+        {
+            continue;
+        }
+        payloads.insert((source.module, name), definition);
+    }
+    payloads
 }
 
 fn compiler_owned_default_err(module: &str) -> TirTypeDef {
@@ -2846,6 +3058,19 @@ fn compiler_owned_core_record(
         }),
     )
 }
+fn compiler_owned_core_variant_payload(payload: &VariantPayload) -> TirVariantPayload {
+    let identity = |ty: &Type, _: &[String]| ty.clone();
+    match payload {
+        VariantPayload::Unit => TirVariantPayload::Unit,
+        VariantPayload::Single(ty, _) => TirVariantPayload::Single(ty.clone()),
+        VariantPayload::Named(fields) => TirVariantPayload::Named(
+            fields
+                .iter()
+                .map(|field| lower_variant_field(field, &identity, &[]))
+                .collect(),
+        ),
+    }
+}
 
 fn compiler_owned_vjp_run(module: &str) -> TirTypeDef {
     let span = Span::new(0, 0);
@@ -2939,13 +3164,40 @@ fn compiler_owned_parse_error(module: &str) -> TirTypeDef {
     row
 }
 
-
-
-fn compiler_owned_type_defs(
-    module: &str,
+fn compiler_owned_type_defs<'a>(
+    module: &'a str,
     seed_parse_error: bool,
-) -> impl Iterator<Item = TirTypeDef> + '_ {
+    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+) -> impl Iterator<Item = TirTypeDef> + 'a {
     let span = Span::new(0, 0);
+    let net_error_variants = ["NetDnsError", "NetError"]
+        .into_iter()
+        .map(|enum_name| {
+            (
+                enum_name.to_string(),
+                crate::Sema::core_net_error_variants(enum_name)
+                    .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}")),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for enum_name in ["NetDnsError", "NetError"] {
+        let canonical_names = compiler_owned_enum_variants(enum_name)
+            .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
+        let variants = net_error_variants
+            .get(enum_name)
+            .expect("canonical sema enum was registered");
+        assert_eq!(
+            canonical_names.len(),
+            variants.len(),
+            "Core/MIR variant rows disagree for {enum_name}"
+        );
+        for variant in canonical_names {
+            assert!(
+                variants.contains_key(*variant),
+                "missing canonical Core variant {enum_name}.{variant}"
+            );
+        }
+    }
     COMPILER_OWNED_ENUMS
         .iter()
         .map(move |(name, variants)| TirTypeDef {
@@ -3001,9 +3253,7 @@ fn compiler_owned_type_defs(
                                 "Transform" => {
                                     TirVariantPayload::Single(Type::Named("T".to_string()))
                                 }
-                                "Fail" => {
-                                    TirVariantPayload::Single(Type::Named("E".to_string()))
-                                }
+                                "Fail" => TirVariantPayload::Single(Type::Named("E".to_string())),
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "HookOutcome" {
@@ -3011,9 +3261,7 @@ fn compiler_owned_type_defs(
                                 "Continue" => {
                                     TirVariantPayload::Single(Type::Named("T".to_string()))
                                 }
-                                "Fail" => {
-                                    TirVariantPayload::Single(Type::Named("E".to_string()))
-                                }
+                                "Fail" => TirVariantPayload::Single(Type::Named("E".to_string())),
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "WsError" {
@@ -3167,12 +3415,12 @@ fn compiler_owned_type_defs(
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
                                 "Text" | "Key" => TirVariantPayload::Single(Type::String),
-                                "Bytes" => TirVariantPayload::Single(Type::List(Box::new(
-                                    Type::IntN {
+                                "Bytes" => {
+                                    TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
                                         signed: false,
                                         bits: 8,
-                                    },
-                                ))),
+                                    })))
+                                }
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "DataTree" {
@@ -3203,6 +3451,14 @@ fn compiler_owned_type_defs(
                                 ))),
                                 _ => TirVariantPayload::Unit,
                             }
+                        } else if matches!(*name, "NetError" | "NetDnsError") {
+                            let (_, payload) = net_error_variants
+                                .get(*name)
+                                .and_then(|variants| variants.get(*variant))
+                                .unwrap_or_else(|| {
+                                    panic!("missing canonical Core variant {name}.{variant}")
+                                });
+                            compiler_owned_core_variant_payload(payload)
                         } else {
                             TirVariantPayload::Unit
                         },
@@ -3212,7 +3468,7 @@ fn compiler_owned_type_defs(
                 methods: Vec::new(),
             },
         })
-        .chain(compiler_owned_core_unit_enums(module))
+        .chain(compiler_owned_core_enums(module, checked_nominals))
         .chain(std::iter::once(compiler_owned_default_err(module)))
         .chain(std::iter::once(compiler_owned_record(
             module,
@@ -3241,7 +3497,14 @@ fn compiler_owned_type_defs(
                 (
                     "DataSnapshot",
                     &["T"][..],
-                    &["value", "identity", "provenance", "schema", "status", "content"][..],
+                    &[
+                        "value",
+                        "identity",
+                        "provenance",
+                        "schema",
+                        "status",
+                        "content",
+                    ][..],
                 ),
             ]
             .into_iter()
@@ -3394,17 +3657,21 @@ fn compiler_owned_type_defs(
                 .iter()
                 .map(move |(name, fields)| compiler_owned_core_record(module, *name, *fields)),
         )
-.chain(COMPILER_OWNED_MATH_RECORDS.iter().map(move |(name, fields)| {
-    let scalar = crate::Sema::math_scalar_ty(name);
-    compiler_owned_record(
-        module,
-        name,
-        fields
-            .iter()
-            .copied()
-            .map(move |field| (field, scalar.clone())),
-    )
-}))
+        .chain(
+            COMPILER_OWNED_MATH_RECORDS
+                .iter()
+                .map(move |(name, fields)| {
+                    let scalar = crate::Sema::math_scalar_ty(name);
+                    compiler_owned_record(
+                        module,
+                        name,
+                        fields
+                            .iter()
+                            .copied()
+                            .map(move |field| (field, scalar.clone())),
+                    )
+                }),
+        )
         .chain(seed_parse_error.then(|| compiler_owned_parse_error(module)))
 }
 

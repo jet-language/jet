@@ -20,8 +20,8 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
     if !have_rustc() {
         return;
     }
-    let source_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/tooling/service_runtime.jet");
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/service_runtime/run.jet");
     let source = fs::read_to_string(source_path).unwrap();
     let expected = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))

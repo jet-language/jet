@@ -136,6 +136,42 @@ fn run() {{
 }
 
 #[test]
+fn session_request_rejects_invalid_proxy_before_transport() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() -[Net, Time.Wait]> {{
+    session :: http.session_proxy(http.session(), "not a proxy URL")
+    if http.session_request(session, "GET", "http://{addr}/", "") == {{
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {{
+            if error == {{
+                .Proxy(stage) -> if stage == "invalid proxy" -> print("proxy rejected") else -> print("wrong error")
+                else -> print("wrong error")
+            }}
+        }}
+        else -> print("unexpected")
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "session_invalid_proxy", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "proxy rejected\n");
+    assert!(
+        matches!(
+            listener.accept(),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ),
+        "invalid session proxy must be rejected before dialing the origin"
+    );
+}
+
+#[test]
 fn h1_rejects_user_framing_headers_before_connecting() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();

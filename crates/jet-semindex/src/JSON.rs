@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use jet_foundation::Report::{StatusEnvelope, StatusValue};
-use jet_foundation::AST::{AccessConvention, ParamZone, Type};
+use jet_foundation::AST::{ParamZone, Type};
 use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
@@ -17,12 +17,12 @@ use jet_pkg_model::Package::{
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
-    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CallableParameterFact,
-    CallableSignatureFact, DefinitionFact,
-    CompilerFact, EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
-    OutputFact, SemIndex, SourceSpan, StateGraphFact, SymbolDef, SymbolKind, SymbolRef,
-    TraitContractFact, TypeDossier, ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
-    ViewSourcePathFact,
+    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CallableEffectFact,
+    CallableEffectsFact, CallableFactAvailability, CallableFactUnavailable, CallableParameterFact,
+    CallableSignatureFact, DefinitionFact, CompilerFact, EffectFact, ExpandProjection,
+    ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
+    SourceSpan, StateGraphFact, SymbolDef, SymbolKind, SymbolRef, TraitContractFact, TypeDossier,
+    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
@@ -152,6 +152,9 @@ fn json_strings(values: &[String]) -> String {
         .map(|value| json_str(value))
         .collect::<Vec<_>>()
         .join(",")
+}
+fn json_string_array(values: &[String]) -> String {
+    format!("[{}]", json_strings(values))
 }
 
 fn json_optional_strings(values: Option<&Vec<String>>) -> String {
@@ -566,50 +569,146 @@ fn json_view_provenance(provenance: &ViewProvenanceFact) -> String {
         provenance.mutable,
     )
 }
+fn json_callable_unavailable(unavailable: &CallableFactUnavailable) -> String {
+    format!(
+        "{{\"status\":\"unavailable\",\"required_stage\":{},\"reason\":{}}}",
+        json_str(unavailable.required_stage.as_str()),
+        json_str(unavailable.reason),
+    )
+}
 
-fn json_callable_signature(signature: &crate::Types::CallableSignatureFact) -> String {
+fn json_callable_signature(signature: &CallableSignatureFact) -> String {
     let parameters = signature
         .parameters
         .iter()
         .map(|parameter| {
+            let default = parameter.default.as_ref();
+            let default_source = default
+                .map(|value| json_span(value.source))
+                .unwrap_or_else(|| "null".to_string());
+            let default_value = default
+                .map(|value| json_callable_unavailable(&value.value_unavailable))
+                .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"name\":{},\"label\":{},\"default\":{},\"access\":{},\"zone\":{},\"type\":{},\"variadic\":{}}}",
+                "{{\"name\":{},\"label\":{},\"source\":{},\"default\":{},\"default_source\":{},\"default_value\":{},\"access\":{},\"zone\":{},\"type\":{},\"variadic\":{}}}",
                 json_str(&parameter.name),
                 json_str(&parameter.label),
-                parameter
-                    .default
-                    .as_ref()
-                    .map_or_else(|| "null".to_string(), |value| json_str(value)),
-                json_str(&parameter.access),
-                json_str(&parameter.zone),
-                json_str(&parameter.ty),
+                json_span(parameter.source),
+                default.map_or_else(|| "null".to_string(), |value| json_str(&value.source_text)),
+                default_source,
+                default_value,
+                json_str(parameter.access_name()),
+                json_str(parameter.zone_name()),
+                json_str(&parameter.type_name()),
                 parameter.variadic,
             )
         })
         .collect::<Vec<_>>()
         .join(",");
-    let list = |values: &[String]| {
-        values
-            .iter()
-            .map(|value| json_str(value))
-            .collect::<Vec<_>>()
-            .join(",")
+    let (effects, effect_status, effect_facts) = match &signature.effects {
+        CallableEffectsFact::Checked(values) => {
+            let names = values
+                .iter()
+                .map(CallableEffectFact::display_name)
+                .collect::<Vec<_>>();
+            let facts = values
+                .iter()
+                .map(|effect| {
+                    let (kind, name, source) = match effect {
+                        CallableEffectFact::Named { name, source } => {
+                            ("named", name.as_str(), *source)
+                        }
+                        CallableEffectFact::ViaParameter { name, source } => {
+                            ("via_parameter", name.as_str(), *source)
+                        }
+                    };
+                    format!(
+                        "{{\"kind\":{},\"name\":{},\"source\":{}}}",
+                        json_str(kind),
+                        json_str(name),
+                        json_span(source),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                json_string_array(&names),
+                "{\"status\":\"checked\"}".to_string(),
+                format!("[{facts}]"),
+            )
+        }
+        CallableEffectsFact::Unavailable(unavailable) => (
+            "null".to_string(),
+            json_callable_unavailable(unavailable),
+            "null".to_string(),
+        ),
     };
+    let errors = signature
+        .error_names()
+        .map(|values| json_string_array(&values))
+        .unwrap_or_else(|| "null".to_string());
+    let (failure_contract, failure_source, failure_status) = match &signature.failure_contract {
+        CallableFactAvailability::Checked(failure) => (
+            json_str(&failure.effective_type().name()),
+            json_str(&failure.source()),
+            "{\"status\":\"checked\"}".to_string(),
+        ),
+        CallableFactAvailability::Unavailable(unavailable) => (
+            "null".to_string(),
+            "null".to_string(),
+            json_callable_unavailable(unavailable),
+        ),
+    };
+    let (generic_parameters, generic_parameters_status) = match &signature.generic_parameters {
+        CallableFactAvailability::Checked(parameters) => (
+            json_string_array(
+                &parameters
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            "{\"status\":\"checked\"}".to_string(),
+        ),
+        CallableFactAvailability::Unavailable(unavailable) => (
+            "null".to_string(),
+            json_callable_unavailable(unavailable),
+        ),
+    };
+    let return_type = signature
+        .return_type
+        .as_ref()
+        .map(|ty| json_str(&ty.name()))
+        .unwrap_or_else(|| "null".to_string());
     let views = signature
         .returned_views
         .iter()
         .map(json_view_provenance)
         .collect::<Vec<_>>()
         .join(",");
+    let policies = json_string_array(&signature.policy_names());
+    let producer_status = match signature.metadata_producer_status {
+        jet_foundation::AST::MetadataProducerStatus::ContractOnly => "contract_only",
+        jet_foundation::AST::MetadataProducerStatus::NotImplemented => "not_implemented",
+        jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension => {
+            "existing_callable_producer_needs_extension"
+        }
+    };
     format!(
-        "{{\"parameters\":[{}],\"effects\":[{}],\"errors\":[{}],\"failure_contract\":{},\"failure_source\":{},\"returned_views\":[{}],\"policies\":[{}]}}",
+        "{{\"parameters\":[{}],\"return_type\":{},\"return_type_status\":\"checked\",\"effects\":{},\"effect_status\":{},\"effect_facts\":{},\"errors\":{},\"failure_contract\":{},\"failure_source\":{},\"failure_status\":{},\"returned_views\":[{}],\"policies\":{},\"generic_parameters\":{},\"generic_parameters_status\":{},\"metadata_producer_status\":{}}}",
         parameters,
-        list(&signature.effects),
-        list(&signature.errors),
-        json_str(&signature.failure_contract),
-        json_str(&signature.failure_source),
+        return_type,
+        effects,
+        effect_status,
+        effect_facts,
+        errors,
+        failure_contract,
+        failure_source,
+        failure_status,
         views,
-        list(&signature.policies),
+        policies,
+        generic_parameters,
+        generic_parameters_status,
+        json_str(producer_status),
     )
 }
 
@@ -701,6 +800,7 @@ fn json_def(d: &SymbolDef) -> String {
         .as_ref()
         .map(json_callable_signature)
         .unwrap_or_else(|| "null".to_string());
+    let declaration_identity = json_callable_unavailable(&d.declaration_identity_unavailable);
     let derives = d
         .derives
         .iter()
@@ -718,8 +818,9 @@ fn json_def(d: &SymbolDef) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{},\"callable_signature\":{},\"derives\":[{}],\"nominal_base\":{},\"trait_contracts\":[{}]}}",
+        "{{\"identity\":{},\"metadata_declaration_identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{},\"callable_signature\":{},\"derives\":[{}],\"nominal_base\":{},\"trait_contracts\":[{}]}}",
         json_str(&d.identity),
+        declaration_identity,
         json_str(&d.qualified_name),
         json_str(&d.name),
         json_str(&d.module_path),
@@ -732,7 +833,6 @@ fn json_def(d: &SymbolDef) -> String {
         trait_contracts,
     )
 }
-
 fn json_trait_contract(contract: &TraitContractFact) -> String {
     let associated_types = contract
         .associated_types
@@ -1142,10 +1242,15 @@ impl TypeDossier {
                     }
                 }
                 if let Some(signature) = &def.callable_signature {
-                    out.push_str(&format!(
-                        "failure contract\n  {} ({})\n",
-                        signature.failure_contract, signature.failure_source
-                    ));
+                    match (
+                        signature.failure_contract_name(),
+                        signature.failure_source_name(),
+                    ) {
+                        (Some(failure), Some(source)) => out.push_str(&format!(
+                            "failure contract\n  {failure} ({source})\n"
+                        )),
+                        _ => out.push_str("failure contract\n  unavailable\n"),
+                    }
                 }
             }
             None => out.push_str("summary\n  defined: not found\n"),
@@ -1300,6 +1405,10 @@ pub(crate) fn convert_defs(
             };
             SymbolDef {
                 identity: d.identity.clone(),
+                declaration_identity_unavailable: CallableFactUnavailable {
+                    required_stage: jet_foundation::AST::CompilerStage::Resolved,
+                    reason: "the semindex producer does not receive a checker-issued DeclarationHandle",
+                },
                 name: d.name.clone(),
                 qualified_name: canonical_symbol_name(
                     bundle,
@@ -1515,80 +1624,85 @@ fn callable_signature(
     returned_views: &[crate::Types::ViewProvenanceFact],
 ) -> Option<CallableSignatureFact> {
     let SymKind::Function {
+        signature_facts_available,
         params,
+        param_sources,
         param_contract,
         param_variadic,
-        ret,
+        return_type,
         failure_contract,
-        failure_source,
         effects,
         effect_via,
         param_access,
         param_defaults,
         policies,
+        generic_parameters,
+        ..
     } = kind
     else {
         return None;
     };
+    if !*signature_facts_available {
+        return None;
+    }
     let parameters = params
         .iter()
         .enumerate()
         .map(|(index, (name, ty))| {
-            let (label, zone) = param_contract
+            let (_, label, zone) = param_contract
                 .get(index)
-                .map(|(_, label, zone)| {
-                    (
-                        label.clone(),
-                        match zone {
-                            ParamZone::PositionalOnly => "positional_only",
-                            ParamZone::Either => "either",
-                            ParamZone::LabelOnly => "label_only",
-                        }
-                        .to_string(),
-                    )
-                })
-                .unwrap_or_else(|| (String::new(), "either".to_string()));
-            let access = match param_access
-                .get(index)
-                .copied()
-                .unwrap_or(AccessConvention::Read)
-            {
-                AccessConvention::Read => "read",
-                AccessConvention::Write => "write",
-                AccessConvention::Move => "move",
-            };
+                .expect("callable parameter contract facts must stay ordered");
             CallableParameterFact {
                 name: name.clone(),
-                label,
-                default: param_defaults.get(index).cloned().flatten(),
-                access: access.to_string(),
-                zone,
-                ty: ty.name(),
-                variadic: param_variadic.get(index).copied().unwrap_or(false),
+                source: *param_sources
+                    .get(index)
+                    .expect("callable parameter source facts must stay ordered"),
+                label: label.clone(),
+                default: param_defaults
+                    .get(index)
+                    .expect("callable parameter defaults must stay ordered")
+                    .clone(),
+                access: *param_access
+                    .get(index)
+                    .expect("callable parameter access facts must stay ordered"),
+                zone: *zone,
+                ty: ty.clone(),
+                variadic: *param_variadic
+                    .get(index)
+                    .expect("callable variadic facts must stay ordered"),
             }
         })
         .collect();
-    let effects = effect_via
-        .as_ref()
-        .map(|(name, _)| vec![format!("via {name}")])
-        .or_else(|| {
-            effects
-                .as_ref()
-                .map(|row| row.iter().map(|(name, _)| name.clone()).collect())
+    let effects = if let Some((name, span)) = effect_via {
+        CallableEffectsFact::Checked(vec![CallableEffectFact::ViaParameter {
+            name: name.clone(),
+            source: (*span).into(),
+        }])
+    } else if let Some(row) = effects {
+        CallableEffectsFact::Checked(
+            row.iter()
+                .map(|(name, span)| CallableEffectFact::Named {
+                    name: name.clone(),
+                    source: (*span).into(),
+                })
+                .collect(),
+        )
+    } else {
+        CallableEffectsFact::Unavailable(CallableFactUnavailable {
+            required_stage: jet_foundation::AST::CompilerStage::Typed,
+            reason: "the checker has not published a checked callable effect row",
         })
-        .unwrap_or_default();
-    let errors = match ret {
-        Some(Type::Result { err, .. }) => vec![err.name()],
-        _ => Vec::new(),
     };
     Some(CallableSignatureFact {
         parameters,
+        return_type: return_type.clone(),
         effects,
-        errors,
         failure_contract: failure_contract.clone(),
-        failure_source: failure_source.clone(),
         returned_views: returned_views.to_vec(),
         policies: policies.clone(),
+        generic_parameters: generic_parameters.clone(),
+        metadata_producer_status:
+            jet_foundation::AST::MetadataProducerStatus::ExistingCallableProducerNeedsExtension,
     })
 }
 
@@ -1612,7 +1726,8 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
             params,
             param_contract,
             param_variadic,
-            ret,
+            return_type,
+            failure_contract,
             ..
         } => SymbolKind::Function {
             params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
@@ -1632,7 +1747,14 @@ fn convert_kind(kind: &SymKind) -> SymbolKind {
                     )
                 })
                 .collect(),
-            ret: ret.as_ref().map(|t| t.name()),
+            ret: match failure_contract {
+                CallableFactAvailability::Checked(failure) => {
+                    Some(failure.effective_type().name())
+                }
+                CallableFactAvailability::Unavailable(_) => {
+                    return_type.as_ref().map(Type::name)
+                }
+            },
         },
         SymKind::Struct { fields, .. } => SymbolKind::Struct {
             fields: fields.iter().map(|(n, t)| (n.clone(), t.name())).collect(),

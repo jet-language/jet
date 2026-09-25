@@ -1,11 +1,17 @@
 use super::patterns::resolved_enum_subject_type;
-use crate::jet_generated_format as jet_format;
-use crate::Codegen::escape_rust_str;
-use crate::Codegen::is_json_variant;
-use crate::Codegen::is_key_variant;
-use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::BranchClass;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPatternPosition;
+use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_guarded_variant_pattern;
@@ -22,7 +28,7 @@ use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
-use crate::Codegen::TIR::lower::{deferred_stmt, lower_return_value, LowerBody, LowerStmtPlan};
+use crate::Codegen::TIR::lower::{LowerBody, LowerStmtPlan, deferred_stmt, lower_return_value};
 use crate::Codegen::TIR::lower_enum_match;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
@@ -30,21 +36,15 @@ use crate::Codegen::TIR::lower_range_switch;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
 use crate::Codegen::TIR::tir_add_pattern_bindings;
 use crate::Codegen::TIR::tir_recv_jet_ty;
-use crate::Codegen::TIR::BranchClass;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::TExpr;
-use crate::Codegen::TIR::TExprKind;
-use crate::Codegen::TIR::TForInMethod;
-use crate::Codegen::TIR::TIfCond;
-use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::TPattern;
-use crate::Codegen::TIR::TPatternPosition;
-use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::TirWorklist;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
 use crate::Syntax;
-use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
+use crate::jet_generated_format as jet_format;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -85,7 +85,14 @@ fn rewrite_function_value_tails(body: &mut Vec<Stmt>) {
         return;
     }
     match body.last_mut() {
-        Some(Stmt::Switch { arms, else_body, .. } | Stmt::ComptimeSwitch { arms, else_body, .. }) => {
+        Some(
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            },
+        ) => {
             for arm in arms {
                 rewrite_function_value_tails(&mut arm.body);
             }
@@ -292,13 +299,7 @@ pub(super) fn lower_binding_free_variant_pattern_test(
         ty: Type::Bool,
         kind: TExprKind::PatternMatches {
             subj: Box::new(subj),
-            pattern: TPattern::from_ast(
-                pattern.clone(),
-                enum_type,
-                position,
-                false,
-                false,
-            ),
+            pattern: TPattern::from_ast(pattern.clone(), enum_type, position, false, false),
         },
     }
 }
@@ -359,7 +360,7 @@ pub(super) fn lower_if_let_subject(
 
 #[cfg(test)]
 mod borrowed_pattern_tests {
-    use super::{pattern_subject_is_borrowed, Expr, LowerEnv, Span, TLocal};
+    use super::{Expr, LowerEnv, Span, TLocal, pattern_subject_is_borrowed};
 
     fn nested_self() -> Expr {
         Expr::Field(
@@ -817,11 +818,14 @@ fn lower_if_cond_atom(
                 .unwrap_or_default();
             let if_bindings: Vec<IfBinding> = bindings
                 .iter()
-                .zip(payload_tys.into_iter().map(Some).chain(std::iter::repeat(None)))
+                .zip(
+                    payload_tys
+                        .into_iter()
+                        .map(Some)
+                        .chain(std::iter::repeat(None)),
+                )
                 .filter_map(|(slot, ty)| match slot {
-                    PatSlot::Bind { name, .. } => {
-                        Some((name.clone(), TLocal::user(name), ty))
-                    }
+                    PatSlot::Bind { name, .. } => Some((name.clone(), TLocal::user(name), ty)),
                     _ => None,
                 })
                 .collect();
@@ -1040,6 +1044,62 @@ fn lower_if_cond_atom(
             } else {
                 lower_if_let_subject(subject, cx, env, cached)
             };
+            if let Pattern::Present { binding, .. } = pattern {
+                if !matches!(&subj.ty, Type::Option(_)) {
+                    if let Expr::Ident(source_name, _) = subject.as_ref() {
+                        // A same-name Present refinement already replaced the
+                        // local's runtime Option with its payload. Sema still
+                        // validates a later `.Val(value)` against the stable
+                        // carrier, so this repeated test is proven true here.
+                        let ty = subj.ty.clone();
+                        let mutable = match &ty {
+                            Type::Named(name) | Type::Apply { name, .. } => {
+                                cx.has_close_type(name) || name == "TLSStream"
+                            }
+                            _ => false,
+                        };
+                        let place = if ty.is_allocator_view() {
+                            TLocal::user(binding).through_ref()
+                        } else {
+                            TLocal::user(binding)
+                        };
+                        let place = if mutable { place.as_mutable() } else { place };
+                        let has_binding = !binding.is_empty() && binding != "_";
+                        let prelude = if has_binding && binding != source_name {
+                            vec![TStmt::Let {
+                                name: binding.clone(),
+                                kw: if mutable { "let mut" } else { "let" },
+                                let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+                                init: subj,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            }]
+                        } else {
+                            Vec::new()
+                        };
+                        let condition = TIfCond::Plain(TExpr {
+                            ty: Type::Bool,
+                            kind: TExprKind::BoolLit(true),
+                        });
+                        return (
+                            if prelude.is_empty() {
+                                condition
+                            } else {
+                                TIfCond::WithPrelude {
+                                    prelude,
+                                    cond: Box::new(condition),
+                                }
+                            },
+                            if has_binding {
+                                vec![(binding.clone(), place, Some(ty))]
+                            } else {
+                                Vec::new()
+                            },
+                            Vec::new(),
+                        );
+                    }
+                }
+            }
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
             let binding = match pattern {
@@ -1073,7 +1133,7 @@ fn lower_if_cond_atom(
             // Rust `if let` pattern binding.
             let mutable = ty.as_ref().is_some_and(|ty| match ty {
                 Type::Named(name) | Type::Apply { name, .. } => {
-                    cx.close_types.contains(name) || name == "TLSStream"
+                    cx.has_close_type(name) || name == "TLSStream"
                 }
                 _ => false,
             });
@@ -1082,11 +1142,7 @@ fn lower_if_cond_atom(
             } else {
                 TLocal::user(&name)
             };
-            let place = if mutable {
-                place.as_mutable()
-            } else {
-                place
-            };
+            let place = if mutable { place.as_mutable() } else { place };
             let mut pattern = if matches!(&subj.ty, Type::Option(_)) {
                 TPattern::option_binding(pattern.clone())
             } else {

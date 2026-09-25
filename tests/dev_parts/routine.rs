@@ -1628,12 +1628,15 @@ fn dev_default_socket_echo_reports_jit_gap() {
 #[test]
 fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let dir = std::env::temp_dir().join(format!(
-        "jet_dev_tls_peer_identity_parity_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    // A private package root keeps this transport fixture's authority scan out
+    // of the shared scratch project and is removed when the test scope ends.
+    let scratch = common::Scratch::new("tls-peer-identity");
+    let dir = scratch.path.as_path();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"tls_peer_identity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n",
+    )
+    .unwrap();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ca_cert = root.join("tests/fixtures/tls/localhost.cert.pem");
     let ca_key = root.join("tests/fixtures/tls/localhost.key.pem");
@@ -1709,16 +1712,39 @@ fn run() {{
     budget :: Duration.seconds(2) ?? panic("deadline")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
     peer :: secure.peer_identity()
+    if peer.verified_server_name != "localhost" {{ panic("server name") }}
+    print(peer.verified_server_name)
     print(peer.cipher_suite)
     print(peer.tls_version)
     if !peer.cipher_suite.starts_with("TLS13_") {{ panic("cipher") }}
     if peer.tls_version != .Tls13 {{ panic("version") }}
+    crlf :: String.from_bytes([U8]{{13, 10}}) ?? panic("CRLF")
+    secure.write_text("GET / HTTP/1.0{{crlf}}Host: localhost{{crlf}}{{crlf}}") ?? panic("request")
+    // At most 8 * 512 bytes; preserve the marker across TLS read boundaries.
+    response := ""
+    response_reads := 0
+    loop response_reads < 8 && !response.contains("<HTML>") {{
+        chunk :: secure.read_text(512) ?? panic("response")
+        if chunk == "" -> break
+        response = "{{response}}{{chunk}}"
+        response_reads = response_reads + 1
+    }}
+    if !response.contains("<HTML>") {{ panic("response body") }}
+    print("tls-response-ok")
     secure.close() ?? panic("close")
 }}
 "#,
             roots = jet_bytes(&root_bytes),
         )
     };
+    struct TlsServer(std::process::Child);
+    impl Drop for TlsServer {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     let wait_ready = |port: u16| {
         for _ in 0..50 {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -1729,25 +1755,27 @@ fn run() {{
         panic!("openssl TLS 1.3 server did not accept on 127.0.0.1:{port}");
     };
     let start_server = |port: u16| {
-        let server = Command::new("openssl")
-            .args([
-                "s_server",
-                "-quiet",
-                "-www",
-                "-tls1_3",
-                "-accept",
-                &port.to_string(),
-                "-cert",
-            ])
-            .arg(&server_cert)
-            .arg("-key")
-            .arg(&server_key)
-            .arg("-cert_chain")
-            .arg(&ca_cert)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("openssl TLS 1.3 server");
+        let server = TlsServer(
+            Command::new("openssl")
+                .args([
+                    "s_server",
+                    "-quiet",
+                    "-www",
+                    "-tls1_3",
+                    "-accept",
+                    &port.to_string(),
+                    "-cert",
+                ])
+                .arg(&server_cert)
+                .arg("-key")
+                .arg(&server_key)
+                .arg("-cert_chain")
+                .arg(&ca_cert)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("openssl TLS 1.3 server"),
+        );
         wait_ready(port);
         server
     };
@@ -1761,36 +1789,27 @@ fn run() {{
     let aot_port = fresh_port();
     let file = dir.join("tls_peer_identity.jet");
     fs::write(&file, source_for(aot_port)).unwrap();
-    let mut server = start_server(aot_port);
+    let server = start_server(aot_port);
     let shown = file.to_string_lossy().to_string();
     let aot = compiled_binary_output(
-        &dir,
+        dir,
         "tls_peer_identity_aot",
         0,
         "tls_peer_identity",
         &shown,
     );
-    let _ = server.kill();
-    let _ = server.wait();
+    drop(server);
     assert_eq!(aot.exit_code, 0, "AOT stderr: {}", aot.stderr);
 
     let dev_port = fresh_port();
     fs::write(&file, source_for(dev_port)).unwrap();
-    let mut server = start_server(dev_port);
-    let dev = match dev_iteration_with_timeout("tls_peer_identity", &shown, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev TLS peer identity failed: {diags:?}"),
-    };
-    let _ = server.kill();
-    let _ = server.wait();
+    let server = start_server(dev_port);
+    let dev = run_default_dev_resident(&shown, "tls_peer_identity");
+    drop(server);
 
     let interpreter_port = fresh_port();
     fs::write(&file, source_for(interpreter_port)).unwrap();
-    let mut server = start_server(interpreter_port);
+    let server = start_server(interpreter_port);
     let interpreted = match dev_iteration_with_timeout("tls_peer_identity", &shown, true) {
         RunOutcome::Ran {
             stdout,
@@ -1799,24 +1818,29 @@ fn run() {{
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(diags) => panic!("interpreter TLS peer identity failed: {diags:?}"),
     };
-    let _ = server.kill();
-    let _ = server.wait();
+    drop(server);
 
     let mut aot_lines = aot.stdout.lines();
+    assert_eq!(aot_lines.next(), Some("localhost"));
     assert!(aot_lines
         .next()
         .is_some_and(|cipher| cipher.starts_with("TLS13_")));
     assert_eq!(aot_lines.next(), Some("Tls13"));
+    assert_eq!(aot_lines.next(), Some("tls-response-ok"));
     assert_eq!(aot_lines.next(), None);
     assert_eq!(dev.stdout, aot.stdout);
     assert_eq!(interpreted.stdout, aot.stdout);
+    assert_eq!(dev.stderr, aot.stderr, "default dev stderr differed from AOT");
+    assert_eq!(
+        interpreted.stderr, aot.stderr,
+        "interpreter stderr differed from AOT"
+    );
     assert_eq!(dev.exit_code, 0, "default dev stderr: {}", dev.stderr);
     assert_eq!(
         interpreted.exit_code, 0,
         "interpreter stderr: {}",
         interpreted.stderr
     );
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -2564,7 +2588,8 @@ fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
         RunOutcome::Problems(diags) => panic!("default dev failed Archive example: {diags:?}"),
     };
 
-    let dir = std::env::temp_dir().join(format!("jet_archive_{}", std::process::id()));
+    let dir = common::test_scratch_root("dev_archive")
+        .join(format!("jet_archive_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let aot = compiled_binary_output(&dir, "archive", 0, "archive", file);

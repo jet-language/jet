@@ -1,4 +1,4 @@
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError {
     {
@@ -26,14 +26,17 @@ fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> Enc
     }
 }
 
-fn safe_limits() -> EncodingLimits {
+
+fn safe_xml_limits() -> XMLLimits {
     {
-        buffer_bytes: 65536,
         max_depth: 256,
-        max_item_bytes: 16777216,
-        max_total_bytes: None,
-        max_expansion_depth: 32,
-        max_expansion_bytes: 8388608,
+        max_nodes: 1000000,
+        max_attributes_per_element: 1024,
+        max_name_bytes: 1024,
+        max_text_bytes: 16777216,
+        max_entity_declarations: 0,
+        max_entity_depth: 0,
+        max_entity_replacement_bytes: 0,
     }
 }
 
@@ -134,11 +137,20 @@ pub fn parse_bytes(bytes: [U8]) -> DataTree !EncodingError {
 }
 
 pub fn parse_with(text: String, limits: XMLLimits) -> DataTree !EncodingError {
+    if limits.max_depth < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_depth must be positive"))
+    if limits.max_nodes < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_nodes must be positive"))
+    if limits.max_attributes_per_element < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_attributes_per_element cannot be negative"))
+    if limits.max_name_bytes < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_name_bytes must be positive"))
+    if limits.max_text_bytes < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_text_bytes cannot be negative"))
+    if limits.max_entity_declarations < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_entity_declarations cannot be negative"))
+    if limits.max_entity_depth < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_entity_depth cannot be negative"))
+    if limits.max_entity_replacement_bytes < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_entity_replacement_bytes cannot be negative"))
     if text.bytes().len() > limits.max_text_bytes {
         return Err(unsupported_error(EncodingFormat.XML, 0, "XML document exceeds XMLLimits.max_text_bytes"))
     }
-    parse_xml_limited(text, limits.max_depth)
+    parse_xml_limited(text, limits)
 }
+
 
 pub fn to_string(value: DataTree) -> String { render_xml(value) }
 
@@ -179,11 +191,25 @@ impl XMLWriter {
 }
 
 fn parse_xml(text: String) -> DataTree !EncodingError {
-    parse_xml_limited(text, safe_limits().max_depth)
+    parse_xml_limited(text, safe_xml_limits())
 }
 
-fn parse_xml_limited(text: String, max_depth: Int) -> DataTree !EncodingError {
-    p := XmlParser{bytes: text.bytes(), index: 0, line: 1, column: 1, depth: 0, max_depth: max_depth}
+fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree !EncodingError {
+    if text.bytes().len() > limits.max_text_bytes {
+        return Err(unsupported_error(EncodingFormat.XML, 0, "XML document exceeds XMLLimits.max_text_bytes"))
+    }
+    p := XmlParser{
+        bytes: text.bytes(),
+        index: 0,
+        line: 1,
+        column: 1,
+        depth: 0,
+        max_depth: limits.max_depth,
+        nodes: 0,
+        max_nodes: limits.max_nodes,
+        max_attributes_per_element: limits.max_attributes_per_element,
+        max_name_bytes: limits.max_name_bytes,
+    }
     _ :: p.skip_misc() ?? return Err(p.fail("XML preamble could not be parsed"))
     node :: p.parse_element()
     _ :: p.skip_misc() ?? return Err(p.fail("XML trailing content could not be parsed"))
@@ -206,6 +232,10 @@ struct XmlParser {
     column: Int
     depth: Int
     max_depth: Int
+    nodes: Int
+    max_nodes: Int
+    max_attributes_per_element: Int
+    max_name_bytes: Int
 }
 
 impl XmlParser {
@@ -294,15 +324,21 @@ impl XmlParser {
     }
     fn parse_name(&self) -> String !EncodingError {
         out := [U8]{}
+        at_start := true
         loop {
             b :: self.peek() ?? break
             n :: b
-            ok :: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45 || n == 58 || n == 46
+            letter :: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+            ok :: letter || n == 95 || (!at_start && ((n >= 48 && n <= 57) || n == 45 || n == 58 || n == 46))
             if ok == false -> break
+            if out.len() >= self.max_name_bytes {
+                return Err(unsupported_error(EncodingFormat.XML, self.index, "XML name exceeds XMLLimits.max_name_bytes"))
+            }
             out.push(b)
             _ :: self.bump()
+            at_start = false
         }
-        if out.len() == 0 -> return Err(self.fail("expected an element or attribute name"))
+        if out.len() == 0 -> return Err(self.fail("expected an XML name beginning with a letter or underscore"))
         Ok(String.from_bytes(out) ?? "")
     }
     fn parse_element(&self) -> DataTree !EncodingError {
@@ -310,6 +346,11 @@ impl XmlParser {
         if self.depth > self.max_depth {
             return Err(unsupported_error(EncodingFormat.XML, self.index, "XML nesting exceeds XMLLimits.max_depth"))
         }
+        self.nodes += 1
+        if self.nodes > self.max_nodes {
+            return Err(unsupported_error(EncodingFormat.XML, self.index, "XML node count exceeds XMLLimits.max_nodes"))
+        }
+
         lt :: self.bump() ?? return Err(self.fail("expected '<'"))
         if lt != (U8{60}) -> return Err(self.fail("expected '<'"))
         name :: self.parse_name()
@@ -339,6 +380,9 @@ impl XmlParser {
                 }
             }
             attrs.push(attribute(attr_name, attr_value))
+            if attrs.len() > self.max_attributes_per_element {
+                return Err(unsupported_error(EncodingFormat.XML, self.index, "XML attribute count exceeds XMLLimits.max_attributes_per_element"))
+            }
         }
         children := [DataTree]{}
         loop {
@@ -415,6 +459,8 @@ fn decode_entities(text: String) -> String !EncodingError {
         }
         j := i + 1
         loop j < raw.len() && raw[j] != (U8{59}) -> j += 1
+        if j >= raw.len() -> return Err(syntax_error(EncodingFormat.XML, i, 1, i + 1, "", "XML entity reference must end with ';'"))
+        if j == i + 1 -> return Err(syntax_error(EncodingFormat.XML, i, 1, i + 1, "", "empty XML entity reference"))
         name :: String.from_bytes(raw[i + 1..j - 1]) ?? return Err(syntax_error(EncodingFormat.XML, i, 1, i + 1, "", "invalid XML entity name"))
         if name == {
             "lt" -> out.push(U8{60})

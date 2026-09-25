@@ -62,6 +62,10 @@ pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_s
     })
 }
 
+pub(crate) fn jet_std_file_reader_path(reader: &JetFileReader) -> String {
+    reader.path.clone()
+}
+
 pub(crate) fn jet_std_file_reader_read_line(
     reader: &mut JetFileReader,
 ) -> Result<Option<String>, jet_std::IOError> {
@@ -129,4 +133,8 @@ pub(crate) fn jet_std_file_writer_flush(
         .inner
         .flush()
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
+}
+
+pub(crate) fn jet_std_file_writer_path(writer: &JetFileWriter) -> String {
+    writer.path.clone()
 }

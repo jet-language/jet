@@ -64,7 +64,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
-        | ("lines", 0)
+        | ("lines", 0) | ("bytes", 0)
         // D-STR-DECLINE1=C: `parse`/`to_int`/`to_float` — same numeric
         // parse mechanisms, with String as the receiver.
         | ("parse", 0) | ("to_int", 0) | ("to_float", 0)
@@ -736,8 +736,8 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Opt
         return Some(TNumericOp::Predicate(method.to_string()));
     }
     // Integer bit-population queries → `((recv).{method}() as i64)`.
-    if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
-    | "bit_count" | "bit_length" = method
+    if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "bit_count"
+    | "bit_length" = method
     {
         let width = match src_name {
             "I8" | "U8" => 8,

@@ -2947,20 +2947,28 @@ fn getter_key(index: &SemIndex, name: &str, span: SourceSpan) -> String {
     )
 }
 
-fn method_is_pure(index: &SemIndex, span: SourceSpan) -> Option<bool> {
-    let reference = index
+fn method_is_pure(index: &SemIndex, span: SourceSpan) -> bool {
+    let Some(reference) = index
         .references()
         .iter()
-        .find(|reference| reference.span == span)?;
-    let target = reference.target.as_ref()?;
-    let definition = index.definitions().iter().find(|definition| {
+        .find(|reference| reference.span == span)
+    else {
+        return false;
+    };
+    let Some(target) = reference.target.as_ref() else {
+        return false;
+    };
+    let Some(definition) = index.definitions().iter().find(|definition| {
         definition.module_path == target.module_path && definition.def_span == target.def_span
-    })?;
-    Some(
-        definition
-            .callable_signature
-            .as_ref()
-            .map_or(true, |signature| signature.effects.is_empty()),
+    }) else {
+        return false;
+    };
+    let Some(signature) = definition.callable_signature.as_ref() else {
+        return false;
+    };
+    matches!(
+        &signature.effects,
+        jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty()
     )
 }
 
@@ -3104,8 +3112,7 @@ fn project_expr_node(
         } => {
             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
             let variant_like = starts_uppercase(method);
-            let pure = method_is_pure(index, (*method_span).into())
-                .unwrap_or_else(|| !exec_context && !call_has_effects(index, method));
+            let pure = method_is_pure(index, (*method_span).into());
             let archetype = if variant_like || pure {
                 "function_pure"
             } else {

@@ -1,8 +1,10 @@
-// core-conformance: core.service.tree_show
+// typed-service-conformance: ServiceTree.show
 use core.service as service
 
+fn worker() {}
+
 fn run() {
-    tree :: service.tree("conformance")
-    result :: service.tree_show(tree)
-    print(result)
+    tree := service.tree("conformance")
+    tree.worker("worker", worker, capacity: 2) ?? panic("worker")
+    print(tree.show())
 }

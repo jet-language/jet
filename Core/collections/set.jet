@@ -38,7 +38,7 @@ pub fn add(s: StringSet, item: String) -> StringSet {
 pub fn discard(s: StringSet, item: String) -> StringSet {
     items := [String]{}
     loop x in s.items {
-        if x != item && !has_string(items, x) -> items.push(~x)
+        if x != item -> items.push(~x)
     }
     StringSet{items: items}
 }
@@ -71,7 +71,7 @@ pub fn union(a: StringSet, b: StringSet) -> StringSet {
 pub fn intersection(a: StringSet, b: StringSet) -> StringSet {
     items := [String]{}
     loop x in a.items {
-        if has_string(b.items, x) && !has_string(items, x) -> items.push(~x)
+        if has_string(b.items, x) -> items.push(~x)
     }
     StringSet{items: items}
 }
@@ -79,7 +79,7 @@ pub fn intersection(a: StringSet, b: StringSet) -> StringSet {
 pub fn difference(a: StringSet, b: StringSet) -> StringSet {
     items := [String]{}
     loop x in a.items {
-        if !has_string(b.items, x) && !has_string(items, x) -> items.push(~x)
+        if !has_string(b.items, x) -> items.push(~x)
     }
     StringSet{items: items}
 }

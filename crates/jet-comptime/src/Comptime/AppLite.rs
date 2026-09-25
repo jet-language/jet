@@ -420,6 +420,7 @@ mod http_kernel {
     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
     include!("../../../jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
     include!("../../../jet-codegen/src/Prelude/Core/NetPure.rs");

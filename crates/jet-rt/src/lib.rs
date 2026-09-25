@@ -374,6 +374,12 @@ impl JetArena {
             .collect()
     }
 
+    /// Whether restoring string slots alone would lose live arena state.
+    pub fn has_non_string_state(&self) -> bool {
+        !self.exact_roots.is_empty()
+            || self.values.iter().any(|value| !matches!(value, JetVal::String(_)))
+    }
+
     /// Restore compile-time string handles so cached machine code sees the same ids.
     pub fn install_string_slots(&mut self, slots: &[(usize, String)]) {
         if slots.is_empty() {

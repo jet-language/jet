@@ -1,9 +1,11 @@
 // D-MIGRATE2: every migration op on one #PublishedSchema record.
 //
-// The committed snapshot (.jet/cache/schema/Profile.snapshot) records the
-// 1.0.0 shape: legacy_id: Int, id: Int, name: String, score: Int. This release
-// (2.0.0) reshapes it, and the `migration` block declares every breaking change
-// so the compiler can prove old data still reads:
+// The canonical fixture is `fixture-state/cache/schema/Profile.snapshot`.
+// The golden harness stages it as `.jet/cache/schema` in an external scratch
+// project, keeping source state out of the checkout. The snapshot records the
+// 1.0.0 shape: legacy_id: Int, id: Int, name: String, score: Int. Release
+// 2.0.0 reshapes it, and the migration block declares every breaking change so
+// the compiler can prove old data still reads:
 //
 //   remove legacy_id          (D-MIGRATE2D) — a field is gone
 //   rename name -> title      (D-MIGRATE1)  — a field changed name

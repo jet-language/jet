@@ -46,12 +46,16 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         let errors = rt.heap.alloc_string(out.errors.clone());
         let _ = rt.heap.record_set_string(record, 2, errors);
         let _ = rt.heap.record_set_bool(record, 3, out.success);
-        // A present narrow value is encoded as handle+1; zero is absent.
-        let signal = out
-            .signal
-            .as_ref()
-            .map(|value| value.to_i64().unwrap_or(0).wrapping_add(1))
-            .unwrap_or(0);
+        // Typed Option fields carry result-arena handles; presence is not
+        // encoded by reserving a scalar value.
+        let signal = match out.signal.as_ref() {
+            Ok(value) => crate::runtime_host::alloc_jit_result(
+                rt,
+                true,
+                value.to_i64().unwrap_or(0) as u64,
+            ),
+            Err(JetAbsent) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+        };
         let _ = rt.heap.record_set_int(record, 4, signal);
         let _ = rt.heap.record_set_bool(record, 5, out.timed_out);
         let executable = rt.heap.alloc_string(out.executable_identity.clone());
@@ -96,10 +100,18 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         let _ = rt
             .heap
             .record_set_int(record, 16, out.pid.to_i64().unwrap_or(0));
-        let limit_hit = out
-            .limit_hit
-            .map(|limit| process_resource_limit_variant(limit).wrapping_add(1))
-            .unwrap_or(0);
+        let limit_hit = match out.limit_hit.as_ref() {
+            Ok(limit) => {
+                let limit_record = rt.heap.alloc_record(1);
+                let _ = rt.heap.record_set_int(
+                    limit_record,
+                    0,
+                    process_resource_limit_variant(*limit),
+                );
+                crate::runtime_host::alloc_jit_result(rt, true, limit_record as u64)
+            }
+            Err(JetAbsent) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+        };
         let _ = rt.heap.record_set_int(record, 17, limit_hit);
         record
     })
@@ -248,25 +260,13 @@ fn process_io_error_result(error: process_prelude::IOError) -> i64 {
             os_code,
             cause,
         } = context;
-        let record = rt.heap.alloc_record(4);
-        let _ = rt
-            .heap
-            .record_set_int(record, 0, process_io_operation_bits(operation));
-        let resource = match resource {
-            Ok(resource) => rt.heap.alloc_string(resource).wrapping_add(1),
-            Err(JetAbsent) => 0,
-        };
-        let _ = rt.heap.record_set_int(record, 1, resource);
-        let os_code = match os_code {
-            Ok(os_code) => os_code.wrapping_add(1),
-            Err(JetAbsent) => 0,
-        };
-        let _ = rt.heap.record_set_int(record, 2, os_code);
-        let cause = match cause {
-            Ok(cause) => rt.heap.alloc_string(cause).wrapping_add(1),
-            Err(JetAbsent) => 0,
-        };
-        let _ = rt.heap.record_set_int(record, 3, cause);
+        let record = crate::runtime_host::alloc_io_context(
+            rt,
+            process_io_operation_bits(operation),
+            resource.as_ref().ok().map(String::as_str),
+            os_code.ok(),
+            cause.as_ref().ok().map(String::as_str),
+        );
         rt.results.push(super::JitResultValue {
             ok: false,
             bits: record.wrapping_shl(8).wrapping_add(variant) as u64,
@@ -277,7 +277,8 @@ fn process_io_error_result(error: process_prelude::IOError) -> i64 {
 /// Render a packed `IOError` with the canonical Prelude wording.
 /// `ResourceLimit` stores its `ProcessResourceLimit` enum-record handle in the
 /// payload word; ordinary I/O errors store an `IOContext` heap record.
-pub(crate) fn process_error_show_text(packed: i64, heap: &jet_rt::JetArena) -> String {
+pub(crate) fn process_error_show_text(packed: i64, rt: &crate::JitRuntime) -> String {
+    let heap = &rt.heap;
     let variant = packed & 0xff;
     if variant == process_io_error_variant("ResourceLimit") {
         let limit_record = packed >> 8;
@@ -288,15 +289,21 @@ pub(crate) fn process_error_show_text(packed: i64, heap: &jet_rt::JetArena) -> S
     let context = packed >> 8;
     let resource = heap
         .record_get_int(context, 1)
-        .and_then(|encoded| encoded.checked_sub(1))
+        .and_then(|handle| crate::runtime_host::jit_result(rt, handle))
+        .filter(|result| result.ok)
+        .map(|result| result.bits as i64)
         .and_then(|handle| heap.clone_string(handle));
     let cause = heap
         .record_get_int(context, 3)
-        .and_then(|encoded| encoded.checked_sub(1))
+        .and_then(|handle| crate::runtime_host::jit_result(rt, handle))
+        .filter(|result| result.ok)
+        .map(|result| result.bits as i64)
         .and_then(|handle| heap.clone_string(handle));
     jet_foundation::StructuralDebug::jet_show_io_error(
         variant,
-        heap.record_get_int(context, 0).unwrap_or(0),
+        heap.record_get_int(context, 0)
+            .and_then(|operation| heap.record_get_int(operation, 0))
+            .unwrap_or(0),
         resource.as_deref(),
         cause.as_deref(),
     )
@@ -2192,7 +2199,7 @@ fn jet_jit_process_child_wait(child: i64) -> i64 {
 /// Marshal a packed process `IOError` into the shared Prelude display text.
 fn jet_jit_process_error_show(packed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let text = process_error_show_text(packed, &rt.heap);
+        let text = process_error_show_text(packed, rt);
         rt.heap.alloc_string(text)
     })
 }

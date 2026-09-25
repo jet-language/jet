@@ -87,25 +87,32 @@ fn adapters_use_one_jet_library_runner_and_fail_closed_outputs() {
 fn representative_projects_declare_exact_inputs_and_stay_under_ten_lines() {
     let root = repo_root().join("tests/fixtures/foreign_build_hosts");
     let projects = [
-        ("cmake", "CMakeLists.txt", ["package.jet", ".jet/lock", "library.jet", "extra.jet"]),
-        ("gradle", "build.gradle", ["package.jet", ".jet/lock", "library.jet", "extra.jet"]),
-        ("bazel", "BUILD.bazel", ["package.jet", ".jet/lock", "library.jet", "extra.jet"]),
-        ("msbuild", "host.proj", ["package.jet", ".jet/lock", "library.jet", "extra.jet"]),
+        ("cmake", "CMakeLists.txt"),
+        ("gradle", "build.gradle"),
+        ("bazel", "BUILD.bazel"),
+        ("msbuild", "host.proj"),
     ];
-    for (host, build_file, inputs) in projects {
+    for (host, build_file) in projects {
         let project = root.join(host);
         let build = read(&project.join(build_file));
-        assert!(maintained_lines(&project.join(build_file)) < 10, "{host} build grew past ten maintained lines");
-        for input in inputs {
-            assert!(project.join(input).is_file(), "{host} is missing {input}");
+        assert!(
+            maintained_lines(&project.join(build_file)) < 10,
+            "{host} build grew past ten maintained lines"
+        );
+        for (input, fixture) in [
+            ("package.jet", "package.jet"),
+            (".jet/lock", "lock.fixture"),
+            ("library.jet", "library.jet"),
+            ("extra.jet", "extra.jet"),
+        ] {
+            assert!(project.join(fixture).is_file(), "{host} is missing {input}");
             let named = build.contains(input)
                 || (input == ".jet/lock" && build.contains(".jet\\lock"));
             assert!(named, "{host} build does not name {input}");
         }
         assert!(project.join("package.jet").is_file());
-        assert!(project.join(".jet/lock").is_file());
+        assert!(read(&project.join("lock.fixture")).contains("[build.stamp]"));
         assert!(read(&project.join("package.jet")).contains(".Library"));
-        assert!(read(&project.join(".jet/lock")).contains("[build.stamp]"));
         assert!(build.contains("loadable"), "{host} does not name the native artifact");
         let host_source = if host == "msbuild" { "host.cpp" } else { "host.c" };
         assert!(read(&project.join(host_source)).contains("on_tick(41) == 42"));

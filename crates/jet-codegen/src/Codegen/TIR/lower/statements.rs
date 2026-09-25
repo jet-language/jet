@@ -1,9 +1,26 @@
-use crate::jet_generated_format as jet_format;
-#[cfg(test)]
-use crate::Codegen::build_cx;
-use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::ScopeMemberKind;
+use crate::Codegen::TIR::TBuiltinOp;
+use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TContract;
+use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TFnValueKind;
+use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TIndexFieldAssign;
+use crate::Codegen::TIR::TIntegerBounds;
+use crate::Codegen::TIR::TLetTy;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPlace;
+use crate::Codegen::TIR::TRequireKind;
+use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::TUnsafeGate;
+use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::integer_bounds_for_expr;
 use crate::Codegen::TIR::label_name;
@@ -26,37 +43,20 @@ use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::ScopeMemberKind;
-use crate::Codegen::TIR::TBuiltinOp;
-use crate::Codegen::TIR::TCallArg;
-use crate::Codegen::TIR::TContract;
-use crate::Codegen::TIR::TCoreClosureKind;
-use crate::Codegen::TIR::TExpr;
-use crate::Codegen::TIR::TExprKind;
-use crate::Codegen::TIR::TFnValueKind;
-use crate::Codegen::TIR::TForInMethod;
-use crate::Codegen::TIR::TIfCond;
-use crate::Codegen::TIR::TIndexFieldAssign;
-use crate::Codegen::TIR::TIntegerBounds;
-use crate::Codegen::TIR::TLetTy;
-use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::TPattern;
-use crate::Codegen::TIR::TPlace;
-use crate::Codegen::TIR::TRequireKind;
-use crate::Codegen::TIR::TStaticOwner;
-use crate::Codegen::TIR::TStmt;
-use jet_foundation::CanonicalPass;
-use crate::Codegen::TIR::TUnsafeGate;
-use crate::Codegen::TIR::TirWorklist;
-
 #[cfg(test)]
-use crate::Diagnostics::Span;
-use crate::Syntax;
+use crate::Codegen::build_cx;
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
+use crate::jet_generated_format as jet_format;
+use jet_foundation::CanonicalPass;
+
 use crate::AST::{
     BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, Pattern, PlaceAccess, Stmt, Type,
     UnOp,
 };
+#[cfg(test)]
+use crate::Diagnostics::Span;
+use crate::Syntax;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -190,6 +190,16 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                     || walk_expr(then_value)
                     || walk_stmts(else_body)
                     || walk_expr(else_value)
+            }
+            TExprKind::ResultHandler {
+                subject, ok_body, ok_value, err_body, err_value, terminal, ..
+            } => {
+                walk_expr(subject)
+                    || walk_stmts(ok_body)
+                    || walk_expr(ok_value)
+                    || walk_stmts(err_body)
+                    || walk_expr(err_value)
+                    || walk_expr(terminal)
             }
             TExprKind::Try { inner, note, .. } => {
                 walk_expr(inner) || note.as_deref().is_some_and(walk_expr)
@@ -524,9 +534,9 @@ fn collect_thread_callback_scan(
                     args,
                     ..
                 } => {
-                    let thread_callback =
-                        (method == "on_interrupt" && is_core_os_receiver(receiver, cx))
-                            || matches!(method.as_str(), "with_event_time" | "key_by");
+                    let thread_callback = (method == "on_interrupt"
+                        && is_core_os_receiver(receiver, cx))
+                        || matches!(method.as_str(), "with_event_time" | "key_by");
                     if thread_callback {
                         if let Some(callback) = args.first().map(|arg| &arg.expr) {
                             if let Some(name) = thread_callback_ident(callback) {
@@ -990,9 +1000,7 @@ fn collect_thread_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(String, 
             crate::AST::LambdaBody::Expr(body) => {
                 collect_thread_lambda_captures_expr(body, captures)
             }
-            crate::AST::LambdaBody::Block(body) => {
-                collect_thread_lambda_captures(body, captures)
-            }
+            crate::AST::LambdaBody::Block(body) => collect_thread_lambda_captures(body, captures),
         },
         Expr::MethodCall { receiver, args, .. } => {
             collect_thread_lambda_captures_expr(receiver, captures);
@@ -1859,12 +1867,10 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
 }
 #[inline(never)]
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let before_payload = CanonicalPass::enabled().then(|| {
-        CanonicalPass::debug_payload("ast", "tir.lower-statements", &stmts)
-    });
-    let before_identity = CanonicalPass::enabled().then(|| {
-        CanonicalPass::debug_identity("ast", "tir.lower-statements", &stmts)
-    });
+    let before_payload = CanonicalPass::enabled()
+        .then(|| CanonicalPass::debug_payload("ast", "tir.lower-statements", &stmts));
+    let before_identity = CanonicalPass::enabled()
+        .then(|| CanonicalPass::debug_identity("ast", "tir.lower-statements", &stmts));
     // Child blocks are heap tasks. A nested source block therefore resumes its
     // parent through `LowerBlock::resume` instead of keeping the parent lowering
     // frame on the native stack.
@@ -2345,7 +2351,9 @@ fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
 fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a str> {
     match pattern {
         Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => Some(binding),
-        Pattern::Variant { bindings, .. } => bindings.first().and_then(crate::AST::PatSlot::as_bind),
+        Pattern::Variant { bindings, .. } => {
+            bindings.first().and_then(crate::AST::PatSlot::as_bind)
+        }
         _ => None,
     }
 }
@@ -2821,10 +2829,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     });
                 }
                 ready_return!(TStmt::RefutableBind {
-                    pattern: TPattern::binding_with_values(
-                        pattern.clone(),
-                        |value| lower_expr(value, cx, env),
-                    ),
+                    pattern: TPattern::binding_with_values(pattern.clone(), |value| lower_expr(
+                        value, cx, env
+                    ),),
                     init,
                     fallback,
                 });
@@ -2858,11 +2865,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
                                 kw: "let mut",
-                                let_ty: crate::Codegen::TIR::let_ty_for_opt(
-                                    Some(ty),
-                                    false,
-                                    false
-                                ),
+                                let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), false, false),
                                 init: TExpr {
                                     ty: ty.clone(),
                                     kind: TExprKind::Uninit,
@@ -3053,11 +3056,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         && !skip_ct_ptr_bake
                     {
                         return in_own_frame(|| {
-                            let let_ty = crate::Codegen::TIR::let_ty_for_opt(
-                                b.ty.as_ref(),
-                                false,
-                                false,
-                            );
+                            let let_ty =
+                                crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), false, false);
                             let init_ty = match &b.init {
                                 Expr::TupleLit(_, _, Some(ty @ Type::Tuple(_))) => ty.clone(),
                                 _ => {
@@ -3285,7 +3285,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                         let is_resource = match &ty {
                             Type::Named(name) | Type::Apply { name, .. } => {
-                                cx.close_types.contains(name)
+                                cx.has_close_type(name)
                             }
                             _ => false,
                         };
@@ -3494,7 +3494,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             None
                         };
                         let kind = inferred_kind.as_ref().unwrap_or(kind);
-                        let base_t = if matches!(kind, IndexKind::List | IndexKind::FixedListProof) {
+                        let base_t = if matches!(kind, IndexKind::List | IndexKind::FixedListProof)
+                        {
                             lower_expr_as_mut_place(base, cx, env)
                         } else {
                             base_t
@@ -4362,9 +4363,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             &synthetic, cx, &outer_env, shared,
                         );
                         cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-                        TStmt::Reactive {
-                            executable,
-                        }
+                        TStmt::Reactive { executable }
                     },
                 );
             });
@@ -4757,10 +4756,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
     })
 }
 
-fn hardware_dma_channel(
-    expr: &crate::AST::Expr,
-    cx: &Cx,
-) -> Option<String> {
+fn hardware_dma_channel(expr: &crate::AST::Expr, cx: &Cx) -> Option<String> {
     let crate::AST::Expr::MethodCall {
         receiver,
         method,

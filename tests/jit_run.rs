@@ -1059,6 +1059,7 @@ fn run_jet(file: &Path, release: bool) -> Output {
     }
     command
         .arg(file)
+        .current_dir(file.parent().expect("Jet fixture has a project directory"))
         .env("NO_COLOR", "1")
         .env("JET_SPEC_REMOVE", "host-value")
         .output()
@@ -2727,20 +2728,20 @@ fn assert_typed_fast_path_fixture_with_manifest(
 
 /// Card #2863: default Int arithmetic stays exact. In-range operations use
 /// the native carrier, while overflow takes the canonical promoting rail; the
-/// checked and saturating Core helpers retain their own published semantics.
+/// checked and saturating Core helpers return the same exact result.
 #[test]
 fn jit_typed_int_arithmetic_preserves_checked_promotion() {
     let source = r#"use core.math as math
 
-fn add_one(value: Int) Int -> {
+fn add_one(value: Int) -> Int {
     return value + 1
 }
 
-fn subtract_one(value: Int) Int -> {
+fn subtract_one(value: Int) -> Int {
     return value - 1
 }
 
-fn multiply_two(value: Int) Int -> {
+fn multiply_two(value: Int) -> Int {
     return value * 2
 }
 
@@ -2756,7 +2757,7 @@ fn run() {
     assert_typed_fast_path_fixture(
         "jit_typed_int_arithmetic",
         source,
-        "42\n9223372036854775808\n-9223372036854775809\n18446744073709551614\n-1\n9223372036854775807\n",
+        "42\n9223372036854775808\n-9223372036854775809\n18446744073709551614\n9223372036854775808\n9223372036854775808\n",
     );
 }
 

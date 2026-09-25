@@ -1,6 +1,6 @@
-use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::{integer_bounds_for_expr, integer_bounds_for_op, TIntegerBounds, TLocal};
 use crate::AST::{BinOp, Expr, LValue, Stmt, Type};
+use crate::Codegen::TIR::TirWorklist;
+use crate::Codegen::TIR::{TIntegerBounds, TLocal, integer_bounds_for_expr, integer_bounds_for_op};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -161,12 +161,11 @@ impl LowerEnv {
     }
     /// Resolve and record one owned resource transfer. Child environments share
     /// this fact with their enclosing lowering pass.
-    pub(super) fn resource_take_place(&mut self, name: &str) -> String {
-        let place = self.rust_name_of(name);
+    pub(super) fn resource_take_place(&mut self, name: &str) -> TLocal {
         self.resource_take_targets
             .borrow_mut()
-            .insert(place.clone());
-        place
+            .insert(self.rust_name_of(name));
+        self.local_of(name)
     }
     pub(super) fn resource_take_targets(&self) -> HashSet<String> {
         self.resource_take_targets.borrow().clone()
@@ -211,7 +210,7 @@ impl LowerEnv {
     /// Checked GC edge identities for analytical host lowering. Unlike the
     /// legacy statement emitter's edge strings, these are structured local
     /// slots; adapters derive object-id reads from them.
-    
+
     pub(super) fn note_clone(&mut self, ty: &Type) {
         self.cloned_types.borrow_mut().push(ty.clone());
     }

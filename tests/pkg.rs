@@ -5322,6 +5322,7 @@ fn run(args: GreetingArgs) {
 
     write(
         &project,
+        "run.jet",
         "print(\"before\")\nfn run() { print(\"middle\") }\nprint(\"after\")\n",
     );
     let invalid = jet_cmd(&["check"], &project, &store);

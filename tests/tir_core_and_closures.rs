@@ -6,7 +6,7 @@ mod common;
 mod tir_support;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tir_support::{
@@ -122,6 +122,18 @@ fn run() {
     assert_tiers_agree("tir_core_fs_absolute", src, "true\n");
 }
 
+fn stage_jetpack_phase1(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create staged Jetpack fixture");
+    for name in ["package.jet", "env.jet"] {
+        fs::copy(source.join(name), destination.join(name))
+            .unwrap_or_else(|error| panic!("copy Jetpack fixture {name}: {error}"));
+    }
+    let lock = destination.join(".jet/lock");
+    fs::create_dir_all(lock.parent().unwrap()).expect("create staged Jetpack lock directory");
+    fs::copy(source.join("fixture-state/lock"), &lock)
+        .unwrap_or_else(|error| panic!("stage Jetpack fixture lock: {error}"));
+}
+
 #[test]
 fn core_files_absolute_path_read_matches_every_tier() {
     if !have_rustc() {
@@ -138,6 +150,9 @@ fn core_files_absolute_path_read_matches_every_tier() {
         fs::remove_dir_all(&cache_root).unwrap();
     }
     fs::create_dir_all(&cache_root).unwrap();
+    let fixture_source = repo.join("dogfood/jetpack/tests/fixtures/phase1");
+    let fixture_root = cache_root.join("phase1");
+    stage_jetpack_phase1(&fixture_source, &fixture_root);
     let mut outputs = Vec::new();
     for (mode, release, interpret) in [
         ("release", true, false),
@@ -161,7 +176,7 @@ fn core_files_absolute_path_read_matches_every_tier() {
             .env("JETPACK_DOGFOOD_ROOT", &dogfood_root)
             .env(
                 "JETPACK_PROJECT_ROOT",
-                "dogfood/jetpack/tests/fixtures/phase1",
+                &fixture_root,
             )
             .env("JETPACK_OFFLINE", "1")
             .env("NO_COLOR", "1")

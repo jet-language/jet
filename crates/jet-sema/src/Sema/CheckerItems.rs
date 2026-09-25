@@ -2356,6 +2356,12 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_email_variants(enum_name) {
             return Some(v);
         }
+        if let Some(v) = core_service_error_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_workflow_outcome_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = self.registry.enum_variants(enum_name) {
             return Some(v.clone());
         }
@@ -2402,12 +2408,6 @@ impl<'a> Checker<'a> {
             return Some(core_env_error_variants());
         }
         if let Some(v) = core_delivery_state_variants(enum_name) {
-            return Some(v);
-        }
-        if let Some(v) = core_service_error_variants(enum_name) {
-            return Some(v);
-        }
-        if let Some(v) = core_workflow_outcome_variants(enum_name) {
             return Some(v);
         }
         // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
@@ -2527,7 +2527,7 @@ impl<'a> Checker<'a> {
     /// Check a struct field value through the shared assignability rules.
     /// Plain mismatches do not emit a diagnostic in `check_type_assignable`,
     /// so record construction supplies the field-specific E0108 fallback.
-    fn check_struct_field_assignable(
+    pub(super) fn check_struct_field_assignable(
         &mut self,
         field: &str,
         expected: &Type,

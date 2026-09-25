@@ -29,15 +29,15 @@ pub struct SocketAddr {
 }
 
 pub struct TCPStream {
-    pub fd: Int
-    pub host: String
-    pub port: Int
+    fd: Int
+    host: String
+    port: Int
 }
 
 pub struct TCPListener {
-    pub fd: Int
-    pub host: String
-    pub port: Int
+    fd: Int
+    host: String
+    port: Int
 }
 
 pub struct UDPSocket {
@@ -75,26 +75,39 @@ pub struct SrvRecord {
 pub fn gethostname() -> String { core.net.gethostname() }
 
 pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr !NetError {
+    if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     core.net.ip_addr(text)
 }
 
-pub fn ip_to_string(addr: IPAddr) -> String { core.net.ip_to_string(addr) }
+fn ip_to_string_impl(addr: IPAddr) -> String !Never {
+    core.net.ip_to_string(addr)
+}
+pub fn ip_to_string(addr: IPAddr) -> String { ip_to_string_impl(addr) }
 pub fn ip_is_ipv4(addr: IPAddr) -> Bool { core.net.ip_is_ipv4(addr) }
 
 pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr !NetError {
-    core.net.socket_addr(host, port)
+    if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
+    if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
+    host_text := host
+    if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
+    core.net.socket_addr(host_text, port)
 }
 
 pub fn socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr !NetError {
+    if !valid_text(text) -> return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
     core.net.socket_addr_parse(text)
 }
 
 pub fn socket_host(addr: SocketAddr) -> String { core.net.socket_host(addr) }
 pub fn socket_port(addr: SocketAddr) -> Int { core.net.socket_port(addr) }
-pub fn socket_to_string(addr: SocketAddr) -> String { core.net.socket_to_string(addr) }
+fn socket_to_string_impl(addr: SocketAddr) -> String !Never {
+    core.net.socket_to_string(addr)
+}
+pub fn socket_to_string(addr: SocketAddr) -> String { socket_to_string_impl(addr) }
 pub fn socket_type(stream: TCPStream) -> String { "stream" }
 
 pub fn tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener !NetError {
+    if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
     core.net.tcp_listen(addr)
 }
 
@@ -107,6 +120,7 @@ pub fn tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream !NetError 
 }
 
 pub fn tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream !NetError {
+    if !valid_text(addr) -> return Err(net_err("tcp_connect", addr, "connect address is empty or contains control bytes"))
     core.net.tcp_connect(addr)
 }
 
@@ -115,21 +129,28 @@ pub fn tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream !NetError
 }
 
 pub fn tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError {
+    if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_timeout", socket_to_string_impl(addr), "timeout must be non-negative"))
     core.net.tcp_connect_timeout(addr, timeout_ms)
 }
 
 pub fn tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError {
+    if !valid_host_text(host) -> return Err(net_err("tcp_connect_happy", host, "connect host is empty or contains invalid bytes"))
+    if !valid_port(port) -> return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
+    if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_happy", host, "timeout must be non-negative"))
     core.net.tcp_connect_happy(host, port, timeout_ms)
 }
 
 pub fn create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError {
+    if !valid_host_text(host) -> return Err(net_err("create_connection", host, "connect host is empty or contains invalid bytes"))
+    if !valid_port(port) -> return Err(net_err("create_connection", host, "port must be in 0..=65535"))
     tcp_connect(format_host_port(host, port))
 }
 
 pub fn create_server(host: String, port: Int) -[Net, Time.Wait]> TCPListener !NetError {
+    if !valid_host_text(host) -> return Err(net_err("create_server", host, "listen host is empty or contains invalid bytes"))
+    if !valid_port(port) -> return Err(net_err("create_server", host, "port must be in 0..=65535"))
     tcp_listen(format_host_port(host, port))
 }
-
 pub fn send(stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError {
     stream.write(text)
 }
@@ -141,12 +162,13 @@ pub fn tcp_read(stream: TCPStream) -[Net, Time.Wait]> String !NetError {
 pub fn tcp_write(stream: TCPStream, text: String) !NetError -[Net, Time.Wait]> {
     return stream.write_text(text)
 }
-
 pub fn tcp_read_bytes(stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] !NetError {
+    if n < 0 -> return Err(net_err("tcp_read_bytes", "", "read limit must be non-negative"))
     stream.read(n)
 }
 
 pub fn tcp_read_text(stream: TCPStream, n: Int) -[Net, Time.Wait]> String !NetError {
+    if n < 0 -> return Err(net_err("tcp_read_text", "", "read limit must be non-negative"))
     stream.read_text(n)
 }
 
@@ -169,8 +191,9 @@ pub fn tcp_shutdown(stream: TCPStream, how: NetShutdown) !NetError -[Net, Time.W
 pub fn tcp_close(stream: TCPStream) !NetError -[Net, Time.Wait]> {
     return stream.close()
 }
-
 pub fn tcp_ready(stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError {
+    if !valid_timeout(deadline_ms) -> return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
+    if deadline_ms > 9223372036854 -> return Err(net_err("tcp_ready", "", "deadline is too large"))
     stream.ready(interest, deadline: Duration{ns: deadline_ms * 1000000})
 }
 
@@ -198,20 +221,24 @@ pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> Sock
 }
 
 pub fn tcp_reply(stream: TCPStream, status: String, body: String) !NetError -[Net, Time.Wait]> {
+    if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
     core.net.tcp_reply(^stream, status, body)
 }
 
 pub fn set_timeout(stream: TCPStream, timeout_ms: Int) !NetError -[Net, Time.Wait]> {
+    if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
     working := stream
     core.net.set_timeout(&working, timeout_ms)
 }
 
 pub fn set_read_timeout(stream: TCPStream, timeout_ms: Int) !NetError -[Net, Time.Wait]> {
+    if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
     working := stream
     core.net.set_read_timeout(&working, timeout_ms)
 }
 
 pub fn set_write_timeout(stream: TCPStream, timeout_ms: Int) !NetError -[Net, Time.Wait]> {
+    if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
     working := stream
     core.net.set_write_timeout(&working, timeout_ms)
 }
@@ -228,18 +255,20 @@ pub fn set_nodelay(stream: TCPStream, on: Bool) !NetError -[Net, Time.Wait]> {
 pub fn ttl(stream: TCPStream) -[Net, Time.Wait]> Int !NetError {
     core.net.ttl(stream)
 }
-
 pub fn set_ttl(stream: TCPStream, hops: Int) !NetError -[Net, Time.Wait]> {
+    if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
     working := stream
     core.net.set_ttl(&working, hops)
 }
 
 pub fn sendfile(stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int !NetError {
+    if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
     working := stream
     core.net.sendfile(&working, path)
 }
 
 pub fn udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket !NetError {
+    if !valid_text(addr) -> return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
     core.net.udp_bind(addr)
 }
 
@@ -252,6 +281,7 @@ pub fn udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr !NetError
 }
 
 pub fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) !NetError -[Net, Time.Wait]> {
+    if !valid_timeout(timeout_ms) -> return Err(net_err("udp_set_timeout", "", "timeout must be non-negative"))
     core.net.udp_set_timeout(socket, timeout_ms)
 }
 
@@ -260,6 +290,7 @@ pub fn udp_send_to(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Tim
 }
 
 pub fn udp_recv_from(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket !NetError {
+    if limit <= 0 -> return Err(net_err("udp_recv_from", "", "receive limit must be positive"))
     core.net.udp_recv_from(socket, limit)
 }
 
@@ -268,6 +299,7 @@ pub fn udp_send_bytes_to(socket: UDPSocket, bytes: [U8], addr: SocketAddr) -[Net
 }
 
 pub fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket !NetError {
+    if limit < 0 -> return Err(net_err("udp_receive", "", "receive limit must be non-negative"))
     core.net.udp_receive(socket, limit)
 }
 
@@ -278,6 +310,7 @@ pub fn udp_packet_original_len(packet: UDPPacket) -> Int { core.net.udp_packet_o
 pub fn udp_packet_truncated(packet: UDPPacket) -> Bool { core.net.udp_packet_truncated(packet) }
 
 pub fn unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener !NetError {
+    if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
     core.net.unix_listen(path)
 }
 
@@ -286,6 +319,7 @@ pub fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream !NetErr
 }
 
 pub fn unix_connect(path: String) -[Net, FS, Time.Wait]> UnixStream !NetError {
+    if !valid_text(path) -> return Err(net_err("unix_connect", path, "socket path is empty or contains control bytes"))
     core.net.unix_connect(path)
 }
 
@@ -300,6 +334,7 @@ pub fn unix_write(stream: UnixStream, text: String) !NetError -[Net, Time.Wait]>
 }
 
 pub fn unix_read_bytes(stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] !NetError {
+    if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
     working := stream
     core.net.unix_read_bytes(&working, n)
 }
@@ -319,65 +354,68 @@ pub fn unix_close(stream: UnixStream) !NetError -[Net, Time.Wait]> {
     core.net.unix_close(&working)
 }
 
-
 pub fn dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError {
-    if name.bytes().len() == 0 -> return Err(net_err("dns_a", name, "DNS name is empty"))
-    if ms < 0 -> return Err(net_err("dns_a", name, "DNS timeout must be non-negative"))
+    if !valid_text(name) -> return Err(net_err("dns_a", name, "DNS name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_a", name, "DNS timeout must be non-negative"))
     core.net.dns_a(name, ms)
 }
 
 pub fn dns_aaaa(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError {
-    if name.bytes().len() == 0 -> return Err(net_err("dns_aaaa", name, "DNS name is empty"))
-    if ms < 0 -> return Err(net_err("dns_aaaa", name, "DNS timeout must be non-negative"))
+    if !valid_text(name) -> return Err(net_err("dns_aaaa", name, "DNS name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_aaaa", name, "DNS timeout must be non-negative"))
     core.net.dns_aaaa(name, ms)
 }
 
 pub fn dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError {
-    if server.bytes().len() == 0 || name.bytes().len() == 0 -> return Err(net_err("dns_a_at", name, "DNS server/name is empty"))
-    if ms < 0 -> return Err(net_err("dns_a_at", name, "DNS timeout must be non-negative"))
+    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_a_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_a_at", name, "DNS timeout must be non-negative"))
+    _ :: socket_addr_parse(server) ?? return Err(net_err("dns_a_at", server, "DNS server must be an IP socket address"))
     core.net.dns_a_at(server, name, ms)
 }
 
 pub fn dns_aaaa_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError {
-    if server.bytes().len() == 0 || name.bytes().len() == 0 -> return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty"))
-    if ms < 0 -> return Err(net_err("dns_aaaa_at", name, "DNS timeout must be non-negative"))
+    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_aaaa_at", name, "DNS timeout must be non-negative"))
+    _ :: socket_addr_parse(server) ?? return Err(net_err("dns_aaaa_at", server, "DNS server must be an IP socket address"))
     core.net.dns_aaaa_at(server, name, ms)
 }
 
 pub fn dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError {
-    if name.bytes().len() == 0 -> return Err(net_err("dns_txt", name, "DNS name is empty"))
-    if ms < 0 -> return Err(net_err("dns_txt", name, "DNS timeout must be non-negative"))
+    if !valid_text(name) -> return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_txt", name, "DNS timeout must be non-negative"))
     core.net.dns_txt(name, ms)
 }
 
 pub fn dns_txt_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError {
-    if server.bytes().len() == 0 || name.bytes().len() == 0 -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty"))
-    if ms < 0 -> return Err(net_err("dns_txt_at", name, "DNS timeout must be non-negative"))
+    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_txt_at", name, "DNS timeout must be non-negative"))
+    _ :: socket_addr_parse(server) ?? return Err(net_err("dns_txt_at", server, "DNS server must be an IP socket address"))
     core.net.dns_txt_at(server, name, ms)
 }
 
 pub fn dns_ptr(addr: String, ms: Int) -[Net, Time.Wait]> [String] !NetError {
-    if addr.bytes().len() == 0 -> return Err(net_err("dns_ptr", addr, "DNS address is empty"))
-    if ms < 0 -> return Err(net_err("dns_ptr", addr, "DNS timeout must be non-negative"))
+    if !valid_text(addr) -> return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_ptr", addr, "DNS timeout must be non-negative"))
     core.net.dns_ptr(addr, ms)
 }
 
 pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSrv] !NetError {
-    if name.bytes().len() == 0 -> return Err(net_err("dns_srv", name, "DNS name is empty"))
-    if ms < 0 -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
+    if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
     core.net.dns_srv(name, ms)
 }
 
 pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [DNSSrv] !NetError {
-    if server.bytes().len() == 0 || name.bytes().len() == 0 -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty"))
-    if ms < 0 -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
+    if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
+    if !valid_timeout(ms) -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
+    _ :: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
     core.net.dns_srv_at(server, name, ms)
 }
 
 pub fn gethostbyname(name: String) -[Net, Time.Wait]> String !NetError {
     hosts :: dns_a(name, 5000)
     if hosts.len() == 0 -> return Err(net_err("gethostbyname", name, "no address"))
-    ip_to_string(hosts[0])
+    ip_to_string_impl(hosts[0])
 }
 
 pub fn gethostbyaddr(addr: String) -[Net, Time.Wait]> String !NetError {
@@ -392,10 +430,12 @@ pub fn dns_srv_priority(record: DNSSrv) -> Int { core.net.dns_srv_priority(recor
 pub fn dns_srv_weight(record: DNSSrv) -> Int { core.net.dns_srv_weight(record) }
 
 pub fn getservbyname(name: String) -[Net, Time.Wait]> Int !NetError {
+    if !valid_text(name) -> return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
     core.net.getservbyname(name)
 }
 
 pub fn getservbyport(port: Int) -[Net, Time.Wait]> String !NetError {
+    if !valid_port(port) -> return Err(net_err("getservbyport", "{port}", "port must be in 0..=65535"))
     core.net.getservbyport(port)
 }
 
@@ -409,7 +449,7 @@ pub fn addressfamily(addr: SocketAddr) -> String {
     if contains_byte(addr.host, 58) -> "IPv6" else -> "IPv4"
 }
 
-fn net_err(op: String, addr: String, message: String) -> NetError {
+fn net_err(op: String, addr: String, message: String) -> NetError !Never {
     NetError.InvalidInput(NetErrorDetail{
         operation: op,
         address: Val(addr),
@@ -422,34 +462,84 @@ fn net_err(op: String, addr: String, message: String) -> NetError {
 
 
 
-fn duration_millis(duration: Duration) -> Int {
+fn valid_text(text: String) -> Bool !Never {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n <= 31 || n == 127 -> return false
+    }
+    true
+}
+
+fn valid_status(status: String) -> Bool !Never {
+    raw :: status.bytes()
+    if raw.len() < 3 -> return false
+    if Int.from_u8(raw[0]) < 48 || Int.from_u8(raw[0]) > 57 || Int.from_u8(raw[1]) < 48 || Int.from_u8(raw[1]) > 57 || Int.from_u8(raw[2]) < 48 || Int.from_u8(raw[2]) > 57 -> return false
+    if raw.len() > 3 && raw[3] != (U8{32}) -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n == 10 || n == 13 -> return false
+    }
+    true
+}
+
+fn valid_host_text(host: String) -> Bool !Never {
+    raw :: host.bytes()
+    if raw.len() == 0 -> return false
+    if raw[0] == (U8{91}) && (raw.len() < 3 || raw[raw.len() - 1] != (U8{93})) -> return false
+    i := 0
+    loop i < raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
+        if n == 91 && i != 0 -> return false
+        if n == 93 && (i == 0 || raw[0] != (U8{91}) || i != raw.len() - 1) -> return false
+        i = i + 1
+    }
+    true
+}
+
+fn valid_port(port: Int) -> Bool !Never { port >= 0 && port <= 65535 }
+
+fn valid_timeout(timeout_ms: Int) -> Bool !Never { timeout_ms >= 0 }
+
+fn starts_with(text: String, prefix: String) -> Bool !Never {
+    a :: text.bytes()
+    b :: prefix.bytes()
+    if b.len() > a.len() -> return false
+    loop i in 0..<b.len() {
+        if a[i] != b[i] -> return false
+    }
+    true
+}
+
+fn duration_millis(duration: Duration) -> Int !Never {
     if duration.ns < 0 -> return -1
     duration.ns /% 1000000
 }
 
-fn format_host_port(host: String, port: Int) -> String {
-    result := "{host}:{port}"
-    if contains_byte(host, 58) {
-        result = "[{host}]:{port}"
-    }
-    return result
+fn format_host_port(host: String, port: Int) -> String !Never {
+    raw :: host.bytes()
+    if raw.len() > 0 && raw[0] == (U8{91}) -> return "{host}:{port}"
+    if contains_byte(host, 58) -> return "[{host}]:{port}"
+    "{host}:{port}"
 }
 
-fn contains_byte(text: String, needle: Int) -> Bool {
+fn contains_byte(text: String, needle: Int) -> Bool !Never {
     loop b in text.bytes() {
         if Int.from_u8(b) == needle -> return true
     }
     false
 }
 
-fn index_of(raw: [U8], b: Int) -> Int {
+fn index_of(raw: [U8], b: Int) -> Int !Never {
     loop i in 0..<raw.len() {
         if Int.from_u8(raw[i]) == b -> return i
     }
     -1
 }
 
-fn last_index(raw: [U8], b: Int) -> Int {
+fn last_index(raw: [U8], b: Int) -> Int !Never {
     i := raw.len() - 1
     loop i >= 0 {
         if Int.from_u8(raw[i]) == b -> return i
@@ -458,7 +548,7 @@ fn last_index(raw: [U8], b: Int) -> Int {
     -1
 }
 
-fn parse_port(text: String) -> ?Int {
+fn parse_port(text: String) -> ?Int !Never {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
     n := 0
@@ -471,7 +561,7 @@ fn parse_port(text: String) -> ?Int {
     Val(n)
 }
 
-fn ascii_lower(text: String) -> String {
+fn ascii_lower(text: String) -> String !Never {
     out := [U8]{}
     loop b in text.bytes() {
         n :: Int.from_u8(b)
@@ -480,11 +570,11 @@ fn ascii_lower(text: String) -> String {
     String.from_bytes(out) ?? ""
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String {
+fn slice(raw: [U8], start: Int, end: Int) -> String !Never {
     String.from_bytes(slice_bytes(raw, start, end)) ?? ""
 }
 
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] {
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] !Never {
     out := [U8]{}
     limit := if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out

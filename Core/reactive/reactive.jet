@@ -10,59 +10,90 @@ package {
 }
 module loadable
 
-pub struct Signal {
-    pub value: Int
+// Reactive values are immutable Jet carriers.  The runtime provider replaces
+// these constructors with shared, dependency-tracked cells; keeping the
+// transition rules here makes the source-level API deterministic as well.
+pub struct Signal<T> {
+    pub value: T
     pub version: Int
 }
 
-pub struct Computed {
-    pub value: Int
+pub struct Computed<T> {
+    pub value: T
+    pub version: Int
+}
+
+pub struct Derived<T> {
+    pub value: T
     pub version: Int
 }
 
 pub struct Effect {
     pub last: Int
+    pub active: Bool
 }
 
-pub fn signal(value: Int) -> Signal { {value: value, version: 0} }
+pub fn signal<T>(value: T) -> Signal<T> { Signal<T>{value: value, version: 0} }
 
-pub fn computed(value: Int) -> Computed { {value: value, version: 0} }
+pub fn computed<T>(compute: fn() -> T) -> Computed<T> {
+    Computed<T>{value: compute(), version: 0}
+}
 
-pub fn derived(value: Int) -> Computed { computed(value) }
+pub fn derived<T>(compute: fn() -> T) -> Derived<T> {
+    Derived<T>{value: compute(), version: 0}
+}
 
+pub fn effect(body: fn()) -> Effect {
+    body()
+    Effect{last: 0, active: true}
+}
+pub fn unsubscribe(e: Effect) -> Effect {
+    Effect{last: e.last, active: false}
+}
 
-pub fn set(sig: Signal, value: Int) -> Signal { {value: value, version: sig.version + 1} }
+pub fn is_active(e: Effect) -> Bool { e.active }
 
-pub fn set_if_changed(sig: Signal, value: Int) -> Signal {
+pub fn set<T>(sig: Signal<T>, value: T) -> Signal<T> {
+    if sig.version >= 2147483646 -> return ~sig
+    Signal<T>{value: value, version: sig.version + 1}
+}
+
+pub fn set_if_changed(sig: Signal<Int>, value: Int) -> Signal<Int> {
     if sig.value == value -> return ~sig
     set(sig, value)
 }
 
-pub fn changed(sig: Signal, value: Int) -> Bool { sig.value != value }
+pub fn changed(sig: Signal<Int>, value: Int) -> Bool { sig.value != value }
 
-pub fn computed_update(c: Computed, delta: Int) -> Computed {
+pub fn computed_update(c: Computed<Int>, delta: Int) -> Computed<Int> {
     computed_set(c, c.value + delta)
 }
 
-pub fn computed_version(c: Computed) -> Int { c.version }
+pub fn computed_version<T>(c: Computed<T>) -> Int { c.version }
 
 pub fn effect_run_if(e: Effect, value: Int) -> Effect {
-    if e.last == value -> return ~e
+    if e.active && e.last == value -> return ~e
     effect_run(e, value)
 }
 
-pub fn effect_changed(e: Effect, value: Int) -> Bool { e.last != value }
+pub fn effect_changed(e: Effect, value: Int) -> Bool { !e.active || e.last != value }
 
-pub fn get(sig: Signal) -> Int { sig.value }
+pub fn get<T>(sig: Signal<T>) -> T { sig.value }
 
-pub fn version(sig: Signal) -> Int { sig.version }
+pub fn version<T>(sig: Signal<T>) -> Int { sig.version }
 
-pub fn update(sig: Signal, delta: Int) -> Signal { set(sig, sig.value + delta) }
+pub fn update(sig: Signal<Int>, delta: Int) -> Signal<Int> { set(sig, sig.value + delta) }
 
-pub fn computed_get(c: Computed) -> Int { c.value }
+pub fn computed_get<T>(c: Computed<T>) -> T { c.value }
 
-pub fn computed_set(c: Computed, value: Int) -> Computed { {value: value, version: c.version + 1} }
+pub fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> {
+    if c.version >= 2147483646 -> return ~c
+    Computed<T>{value: value, version: c.version + 1}
+}
 
-pub fn effect_run(_e: Effect, value: Int) -> Effect { {last: value} }
+pub fn effect_run(e: Effect, value: Int) -> Effect {
+    if !e.active || e.last != value -> Effect{last: value, active: true}
+    else -> ~e
+}
 
 pub fn effect_last(e: Effect) -> Int { e.last }

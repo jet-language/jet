@@ -1,6 +1,11 @@
 #![allow(dead_code)]
-use crate::Codegen::mangle_generated;
+use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Type};
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::SerdeCodec;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TUnsafeGate;
+use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Codegen::TIR::lower::lower_value_block;
 use crate::Codegen::TIR::lower::note_stack_sentry_in_tir;
 use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
@@ -8,20 +13,15 @@ use crate::Codegen::TIR::lower::return_type_has_value;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::resolve_self_ty;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::SerdeCodec;
-use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::TUnsafeGate;
-use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Codegen::TIR::{
-    function_effect_facts, function_failure_carrier, function_foreign_provenance,
-    function_semantic_key, function_target_applicability, function_visibility, TContract,
-    TContractDisposition, TContractKind, TContractResult, TContractResultMode, TEffectFacts, TExpr,
-    TExprKind, TFailureCarrier, TFunc, TFuncKind, TGenericParam, TStmt, TTargetApplicability,
-    TVisibility,
+    TContract, TContractDisposition, TContractKind, TContractResult, TContractResultMode,
+    TEffectFacts, TExpr, TExprKind, TFailureCarrier, TFunc, TFuncKind, TGenericParam, TStmt,
+    TTargetApplicability, TVisibility, function_effect_facts, function_failure_carrier,
+    function_foreign_provenance, function_semantic_key, function_target_applicability,
+    function_visibility,
 };
+use crate::Codegen::mangle_generated;
 use crate::Syntax;
-use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Type};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -75,7 +75,11 @@ fn method_semantic_key(
         Some(trait_name) => format!("{owner_name}::{trait_name}::{method}"),
         None => format!("{owner_name}::{method}"),
     };
-    function_semantic_key(module, &method_name)
+    if !module.is_empty() && method_name.starts_with(&format!("{module}::")) {
+        method_name
+    } else {
+        function_semantic_key(module, &method_name)
+    }
 }
 
 fn generic_params_from(type_params: &[crate::AST::TypeParam]) -> Vec<TGenericParam> {
@@ -147,7 +151,7 @@ fn bind_resource_param(
     ordinary_slot: TLocal,
 ) {
     let resource = matches!(convention, AccessConvention::Move)
-        && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.close_types.contains(name));
+        && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.has_close_type(name));
     if !resource {
         let local_ty = match ty {
             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => Type::Tagged {
@@ -172,7 +176,10 @@ fn bind_resource_param(
             ty: ty.clone(),
             kind: TExprKind::ResourceNew(Box::new(TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::Local(TLocal::user(source_name)),
+                kind: TExprKind::Move(Box::new(TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::Local(TLocal::user(source_name)),
+                })),
             })),
         },
         gc_promotion: None,
@@ -891,8 +898,10 @@ fn lower_method_for_owner_inner(
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
     cx.current_type_params.replace(method_type_params.clone());
-    let return_type =
-        canonical_owner_type(cx, &cx.canonicalize_checked_type(&return_type, &method_type_params));
+    let return_type = canonical_owner_type(
+        cx,
+        &cx.canonicalize_checked_type(&return_type, &method_type_params),
+    );
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
@@ -1137,8 +1146,10 @@ fn lower_trait_method_inner(
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
     cx.current_type_params.replace(method_type_params.clone());
-    let return_type =
-        canonical_owner_type(cx, &cx.canonicalize_checked_type(&return_type, &method_type_params));
+    let return_type = canonical_owner_type(
+        cx,
+        &cx.canonicalize_checked_type(&return_type, &method_type_params),
+    );
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.sentries_fenced = cx.dependency_fenced;
@@ -1180,10 +1191,7 @@ fn lower_trait_method_inner(
         };
         let pty = canonical_owner_type(
             cx,
-            &cx.canonicalize_checked_type(
-                &resolve_self_ty(&p.ty, type_name),
-                &method_type_params,
-            ),
+            &cx.canonicalize_checked_type(&resolve_self_ty(&p.ty, type_name), &method_type_params),
         );
         bind_resource_param(
             &p.name,
@@ -1348,10 +1356,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 
 fn lower_delegation_method_inner(f: &Func, _field: &str, cx: &Cx) -> TFunc {
     let type_param_names = type_param_names(f);
-    let return_type = cx.canonicalize_checked_type(
-        &f.effective_return_type(),
-        &type_param_names,
-    );
+    let return_type = cx.canonicalize_checked_type(&f.effective_return_type(), &type_param_names);
     let owner_ty = f
         .params
         .iter()
@@ -1433,9 +1438,5 @@ pub(crate) fn param_place(name: &str, p: &Param) -> TLocal {
         AccessConvention::Move => false,
     };
     let slot = TLocal::user(name);
-    if deref {
-        slot.through_ref()
-    } else {
-        slot
-    }
+    if deref { slot.through_ref() } else { slot }
 }

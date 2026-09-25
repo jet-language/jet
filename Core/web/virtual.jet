@@ -3,9 +3,11 @@
 // A virtual window is a compact layout fact. It never allocates one entry
 // per source row: even a 100_000-row table produces only the bounded
 // visible range. Overscan is in rows; sizes are the renderer's units.
-@c_max_visible :: 4096
+c_max_visible :: 4096
 
-@c_max_measure :: 4096
+c_max_measure :: 4096
+c_max_virtual_extent :: 9223372036854775807
+
 
 pub struct WebVirtualWindow {
     pub total_count: Int
@@ -40,16 +42,15 @@ pub struct WebVirtualPlanViewport {
 
 /// Build one bounded virtual range.
 pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualWindow {
-    total := total_count
-    if total < 0 -> total = 0
-    view := viewport_size
-    if view < 0 -> view = 0
+    total := bounded_nonnegative(total_count)
+    view := bounded_nonnegative(viewport_size)
     est := estimated_item_size
     if est < 1 -> est = 1
+    if est > c_max_virtual_extent -> est = c_max_virtual_extent
     over := overscan
     if over < 0 -> over = 0
-    if over > @c_max_visible -> over = @c_max_visible
-    total_size :: total * est
+    if over > c_max_visible -> over = c_max_visible
+    total_size := bounded_mul(total, est)
     max_off := total_size - view
     if max_off < 0 -> max_off = 0
     off := scroll_offset
@@ -61,22 +62,21 @@ pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimate
     if first > total -> first = total
     visible := 0
     if view > 0 {
-        visible = (view + est - 1) /% est
-
-        if visible > @c_max_visible -> visible = @c_max_visible
+        visible = bounded_add(view, est - 1) /% est
+        if visible > c_max_visible -> visible = c_max_visible
     }
-    last := first + visible
+    last := bounded_add(first, visible)
     if last > total -> last = total
     start := first - over
     if start < 0 -> start = 0
-    end := last + over
+    end := bounded_add(last, over)
     if end > total -> end = total
-    if end - start > @c_max_visible {
-        start = first - (@c_max_visible /% 2)
+    if end - start > c_max_visible {
+        start = first - (c_max_visible /% 2)
 
         if start < 0 -> start = 0
         if start > total -> start = total
-        end = start + @c_max_visible
+        end = bounded_add(start, c_max_visible)
         if end > total -> end = total
     }
     {
@@ -96,13 +96,14 @@ pub fn window_measured(total_count: Int, scroll_offset: Int, viewport_size: Int,
     sum := 0
     count := 0
     loop s in measurements {
-        if s > 0 && count < @c_max_measure {
-            sum = sum + s
+        if s > 0 && count < c_max_measure {
+            sum = bounded_add(sum, bounded_nonnegative(s))
             count = count + 1
         }
     }
     est := fallback_item_size
     if est < 1 -> est = 1
+    if est > c_max_virtual_extent -> est = c_max_virtual_extent
     if count > 0 -> est = sum /% count
 
     if est < 1 -> est = 1
@@ -129,7 +130,7 @@ pub fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] {
     end := w.end
     if end < start -> end = start
     if end > rows.len() -> end = rows.len()
-    if end - start > @c_max_visible -> end = start + @c_max_visible
+    if end - start > c_max_visible -> end = start + c_max_visible
     if end > rows.len() -> end = rows.len()
     out := [T]{}
     loop i in start..<end -> out.push(rows[i])
@@ -138,10 +139,13 @@ pub fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] {
 
 pub fn indices(w: WebVirtualWindow) -> [Int] {
     out := [Int]{}
-    if w.start >= w.end -> return out
+    start := w.start
+    if start < 0 -> start = 0
+    if start >= w.end -> return out
     end := w.end
-    if end > w.start + @c_max_visible -> end = w.start + @c_max_visible
-    loop i in w.start..<end -> out.push(i)
+    limit := bounded_add(start, c_max_visible)
+    if end > limit -> end = limit
+    loop i in start..<end -> out.push(i)
     out
 }
 
@@ -172,9 +176,10 @@ pub fn plan_indices(p: WebVirtualPlan) -> [Int] {
 pub fn plan_viewport(p: WebVirtualPlan) -> WebVirtualPlanViewport { {plan: p} }
 
 pub fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan {
-    if index < 0 || index >= p.total_count || size <= 0 -> return ~p
+    if index < 0 || index >= p.total_count || size <= 0 || size > c_max_virtual_extent -> return ~p
+    if p.measured_count >= c_max_measure -> return ~p
     count := p.measured_count + 1
-    total := (p.estimated_item_size * p.measured_count) + size
+    total := bounded_add(bounded_mul(p.estimated_item_size, p.measured_count), size)
     est := total /% count
     if est < 1 -> est = 1
     w :: window(p.total_count, p.scroll_offset, p.viewport_height, est, p.overscan)
@@ -215,4 +220,22 @@ pub fn plan_facts(p: WebVirtualPlan) -> String {
 fn max0(n: Int) -> Int {
     if n < 0 -> return 0
     n
+}
+fn bounded_nonnegative(n: Int) -> Int {
+    if n < 0 -> return 0
+    if n > c_max_virtual_extent -> return c_max_virtual_extent
+    n
+}
+
+fn bounded_add(a: Int, b: Int) -> Int {
+    if a <= 0 -> return bounded_nonnegative(b)
+    if b <= 0 -> return a
+    if a > c_max_virtual_extent - b -> return c_max_virtual_extent
+    a + b
+}
+
+fn bounded_mul(a: Int, b: Int) -> Int {
+    if a <= 0 || b <= 0 -> return 0
+    if a > c_max_virtual_extent /% b -> return c_max_virtual_extent
+    a * b
 }

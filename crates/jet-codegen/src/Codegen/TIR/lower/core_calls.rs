@@ -1,8 +1,16 @@
+use crate::AST::{Expr, Lambda, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::data_plan_for_core_call;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFailureCarrier;
+use crate::Codegen::TIR::TJitSpawnLambda;
+use crate::Codegen::TIR::TLambda;
+use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::core_closure_call_return_ty;
+use crate::Codegen::TIR::data_plan_for_core_call;
+use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
 use crate::Codegen::TIR::lower_expr;
@@ -10,22 +18,14 @@ use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting_callable;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower_lambda_expecting_value_with_return;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
-use crate::Codegen::TIR::lower_owned_expr;
-use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_unit;
 use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::TCoreClosureKind;
-use crate::Codegen::TIR::TExpr;
-use crate::Codegen::TIR::TExprKind;
-use crate::Codegen::TIR::TJitSpawnLambda;
-use crate::Codegen::TIR::TLambda;
 use crate::Diagnostics::Span;
-use crate::AST::{Expr, Lambda, Type};
 
 fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     TExpr {
@@ -79,9 +79,7 @@ fn required_lambda<'a>(
         .ok_or_else(|| {
             invariant_violation_expr(
                 span,
-                format!(
-                    "checked Core call `{module}.{method}` has no lambda at argument {index}"
-                ),
+                format!("checked Core call `{module}.{method}` has no lambda at argument {index}"),
             )
         })
 }
@@ -255,9 +253,7 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Lambda(Box::new(tl)),
             })
         }
-        Expr::Ident(name, _)
-            if !env.locals.contains_key(name) && !cx.consts.contains_key(name) =>
-        {
+        Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.consts.contains_key(name) => {
             let Some(ty) = cx.fn_types.get(name).cloned() else {
                 return invariant_violation_expr(
                     expr.span(),
@@ -308,7 +304,6 @@ pub(super) fn core_module_path_from_receiver(
     }
 }
 
-
 /// D-QUERY-RETAIN1=A: `Query<T>` / grouped-query receiver methods and the
 /// checked-SQL list door `[T].query(SQL)` are projections onto the receiver
 /// Core rows. The receiver is the first Core argument; each callback is
@@ -344,14 +339,10 @@ pub(crate) fn lower_query_receiver_call(
         {
             ("Query", 0)
         }
-        Some("DataTracked")
-            if matches!(method, "query" | "insert" | "replace" | "remove") =>
-        {
+        Some("DataTracked") if matches!(method, "query" | "insert" | "replace" | "remove") => {
             ("DataTracked", 0)
         }
-        Some("DataWatch") if matches!(method, "get" | "status" | "cancel") => {
-            ("DataWatch", 0)
-        }
+        Some("DataWatch") if matches!(method, "get" | "status" | "cancel") => ("DataWatch", 0),
         Some("DataGroupedQuery") if matches!(method, "count" | "sum" | "mean") => {
             ("DataGroupedQuery", 0)
         }
@@ -408,14 +399,7 @@ pub(crate) fn lower_query_receiver_call(
         } else {
             matches!(
                 method,
-                "filter"
-                    | "sort_by"
-                    | "map"
-                    | "min"
-                    | "max"
-                    | "group_by"
-                    | "sum"
-                    | "mean"
+                "filter" | "sort_by" | "map" | "min" | "max" | "group_by" | "sum" | "mean"
             )
         };
         if takes_callback {
@@ -436,9 +420,7 @@ pub(crate) fn lower_query_receiver_call(
             } else {
                 row_ty.clone()
             };
-            let lowered = if let Some(callback_return) =
-                query_callback_return_type(method, index)
-            {
+            let lowered = if let Some(callback_return) = query_callback_return_type(method, index) {
                 lower_lambda_expecting_value_with_return(
                     lam,
                     cx,
@@ -490,9 +472,7 @@ pub(crate) fn lower_query_receiver_call(
     })
 }
 
-
 pub(crate) fn lower_core_closure_call(
-
     module: &str,
     method: &str,
     source_span: Span,
@@ -502,13 +482,20 @@ pub(crate) fn lower_core_closure_call(
 ) -> Option<TExpr> {
     if module == "core.term" && method == "progress" {
         let Some(first) = args.first() else {
-            return Some(invariant_violation_expr(source_span, "checked progress call has no source"));
+            return Some(invariant_violation_expr(
+                source_span,
+                "checked progress call has no source",
+            ));
         };
         let mut source = lower_owned_expr(&first.expr, cx, env);
         let (member, result_ty) = match &source.ty {
             Type::String => {
-                let Some((_, result)) = crate::Sema::core_call_semantic_signature(module, method) else {
-                    return Some(invariant_violation_expr(source_span, "checked text progress has no signature"));
+                let Some((_, result)) = crate::Sema::core_call_semantic_signature(module, method)
+                else {
+                    return Some(invariant_violation_expr(
+                        source_span,
+                        "checked text progress has no signature",
+                    ));
                 };
                 ("progress", result)
             }
@@ -527,10 +514,19 @@ pub(crate) fn lower_core_closure_call(
             Type::Apply { name, args } if name == crate::Syntax::TYPE_ITER && args.len() == 1 => {
                 ("progress_iter", source.ty.clone())
             }
-            _ => return Some(invariant_violation_expr(source_span, "checked progress source is not text or a sequence")),
+            _ => {
+                return Some(invariant_violation_expr(
+                    source_span,
+                    "checked progress source is not text or a sequence",
+                ));
+            }
         };
         let mut values = vec![source];
-        values.extend(args.iter().skip(1).map(|arg| lower_owned_expr(&arg.expr, cx, env)));
+        values.extend(
+            args.iter()
+                .skip(1)
+                .map(|arg| lower_owned_expr(&arg.expr, cx, env)),
+        );
         if member == "progress_iter" {
             while values.len() < 3 {
                 values.push(TExpr {
@@ -599,12 +595,7 @@ pub(crate) fn lower_core_closure_call(
             name: "Query".to_string(),
             args: vec![row_ty.clone()],
         };
-        let data_plan = match data_plan_for_core_call(
-            record,
-            &call_args,
-            &result_ty,
-            source_span,
-        ) {
+        let data_plan = match data_plan_for_core_call(record, &call_args, &result_ty, source_span) {
             Ok(plan) => plan,
             Err(error) => return Some(invariant_violation_expr(source_span, error)),
         };
@@ -655,7 +646,10 @@ pub(crate) fn lower_core_closure_call(
                     rate: Box::new(lower_expr(&args[0].expr, cx, env)),
                     frames: Box::new(lower_expr(&args[1].expr, cx, env)),
                     executable: Box::new(lower_lambda_expecting_callable(
-                        lam, cx, env, &callback_fn,
+                        lam,
+                        cx,
+                        env,
+                        &callback_fn,
                     )),
                 },
             },
@@ -680,7 +674,11 @@ pub(crate) fn lower_core_closure_call(
         let site = jit_spawn_site(lam, cx, env);
         let label = spawn_label(lam, cx, env);
         let executable = Box::new(lower_lambda_expecting_value_with_return(
-            lam, cx, &spawn_env, &[], &carrier_ty,
+            lam,
+            cx,
+            &spawn_env,
+            &[],
+            &carrier_ty,
         ));
         return Some(TExpr {
             ty: core_closure_call_return_ty(module, method, carrier_ty),
@@ -803,15 +801,11 @@ pub(crate) fn lower_core_closure_call(
             let key = typed_lambda_value(lam, key);
             let call_args = vec![rows, key];
             let widen_to_vec = data_widening(&call_args, &[(0, &row_ty)]);
-            let data_plan = match data_plan_for_core_call(
-                record,
-                &call_args,
-                &result_ty,
-                source_span,
-            ) {
-                Ok(plan) => plan,
-                Err(error) => return Some(invariant_violation_expr(source_span, error)),
-            };
+            let data_plan =
+                match data_plan_for_core_call(record, &call_args, &result_ty, source_span) {
+                    Ok(plan) => plan,
+                    Err(error) => return Some(invariant_violation_expr(source_span, error)),
+                };
             return Some(TExpr {
                 ty: result_ty.clone(),
                 kind: TExprKind::CoreCall {
@@ -852,7 +846,7 @@ pub(crate) fn lower_core_closure_call(
                         format!(
                             "checked Core call `{module}.{method}` did not retain its left row type"
                         ),
-                    ))
+                    ));
                 }
             };
             let right_ty = match &right.ty {
@@ -863,7 +857,7 @@ pub(crate) fn lower_core_closure_call(
                         format!(
                             "checked Core call `{module}.{method}` did not retain its right row type"
                         ),
-                    ))
+                    ));
                 }
             };
             let left_lam = match required_lambda(args, 2, module, method, source_span) {
@@ -874,10 +868,8 @@ pub(crate) fn lower_core_closure_call(
                 Ok(lam) => lam,
                 Err(error) => return Some(error),
             };
-            let left_key =
-                lower_lambda_expecting_value(left_lam, cx, env, &[left_ty.clone()]);
-            let right_key =
-                lower_lambda_expecting_value(right_lam, cx, env, &[right_ty.clone()]);
+            let left_key = lower_lambda_expecting_value(left_lam, cx, env, &[left_ty.clone()]);
+            let right_key = lower_lambda_expecting_value(right_lam, cx, env, &[right_ty.clone()]);
             let call_args = vec![
                 left,
                 right,
@@ -937,18 +929,8 @@ pub(crate) fn lower_core_closure_call(
                 Ok(lam) => lam,
                 Err(error) => return Some(error),
             };
-            let row_key = lower_lambda_expecting_value(
-                row_lam,
-                cx,
-                env,
-                &[row_ty.clone()],
-            );
-            let col_key = lower_lambda_expecting_value(
-                col_lam,
-                cx,
-                env,
-                &[row_ty.clone()],
-            );
+            let row_key = lower_lambda_expecting_value(row_lam, cx, env, &[row_ty.clone()]);
+            let col_key = lower_lambda_expecting_value(col_lam, cx, env, &[row_ty.clone()]);
             let value = lower_lambda_expecting_value(value_lam, cx, env, &[row_ty.clone()]);
             let cell = Type::Named("DataPivotCell".to_string());
             let call_args = vec![
@@ -994,10 +976,7 @@ pub(crate) fn lower_core_closure_call(
                     args: vec![body_ty],
                 },
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::ReactiveDerived {
-                        executable,
-                        site,
-                    },
+                    kind: TCoreClosureKind::ReactiveDerived { executable, site },
                 },
             });
         }
@@ -1019,10 +998,7 @@ pub(crate) fn lower_core_closure_call(
                 &unit_callback_type(),
             ));
             let site = jit_spawn_site_unit(lam, cx, env);
-            TCoreClosureKind::ReactiveEffect {
-                executable,
-                site,
-            }
+            TCoreClosureKind::ReactiveEffect { executable, site }
         }
         ("core.ui", "reactive_render") => {
             if args.len() != 1 {
@@ -1065,10 +1041,7 @@ pub(crate) fn lower_core_closure_call(
                     args: vec![body_ty],
                 },
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::ReactiveDerived {
-                        executable,
-                        site,
-                    },
+                    kind: TCoreClosureKind::ReactiveDerived { executable, site },
                 },
             });
         }
@@ -1096,7 +1069,8 @@ pub(crate) fn lower_core_closure_call(
                 ));
             };
             let name_arg = args.first().expect("preview arity includes name");
-            let viewport_index = (args.len() == 3).then_some(if callback_index == 1 { 2 } else { 1 });
+            let viewport_index =
+                (args.len() == 3).then_some(if callback_index == 1 { 2 } else { 1 });
             let viewport = if let Some(index) = viewport_index {
                 Box::new(lower_optional_core_arg(
                     &args[index],
@@ -1106,9 +1080,7 @@ pub(crate) fn lower_core_closure_call(
                 ))
             } else {
                 Box::new(TExpr {
-                    ty: Type::Option(Box::new(Type::Named(
-                        "UiPreviewViewport".to_string(),
-                    ))),
+                    ty: Type::Option(Box::new(Type::Named("UiPreviewViewport".to_string()))),
                     kind: TExprKind::Absent,
                 })
             };
@@ -1144,11 +1116,8 @@ pub(crate) fn lower_core_closure_call(
                             source_span.start,
                         )
                         .1 as u32,
-                        source_end_line: crate::Diagnostics::span_line_col(
-                            &cx.src,
-                            source_span.end,
-                        )
-                        .0 as u32,
+                        source_end_line: crate::Diagnostics::span_line_col(&cx.src, source_span.end)
+                            .0 as u32,
                         source_end_column: crate::Diagnostics::span_line_col(
                             &cx.src,
                             source_span.end,
@@ -1186,12 +1155,8 @@ pub(crate) fn lower_core_closure_call(
                 cx,
                 env,
             ));
-            let accessible_label = Box::new(lower_optional_core_arg(
-                &args[2],
-                &Type::String,
-                cx,
-                env,
-            ));
+            let accessible_label =
+                Box::new(lower_optional_core_arg(&args[2], &Type::String, cx, env));
             let executable = Box::new(lower_lambda_expecting_callable(
                 lam,
                 cx,

@@ -276,7 +276,7 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Crypto, "shared_secret_bytes") => {
             crypto_extract(args, 0, "SharedSecret", span)
         }
-        // TIR lowers Signature/VerifyKey/… `.bytes()` to core.crypto.__*_bytes;
+        // TIR routes opaque crypto `.bytes()` accessors through hidden CoreCalls;
         // keep those pure field extracts resident so REPL does not hit E1802.
         (CoreCallPureRoute::Crypto, "__signature_bytes") => {
             crypto_extract(args, 0, "Signature", span)
@@ -288,12 +288,6 @@ pub(super) fn evaluate(
             crypto_extract(args, 0, "X25519PublicKey", span)
         }
         (CoreCallPureRoute::Crypto, "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
-        (CoreCallPureRoute::Crypto, "__digest256_bytes") => {
-            crypto_extract(args, 0, "Digest256", span)
-        }
-        (CoreCallPureRoute::Crypto, "__digest512_bytes") => {
-            crypto_extract(args, 0, "Digest512", span)
-        }
         // Typed decode/decode_bytes run in eval_method; arms prove inventory coverage.
         (CoreCallPureRoute::EncodingXml, "decode") => Err(unsupported(
             "core.encoding.xml.decode() requires a type argument",

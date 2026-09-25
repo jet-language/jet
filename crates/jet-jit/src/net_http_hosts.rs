@@ -494,20 +494,14 @@ fn net_io_operation_ordinal(operation: jet_std::IOOperation) -> i64 {
 }
 
 fn net_io_context_handle(context: &jet_std::IOContext) -> i64 {
-    let operation = net_io_operation_ordinal(context.operation);
-    let resource = option_string(context.resource.clone());
-    let os_code = context
-        .os_code
-        .map(|value| value.wrapping_add(1))
-        .unwrap_or(0);
-    let cause = option_string(context.cause.clone());
     Concurrency::with_runtime_mut(|rt| {
-        let record = rt.heap.alloc_record(4);
-        let _ = rt.heap.record_set_int(record, 0, operation);
-        let _ = rt.heap.record_set_int(record, 1, resource);
-        let _ = rt.heap.record_set_int(record, 2, os_code);
-        let _ = rt.heap.record_set_int(record, 3, cause);
-        record
+        crate::runtime_host::alloc_io_context(
+            rt,
+            net_io_operation_ordinal(context.operation),
+            context.resource.as_deref(),
+            context.os_code,
+            context.cause.as_deref(),
+        )
     })
 }
 

@@ -20,7 +20,7 @@
 //! addition to that harness.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
@@ -307,11 +307,25 @@ fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
         .expect("qualified nested entry wrapper should compile");
 }
 
+fn stage_jetpack_phase1(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create staged Jetpack fixture");
+    for name in ["package.jet", "env.jet"] {
+        fs::copy(source.join(name), destination.join(name))
+            .unwrap_or_else(|error| panic!("copy Jetpack fixture {name}: {error}"));
+    }
+    let lock = destination.join(".jet/lock");
+    fs::create_dir_all(lock.parent().unwrap()).expect("create staged Jetpack lock directory");
+    fs::copy(source.join("fixture-state/lock"), &lock)
+        .unwrap_or_else(|error| panic!("stage Jetpack fixture lock: {error}"));
+}
+
 #[test]
 fn package_default_output_alias_invokes_nested_leaf_from_path_and_cwd() {
     let package = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dogfood/jetpack");
-    let fixture_root = package.join("tests/fixtures/phase1");
+    let fixture_source = package.join("tests/fixtures/phase1");
     let scratch = common::Scratch::new("package-output-default");
+    let fixture_root = scratch.join("phase1");
+    stage_jetpack_phase1(&fixture_source, &fixture_root);
     let home = scratch.join("home");
     let store = home.join(".cache/jet-dogfood/jetpack-store");
     fs::create_dir_all(&home).unwrap();

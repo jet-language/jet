@@ -34,7 +34,7 @@ pub fn warn(message: String) -[Log]> { emit("warn", message, [LogField]{}) }
 
 pub fn error(message: String) -[Log]> { emit("error", message, [LogField]{}) }
 /// Emit a message at a caller-selected level.
-pub fn log(level: String, message: String) -[Log]> { emit(canon_level(level), message, [LogField]{}) }
+pub fn log(level: String, message: String) -[Log]> { emit(level, message, [LogField]{}) }
 
 /// Python-compatible warning spelling.
 pub fn warning(message: String) -[Log]> { warn(message) }
@@ -52,15 +52,25 @@ pub fn warn_fields(message: String, fields: [LogField]) -[Log]> { emit("warn", m
 
 pub fn error_fields(message: String, fields: [LogField]) -[Log]> { emit("error", message, fields) }
 
-pub fn field(key: String, value: String) -> LogField { core.log.field(key, value) }
+pub fn field(key: String, value: String) -> LogField {
+    LogField{key: key, value: value, kind: "string", redacted: false}
+}
 
-pub fn int(key: String, value: Int) -> LogField { core.log.int(key, value) }
+pub fn int(key: String, value: Int) -> LogField {
+    LogField{key: key, value: "{value}", kind: "int", redacted: false}
+}
 
-pub fn float(key: String, value: Float) -> LogField { core.log.float(key, value) }
+pub fn float(key: String, value: Float) -> LogField {
+    LogField{key: key, value: "{value}", kind: "float", redacted: false}
+}
 
-pub fn bool(key: String, value: Bool) -> LogField { core.log.bool(key, value) }
+pub fn bool(key: String, value: Bool) -> LogField {
+    LogField{key: key, value: "{value}", kind: "bool", redacted: false}
+}
 
-pub fn redact(key: String) -> LogField { core.log.redact(key) }
+pub fn redact(key: String) -> LogField {
+    LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
+}
 
 pub fn span(name: String) -[Log]> LogSpan { core.log.span(name) }
 
@@ -68,17 +78,33 @@ pub fn enter(span: LogSpan) -[Log]> { core.log.enter(span) }
 
 pub fn close(span: LogSpan) -[Log]> { core.log.close(span) }
 
-pub fn set_sink(kind: String, path: String) -[Log]> { core.log.set_sink(kind, path) }
+pub fn set_sink(kind: String, path: String) -[Log]> {
+    normalized :: ascii_lower(trim(kind))
+    if normalized == "stderr" -> return core.log.set_sink("json", "")
+    if normalized == "stdout" -> return
+    if normalized != "json" && normalized != "jsonl" && normalized != "text" -> return
+    if (normalized == "jsonl" || normalized == "text") && trim(~path).len() == 0 -> return
+    core.log.set_sink(normalized, path)
+}
 
-pub fn sample_every(n: Int) -[Log]> { core.log.sample_every(n) }
+pub fn sample_every(n: Int) -[Log]> {
+    if n > 0 -> core.log.sample_every(n)
+}
 
 pub fn counter(name: String, value: Int) -> LogField { core.log.counter(name, value) }
 
-pub fn otlp_file(path: String) -[Log, FS]> { core.log.otlp_file(path) }
+pub fn otlp_file(path: String) -[Log, FS]> {
+    if trim(~path).len() > 0 -> core.log.otlp_file(path)
+}
 
-pub fn set_level(level: String) -[Log]> { core.log.set_level(canon_level(level)) }
+pub fn set_level(level: String) -[Log]> {
+    normalized :: canon_level(level)
+    if normalized.len() > 0 -> core.log.set_level(normalized)
+}
 
-pub fn set_trace_id(id: String) -[Log]> { core.log.set_trace_id(id) }
+pub fn set_trace_id(id: String) -[Log]> {
+    if trim(~id).len() > 0 -> core.log.set_trace_id(id)
+}
 
 /// Apply comma-separated `key=value` settings without handing the whole
 /// grammar to the host. The host owns the sink and process-global cells; Jet
@@ -92,14 +118,12 @@ pub fn setup(spec: String) -[Log]> {
             key == "level" -> set_level(value)
             key == "format" -> {
                 format :: ascii_lower(value)
-                if format == "json" || format == "text" -> core.log.setup(format)
+                if format == "auto" || format == "json" || format == "text" -> core.log.setup(format)
             }
             key == "sink" -> {
                 sink :: ascii_lower(value)
-                if {
-                    sink == "stderr" || sink == "stdout" -> set_sink("json", "")
-                    sink.len() > 0 -> set_sink("jsonl", value)
-                }
+                if sink == "stderr" -> set_sink("json", "")
+                if sink != "stdout" && sink != "stderr" && sink.len() > 0 -> set_sink("jsonl", value)
             }
             key == "file" || key == "path" -> {
                 if value.len() > 0 -> set_sink("jsonl", value)
@@ -117,39 +141,68 @@ pub fn disable() -[Log]> { core.log.disable() }
 
 pub fn flush() -[Log]> { core.log.flush() }
 
-pub fn enabled(level: String) -[Log]> Bool { core.log.enabled(canon_level(level)) }
+pub fn enabled(level: String) -[Log]> Bool {
+    normalized :: canon_level(level)
+    if normalized.len() == 0 -> return false
+    core.log.enabled(normalized)
+}
 
 fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     normalized :: canon_level(level)
+    if normalized.len() == 0 -> return
+    if !core.log.enabled(normalized) -> return
+    normalized_fields := fields
+    if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
     if normalized == {
         "debug" -> {
-            if fields.len() > 0 -> return core.log.debug_fields(message, fields)
+            if normalized_fields.len() > 0 -> return core.log.debug_fields(message, normalized_fields)
             return core.log.debug(message)
         }
         "info" -> {
-            if fields.len() > 0 -> return core.log.info_fields(message, fields)
+            if normalized_fields.len() > 0 -> return core.log.info_fields(message, normalized_fields)
             return core.log.info(message)
         }
         "warn" -> {
-            if fields.len() > 0 -> return core.log.warn_fields(message, fields)
+            if normalized_fields.len() > 0 -> return core.log.warn_fields(message, normalized_fields)
             return core.log.warn(message)
         }
         "error" -> {
-            if fields.len() > 0 -> return core.log.error_fields(message, fields)
+            if normalized_fields.len() > 0 -> return core.log.error_fields(message, normalized_fields)
             return core.log.error(message)
         }
         "critical" -> {
             line := message
-            if fields.len() > 0 -> line = render_json(record(normalized, message, fields))
+            if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
             return core.log.critical(line)
         }
         "fatal" -> {
             line := message
-            if fields.len() > 0 -> line = render_json(record(normalized, message, fields))
+            if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
             return core.log.fatal(line)
         }
-        else -> return core.log.info(message)
+        else -> return
     }
+}
+fn normalize_fields(fields: [LogField]) -> [LogField] {
+    needs_normalization := false
+    loop i in 0..<fields.len() {
+        if fields[i].redacted || (fields[i].kind != "string" && fields[i].kind != "int" && fields[i].kind != "float" && fields[i].kind != "bool" && fields[i].kind != "counter") {
+            needs_normalization = true
+            break
+        }
+    }
+    if !needs_normalization -> return ~fields
+    out := [LogField]{}
+    loop field in fields {
+        if field.redacted {
+            out.push(LogField{key: field.key, value: "[redacted]", kind: "redacted", redacted: true})
+        } else if field.kind != "string" && field.kind != "int" && field.kind != "float" && field.kind != "bool" && field.kind != "counter" {
+            out.push(LogField{key: field.key, value: field.value, kind: "string", redacted: false})
+        } else {
+            out.push(field)
+        }
+    }
+    out
 }
 
 fn rank(level: String) -> Int {
@@ -157,11 +210,11 @@ fn rank(level: String) -> Int {
     if n == {
         "debug" -> 10
         "info" -> 20
-        "warn" | "warning" -> 30
+        "warn" -> 30
         "error" -> 40
         "critical" -> 50
         "fatal" -> 60
-        else -> 20
+        else -> -1
     }
 }
 
@@ -172,8 +225,20 @@ fn canon_level(level: String) -> String {
         "err" -> return "error"
         "crit" -> return "critical"
         "debug" | "info" | "warn" | "error" | "critical" | "fatal" -> return n
-        else -> "info"
+        else -> ""
     }
+}
+
+fn default_level(level: String) -> String {
+    normalized :: canon_level(level)
+    if normalized.len() == 0 -> return "info"
+    normalized
+}
+
+fn canon_mode(mode: String) -> String {
+    normalized :: ascii_lower(trim(mode))
+    if normalized == "text" -> return "text"
+    "json"
 }
 
 fn escape(text: String) -> String {
@@ -285,40 +350,46 @@ pub struct Handler {
 }
 
 pub fn record(level: String, message: String, fields: [LogField]) -> LogRecord {
-    LogRecord{level: canon_level(level), message: message, fields: fields}
+    LogRecord{level: default_level(level), message: message, fields: fields}
 }
 
 pub fn formatter(mode: String) -> Formatter {
-    Formatter{mode: ascii_lower(trim(mode))}
+    Formatter{mode: canon_mode(mode)}
 }
 
 pub fn handler(level: String) -> Handler {
-    Handler{minimum: canon_level(level), mode: "json"}
+    Handler{minimum: default_level(level), mode: "json"}
 }
 
 pub fn handler_format(target: Handler, mode: String) -> Handler {
-    Handler{minimum: target.minimum, mode: ascii_lower(trim(mode))}
+    Handler{minimum: default_level(target.minimum), mode: canon_mode(mode)}
 }
 
 pub fn format(target: Formatter, event: LogRecord) -> String {
-    mode :: ascii_lower(trim(target.mode))
+    mode :: canon_mode(target.mode)
     if mode == "text" -> return render_text(event)
     render_json(event)
 }
 
 pub fn handle(target: Handler, event: LogRecord) -[Log]> {
-    if rank(event.level) < rank(target.minimum) -> return
-    formatter :: Formatter{mode: target.mode}
-    if ascii_lower(trim(target.mode)) == "text" {
+    minimum :: default_level(target.minimum)
+    if rank(event.level) < rank(minimum) -> return
+    formatter :: Formatter{mode: canon_mode(target.mode)}
+    if formatter.mode == "text" {
         emit(event.level, format(formatter, event), [LogField]{})
     } else {
         emit(event.level, event.message, event.fields)
     }
 }
 
+
 fn render_text(event: LogRecord) -> String {
     line := "{event.level}: {event.message}"
-    loop field in event.fields -> line = "{line} {field.key}={field.value}"
+    loop field in event.fields {
+        value := field.value
+        if field.redacted -> value = "[redacted]"
+        line = "{line} {field.key}={value}"
+    }
     line
 }
 
@@ -327,6 +398,8 @@ fn render_json(event: LogRecord) -> String {
     loop field in event.fields {
         if field.redacted {
             line = "{line},\"{escape(field.key)}\":\"[redacted]\""
+        } else if field.kind == "int" || field.kind == "float" || field.kind == "bool" || field.kind == "counter" {
+            line = "{line},\"{escape(field.key)}\":{field.value}"
         } else {
             line = "{line},\"{escape(field.key)}\":\"{escape(field.value)}\""
         }
@@ -384,13 +457,13 @@ fn parse_int(text: String) -> ?Int {
     loop b in text.bytes() {
         d :: b
         if d < 48 || d > 57 -> return None
+        if n > 922337203685477580 || (n == 922337203685477580 && d > 7) -> return None
         n = n * 10 + (d - 48)
         any = true
     }
     if !any -> return None
     Val(n)
 }
-
 pub fn add(event: LogRecord, field: LogField) -> LogRecord {
     fields := event.fields
     fields.push(field)

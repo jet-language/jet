@@ -1,0 +1,137 @@
+//! Nested fallible arguments use the same checked error-domain routes on every tier.
+
+mod common;
+
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+const NESTED_ERROR_DOMAINS: &str = r#"
+#Error
+struct DomainError { reason: String }
+
+#Error
+struct SourceError { reason: String }
+
+fn matching_failure(fail: Bool) -> DomainError !DomainError {
+    if fail {
+        return Err(DomainError{reason: "matching nested"})
+    }
+    return DomainError{reason: "matching value"}
+}
+
+fn nested_matching(fail: Bool) -> DomainError !DomainError {
+    return Err(matching_failure(fail))
+}
+
+fn never_value() -> DomainError !Never { DomainError{reason: "never"} }
+fn never_int() -> Int !Never { 40 }
+fn early_return_then_never(fail: Bool) -> Int !Never {
+    if fail -> return 1
+    value :: never_int()
+    value + 1
+}
+fn optional_never() -> ?Int {
+    value :: never_int()
+    Val(value)
+}
+fn optional_never_value() -> Int {
+    optional_never() ?? 0
+}
+
+fn nested_never() -> DomainError !DomainError { Err(never_value()) }
+
+fn implicit_failure(fail: Bool) -> DomainError {
+    if fail {
+        return Err("default failure")
+    }
+    return DomainError{reason: "implicit value"}
+}
+
+fn nested_locally_handled(fail: Bool) -> DomainError !DomainError {
+    recovered := implicit_failure(fail) ?? DomainError{reason: "handled default"}
+    return Err(recovered)
+}
+
+impl SourceError -> DomainError {
+    return DomainError{reason: "converted"}
+}
+
+fn declared_failure(fail: Bool) -> DomainError !SourceError {
+    if fail {
+        return Err(SourceError{reason: "source"})
+    }
+    return DomainError{reason: "conversion value"}
+}
+
+fn nested_conversion(fail: Bool) -> DomainError !DomainError {
+    return Err(declared_failure(fail))
+}
+
+
+fn implicit_collection() -> [Int] {
+    [1, 2, 3]
+}
+
+fn sum_implicit_collection() -> Int {
+    total := 0
+    loop value in implicit_collection() -> total = total + value
+    total
+}
+
+fn indexed_result() -> [Int] !DomainError { Ok([7, 8]) }
+
+fn check_result_index() {
+    if indexed_result() == {
+        .Ok(values) -> {
+            if values[0] != 7 -> print("unexpected index")
+        }
+        .Err(error) -> print(error.reason)
+    }
+}
+fn run() {
+    if sum_implicit_collection() != 6 -> print("unexpected collection result")
+    if early_return_then_never(true) != 1 -> print("unexpected early return")
+    if early_return_then_never(false) != 41 -> print("unexpected infallible value")
+    if optional_never_value() != 40 -> print("unexpected optional !Never")
+    check_result_index()
+
+
+    if nested_matching(false) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_matching(true) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_never() == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_locally_handled(false) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_locally_handled(true) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_conversion(false) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+    if nested_conversion(true) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print(error.reason)
+    }
+}
+"#;
+
+#[test]
+fn nested_error_domains_agree_across_execution_tiers() {
+    tir_support::assert_release_tiers_agree(
+        "nested_error_domains",
+        NESTED_ERROR_DOMAINS,
+        "matching value\nmatching nested\nnever\nimplicit value\nhandled default\nconversion value\nconverted\n",
+    );
+}

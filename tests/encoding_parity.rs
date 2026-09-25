@@ -687,6 +687,44 @@ fn run() {
 }
 
 #[test]
+fn json_quoted_unicode_and_duplicate_key_errors_match_all_tiers() {
+    on_encoding_stack(json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner);
+}
+
+fn json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping JSON quoted Unicode parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.json as json
+
+fn run() {
+    value :: json.parse("{{\"text\":\"quote: \\\" and music: \\uD834\\uDD1E\"}}") ?? panic("valid JSON")
+    print(json.to_string(value))
+    json.parse("{{\"a\":1,\"a\":}}") ? _value -> {
+        print("duplicate accepted")
+    } ! error -> {
+        print("{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason}")
+    }
+}
+"#;
+    let scratch = Scratch::new("json_quoted_unicode_duplicate_key");
+    let path = scratch.write_project("2026", source);
+    let expected = r#"{"text":"quote: \" and music: 𝄞"}
+true|/a|duplicate object key `a`
+"#;
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "JSON quoted Unicode AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "forced interpreter diverged");
+}
+
+#[test]
 fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
     on_encoding_stack(cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner);
 }

@@ -1,11 +1,11 @@
-use crate::Codegen::is_db_value_type_name;
+use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::is_db_value_type_name;
 use crate::Syntax;
-use crate::AST::{Expr, Type};
 use std::collections::HashSet;
 
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
@@ -158,6 +158,12 @@ pub(crate) fn router_register_in_subset(
 }
 
 pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
+    let handle = match crate::Sema::core_net_handle_dispatch_name(handle) {
+        Some("TCPStream") => "TcpStream",
+        Some("TCPListener") => "TcpListener",
+        Some(_) => unreachable!("core TCP handle dispatch mapping is closed"),
+        None => crate::Sema::core_file_handle_dispatch_name(handle).unwrap_or(handle),
+    };
     let op = match (handle, method, nargs) {
         (Syntax::INTERNAL_RECEIPT_HANDLE, Syntax::METHOD_RECEIPT_ATTACH, 1) => {
             THandleOp::ReceiptAttach
@@ -605,6 +611,9 @@ pub(crate) fn handle_method_return_ty(
     receiver_ty: &Type,
     resolved_ret: Option<&Type>,
 ) -> Type {
+    let handle = crate::Sema::core_net_handle_dispatch_name(handle)
+        .or_else(|| crate::Sema::core_file_handle_dispatch_name(handle))
+        .unwrap_or(handle);
     if let Some(ret) = resolved_ret {
         return ret.clone();
     }
@@ -789,8 +798,6 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
         _ => unit_type(),
     }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Lowering: AST -> TIR. This is where every fact is resolved ONCE.

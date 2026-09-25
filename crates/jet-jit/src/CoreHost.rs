@@ -14,6 +14,9 @@ use super::runtime_host::{self, alloc_jit_result, contract_kernel, jit_result_pa
 use super::Concurrency;
 use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
 use jet_foundation::Devtools::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
@@ -235,25 +238,13 @@ pub(crate) mod os_rt {
             jet_std::IOError::Other(context) => ("Other", context),
         };
         super::Concurrency::with_runtime_mut(|rt| {
-            let record = rt.heap.alloc_record(4);
-            let _ = rt
-                .heap
-                .record_set_int(record, 0, operation_index(&context.operation));
-            let resource = context
-                .resource
-                .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
-                .unwrap_or(0);
-            let _ = rt.heap.record_set_int(record, 1, resource);
-            let _ = rt.heap.record_set_int(
-                record,
-                2,
-                context.os_code.map(|code| code + 1).unwrap_or(0),
+            let record = crate::runtime_host::alloc_io_context(
+                rt,
+                operation_index(&context.operation),
+                context.resource.as_deref(),
+                context.os_code,
+                context.cause.as_deref(),
             );
-            let cause = context
-                .cause
-                .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
-                .unwrap_or(0);
-            let _ = rt.heap.record_set_int(record, 3, cause);
             let packed = ((record << 8) | error_index(name)) as u64;
             rt.results.push(crate::JitResultValue {
                 ok: false,
@@ -293,13 +284,14 @@ pub(crate) mod os_rt {
 // resident host supplies only these raw kernels and its result marshaller.
 mod fs_prelude {
     use crate::Collections::authority_semantics::{JetAuthority, JetFileScope};
-    use crate::Text::text_rt::{jet_view_iter_from_iter, JetViewIter};
+    use crate::Text::text_rt::{jet_fs_remove_entry, jet_view_iter_from_iter, JetViewIter};
     use super::fs_ops_kernel::{
         jet_fs_canonicalize, jet_fs_glob, jet_fs_rename, jet_fs_scope_read,
     };
     use super::os_rt::jet_std;
     use crate::fault_injection::jet_fault_should_fail;
 
+    include!("../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
 }
 mod fs_write_prelude {
@@ -473,6 +465,7 @@ fn jet_jit_os_on_interrupt(callback_record: i64) {
 
 pub(crate) fn reset_jit_interrupts() {
     jit_os_interrupt::reset();
+    JIT_FS_OWNERS.with(|owners| owners.borrow_mut().clear());
 }
 
 // D-BENCH-KEEP1=A: each wrapper is only a carrier-shaped ABI adapter. The
@@ -545,7 +538,7 @@ fn jet_jit_os_temp_dir() -> i64 {
 fn jet_jit_os_executable() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(os_rt::jet_std_os_executable()))
 }
-fn jet_jit_os_pid() -> i64 {
+pub(crate) fn jet_jit_os_pid() -> i64 {
     os_rt::jet_std_os_pid()
 }
 fn jet_jit_os_hostname() -> i64 {
@@ -1558,31 +1551,10 @@ pub(crate) fn jit_env_vars() -> Result<Vec<String>, &'static str> {
     Ok(names.into_iter().map(|(_, name)| name).collect())
 }
 
-fn jet_temp_path(prefix: &str) -> String {
-    let clean: String = prefix
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir()
-        .join(format!("{}_{}_{}", clean, std::process::id(), nanos))
-        .to_string_lossy()
-        .to_string()
-}
 
 fn jet_jit_fs_remove(path: i64) -> i64 {
-    let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    let res = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p));
-    match res {
-        Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("remove {p}: {e}")),
-    }
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(fs_prelude::jet_fs_remove_path(&path), |_| 0)
 }
 
 fn jet_jit_fs_remove_all(path: i64) -> i64 {
@@ -1908,16 +1880,120 @@ fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
     }
 }
 
+#[derive(Clone)]
+enum JitFsOwner {
+    TempDir(fs_prelude::JetTempDirOwner),
+    TempFile(fs_prelude::JetTempFileOwner),
+    FileLock(fs_prelude::JetFileLockOwner),
+}
+
+impl JitFsOwner {
+    fn path(&self) -> &str {
+        match self {
+            Self::TempDir(owner) => &owner.path,
+            Self::TempFile(owner) => &owner.path,
+            Self::FileLock(owner) => &owner.path,
+        }
+    }
+
+    fn kind(&self) -> i64 {
+        match self {
+            Self::TempDir(_) => 0,
+            Self::TempFile(_) => 1,
+            Self::FileLock(_) => 2,
+        }
+    }
+}
+
+static NEXT_JIT_FS_OWNER: AtomicU64 = AtomicU64::new(1);
+thread_local! {
+    static JIT_FS_OWNERS: RefCell<HashMap<i64, JitFsOwner>> = RefCell::new(HashMap::new());
+}
+
+fn next_jit_fs_owner_id() -> Option<i64> {
+    NEXT_JIT_FS_OWNER
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+            (id <= i64::MAX as u64).then_some(id + 1)
+        })
+        .ok()
+        .and_then(|id| i64::try_from(id).ok())
+}
+
+fn jit_fs_owner_record(owner: JitFsOwner) -> u64 {
+    let Some(id) = next_jit_fs_owner_id() else {
+        Concurrency::with_runtime_mut(|rt| rt.set_host_fault("JIT filesystem owner ID exhausted"));
+        return 0;
+    };
+    let path = owner.path().to_string();
+    JIT_FS_OWNERS.with(|owners| owners.borrow_mut().insert(id, owner));
+    let record = Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let path = rt.heap.alloc_string(path);
+        let path_ok = rt.heap.record_set_string(record, 0, path).is_some();
+        let owner_ok = rt.heap.record_set_int(record, 1, id).is_some();
+        (record, path_ok && owner_ok)
+    });
+    if !record.1 {
+        JIT_FS_OWNERS.with(|owners| {
+            owners.borrow_mut().remove(&id);
+        });
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("JIT filesystem owner record construction failed")
+        });
+        return 0;
+    }
+    record.0 as u64
+}
+
+fn jit_fs_owner_token(record: i64) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(record, 1))
+        .filter(|id| *id > 0)
+}
+
+fn jet_jit_fs_resource_clone(record: i64, kind: i64) -> i64 {
+    let Some(id) = jit_fs_owner_token(record) else {
+        Concurrency::with_runtime_mut(|rt| rt.set_host_fault("invalid JIT filesystem owner"));
+        return 0;
+    };
+    let owner = JIT_FS_OWNERS.with(|owners| {
+        owners
+            .borrow()
+            .get(&id)
+            .filter(|owner| owner.kind() == kind)
+            .cloned()
+    });
+    let Some(owner) = owner else {
+        Concurrency::with_runtime_mut(|rt| rt.set_host_fault("stale JIT filesystem owner"));
+        return 0;
+    };
+    jit_fs_owner_record(owner) as i64
+}
+
+fn jet_jit_fs_resource_drop(record: i64, kind: i64) {
+    let Some(id) = jit_fs_owner_token(record) else {
+        return;
+    };
+    let owner = JIT_FS_OWNERS.with(|owners| {
+        let mut owners = owners.borrow_mut();
+        match owners.get(&id) {
+            Some(owner) if owner.kind() == kind => owners.remove(&id),
+            Some(_) => None,
+            None => None,
+        }
+    });
+    if owner.is_none() {
+        let present = JIT_FS_OWNERS.with(|owners| owners.borrow().contains_key(&id));
+        if present {
+            Concurrency::with_runtime_mut(|rt| rt.set_host_fault("JIT filesystem owner kind mismatch"));
+        }
+    }
+}
+
 fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
-    let path = jet_temp_path(&pref);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {path}"));
-    }
-    match std::fs::create_dir(&path) {
-        Ok(()) => result_ok(path_record(path) as u64),
-        Err(e) => result_err_msg(&format!("temp_dir {path}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_temp_dir(&pref), |owner| {
+        jit_fs_owner_record(JitFsOwner::TempDir(owner))
+    })
 }
 fn jet_jit_fs_mkdtemp(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
@@ -1926,36 +2002,18 @@ fn jet_jit_fs_mkdtemp(prefix: i64) -> i64 {
     })
 }
 
-
 fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
     let pref = clone_string(prefix);
-    let path = jet_temp_path(&pref);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {path}"));
-    }
-    match std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&path)
-    {
-        Ok(_) => result_ok(path_record(path) as u64),
-        Err(e) => result_err_msg(&format!("temp_file {path}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_temp_file(&pref), |owner| {
+        jit_fs_owner_record(JitFsOwner::TempFile(owner))
+    })
 }
 
 fn jet_jit_fs_lock(path: i64) -> i64 {
     let p = clone_path_arg(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
-    }
-    match std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&p)
-    {
-        Ok(_) => result_ok(path_record(p) as u64),
-        Err(e) => result_err_msg(&format!("lock {p}: {e}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_lock(&p), |owner| {
+        jit_fs_owner_record(JitFsOwner::FileLock(owner))
+    })
 }
 
 // ── core.math (mirrors jet_std_math_* / f64 methods in Process.rs emit) ───────
@@ -2291,6 +2349,9 @@ host_fns! {
         sig_i64_i64_i8.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i8.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i8.params.push(AbiParam::new(types::I8));
+        let mut sig_void_i64_i64 = Signature::new(cc);
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i8.returns.push(AbiParam::new(types::I64));
         let mut sig_path_is_within = Signature::new(cc);
         sig_path_is_within.params.push(AbiParam::new(types::I64));
@@ -2425,9 +2486,12 @@ host_fns! {
     fs_absolute: "jet_jit_fs_absolute" => jet_jit_fs_absolute: sig_unary_i64;
     fs_copy_dir: "jet_jit_fs_copy_dir" => jet_jit_fs_copy_dir: sig_i64_i64_i64;
     fs_copy: "jet_jit_fs_copy" => jet_jit_fs_copy: sig_i64_i64_i64;
+    fs_temp_dir: "jet_jit_fs_temp_dir" => jet_jit_fs_temp_dir: sig_unary_i64;
     fs_mkdtemp: "jet_jit_fs_mkdtemp" => jet_jit_fs_mkdtemp: sig_unary_i64;
     fs_temp_file: "jet_jit_fs_temp_file" => jet_jit_fs_temp_file: sig_unary_i64;
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
+    fs_resource_clone: "jet_jit_fs_resource_clone" => jet_jit_fs_resource_clone: sig_i64_i64_i64;
+    fs_resource_drop: "jet_jit_fs_resource_drop" => jet_jit_fs_resource_drop: sig_void_i64_i64;
     mod_load: "jet_jit_mod_load" => jet_jit_mod_load: sig_i64_i64_i64;
     mod_on_tick: "jet_jit_mod_on_tick" => jet_jit_mod_on_tick: sig_i64_i64_i64;
     // #1992 io/path: `Path.home()` takes no argument at any tier. CoreLib's body

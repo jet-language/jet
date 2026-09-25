@@ -87,6 +87,119 @@ fn compiler_extension_env(
     (guard, restore)
 }
 
+struct UiFixtureScratch {
+    root: PathBuf,
+    entry: PathBuf,
+}
+
+impl UiFixtureScratch {
+    fn for_entry(entry: &Path) -> Option<Self> {
+        let fixture_root = entry.parent()?;
+        let state = fixture_root.join("state");
+        if !state.is_dir() {
+            return None;
+        }
+
+        let base = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .or_else(|| std::env::var_os("JET_TEST_SCRATCH"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+                    .join(".cache/jet-test-scratch")
+            });
+        fs::create_dir_all(&base).expect("create UI fixture scratch root");
+        let base = fs::canonicalize(base).expect("canonicalize UI fixture scratch root");
+        let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("canonicalize repo root");
+        assert!(
+            !base.starts_with(&repo) && !base.starts_with("/tmp"),
+            "UI fixture scratch must be outside the repository and disk-backed: {}",
+            base.display()
+        );
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos();
+        let root = base.join(format!(
+            "ui-fixture-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("create UI fixture scratch project");
+        copy_ui_fixture_tree(fixture_root, &root, true);
+        let manifest = root.join("package.jet");
+        if !manifest.is_file() {
+            let source = fs::read_to_string(entry).unwrap_or_else(|error| {
+                panic!(
+                    "read UI fixture entry {}: {error}",
+                    entry.display()
+                )
+            });
+            let has_inline_package = source
+                .lines()
+                .any(|line| line.trim_start().starts_with("package {"));
+            let is_workspace_entry = entry
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some(jet::Syntax::WORKSPACE_FILE);
+            if !has_inline_package && !is_workspace_entry {
+                // Without a manifest the plugin export name falls back to the
+                // entry stem; preserve matching `plugin__<stem>.api` snapshots.
+                let package_name = entry
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("ui-fixture-scratch");
+                let contents = format!("name: \"{package_name}\"\nversion: \"0.1.0\"\n");
+                fs::write(&manifest, contents).unwrap_or_else(|error| {
+                    panic!(
+                        "write staged UI package manifest {}: {error}",
+                        manifest.display()
+                    )
+                });
+            }
+        }
+        let jet_state = root.join(".jet");
+        fs::create_dir_all(&jet_state).expect("create staged UI .jet state");
+        copy_ui_fixture_tree(&state, &jet_state, false);
+        Some(Self {
+            entry: root.join(entry.file_name()?),
+            root,
+        })
+    }
+}
+
+impl Drop for UiFixtureScratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn copy_ui_fixture_tree(source: &Path, destination: &Path, skip_state: bool) {
+    for item in fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read UI fixture directory {}: {error}", source.display()))
+        .flatten()
+    {
+        let name = item.file_name();
+        if skip_state && (name == "state" || name == "stderr") {
+            continue;
+        }
+        let from = item.path();
+        let to = destination.join(&name);
+        let file_type = item.file_type().expect("read UI fixture entry type");
+        if file_type.is_dir() {
+            fs::create_dir_all(&to).expect("create copied UI fixture directory");
+            copy_ui_fixture_tree(&from, &to, false);
+        } else if file_type.is_file() {
+            fs::copy(&from, &to).unwrap_or_else(|error| {
+                panic!(
+                    "copy UI fixture {} -> {}: {error}",
+                    from.display(),
+                    to.display()
+                )
+            });
+        }
+    }
+}
+
 #[test]
 fn compiler_extension_env_lock_covers_plain_compile_regions() {
     let held = compiler_extension_env_lock()
@@ -210,15 +323,26 @@ fn ui_snapshots() {
                 .unwrap_or("Unknown")
                 .trim()
                 .to_string();
-            let tmp = std::env::temp_dir().join(format!("jet_schema_ui_{}", std::process::id()));
-            fs::create_dir_all(&tmp).ok();
-            fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text).ok();
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before Unix epoch")
+                .as_nanos();
+            let tmp = PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
+                .join(".cache/jet-test-scratch")
+                .join(format!("jet_schema_ui_{}_{}", std::process::id(), stamp));
+            fs::create_dir_all(&tmp).expect("create UI schema fixture cache");
+            fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text)
+                .expect("write UI schema fixture cache");
             std::env::set_var("JET_SCHEMA_CACHE_DIR", &tmp);
         } else {
             std::env::remove_var("JET_SCHEMA_CACHE_DIR");
         }
 
-        let file_arg = path.to_string_lossy();
+        let staged_fixture = UiFixtureScratch::for_entry(&path);
+        let compile_entry = staged_fixture
+            .as_ref()
+            .map_or(path.as_path(), |fixture| fixture.entry.as_path());
+        let file_arg = compile_entry.to_string_lossy();
         let render_path = if path.file_name().and_then(|name| name.to_str())
             == Some(jet::Syntax::WORKSPACE_FILE)
         {

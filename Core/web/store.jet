@@ -1,3 +1,7 @@
+c_max_store_name :: 256
+c_max_store_subscribers :: 1000000
+
+
 // core.web.store — typed state history, transactions, and patches.
 
 #Error
@@ -182,9 +186,11 @@ pub fn set_history_limit<T>(store: &WebStore<T>, limit: Int) {
     n := limit
     if n < 1 -> n = 1
     if n > 1000 -> n = 1000
+    if n == store.history_limit -> return
     store.history_limit = n
     if store.history.len() > n -> store.history = tail<T>(store.history, n)
     if store.cursor >= store.history.len() -> store.cursor = store.history.len() - 1
+    store.generation = store.generation + 1
 }
 
 pub fn history_enabled<T>(store: WebStore<T>) -> Bool { store.history_enabled }
@@ -193,6 +199,7 @@ pub fn cursor<T>(store: WebStore<T>) -> Int { store.cursor }
 pub fn current_generation<T>(store: WebStore<T>) -> Int { store.generation }
 
 pub fn subscribe<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription {
+    if store.subs >= c_max_store_subscribers -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     callback(store.value)
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: ""}
@@ -202,6 +209,7 @@ pub fn subscription_unsubscribe(subscription: &WebStoreSubscription) { subscript
 pub fn subscription_active(subscription: WebStoreSubscription) -> Bool { subscription.active }
 
 pub fn subscribe_selector<T, U>(store: &WebStore<T>, project: fn(T) -> U, callback: fn(U)) -> WebStoreSubscription {
+    if store.subs >= c_max_store_subscribers -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     callback(project(store.value))
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: "derived"}
@@ -215,11 +223,11 @@ pub fn inspect<T>(store: WebStore<T>) -> WebStoreInspection {
 }
 
 pub fn facts_json<T>(store: WebStore<T>) -> String {
-    "{{\"name\":\"{store.name}\",\"cursor\":{store.cursor},\"generation\":{store.generation},\"history\":{store.history.len()}}}"
+    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation},\"history\":{store.history.len()}}}"
 }
 
 pub fn event_json<T>(store: WebStore<T>) -> String {
-    "{{\"name\":\"{store.name}\",\"cursor\":{store.cursor},\"generation\":{store.generation}}}"
+    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation}}}"
 }
 
 fn record<T>(store: &WebStore<T>) {
@@ -240,5 +248,24 @@ fn tail<T>(values: [T], count: Int) -> [T] {
     if start < 0 -> start = 0
     out := [T]{ }
     loop i in start..<values.len() -> out.push(values[i])
+    out
+}
+fn esc_json(text: String) -> String {
+    out := ""
+    loop b in text.bytes() {
+        if b == (U8{34}) {
+            out = "{out}\\\""
+        } else if b == (U8{92}) {
+            out = "{out}\\\\"
+        } else if b == (U8{10}) {
+            out = "{out}\\n"
+        } else if b == (U8{13}) {
+            out = "{out}\\r"
+        } else if b == (U8{9}) {
+            out = "{out}\\t"
+        } else {
+            out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+        }
+    }
     out
 }

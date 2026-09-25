@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_missing_block_value(&mut self, expected: &Type, span: Span) {
+    pub(super) fn report_missing_block_value(&mut self, expected: &Type, span: Span) {
         self.diags.push(Diagnostic::error(
             "E0114",
             format!(

@@ -16,31 +16,46 @@ pub struct MIME {
 
 pub fn parse(text: String) -> MIME !MIMEError {
     raw :: trim_ascii(text)
-    slash := -1
-    i := 0
     bytes :: raw.bytes()
-    loop {
-        if i >= bytes.len() -> break
-        if bytes[i] == (U8{47}) {
-            slash = i
+    semi := bytes.len()
+    i := 0
+    loop i < bytes.len() {
+        if bytes[i] == (U8{59}) {
+            semi = i
             break
         }
         i = i + 1
     }
-    if slash <= 0 -> return Err(MIMEError.Syntax)
-    semi := bytes.len()
-    j := slash + 1
-    loop {
-        if j >= bytes.len() -> break
-        if bytes[j] == (U8{59}) {
-            semi = j
-            break
+    essence :: slice(bytes, 0, semi)
+    slash := -1
+    i = 0
+    loop i < essence.bytes().len() {
+        if essence.bytes()[i] == (U8{47}) {
+            if slash >= 0 -> return Err(MIMEError.Syntax)
+            slash = i
         }
-        j = j + 1
+        i = i + 1
     }
-    top :: ascii_lower(slice(bytes, 0, slash))
-    sub :: ascii_lower(trim_ascii(slice(bytes, slash + 1, semi)))
-    if top.bytes().len() == 0 || sub.bytes().len() == 0 -> return Err(MIMEError.Syntax)
+    if slash <= 0 -> return Err(MIMEError.Syntax)
+    top :: ascii_lower(trim_ascii(slice(essence.bytes(), 0, slash)))
+    sub :: ascii_lower(trim_ascii(slice(essence.bytes(), slash + 1, essence.bytes().len())))
+    if !mime_token(top) || !mime_token(sub) -> return Err(MIMEError.Syntax)
+
+    start := semi + 1
+    i = start
+    loop i <= bytes.len() {
+        if i == bytes.len() || bytes[i] == (U8{59}) {
+            parameter :: trim_ascii(slice(bytes, start, i))
+            if parameter.bytes().len() > 0 {
+                eq := index_of(parameter.bytes(), 61)
+                if eq <= 0 -> return Err(MIMEError.Syntax)
+                name :: ascii_lower(trim_ascii(slice(parameter.bytes(), 0, eq)))
+                if !mime_token(name) -> return Err(MIMEError.Syntax)
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
     Ok(MIME{top: top, sub: sub})
 }
 
@@ -101,7 +116,9 @@ pub fn extension(mime: String) -> ?String {
 
 fn trim_dot(ext: String) -> String {
     raw :: (~ext).bytes()
-    if raw.len() > 0 && raw[0] == (U8{46}) -> return slice(raw, 1, raw.len())
+    i := 0
+    loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
+    if i > 0 -> return slice(raw, i, raw.len())
     return ~ext
 }
 
@@ -119,13 +136,13 @@ fn trim_ascii(text: String) -> String {
     end := raw.len()
     loop {
         if start >= end -> return ""
-        n :: raw[start]
-        if n == 32 || n == 9 -> start = start + 1 else -> break
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop {
         if end <= start -> return ""
-        n :: raw[end - 1]
-        if n == 32 || n == 9 -> end = end - 1 else { break }
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     slice(raw, start, end)
 }
@@ -137,6 +154,29 @@ fn ascii_lower(text: String) -> String {
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
+}
+
+fn mime_token(text: String) -> Bool {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) {
+            next
+        }
+        if n == 33 || n == 35 || n == 36 || n == 38 || n == 45 || n == 94 || n == 95 || n == 46 || n == 43 {
+            next
+        }
+        return false
+    }
+    true
+}
+
+fn index_of(raw: [U8], needle: Int) -> Int {
+    loop i in 0..<raw.len() {
+        if Int.from_u8(raw[i]) == needle -> return i
+    }
+    -1
 }
 
 fn slice(raw: [U8], start: Int, end: Int) -> String {

@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn is_resource_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Named(name) | Type::Apply { name, .. } => {
-                self.trait_reg.implements_trait(name, Syntax::TRAIT_CLOSE)
+                self.type_implements_trait_for_name(name, Syntax::TRAIT_CLOSE)
             }
             Type::String => self
                 .trait_reg

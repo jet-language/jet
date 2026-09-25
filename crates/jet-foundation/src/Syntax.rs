@@ -27,6 +27,22 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
     LexicalEntry { spelling: "@", meaning: "compile-time block, name, or fact", decision: "D-ONCE-AT1" },
+    LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block expression", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: META_QUERY_PHASE, meaning: "total evaluation-site phase query", decision: "D-PREP-SURFACE2=A" },
+    LexicalEntry { spelling: META_QUERY_TYPE, meaning: "checked type metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_FUNCTION, meaning: "checked function metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_METHOD, meaning: "checked method metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_CLOSURE, meaning: "checked closure metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_PROGRAM, meaning: "authorized checked-program metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_PACKAGE, meaning: "lexical package metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_VALUE, meaning: "retained runtime-value metadata query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query", decision: "D-META-REFLECT2=A" },
+    LexicalEntry { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items", decision: "D-META-PUBLISH2=A" },
+    LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    LexicalEntry { spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
     LexicalEntry { spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1" },
     LexicalEntry { spelling: "!", meaning: "error type in a signature; deny-only root", decision: "D-RESULT1; D-EFF4" },
     LexicalEntry { spelling: "?", meaning: "optional type", decision: "D-OPT1" },
@@ -41,6 +57,30 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "_name", meaning: "ordinary identifier", decision: "" },
     LexicalEntry { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
 ];
+
+/// D-PREP-SURFACE2=A: a shared preparation block always has an explicit body.
+pub const KW_PREP: &str = "prep";
+/// D-PREP-SURFACE2=A: the total compiler-known evaluation-site phase query.
+pub const META_QUERY_PHASE: &str = "@PHASE";
+/// D-META-REFLECT2=A: checked compiler metadata query roots.
+pub const META_QUERY_TYPE: &str = "@TYPE";
+pub const META_QUERY_FUNCTION: &str = "@FUNCTION";
+pub const META_QUERY_METHOD: &str = "@METHOD";
+pub const META_QUERY_CLOSURE: &str = "@CLOSURE";
+pub const META_QUERY_PROGRAM: &str = "@PROGRAM";
+pub const META_QUERY_PACKAGE: &str = "@PACKAGE";
+pub const META_QUERY_SOURCE: &str = "@SOURCE";
+pub const META_QUERY_VALUE: &str = "@VALUE";
+pub const META_QUERY_TYPES: &str = "@TYPES";
+/// D-META-PUBLISH2=A: publication remains explicit and uses the existing Generated value.
+pub const COMPILER_GENERATE: &str = "compiler.generate";
+/// D-META-CONTROL2=A / D-META-OPTIN2=A: advanced providers are root-opted-in and target-registered.
+pub const COMPILER_ADVANCED_REGISTER: &str = "compiler.advanced.register";
+pub const COMPILER_ADVANCED_REGISTER_EXPANSION: &str = "compiler.advanced.register_expansion";
+pub const COMPILER_ADVANCED_REGISTER_SPECIALIZATION: &str =
+    "compiler.advanced.register_specialization";
+/// A session is available only inside an authorized registered provider.
+pub const COMPILER_ADVANCED_SESSION: &str = "compiler.advanced.session";
 /// D-PLACE1=A: the old standalone marker gets a dedicated teaching diagnostic;
 /// it is not part of the active marker registry.
 pub const MARKER_ALIGN_LEGACY: &str = "Align";
