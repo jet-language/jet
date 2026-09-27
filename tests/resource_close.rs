@@ -116,7 +116,7 @@ fn defer_rejects_general_actions_blocks_and_values_without_close_capability() {
     let block = codes("fn run() { defer { print(\"not close\") } }");
     assert!(block.contains(&"E0003".into()), "{block:?}");
 
-    let non_resource = codes("fn run() { value := 1; defer close(^value) }");
+    let non_resource = codes("fn run() {\n    value := 1\n    defer close(^value)\n}");
     assert!(non_resource.contains(&"E0905".into()), "{non_resource:?}");
 }
 
@@ -295,22 +295,22 @@ fn run() {
 #[test]
 fn scheduled_transfer_reuses_move_checks_for_every_second_use() {
     let use_after = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; defer close(^resource); print(resource.name) }}"
+        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    print(resource.name)\n}}"
     ));
     assert!(use_after.contains(&"E0121".into()), "{use_after:?}");
 
     let double_defer = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; defer close(^resource); defer close(^resource) }}"
+        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    defer close(^resource)\n}}"
     ));
     assert!(double_defer.contains(&"E0121".into()), "{double_defer:?}");
 
     let double_close = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; close(^resource); close(^resource) }}"
+        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    close(^resource)\n    close(^resource)\n}}"
     ));
     assert!(double_close.contains(&"E0121".into()), "{double_close:?}");
 
     let copied = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; copied := ~resource; print(copied.name) }}"
+        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    copied := ~resource\n    print(copied.name)\n}}"
     ));
     assert!(copied.contains(&"E0211".into()), "{copied:?}");
 }

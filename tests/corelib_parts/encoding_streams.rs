@@ -812,7 +812,10 @@ fn run() {{
     valid_reader :: jsonl.reader(^valid_input, valid_limits) ?? panic("valid reader")
     valid_record :: valid_reader.next() ?? panic("valid next")
     if valid_record == {{
-        Val(value) -> {{ last :: value.at(31) ?? DataTree.Int(-1); print(last.int() ?? -1) }}
+        Val(value) -> {{
+            last :: value.at(31) ?? DataTree.Int(-1)
+            print(last.int() ?? -1)
+        }}
         None -> {{ print("valid-missing") }}
     }}
 
@@ -827,7 +830,10 @@ fn run() {{
             scalar_again :: scalar_reader.next()
             if scalar_again == {{
                 .Ok(_) -> {{ print("scalar-terminal-missed") }}
-                .Err(second) -> {{ print(first.path); print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
+                .Err(second) -> {{
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }}
             }}
         }}
     }}
@@ -1636,12 +1642,23 @@ fn run() {{
     reader :: csv.reader(^input) ?? panic("reader")
     first :: reader.next()
     if first == {{
-        .Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1]); print(row.fields[2]); print(row.fields[3]) }}
+        .Val(row) -> {{
+            print(row.fields[0])
+            print(row.line)
+            print(row.fields[1])
+            print(row.fields[2])
+            print(row.fields[3])
+        }}
         .None -> {{ print("first-missing") }}
     }}
     second :: reader.next()
     if second == {{
-        .Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1] == ""); print(row.fields[2]) }}
+        .Val(row) -> {{
+            print(row.fields[0])
+            print(row.line)
+            print(row.fields[1] == "")
+            print(row.fields[2])
+        }}
         .None -> {{ print("second-missing") }}
     }}
     eof :: reader.next()
@@ -1655,7 +1672,11 @@ fn run() {{
     options_first :: options_reader.next()
     crlf :: String.from_bytes([U8]{{"\x0D\x0A"}}) ?? panic("crlf")
     if options_first == {{
-        .Val(row) -> {{ print(row.line); print(row.fields[0]); print(row.fields[1].replace(crlf, "|")) }}
+        .Val(row) -> {{
+            print(row.line)
+            print(row.fields[0])
+            print(row.fields[1].replace(crlf, "|"))
+        }}
         .None -> {{ print("options-missing") }}
     }}
     options_eof :: options_reader.next()
@@ -1668,7 +1689,10 @@ fn run() {{
         .Err(malformed_first) -> {{
             if malformed_reader.next() == {{
                 .Ok(_) -> {{ print("malformed-terminal-missed") }}
-                .Err(malformed_second) -> {{ print(malformed_first.path); print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason) }}
+                .Err(malformed_second) -> {{
+                    print(malformed_first.path)
+                    print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason)
+                }}
             }}
         }}
     }}
@@ -1694,7 +1718,10 @@ fn run() {{
         .Err(item_first) -> {{
             if item_reader.next() == {{
                 .Ok(_) -> {{ print("item-terminal-missed") }}
-                .Err(item_second) -> {{ print(item_first.path); print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason) }}
+                .Err(item_second) -> {{
+                    print(item_first.path)
+                    print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason)
+                }}
             }}
         }}
     }}
@@ -1708,7 +1735,11 @@ fn run() {{
         .Err(total_first) -> {{
             if total_reader.next() == {{
                 .Ok(_) -> {{ print("total-terminal-missed") }}
-                .Err(total_second) -> {{ print(total_first.byte_offset); print(total_first.path); print(total_first.reason == total_second.reason) }}
+                .Err(total_second) -> {{
+                    print(total_first.byte_offset)
+                    print(total_first.path)
+                    print(total_first.reason == total_second.reason)
+                }}
             }}
         }}
     }}
@@ -2207,7 +2238,10 @@ fn run() {{
             print(first.reason == "max_item_bytes 7 exceeded")
             print(terminal(&rejected_writer, ~first.reason))
         }}
-        .Ok(_) -> {{ print(false); print(false) }}
+        .Ok(_) -> {{
+            print(false)
+            print(false)
+        }}
     }}
 }}
 "#);

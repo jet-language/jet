@@ -97,8 +97,7 @@ fn mir_pass_validate_function(function: MirFunction, pass: MirOptimizationPassId
         }
     }
     loop scope in &function.scopes {
-        if scope.deadline != None {
-            value :: scope.deadline ?? MirValueId{value: 0}
+        if scope.deadline == .Val(value) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), scope.span, "MIR scope deadline reads an undefined SSA value"))
         }
     }
@@ -107,12 +106,10 @@ fn mir_pass_validate_function(function: MirFunction, pass: MirOptimizationPassId
         if !mir_pass_operation_id_seen(seen_operations, fact.operation) || fact.elided && !fact.proven || !fact.failure_preserved || fact.span.start > fact.span.end {
             return Val(mir_pass_error(pass, .InvalidFact, Val(function.id), fact.span, "MIR bounds fact does not describe a checked operation"))
         }
-        if fact.place != None {
-            place :: fact.place ?? MirPlaceId{value: 0}
+        if fact.place == .Val(place) {
             if !mir_pass_place_exists(function.places, place) -> return Val(mir_pass_error(pass, .InvalidFact, Val(function.id), fact.span, "MIR bounds fact references a missing place"))
         }
-        if fact.index != None {
-            value :: fact.index ?? MirValueId{value: 0}
+        if fact.index == .Val(value) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidFact, Val(function.id), fact.span, "MIR bounds fact references an undefined index"))
         }
     }
@@ -149,20 +146,19 @@ fn mir_pass_validate_function(function: MirFunction, pass: MirOptimizationPassId
         }
     }
     semantic_failure := mir_pass_validate_function_legality(function, program, definitions)
-    if semantic_failure != None {
-        message :: semantic_failure ?? "MIR semantic legality validation failed"
+    if semantic_failure == .Val(message) {
         return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, message))
     }
     None
 }
+
 fn mir_pass_validate_function_legality(
     function: MirFunction,
     program: MirProgram,
     definitions: [MirPassDefinition],
 ) -> ?String {
     if !mir_pass_type_valid(function.return_type) -> return Val("function return type has invalid MIR layout")
-    if function.declared_return != None {
-        declared :: function.declared_return ?? return Val("function declared return type is missing")
+    if function.declared_return == .Val(declared) {
         if !mir_pass_type_valid(declared) -> return Val("function declared return type has invalid MIR layout")
     }
     failure := mir_pass_validate_failure_carrier(function.failure)
@@ -225,73 +221,66 @@ fn mir_pass_validate_function_legality(
 fn mir_pass_type_valid(ty: MirType) -> Bool {
     if !mir_type_has_valid_layout(ty) -> return false
     if ty.kind == {
-        .IntN(_, bits) -> return bits > 0 && bits <= 64
-        .InlineRange(base, lo, hi) -> return lo <= hi && mir_pass_type_valid(base)
+        .IntN(_, bits) -> bits > 0 && bits <= 64
+        .InlineRange(base, lo, hi) -> lo <= hi && mir_pass_type_valid(base)
         .List(inner)
         | .Shared(inner)
         | .Option(inner)
         | .FixedList(inner, _)
         | .Tagged(_, inner)
-        | .Quantity(inner, _) -> return mir_pass_type_valid(inner)
-        .Map(key, value) -> return mir_pass_type_valid(key) && mir_pass_type_valid(value)
-        .Result(ok, err) -> return mir_pass_type_valid(ok) && mir_pass_type_valid(err)
+        | .Quantity(inner, _) -> mir_pass_type_valid(inner)
+        .Map(key, value) -> mir_pass_type_valid(key) && mir_pass_type_valid(value)
+        .Result(ok, err) -> mir_pass_type_valid(ok) && mir_pass_type_valid(err)
         .Fn(signature) -> {
             loop parameter in signature.params {
                 if !mir_pass_type_valid(parameter) -> return false
             }
-            if signature.ret != None {
-                result :: signature.ret ?? return false
+            if signature.ret == .Val(result) {
                 if !mir_pass_type_valid(result) -> return false
             }
-            return true
+            true
         }
         .SendFn(params, ret, _) -> {
             loop parameter in params {
                 if !mir_pass_type_valid(parameter) -> return false
             }
-            if ret != None {
-                result :: ret ?? return false
+            if ret == .Val(result) {
                 if !mir_pass_type_valid(result) -> return false
             }
-            return true
+            true
         }
         .Apply(_, args) | .Union(args) -> {
             loop argument in args {
                 if !mir_pass_type_valid(argument) -> return false
             }
-            return true
+            true
         }
         .Tuple(fields) -> {
             loop field in fields {
                 if !mir_pass_type_valid(field.ty) -> return false
             }
-            return true
+            true
         }
-        else -> return true
+        else -> true
     }
 }
 
 fn mir_pass_validate_failure_carrier(carrier: MirFailureCarrier) -> ?String {
     if carrier == {
-        .Infallible -> return None
-        .Result(success, error) -> {
-            if !mir_pass_type_valid(success) || !mir_pass_type_valid(error) -> return Val("Result failure carrier contains an invalid type")
-        }
-        .Optional(value) | .Diverges(value) -> {
-            if !mir_pass_type_valid(value) -> return Val("optional failure carrier contains an invalid type")
-        }
+        .Infallible -> None
+        .Result(success, error) -> if !mir_pass_type_valid(success) || !mir_pass_type_valid(error) -> Val("Result failure carrier contains an invalid type") else -> None
+        .Optional(value) | .Diverges(value) -> if !mir_pass_type_valid(value) -> Val("optional failure carrier contains an invalid type") else -> None
     }
-    None
 }
 
 fn mir_pass_ownership_valid(ownership: MirOwnership) -> Bool {
     if ownership.mode == {
-        .Copy -> return ownership.drop == .NoDrop && !ownership.moved
-        .Owned -> return ownership.drop == .Value || ownership.drop == .ForeignHandle
-        .Shared -> return ownership.drop == .Shared
-        .ReadBorrow -> return ownership.drop == .NoDrop || ownership.drop == .View
-        .WriteBorrow -> return ownership.drop == .View
-        .Move -> return ownership.drop == .Value || ownership.drop == .ForeignHandle
+        .Copy -> ownership.drop == .NoDrop && !ownership.moved
+        .Owned -> ownership.drop == .Value || ownership.drop == .ForeignHandle
+        .Shared -> ownership.drop == .Shared
+        .ReadBorrow -> ownership.drop == .NoDrop || ownership.drop == .View
+        .WriteBorrow -> ownership.drop == .View
+        .Move -> ownership.drop == .Value || ownership.drop == .ForeignHandle
     }
 }
 
@@ -355,15 +344,19 @@ fn mir_pass_block_target_exists(rows: [MirBasicBlock], id: MirBlockId) -> Bool {
 }
 
 fn mir_pass_index_route_arity(kind: MirIndexKind) -> Int {
-    if kind == .List || kind == .FixedListProof || kind == .Lane -> return 4
-    if kind == .Map -> return 8
-    6
+    if kind == {
+        .List | .FixedListProof | .Lane -> 4
+        .Map -> 8
+        else -> 6
+    }
 }
 
 fn mir_pass_setter_route_arity(kind: MirIndexKind) -> Int {
-    if kind == .List || kind == .FixedListProof || kind == .Lane -> return 5
-    if kind == .Map -> return 3
-    7
+    if kind == {
+        .List | .FixedListProof | .Lane -> 5
+        .Map -> 3
+        else -> 7
+    }
 }
 
 fn mir_pass_validate_panic_context(context: MirPanicContext, function: MirFunction) -> ?String {
@@ -397,10 +390,11 @@ fn mir_pass_validate_prelude_rows(rows: [MirPreludeCall]) -> ?String {
 
 fn mir_pass_validate_call_fallibility(fallibility: MirCallFallibility) -> ?String {
     if fallibility == {
-        .Infallible -> return None
-        .Failure(carrier) -> return mir_pass_validate_failure_carrier(carrier)
+        .Infallible -> None
+        .Failure(carrier) -> mir_pass_validate_failure_carrier(carrier)
     }
 }
+
 fn mir_pass_validate_place(
     place: MirPlace,
     function: MirFunction,
@@ -432,19 +426,18 @@ fn mir_pass_validate_place(
                 if !mir_pass_definition_exists(definitions, index) -> return Val("place index is undefined")
                 if !mir_pass_prelude_id_exists(program.prelude_calls, call) -> return Val("place index route is missing")
                 route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("place index route is missing")
-                arity := mir_pass_index_route_arity(kind)
+                arity :: mir_pass_index_route_arity(kind)
                 if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Val("place index route has invalid ABI or arity")
                 if (place.access == .Write) != (write_call != None) -> return Val("place index write route disagrees with place access")
-                if write_call != None {
-                    setter :: write_call ?? return Val("place index setter route is missing")
+                if write_call == .Val(setter) {
                     if !mir_pass_prelude_id_exists(program.prelude_calls, setter) -> return Val("place index setter route is missing")
                     setter_route :: mir_pass_prelude(program.prelude_calls, setter) ?? return Val("place index setter route is missing")
-                    setter_arity := mir_pass_setter_route_arity(kind)
+                    setter_arity :: mir_pass_setter_route_arity(kind)
                     if setter_route.signature.arity != setter_arity || setter_route.signature.max_arity != setter_arity || setter_route.abi != .Value -> return Val("place index setter route has invalid ABI or arity")
                 }
                 if (kind == .Map || kind == .Pool) != (context != None) -> return Val("place index panic context disagrees with index kind")
-                if context != None {
-                    context_failure := mir_pass_validate_panic_context(context ?? MirPanicContext{function: "", source_line: "", caret: 0, locals: [MirPanicLocal]{}}, function)
+                if context == .Val(panic_context) {
+                    context_failure := mir_pass_validate_panic_context(panic_context, function)
                     if context_failure != None -> return context_failure
                 }
                 if !mir_pass_source_file_id_exists(program.source_files, location.file) -> return Val("place index panic location references an unknown source file")
@@ -462,13 +455,12 @@ fn mir_pass_prelude(rows: [MirPreludeCall], id: MirPreludeCallId) -> ?MirPrelude
     loop row in &rows { if row.id == id -> return Val(row) }
     None
 }
+
 fn mir_pass_append_optional_place(places: &[MirPlaceId], optional: ?MirPlaceId) {
-    if optional != None {
-        place :: optional ?? MirPlaceId{value: 0}
+    if optional == .Val(place) {
         if !mir_pass_place_id_seen(places, place) -> places.push(place)
     }
 }
-
 
 fn mir_pass_operation_place_refs(operation: MirOperation) -> [MirPlaceId] {
     places := mir_operation_place_uses(operation)
@@ -518,8 +510,7 @@ fn mir_pass_semantic_field_uses(operation: MirSemanticOp) -> [MirFieldId] {
         }
         .ColumnarRead(_, _, column, _, _) -> fields.push(column)
         .BuiltinMethod(_, _, _, _, aggregate_fields) -> {
-            if aggregate_fields != None {
-                values :: aggregate_fields ?? return fields
+            if aggregate_fields == .Val(values) {
                 loop field in values -> fields.push(field)
             }
         }
@@ -553,27 +544,22 @@ fn mir_pass_validate_call_args(
         if arg.span.start > arg.span.end -> return Val("call argument span is inverted")
         if !mir_pass_definition_exists(definitions, arg.value) -> return Val("call argument references an undefined value")
         if arg.access == .Write && arg.place == None -> return Val("write call argument has no checked place")
-        if arg.place != None {
-            place :: arg.place ?? return Val("call argument place is missing")
+        if arg.place == .Val(place) {
             if !mir_pass_place_exists(function.places, place) -> return Val("call argument references a missing place")
         }
-        if arg.label != None {
-            label :: arg.label ?? return Val("call argument label is missing")
+        if arg.label == .Val(label) {
             if label == "" -> return Val("call argument label is empty")
         }
-        if arg.fn_coercion != None {
-            coercion :: arg.fn_coercion ?? return Val("function coercion metadata is missing")
+        if arg.fn_coercion == .Val(coercion) {
             if !mir_pass_type_valid(coercion.ty) -> return Val("function coercion type is invalid")
         }
-        if arg.widen_to_union != None {
-            coercion :: arg.widen_to_union ?? return Val("union coercion metadata is missing")
+        if arg.widen_to_union == .Val(coercion) {
             if !mir_pass_type_id_exists(program.types, coercion.union) || coercion.variant == "" -> return Val("union coercion metadata is invalid")
         }
-        if arg.box_as_trait != None {
-            trait_type :: arg.box_as_trait ?? return Val("trait boxing type is missing")
+        if arg.box_as_trait == .Val(trait_type) {
             if !mir_pass_type_id_exists(program.types, trait_type) -> return Val("trait boxing type is unknown")
         }
-        consumes_coercion := arg.fn_coercion != None || arg.widen_to_union != None || arg.box_as_trait != None
+        consumes_coercion :: arg.fn_coercion != None || arg.widen_to_union != None || arg.box_as_trait != None
         ownership :: mir_pass_value_ownership(function, arg.value) ?? return Val("call argument ownership metadata is missing")
         if consumes_coercion && ownership.mode != .Copy && arg.access != .Move && !arg.implicit_clone && !arg.shared_auto_clone && !arg.owned_last_use {
             return Val("coercion consumes a non-Copy call argument")
@@ -581,6 +567,7 @@ fn mir_pass_validate_call_args(
     }
     None
 }
+
 fn mir_pass_route_matches(
     route: MirPreludeCall,
     family: MirPreludeFamily,
@@ -605,20 +592,18 @@ fn mir_pass_core_symbol_matches(core_symbol: CoreCallSymbol, route_symbol: MirSy
     if core_symbol == {
         .Prelude(name) -> {
             if route_symbol == {
-                .Prelude(route_name) -> return name == route_name
-                else -> return false
+                .Prelude(route_name) -> name == route_name
+                else -> false
             }
         }
         .Rust(name) -> {
             if route_symbol == {
-                .Runtime(route_name) -> return name == route_name
-                else -> return false
+                .Runtime(route_name) -> name == route_name
+                else -> false
             }
         }
     }
-    false
 }
-
 
 fn mir_pass_guard_route(
     rows: [MirPreludeCall],
@@ -633,9 +618,11 @@ fn mir_pass_guard_route(
 }
 
 fn mir_pass_guard_paths_distinct(first: [MirFieldId], second: [MirFieldId]) -> Bool {
-    if first == second -> return false
-    if mir_pass_field_path_prefix(first, second) || mir_pass_field_path_prefix(second, first) -> return false
-    true
+    if {
+        first == second -> false
+        mir_pass_field_path_prefix(first, second) || mir_pass_field_path_prefix(second, first) -> false
+        else -> true
+    }
 }
 
 fn mir_pass_field_path_prefix(prefix: [MirFieldId], path: [MirFieldId]) -> Bool {
@@ -703,8 +690,7 @@ fn mir_pass_validate_semantic_operation(
             }
         }
         .OverflowOption(_, _, _, location) -> {
-            if location != None {
-                loc :: location ?? return Val("overflow location is missing")
+            if location == .Val(loc) {
                 if !mir_pass_source_file_id_exists(program.source_files, loc.file) -> return Val("overflow location references an unknown source file")
             }
         }
@@ -723,10 +709,9 @@ fn mir_pass_validate_semantic_operation(
         }
         .RequireStop(call, kind, condition, location, context, _, _) -> {
             if !mir_pass_source_file_id_exists(program.source_files, location.file) -> return Val("require-stop location references an unknown source file")
-            requires_condition := kind == .Require || kind == .RequireEq
+            requires_condition :: kind == .Require || kind == .RequireEq
             if (condition != None) != requires_condition -> return Val("require-stop condition presence is inconsistent")
-            if condition != None {
-                value :: condition ?? return Val("require-stop condition is missing")
+            if condition == .Val(value) {
                 type :: mir_pass_value_type(function, value) ?? return Val("require-stop condition type is missing")
                 if type.kind != .Bool -> return Val("require-stop condition is not Bool")
             }
@@ -744,10 +729,9 @@ fn mir_pass_validate_semantic_operation(
             loop path in paths { if path.len() == 0 -> return Val("cell guard projection has an empty path") }
             split := paths.len() == 2
             if (split_call != None) != split -> return Val("cell guard split route disagrees with path count")
-            if split_call != None {
-                split_id :: split_call ?? return Val("cell guard split route is missing")
+            if split_call == .Val(split_id) {
                 if split_id == map_call -> return Val("cell guard projection reuses its map route")
-                split_member := if editable -> "split_edit" else -> "split_read"
+                split_member :: if editable -> "split_edit" else -> "split_read"
                 split_route :: mir_pass_prelude(program.prelude_calls, split_id) ?? return Val("cell guard split route is missing")
                 if !mir_pass_route_matches(split_route, .StaticPrelude, "core.cell_guard", split_member, "jet_cell_guard_split", 3, [Bool]{true, false, false}, .Value) -> return Val("cell guard split route metadata is inconsistent")
                 if !mir_pass_guard_paths_distinct(paths[0], paths[1]) -> return Val("cell guard split paths overlap")
@@ -794,8 +778,7 @@ fn mir_pass_validate_semantic_operation(
         .GcEdit(call, root, edges, edit, index, kind, site) -> {
             if site.value == 0 || !mir_pass_definition_exists(definitions, root) || !mir_pass_definition_exists(definitions, edit) -> return Val("GC edit carries an invalid root, edit, or site")
             loop edge in edges { if !mir_pass_definition_exists(definitions, edge) -> return Val("GC edit carries an undefined edge") }
-            if index != None {
-                value :: index ?? return Val("GC edit index is missing")
+            if index == .Val(value) {
                 if !mir_pass_definition_exists(definitions, value) -> return Val("GC edit index is undefined")
             }
             gc_failure := mir_pass_validate_gc_edit_route(program.prelude_calls, call, kind, edges, index)
@@ -855,8 +838,7 @@ fn mir_pass_validate_semantic_operation(
             if args_failure != None -> return args_failure
         }
         .AllocNew(_, _, inline_size, args) -> {
-            if inline_size != None {
-                size :: inline_size ?? return Val("allocator inline size is missing")
+            if inline_size == .Val(size) {
                 if size < 0 -> return Val("allocator inline size is negative")
             }
             args_failure := mir_pass_validate_call_args(args, function, program, definitions)
@@ -875,6 +857,7 @@ fn mir_pass_validate_semantic_operation(
     }
     None
 }
+
 struct MirPassRouteShape {
     pub member: String
     pub symbol: String
@@ -884,36 +867,40 @@ struct MirPassRouteShape {
 
 fn mir_pass_type_is_result(ty: MirType) -> Bool {
     if ty.kind == {
-        .Result(_, _) -> return true
+        .Result(_, _) -> true
+        else -> false
     }
-    false
 }
 
 fn mir_pass_type_is_callable(ty: MirType) -> Bool {
     if ty.kind == {
-        .Fn(_) | .SendFn(_, _, _) -> return true
-        else -> return false
+        .Fn(_) | .SendFn(_, _, _) -> true
+        else -> false
     }
 }
 
 fn mir_pass_typed_text_route_shape(kind: MirTypedHeadKind) -> MirPassRouteShape {
-    if kind == .SQL -> return MirPassRouteShape{member: "sql_interpolate", symbol: "jet_typed_sql_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
-    if kind == .HTML -> return MirPassRouteShape{member: "html_interpolate", symbol: "jet_typed_html_interpolate", arity: 3, borrow_mask: [Bool]{true, false, true}}
-    if kind == .Sh -> return MirPassRouteShape{member: "sh_interpolate", symbol: "jet_typed_sh_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
-    if kind == .URL -> return MirPassRouteShape{member: "url_literal", symbol: "jet_std::jet_typed_url_literal", arity: 2, borrow_mask: [Bool]{true, false}}
-    if kind == .Path -> return MirPassRouteShape{member: "path_literal", symbol: "jet_typed_path_literal", arity: 2, borrow_mask: [Bool]{true, false}}
-    MirPassRouteShape{member: "datetime_literal", symbol: "jet_typed_datetime_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+    if kind == {
+        .SQL -> MirPassRouteShape{member: "sql_interpolate", symbol: "jet_typed_sql_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
+        .HTML -> MirPassRouteShape{member: "html_interpolate", symbol: "jet_typed_html_interpolate", arity: 3, borrow_mask: [Bool]{true, false, true}}
+        .Sh -> MirPassRouteShape{member: "sh_interpolate", symbol: "jet_typed_sh_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
+        .URL -> MirPassRouteShape{member: "url_literal", symbol: "jet_std::jet_typed_url_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+        .Path -> MirPassRouteShape{member: "path_literal", symbol: "jet_typed_path_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+        else -> MirPassRouteShape{member: "datetime_literal", symbol: "jet_typed_datetime_literal", arity: 2, borrow_mask: [Bool]{true, false}}
+    }
 }
 
 fn mir_pass_gc_route_shape(kind: MirGcEditKind) -> MirPassRouteShape {
-    if kind == .Clear -> return MirPassRouteShape{member: "edit_clear", symbol: "jet_gc_edit_clear", arity: 2, borrow_mask: [Bool]{true, false}}
-    if kind == .Pop -> return MirPassRouteShape{member: "edit_pop", symbol: "jet_gc_edit_pop", arity: 2, borrow_mask: [Bool]{true, false}}
-    if kind == .RemoveIndex -> return MirPassRouteShape{member: "edit_remove_index", symbol: "jet_gc_edit_remove_index", arity: 3, borrow_mask: [Bool]{true, false, false}}
-    if kind == .InsertIndex -> return MirPassRouteShape{member: "edit_insert_index", symbol: "jet_gc_edit_insert_index", arity: 4, borrow_mask: [Bool]{true, false, true, false}}
-    if kind == .Prepend -> return MirPassRouteShape{member: "edit_prepend", symbol: "jet_gc_edit_prepend", arity: 3, borrow_mask: [Bool]{true, true, false}}
-    if kind == .Additive -> return MirPassRouteShape{member: "edit_additive", symbol: "jet_gc_edit_additive", arity: 3, borrow_mask: [Bool]{true, true, false}}
-    if kind == .Plain -> return MirPassRouteShape{member: "edit_plain", symbol: "jet_gc_edit_plain", arity: 2, borrow_mask: [Bool]{true, false}}
-    MirPassRouteShape{member: "edit_edge_slot", symbol: "jet_gc_edit_edge_slot", arity: 4, borrow_mask: [Bool]{true, true, false, false}}
+    if kind == {
+        .Clear -> MirPassRouteShape{member: "edit_clear", symbol: "jet_gc_edit_clear", arity: 2, borrow_mask: [Bool]{true, false}}
+        .Pop -> MirPassRouteShape{member: "edit_pop", symbol: "jet_gc_edit_pop", arity: 2, borrow_mask: [Bool]{true, false}}
+        .RemoveIndex -> MirPassRouteShape{member: "edit_remove_index", symbol: "jet_gc_edit_remove_index", arity: 3, borrow_mask: [Bool]{true, false, false}}
+        .InsertIndex -> MirPassRouteShape{member: "edit_insert_index", symbol: "jet_gc_edit_insert_index", arity: 4, borrow_mask: [Bool]{true, false, true, false}}
+        .Prepend -> MirPassRouteShape{member: "edit_prepend", symbol: "jet_gc_edit_prepend", arity: 3, borrow_mask: [Bool]{true, true, false}}
+        .Additive -> MirPassRouteShape{member: "edit_additive", symbol: "jet_gc_edit_additive", arity: 3, borrow_mask: [Bool]{true, true, false}}
+        .Plain -> MirPassRouteShape{member: "edit_plain", symbol: "jet_gc_edit_plain", arity: 2, borrow_mask: [Bool]{true, false}}
+        else -> MirPassRouteShape{member: "edit_edge_slot", symbol: "jet_gc_edit_edge_slot", arity: 4, borrow_mask: [Bool]{true, true, false, false}}
+    }
 }
 
 fn mir_pass_validate_gc_edit_route(
@@ -924,7 +911,7 @@ fn mir_pass_validate_gc_edit_route(
     index: ?MirValueId,
 ) -> ?String {
     route :: mir_pass_prelude(rows, call) ?? return Val("GC edit route is missing")
-    shape := mir_pass_gc_route_shape(kind)
+    shape :: mir_pass_gc_route_shape(kind)
     if !mir_pass_route_matches(route, .StaticPrelude, "core.gc", shape.member, shape.symbol, shape.arity, shape.borrow_mask, .Value) -> return Val("GC edit route metadata is inconsistent")
     if kind == .Clear || kind == .Pop || kind == .Plain {
         if index != None || edges.len() != 0 -> return Val("GC edit carries unused operands")
@@ -941,13 +928,15 @@ fn mir_pass_validate_gc_edit_route(
 fn mir_pass_http_route_shape(receiver: MirType, handler_names: [String]) -> MirPassRouteShape {
     if receiver.kind == {
         .Apply(name, _) -> {
-            if name.name == "HTTPMux" && handler_names.len() == 0 -> return MirPassRouteShape{member: "mux_add_zero", symbol: "jet_http_mux_add_zero_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}}
-            if name.name == "HTTPMux" -> return MirPassRouteShape{member: "mux_add", symbol: "jet_http_mux_add_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}}
-            if name.name == "HTTPRouter" -> return MirPassRouteShape{member: "router_register", symbol: "jet_http_router_register", arity: 7, borrow_mask: [Bool]{true, false, false, false, true, false, false}}
+            if {
+                name.name == "HTTPMux" && handler_names.len() == 0 -> MirPassRouteShape{member: "mux_add_zero", symbol: "jet_http_mux_add_zero_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}}
+                name.name == "HTTPMux" -> MirPassRouteShape{member: "mux_add", symbol: "jet_http_mux_add_handler", arity: 4, borrow_mask: [Bool]{true, false, false, false}}
+                name.name == "HTTPRouter" -> MirPassRouteShape{member: "router_register", symbol: "jet_http_router_register", arity: 7, borrow_mask: [Bool]{true, false, false, false, true, false, false}}
+                else -> MirPassRouteShape{member: "", symbol: "", arity: 0, borrow_mask: [Bool]{}}
+            }
         }
-        else -> {}
+        else -> MirPassRouteShape{member: "", symbol: "", arity: 0, borrow_mask: [Bool]{}}
     }
-    MirPassRouteShape{member: "", symbol: "", arity: 0, borrow_mask: [Bool]{}}
 }
 
 fn mir_pass_validate_hardware_call(
@@ -962,24 +951,26 @@ fn mir_pass_validate_hardware_call(
     route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("hardware route is missing")
     if route.signature.arity != args.len() || route.signature.max_arity != args.len() || route.abi != .Value -> return Val("hardware route has invalid argument metadata")
     loop borrowed in route.signature.borrow_mask { if borrowed -> return Val("hardware route has a borrow mask for a value argument") }
-    expected_receiver := if operation == {
+    expected_receiver :: if operation == {
         .DmaWait(_, _, _) -> true
         else -> false
     }
     if (receiver != None) != expected_receiver -> return Val("hardware receiver presence is inconsistent")
-    if receiver != None {
-        value :: receiver ?? return Val("hardware receiver is missing")
+    if receiver == .Val(value) {
         if !mir_pass_definition_exists(definitions, value) -> return Val("hardware receiver is undefined")
     }
-    expected_access := if operation == {
+    expected_access :: if operation == {
         .RegisterWrite(_, _, _, _) -> Val(MirAccess.Read)
         .DmaStart(_, _, _) -> Val(MirAccess.Move)
         else -> None
     }
-    if expected_access != None {
-        access :: expected_access ?? return Val("hardware argument access is missing")
-        if args.len() != 1 || args[0].access != access || args[0].place != None -> return Val("hardware value argument metadata is inconsistent")
-    } else if args.len() != 0 -> return Val("hardware operation has unexpected arguments")
+    if {
+        expected_access == .Val(access) -> {
+            if args.len() != 1 || args[0].access != access || args[0].place != None -> return Val("hardware value argument metadata is inconsistent")
+        }
+        args.len() != 0 -> return Val("hardware operation has unexpected arguments")
+        else -> {}
+    }
     if operation == {
         .RegisterRead(profile, block, register, _) | .RegisterWrite(profile, block, register, _) -> {
             if profile == "" || block == "" || register == "" -> return Val("hardware register identity is empty")
@@ -994,18 +985,16 @@ fn mir_pass_validate_hardware_call(
             if profile == "" || channel == "" || !mir_pass_type_valid(buffer_type) -> return Val("DMA wait metadata is invalid")
             receiver_value :: receiver ?? return Val("DMA wait has no receiver")
             receiver_type :: mir_pass_value_type(function, receiver_value) ?? return Val("DMA receiver type is missing")
-            valid := false
-            if receiver_type.kind == {
-                .Apply(name, arguments) -> {
-                    valid = name.name == "__JetDmaTransfer" && arguments.len() == 1 && mir_type_same_checked_type(arguments[0], buffer_type)
-                }
-                else -> {}
+            valid :: if receiver_type.kind == {
+                .Apply(name, arguments) -> name.name == "__JetDmaTransfer" && arguments.len() == 1 && mir_type_same_checked_type(arguments[0], buffer_type)
+                else -> false
             }
             if !valid -> return Val("DMA receiver is not the checked transfer type")
         }
     }
     None
 }
+
 fn mir_pass_operation_field_uses(operation: MirOperation) -> [MirFieldId] {
     fields := [MirFieldId]{}
     if operation == {
@@ -1014,8 +1003,7 @@ fn mir_pass_operation_field_uses(operation: MirOperation) -> [MirFieldId] {
         .Struct(_, values) | .Tuple(_, values) -> loop value in values -> fields.push(value.field)
         .Enum(_, _, args) -> {
             loop arg in args {
-                if arg.field != None {
-                    field :: arg.field ?? MirFieldId{value: 0}
+                if arg.field == .Val(field) {
                     fields.push(field)
                 }
             }
@@ -1050,8 +1038,7 @@ fn mir_pass_validate_operation_legality(
             if dispatch == {
                 .Prelude(call, location) -> {
                     if !mir_pass_prelude_id_exists(program.prelude_calls, call) -> return Val("binary Prelude route is missing")
-                    if location != None {
-                        loc :: location ?? return Val("binary panic location is missing")
+                    if location == .Val(loc) {
                         if !mir_pass_source_file_id_exists(program.source_files, loc.file) -> return Val("binary panic location references an unknown source file")
                     }
                 }
@@ -1087,8 +1074,7 @@ fn mir_pass_validate_operation_legality(
             fallibility_failure := mir_pass_validate_call_fallibility(fallibility)
             if fallibility_failure != None -> return fallibility_failure
             loop type in type_args { if !mir_pass_type_valid(type) -> return Val("core call type argument is invalid") }
-            if data_plan != None {
-                plan :: data_plan ?? return Val("core data plan is missing")
+            if data_plan == .Val(plan) {
                 plan_failure := mir_pass_validate_data_plan(plan)
                 if plan_failure != None -> return plan_failure
             }
@@ -1122,29 +1108,29 @@ fn mir_pass_validate_operation_legality(
         }
         .Index(call, _, _, kind, _, location, context) -> {
             route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("index route is missing")
-            arity := mir_pass_index_route_arity(kind)
+            arity :: mir_pass_index_route_arity(kind)
             if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Val("index route has invalid ABI or arity")
             if !mir_pass_source_file_id_exists(program.source_files, location.file) -> return Val("index location references an unknown source file")
             if (kind == .Map || kind == .Pool) != (context != None) -> return Val("index context disagrees with index kind")
-            if context != None {
-                context_failure := mir_pass_validate_panic_context(context ?? MirPanicContext{function: "", source_line: "", caret: 0, locals: [MirPanicLocal]{}}, function)
+            if context == .Val(panic_context) {
+                context_failure := mir_pass_validate_panic_context(panic_context, function)
                 if context_failure != None -> return context_failure
             }
         }
         .Slice(call, _, _, _, range, location) -> {
             route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("slice route is missing")
-            arity := if range != None -> 4 else -> 5
+            arity :: if range != None -> 4 else -> 5
             if route.signature.arity != arity || route.signature.max_arity != arity || route.abi != .Value -> return Val("slice route has invalid ABI or arity")
             if !mir_pass_source_file_id_exists(program.source_files, location.file) -> return Val("slice location references an unknown source file")
         }
         .LoopRangeInit(call, _, _, _, _) -> {
             route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("loop range route is missing")
-            no_borrow_mask := [Bool]{false, false, false, false, false}
+            no_borrow_mask :: [Bool]{false, false, false, false, false}
             if route.signature.arity != 5 || route.signature.max_arity != 5 || route.signature.borrow_mask != no_borrow_mask || route.abi != .Value -> return Val("loop range route has invalid metadata")
         }
         .LoopIterInit(call, _, _, _, source_kind) -> {
             route :: mir_pass_prelude(program.prelude_calls, call) ?? return Val("loop iterator route is missing")
-            no_borrow_mask := [Bool]{false, false, false, false, false}
+            no_borrow_mask :: [Bool]{false, false, false, false, false}
             if route.signature.arity != 5 || route.signature.max_arity != 5 || route.signature.borrow_mask != no_borrow_mask || route.abi != .Value -> return Val("loop iterator route has invalid metadata")
             if source_kind == {
                 .EncodingReader(reader_type) -> {
@@ -1166,8 +1152,7 @@ fn mir_pass_validate_operation_legality(
         }
         .Todo(call, location, expected_type) -> {
             if !mir_pass_source_file_id_exists(program.source_files, location.file) -> return Val("Todo location references an unknown source file")
-            if expected_type != None {
-                type :: expected_type ?? return Val("Todo expected type is missing")
+            if expected_type == .Val(type) {
                 if !mir_pass_type_valid(type) -> return Val("Todo expected type is invalid")
             }
         }
@@ -1218,6 +1203,7 @@ fn mir_pass_validate_operation_legality(
     }
     None
 }
+
 fn mir_pass_validate_callee(
     callee: MirCallee,
     args: [MirCallArg],
@@ -1262,40 +1248,36 @@ fn mir_pass_validate_callee(
 
 fn mir_pass_fallibility_same(left: MirCallFallibility, right: MirCallFallibility) -> Bool {
     if left == {
-        .Infallible -> return right == .Infallible
+        .Infallible -> right == .Infallible
         .Failure(left_carrier) -> {
             if right == {
-                .Failure(right_carrier) -> return mir_pass_failure_same(left_carrier, right_carrier)
-                else -> return false
+                .Failure(right_carrier) -> mir_pass_failure_same(left_carrier, right_carrier)
+                else -> false
             }
-            return false
         }
     }
 }
 
 fn mir_pass_failure_same(left: MirFailureCarrier, right: MirFailureCarrier) -> Bool {
     if left == {
-        .Infallible -> return right == .Infallible
+        .Infallible -> right == .Infallible
         .Result(left_ok, left_err) -> {
             if right == {
-                .Result(right_ok, right_err) -> return mir_type_same_checked_type(left_ok, right_ok) && mir_type_same_checked_type(left_err, right_err)
-                else -> return false
+                .Result(right_ok, right_err) -> mir_type_same_checked_type(left_ok, right_ok) && mir_type_same_checked_type(left_err, right_err)
+                else -> false
             }
-            return false
         }
         .Optional(left_value) -> {
             if right == {
-                .Optional(right_value) -> return mir_type_same_checked_type(left_value, right_value)
-                else -> return false
+                .Optional(right_value) -> mir_type_same_checked_type(left_value, right_value)
+                else -> false
             }
-            return false
         }
         .Diverges(left_value) -> {
             if right == {
-                .Diverges(right_value) -> return mir_type_same_checked_type(left_value, right_value)
-                else -> return false
+                .Diverges(right_value) -> mir_type_same_checked_type(left_value, right_value)
+                else -> false
             }
-            return false
         }
     }
 }
@@ -1312,8 +1294,7 @@ fn mir_pass_validate_data_plan(plan: MirDataPlan) -> ?String {
         loop column in &node.columns {
             if !mir_pass_type_valid(column.ty) || column.name == "" -> return Val("data plan column is invalid")
         }
-        if node.callable != None {
-            callable :: node.callable ?? return Val("data plan callable is missing")
+        if node.callable == .Val(callable) {
             if !mir_pass_type_valid(callable.parameter) || !mir_pass_type_valid(callable.result) || callable.label == "" -> return Val("data plan callable is invalid")
         }
         loop input in node.inputs {
@@ -1350,6 +1331,7 @@ fn mir_pass_scope_exists(rows: [MirScope], id: MirScopeId) -> Bool {
 fn mir_pass_drop_forbidden_type(ty: MirType) -> Bool {
     mir_type_is_integer(ty) || mir_type_is_float(ty) || ty.kind == .Bool || ty.kind == .Char
 }
+
 fn mir_pass_validate_drops(function: MirFunction, definitions: [MirPassDefinition]) -> ?String {
     loop drop in &function.drops {
         if !mir_pass_place_exists(function.places, drop.place) -> return Val("drop action references a missing place")
@@ -1374,8 +1356,7 @@ struct MirPassMoveEvent {
 }
 
 fn mir_pass_call_arg_consumes(arg: MirCallArg) -> Bool {
-    if arg.implicit_clone || arg.shared_auto_clone -> return false
-    arg.access == .Move || arg.owned_last_use
+    if arg.implicit_clone || arg.shared_auto_clone -> false else -> arg.access == .Move || arg.owned_last_use
 }
 
 fn mir_pass_consumed_values(operation: MirOperation) -> [MirValueId] {
@@ -1415,8 +1396,7 @@ fn mir_pass_consumed_values(operation: MirOperation) -> [MirValueId] {
 }
 
 fn mir_pass_event_dominates(event: MirPassMoveEvent, block: MirBlockId, index: Int, dominators: [MirPassDominatorRow]) -> Bool {
-    if event.block == block -> return event.index < index
-    mir_pass_dominates(dominators, event.block, block)
+    if event.block == block -> event.index < index else -> mir_pass_dominates(dominators, event.block, block)
 }
 
 fn mir_pass_validate_moves(
@@ -1424,8 +1404,8 @@ fn mir_pass_validate_moves(
     program: MirProgram,
     definitions: [MirPassDefinition],
 ) -> ?String {
-    reachable := mir_pass_reachable(function)
-    dominators := mir_pass_dominators(function)
+    reachable :: mir_pass_reachable(function)
+    dominators :: mir_pass_dominators(function)
     consumed := [MirPassMoveEvent]{}
     moved_places := [MirPlaceId]{}
     loop block in &function.blocks {
@@ -1439,8 +1419,7 @@ fn mir_pass_validate_moves(
                 }
                 loop place_id in mir_pass_operation_place_refs(instruction.operation) {
                     place_option := mir_pass_find_place(function.places, place_id)
-                    if place_option != None {
-                        place :: place_option ?? MirPlace{id: place_id, span: Span{start: 0, end: 0}, ty: MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)}, base: .Static(""), projections: [MirProjection]{}, access: .Read, persist_key: None}
+                    if place_option == .Val(place) {
                         if place.base == {
                             .Static(_) -> {
                                 if mir_pass_operation_mutably_borrows_place(instruction.operation, place_id) -> return Val("mutable borrow of static place cannot escape its storage")
@@ -1480,11 +1459,9 @@ fn mir_pass_validate_moves(
                     | .IndirectCall(_, args, _)
                     | .CoreCall(_, _, args, _, _, _) -> {
                         loop arg in args {
-                            if arg.place != None {
-                                place_id :: arg.place ?? MirPlaceId{value: 0}
+                            if arg.place == .Val(place_id) {
                                 place_option := mir_pass_find_place(function.places, place_id)
-                                if place_option != None {
-                                    place :: place_option ?? MirPlace{id: place_id, span: Span{start: 0, end: 0}, ty: MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)}, base: .Static(""), projections: [MirProjection]{}, access: .Read, persist_key: None}
+                                if place_option == .Val(place) {
                                     if arg.access == .Write && place.access == .Read -> return Val("mutable call borrow uses a read-only place")
                                 }
                             }
@@ -1497,11 +1474,9 @@ fn mir_pass_validate_moves(
                             | .ClosureMethod(_, args, _)
                             | .HostCall(_, args) -> {
                                 loop arg in args {
-                                    if arg.place != None {
-                                        place_id :: arg.place ?? MirPlaceId{value: 0}
+                                    if arg.place == .Val(place_id) {
                                         place_option := mir_pass_find_place(function.places, place_id)
-                                        if place_option != None {
-                                            place :: place_option ?? MirPlace{id: place_id, span: Span{start: 0, end: 0}, ty: MirType{kind: .Int, identity: None, layout: mir_type_layout(.Int)}, base: .Static(""), projections: [MirProjection]{}, access: .Read, persist_key: None}
+                                        if place_option == .Val(place) {
                                             if arg.access == .Write && place.access == .Read -> return Val("mutable semantic call borrow uses a read-only place")
                                         }
                                     }
@@ -1533,7 +1508,7 @@ fn mir_pass_validate_host_callbacks(function: MirFunction, rows: [MirPreludeCall
                 result :: instruction.result ?? return Val("HostBorrowCallback has no representation result")
                 type :: instruction.ty ?? return Val("HostBorrowCallback has no representation type")
                 if !mir_pass_type_is_callable(type) -> return Val("HostBorrowCallback result is not callable")
-                next_index := index + 1
+                next_index :: index + 1
                 if next_index >= block.instructions.len() -> return Val("HostBorrowCallback result has no direct consumer")
                 next := block.instructions[next_index]
                 count := 0
@@ -1595,10 +1570,11 @@ fn mir_pass_host_callback_consumer(operation: MirOperation, rows: [MirPreludeCal
     route :: mir_pass_prelude(rows, id) ?? return false
     route.family == .StaticPrelude || route.family == .ClosureMethod || route.family == .Host
 }
+
 fn mir_pass_operation_has_effect(operation: MirOperation, function: MirFunction, rows: [MirPreludeCall]) -> Bool {
     if operation == {
         .Semantic(semantic) -> {
-            calls := mir_semantic_op_prelude_calls(semantic)
+            calls :: mir_semantic_op_prelude_calls(semantic)
             if calls.len() == 0 -> return true
             loop call in calls { if !mir_pass_prelude_is_pure(rows, call) -> return true }
             return false
@@ -1644,8 +1620,7 @@ fn mir_pass_operation_has_effect(operation: MirOperation, function: MirFunction,
                 if projection == {
                     .Index(_, call, _, write_call, _, _, _) -> {
                         if !mir_pass_prelude_is_pure(rows, call) -> return true
-                        if write_call != None {
-                            setter :: write_call ?? return true
+                        if write_call == .Val(setter) {
                             if !mir_pass_prelude_is_pure(rows, setter) -> return true
                         }
                     }
@@ -1666,6 +1641,7 @@ fn mir_pass_operation_has_effect(operation: MirOperation, function: MirFunction,
         else -> return false
     }
 }
+
 fn mir_pass_local_id_seen(rows: [MirLocalId], id: MirLocalId) -> Bool {
     loop row in rows { if row == id -> return true }
     false

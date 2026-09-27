@@ -13,13 +13,13 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
             index := arms.len()
             loop index > 0 {
                 index -= 1
-                arm := arms[index]
+                arm :: arms[index]
                 expression = "({expression} === __jet_values.get({arm.condition.value}) ? {arm.target.value} : {otherwise.value})"
             }
             out.push("        __jet_pred = __jet_block; __jet_block = {expression}; continue;")
         }
         .Return(value) -> {
-            if value != None -> out.push("        return __jet_values.get({(value ?? MirValueId{value: 0}).value});") else -> out.push("        return undefined;")
+            if value == .Val(id) -> out.push("        return __jet_values.get({id.value});") else -> out.push("        return undefined;")
         }
         .Yield(value, resume) -> {
             if function.generator == None {
@@ -29,7 +29,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
             }
         }
         .Break(target, value) -> {
-            if value != None -> out.push("        __jet_break_value = __jet_values.get({(value ?? MirValueId{value: 0}).value});")
+            if value == .Val(id) -> out.push("        __jet_break_value = __jet_values.get({id.value});")
             out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
         }
         .Continue(target) -> out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
@@ -39,7 +39,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MirFunction, bl
 
 fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out: &[String]) {
     if !jet_web_function_in_bucket(function, MirWebBucket.JS) -> return
-    keyword := if function.generator != None -> "async function*" else -> "async function"
+    keyword :: if function.generator != None -> "async function*" else -> "async function"
     out.push("{keyword} jet_fn_{function.id.value}(__jet_env, __jet_args) {{")
     out.push("  const __jet_stack_frame = jet_stack_enter({jet_web_js_quote(jet_web_find_source_path(ctx.program, function.source_file) ?? "")}, {jet_web_source_line(ctx.program, function)}, {jet_web_js_quote(function.name)}, {jet_web_js_quote(jet_web_source_line(ctx.program, function))});")
     out.push("  try {{")
@@ -62,16 +62,14 @@ fn jet_web_emit_js_function(ctx: &JetWebEmitContext, function: MirFunction, out:
     loop block in function.blocks {
         out.push("        case {block.id.value}: {{")
         loop instruction in block.instructions {
-            expression := jet_web_js_operation(ctx, function, instruction.operation, instruction.ty)
-            if instruction.result != None {
-                result :: instruction.result ?? MirValueId{value: 0}
+            expression :: jet_web_js_operation(ctx, function, instruction.operation, instruction.ty)
+            if instruction.result == .Val(result) {
                 out.push("          __jet_values.set({result.value}, {expression});")
                 if instruction.operation == {
                     .Parameter(index, _) -> {
                         parameter := None
                         loop row in function.params { if row.index == index -> parameter = Val(row) }
-                        if parameter != None {
-                            row :: parameter ?? MirParam{index: index, name: "", span: function.span, ty: function.return_type, access: MirAccess.Read, ownership: mir_copy_ownership(), public_label: "", variadic: false, default_present: false}
+                        if parameter == .Val(row) {
                             if row.access == MirAccess.Write {
                                 out.push("          __jet_cells.set({result.value}, {{ get value() {{ return __jet_args[{index}]; }}, set value(v) {{ __jet_args[{index}] = v; }} }});")
                             } else {
@@ -112,38 +110,38 @@ fn jet_web_emit_module_registry(ctx: &JetWebEmitContext, out: &[String]) {
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web artifact module has no stable key or path", "module registry provenance requires both checked identity fields", None)
             next
         }
-        interface_seed := "{row.key}\u0000{row.path}\u0000{row.imports.len()}\u0000{row.item_order.len()}"
-        body_seed := "{ctx.artifact_identity}\u0000{module_id.value}\u0000{row.path}"
+        interface_seed :: "{row.key}\u0000{row.path}\u0000{row.imports.len()}\u0000{row.item_order.len()}"
+        body_seed :: "{ctx.artifact_identity}\u0000{module_id.value}\u0000{row.path}"
         out.push("jetDom.registerWebModule({jet_web_js_quote(row.key)}, {jet_web_js_quote(\"sha256-{mir_sha256_hex(interface_seed)}\")}, {jet_web_js_quote(\"sha256-{mir_sha256_hex(body_seed)}\")});")
     }
     out.push("")
 }
 
 fn jet_web_emit_js_entry(ctx: &JetWebEmitContext, out: &[String]) {
-    function := ctx.entry
-    if jet_web_function_in_bucket(function, MirWebBucket.JS) {
-        out.push("export async function jet_main(...args) {{")
-        out.push("  const __jet_edge_result = await jet_fn_{function.id.value}([], args);")
-        out.push("  return jet_web_edge_result(__jet_edge_result);")
-        out.push("}")
-        out.push("")
-        return
-    }
-    if jet_web_function_in_bucket(function, MirWebBucket.Wasm) {
-        if function.generator != None {
-            jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm entry cannot be a generator", function.name, Val(function.span))
-            return
+    function :: ctx.entry
+    if {
+        jet_web_function_in_bucket(function, MirWebBucket.JS) -> {
+            out.push("export async function jet_main(...args) {{")
+            out.push("  const __jet_edge_result = await jet_fn_{function.id.value}([], args);")
+            out.push("  return jet_web_edge_result(__jet_edge_result);")
+            out.push("}")
+            out.push("")
         }
-        out.push("export async function jet_main(...args) {{")
-        out.push("  __jetPreludeWasm.jet_entry_{function.id.value}(...args);")
-        out.push("  const outcome = jetDom.takeWasmError(__jetPreludeWasm);")
-        out.push("  if (outcome) return jet_web_edge_result(outcome);")
-        out.push("  return undefined;")
-        out.push("}")
-        out.push("")
-        return
+        jet_web_function_in_bucket(function, MirWebBucket.Wasm) -> {
+            if function.generator != None {
+                jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "Web Wasm entry cannot be a generator", function.name, Val(function.span))
+                return
+            }
+            out.push("export async function jet_main(...args) {{")
+            out.push("  __jetPreludeWasm.jet_entry_{function.id.value}(...args);")
+            out.push("  const outcome = jetDom.takeWasmError(__jetPreludeWasm);")
+            out.push("  if (outcome) return jet_web_edge_result(outcome);")
+            out.push("  return undefined;")
+            out.push("}")
+            out.push("")
+        }
+        else -> jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(function.span))
     }
-    jet_web_fail(ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web entry has no checked partition", "the selected entry function must be JS or Wasm-applicable", Val(function.span))
 }
 
 fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) {
@@ -206,7 +204,7 @@ fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) {
         found := false
         loop fact in ctx.program.facts.model_outputs { if fact.signature_name == Val(definition.name) -> found = true }
         if !found -> next
-        prefix := jet_web_js_model_prefix(definition.key)
+        prefix :: jet_web_js_model_prefix(definition.key)
         out.push("async function __jet_model_open_{prefix}(output) {{")
         out.push("  const input = __jetModelInput(\"{prefix}\", String(output));")
         out.push("  let handle;")
@@ -228,11 +226,11 @@ fn jet_web_emit_model_bridges(ctx: &JetWebEmitContext, out: &[String]) {
 }
 
 fn jet_web_emit_js_app(ctx: &JetWebEmitContext) -> String {
-    needs_font := jet_web_needs_font_shaping(ctx)
-    has_data := jet_web_has_runtime_part(ctx, MirRuntimePartId.Data)
-    has_model := ctx.program.facts.model_outputs.len() != 0
-    has_game := jet_web_has_runtime_part(ctx, MirRuntimePartId.Game)
-    font_import := if needs_font -> "await jet_ui_web_harfbuzz_imports()" else -> "jet_ui_web_unreachable_harfbuzz_imports()"
+    needs_font :: jet_web_needs_font_shaping(ctx)
+    has_data :: jet_web_has_runtime_part(ctx, MirRuntimePartId.Data)
+    has_model :: ctx.program.facts.model_outputs.len() != 0
+    has_game :: jet_web_has_runtime_part(ctx, MirRuntimePartId.Game)
+    font_import :: if needs_font -> "await jet_ui_web_harfbuzz_imports()" else -> "jet_ui_web_unreachable_harfbuzz_imports()"
     lines := [String]{
         "import * as jetDom from \"./jet_dom_runtime.js\";",
         jet_web_compose_prelude(ctx),

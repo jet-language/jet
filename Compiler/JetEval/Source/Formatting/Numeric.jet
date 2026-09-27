@@ -31,10 +31,10 @@ fn jet_eval_format_find_source_row(
     machine: &JetEvalMachine,
     member: String,
 ) -> ?MirPreludeCall {
-    if member == "display" || member == "debug" {
-        return jet_eval_format_find_display_debug_row(&machine, member)
+    if member == {
+        "display" | "debug" -> jet_eval_format_find_display_debug_row(&machine, member)
+        else -> jet_eval_source_row(machine.program, member)
     }
-    jet_eval_source_row(machine.program, member)
 }
 
 fn jet_eval_format_core_source_call(
@@ -55,15 +55,16 @@ fn jet_eval_format_core_source_call(
         jet_eval_compiler_fail(&machine, span, "core.text.fmt.{member} source target ABI does not match the route")
         return None
     }
-    runtime_args := [JetEvalRuntimeValue]{}
-    loop arg in args -> runtime_args.push(JetEvalRuntimeValue.Data(arg))
+    runtime_args :: loop arg in args -> JetEvalRuntimeValue.Data(arg)
     runtime :: jet_eval_invoke(&machine, target.function, runtime_args, [JetEvalRuntimeValue]{}, span) ?? return None
     data :: jet_eval_data(runtime, &machine, span) ?? return None
-    if data == {.String(text) -> {
-        return Val(text)
-    }}
-    jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source function did not return String")
-    None
+    if data == {
+        .String(text) -> Val(text)
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source function did not return String")
+            None
+        }
+    }
 }
 
 fn jet_eval_format_fixed_value(
@@ -73,18 +74,19 @@ fn jet_eval_format_fixed_value(
     grouped: Bool,
     span: Span,
 ) -> ?String {
-    if value == {.Float(number, _) -> {
-        member :: if grouped -> "grouped" else -> "decimal"
-        return jet_eval_format_core_source_call(
+    member :: if grouped -> "grouped" else -> "decimal"
+    if value == {
+        .Float(number, _) -> jet_eval_format_core_source_call(
             &machine,
             member,
             [TComptimeValue]{TComptimeValue.Float(number, 64), TComptimeValue.Int(precision)},
             span,
         )
-    }}
-    member :: if grouped -> "grouped" else -> "decimal"
-    jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source formatting requires Float")
-    None
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source formatting requires Float")
+            None
+        }
+    }
 }
 
 fn jet_eval_format_radix_value(
@@ -94,22 +96,19 @@ fn jet_eval_format_radix_value(
     width: Int,
     span: Span,
 ) -> ?String {
-    if value == {.Int(number) -> {
-        if base == 16 {
-            return jet_eval_format_core_source_call(
+    if value == .Int(number) {
+        if base == {
+            16 -> return jet_eval_format_core_source_call(
                 &machine,
                 "hex",
                 [TComptimeValue]{TComptimeValue.Int(number), TComptimeValue.Int(width)},
                 span,
             )
+            2 -> return jet_eval_format_core_source_call(&machine, "bin", [TComptimeValue]{TComptimeValue.Int(number)}, span)
+            8 -> return jet_eval_format_core_source_call(&machine, "oct", [TComptimeValue]{TComptimeValue.Int(number)}, span)
+            else -> {}
         }
-        if base == 2 {
-            return jet_eval_format_core_source_call(&machine, "bin", [TComptimeValue]{TComptimeValue.Int(number)}, span)
-        }
-        if base == 8 {
-            return jet_eval_format_core_source_call(&machine, "oct", [TComptimeValue]{TComptimeValue.Int(number)}, span)
-        }
-    }}
+    }
     jet_eval_unsupported(&machine, span, "core.text.fmt radix source formatting requires Int")
     None
 }
@@ -120,16 +119,18 @@ fn jet_eval_format_scientific_value(
     precision: Int,
     span: Span,
 ) -> ?String {
-    if value == {.Float(number, _) -> {
-        return jet_eval_format_core_source_call(
+    if value == {
+        .Float(number, _) -> jet_eval_format_core_source_call(
             &machine,
             "sci",
             [TComptimeValue]{TComptimeValue.Float(number, 64), TComptimeValue.Int(precision)},
             span,
         )
-    }}
-    jet_eval_unsupported(&machine, span, "core.text.fmt.sci source formatting requires Float")
-    None
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt.sci source formatting requires Float")
+            None
+        }
+    }
 }
 
 fn jet_eval_format_percent_value(
@@ -138,16 +139,18 @@ fn jet_eval_format_percent_value(
     precision: Int,
     span: Span,
 ) -> ?String {
-    if value == {.Float(number, _) -> {
-        return jet_eval_format_core_source_call(
+    if value == {
+        .Float(number, _) -> jet_eval_format_core_source_call(
             &machine,
             "percent",
             [TComptimeValue]{TComptimeValue.Float(number, 64), TComptimeValue.Int(precision)},
             span,
         )
-    }}
-    jet_eval_unsupported(&machine, span, "core.text.fmt.percent source formatting requires Float")
-    None
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt.percent source formatting requires Float")
+            None
+        }
+    }
 }
 
 fn jet_eval_format_padding_value(
@@ -158,17 +161,21 @@ fn jet_eval_format_padding_value(
     left: Bool,
     span: Span,
 ) -> ?String {
-    if value == {.String(text) -> {
-        member :: if left -> "pad_left" else -> "pad"
-        return jet_eval_format_core_source_call(
-            &machine,
-            member,
-            [TComptimeValue]{TComptimeValue.String(text), TComptimeValue.Int(width), TComptimeValue.String(fill)},
-            span,
-        )
-    }}
-    jet_eval_unsupported(&machine, span, "core.text.fmt padding source formatting requires String")
-    None
+    if value == {
+        .String(text) -> {
+            member :: if left -> "pad_left" else -> "pad"
+            jet_eval_format_core_source_call(
+                &machine,
+                member,
+                [TComptimeValue]{TComptimeValue.String(text), TComptimeValue.Int(width), TComptimeValue.String(fill)},
+                span,
+            )
+        }
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt padding source formatting requires String")
+            None
+        }
+    }
 }
 
 fn jet_eval_format_pretty_value(
@@ -176,9 +183,11 @@ fn jet_eval_format_pretty_value(
     value: TComptimeValue,
     span: Span,
 ) -> ?String {
-    if value == {.String(text) -> {
-        return jet_eval_format_core_source_call(&machine, "pretty", [TComptimeValue]{TComptimeValue.String(text)}, span)
-    }}
-    jet_eval_unsupported(&machine, span, "core.text.fmt.pretty source formatting requires String")
-    None
+    if value == {
+        .String(text) -> jet_eval_format_core_source_call(&machine, "pretty", [TComptimeValue]{TComptimeValue.String(text)}, span)
+        else -> {
+            jet_eval_unsupported(&machine, span, "core.text.fmt.pretty source formatting requires String")
+            None
+        }
+    }
 }

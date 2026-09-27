@@ -1242,7 +1242,7 @@ fn semindex_projects_inline_module_inferred_effects() {
 fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let path = temp_fixture(
         "effect_provenance_origins.jet",
-        "trait Shape { fn area(self) -[IO]> Int }\nfn dynamic(shape: Shape) -> Int { return shape.area() }\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn stored(f: ^fn() -> Int) -> Int { g :: f; return g() }\nfn run() {}\n",
+        "trait Shape { fn area(self) -[IO]> Int }\nfn dynamic(shape: Shape) -> Int { return shape.area() }\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn stored(f: ^fn() -> Int) -> Int {\n    g :: f\n    return g()\n}\nfn run() {}\n",
     );
     let index = open(&path).expect("effect provenance index");
 

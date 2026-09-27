@@ -581,7 +581,10 @@ fn run() {{
             .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
-                    None -> {{ print("depth-missed"); break }}
+                    None -> {{
+                        print("depth-missed")
+                        break
+                    }}
                 }}
             }}
             .Err(error) -> {{
@@ -605,7 +608,10 @@ fn run() {{
             .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
-                    None -> {{ print("xml-depth-missed"); break }}
+                    None -> {{
+                        print("xml-depth-missed")
+                        break
+                    }}
                 }}
             }}
             .Err(error) -> {{
@@ -1085,7 +1091,10 @@ fn run() {{
             .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
-                    None -> {{ print("malformed-missed"); break }}
+                    None -> {{
+                        print("malformed-missed")
+                        break
+                    }}
                 }}
             }}
             .Err(first) -> {{
@@ -1107,7 +1116,10 @@ fn run() {{
             .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
-                    None -> {{ print("invalid-character-missed"); break }}
+                    None -> {{
+                        print("invalid-character-missed")
+                        break
+                    }}
                 }}
             }}
             .Err(first) -> {{
@@ -1137,14 +1149,20 @@ fn run() {{
             .Ok(maybe) -> {{
                 if maybe == {{
                     Val(_) -> {{}}
-                    None -> {{ print("total-missed"); break }}
+                    None -> {{
+                        print("total-missed")
+                        break
+                    }}
                 }}
             }}
             .Err(first) -> {{
                 again :: total_reader.next()
                 if again == {{
                     .Ok(_) -> {{ print("total-terminal-missed") }}
-                    .Err(second) -> {{ print(first.byte_offset); print(first.reason == second.reason) }}
+                    .Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.reason == second.reason)
+                    }}
                 }}
                 break
             }}

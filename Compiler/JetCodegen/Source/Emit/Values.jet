@@ -7,8 +7,11 @@ struct JetRustPartialValuePath {
 }
 
 fn jet_rust_emit_value_slot(value: MirValueId) -> String { "__jet_v_{value.value}" }
+
 fn jet_rust_emit_local_slot(local: MirLocalId) -> String { "__jet_l_{local.value}" }
+
 fn jet_rust_emit_previous_slot() -> String { "__jet_mir_dispatch_prev" }
+
 fn jet_rust_emit_local_uninit_fixed_type(function: MirFunction, local: MirLocalId) -> ?MirType {
     loop row in function.locals {
         if row.id == local && row.uninit {
@@ -23,8 +26,8 @@ fn jet_rust_emit_local_uninit_fixed_type(function: MirFunction, local: MirLocalI
 
 fn jet_rust_emit_uninit_fixed_storage_type(ctx: &JetRustEmitContext, ty: MirType) -> ?String {
     if ty.kind == {
-        .FixedList(elem, len) -> return Val("{ctx.config.root_prefix}jet_mem::JetUninitFixed<{jet_rust_emit_type(ctx, elem)}, {mir_measure_expression(len)}>")
-        else -> return None
+        .FixedList(elem, len) -> Val("{ctx.config.root_prefix}jet_mem::JetUninitFixed<{jet_rust_emit_type(ctx, elem)}, {mir_measure_expression(len)}>")
+        else -> None
     }
 }
 
@@ -39,7 +42,6 @@ fn jet_rust_emit_uninit_fixed_place_local(function: MirFunction, place: MirPlace
     }
     None
 }
-
 
 fn jet_rust_emit_find_value_instruction(function: MirFunction, value: MirValueId) -> ?MirInstruction {
     loop block in function.blocks {
@@ -74,17 +76,16 @@ fn jet_rust_emit_is_receiver(function: MirFunction, index: Int) -> Bool {
 }
 
 fn jet_rust_emit_parameter_name(function: MirFunction, index: Int) -> String {
-    if jet_rust_emit_is_receiver(function, index) -> return "__jet_self"
-    jet_rust_emit_sanitize(jet_rust_emit_find_parameter(function, index).name)
+    if jet_rust_emit_is_receiver(function, index) -> "__jet_self" else -> jet_rust_emit_sanitize(jet_rust_emit_find_parameter(function, index).name)
 }
 
 fn jet_rust_emit_capture_name(slot: Int) -> String { "__jet_capture_{slot}" }
 
 fn jet_rust_emit_parameter_expression(function: MirFunction, index: Int, access: MirAccess) -> String {
-    name := jet_rust_emit_parameter_name(function, index)
+    name :: jet_rust_emit_parameter_name(function, index)
     if access == {
         .Read -> {
-            parameter := jet_rust_emit_find_parameter(function, index)
+            parameter :: jet_rust_emit_find_parameter(function, index)
             if jet_rust_emit_is_receiver(function, index) || jet_rust_emit_type_is_borrowed(parameter.ty) -> "(*{name}).clone()" else -> name
         }
         .Write -> "(*{name}).clone()"
@@ -93,7 +94,7 @@ fn jet_rust_emit_parameter_expression(function: MirFunction, index: Int, access:
 }
 
 fn jet_rust_emit_capture_expression(function: MirFunction, slot: Int, access: MirAccess) -> String {
-    name := jet_rust_emit_capture_name(slot)
+    name :: jet_rust_emit_capture_name(slot)
     if access == MirAccess.Move -> name else -> "(*{name}).clone()"
 }
 
@@ -113,8 +114,8 @@ fn jet_rust_emit_parameter_place(function: MirFunction, value: MirValueId, mutab
     instruction :: jet_rust_emit_find_value_instruction(function, value) ?? panic("MIR parameter place has no producer")
     if instruction.operation == {
         .Parameter(index, _) -> {
-            name := jet_rust_emit_parameter_name(function, index)
-            access := jet_rust_emit_find_parameter(function, index).access
+            name :: jet_rust_emit_parameter_name(function, index)
+            access :: jet_rust_emit_find_parameter(function, index).access
             if mutable {
                 if access != MirAccess.Write -> panic("MIR parameter place is not writable")
                 return "*{name}"
@@ -156,21 +157,21 @@ fn jet_rust_emit_source_path(ctx: &JetRustEmitContext, id: MirSourceFileId) -> S
 
 fn jet_rust_emit_partial_base_key(base: MirPlaceBase) -> String {
     if base == {
-        .Local(local) -> return "local_{local.value}"
-        .Parameter(value) -> return "value_{value.value}"
-        .Capture(value) -> return "value_{value.value}"
-        .Temporary(value) -> return "value_{value.value}"
-        .Static(name) -> return "static_{jet_rust_emit_sanitize(name)}"
+        .Local(local) -> "local_{local.value}"
+        .Parameter(value) -> "value_{value.value}"
+        .Capture(value) -> "value_{value.value}"
+        .Temporary(value) -> "value_{value.value}"
+        .Static(name) -> "static_{jet_rust_emit_sanitize(name)}"
     }
 }
 
 fn jet_rust_emit_partial_root_slot(base: MirPlaceBase) -> String {
     if base == {
-        .Local(local) -> return jet_rust_emit_local_slot(local)
-        .Parameter(value) -> return jet_rust_emit_value_slot(value)
-        .Capture(value) -> return jet_rust_emit_value_slot(value)
-        .Temporary(value) -> return jet_rust_emit_value_slot(value)
-        .Static(name) -> return "{name}"
+        .Local(local) -> jet_rust_emit_local_slot(local)
+        .Parameter(value) -> jet_rust_emit_value_slot(value)
+        .Capture(value) -> jet_rust_emit_value_slot(value)
+        .Temporary(value) -> jet_rust_emit_value_slot(value)
+        .Static(name) -> "{name}"
     }
 }
 
@@ -186,11 +187,7 @@ fn jet_rust_emit_partial_field_slot(base: MirPlaceBase, path: [MirFieldId]) -> S
 
 fn jet_rust_emit_partial_path_prefix(path: [MirFieldId], count: Int) -> [MirFieldId] {
     prefix := [MirFieldId]{}
-    index := 0
-    loop index < count {
-        prefix.push(path[index])
-        index += 1
-    }
+    loop index in 0..<count -> prefix.push(path[index])
     prefix
 }
 
@@ -200,6 +197,7 @@ fn jet_rust_emit_partial_path_append(path: [MirFieldId], field: MirFieldId) -> [
     extended.push(field)
     extended
 }
+
 fn jet_rust_emit_partial_path_suffix(path: [MirFieldId], start: Int) -> [MirFieldId] {
     suffix := [MirFieldId]{}
     index := start
@@ -268,13 +266,14 @@ fn jet_rust_emit_place_projection_path(function: MirFunction, id: MirPlaceId) ->
     }
     [MirFieldId]{}
 }
+
 fn jet_rust_emit_partial_value_path(function: MirFunction, value: MirValueId) -> ?JetRustPartialValuePath {
     instruction :: jet_rust_emit_find_value_instruction(function, value) ?? return None
     if instruction.operation == {
         .ReadPlace(place) | .AddressOf(place, _) -> {
             loop row in function.places {
                 if row.id == place {
-                    fields := jet_rust_emit_place_projection_path(function, place)
+                    fields :: jet_rust_emit_place_projection_path(function, place)
                     if fields.len() != row.projections.len() -> return None
                     return Val(JetRustPartialValuePath{base: row.base, fields: fields})
                 }
@@ -296,27 +295,23 @@ fn jet_rust_emit_partial_value_path(function: MirFunction, value: MirValueId) ->
 }
 
 fn jet_rust_emit_partial_projected_value(ctx: &JetRustEmitContext, function: MirFunction, base: MirValueId, field: MirFieldId) -> ?String {
-    path := jet_rust_emit_partial_value_path(function, base)
-    if path == None -> return None
-    projected := path ?? return None
+    projected := jet_rust_emit_partial_value_path(function, base) ?? return None
     if !jet_rust_emit_partial_root_has(function, projected.base) -> return None
-    owner := jet_rust_emit_partial_node_owner(ctx, function, projected.base, [MirFieldId]{}) ?? return None
+    owner :: jet_rust_emit_partial_node_owner(ctx, function, projected.base, [MirFieldId]{}) ?? return None
     projected.fields.push(field)
-    return Val(jet_rust_emit_partial_field_reference(ctx, function, projected.base, [MirFieldId]{}, owner, projected.fields, false))
+    Val(jet_rust_emit_partial_field_reference(ctx, function, projected.base, [MirFieldId]{}, owner, projected.fields, false))
 }
 
 fn jet_rust_emit_partial_value_reference(ctx: &JetRustEmitContext, function: MirFunction, value: MirValueId) -> ?String {
-    path := jet_rust_emit_partial_value_path(function, value)
-    if path == None -> return None
-    projected :: path ?? return None
+    projected :: jet_rust_emit_partial_value_path(function, value) ?? return None
     if !jet_rust_emit_partial_root_has(function, projected.base) -> return None
-    owner := jet_rust_emit_partial_node_owner(ctx, function, projected.base, [MirFieldId]{}) ?? return None
+    owner :: jet_rust_emit_partial_node_owner(ctx, function, projected.base, [MirFieldId]{}) ?? return None
     if projected.fields.len() > 0 {
         return Val(jet_rust_emit_partial_field_reference(ctx, function, projected.base, [MirFieldId]{}, owner, projected.fields, false))
     }
-    root := jet_rust_emit_partial_root_slot(projected.base)
-    restore := jet_rust_emit_partial_restore(ctx, function, projected.base, [MirFieldId]{}, owner, false)
-    reference := "{root}.as_ref().expect(\"MIR local\")"
+    root :: jet_rust_emit_partial_root_slot(projected.base)
+    restore :: jet_rust_emit_partial_restore(ctx, function, projected.base, [MirFieldId]{}, owner, false)
+    reference :: "{root}.as_ref().expect(\"MIR local\")"
     Val("{{ {restore} {reference} }}")
 }
 
@@ -325,7 +320,7 @@ fn jet_rust_emit_partial_direct_borrow_call(ctx: &JetRustEmitContext, function: 
         .Foreign(_) -> return false
         else -> {}
     }
-    borrow_mask := jet_rust_emit_call_borrow_mask(ctx, callee, function, args)
+    borrow_mask :: jet_rust_emit_call_borrow_mask(ctx, callee, function, args)
     found := false
     index := 0
     loop arg in args {
@@ -337,7 +332,7 @@ fn jet_rust_emit_partial_direct_borrow_call(ctx: &JetRustEmitContext, function: 
                 if arg.access != MirAccess.Read || jet_rust_emit_partial_value_reference(ctx, function, value) == None -> return false
             } else {
                 place_id :: arg.place ?? return false
-                place_fields := jet_rust_emit_place_projection_path(function, place_id)
+                place_fields :: jet_rust_emit_place_projection_path(function, place_id)
                 place_found := false
                 loop row in function.places {
                     if row.id == place_id {
@@ -378,7 +373,6 @@ fn jet_rust_emit_partial_projection_only(ctx: &JetRustEmitContext, function: Mir
     true
 }
 
-
 fn jet_rust_emit_partial_root_has(function: MirFunction, base: MirPlaceBase) -> Bool {
     loop block in function.blocks {
         loop instruction in block.instructions {
@@ -407,33 +401,29 @@ fn jet_rust_emit_partial_root_has(function: MirFunction, base: MirPlaceBase) -> 
     }
     false
 }
+
 fn jet_rust_emit_partial_path_starts_with(path: [MirFieldId], prefix: [MirFieldId]) -> Bool {
     if path.len() < prefix.len() -> return false
-    index := 0
-    loop index < prefix.len() {
-        if path[index] != prefix[index] -> return false
-        index += 1
+    loop (index, field) in prefix {
+        if path[index] != field -> return false
     }
     true
 }
 
 fn jet_rust_emit_partial_node_slot(base: MirPlaceBase, prefix: [MirFieldId]) -> String {
-    if prefix.len() == 0 -> return jet_rust_emit_partial_root_slot(base)
-    jet_rust_emit_partial_field_slot(base, prefix)
+    if prefix.len() == 0 -> jet_rust_emit_partial_root_slot(base) else -> jet_rust_emit_partial_field_slot(base, prefix)
 }
 
 fn jet_rust_emit_partial_node_owner(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId]) -> ?MirTypeId {
     loop block in function.blocks {
         loop instruction in block.instructions {
-            place_id := None
-            if instruction.operation == {
-                .MovePlace(place) -> place_id = Val(place)
-                .AddressOf(place, access) -> if access == MirAccess.Move -> place_id = Val(place)
-                else -> {}
+            place_id :: if instruction.operation == {
+                .MovePlace(place) -> Val(place)
+                .AddressOf(place, access) -> if access == MirAccess.Move -> Val(place) else -> None
+                else -> None
             }
-            if place_id != None {
-                place :: place_id ?? MirPlaceId{value: 0}
-                path := jet_rust_emit_partial_place_path(function, place)
+            if place_id == .Val(place) {
+                path :: jet_rust_emit_partial_place_path(function, place)
                 if path.len() > prefix.len() && jet_rust_emit_partial_path_starts_with(path, prefix) {
                     loop row in function.places {
                         if row.id == place && row.base == base -> return jet_rust_emit_partial_owner(ctx, path[prefix.len()])
@@ -444,6 +434,7 @@ fn jet_rust_emit_partial_node_owner(ctx: &JetRustEmitContext, function: MirFunct
     }
     None
 }
+
 fn jet_rust_emit_partial_node_type(function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId]) -> ?MirType {
     if prefix.len() == 0 {
         if base == {
@@ -460,7 +451,7 @@ fn jet_rust_emit_partial_node_type(function: MirFunction, base: MirPlaceBase, pr
     }
     loop row in function.places {
         if row.base == base {
-            path := jet_rust_emit_place_projection_path(function, row.id)
+            path :: jet_rust_emit_place_projection_path(function, row.id)
             if path.len() == prefix.len() && jet_rust_emit_partial_path_starts_with(path, prefix) -> return Val(row.ty)
         }
     }
@@ -478,30 +469,25 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MirTy
     if source.kind == {
         .Apply(name, nested) -> {
             if nested.len() == 0 {
-                index := 0
-                loop parameter in parameters {
+                loop (index, parameter) in parameters {
                     if parameter.name == name.name && name.id == mir_type_id(parameter.name) {
                         if index < arguments.len() -> return arguments[index]
                         return source
                     }
-                    index += 1
                 }
             }
-            mapped := [MirType]{}
-            loop item in nested -> mapped.push(jet_rust_emit_partial_substitute_type(ctx, item, parameters, arguments))
-            return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Apply(name, mapped)))
+            mapped :: loop item in nested -> jet_rust_emit_partial_substitute_type(ctx, item, parameters, arguments)
+            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Apply(name, mapped)))
         }
-        .List(inner) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.List(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
-        .Map(key, value) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Map(jet_rust_emit_partial_substitute_type(ctx, key, parameters, arguments), jet_rust_emit_partial_substitute_type(ctx, value, parameters, arguments))))
-        .Shared(inner) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Shared(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
-        .Option(inner) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Option(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
-        .Result(ok, err) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Result(jet_rust_emit_partial_substitute_type(ctx, ok, parameters, arguments), jet_rust_emit_partial_substitute_type(ctx, err, parameters, arguments))))
+        .List(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.List(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
+        .Map(key, value) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Map(jet_rust_emit_partial_substitute_type(ctx, key, parameters, arguments), jet_rust_emit_partial_substitute_type(ctx, value, parameters, arguments))))
+        .Shared(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Shared(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
+        .Option(inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Option(jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
+        .Result(ok, err) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Result(jet_rust_emit_partial_substitute_type(ctx, ok, parameters, arguments), jet_rust_emit_partial_substitute_type(ctx, err, parameters, arguments))))
         .Fn(signature) -> {
-            mapped_params := [MirType]{}
-            loop parameter in signature.params -> mapped_params.push(jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments))
-            mapped_ret := signature.ret
-            if mapped_ret != None -> mapped_ret = Val(jet_rust_emit_partial_substitute_type(ctx, mapped_ret ?? source, parameters, arguments))
-            mapped_signature := MirFunctionSignature{
+            mapped_params :: loop parameter in signature.params -> jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments)
+            mapped_ret :: if signature.ret == .Val(ret_ty) -> Val(jet_rust_emit_partial_substitute_type(ctx, ret_ty, parameters, arguments)) else -> None
+            mapped_signature :: MirFunctionSignature{
                 params: mapped_params,
                 ret: mapped_ret,
                 effect_bound: signature.effect_bound,
@@ -509,33 +495,27 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MirTy
                 call_metadata: signature.call_metadata,
                 return_view_provenance: signature.return_view_provenance,
             }
-            return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Fn(mapped_signature)))
+            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Fn(mapped_signature)))
         }
         .SendFn(params, ret, conventions) -> {
-            mapped_params := [MirType]{}
-            loop parameter in params -> mapped_params.push(jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments))
-            mapped_ret := ret
-            if mapped_ret != None -> mapped_ret = Val(jet_rust_emit_partial_substitute_type(ctx, mapped_ret ?? source, parameters, arguments))
-            return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.SendFn(mapped_params, mapped_ret, conventions)))
+            mapped_params :: loop parameter in params -> jet_rust_emit_partial_substitute_type(ctx, parameter, parameters, arguments)
+            mapped_ret :: if ret == .Val(ret_ty) -> Val(jet_rust_emit_partial_substitute_type(ctx, ret_ty, parameters, arguments)) else -> None
+            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.SendFn(mapped_params, mapped_ret, conventions)))
         }
         .Tuple(fields) -> {
-            mapped_fields := [MirTupleField]{}
-            loop field in fields -> mapped_fields.push(MirTupleField{name: field.name, ty: jet_rust_emit_partial_substitute_type(ctx, field.ty, parameters, arguments)})
-            return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tuple(mapped_fields)))
+            mapped_fields :: loop field in fields -> MirTupleField{name: field.name, ty: jet_rust_emit_partial_substitute_type(ctx, field.ty, parameters, arguments)}
+            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tuple(mapped_fields)))
         }
-        .FixedList(elem, len) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.FixedList(jet_rust_emit_partial_substitute_type(ctx, elem, parameters, arguments), len)))
-        .InlineRange(base, lo, hi) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.InlineRange(jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), lo, hi)))
-        .Tagged(marker, inner) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tagged(marker, jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
+        .FixedList(elem, len) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.FixedList(jet_rust_emit_partial_substitute_type(ctx, elem, parameters, arguments), len)))
+        .InlineRange(base, lo, hi) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.InlineRange(jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), lo, hi)))
+        .Tagged(marker, inner) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Tagged(marker, jet_rust_emit_partial_substitute_type(ctx, inner, parameters, arguments))))
         .Union(members) -> {
-            mapped := [MirType]{}
-            loop member in members -> mapped.push(jet_rust_emit_partial_substitute_type(ctx, member, parameters, arguments))
-            return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Union(mapped)))
+            mapped :: loop member in members -> jet_rust_emit_partial_substitute_type(ctx, member, parameters, arguments)
+            jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Union(mapped)))
         }
-        .Quantity(base, dimension) -> return jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Quantity(jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), dimension)))
-        else -> return source
+        .Quantity(base, dimension) -> jet_rust_emit_partial_type_instance(ctx, mir_type_from_kind(MirTypeKind.Quantity(jet_rust_emit_partial_substitute_type(ctx, base, parameters, arguments), dimension)))
+        else -> source
     }
-    source
-
 }
 
 fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, field: MirField) -> String {
@@ -545,8 +525,7 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunct
         return jet_rust_emit_type(ctx, field.ty)
     }
     parent_type := parent ?? field.ty
-    if parent_type.identity != None {
-        identity :: parent_type.identity ?? MirTypeId{value: 0}
+    if parent_type.identity == .Val(identity) {
         loop instance in ctx.program.type_instances {
             if instance.identity == Val(identity) -> parent_type = instance
         }
@@ -567,7 +546,7 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunct
                     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR partial storage owner has incomplete type arguments", "projected field slots must use the same checked generic instantiation as their parent aggregate", Val(field.span))
                     return jet_rust_emit_type(ctx, field.ty)
                 }
-                specialized := jet_rust_emit_partial_substitute_type(ctx, field.ty, generic_params, args)
+                specialized :: jet_rust_emit_partial_substitute_type(ctx, field.ty, generic_params, args)
                 return jet_rust_emit_type(ctx, specialized)
             }
         }
@@ -576,28 +555,27 @@ fn jet_rust_emit_partial_field_type(ctx: &JetRustEmitContext, function: MirFunct
     jet_rust_emit_type(ctx, field.ty)
 }
 
-
 fn jet_rust_emit_partial_field_reference(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, fields: [MirFieldId], mutable: Bool) -> String {
     field := fields[0]
-    child_prefix := jet_rust_emit_partial_path_append(prefix, field)
-    slot := jet_rust_emit_partial_field_slot(base, child_prefix)
-    boxed := jet_rust_emit_partial_field_boxed(ctx, owner, field)
+    child_prefix :: jet_rust_emit_partial_path_append(prefix, field)
+    slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
+    boxed :: jet_rust_emit_partial_field_boxed(ctx, owner, field)
     whole := "__jet_whole"
     loop projected in fields -> whole = "({whole}).{jet_rust_emit_field_name(ctx, projected)}"
     last := fields[fields.len() - 1]
-    last_owner := jet_rust_emit_partial_owner(ctx, last) ?? MirTypeId{value: 0}
-    last_boxed := jet_rust_emit_partial_field_boxed(ctx, last_owner, last)
-    borrow := if mutable -> "&mut" else -> "&"
-    accessor := if mutable -> "as_mut" else -> "as_ref"
-    whole_ref := if last_boxed -> "({whole}).{accessor}()" else -> "{borrow}({whole})"
+    last_owner :: jet_rust_emit_partial_owner(ctx, last) ?? MirTypeId{value: 0}
+    last_boxed :: jet_rust_emit_partial_field_boxed(ctx, last_owner, last)
+    borrow :: if mutable -> "&mut" else -> "&"
+    accessor :: if mutable -> "as_mut" else -> "as_ref"
+    whole_ref :: if last_boxed -> "({whole}).{accessor}()" else -> "{borrow}({whole})"
     nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
     if fields.len() == 1 {
         target := if boxed -> "{slot}.{accessor}().expect(\"MIR partial field\").{accessor}()" else -> "{borrow} *{slot}.{accessor}().expect(\"MIR partial field\")"
-        reference := "match {jet_rust_emit_partial_node_slot(base, prefix)}.{accessor}() {{ Some(__jet_whole) => {whole_ref}, None => {target} }}"
+        reference :: "match {jet_rust_emit_partial_node_slot(base, prefix)}.{accessor}() {{ Some(__jet_whole) => {whole_ref}, None => {target} }}"
         if nested_owner != None {
-            nested := nested_owner ?? MirTypeId{value: 0}
-            restore := jet_rust_emit_partial_restore(ctx, function, base, child_prefix, nested, boxed)
-            parent := jet_rust_emit_partial_node_slot(base, prefix)
+            nested :: nested_owner ?? MirTypeId{value: 0}
+            restore :: jet_rust_emit_partial_restore(ctx, function, base, child_prefix, nested, boxed)
+            parent :: jet_rust_emit_partial_node_slot(base, prefix)
             return "{{ if {parent}.is_none() {{ {restore} }}; {reference} }}"
         }
         return reference
@@ -625,7 +603,6 @@ fn jet_rust_emit_partial_field_reference(ctx: &JetRustEmitContext, function: Mir
     "match {jet_rust_emit_partial_node_slot(base, prefix)}.{accessor}() {{ Some(__jet_whole) => {whole_ref}, None => {partial} }}"
 }
 
-
 fn jet_rust_emit_partial_type_is_tuple(ctx: &JetRustEmitContext, owner: MirTypeId) -> Bool {
     loop instance in ctx.program.type_instances {
         if instance.identity == Val(owner) {
@@ -636,13 +613,13 @@ fn jet_rust_emit_partial_type_is_tuple(ctx: &JetRustEmitContext, owner: MirTypeI
 }
 
 fn jet_rust_emit_partial_split(ctx: &JetRustEmitContext, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, boxed: Bool) -> String {
-    node := jet_rust_emit_partial_node_slot(base, prefix)
+    node :: jet_rust_emit_partial_node_slot(base, prefix)
     out := "if let Some(__jet_whole) = {node}.take() {{ "
     if boxed -> out = "{out}let __jet_whole = *__jet_whole; "
-    fields := jet_rust_emit_partial_fields(ctx, owner)
+    fields :: jet_rust_emit_partial_fields(ctx, owner)
     loop field in fields {
-        child_prefix := jet_rust_emit_partial_path_append(prefix, field.id)
-        slot := jet_rust_emit_partial_field_slot(base, child_prefix)
+        child_prefix :: jet_rust_emit_partial_path_append(prefix, field.id)
+        slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
         out = "{out}{slot} = Some(__jet_whole.{jet_rust_emit_field_name(ctx, field.id)}); "
     }
     "{out}}}"
@@ -650,10 +627,10 @@ fn jet_rust_emit_partial_split(ctx: &JetRustEmitContext, base: MirPlaceBase, pre
 
 fn jet_rust_emit_partial_clear(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId) -> String {
     out := ""
-    fields := jet_rust_emit_partial_fields(ctx, owner)
+    fields :: jet_rust_emit_partial_fields(ctx, owner)
     loop field in fields {
-        child_prefix := jet_rust_emit_partial_path_append(prefix, field.id)
-        slot := jet_rust_emit_partial_field_slot(base, child_prefix)
+        child_prefix :: jet_rust_emit_partial_path_append(prefix, field.id)
+        slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
         out = "{out}drop({slot}.take()); "
         nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
         if nested_owner != None {
@@ -664,18 +641,18 @@ fn jet_rust_emit_partial_clear(ctx: &JetRustEmitContext, function: MirFunction, 
 }
 
 fn jet_rust_emit_partial_restore(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, boxed: Bool) -> String {
-    node := jet_rust_emit_partial_node_slot(base, prefix)
+    node :: jet_rust_emit_partial_node_slot(base, prefix)
     out := "if {node}.is_none() {{ "
-    fields := jet_rust_emit_partial_fields(ctx, owner)
+    fields :: jet_rust_emit_partial_fields(ctx, owner)
     values := [String]{}
     loop field in fields {
-        child_prefix := jet_rust_emit_partial_path_append(prefix, field.id)
+        child_prefix :: jet_rust_emit_partial_path_append(prefix, field.id)
         nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
         if nested_owner != None {
-            child_boxed := jet_rust_emit_partial_field_boxed(ctx, owner, field.id)
+            child_boxed :: jet_rust_emit_partial_field_boxed(ctx, owner, field.id)
             out = "{out}{jet_rust_emit_partial_restore(ctx, function, base, child_prefix, nested_owner ?? MirTypeId{value: 0}, child_boxed)}"
         }
-        slot := jet_rust_emit_partial_field_slot(base, child_prefix)
+        slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
         value := "{slot}.take().expect(\"MIR initialized field\")"
         if jet_rust_emit_partial_type_is_tuple(ctx, owner) {
             values.push(value)
@@ -689,14 +666,14 @@ fn jet_rust_emit_partial_restore(ctx: &JetRustEmitContext, function: MirFunction
 }
 
 fn jet_rust_emit_partial_write(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, prefix: [MirFieldId], owner: MirTypeId, fields: [MirFieldId], value: String) -> String {
-    node := jet_rust_emit_partial_node_slot(base, prefix)
+    node :: jet_rust_emit_partial_node_slot(base, prefix)
     if fields.len() == 0 {
         clear := jet_rust_emit_partial_clear(ctx, function, base, prefix, owner)
         return "{{ let __jet_replacement = {value}; {clear} {node} = Some(__jet_replacement); }}"
     }
     field := fields[0]
-    child_prefix := jet_rust_emit_partial_path_append(prefix, field)
-    slot := jet_rust_emit_partial_field_slot(base, child_prefix)
+    child_prefix :: jet_rust_emit_partial_path_append(prefix, field)
+    slot :: jet_rust_emit_partial_field_slot(base, child_prefix)
     whole := "__jet_whole"
     loop projected in fields -> whole = "({whole}).{jet_rust_emit_field_name(ctx, projected)}"
     partial := ""
@@ -707,7 +684,7 @@ fn jet_rust_emit_partial_write(ctx: &JetRustEmitContext, function: MirFunction, 
     } else {
         nested_owner := jet_rust_emit_partial_node_owner(ctx, function, base, child_prefix)
         if nested_owner != None {
-            tail := jet_rust_emit_partial_path_suffix(fields, 1)
+            tail :: jet_rust_emit_partial_path_suffix(fields, 1)
             partial = jet_rust_emit_partial_write(ctx, function, base, child_prefix, nested_owner ?? MirTypeId{value: 0}, tail, "__jet_replacement")
         } else {
             target := "{slot}.as_mut().expect(\"MIR initialized field\")"
@@ -725,7 +702,7 @@ fn jet_rust_emit_partial_write(ctx: &JetRustEmitContext, function: MirFunction, 
 fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId) -> ?String {
     loop row in function.places {
         if row.id == place {
-            fields := jet_rust_emit_partial_place_path(function, place)
+            fields :: jet_rust_emit_partial_place_path(function, place)
             if fields.len() == 0 || row.projections.len() != fields.len() -> return None
             prefix := [MirFieldId]{}
             out := ""
@@ -734,7 +711,7 @@ fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MirFunction, p
                 owner := jet_rust_emit_partial_owner(ctx, fields[index]) ?? MirTypeId{value: 0}
                 boxed := false
                 if prefix.len() > 0 {
-                    parent_owner := jet_rust_emit_partial_owner(ctx, prefix[prefix.len() - 1]) ?? MirTypeId{value: 0}
+                    parent_owner :: jet_rust_emit_partial_owner(ctx, prefix[prefix.len() - 1]) ?? MirTypeId{value: 0}
                     boxed = jet_rust_emit_partial_field_boxed(ctx, parent_owner, prefix[prefix.len() - 1])
                 }
                 out = "{out}{jet_rust_emit_partial_split(ctx, row.base, prefix, owner, boxed)} "
@@ -748,9 +725,9 @@ fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MirFunction, p
             if nested_owner != None {
                 out = "{out}{jet_rust_emit_partial_restore(ctx, function, row.base, prefix, nested_owner ?? MirTypeId{value: 0}, boxed)}"
             }
-            slot := jet_rust_emit_partial_node_slot(row.base, prefix)
-            unbox := if boxed -> "*" else -> ""
-            field_name := jet_rust_emit_field_name(ctx, last)
+            slot :: jet_rust_emit_partial_node_slot(row.base, prefix)
+            unbox :: if boxed -> "*" else -> ""
+            field_name :: jet_rust_emit_field_name(ctx, last)
             return Val("{{ {out} {unbox}{slot}.take().expect(\"MIR partial field {field_name}\") }}")
         }
     }
@@ -760,9 +737,9 @@ fn jet_rust_emit_partial_move(ctx: &JetRustEmitContext, function: MirFunction, p
 fn jet_rust_emit_partial_drop(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId) -> ?String {
     loop row in function.places {
         if row.id == place && row.projections.len() == 0 && jet_rust_emit_partial_root_has(function, row.base) {
-            owner := jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
-            clear := jet_rust_emit_partial_clear(ctx, function, row.base, [MirFieldId]{}, owner)
-            root := jet_rust_emit_partial_root_slot(row.base)
+            owner :: jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
+            clear :: jet_rust_emit_partial_clear(ctx, function, row.base, [MirFieldId]{}, owner)
+            root :: jet_rust_emit_partial_root_slot(row.base)
             return Val("{{ drop({root}.take()); {clear} () }}")
         }
     }
@@ -841,9 +818,9 @@ fn jet_rust_emit_partial_field_expression(ctx: &JetRustEmitContext, function: Mi
     loop row in function.places {
         if row.id == place {
             if !jet_rust_emit_partial_root_has(function, row.base) -> return None
-            fields := jet_rust_emit_place_projection_path(function, place)
+            fields :: jet_rust_emit_place_projection_path(function, place)
             if fields.len() == 0 || row.projections.len() != fields.len() -> return None
-            owner := jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
+            owner :: jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
             return Val(jet_rust_emit_partial_field_reference(ctx, function, row.base, [MirFieldId]{}, owner, fields, mutable))
         }
     }
@@ -853,13 +830,12 @@ fn jet_rust_emit_partial_field_expression(ctx: &JetRustEmitContext, function: Mi
 fn jet_rust_emit_partial_root_restore(ctx: &JetRustEmitContext, function: MirFunction, place: MirPlaceId) -> ?String {
     loop row in function.places {
         if row.id == place && row.projections.len() == 0 && jet_rust_emit_partial_root_has(function, row.base) {
-            owner := jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
+            owner :: jet_rust_emit_partial_node_owner(ctx, function, row.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
             return Val(jet_rust_emit_partial_restore(ctx, function, row.base, [MirFieldId]{}, owner, false))
         }
     }
     None
 }
-
 
 fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MirFunction, base: MirPlaceBase, mutable: Bool, projections: [MirProjection]) -> String {
     expression := if base == {
@@ -880,8 +856,8 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MirFunction, bas
             .Index(kind, index, call, _, location, _, _) -> {
                 index_expression := jet_rust_emit_value_read(index)
                 if kind == MirIndexKind.Map -> index_expression = "&({index_expression})"
-                symbol := jet_rust_emit_prelude_symbol(ctx, call)
-                borrow := if mutable -> "&mut" else -> "&"
+                symbol :: jet_rust_emit_prelude_symbol(ctx, call)
+                borrow :: if mutable -> "&mut" else -> "&"
                 expression = "*{symbol}({borrow}({expression}), {index_expression}, {jet_rust_emit_source_path(ctx, location.file)}, {location.line}u32)"
             }
         }
@@ -900,18 +876,18 @@ fn jet_rust_emit_place(ctx: &JetRustEmitContext, function: MirFunction, id: MirP
 fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String {
     uninit_local := jet_rust_emit_uninit_fixed_place_local(function, id)
     if uninit_local != None {
-        local := uninit_local ?? MirLocalId{value: 0}
+        local :: uninit_local ?? MirLocalId{value: 0}
         return "{jet_rust_emit_local_slot(local)}.as_ref().expect(\"MIR local\").read_array()"
     }
     partial := jet_rust_emit_partial_field_expression(ctx, function, id, false)
     if partial != None {
-        fallback := partial ?? "__jet_missing_partial"
+        fallback :: partial ?? "__jet_missing_partial"
         return "({fallback}).clone()"
     }
-    place := jet_rust_emit_place(ctx, function, id, false)
+    place :: jet_rust_emit_place(ctx, function, id, false)
     restore := jet_rust_emit_partial_root_restore(ctx, function, id)
     if restore != None {
-        prepare := restore ?? ""
+        prepare :: restore ?? ""
         return "{{ {prepare} ({place}).clone() }}"
     }
     "({place}).clone()"
@@ -921,17 +897,16 @@ fn jet_rust_emit_place_reference(ctx: &JetRustEmitContext, function: MirFunction
     if access == MirAccess.Move -> return jet_rust_emit_place_move(ctx, function, id)
     uninit_local := jet_rust_emit_uninit_fixed_place_local(function, id)
     if uninit_local != None {
-        local := uninit_local ?? MirLocalId{value: 0}
+        local :: uninit_local ?? MirLocalId{value: 0}
         if access == MirAccess.Write -> return "{jet_rust_emit_local_slot(local)}.as_mut().expect(\"MIR local\").as_array_mut()"
         return "{jet_rust_emit_local_slot(local)}.as_ref().expect(\"MIR local\").as_array()"
     }
-    partial := jet_rust_emit_partial_field_expression(ctx, function, id, access == MirAccess.Write)
-    if partial != None -> return partial ?? "__jet_missing_partial"
-    place := jet_rust_emit_place(ctx, function, id, access == MirAccess.Write)
+    if jet_rust_emit_partial_field_expression(ctx, function, id, access == MirAccess.Write) == .Val(partial) -> return partial
+    place :: jet_rust_emit_place(ctx, function, id, access == MirAccess.Write)
     restore := jet_rust_emit_partial_root_restore(ctx, function, id)
     if restore != None {
-        prepare := restore ?? ""
-        borrow := if access == MirAccess.Write -> "&mut" else -> "&"
+        prepare :: restore ?? ""
+        borrow :: if access == MirAccess.Write -> "&mut" else -> "&"
         return "{{ {prepare} {borrow}({place}) }}"
     }
     if access == MirAccess.Write -> "&mut ({place})" else -> "&({place})"
@@ -947,7 +922,6 @@ fn jet_rust_emit_partial_fields(ctx: &JetRustEmitContext, owner: MirTypeId) -> [
 
 // Partial split, restore, move, write, and drop helpers above use the same path-qualified storage tree.
 
-
 fn jet_rust_emit_place_lvalue(ctx: &JetRustEmitContext, function: MirFunction, id: MirPlaceId) -> String {
     jet_rust_emit_place(ctx, function, id, true)
 }
@@ -962,7 +936,7 @@ fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MirFunction, id
                             if place.base == {
                                 .Local(local) -> {
                                     if jet_rust_emit_local_uninit_fixed_type(function, local) != None {
-                                        index_text := jet_rust_emit_index_operand(ctx, function, index, location)
+                                        index_text :: jet_rust_emit_index_operand(ctx, function, index, location)
                                         return "{jet_rust_emit_local_slot(local)}.as_mut().expect(\"MIR local\").write(({index_text}) as usize, {value})"
                                     }
                                 }
@@ -974,13 +948,13 @@ fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MirFunction, id
                 }
             }
             if jet_rust_emit_partial_root_has(function, place.base) {
-                fields := jet_rust_emit_place_projection_path(function, id)
+                fields :: jet_rust_emit_place_projection_path(function, id)
                 if place.projections.len() == fields.len() {
-                    root_owner := jet_rust_emit_partial_node_owner(ctx, function, place.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
+                    root_owner :: jet_rust_emit_partial_node_owner(ctx, function, place.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
                     stored := value
                     if fields.len() > 0 {
                         last := fields[fields.len() - 1]
-                        owner := jet_rust_emit_partial_owner(ctx, last) ?? MirTypeId{value: 0}
+                        owner :: jet_rust_emit_partial_owner(ctx, last) ?? MirTypeId{value: 0}
                         if jet_rust_emit_partial_field_boxed(ctx, owner, last) -> stored = "Box::new({stored})"
                     }
                     return jet_rust_emit_partial_write(ctx, function, place.base, [MirFieldId]{}, root_owner, fields, stored)
@@ -1010,14 +984,13 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MirFunction, id:
     loop place in function.places {
         if place.id == id {
             if place.projections.len() != 0 {
-                partial := jet_rust_emit_partial_move(ctx, function, id)
-                if partial != None -> return partial ?? "unreachable!(\"missing partial move\")"
+                if jet_rust_emit_partial_move(ctx, function, id) == .Val(partial) -> return partial
                 jet_rust_emit_fail(ctx, JetRustEmitFailureKind.InvalidOwnership, "E0003", "projected MIR move lacks a source ownership projection", "checked projected moves require a canonical partial-move plan", Val(place.span))
                 return "unreachable!(\"unsupported projected MIR move\")"
             }
             if jet_rust_emit_partial_root_has(function, place.base) {
-                owner := jet_rust_emit_partial_node_owner(ctx, function, place.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
-                restore := jet_rust_emit_partial_restore(ctx, function, place.base, [MirFieldId]{}, owner, false)
+                owner :: jet_rust_emit_partial_node_owner(ctx, function, place.base, [MirFieldId]{}) ?? MirTypeId{value: 0}
+                restore :: jet_rust_emit_partial_restore(ctx, function, place.base, [MirFieldId]{}, owner, false)
                 return "{{ {restore} {jet_rust_emit_partial_root_slot(place.base)}.take().expect(\"MIR whole move\") }}"
             }
             if place.base == {

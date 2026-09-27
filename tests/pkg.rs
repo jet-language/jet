@@ -2492,7 +2492,7 @@ fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
     write(
         &tmp,
         "run.jet",
-        "fn run() { unused_binding :: 1; print(\"hi\") }\n",
+        "fn run() {\n    unused_binding :: 1\n    print(\"hi\")\n}\n",
     );
 
     let warning = jet_cmd(&["build", "run.jet"], &tmp, &store);
@@ -6058,7 +6058,7 @@ fn inferred_public_effect_drift_is_breaking() {
     let pure_path = dir.join("pure.jet");
     let io_path = dir.join("io.jet");
     let pure = "pub fn report() -> Int { return 1 }\n";
-    let io = "pub fn report() -> Int { print(\"report\"); return 1 }\n";
+    let io = "pub fn report() -> Int {\n    print(\"report\")\n    return 1\n}\n";
     fs::write(&pure_path, pure).unwrap();
     fs::write(&io_path, io).unwrap();
 
@@ -6082,8 +6082,8 @@ fn inferred_inline_module_effects_are_published() {
     fs::create_dir_all(&new_dir).unwrap();
     let old_path = old_dir.join("run.jet");
     let new_path = new_dir.join("run.jet");
-    let old = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() {} }\n";
-    let new = "module files { pub fn report() { print(\"report\"); } }\nmodule bench { pub fn report() { print(\"bench\"); } }\n";
+    let old = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() {} }\n";
+    let new = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() { print(\"bench\") } }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
@@ -6165,8 +6165,8 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) -[IO]> Int; }\n";
-    let new = "pub trait Render { fn draw(self) -[GPU]> Int; }\n";
+    let old = "pub trait Render { fn draw(self) -[IO]> Int }\n";
+    let new = "pub trait Render { fn draw(self) -[GPU]> Int }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
@@ -6197,7 +6197,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
     // canonical Length family instead (card #1765/#1769 root cause: the
     // prior fixture redeclared the family and shadowed the very identity
     // it meant to assert on).
-    let source = "pub trait Measure { fn scale(value: Meter) -> Meter; }\n";
+    let source = "pub trait Measure { fn scale(value: Meter) -> Meter }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());

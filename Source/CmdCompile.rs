@@ -5256,7 +5256,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     let command_files = [
         (
             jet::Syntax::COMMAND_FILE_RUN,
-            "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {\n//     print(\"run override\");\n// }\n// Inspect the stock behavior with: `jet run --show-default`\n",
+            "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {\n//     print(\"run override\")\n// }\n// Inspect the stock behavior with: `jet run --show-default`\n",
         ),
         (
             jet::Syntax::COMMAND_FILE_BUILD,
@@ -5264,7 +5264,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         ),
         (
             jet::Syntax::COMMAND_FILE_DEV,
-            "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {\n//     print(\"dev override\");\n// }\n// Inspect the stock behavior with: `jet dev --show-default`\n",
+            "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {\n//     print(\"dev override\")\n// }\n// Inspect the stock behavior with: `jet dev --show-default`\n",
         ),
         (
             jet::Syntax::COMMAND_FILE_TEST,

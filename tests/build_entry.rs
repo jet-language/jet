@@ -167,7 +167,10 @@ fn build(b: BuildContext) -> BuildPlan {
     return b.plan(app)
 }
 
-fn run() { print(dep_a.value()); print(dep_b.value()) }
+fn run() {
+    print(dep_a.value())
+    print(dep_b.value())
+}
 "#,
     );
     (root, dep_b_source)
@@ -869,7 +872,7 @@ fn package_build_entry_is_discovered_from_one_unimported_source_file() {
     fs::create_dir_all(root.join("tools")).unwrap();
     write(
         &root.join("tools/build.jet"),
-        "fn build(b: BuildContext) -> BuildPlan { target :: b.add_library(\"discovered\", [\"run.jet\"], []); return b.plan(target) }\n",
+        "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"discovered\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n",
     );
 
     let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
@@ -967,7 +970,7 @@ fn package_build_discovery_stops_at_nested_package_boundary() {
     fs::create_dir_all(root.join("tools")).unwrap();
     write(
         &root.join("tools/build.jet"),
-        "fn build(b: BuildContext) -> BuildPlan { target :: b.add_library(\"root\", [\"run.jet\"], []); return b.plan(target) }\n",
+        "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"root\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n",
     );
     fs::create_dir_all(root.join("packages/nested/tools")).unwrap();
     write(
@@ -977,7 +980,7 @@ fn package_build_discovery_stops_at_nested_package_boundary() {
     write(&root.join("packages/nested/run.jet"), "fn run() {}\n");
     write(
         &root.join("packages/nested/tools/build.jet"),
-        "fn build(b: BuildContext) -> BuildPlan { target :: b.add_library(\"nested\", [\"run.jet\"], []); return b.plan(target) }\n",
+        "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"nested\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n",
     );
 
     let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
@@ -2007,7 +2010,7 @@ fn program_info_uses_qualified_collision_free_type_function_and_method_identitie
 
 fn run_program_info_uses_qualified_collision_free_type_function_and_method_identities() {
     let root = project("program-identities");
-    write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() { helper(); panic(\"left\") }\npub fn answer() -> Int { return 7 }\n");
+    write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() {\n    helper()\n    panic(\"left\")\n}\npub fn answer() -> Int { return 7 }\n");
     write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
     let entry = root.join("main.jet");
     write(
@@ -2031,7 +2034,10 @@ fn build(b: BuildContext) -> BuildPlan {
     }
     return b.plan()
 }
-fn run() { left.same(); right.same() }
+fn run() {
+    left.same()
+    right.same()
+}
 "#,
     );
     let (check_diags, _, facts) =

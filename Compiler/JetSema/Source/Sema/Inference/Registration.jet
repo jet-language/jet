@@ -3,7 +3,7 @@
 // projects its canonical rows into solver context and keeps the proof result.
 
 pub fn sema_infer_context_for_registration(graph: SemaRegistrationGraph, caller_module_identity: String, caller_package_identity: String, parameters: [SemaRegistrationGenericParam], lexical_generic_params: [TGenericParam], expected: ?Type) -> SemaInferenceContext {
-    type_params := sema_inference_registration_params(parameters)
+    type_params :: sema_inference_registration_params(parameters)
     sema_inference_context(Val(graph), caller_module_identity, caller_package_identity, type_params, lexical_generic_params, expected)
 }
 
@@ -28,7 +28,7 @@ pub fn sema_infer_registered_method(function: SemaRegistrationFunction, graph: S
     if function.signature == {
         .Fn(parameters, ret, _, _, _, _) -> {
             actuals := [Type]{}
-            if receiver != None -> actuals.push(receiver ?? Type.Named("Unit"))
+            if receiver == .Val(receiver_ty) -> actuals.push(receiver_ty)
             loop arg in args -> actuals.push(arg)
             sema_infer_callable(&context, parameters, ret, actuals, explicit_type_args, span, &diagnostics)
         }

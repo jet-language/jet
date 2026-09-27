@@ -140,22 +140,24 @@ fn jet_web_fail(ctx: &JetWebEmitContext, kind: JetWebEmitFailureKind, code: Stri
 fn jet_web_id(value: Int) -> String { "{value}" }
 
 fn jet_web_json_quote(value: String) -> String {
-    bytes := value.bytes()
+    bytes :: value.bytes()
     out := "\""
     loop byte in bytes {
-        code := Int.from_u8(byte)
-        if code == 92 -> out = "{out}\\\\"
-        else if code == 34 -> out = "{out}\\\""
-        else if code == 10 -> out = "{out}\\n"
-        else if code == 13 -> out = "{out}\\r"
-        else if code == 9 -> out = "{out}\\t"
-        else if code < 32 -> {
-            hex := "0123456789abcdef"
-            high := String.from_bytes([hex.bytes()[code / 16]]) ?? "0"
-            low := String.from_bytes([hex.bytes()[code % 16]]) ?? "0"
-            out = "{out}\\u00{high}{low}"
+        code :: Int.from_u8(byte)
+        out = if {
+            code == 92 -> "{out}\\\\"
+            code == 34 -> "{out}\\\""
+            code == 10 -> "{out}\\n"
+            code == 13 -> "{out}\\r"
+            code == 9 -> "{out}\\t"
+            code < 32 -> {
+                hex :: "0123456789abcdef"
+                high :: String.from_bytes([hex.bytes()[code / 16]]) ?? "0"
+                low :: String.from_bytes([hex.bytes()[code % 16]]) ?? "0"
+                "{out}\\u00{high}{low}"
+            }
+            else -> "{out}{String.from_bytes([byte]) ?? \"\"}"
         }
-        else -> out = "{out}{String.from_bytes([byte]) ?? \"\"}"
     }
     "{out}\""
 }
@@ -163,36 +165,41 @@ fn jet_web_json_quote(value: String) -> String {
 fn jet_web_js_quote(value: String) -> String { jet_web_json_quote(value) }
 
 fn jet_web_bool_json(value: Bool) -> String { if value -> "true" else -> "false" }
+
 fn jet_web_optional_string(value: ?String) -> String {
-    if value == None -> return "null"
-    jet_web_json_quote(value ?? "")
+    text :: value ?? return "null"
+    jet_web_json_quote(text)
 }
+
 fn jet_web_optional_int(value: ?Int) -> String {
-    if value == None -> return "null"
-    "{value ?? 0}"
+    number :: value ?? return "null"
+    "{number}"
 }
 
 fn jet_web_bucket_json(value: ?MirWebBucket) -> String {
-    if value == None -> return "null"
-    bucket :: value ?? MirWebBucket.JS
-    if bucket == MirWebBucket.JS -> return jet_web_json_quote("JS")
-    jet_web_json_quote("Wasm")
+    bucket :: value ?? return "null"
+    if bucket == {
+        .JS -> jet_web_json_quote("JS")
+        else -> jet_web_json_quote("Wasm")
+    }
 }
 
 fn jet_web_marker_json(value: ?MirWebPartitionMarker) -> String {
-    if value == None -> return "null"
-    marker :: value ?? MirWebPartitionMarker.JS
-    if marker == MirWebPartitionMarker.JS -> return jet_web_json_quote("JS")
-    if marker == MirWebPartitionMarker.Wasm -> return jet_web_json_quote("Wasm")
-    jet_web_json_quote("WasmExport")
+    marker :: value ?? return "null"
+    if marker == {
+        .JS -> jet_web_json_quote("JS")
+        .Wasm -> jet_web_json_quote("Wasm")
+        else -> jet_web_json_quote("WasmExport")
+    }
 }
 
 fn jet_web_function_in_bucket(function: MirFunction, bucket: MirWebBucket) -> Bool {
-    if function.web_bucket != None -> return (function.web_bucket ?? bucket) == bucket
-    if function.web_marker == None -> return false
-    marker :: function.web_marker ?? MirWebPartitionMarker.JS
-    if bucket == MirWebBucket.JS -> return marker == MirWebPartitionMarker.JS
-    marker == MirWebPartitionMarker.Wasm || marker == MirWebPartitionMarker.WasmExport
+    if function.web_bucket == .Val(own) -> return own == bucket
+    marker :: function.web_marker ?? return false
+    if bucket == {
+        .JS -> marker == MirWebPartitionMarker.JS
+        else -> marker == MirWebPartitionMarker.Wasm || marker == MirWebPartitionMarker.WasmExport
+    }
 }
 
 fn jet_web_is_wasm_export(function: MirFunction) -> Bool {
@@ -249,9 +256,8 @@ fn jet_web_source_line(program: MirProgram, function: MirFunction) -> String {
         if text.bytes()[offset] == U8{10} -> line += 1
         offset += 1
     }
-    lines := text.split("\n")
-    if line > 0 && line <= lines.len() -> return lines[line - 1]
-    ""
+    lines :: text.split("\n")
+    if line > 0 && line <= lines.len() -> lines[line - 1] else -> ""
 }
 
 fn jet_web_validate_assets(ctx: &JetWebEmitContext) {
@@ -302,7 +308,7 @@ fn jet_web_validate_assets(ctx: &JetWebEmitContext) {
 }
 
 fn jet_web_validate_artifact(ctx: &JetWebEmitContext) {
-    artifact := ctx.artifact
+    artifact :: ctx.artifact
     if artifact.kind != MirArtifactKind.WebApplication {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "selected MIR artifact is not a WebApplication", "Web emission accepts only the checked WebApplication artifact plan", None)
     }

@@ -1,9 +1,9 @@
 // MIR operation dispatcher for the JavaScript Web partition.
 
 fn jet_web_js_result_copy(ctx: &JetWebEmitContext, ty: ?MirType, expression: String) -> String {
-    if ty != None -> return jet_web_js_copy(ctx, ty ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}, expression)
-    expression
+    if ty == .Val(known) -> jet_web_js_copy(ctx, known, expression) else -> expression
 }
+
 fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> String {
     if symbol == {
         .Prelude(name) -> jet_web_js_symbol(ctx, MirSymbol.Prelude(name))
@@ -12,7 +12,7 @@ fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> St
 }
 
 fn jet_web_js_data_symbol(name: String) -> Bool {
-    names := [String]{
+    names :: [String]{
         "jet_data_count", "jet_data_query", "jet_data_track", "jet_data_query_tracked",
         "jet_data_track_insert", "jet_data_track_replace", "jet_data_track_remove",
         "jet_data_load", "jet_data_loader_load", "jet_data_loader_load_default",
@@ -34,6 +34,7 @@ fn jet_web_js_data_symbol(name: String) -> Bool {
     }
     names.contains(name) || name.starts_with("jet_data.loader.")
 }
+
 fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool {
     if symbol == {
         .Prelude(name) -> jet_web_js_data_symbol(name)
@@ -42,31 +43,27 @@ fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool {
 }
 
 fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunction, call: MirCoreCallId, route: ?MirPreludeCallId, args: [MirCallArg], type_args: [MirType]) -> String {
-    core := jet_web_find_core(ctx.program, call)
-    if core == None {
+    core_row :: jet_web_find_core(ctx.program, call) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.MissingCoreCall, "E0003", "MIR Core call has no registry row", "checked Core calls must preserve a canonical Core ABI row", Val(function.span))
         return "undefined"
     }
-    core_row :: core ?? return "undefined"
     if !jet_web_js_validate_type_args(ctx, type_args) -> return "undefined"
     if core_row.arity > args.len() || core_row.max_arity < args.len() || core_row.borrow_mask.len() != args.len() {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Core call arity does not match its checked ABI", "the Core-call row and operation payload must agree exactly", Val(function.span))
         return "undefined"
     }
-    values := jet_web_js_call_values(ctx, function, args, false)
+    values :: jet_web_js_call_values(ctx, function, args, false)
     if core_row.module_name == "core.models" && core_row.member == "open" {
         if values.len() != 1 {
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR models.open has an invalid value count", "checked model open calls take one output name", Val(function.span))
             return "undefined"
         }
-        definition := jet_web_js_model_trait_for_type_args(ctx, type_args)
-        if definition == None {
+        model :: jet_web_js_model_trait_for_type_args(ctx, type_args) ?? {
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR models.open has no checked model trait binding", "checked model calls retain a model-output trait identity", Val(function.span))
             return "undefined"
         }
-        model :: definition ?? return "undefined"
-        expression := "__jet_model_open_{jet_web_js_model_prefix(model.key)}({values[0]})"
-        if function.generator == None -> expression = "await ({expression})"
+        open_call :: "__jet_model_open_{jet_web_js_model_prefix(model.key)}({values[0]})"
+        expression :: if function.generator == None -> "await ({open_call})" else -> open_call
         return jet_web_js_guard_core(ctx, core_row, expression)
     }
     if core_row.module_name == "core.testing" && core_row.member == "histories" {
@@ -74,14 +71,13 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunctio
             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR testing.histories metadata is inconsistent", "checked history calls carry one command type and six runtime values", Val(function.span))
             return "undefined"
         }
-        descriptor := "{{ command_type: {jet_web_js_quote(jet_web_js_type_descriptor(type_args[0]))}, provenance: {{ source: {jet_web_js_quote(ctx.history_source)}, tool: {jet_web_js_quote(ctx.history_tool)}, target: {jet_web_js_quote(ctx.history_target)} }} }}"
-        expression := "{jet_web_js_core_symbol(ctx, core_row.symbol)}({values.join(\", \")}, {descriptor})"
+        descriptor :: "{{ command_type: {jet_web_js_quote(jet_web_js_type_descriptor(type_args[0]))}, provenance: {{ source: {jet_web_js_quote(ctx.history_source)}, tool: {jet_web_js_quote(ctx.history_tool)}, target: {jet_web_js_quote(ctx.history_target)} }} }}"
+        expression :: "{jet_web_js_core_symbol(ctx, core_row.symbol)}({values.join(\", \")}, {descriptor})"
         return jet_web_js_guard_core(ctx, core_row, expression)
     }
-    route_row := if route != None -> jet_web_find_prelude(ctx.program, route ?? MirPreludeCallId{value: 0}) else -> None
-    if route_row != None {
-        prelude :: route_row ?? return "undefined"
-        symbol := jet_web_js_symbol(ctx, prelude.symbol)
+    route_row :: if route == .Val(route_id) -> jet_web_find_prelude(ctx.program, route_id) else -> None
+    if route_row == .Val(prelude) {
+        symbol :: jet_web_js_symbol(ctx, prelude.symbol)
         if mir_symbol_name(prelude.symbol) == "jet_transaction_commit" {
             if values.len() != 1 {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR transaction commit has an invalid value count", "checked transaction commits take exactly one transaction handle", Val(function.span))
@@ -90,41 +86,38 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MirFunctio
             return jet_web_js_guard_core(ctx, core_row, "await ({values[0]}.commit())")
         }
         if jet_web_js_data_symbol(mir_symbol_name(prelude.symbol)) {
-            descriptors := [String]{}
-            loop ty in type_args -> descriptors.push(jet_web_js_quote(jet_web_js_type_descriptor(ty)))
+            descriptors :: loop ty in type_args -> jet_web_js_quote(jet_web_js_type_descriptor(ty))
             if values.len() < prelude.signature.arity || values.len() > prelude.signature.max_arity || prelude.signature.borrow_mask.len() != values.len() {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR data route arity does not match its checked ABI", "checked data routes preserve runtime values before type descriptors", Val(function.span))
                 return "undefined"
             }
-            expression := "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
-            return expression
+            return "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
         }
     }
     if jet_web_js_core_data_symbol(core_row.symbol) {
-        descriptors := [String]{}
-        loop ty in type_args -> descriptors.push(jet_web_js_quote(jet_web_js_type_descriptor(ty)))
-        symbol := jet_web_js_core_symbol(ctx, core_row.symbol)
-        expression := "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
-        return expression
+        descriptors :: loop ty in type_args -> jet_web_js_quote(jet_web_js_type_descriptor(ty))
+        symbol :: jet_web_js_core_symbol(ctx, core_row.symbol)
+        return "{symbol}({values.join(\", \")}{if values.len() > 0 -> \", \" else -> \"\"}[{descriptors.join(\", \")}])"
     }
-    if route == None {
-        symbol := jet_web_js_core_symbol(ctx, core_row.symbol)
-        return jet_web_js_guard_core(ctx, core_row, "{symbol}({values.join(\", \")})")
+    if route == {
+        .Val(route_id) -> jet_web_js_guard_core(ctx, core_row, jet_web_js_route_call(ctx, route_id, values))
+        else -> {
+            symbol :: jet_web_js_core_symbol(ctx, core_row.symbol)
+            jet_web_js_guard_core(ctx, core_row, "{symbol}({values.join(\", \")})")
+        }
     }
-    return jet_web_js_guard_core(ctx, core_row, jet_web_js_route_call(ctx, route ?? MirPreludeCallId{value: 0}, values))
 }
 
-
 fn jet_web_js_field_object(ctx: &JetWebEmitContext, type_id: MirTypeId, fields: [MirFieldValue], move_fields: Bool) -> String {
-    rendered := [String]{}
-    loop field in fields {
-        value := if move_fields -> jet_web_js_move(field.value) else -> jet_web_js_value(field.value)
-        rendered.push("{jet_web_js_quote(jet_web_js_field_name(ctx, field.field))}: {value}")
+    rendered :: loop field in fields -> {
+        value :: if move_fields -> jet_web_js_move(field.value) else -> jet_web_js_value(field.value)
+        "{jet_web_js_quote(jet_web_js_field_name(ctx, field.field))}: {value}"
     }
-    object := "{{ {rendered.join(", ")} }}"
+    object :: "{{ {rendered.join(", ")} }}"
 
     "Object.defineProperty({object}, \"__jet_type\", {{ value: {jet_web_js_quote(\"{type_id.value}\")}, enumerable: false }})"
 }
+
 fn jet_web_js_effect_name(effect: Effect) -> String {
     if effect == {
         .Net -> "Net"
@@ -146,30 +139,26 @@ fn jet_web_js_effect_name(effect: Effect) -> String {
 }
 
 fn jet_web_js_guard_core(ctx: &JetWebEmitContext, core: MirCoreCall, expression: String) -> String {
-    if core.effect_kind == None -> return expression
-    effect := core.effect_kind ?? Effect.Net
-    controlled := if effect == {
+    effect :: core.effect_kind ?? return expression
+    controlled :: if effect == {
         .Time -> core.module_name == "core.time" && core.member != "start"
         .Rand -> core.module_name != "core.crypto.random"
         else -> false
     }
-    if controlled -> return expression
-    "(jet_world_reject_uncontrolled_effect({jet_web_js_quote(jet_web_js_effect_name(effect))}), {expression})"
+    if controlled -> expression else -> "(jet_world_reject_uncontrolled_effect({jet_web_js_quote(jet_web_js_effect_name(effect))}), {expression})"
 }
 
 fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, args: [MirEnumArg]) -> String {
-    definition := jet_web_find_type(ctx.program, type_id)
-    if definition == None {
+    row :: jet_web_find_type(ctx.program, type_id) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum type definition is missing", "checked enum construction resolves to a canonical type definition", None)
         return "undefined"
     }
     valid := false
-    row :: definition ?? return "undefined"
     if row.kind == {
         .Enum(variants, _) -> {
             loop candidate in variants {
                 if candidate.name == variant {
-                    arity := if candidate.payload == {
+                    arity :: if candidate.payload == {
                         .Unit -> 0
                         .Single(_) -> 1
                         .Named(fields) -> fields.len()
@@ -184,29 +173,26 @@ fn jet_web_js_enum_object(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: 
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum variant metadata is inconsistent", "checked enum construction names a declared variant with matching payload arity", None)
         return "undefined"
     }
-    rendered := [String]{}
-    loop arg in args -> rendered.push(jet_web_js_move(arg.value))
-    object := "{{ tag: {jet_web_js_quote(variant)}, values: [{rendered.join(", ")}] }}"
+    rendered :: loop arg in args -> jet_web_js_move(arg.value)
+    object :: "{{ tag: {jet_web_js_quote(variant)}, values: [{rendered.join(", ")}] }}"
     "Object.defineProperty({object}, \"__jet_type\", {{ value: {jet_web_js_quote(\"{type_id.value}\")}, enumerable: false }})"
 }
+
 fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, variant: String, index: ?Int) -> Bool {
-    definition := jet_web_find_type(ctx.program, type_id)
-    if definition == None {
+    row :: jet_web_find_type(ctx.program, type_id) ?? {
         jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum type definition is missing", "checked enum operations resolve to a canonical type definition", None)
         return false
     }
-    row :: definition ?? return false
     if row.kind == {
         .Enum(variants, _) -> {
             loop candidate in variants {
                 if candidate.name == variant {
-                    arity := if candidate.payload == {
+                    arity :: if candidate.payload == {
                         .Unit -> 0
                         .Single(_) -> 1
                         .Named(fields) -> fields.len()
                     }
-                    if index != None {
-                        position := index ?? 0
+                    if index == .Val(position) {
                         if position < 0 || position >= arity {
                             jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR enum payload index is out of range", "checked enum payload operations name a declared payload position", None)
                             return false
@@ -222,33 +208,28 @@ fn jet_web_js_enum_variant_valid(ctx: &JetWebEmitContext, type_id: MirTypeId, va
     false
 }
 
-
 fn jet_web_js_conversion(ctx: &JetWebEmitContext, value: MirValueId, parameters: [MirValueId], target: MirType, conversion: MirConversion) -> String {
-    expression := jet_web_js_move(value)
+    expression :: jet_web_js_move(value)
     if conversion == {
-        .Transparent -> return expression
+        .Transparent -> expression
         .NumericCast -> {
             if target.kind == {
-                .IntN(_, bits) -> {
-                    if bits > 32 -> return "BigInt({expression})"
-                    return "Number({expression})"
-                }
-                .Int -> return "BigInt({expression})"
-                .Float | .Float32 -> return "Number({expression})"
-                .Bool -> return "Boolean({expression})"
-                else -> return expression
+                .IntN(_, bits) -> if bits > 32 -> "BigInt({expression})" else -> "Number({expression})"
+                .Int -> "BigInt({expression})"
+                .Float | .Float32 -> "Number({expression})"
+                .Bool -> "Boolean({expression})"
+                else -> expression
             }
         }
-        .SendFn -> return expression
+        .SendFn -> expression
         .Prelude(call, location, fallibility) -> {
             args := [String]{expression}
             loop parameter in parameters -> args.push(jet_web_js_move(parameter))
-            if location != None {
-                row :: location ?? MirPanicLoc{file: MirSourceFileId{value: 0}, line: 0, column: 0}
+            if location == .Val(row) {
                 args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
                 args.push("{row.line}")
             }
-            return jet_web_js_route_call(ctx, call, args)
+            jet_web_js_route_call(ctx, call, args)
         }
     }
 }
@@ -258,35 +239,34 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
         .Parameter(index, _) -> {
             parameter := None
             loop row in function.params { if row.index == index -> parameter = Val(row) }
-            if parameter == None {
+            row :: parameter ?? {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR parameter index is missing", "checked Parameter operations must resolve to a function parameter", Val(function.span))
                 return "undefined"
             }
-            row :: parameter ?? return "undefined"
-            expression := "__jet_args[{index}]"
-            if row.access == MirAccess.Move -> return expression
-            return jet_web_js_result_copy(ctx, result_ty, expression)
+            expression :: "__jet_args[{index}]"
+            if row.access == MirAccess.Move -> expression else -> jet_web_js_result_copy(ctx, result_ty, expression)
         }
         .Capture(slot) -> {
             if slot < 0 || slot >= function.capture_params.len() {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR capture slot is missing", "checked Capture operations must resolve to a capture parameter", Val(function.span))
                 return "undefined"
             }
-            capture := function.capture_params[slot]
-            expression := if capture.access == MirAccess.Move -> "__jet_env[{slot}]" else -> "__jet_env[{slot}].value"
-            if capture.access == MirAccess.Move -> return expression
-            return jet_web_js_result_copy(ctx, result_ty, expression)
+            capture :: function.capture_params[slot]
+            expression :: if capture.access == MirAccess.Move -> "__jet_env[{slot}]" else -> "__jet_env[{slot}].value"
+            if capture.access == MirAccess.Move -> expression else -> jet_web_js_result_copy(ctx, result_ty, expression)
         }
         .Global(name) -> {
-            if name == "transaction" -> return "(() => {{ const __jet_transaction = jet_transaction(); __jet_transactions.push(__jet_transaction); return __jet_transaction; }})()"
-            if name == "stm" -> return "jet_stm_begin()"
-            return "globalThis[{jet_web_js_quote(name)}]"
+            if name == {
+                "transaction" -> "(() => {{ const __jet_transaction = jet_transaction(); __jet_transactions.push(__jet_transaction); return __jet_transaction; }})()"
+                "stm" -> "jet_stm_begin()"
+                else -> "globalThis[{jet_web_js_quote(name)}]"
+            }
         }
-        .Phi(incoming) -> return jet_web_js_phi(incoming)
-        .ReadPlace(place) -> return jet_web_js_read_place(ctx, function, place)
-        .MovePlace(place) -> return jet_web_js_move_place(ctx, function, place)
-        .WritePlace(place, value) -> return jet_web_js_write_place(ctx, function, place, jet_web_js_move(value))
-        .ReplacePlace(place, value) -> return jet_web_js_write_place(ctx, function, place, jet_web_js_move(value))
+        .Phi(incoming) -> jet_web_js_phi(incoming)
+        .ReadPlace(place) -> jet_web_js_read_place(ctx, function, place)
+        .MovePlace(place) -> jet_web_js_move_place(ctx, function, place)
+        .WritePlace(place, value) -> jet_web_js_write_place(ctx, function, place, jet_web_js_move(value))
+        .ReplacePlace(place, value) -> jet_web_js_write_place(ctx, function, place, jet_web_js_move(value))
         .InitializeUninit(place) -> {
             count := None
             loop row in function.places {
@@ -295,28 +275,25 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
                     else -> {}
                 }
             }
-            value := if count != None -> "Array({count ?? 0}).fill(undefined)" else -> "undefined"
-            return jet_web_js_write_place(ctx, function, place, value)
+            value :: if count != None -> "Array({count ?? 0}).fill(undefined)" else -> "undefined"
+            jet_web_js_write_place(ctx, function, place, value)
         }
         .Copy(value, materialize_view) -> {
-            source := jet_web_find_value_type(function, value)
-            if source == None {
+            source :: jet_web_find_value_type(function, value) ?? {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR Copy source type is missing", "checked value facts must cover every copy operation", Val(function.span))
                 return "undefined"
             }
-            if materialize_view -> return "jet_view_copy({jet_web_js_value(value)})"
-            return jet_web_js_copy(ctx, source ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}, jet_web_js_value(value))
+            if materialize_view -> "jet_view_copy({jet_web_js_value(value)})" else -> jet_web_js_copy(ctx, source, jet_web_js_value(value))
         }
-        .Move(value) -> return jet_web_js_move(value)
-        .Convert(value, parameters, target, conversion) -> return jet_web_js_conversion(ctx, value, parameters, target, conversion)
+        .Move(value) -> jet_web_js_move(value)
+        .Convert(value, parameters, target, conversion) -> jet_web_js_conversion(ctx, value, parameters, target, conversion)
         .TraitBox(value, target) -> {
             target_ty := None
             loop candidate in ctx.program.type_instances { if candidate.identity == Val(target) -> target_ty = Val(candidate) }
-            if target_ty == None {
+            row :: target_ty ?? {
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait box target type is missing", "checked trait boxes name a canonical target type", Val(function.span))
                 return "undefined"
             }
-            row :: target_ty ?? return "undefined"
             if row.kind != {
                 .TraitObject(bounds) -> bounds.len() == 1
                 else -> false
@@ -324,118 +301,110 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MirFunction, operatio
                 jet_web_fail(ctx, JetWebEmitFailureKind.InvalidMir, "E0003", "MIR trait box target is not a single-bound trait object", "checked trait boxes name exactly one canonical trait-object bound", Val(function.span))
                 return "undefined"
             }
-            return jet_web_js_value(value)
+            jet_web_js_value(value)
         }
-        .Constant(value) -> return jet_web_js_constant(ctx, value)
-        .Unary(op, value) -> return jet_web_js_unary(op, jet_web_js_value(value))
+        .Constant(value) -> jet_web_js_constant(ctx, value)
+        .Unary(op, value) -> jet_web_js_unary(op, jet_web_js_value(value))
         .Binary(op, dispatch, overflow, left, right) -> {
             if dispatch == {
                 .Prelude(call, location) -> {
                     args := [String]{jet_web_js_value(left), jet_web_js_value(right)}
-                    if location != None {
-                        row :: location ?? MirPanicLoc{file: MirSourceFileId{value: 0}, line: 0, column: 0}
+                    if location == .Val(row) {
                         args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, row.file) ?? ""))
                         args.push("{row.line}")
                     }
-                    return jet_web_js_route_call(ctx, call, args)
+                    jet_web_js_route_call(ctx, call, args)
                 }
-                .Primitive -> return jet_web_js_binary(op, jet_web_js_value(left), jet_web_js_value(right))
+                .Primitive -> jet_web_js_binary(op, jet_web_js_value(left), jet_web_js_value(right))
             }
         }
         .BuildString(parts) -> {
-            rendered := [String]{}
-            loop part in parts -> rendered.push(jet_web_js_string_part(ctx, part))
-            return "[{rendered.join(", ")}].join(\"\")"
+            rendered :: loop part in parts -> jet_web_js_string_part(ctx, part)
+            "[{rendered.join(", ")}].join(\"\")"
         }
         .BuildList(values, _) -> {
-            rendered := [String]{}
-            loop value in values -> rendered.push(jet_web_js_move(value))
-            return "[{rendered.join(", ")}]"
+            rendered :: loop value in values -> jet_web_js_move(value)
+            "[{rendered.join(", ")}]"
         }
         .BuildMap(entries) -> {
-            rendered := [String]{}
-            loop entry in entries -> rendered.push("[{jet_web_js_move(entry.key)}, {jet_web_js_move(entry.value)}]")
-            return "new Map([{rendered.join(", ")}])"
+            rendered :: loop entry in entries -> "[{jet_web_js_move(entry.key)}, {jet_web_js_move(entry.value)}]"
+            "new Map([{rendered.join(", ")}])"
         }
         .EnumIs(subject, owner, variant) -> {
-            if !jet_web_js_enum_variant_valid(ctx, owner, variant, None) -> return "undefined"
-            return "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)}"
+            if !jet_web_js_enum_variant_valid(ctx, owner, variant, None) -> "undefined" else -> "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)}"
         }
         .EnumPayload(subject, owner, variant, index) -> {
             if !jet_web_js_enum_variant_valid(ctx, owner, variant, Val(index)) -> return "undefined"
-            expression := "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)} ? {jet_web_js_value(subject)}?.values[{index}] : undefined"
-            return jet_web_js_result_copy(ctx, result_ty, expression)
+            expression :: "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)} ? {jet_web_js_value(subject)}?.values[{index}] : undefined"
+            jet_web_js_result_copy(ctx, result_ty, expression)
         }
-        .OptionIsSome(subject) -> return "{jet_web_js_value(subject)}?.tag === \"Ok\""
-        .OptionValue(subject) -> return "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== \"Ok\") throw new Error(\"missing Option payload\"); return carrier.values[0]; }})()"
-        .ResultIsOk(subject) -> return "{jet_web_js_value(subject)}?.tag === \"Ok\""
+        .OptionIsSome(subject) -> "{jet_web_js_value(subject)}?.tag === \"Ok\""
+        .OptionValue(subject) -> "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== \"Ok\") throw new Error(\"missing Option payload\"); return carrier.values[0]; }})()"
+        .ResultIsOk(subject) -> "{jet_web_js_value(subject)}?.tag === \"Ok\""
         .ResultValue(subject, ok) -> {
-            tag := if ok -> "Ok" else -> "Err"
-            return "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== {jet_web_js_quote(tag)}) throw new Error(\"missing Result payload\"); return carrier.values[0]; }})()"
+            tag :: if ok -> "Ok" else -> "Err"
+            "(() => {{ const carrier = {jet_web_js_move(subject)}; if (carrier?.tag !== {jet_web_js_quote(tag)}) throw new Error(\"missing Result payload\"); return carrier.values[0]; }})()"
         }
         .PatternCapture(matched, index) -> {
-            expression := "{jet_web_js_value(matched)}?.tag === \"Ok\" ? {jet_web_js_value(matched)}?.values?.[0]?.[{index}] : undefined"
-            return jet_web_js_result_copy(ctx, result_ty, expression)
+            expression :: "{jet_web_js_value(matched)}?.tag === \"Ok\" ? {jet_web_js_value(matched)}?.values?.[0]?.[{index}] : undefined"
+            jet_web_js_result_copy(ctx, result_ty, expression)
         }
-        .PatternMatched(matched) -> return "{jet_web_js_value(matched)}?.tag === \"Ok\""
+        .PatternMatched(matched) -> "{jet_web_js_value(matched)}?.tag === \"Ok\""
         .ProjectMembers(base, members) -> {
             expression := jet_web_js_value(base)
             loop field in members -> expression = "({expression})[{jet_web_js_quote(jet_web_js_field_name(ctx, field))}]"
-            return jet_web_js_result_copy(ctx, result_ty, expression)
+            jet_web_js_result_copy(ctx, result_ty, expression)
         }
-        .Index(call, base, index, kind, access, location, context) -> return jet_web_js_index_call(ctx, call, jet_web_js_value(base), jet_web_js_value(index), location, context)
+        .Index(call, base, index, kind, access, location, context) -> jet_web_js_index_call(ctx, call, jet_web_js_value(base), jet_web_js_value(index), location, context)
         .Slice(call, base, start, end, range, location) -> {
-            range_value := None
-            if range != None -> range_value = Val(jet_web_js_value(range ?? MirValueId{value: 0}))
-            return jet_web_js_slice_call(ctx, call, jet_web_js_value(base), jet_web_js_value(start), jet_web_js_value(end), range_value, location)
+            range_value :: if range == .Val(range_id) -> Val(jet_web_js_value(range_id)) else -> None
+            jet_web_js_slice_call(ctx, call, jet_web_js_value(base), jet_web_js_value(start), jet_web_js_value(end), range_value, location)
         }
-        .Range(start, end, exclusive) -> return "{{ start: {jet_web_js_value(start)}, end: {jet_web_js_value(end)}, exclusive: {jet_web_bool_json(exclusive)} }}"
-        .Field(base, field) -> return jet_web_js_result_copy(ctx, result_ty, "{jet_web_js_value(base)}[{jet_web_js_quote(jet_web_js_field_name(ctx, field))}]")
-        .Struct(type_id, fields) -> return jet_web_js_field_object(ctx, type_id, fields, true)
-        .Enum(type_id, variant, args) -> return jet_web_js_enum_object(ctx, type_id, variant, args)
-        .Tuple(type_id, fields) -> return jet_web_js_field_object(ctx, type_id, fields, true)
-        .Present(value) -> return "jet_option_some({jet_web_js_move(value)})"
-        .Absent -> return "jet_absent()"
-        .ResultOk(value) -> return "jet_outcome_ok({jet_web_js_move(value)})"
-        .ResultErr(value) -> return "jet_outcome_err({jet_web_js_move(value)})"
-        .Call(callee, args, type_args) -> return jet_web_js_callee(ctx, function, callee, args, type_args)
+        .Range(start, end, exclusive) -> "{{ start: {jet_web_js_value(start)}, end: {jet_web_js_value(end)}, exclusive: {jet_web_bool_json(exclusive)} }}"
+        .Field(base, field) -> jet_web_js_result_copy(ctx, result_ty, "{jet_web_js_value(base)}[{jet_web_js_quote(jet_web_js_field_name(ctx, field))}]")
+        .Struct(type_id, fields) -> jet_web_js_field_object(ctx, type_id, fields, true)
+        .Enum(type_id, variant, args) -> jet_web_js_enum_object(ctx, type_id, variant, args)
+        .Tuple(type_id, fields) -> jet_web_js_field_object(ctx, type_id, fields, true)
+        .Present(value) -> "jet_option_some({jet_web_js_move(value)})"
+        .Absent -> "jet_absent()"
+        .ResultOk(value) -> "jet_outcome_ok({jet_web_js_move(value)})"
+        .ResultErr(value) -> "jet_outcome_err({jet_web_js_move(value)})"
+        .Call(callee, args, type_args) -> jet_web_js_callee(ctx, function, callee, args, type_args)
         .IndirectCall(callee, args, type_args) -> {
             if !jet_web_js_validate_type_args(ctx, type_args) -> return "undefined"
-            rendered := jet_web_js_call_values(ctx, function, args, true)
-            return "({jet_web_js_value(callee)})({rendered.join(\", \")})"
+            rendered :: jet_web_js_call_values(ctx, function, args, true)
+            "({jet_web_js_value(callee)})({rendered.join(\", \")})"
         }
-        .Closure(function_id, captures, facts) -> return jet_web_js_closure_expression(ctx, function, function_id, captures)
-        .PtrFromAddr(address, element) -> return jet_web_js_result_copy(ctx, result_ty, jet_web_js_value(address))
-        .Deref(value) -> return jet_web_js_result_copy(ctx, result_ty, "({jet_web_js_value(value)}).value")
-        .RawAddressOf(place) -> return jet_web_js_place_cell(ctx, function, place)
+        .Closure(function_id, captures, facts) -> jet_web_js_closure_expression(ctx, function, function_id, captures)
+        .PtrFromAddr(address, element) -> jet_web_js_result_copy(ctx, result_ty, jet_web_js_value(address))
+        .Deref(value) -> jet_web_js_result_copy(ctx, result_ty, "({jet_web_js_value(value)}).value")
+        .RawAddressOf(place) -> jet_web_js_place_cell(ctx, function, place)
         .AddressOf(place, access) -> {
-            if access == MirAccess.Read -> return jet_web_js_read_place(ctx, function, place)
-            return jet_web_js_place_cell(ctx, function, place)
+            if access == MirAccess.Read -> jet_web_js_read_place(ctx, function, place) else -> jet_web_js_place_cell(ctx, function, place)
         }
-        .CoreCall(call, route, args, type_args, fallibility, data_plan) -> return jet_web_js_core_call_expression(ctx, function, call, Val(route), args, type_args)
-        .AttachTag(value, tag) -> return jet_web_js_move(value)
+        .CoreCall(call, route, args, type_args, fallibility, data_plan) -> jet_web_js_core_call_expression(ctx, function, call, Val(route), args, type_args)
+        .AttachTag(value, tag) -> jet_web_js_move(value)
         .Todo(call, location, expected_type) -> {
-            if expected_type != None {
-                ty :: expected_type ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}
+            if expected_type == .Val(ty) {
                 if ty.identity != None && !jet_web_js_type_instance_valid(ctx, ty.identity ?? MirTypeId{value: 0}) -> return "undefined"
             }
-            expected := if expected_type != None -> jet_web_js_type_descriptor(expected_type ?? MirType{kind: MirTypeKind.Int, identity: None, layout: mir_type_layout(MirTypeKind.Int)}) else -> "(unknown)"
-            return jet_web_js_route_call(ctx, call, [jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? ""), "{location.line}", jet_web_js_quote(expected)])
+            expected :: if expected_type == .Val(ty) -> jet_web_js_type_descriptor(ty) else -> "(unknown)"
+            jet_web_js_route_call(ctx, call, [jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? ""), "{location.line}", jet_web_js_quote(expected)])
         }
-        .Never(reason) -> return "(() => {{ throw new Error({jet_web_js_quote(reason)}); }})()"
-        .Semantic(operation) -> return jet_web_js_semantic_expression(ctx, function, operation, result_ty)
+        .Never(reason) -> "(() => {{ throw new Error({jet_web_js_quote(reason)}); }})()"
+        .Semantic(operation) -> jet_web_js_semantic_expression(ctx, function, operation, result_ty)
         .LoopRangeInit(call, start, end, step, exclusive) -> {
-            step_value := if step != None -> jet_web_js_value(step ?? MirValueId{value: 0}) else -> "1"
-            return jet_web_js_route_call(ctx, call, [jet_web_js_value(start), jet_web_js_value(end), step_value, jet_web_bool_json(exclusive)])
+            step_value :: if step == .Val(step_id) -> jet_web_js_value(step_id) else -> "1"
+            jet_web_js_route_call(ctx, call, [jet_web_js_value(start), jet_web_js_value(end), step_value, jet_web_bool_json(exclusive)])
         }
-        .LoopRangeHasNext(call, cursor) | .LoopRangeValue(call, cursor) | .LoopRangeAdvance(call, cursor) -> return jet_web_js_route_call(ctx, call, [jet_web_js_value(cursor)])
+        .LoopRangeHasNext(call, cursor) | .LoopRangeValue(call, cursor) | .LoopRangeAdvance(call, cursor) -> jet_web_js_route_call(ctx, call, [jet_web_js_value(cursor)])
         .LoopIterInit(call, collection, step, by_value, source_kind) -> {
-            step_value := if step != None -> jet_web_js_value(step ?? MirValueId{value: 0}) else -> "1"
-            return jet_web_js_route_call(ctx, call, [jet_web_js_value(collection), step_value])
+            step_value :: if step == .Val(step_id) -> jet_web_js_value(step_id) else -> "1"
+            jet_web_js_route_call(ctx, call, [jet_web_js_value(collection), step_value])
         }
-        .LoopIterHasNext(call, cursor) | .LoopIterValue(call, cursor) | .LoopIterAdvance(call, cursor) -> return jet_web_js_route_call(ctx, call, [jet_web_js_value(cursor)])
-        .ScopeEnter(scope, test_member) -> return "jet_scope_enter({scope.value})"
-        .ScopeExit(scope) -> return "jet_scope_exit({scope.value})"
-        .Drop(value, kind) -> return "void ({jet_web_js_value(value)})"
+        .LoopIterHasNext(call, cursor) | .LoopIterValue(call, cursor) | .LoopIterAdvance(call, cursor) -> jet_web_js_route_call(ctx, call, [jet_web_js_value(cursor)])
+        .ScopeEnter(scope, test_member) -> "jet_scope_enter({scope.value})"
+        .ScopeExit(scope) -> "jet_scope_exit({scope.value})"
+        .Drop(value, kind) -> "void ({jet_web_js_value(value)})"
     }
 }

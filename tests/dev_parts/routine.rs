@@ -3350,7 +3350,10 @@ fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
 module value(n: Int) { pub fn get() -> Int { return n } }
 module three :: value(3)
 module same :: value(3)
-fn run() { print(three.get()); print(same.get()) }
+fn run() {
+    print(three.get())
+    print(same.get())
+}
 "#;
     let jit = run_cranelift_without_fallback(src, "generic_module_instance");
     assert_eq!(jit.stdout, "3\n3\n");

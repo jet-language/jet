@@ -83,7 +83,7 @@ fn omitted_base_defaults_to_first_member() {
     );
     let codes = codes_of(
         "#UnitFamily(Length) { meter millimeter(scale: 1/1000) }\n\
-         fn run() { m :: Millimeter.from_float(Float{1000.0}); print(\"{(m.raw())}\") }\n",
+         fn run() {\n    m :: Millimeter.from_float(Float{1000.0})\n    print(\"{(m.raw())}\")\n}\n",
     );
     assert!(codes.is_empty(), "expected clean compile, got {codes:?}");
 }
@@ -600,7 +600,7 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
 
     if tir_support::have_rustc() {
         let explicit = format!(
-            "{family}\nfn run() {{ value :: Meter.from_almost(1almost) ?? Meter.from_float(Float{{-1.0}}); print(value.raw()) }}\n"
+            "{family}\nfn run() {{\n    value :: Meter.from_almost(1almost) ?? Meter.from_float(Float{{-1.0}})\n    print(value.raw())\n}}\n"
         );
         let (code, stdout) = tir_support::build_and_run("quantity_exact_rational_edge", &explicit);
         assert_eq!(code, 0);
@@ -1167,7 +1167,7 @@ fn run() {
 #[test]
 fn same_unit_arithmetic_compiles() {
     let src = format!(
-        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{ t :: add(Usd.from_float(1.0), Usd.from_float(2.0)); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{\n    t :: add(Usd.from_float(1.0), Usd.from_float(2.0))\n    print(\"{{(t.raw())}}\")\n}}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -1179,7 +1179,7 @@ fn same_unit_arithmetic_compiles() {
 #[test]
 fn cross_unit_mix_is_e0127() {
     let src = format!(
-        "{}\nfn run() {{ bad :: Usd.from_float(1.0) + Eur.from_float(2.0); print(\"{{(bad.raw())}}\") }}\n",
+        "{}\nfn run() {{\n    bad :: Usd.from_float(1.0) + Eur.from_float(2.0)\n    print(\"{{(bad.raw())}}\")\n}}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -1223,7 +1223,7 @@ fn run() {
 #[test]
 fn family_erases_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ t :: Usd.from_float(1.0); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn run() {{\n    t :: Usd.from_float(1.0)\n    print(\"{{(t.raw())}}\")\n}}\n",
         FAMILY
     );
     let out = jet::compile(&src).expect("should compile");

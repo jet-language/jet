@@ -554,9 +554,15 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
 module laws<T> {
     tag Audited { deny: [Net] }
     fn audited(value: #Audited T) -> #Audited T { return ~value }
-    trait Reveal { type Output; fn reveal(self) -> T }
+    trait Reveal {
+        type Output
+        fn reveal(self) -> T
+    }
     struct Wrapped { value: T }
-    impl Wrapped.Reveal { type Output = T; fn reveal(self) -> T { return self.value } }
+    impl Wrapped.Reveal {
+        type Output = T
+        fn reveal(self) -> T { return self.value }
+    }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }

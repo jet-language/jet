@@ -26,7 +26,10 @@ fn every_double_underscore_source_identifier_is_rejected() {
 module __module
 use thing as __alias
 extern c { fn __ffi(__ffi_arg: Int) }
-fn __call(__arg: Int) { __local :: __arg; value.__field }
+fn __call(__arg: Int) {
+    __local :: __arg
+    value.__field
+}
 trait Contract { fn __method(self) }
 "#;
     let (_, diagnostics) = jet::Lexer::lex(source);

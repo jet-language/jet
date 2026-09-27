@@ -2039,7 +2039,7 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
 
 #[test]
 fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
-    let blocked = "fn pick(value: Int !String) -> String -> value ? ok -> { saved :: ok; saved } ! error -> { saved_error :: error; saved_error }\n";
+    let blocked = "fn pick(value: Int !String) -> String -> value ? ok -> {\n    saved :: ok\n    saved\n} ! error -> {\n    saved_error :: error\n    saved_error\n}\n";
     let nested = "fn pick(value: Int !String) -> Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
     let nested_if =
         "fn pick(value: Int !String) -> Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";

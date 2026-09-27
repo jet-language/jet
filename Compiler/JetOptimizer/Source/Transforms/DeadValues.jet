@@ -5,20 +5,19 @@ fn mir_pass_eliminate_dead_pure(program: &MirProgram) -> Int {
         changed := true
         loop changed {
             changed = false
-            analysis := mir_optimizer_analyze_function(function)
-            uses := analysis.def_use
+            analysis :: mir_optimizer_analyze_function(function)
+            uses :: analysis.def_use
             kept_blocks := [MirBasicBlock]{}
             loop block in &function.blocks {
                 kept_instructions := [MirInstruction]{}
                 loop instruction in &block.instructions {
                     removable := false
-                    if instruction.result != None {
-                        result := instruction.result ?? MirValueId{value: 0}
-                        use_count := mir_pass_use_count_from_rows(uses, result)
+                    if instruction.result == .Val(result) {
+                        use_count :: mir_pass_use_count_from_rows(uses, result)
                         if use_count == 0 {
                             metadata :: mir_pass_find_value(function.values, result)
-                            if metadata != None {
-                                removable = mir_pass_removable_dead(instruction.operation, instruction.ty, (metadata ?? MirValueFact{id: result, ty: mir_type_from_kind(.Int), span: instruction.span, ownership: mir_copy_ownership()}).ownership, program.prelude_calls)
+                            if metadata == .Val(fact) {
+                                removable = mir_pass_removable_dead(instruction.operation, instruction.ty, fact.ownership, program.prelude_calls)
                             }
                         }
                     }
@@ -69,24 +68,21 @@ fn mir_pass_removable_dead(operation: MirOperation, ty: ?MirType, ownership: Mir
     if operation == {
         .Constant(constant) -> {
             if constant == {
-                .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) -> return true
+                .Int(_, _, _) | .Float(_, _, _) | .Bool(_) | .Char(_) -> true
+                else -> false
             }
-            return false
         }
-        .Unary(op, _) -> return op == .Not && ty.map(value -> value.kind == .Bool) ?? false
+        .Unary(op, _) -> op == .Not && ty.map(value -> value.kind == .Bool) ?? false
         .Binary(op, dispatch, _, _, _) -> {
-            pure_dispatch := if dispatch == .Primitive -> true else -> {
-                dispatch_pure := if dispatch == {
-                    .Prelude(call, _) -> mir_pass_prelude_is_pure(prelude_calls, call)
-                    else -> false
-                }
-                dispatch_pure
+            pure_dispatch :: if dispatch == {
+                .Primitive -> true
+                .Prelude(call, _) -> mir_pass_prelude_is_pure(prelude_calls, call)
             }
-            return pure_dispatch && (op == .Eq || op == .Ne || op == .Lt || op == .Gt || op == .Le || op == .Ge || op == .BitAnd || op == .BitOr || op == .BitXor || op == .And || op == .Or)
+            pure_dispatch && (op == .Eq || op == .Ne || op == .Lt || op == .Gt || op == .Le || op == .Ge || op == .BitAnd || op == .BitOr || op == .BitXor || op == .And || op == .Or)
         }
-        .Phi(_) -> return true
-        .Convert(_, _, _, conversion) -> return mir_pass_conversion_is_pure(conversion, prelude_calls)
-        else -> return false
+        .Phi(_) -> true
+        .Convert(_, _, _, conversion) -> mir_pass_conversion_is_pure(conversion, prelude_calls)
+        else -> false
     }
 }
 
@@ -99,10 +95,7 @@ fn mir_pass_prelude_is_pure(rows: [MirPreludeCall], id: MirPreludeCallId) -> Boo
 
 fn mir_pass_conversion_is_pure(conversion: MirConversion, rows: [MirPreludeCall]) -> Bool {
     if conversion == {
-        .Transparent | .NumericCast | .SendFn -> return true
+        .Transparent | .NumericCast | .SendFn -> true
+        .Prelude(call, _, fallibility) -> fallibility == .Infallible && mir_pass_prelude_is_pure(rows, call)
     }
-    if conversion == {
-        .Prelude(call, _, fallibility) -> return fallibility == .Infallible && mir_pass_prelude_is_pure(rows, call)
-    }
-    false
 }

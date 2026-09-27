@@ -196,7 +196,7 @@ fn plain_struct_auto_codable_matches_all_execution_tiers() {
         r#"
 use core.encoding.json as json
 
-struct Record { id: Int; name: String }
+struct Record { id: Int name: String }
 
 fn run() {
     print(json.to_string(Record{ id: 7, name: "plain" }))
@@ -240,7 +240,7 @@ fn auto_derive_keeps_compile_and_binary_measurements_stable() {
 use core.encoding.json as json
 
 #[Encode, Decode]
-struct Record { id: Int; name: String }
+struct Record { id: Int name: String }
 
 fn run() {
     print(json.to_string(Record{ id: 7, name: "plain" }))
@@ -253,7 +253,7 @@ fn run() {
         r#"
 use core.encoding.json as json
 
-struct Record { id: Int; name: String }
+struct Record { id: Int name: String }
 
 fn run() {
     print(json.to_string(Record{ id: 7, name: "plain" }))

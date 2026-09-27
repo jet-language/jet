@@ -35,15 +35,18 @@ fn mir_pass_derive_loop_and_vector_facts(program: &MirProgram) -> MirLoopVectorC
     function_index := 0
     loop function_index < program.functions.len() {
         function := program.functions[function_index]
-        previous_vectors := function.optimization.vector_facts
-        shapes := mir_pass_loop_shapes(function)
+        previous_vectors :: function.optimization.vector_facts
+        shapes :: mir_pass_loop_shapes(function)
         loops := [MirLoopFact]{}
         vectors := [MirVectorFact]{}
         loop shape in shapes {
-            reduction := mir_pass_loop_reduction(function, shape)
-            copy_cost := mir_pass_loop_copy_cost(function, shape)
-            loop_decision := if shape.canonical -> .Eligible else -> .Rejected(.MissingProof)
-            if shape.trip_count == None && shape.form != .Unconditional -> loop_decision = .Rejected(.DynamicTripCount)
+            reduction :: mir_pass_loop_reduction(function, shape)
+            copy_cost :: mir_pass_loop_copy_cost(function, shape)
+            loop_decision :: if {
+                shape.trip_count == None && shape.form != .Unconditional -> .Rejected(.DynamicTripCount)
+                shape.canonical -> .Eligible
+                else -> .Rejected(.MissingProof)
+            }
             loops.push(MirLoopFact{
                 header: shape.header,
                 body: shape.body,
@@ -55,7 +58,7 @@ fn mir_pass_derive_loop_and_vector_facts(program: &MirProgram) -> MirLoopVectorC
                 span: shape.span,
                 decision: loop_decision,
             })
-            vector := mir_pass_loop_vector_fact(function, shape, reduction, copy_cost, program.prelude_calls)
+            vector :: mir_pass_loop_vector_fact(function, shape, reduction, copy_cost, program.prelude_calls)
             vectors.push(vector)
         }
         loop vector in previous_vectors {
@@ -91,16 +94,14 @@ fn mir_pass_loop_shapes(function: MirFunction) -> [MirPassLoopShape] {
     loop block in &function.blocks {
         if block.terminator == {
             .Branch(condition, then_target, else_target) -> {
-                condition_instruction :: mir_pass_instruction_for_value(function, condition)
-                if condition_instruction == None -> next
-                instruction := condition_instruction ?? MirInstruction{id: MirOpId{value: 0}, span: block.span, source_line: None, result: None, ty: None, operation: MirOperation.Absent}
+                instruction :: mir_pass_instruction_for_value(function, condition) ?? next
                 if instruction.operation == {
                     .LoopRangeHasNext(_, cursor) -> {
-                        shape := mir_pass_make_loop_shape(function, block, then_target, else_target, cursor, .Counted)
+                        shape :: mir_pass_make_loop_shape(function, block, then_target, else_target, cursor, .Counted)
                         if !mir_pass_loop_header_seen(shapes, block.id) -> shapes.push(shape)
                     }
                     .LoopIterHasNext(_, cursor) -> {
-                        shape := mir_pass_make_loop_shape(function, block, then_target, else_target, cursor, .Iterator)
+                        shape :: mir_pass_make_loop_shape(function, block, then_target, else_target, cursor, .Iterator)
                         if !mir_pass_loop_header_seen(shapes, block.id) -> shapes.push(shape)
                     }
                     else -> {}
@@ -121,16 +122,24 @@ fn mir_pass_make_loop_shape(
     cursor: MirValueId,
     form: MirLoopForm,
 ) -> MirPassLoopShape {
-    first_returns := mir_pass_reaches_block(function, first, header.id)
-    second_returns := mir_pass_reaches_block(function, second, header.id)
-    body := if first_returns && !second_returns -> Val(first) else if second_returns && !first_returns -> Val(second) else -> None
-    exit := if first_returns && !second_returns -> Val(second) else if second_returns && !first_returns -> Val(first) else -> None
-    body_blocks := if body != None -> mir_pass_loop_body_blocks(function, body ?? header.id, header.id) else -> [MirBlockId]{}
-    init := mir_pass_loop_init(function, cursor, form)
-    induction := mir_pass_loop_induction_value(function, body_blocks, cursor, form)
-    trip := mir_pass_loop_trip_count(function, init)
-    advance := mir_pass_loop_advance_block(function, body_blocks, cursor, form)
-    early_exit := body == None || mir_pass_loop_has_early_exit(function, body_blocks, header.id)
+    first_returns :: mir_pass_reaches_block(function, first, header.id)
+    second_returns :: mir_pass_reaches_block(function, second, header.id)
+    body :: if {
+        first_returns && !second_returns -> Val(first)
+        second_returns && !first_returns -> Val(second)
+        else -> None
+    }
+    exit :: if {
+        first_returns && !second_returns -> Val(second)
+        second_returns && !first_returns -> Val(first)
+        else -> None
+    }
+    body_blocks :: if body == .Val(body_id) -> mir_pass_loop_body_blocks(function, body_id, header.id) else -> [MirBlockId]{}
+    init :: mir_pass_loop_init(function, cursor, form)
+    induction :: mir_pass_loop_induction_value(function, body_blocks, cursor, form)
+    trip :: mir_pass_loop_trip_count(function, init)
+    advance :: mir_pass_loop_advance_block(function, body_blocks, cursor, form)
+    early_exit :: body == None || mir_pass_loop_has_early_exit(function, body_blocks, header.id)
     MirPassLoopShape{
         header: header.id,
         body: body,
@@ -153,8 +162,7 @@ fn mir_pass_loop_header_seen(rows: [MirPassLoopShape], header: MirBlockId) -> Bo
 }
 
 fn mir_pass_sort_loop_shapes(rows: &[MirPassLoopShape]) {
-    index := 1
-    loop index < rows.len() {
+    loop index in 1..<rows.len() {
         current := rows[index]
         cursor := index
         loop cursor > 0 && current.header.value < rows[cursor - 1].header.value {
@@ -162,10 +170,8 @@ fn mir_pass_sort_loop_shapes(rows: &[MirPassLoopShape]) {
             cursor -= 1
         }
         rows[cursor] = current
-        index += 1
     }
 }
-
 
 fn mir_pass_instruction_for_value(function: MirFunction, value: MirValueId) -> ?MirInstruction {
     loop block in &function.blocks {
@@ -191,28 +197,23 @@ fn mir_pass_loop_init(function: MirFunction, cursor: MirValueId, form: MirLoopFo
 }
 
 fn mir_pass_loop_induction_value(function: MirFunction, body: [MirBlockId], cursor: MirValueId, form: MirLoopForm) -> ?MirValueId {
-    wanted := if form == .Counted -> MirOperation.LoopRangeValue(MirPreludeCallId{value: 0}, cursor) else -> MirOperation.LoopIterValue(MirPreludeCallId{value: 0}, cursor)
+    wanted :: if form == .Counted -> MirOperation.LoopRangeValue(MirPreludeCallId{value: 0}, cursor) else -> MirOperation.LoopIterValue(MirPreludeCallId{value: 0}, cursor)
     loop block_id in body {
-        block_option := mir_pass_find_block(function.blocks, block_id)
-        if block_option != None {
-            block := block_option ?? MirBasicBlock{id: block_id, span: Span{start: 0, end: 0}, instructions: [MirInstruction]{}, terminator: MirTerminator.Unreachable("missing")}
-            loop instruction in &block.instructions {
-                if instruction.operation == wanted && instruction.result != None -> return instruction.result
-                if instruction.operation == {
-                    .LoopRangeValue(_, value) -> if form == .Counted && value == cursor -> return instruction.result
-                    .LoopIterValue(_, value) -> if form == .Iterator && value == cursor -> return instruction.result
-                    else -> {}
-                }
+        block :: mir_pass_find_block(function.blocks, block_id) ?? next
+        loop instruction in &block.instructions {
+            if instruction.operation == wanted && instruction.result != None -> return instruction.result
+            if instruction.operation == {
+                .LoopRangeValue(_, value) -> if form == .Counted && value == cursor -> return instruction.result
+                .LoopIterValue(_, value) -> if form == .Iterator && value == cursor -> return instruction.result
+                else -> {}
             }
         }
     }
     None
 }
 
-
 fn mir_pass_loop_induction_model(function: MirFunction, shape: MirPassLoopShape) -> MirPassLoopInduction {
-    induction_option := shape.induction
-    induction :: induction_option ?? return MirPassLoopInduction{values: [MirValueId]{}, places: [MirPlaceId]{}, supported: false}
+    induction :: shape.induction ?? return MirPassLoopInduction{values: [MirValueId]{}, places: [MirPlaceId]{}, supported: false}
     values := [MirValueId]{induction}
     places := [MirPlaceId]{}
     supported := true
@@ -234,29 +235,28 @@ fn mir_pass_loop_induction_model(function: MirFunction, shape: MirPassLoopShape)
     }
     if places.len() > 1 -> supported = false
     if supported {
-        dominators := mir_pass_dominators(function)
+        dominators :: mir_pass_dominators(function)
         loop block_id in shape.body_blocks {
             block :: mir_pass_find_block(function.blocks, block_id) ?? return MirPassLoopInduction{values: values, places: places, supported: false}
-            instruction_index := 0
-            loop instruction in block.instructions {
+            loop (instruction_index, instruction) in block.instructions {
                 if instruction.operation == {
                     .WritePlace(place_id, value) -> if mir_pass_place_id_seen(places, place_id) && value != induction -> supported = false
                     .ReadPlace(place_id) -> if mir_pass_place_id_seen(places, place_id) {
                         value :: instruction.result ?? return MirPassLoopInduction{values: values, places: places, supported: false}
-                        if !mir_pass_loop_induction_write_dominates(function, shape, place_id, block_id, instruction_index, dominators) {
-                            supported = false
-                        } else if !mir_pass_value_id_seen(values, value) {
-                            values.push(value)
+                        if {
+                            !mir_pass_loop_induction_write_dominates(function, shape, place_id, block_id, instruction_index, dominators) -> supported = false
+                            !mir_pass_value_id_seen(values, value) -> values.push(value)
+                            else -> {}
                         }
                     }
                     else -> {}
                 }
-                instruction_index += 1
             }
         }
     }
     MirPassLoopInduction{values: values, places: places, supported: supported}
 }
+
 fn mir_pass_loop_induction_write_dominates(
     function: MirFunction,
     shape: MirPassLoopShape,
@@ -268,19 +268,19 @@ fn mir_pass_loop_induction_write_dominates(
     induction :: shape.induction ?? return false
     loop block_id in shape.body_blocks {
         block :: mir_pass_find_block(function.blocks, block_id) ?? return false
-        instruction_index := 0
-        loop instruction in block.instructions {
+        loop (instruction_index, instruction) in block.instructions {
             if instruction.operation == {
                 .WritePlace(write_place, value) -> if write_place == place_id && value == induction {
-                    if block_id == read_block {
-                        if instruction_index < read_index -> return true
-                    } else if mir_pass_dominates(dominators, block_id, read_block) {
-                        return true
+                    if {
+                        block_id == read_block -> {
+                            if instruction_index < read_index -> return true
+                        }
+                        mir_pass_dominates(dominators, block_id, read_block) -> return true
+                        else -> {}
                     }
                 }
                 else -> {}
             }
-            instruction_index += 1
         }
     }
     false
@@ -289,31 +289,31 @@ fn mir_pass_loop_induction_write_dominates(
 fn mir_pass_loop_induction_place_seen(induction: MirPassLoopInduction, place: MirPlaceId) -> Bool {
     mir_pass_place_id_seen(induction.places, place)
 }
+
 fn mir_pass_loop_trip_count(function: MirFunction, init: ?MirInstruction) -> ?Int {
     instruction :: init ?? return None
     if instruction.operation == {
         .LoopRangeInit(_, start, end, step, exclusive) -> {
-            constants := mir_pass_collect_scalar_constants(function)
+            constants :: mir_pass_collect_scalar_constants(function)
             start_constant :: mir_pass_constant_for(constants, start) ?? return None
             end_constant :: mir_pass_constant_for(constants, end) ?? return None
-            first := 0
-            last := 0
-            if start_constant == {
-                .Int(value, _, _) -> first = value
+            first :: if start_constant == {
+                .Int(value, _, _) -> value
                 else -> return None
             }
-            if end_constant == {
-                .Int(value, _, _) -> last = value
+            last :: if end_constant == {
+                .Int(value, _, _) -> value
                 else -> return None
             }
-            step_value := 1
-            if step != None {
-                step_id :: step ?? return None
-                step_constant :: mir_pass_constant_for(constants, step_id) ?? return None
-                if step_constant == {
-                    .Int(value, _, _) -> step_value = value
-                    else -> return None
+            step_value :: if step == {
+                .Val(step_id) -> {
+                    step_constant :: mir_pass_constant_for(constants, step_id) ?? return None
+                    if step_constant == {
+                        .Int(value, _, _) -> value
+                        else -> return None
+                    }
                 }
+                else -> 1
             }
             mir_pass_range_trip_count(first, last, step_value, exclusive)
         }
@@ -337,7 +337,7 @@ fn mir_pass_range_trip_count(start: Int, end: Int, step: Int, exclusive: Bool) -
         magnitude :: mir_pass_checked_sub(0, step) ?? return None
     }
     adjusted :: mir_pass_checked_add(count, magnitude - 1) ?? return None
-    trip := adjusted / magnitude
+    trip :: adjusted / magnitude
     if trip < 0 -> return None
     Val(trip)
 }
@@ -352,12 +352,9 @@ fn mir_pass_reaches_block(function: MirFunction, start: MirBlockId, target: MirB
         if block_id == target -> return true
         if mir_pass_block_id_seen(visited, block_id) -> next
         visited.push(block_id)
-        block_option := mir_pass_find_block(function.blocks, block_id)
-        if block_option != None {
-            block :: block_option ?? MirBasicBlock{id: block_id, span: Span{start: 0, end: 0}, instructions: [MirInstruction]{}, terminator: MirTerminator.Unreachable("missing")}
-            loop successor in mir_terminator_targets(block.terminator) {
-                if !mir_pass_block_id_seen(visited, successor) -> pending.push(successor)
-            }
+        block :: mir_pass_find_block(function.blocks, block_id) ?? next
+        loop successor in mir_terminator_targets(block.terminator) {
+            if !mir_pass_block_id_seen(visited, successor) -> pending.push(successor)
         }
     }
     false
@@ -373,12 +370,9 @@ fn mir_pass_loop_body_blocks(function: MirFunction, body: MirBlockId, header: Mi
         if block_id == header || mir_pass_block_id_seen(visited, block_id) -> next
         if !mir_pass_reaches_block(function, block_id, header) -> next
         visited.push(block_id)
-        block_option := mir_pass_find_block(function.blocks, block_id)
-        if block_option != None {
-            block :: block_option ?? MirBasicBlock{id: block_id, span: Span{start: 0, end: 0}, instructions: [MirInstruction]{}, terminator: MirTerminator.Unreachable("missing")}
-            loop successor in mir_terminator_targets(block.terminator) {
-                if successor != header && !mir_pass_block_id_seen(visited, successor) -> pending.push(successor)
-            }
+        block :: mir_pass_find_block(function.blocks, block_id) ?? next
+        loop successor in mir_terminator_targets(block.terminator) {
+            if successor != header && !mir_pass_block_id_seen(visited, successor) -> pending.push(successor)
         }
     }
     visited
@@ -388,7 +382,7 @@ fn mir_pass_loop_advance_block(function: MirFunction, body: [MirBlockId], cursor
     loop block_id in body {
         block :: mir_pass_find_block(function.blocks, block_id) ?? next
         loop instruction in &block.instructions {
-            matched := if instruction.operation == {
+            matched :: if instruction.operation == {
                 .LoopRangeAdvance(_, value) -> form == .Counted && value == cursor
                 .LoopIterAdvance(_, value) -> form == .Iterator && value == cursor
                 else -> false
@@ -466,8 +460,8 @@ fn mir_pass_loop_reduction(function: MirFunction, shape: MirPassLoopShape) -> ?M
 
 fn mir_pass_operation_reads_place(operation: MirOperation, place: MirPlaceId) -> Bool {
     if operation == {
-        .ReadPlace(value) | .MovePlace(value) -> return value == place
-        else -> return false
+        .ReadPlace(value) | .MovePlace(value) -> value == place
+        else -> false
     }
 }
 
@@ -478,8 +472,8 @@ fn mir_pass_loop_vector_fact(
     copy_cost: MirCopyCost,
     prelude_calls: [MirPreludeCall],
 ) -> MirVectorFact {
-    index := shape.induction
-    induction := mir_pass_loop_induction_model(function, shape)
+    index :: shape.induction
+    induction :: mir_pass_loop_induction_model(function, shape)
     accesses := [MirVectorAccess]{}
     element_type := None
     written_roots := [MirPlaceId]{}
@@ -497,34 +491,43 @@ fn mir_pass_loop_vector_fact(
             if instruction.operation == {
                 .WritePlace(place_id, value) -> {
                     place :: mir_pass_find_place(function.places, place_id) ?? next
-                    if mir_pass_loop_induction_place_seen(induction, place_id) {
-                        if !mir_pass_value_id_seen(induction.values, value) -> effect_free = false
-                    } else if mir_pass_place_uses_index(place, induction.values) {
-                        if !mir_pass_place_id_seen(written_roots, place_id) -> written_roots.push(place_id)
-                        if !mir_pass_place_id_seen(roots, place_id) -> roots.push(place_id)
-                        mir_pass_vector_access_put(&accesses, place)
-                    } else if reduction.map(value -> value.accumulator == place_id) ?? false {
-                        if !mir_pass_place_id_seen(written_roots, place_id) -> written_roots.push(place_id)
-                    } else {
-                        effect_free = false
+                    if {
+                        mir_pass_loop_induction_place_seen(induction, place_id) -> {
+                            if !mir_pass_value_id_seen(induction.values, value) -> effect_free = false
+                        }
+                        mir_pass_place_uses_index(place, induction.values) -> {
+                            if !mir_pass_place_id_seen(written_roots, place_id) -> written_roots.push(place_id)
+                            if !mir_pass_place_id_seen(roots, place_id) -> roots.push(place_id)
+                            mir_pass_vector_access_put(&accesses, place)
+                        }
+                        reduction.map(value -> value.accumulator == place_id) ?? false -> {
+                            if !mir_pass_place_id_seen(written_roots, place_id) -> written_roots.push(place_id)
+                        }
+                        else -> effect_free = false
                     }
                 }
                 .ReadPlace(place_id) -> {
-                    place :: mir_pass_find_place(function.places, place_id) ?? { effect_free = false; next }
-                    if mir_pass_loop_induction_place_seen(induction, place_id) {
-                        if instruction.result == None {
-                            effect_free = false
-                        } else {
-                            result :: instruction.result ?? next
-                            if !mir_pass_value_id_seen(induction.values, result) -> effect_free = false
+                    place :: mir_pass_find_place(function.places, place_id) ?? {
+                        effect_free = false
+                        next
+                    }
+                    if {
+                        mir_pass_loop_induction_place_seen(induction, place_id) -> {
+                            if instruction.result == .Val(result) {
+                                if !mir_pass_value_id_seen(induction.values, result) -> effect_free = false
+                            } else {
+                                effect_free = false
+                            }
                         }
-                    } else if mir_pass_place_uses_index(place, induction.values) {
-                        if !mir_pass_place_id_seen(roots, place_id) -> roots.push(place_id)
-                        mir_pass_vector_access_put(&accesses, place)
-                        if place.projections.len() > 0 {
-                            if place.projections[place.projections.len() - 1] == { .Field(_, _) -> field_access else -> {} }
+                        mir_pass_place_uses_index(place, induction.values) -> {
+                            if !mir_pass_place_id_seen(roots, place_id) -> roots.push(place_id)
+                            mir_pass_vector_access_put(&accesses, place)
+                            if place.projections.len() > 0 {
+                                if place.projections[place.projections.len() - 1] == { .Field(_, _) -> field_access else -> {} }
+                            }
+                            element_type = Val(place.ty)
                         }
-                        element_type = Val(place.ty)
+                        else -> {}
                     }
                 }
                 .Binary(op, dispatch, _, _, _) -> {
@@ -543,32 +546,39 @@ fn mir_pass_loop_vector_fact(
             }
         }
     }
-    no_aliasing := mir_pass_loop_accesses_do_not_alias(function, roots, written_roots)
-    if reduction != None {
-        row :: reduction ?? MirPassLoopReduction{accumulator: MirPlaceId{value: 0}, addend: MirValueId{value: 0}, seed: MirValueId{value: 0}, condition: None, source_operations: [MirOpId]{}}
-        no_aliasing = mir_pass_loop_reduction_no_alias(function, roots, row)
-    }
+    no_aliasing :: if reduction == .Val(row) -> mir_pass_loop_reduction_no_alias(function, roots, row) else -> mir_pass_loop_accesses_do_not_alias(function, roots, written_roots)
     no_cross_iteration := roots.len() > 0 && written_roots.len() > 0 && no_aliasing && reduction == None && effect_free
     if reduction == None && written_roots.len() > 0 {
         loop root_id in written_roots {
-            place :: mir_pass_find_place(function.places, root_id) ?? { no_cross_iteration = false; next }
+            place :: mir_pass_find_place(function.places, root_id) ?? {
+                no_cross_iteration = false
+                next
+            }
             if !mir_pass_place_uses_index(place, induction.values) -> no_cross_iteration = false
         }
     }
-    no_early_exit := !shape.early_exit
-    fixed_reduction := if reduction != None -> mir_pass_fixed_reduction_candidate(function, shape, reduction ?? MirPassLoopReduction{accumulator: MirPlaceId{value: 0}, addend: MirValueId{value: 0}, seed: MirValueId{value: 0}, condition: None, source_operations: [MirOpId]{}}) else -> None
+    no_early_exit :: !shape.early_exit
+    fixed_reduction :: if reduction == .Val(row) -> mir_pass_fixed_reduction_candidate(function, shape, row) else -> None
     if reduction != None -> no_cross_iteration = fixed_reduction != None && effect_free && no_aliasing && no_early_exit
-    packed := shape.trip_count != None && accesses.len() > 0 && no_aliasing && no_cross_iteration && no_early_exit && effect_free
-    rule := if shape.early_exit -> MirVectorRule.EarlyExitSearch else if reduction != None -> MirVectorRule.Reduction else if field_access -> MirVectorRule.FieldAccess else if conditional -> MirVectorRule.ConditionalAccumulate else -> MirVectorRule.Elementwise
-    decision := if !shape.canonical -> .Rejected(.MissingProof)
-        else if shape.trip_count == None -> .Rejected(.DynamicTripCount)
-        else if shape.early_exit -> .Rejected(.HasEarlyExit)
-        else if !effect_free -> .Rejected(.HasEffects)
-        else if !no_aliasing -> .Rejected(.MayAlias)
-        else if reduction != None && fixed_reduction == None -> .Rejected(.CrossIterationDependency)
-        else if !no_cross_iteration -> .Rejected(.CrossIterationDependency)
-        else if accesses.len() == 0 -> .Rejected(.MissingProof)
+    packed :: shape.trip_count != None && accesses.len() > 0 && no_aliasing && no_cross_iteration && no_early_exit && effect_free
+    rule :: if {
+        shape.early_exit -> MirVectorRule.EarlyExitSearch
+        reduction != None -> MirVectorRule.Reduction
+        field_access -> MirVectorRule.FieldAccess
+        conditional -> MirVectorRule.ConditionalAccumulate
+        else -> MirVectorRule.Elementwise
+    }
+    decision :: if {
+        !shape.canonical -> .Rejected(.MissingProof)
+        shape.trip_count == None -> .Rejected(.DynamicTripCount)
+        shape.early_exit -> .Rejected(.HasEarlyExit)
+        !effect_free -> .Rejected(.HasEffects)
+        !no_aliasing -> .Rejected(.MayAlias)
+        reduction != None && fixed_reduction == None -> .Rejected(.CrossIterationDependency)
+        !no_cross_iteration -> .Rejected(.CrossIterationDependency)
+        accesses.len() == 0 -> .Rejected(.MissingProof)
         else -> .Eligible
+    }
     MirVectorFact{
         loop_header: shape.header,
         cursor: index,
@@ -605,7 +615,7 @@ fn mir_pass_vector_access_put(rows: &[MirVectorAccess], place: MirPlace) {
             else -> {}
         }
     }
-    root := MirVectorAccessRoot.Place(place.id)
+    root :: MirVectorAccessRoot.Place(place.id)
     loop row in rows {
         if row.root == root && row.field == field -> return
     }
@@ -647,8 +657,7 @@ fn mir_pass_loop_reduction_no_alias(function: MirFunction, roots: [MirPlaceId], 
 }
 
 fn mir_pass_checked_vectors(rows: [MirVectorFact]) -> [MirVectorFact] {
-    output := [MirVectorFact]{}
-    loop row in rows { if row.decision == .Eligible -> output.push(row) }
+    output :: loop row in rows if row.decision == .Eligible -> row
     output
 }
 
@@ -678,7 +687,7 @@ fn mir_pass_loop_reduction_seed(function: MirFunction, shape: MirPassLoopShape, 
         .Branch(_, _, _) -> {}
         else -> return None
     }
-    dominators := mir_pass_dominators(function)
+    dominators :: mir_pass_dominators(function)
     best_rank := -1
     best := None
     loop block in &function.blocks {
@@ -689,7 +698,7 @@ fn mir_pass_loop_reduction_seed(function: MirFunction, shape: MirPassLoopShape, 
             if instruction.operation == {
                 .WritePlace(place, value) -> if place == accumulator {
                     row :: mir_pass_dominator_row(dominators, block.id) ?? MirPassDominatorRow{block: block.id, dominators: [MirBlockId]{}}
-                    rank := row.dominators.len() * 100000 + index
+                    rank :: row.dominators.len() * 100000 + index
                     if rank > best_rank {
                         best_rank = rank
                         best = Val(MirPassLoopReductionSeed{value: value, operation: instruction.id})

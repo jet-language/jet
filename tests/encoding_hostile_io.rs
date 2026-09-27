@@ -244,7 +244,10 @@ fn run() {{
         result :: reader.next()
         if result == {{
             .Ok(maybe) -> {{
-                if maybe == None {{ print("eof-missed"); break }}
+                if maybe == None {{
+                    print("eof-missed")
+                    break
+                }}
             }}
             .Err(first) -> {{
                 again :: reader.next()
@@ -293,7 +296,13 @@ fn run() {{
     input :: files.open("{input_path}") ?? panic("open")
     reader :: csv.reader(^input) ?? panic("reader")
     first :: reader.next() ?? panic("first")
-    if first == {{ Val(row) -> {{ print(row.fields[0]); print(row.fields[1]) }} None -> print("none") }}
+    if first == {{
+        Val(row) -> {{
+            print(row.fields[0])
+            print(row.fields[1])
+        }}
+        None -> print("none")
+    }}
     eof :: reader.next() ?? panic("eof")
     if eof == None {{ print("eof") }} else {{ print("bad") }}
 }}

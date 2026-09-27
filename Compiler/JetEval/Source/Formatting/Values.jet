@@ -13,25 +13,27 @@ pub fn jet_eval_format_string_value_full(
     span: Span,
 ) -> ?String {
     if format == {
-        .Display -> return jet_eval_format_core_source_call(&machine, "display", [TComptimeValue]{value}, span)
-        .Debug -> return jet_eval_format_core_source_call(&machine, "debug", [TComptimeValue]{value}, span)
-        .Pretty -> return jet_eval_format_pretty_value(&machine, value, span)
-        .Fixed(digits) -> return jet_eval_format_fixed_value(&machine, value, digits, false, span)
-        .Grouped(digits) -> return jet_eval_format_fixed_value(&machine, value, digits, true, span)
-        .Hex(digits) -> return jet_eval_format_radix_value(&machine, value, 16, digits, span)
-        .Pad(width, fill) -> return jet_eval_format_padding_value(&machine, value, width, fill, false, span)
-        .PadLeft(width, fill) -> return jet_eval_format_padding_value(&machine, value, width, fill, true, span)
-        .Sci(digits) -> return jet_eval_format_scientific_value(&machine, value, digits, span)
-        .Percent(digits) -> return jet_eval_format_percent_value(&machine, value, digits, span)
-        .Bin -> return jet_eval_format_radix_value(&machine, value, 2, 0, span)
-        .Oct -> return jet_eval_format_radix_value(&machine, value, 8, 0, span)
+        .Display -> jet_eval_format_core_source_call(&machine, "display", [TComptimeValue]{value}, span)
+        .Debug -> jet_eval_format_core_source_call(&machine, "debug", [TComptimeValue]{value}, span)
+        .Pretty -> jet_eval_format_pretty_value(&machine, value, span)
+        .Fixed(digits) -> jet_eval_format_fixed_value(&machine, value, digits, false, span)
+        .Grouped(digits) -> jet_eval_format_fixed_value(&machine, value, digits, true, span)
+        .Hex(digits) -> jet_eval_format_radix_value(&machine, value, 16, digits, span)
+        .Pad(width, fill) -> jet_eval_format_padding_value(&machine, value, width, fill, false, span)
+        .PadLeft(width, fill) -> jet_eval_format_padding_value(&machine, value, width, fill, true, span)
+        .Sci(digits) -> jet_eval_format_scientific_value(&machine, value, digits, span)
+        .Percent(digits) -> jet_eval_format_percent_value(&machine, value, digits, span)
+        .Bin -> jet_eval_format_radix_value(&machine, value, 2, 0, span)
+        .Oct -> jet_eval_format_radix_value(&machine, value, 8, 0, span)
         .Unit(_) -> {
             // Unit interpolation is lowered through its checked String
             // function; no Core/text/fmt source row implements this selector.
             jet_eval_unsupported(&machine, span, "unit formatting has no Core/text/fmt source function")
-            return None
+            None
+        }
+        else -> {
+            jet_eval_compiler_fail(&machine, span, "MIR string format has an unknown variant")
+            None
         }
     }
-    jet_eval_compiler_fail(&machine, span, "MIR string format has an unknown variant")
-    None
 }

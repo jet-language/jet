@@ -91,7 +91,7 @@ fn mir_optimizer_succeeded(program: MirProgram, report: MirOptimizationReport) -
 pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     report := mir_optimizer_empty_report()
     validation :: mir_pass_validate_program(program, .LegalityVerification)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.LegalityVerification, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR legality validation failed"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     if mir_optimizer_has_complete_seal(program) {
         report.completed = mir_optimizer_production_order()
         loop function in program.functions {
@@ -107,14 +107,14 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     optimized := program
     mir_pass_clear_batch_facts(&optimized)
 
-    inline_result := mir_pass_expand_inline_always(&optimized)
+    inline_result :: mir_pass_expand_inline_always(&optimized)
     report.inline_calls_expanded = inline_result.expanded
     report.reachable_blocks_removed += inline_result.blocks_removed
-    if inline_result.error != None -> return mir_optimizer_failed(inline_result.error ?? mir_pass_error(.LegalityVerification, .InvalidDefUse, None, Span{start: 0, end: 0}, "inline expansion failed"), report)
+    if inline_result.error == .Val(error) -> return mir_optimizer_failed(error, report)
     mir_pass_mark(&optimized, .LegalityVerification)
     report.completed.push(.LegalityVerification)
     validation = mir_pass_validate_program(optimized, .LegalityVerification)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.LegalityVerification, .InvalidDefUse, None, Span{start: 0, end: 0}, "inline expansion produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks := mir_pass_block_count(&optimized)
     mir_pass_eliminate_unreachable(&optimized)
@@ -122,7 +122,7 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_pass_mark(&optimized, .UnreachableBlockElimination)
     report.completed.push(.UnreachableBlockElimination)
     validation = mir_pass_validate_program(optimized, .UnreachableBlockElimination)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.UnreachableBlockElimination, .InvalidCfg, None, Span{start: 0, end: 0}, "unreachable-block elimination produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     before_blocks = mir_pass_block_count(&optimized)
     mir_pass_simplify_cfg(&optimized)
@@ -130,34 +130,34 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_pass_mark(&optimized, .CfgSimplification)
     report.completed.push(.CfgSimplification)
     validation = mir_pass_validate_program(optimized, .CfgSimplification)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CfgSimplification, .InvalidCfg, None, Span{start: 0, end: 0}, "CFG simplification produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.folded_values = mir_pass_fold_exact_constants(&optimized)
     mir_pass_mark(&optimized, .ExactConstantFolding)
     report.completed.push(.ExactConstantFolding)
     validation = mir_pass_validate_program(optimized, .ExactConstantFolding)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.ExactConstantFolding, .InvalidDefUse, None, Span{start: 0, end: 0}, "constant folding produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.bounds_facts = mir_pass_derive_bounds(&optimized)
     mir_pass_mark(&optimized, .BoundsCheckElimination)
     report.completed.push(.BoundsCheckElimination)
     validation = mir_pass_validate_program(optimized, .BoundsCheckElimination)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.BoundsCheckElimination, .InvalidFact, None, Span{start: 0, end: 0}, "bounds facts are invalid"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.dead_values_removed = mir_pass_eliminate_dead_pure(&optimized)
     mir_pass_mark(&optimized, .DeadPureValueElimination)
     report.completed.push(.DeadPureValueElimination)
     validation = mir_pass_validate_program(optimized, .DeadPureValueElimination)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.DeadPureValueElimination, .InvalidDefUse, None, Span{start: 0, end: 0}, "dead-value elimination produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
-    loop_counts := mir_pass_derive_loop_and_vector_facts(&optimized)
+    loop_counts :: mir_pass_derive_loop_and_vector_facts(&optimized)
     report.loop_facts = loop_counts.loops
     report.vector_facts = loop_counts.vectors
     reduction_counts := mir_pass_fixed_reduction_normalize(&optimized)
     report.fixed_reductions_normalized += reduction_counts.normalized
     report.reachable_blocks_removed += reduction_counts.blocks_removed
     report.dead_values_removed += reduction_counts.dead_values_removed
-    post_reduction_counts := mir_pass_derive_loop_and_vector_facts(&optimized)
+    post_reduction_counts :: mir_pass_derive_loop_and_vector_facts(&optimized)
     report.loop_facts = post_reduction_counts.loops
     report.vector_facts = post_reduction_counts.vectors
     reduction_counts = mir_pass_fixed_reduction_normalize(&optimized)
@@ -168,30 +168,28 @@ pub fn optimize_mir_program(program: MirProgram) -> MirOptimizationResult {
     mir_pass_mark(&optimized, .CanonicalLoopFacts)
     report.completed.push(.CanonicalLoopFacts)
     validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CanonicalLoopFacts, .InvalidFact, None, Span{start: 0, end: 0}, "canonical loop facts are invalid"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
 
     report.acceleration_facts = mir_pass_refresh_acceleration_facts(&optimized)
     mir_pass_canonicalize_program_order(&optimized)
     validation = mir_pass_validate_program(optimized, .CanonicalLoopFacts)
-    if validation != None -> return mir_optimizer_failed(validation ?? mir_pass_error(.CanonicalLoopFacts, .InvalidSchema, None, Span{start: 0, end: 0}, "canonical ordering produced invalid MIR"), report)
+    if validation == .Val(error) -> return mir_optimizer_failed(error, report)
     report.decision_rows = mir_pass_derive_decision_rows(&optimized)
     mir_pass_sort_decision_rows_for_program(&optimized)
-    digest := mir_program_digest(optimized)
+    digest :: mir_program_digest(optimized)
     loop function in &optimized.functions -> function.optimization.derived_from_digest = Val(digest)
     mir_optimizer_succeeded(optimized, report)
 }
 
 fn mir_optimizer_has_complete_seal(program: MirProgram) -> Bool {
     if program.functions.len() == 0 -> return false
-    digest := mir_program_digest(program)
-    expected := mir_optimizer_production_order()
+    digest :: mir_program_digest(program)
+    expected :: mir_optimizer_production_order()
     loop function in program.functions {
         if function.optimization.derived_from_digest != Val(digest) -> return false
         if function.optimization.pass_ids.len() != expected.len() -> return false
-        index := 0
-        loop index < expected.len() {
-            if function.optimization.pass_ids[index] != expected[index] -> return false
-            index += 1
+        loop (index, pass_id) in expected {
+            if function.optimization.pass_ids[index] != pass_id -> return false
         }
     }
     true

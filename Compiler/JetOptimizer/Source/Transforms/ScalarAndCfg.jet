@@ -1,7 +1,7 @@
 // Effect-preserving scalar simplification, constant folding, and CFG transforms.
 fn mir_pass_eliminate_unreachable(program: &MirProgram) {
     loop function in &program.functions {
-        reachable := mir_pass_reachable(function)
+        reachable :: mir_pass_reachable(function)
         kept_blocks := [MirBasicBlock]{}
         loop block in &function.blocks {
             if mir_pass_block_id_seen(reachable, block.id) -> kept_blocks.push(block)
@@ -10,7 +10,7 @@ fn mir_pass_eliminate_unreachable(program: &MirProgram) {
         live_values := [MirValueId]{}
         loop block in &function.blocks {
             loop instruction in &block.instructions {
-                if instruction.result != None -> live_values.push(instruction.result ?? MirValueId{value: 0})
+                if instruction.result == .Val(result) -> live_values.push(result)
             }
         }
         loop place in &function.places {
@@ -19,10 +19,8 @@ fn mir_pass_eliminate_unreachable(program: &MirProgram) {
             }
         }
         loop scope in &function.scopes {
-            if scope.deadline != None {
-                value :: scope.deadline ?? MirValueId{value: 0}
-                if !mir_pass_value_id_seen(live_values, value) -> live_values.push(value)
-            }
+            value :: scope.deadline ?? next
+            if !mir_pass_value_id_seen(live_values, value) -> live_values.push(value)
         }
         kept_values := [MirValueFact]{}
         loop value in &function.values {
@@ -31,18 +29,15 @@ fn mir_pass_eliminate_unreachable(program: &MirProgram) {
         function.values = kept_values
         block_index := 0
         loop block_index < function.blocks.len() {
-            block_id := function.blocks[block_index].id
-            expected := mir_pass_predecessors(function, block_id)
+            block_id :: function.blocks[block_index].id
+            expected :: mir_pass_predecessors(function, block_id)
             instructions := function.blocks[block_index].instructions
             instruction_index := 0
             loop instruction_index < instructions.len() {
                 instruction := instructions[instruction_index]
                 if instruction.operation == {
                     .Phi(incoming) -> {
-                        filtered := [MirPhiIncoming]{}
-                        loop row in incoming {
-                            if mir_pass_block_id_seen(expected, row.block) -> filtered.push(row)
-                        }
+                        filtered :: loop row in incoming if mir_pass_block_id_seen(expected, row.block) -> row
                         instructions[instruction_index].operation = MirOperation.Phi(filtered)
                     }
                     else -> {}
@@ -57,7 +52,7 @@ fn mir_pass_eliminate_unreachable(program: &MirProgram) {
 
 fn mir_pass_simplify_cfg(program: &MirProgram) {
     loop function in &program.functions {
-        constants := mir_pass_collect_scalar_constants(function)
+        constants :: mir_pass_collect_scalar_constants(function)
         loop block in &function.blocks {
             terminator := block.terminator
             if terminator == {
@@ -66,8 +61,7 @@ fn mir_pass_simplify_cfg(program: &MirProgram) {
                         block.terminator = MirTerminator.Jump(then_target)
                     } else {
                         constant :: mir_pass_constant_for(constants, condition)
-                        if constant != None {
-                            constant_value :: constant ?? MirConstant.Bool(false)
+                        if constant == .Val(constant_value) {
                             if constant_value == {
                                 .Bool(flag) -> {
                                     if flag -> block.terminator = MirTerminator.Jump(then_target)
@@ -90,33 +84,34 @@ fn mir_pass_fold_exact_constants(program: &MirProgram) -> Int {
     loop function in &program.functions {
         limit := 1
         loop block in &function.blocks -> limit += block.instructions.len()
-        iteration := 0
-        loop iteration < limit {
+        loop _ in 0..<limit {
             constants := mir_pass_collect_scalar_constants(function)
             changed := false
             loop block in &function.blocks {
                 instruction_index := 0
                 loop instruction_index < block.instructions.len() {
                     instruction := block.instructions[instruction_index]
-                    replacement := mir_pass_fold_operation(instruction.operation, constants, instruction.ty)
-                    if replacement != None {
-                        constant :: replacement ?? MirConstant.Unit
-                        block.instructions[instruction_index].operation = MirOperation.Constant(constant)
-                        changed = true
-                        folded += 1
-                    } else if instruction.result != None {
-                        if instruction.operation == {
-                            .Constant(constant) -> {
-                                if mir_pass_scalar_constant(constant) != None -> mir_pass_constant_put(&constants, instruction.result ?? MirValueId{value: 0}, mir_pass_scalar_constant(constant) ?? constant)
-                            }
-                            else -> {}
+                    replacement :: mir_pass_fold_operation(instruction.operation, constants, instruction.ty)
+                    if {
+                        replacement == .Val(constant) -> {
+                            block.instructions[instruction_index].operation = MirOperation.Constant(constant)
+                            changed = true
+                            folded += 1
                         }
+                        instruction.result == .Val(result) -> {
+                            if instruction.operation == {
+                                .Constant(constant) -> {
+                                    if mir_pass_scalar_constant(constant) == .Val(scalar) -> mir_pass_constant_put(&constants, result, scalar)
+                                }
+                                else -> {}
+                            }
+                        }
+                        else -> {}
                     }
                     instruction_index += 1
                 }
             }
             if !changed -> break
-            iteration += 1
         }
     }
     mir_pass_simplify_cfg(&program)
@@ -125,20 +120,20 @@ fn mir_pass_fold_exact_constants(program: &MirProgram) -> Int {
 
 fn mir_pass_fold_operation(operation: MirOperation, constants: [MirPassConstantFact], ty: ?MirType) -> ?MirConstant {
     if operation == {
-        .Phi(incoming) -> return mir_pass_fold_phi(incoming, constants)
+        .Phi(incoming) -> mir_pass_fold_phi(incoming, constants)
         .Unary(op, value) -> {
             value_constant :: mir_pass_constant_for(constants, value) ?? return None
             target :: ty ?? return None
-            return mir_pass_fold_unary(op, value_constant, target)
+            mir_pass_fold_unary(op, value_constant, target)
         }
         .Binary(op, dispatch, _, left, right) -> {
             if dispatch != .Primitive -> return None
             left_constant :: mir_pass_constant_for(constants, left) ?? return None
             right_constant :: mir_pass_constant_for(constants, right) ?? return None
             target :: ty ?? return None
-            return mir_pass_fold_binary(op, left_constant, right_constant, target)
+            mir_pass_fold_binary(op, left_constant, right_constant, target)
         }
-        else -> return None
+        else -> None
     }
 }
 
@@ -146,16 +141,15 @@ fn mir_pass_collect_scalar_constants(function: MirFunction) -> [MirPassConstantF
     constants := [MirPassConstantFact]{}
     loop block in &function.blocks {
         loop instruction in &block.instructions {
-            if instruction.result != None {
-                result := instruction.result ?? MirValueId{value: 0}
+            if instruction.result == .Val(result) {
                 if instruction.operation == {
                     .Constant(constant) -> {
                         scalar :: mir_pass_scalar_constant(constant)
-                        if scalar != None -> mir_pass_constant_put(&constants, result, scalar ?? constant)
+                        if scalar == .Val(value) -> mir_pass_constant_put(&constants, result, value)
                     }
                     .Phi(incoming) -> {
                         folded :: mir_pass_fold_phi(incoming, constants)
-                        if folded != None -> mir_pass_constant_put(&constants, result, folded ?? MirConstant.Unit)
+                        if folded == .Val(value) -> mir_pass_constant_put(&constants, result, value)
                     }
                     else -> {}
                 }
@@ -186,10 +180,10 @@ fn mir_pass_constant_put(constants: &[MirPassConstantFact], value: MirValueId, c
 
 fn mir_pass_scalar_constant(constant: MirConstant) -> ?MirConstant {
     if constant == {
-        .Int(value, width, _) -> return Val(MirConstant.Int(value, width, None))
-        .Bool(value) -> return Val(MirConstant.Bool(value))
-        .Char(value) -> return Val(MirConstant.Char(value))
-        else -> return None
+        .Int(value, width, _) -> Val(MirConstant.Int(value, width, None))
+        .Bool(value) -> Val(MirConstant.Bool(value))
+        .Char(value) -> Val(MirConstant.Char(value))
+        else -> None
     }
 }
 
@@ -197,56 +191,56 @@ fn mir_pass_same_scalar(left: MirConstant, right: MirConstant) -> Bool {
     if left == {
         .Int(left_value, left_width, _) -> {
             if right == {
-                .Int(right_value, right_width, _) -> return left_value == right_value && left_width == right_width
+                .Int(right_value, right_width, _) -> left_value == right_value && left_width == right_width
+                else -> false
             }
-            return false
         }
         .Bool(left_value) -> {
             if right == {
-                .Bool(right_value) -> return left_value == right_value
+                .Bool(right_value) -> left_value == right_value
+                else -> false
             }
-            return false
         }
         .Char(left_value) -> {
             if right == {
-                .Char(right_value) -> return left_value == right_value
+                .Char(right_value) -> left_value == right_value
+                else -> false
             }
-            return false
         }
-        else -> return false
+        else -> false
     }
 }
 
 fn mir_pass_fold_phi(incoming: [MirPhiIncoming], constants: [MirPassConstantFact]) -> ?MirConstant {
     if incoming.len() == 0 -> return None
     first :: mir_pass_constant_for(constants, incoming[0].value) ?? return None
-    index := 1
-    loop index < incoming.len() {
+    loop index in 1..<incoming.len() {
         candidate :: mir_pass_constant_for(constants, incoming[index].value) ?? return None
         if !mir_pass_same_scalar(first, candidate) -> return None
-        index += 1
     }
     Val(first)
 }
 
 fn mir_pass_fold_unary(op: MirUnaryOp, value: MirConstant, ty: MirType) -> ?MirConstant {
-    if op == .Not {
-        if value == {
-            .Bool(flag) -> return Val(MirConstant.Bool(!flag))
-        }
-        return None
-    }
-    if op == .Neg {
-        if value == {
-            .Int(number, width, _) -> {
-            result :: mir_pass_checked_sub(0, number) ?? return None
-            output_width := mir_pass_integer_width(ty, width)
-            if !mir_pass_fits_integer(result, output_width) -> return None
-            return Val(MirConstant.Int(result, output_width, None))
+    if op == {
+        .Not -> {
+            if value == {
+                .Bool(flag) -> Val(MirConstant.Bool(!flag))
+                else -> None
             }
         }
+        .Neg -> {
+            if value == {
+                .Int(number, width, _) -> {
+                    result :: mir_pass_checked_sub(0, number) ?? return None
+                    output_width :: mir_pass_integer_width(ty, width)
+                    if mir_pass_fits_integer(result, output_width) -> Val(MirConstant.Int(result, output_width, None)) else -> None
+                }
+                else -> None
+            }
+        }
+        else -> None
     }
-    None
 }
 
 fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, ty: MirType) -> ?MirConstant {
@@ -254,101 +248,109 @@ fn mir_pass_fold_binary(op: MirBinaryOp, left: MirConstant, right: MirConstant, 
         .Bool(left_value) -> {
             if right == {
                 .Bool(right_value) -> {
-                    if op == .And -> return Val(MirConstant.Bool(left_value && right_value))
-                    if op == .Or -> return Val(MirConstant.Bool(left_value || right_value))
-                    if op == .Eq -> return Val(MirConstant.Bool(left_value == right_value))
-                    if op == .Ne -> return Val(MirConstant.Bool(left_value != right_value))
+                    if op == {
+                        .And -> Val(MirConstant.Bool(left_value && right_value))
+                        .Or -> Val(MirConstant.Bool(left_value || right_value))
+                        .Eq -> Val(MirConstant.Bool(left_value == right_value))
+                        .Ne -> Val(MirConstant.Bool(left_value != right_value))
+                        else -> None
+                    }
                 }
+                else -> None
             }
-            return None
         }
         .Char(left_value) -> {
             if right == {
                 .Char(right_value) -> {
-                    if op == .Eq -> return Val(MirConstant.Bool(left_value == right_value))
-                    if op == .Ne -> return Val(MirConstant.Bool(left_value != right_value))
-                    if op == .Lt -> return Val(MirConstant.Bool(left_value < right_value))
-                    if op == .Gt -> return Val(MirConstant.Bool(left_value > right_value))
-                    if op == .Le -> return Val(MirConstant.Bool(left_value <= right_value))
-                    if op == .Ge -> return Val(MirConstant.Bool(left_value >= right_value))
+                    if op == {
+                        .Eq -> Val(MirConstant.Bool(left_value == right_value))
+                        .Ne -> Val(MirConstant.Bool(left_value != right_value))
+                        .Lt -> Val(MirConstant.Bool(left_value < right_value))
+                        .Gt -> Val(MirConstant.Bool(left_value > right_value))
+                        .Le -> Val(MirConstant.Bool(left_value <= right_value))
+                        .Ge -> Val(MirConstant.Bool(left_value >= right_value))
+                        else -> None
+                    }
                 }
+                else -> None
             }
-            return None
         }
         .Int(left_value, left_width, _) -> {
             if right == {
                 .Int(right_value, _, _) -> {
-                    if op == .Eq -> return Val(MirConstant.Bool(left_value == right_value))
-                    if op == .Ne -> return Val(MirConstant.Bool(left_value != right_value))
-                    if op == .Lt -> return Val(MirConstant.Bool(left_value < right_value))
-                    if op == .Gt -> return Val(MirConstant.Bool(left_value > right_value))
-                    if op == .Le -> return Val(MirConstant.Bool(left_value <= right_value))
-                    if op == .Ge -> return Val(MirConstant.Bool(left_value >= right_value))
-                    result := mir_pass_integer_result(op, left_value, right_value) ?? return None
-                    width := mir_pass_integer_width(ty, left_width)
-                    if !mir_pass_fits_integer(result, width) -> return None
-                    return Val(MirConstant.Int(result, width, None))
+                    if op == {
+                        .Eq -> Val(MirConstant.Bool(left_value == right_value))
+                        .Ne -> Val(MirConstant.Bool(left_value != right_value))
+                        .Lt -> Val(MirConstant.Bool(left_value < right_value))
+                        .Gt -> Val(MirConstant.Bool(left_value > right_value))
+                        .Le -> Val(MirConstant.Bool(left_value <= right_value))
+                        .Ge -> Val(MirConstant.Bool(left_value >= right_value))
+                        else -> {
+                            result :: mir_pass_integer_result(op, left_value, right_value) ?? return None
+                            width :: mir_pass_integer_width(ty, left_width)
+                            if mir_pass_fits_integer(result, width) -> Val(MirConstant.Int(result, width, None)) else -> None
+                        }
+                    }
                 }
+                else -> None
             }
-            return None
         }
-        else -> return None
+        else -> None
     }
 }
 
 fn mir_pass_integer_result(op: MirBinaryOp, left: Int, right: Int) -> ?Int {
-    if op == .Add -> return mir_pass_checked_add(left, right)
-    if op == .Sub -> return mir_pass_checked_sub(left, right)
-    if op == .Mul -> return mir_pass_checked_mul(left, right)
-    if op == .Div {
-        if right == 0 || (left == mir_pass_int_min() && right == -1) -> return None
-        return Val(left / right)
-    }
-    if op == .FloorDiv -> return mir_pass_floor_div(left, right)
-    if op == .Mod -> return mir_pass_floor_mod(left, right)
-    if op == .Rem {
-        if right == 0 -> return None
-        return Val(left % right)
-    }
-    if op == .BitAnd -> return Val(left & right)
-    if op == .BitOr -> return Val(left | right)
-    if op == .BitXor -> return Val(left ^ right)
-    if op == .Shl {
-        if right < 0 || right >= 63 -> return None
-        return mir_pass_checked_mul(left, 1 << right)
-    }
-    if op == .Shr {
-        if right < 0 || right >= 63 -> return None
-        return Val(left / (1 << right))
-    }
-    if op == .Pow {
-        if right < 0 || right > 63 -> return None
-        result := 1
-        exponent := right
-        base := left
-        loop exponent > 0 {
-            if exponent % 2 == 1 -> result :: mir_pass_checked_mul(result, base) ?? return None
-            exponent = exponent / 2
-            if exponent > 0 -> base :: mir_pass_checked_mul(base, base) ?? return None
+    if op == {
+        .Add -> mir_pass_checked_add(left, right)
+        .Sub -> mir_pass_checked_sub(left, right)
+        .Mul -> mir_pass_checked_mul(left, right)
+        .Div -> {
+            if right == 0 || (left == mir_pass_int_min() && right == -1) -> return None
+            return Val(left / right)
         }
-        return Val(result)
+        .FloorDiv -> mir_pass_floor_div(left, right)
+        .Mod -> mir_pass_floor_mod(left, right)
+        .Rem -> if right == 0 -> None else -> Val(left % right)
+        .BitAnd -> Val(left & right)
+        .BitOr -> Val(left | right)
+        .BitXor -> Val(left ^ right)
+        .Shl -> if right < 0 || right >= 63 -> None else -> mir_pass_checked_mul(left, 1 << right)
+        .Shr -> {
+            if right < 0 || right >= 63 -> return None
+            return Val(left / (1 << right))
+        }
+        .Pow -> {
+            if right < 0 || right > 63 -> return None
+            result := 1
+            exponent := right
+            base := left
+            loop exponent > 0 {
+                if exponent % 2 == 1 -> result :: mir_pass_checked_mul(result, base) ?? return None
+                exponent = exponent / 2
+                if exponent > 0 -> base :: mir_pass_checked_mul(base, base) ?? return None
+            }
+            Val(result)
+        }
+        else -> None
     }
-    None
 }
-
 
 fn mir_pass_int_min() -> Int { 0 - 9223372036854775807 - 1 }
 
 fn mir_pass_checked_add(left: Int, right: Int) -> ?Int {
-    if right > 0 && left > 9223372036854775807 - right -> return None
-    if right < 0 && left < mir_pass_int_min() - right -> return None
-    Val(left + right)
+    if {
+        right > 0 && left > 9223372036854775807 - right -> None
+        right < 0 && left < mir_pass_int_min() - right -> None
+        else -> Val(left + right)
+    }
 }
 
 fn mir_pass_checked_sub(left: Int, right: Int) -> ?Int {
-    if right > 0 && left < mir_pass_int_min() + right -> return None
-    if right < 0 && left > 9223372036854775807 + right -> return None
-    Val(left - right)
+    if {
+        right > 0 && left < mir_pass_int_min() + right -> None
+        right < 0 && left > 9223372036854775807 + right -> None
+        else -> Val(left - right)
+    }
 }
 
 fn mir_pass_checked_mul(left: Int, right: Int) -> ?Int {
@@ -367,40 +369,42 @@ fn mir_pass_checked_mul(left: Int, right: Int) -> ?Int {
 
 fn mir_pass_floor_div(left: Int, right: Int) -> ?Int {
     if right == 0 || (left == mir_pass_int_min() && right == -1) -> return None
-    quotient := left / right
-    remainder := left % right
+    quotient :: left / right
+    remainder :: left % right
     if remainder != 0 && (remainder < 0) != (right < 0) -> return mir_pass_checked_sub(quotient, 1)
     Val(quotient)
 }
 
 fn mir_pass_floor_mod(left: Int, right: Int) -> ?Int {
     if right == 0 || (left == mir_pass_int_min() && right == -1) -> return None
-    remainder := left % right
-    if remainder != 0 && (remainder < 0) != (right < 0) -> return mir_pass_checked_add(remainder, right)
-    Val(remainder)
+    remainder :: left % right
+    if remainder != 0 && (remainder < 0) != (right < 0) -> mir_pass_checked_add(remainder, right) else -> Val(remainder)
 }
 
 fn mir_pass_integer_width(ty: MirType, fallback: ?MirIntegerWidth) -> ?MirIntegerWidth {
     if ty.kind == {
-        .IntN(signed, bits) -> {
-            if bits > 0 && bits <= 64 -> return Val(MirIntegerWidth{signed: signed, bits: bits})
-            return None
-        }
-        .InlineRange(base, _, _) -> return mir_pass_integer_width(base, fallback)
-        .Tagged(_, inner) -> return mir_pass_integer_width(inner, fallback)
-        .Quantity(base, _) -> return mir_pass_integer_width(base, fallback)
-        else -> return fallback
+        .IntN(signed, bits) -> if bits > 0 && bits <= 64 -> Val(MirIntegerWidth{signed: signed, bits: bits}) else -> None
+        .InlineRange(base, _, _) -> mir_pass_integer_width(base, fallback)
+        .Tagged(_, inner) -> mir_pass_integer_width(inner, fallback)
+        .Quantity(base, _) -> mir_pass_integer_width(base, fallback)
+        else -> fallback
     }
 }
 
 fn mir_pass_fits_integer(value: Int, width: ?MirIntegerWidth) -> Bool {
     row :: width ?? return true
-    bits := row.bits
-    if bits <= 0 || bits > 64 -> return false
-    if bits == 64 -> return row.signed || value >= 0
-    limit := 1 << (bits - 1)
-    if row.signed -> return value >= 0 - limit && value <= limit - 1
-    unsigned_limit := 1 << bits
-    value >= 0 && value <= unsigned_limit - 1
+    bits :: row.bits
+    if {
+        bits <= 0 || bits > 64 -> false
+        bits == 64 -> row.signed || value >= 0
+        row.signed -> {
+            limit :: 1 << (bits - 1)
+            value >= 0 - limit && value <= limit - 1
+        }
+        else -> {
+            unsigned_limit :: 1 << bits
+            value >= 0 && value <= unsigned_limit - 1
+        }
+    }
 }
 

@@ -20,6 +20,7 @@ struct JetDriverAuthorizedSourceSnapshot {
     entry_root_identity: String
     entry_path: String
 }
+
 struct JetDriverHostFacts {
     target_triple: ?String
     active_os: ?String
@@ -86,7 +87,6 @@ struct JetDriverPackageInfo {
     dependencies: [JetDriverPackageDependency]
 }
 
-
 struct JetDriverSourceIndex {
     by_identity: [String:Int]
     by_module_name: [String:Int]
@@ -105,6 +105,7 @@ struct JetDriverSourceFileCollection {
     diagnostics: [Diagnostic]
     complete: Bool
 }
+
 struct JetDriverSourceCatalogResult {
     packages: [JetDriverPackageInfo]
     source_units: [JetDriverSourceUnit]
@@ -123,13 +124,13 @@ struct JetDriverLoadedModule {
     module_name: String
     program: Program
 }
+
 struct JetDriverCompileTrace {
     stdout: [String]
     stderr: [String]
     soft_stop: Bool
     exit_code: ?Int
 }
-
 
 struct JetDriverLoadResult {
     package_identity: String
@@ -145,7 +146,6 @@ struct JetDriverLoadResult {
     failed_stage: ?JetDriverStage
     complete: Bool
 }
-
 
 struct JetDriverCompileResult {
     diagnostics: [Diagnostic]
@@ -177,12 +177,10 @@ fn jet_driver_module_identity(package_identity: String, path: String) -> String 
 }
 
 fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] {
-    bytes := source.bytes()
+    bytes :: source.bytes()
     line_starts := [Int]{0}
-    index := 0
-    loop index < bytes.len() {
+    loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
-        index += 1
     }
     [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
@@ -194,20 +192,20 @@ fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fi
 fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, None, what, why, fix)
 }
+
 fn jet_driver_diagnostic_with_optional_span(code: String, span: ?Span, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, span, what, why, fix)
 }
 
 fn jet_driver_diagnostic_at_source(code: String, span: ?Span, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic := diagnostic_from_registry(code, span, what, why, fix)
+    diagnostic :: diagnostic_from_registry(code, span, what, why, fix)
     diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
 }
 
 fn jet_driver_lint_diagnostic_at_source(code: String, span: ?Span, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic := diagnostic_from_registry(code, span, what, why, fix)
+    diagnostic :: diagnostic_from_registry(code, span, what, why, fix)
     diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
 }
-
 
 fn jet_driver_module_index_key(package_identity: String, module_name: String) -> String {
     "{package_identity.len()}:{package_identity}:{module_name}"
@@ -219,11 +217,9 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
     ambiguous_module_names := [String:Bool]{}
     by_path := [String:Int]{}
     diagnostics := [Diagnostic]{}
-    index := 0
-    loop index < source_units.len() {
-        unit := source_units[index]
-        identity := jet_driver_source_identity(unit.package_identity, unit.path)
-        module_key := jet_driver_module_index_key(unit.package_identity, unit.module_name)
+    loop (index, unit) in source_units {
+        identity :: jet_driver_source_identity(unit.package_identity, unit.path)
+        module_key :: jet_driver_module_index_key(unit.package_identity, unit.module_name)
         valid := true
         if unit.package_identity.len() == 0 {
             diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
@@ -248,15 +244,13 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
         if valid {
             by_identity.add(identity, index)
             by_path.add(unit.path, index)
-            if by_module_name.get(module_key) != None {
-                ambiguous_module_names.add(module_key, true)
-            } else {
-                by_module_name.add(module_key, index)
+            if {
+                by_module_name.get(module_key) != None -> ambiguous_module_names.add(module_key, true)
+                else -> by_module_name.add(module_key, index)
             }
         }
-        index += 1
     }
-    complete := diagnostics.len() == 0
+    complete :: diagnostics.len() == 0
     JetDriverSourceIndexResult{
         index: JetDriverSourceIndex{
             by_identity: by_identity,

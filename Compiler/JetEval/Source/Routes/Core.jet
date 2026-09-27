@@ -2,11 +2,12 @@
 // execute only through the checked runtime host adapter.
 fn jet_eval_route_core_symbol(row: MirCoreCall, machine: &JetEvalMachine, span: Span) -> ?String {
     if row.symbol == {
-        .Prelude(name) -> return Val(name)
-        else -> {}
+        .Prelude(name) -> Val(name)
+        else -> {
+            jet_eval_route_not_supported(&machine, span, "Core route does not carry a Prelude symbol")
+            None
+        }
     }
-    jet_eval_route_not_supported(&machine, span, "Core route does not carry a Prelude symbol")
-    None
 }
 
 fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MirCallFallibility, result_ty: ?MirType, machine: &JetEvalMachine, span: Span) -> ?JetEvalRuntimeValue {
@@ -22,29 +23,31 @@ fn jet_eval_route_core_math(row: MirCoreCall, data: [TComptimeValue], args: [Jet
         if data.len() != 1 -> return jet_eval_route_told_failure("invalid Decimal string", fallibility)
         return jet_eval_route_precise_member_host("Decimal", "from_str", args, &machine, result_ty, span)
     }
-    if symbol == "jet_std_math_pi" {
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(3.141592653589793, 64)))
+    if symbol == {
+        "jet_std_math_pi" -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(3.141592653589793, 64)))
+        "jet_std_math_abs_i64" | "jet_std_math_abs_f64" | "jet_std_math_abs_f32" -> {
+            if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math abs ABI")
+            if data[0] == {
+                .Int(number) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(if number < 0 -> 0 - number else -> number)))
+                .Float(number, bits) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(if number < 0.0 -> 0.0 - number else -> number, bits)))
+                else -> jet_eval_route_not_supported(&machine, span, "math abs carrier")
+            }
+        }
+        "jet_std_math_is_nan" -> {
+            if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isnan ABI")
+            number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
+            Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number != number)))
+        }
+        "jet_std_math_is_finite" -> {
+            if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isfinite ABI")
+            number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
+            // Jet's evaluator has no host-float predicates. NaN is the only
+            // non-finite value constructible by the pure carrier today.
+            Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number == number)))
+        }
+        "jet_std_math_is_infinite" -> jet_eval_route_not_supported(&machine, span, "math isinf without a finite-float predicate")
+        else -> jet_eval_route_not_supported(&machine, span, "pure math route {row.member}")
     }
-    if symbol == "jet_std_math_abs_i64" || symbol == "jet_std_math_abs_f64" || symbol == "jet_std_math_abs_f32" {
-        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math abs ABI")
-        if data[0] == {.Int(number) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Int(if number < 0 -> 0 - number else -> number)))}
-        if data[0] == {.Float(number, bits) -> return Val(JetEvalRuntimeValue.Data(TComptimeValue.Float(if number < 0.0 -> 0.0 - number else -> number, bits)))}
-        return jet_eval_route_not_supported(&machine, span, "math abs carrier")
-    }
-    if symbol == "jet_std_math_is_nan" {
-        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isnan ABI")
-        number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number != number)))
-    }
-    if symbol == "jet_std_math_is_finite" {
-        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "math isfinite ABI")
-        number :: jet_eval_route_float_value(data[0], &machine, span) ?? return None
-        // Jet's evaluator has no host-float predicates. NaN is the only
-        // non-finite value constructible by the pure carrier today.
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Bool(number == number)))
-    }
-    if symbol == "jet_std_math_is_infinite" -> return jet_eval_route_not_supported(&machine, span, "math isinf without a finite-float predicate")
-    jet_eval_route_not_supported(&machine, span, "pure math route {row.member}")
 }
 
 fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: MirPreludeCallId, args: [JetEvalRuntimeValue], type_args: [MirType], fallibility: MirCallFallibility, result_ty: ?MirType, span: Span) -> ?JetEvalRuntimeValue {
@@ -80,8 +83,7 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: Mir
             return None
         }
         if !jet_eval_route_signature_prelude(route_row, args.len(), &machine, span) -> return None
-        move_permissions := [Bool]{}
-        loop borrowed in row.borrow_mask -> move_permissions.push(!borrowed)
+        move_permissions :: loop borrowed in row.borrow_mask -> !borrowed
 
         output :: jet_eval_host_row_with_moves(&machine, route_row, args, result_ty, move_permissions, span) ?? return None
         return Val(jet_eval_route_success(output, fallibility))
@@ -91,5 +93,5 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MirCoreCallId, route: Mir
     data :: jet_eval_route_args(args, &machine, span) ?? return None
     if row.pure_route != CoreCallPureRoute.Math -> return jet_eval_route_not_supported(&machine, span, "pure Core route family is not supported")
     output :: jet_eval_route_core_math(row, data, args, fallibility, result_ty, &machine, span) ?? return None
-    return Val(jet_eval_route_success(output, fallibility))
+    Val(jet_eval_route_success(output, fallibility))
 }

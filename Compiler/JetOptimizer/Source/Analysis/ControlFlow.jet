@@ -37,17 +37,16 @@ struct MirPassDominatorRow {
 // The public analyses are intentionally read-only and use the same edge and
 // operand walkers as the legality pass and transforms.
 pub fn mir_optimizer_analyze_function(function: MirFunction) -> MirOptimizationFunctionAnalysis {
-    cfg := mir_pass_cfg_rows(function)
-    defs := mir_pass_definitions(function)
-    rows := [MirOptimizationDefUseRow]{}
-    loop value in function.values {
-        definition := mir_pass_find_definition(defs, value.id)
-        rows.push(MirOptimizationDefUseRow{
+    cfg :: mir_pass_cfg_rows(function)
+    defs :: mir_pass_definitions(function)
+    rows :: loop value in function.values -> {
+        definition :: mir_pass_find_definition(defs, value.id)
+        MirOptimizationDefUseRow{
             value: value.id,
             definition_block: definition.map(row -> row.block),
             definition_index: definition.map(row -> row.index),
             use_count: mir_pass_value_use_count(function, value.id),
-        })
+        }
     }
     MirOptimizationFunctionAnalysis{cfg: cfg, def_use: rows}
 }
@@ -66,9 +65,7 @@ fn mir_pass_definitions(function: MirFunction) -> [MirPassDefinition] {
     loop block in &function.blocks {
         index := 0
         loop instruction in &block.instructions {
-            if instruction.result != None {
-                definitions.push(MirPassDefinition{value: instruction.result ?? MirValueId{value: 0}, block: block.id, index: index})
-            }
+            if instruction.result == .Val(result) -> definitions.push(MirPassDefinition{value: result, block: block.id, index: index})
             index += 1
         }
     }
@@ -87,10 +84,10 @@ fn mir_pass_definition_exists(definitions: [MirPassDefinition], value: MirValueI
 }
 
 fn mir_pass_cfg_rows(function: MirFunction) -> [MirOptimizationCfgRow] {
-    reachable := mir_pass_reachable(function)
+    reachable :: mir_pass_reachable(function)
     rows := [MirOptimizationCfgRow]{}
     loop block in &function.blocks {
-        successors := mir_terminator_targets(block.terminator)
+        successors :: mir_terminator_targets(block.terminator)
         rows.push(MirOptimizationCfgRow{block: block.id, predecessors: mir_pass_predecessors(function, block.id), successors: successors, reachable: mir_pass_block_id_seen(reachable, block.id)})
     }
     rows
@@ -105,12 +102,9 @@ fn mir_pass_reachable(function: MirFunction) -> [MirBlockId] {
         index += 1
         if !mir_pass_block_id_seen(reachable, block_id) {
             reachable.push(block_id)
-            block_option := mir_pass_find_block(function.blocks, block_id)
-            if block_option != None {
-                block :: block_option ?? MirBasicBlock{id: block_id, span: Span{start: 0, end: 0}, instructions: [MirInstruction]{}, terminator: MirTerminator.Unreachable("missing")}
-                loop target in mir_terminator_targets(block.terminator) {
-                    if !mir_pass_block_id_seen(reachable, target) -> pending.push(target)
-                }
+            block :: mir_pass_find_block(function.blocks, block_id) ?? next
+            loop target in mir_terminator_targets(block.terminator) {
+                if !mir_pass_block_id_seen(reachable, target) -> pending.push(target)
             }
         }
     }
@@ -128,7 +122,7 @@ fn mir_pass_predecessors(function: MirFunction, target: MirBlockId) -> [MirBlock
 }
 
 fn mir_pass_predecessor(function: MirFunction, source: MirBlockId, target: MirBlockId) -> Bool {
-    predecessors := mir_pass_predecessors(function, target)
+    predecessors :: mir_pass_predecessors(function, target)
     mir_pass_block_id_seen(predecessors, source)
 }
 
@@ -148,7 +142,7 @@ fn mir_pass_dominators(function: MirFunction) -> [MirPassDominatorRow] {
         rounds += 1
         loop block in &function.blocks {
             if block.id != function.entry {
-                predecessors := mir_pass_predecessors(function, block.id)
+                predecessors :: mir_pass_predecessors(function, block.id)
                 candidate := [MirBlockId]{}
                 if {
                     predecessors.len() == 0 -> candidate.push(block.id)
@@ -198,9 +192,9 @@ fn mir_pass_dominates(rows: [MirPassDominatorRow], definition: MirBlockId, use_b
 }
 
 fn mir_pass_definition_dominates(definition: MirPassDefinition, use_block: MirBlockId, use_index: Int, rows: [MirPassDominatorRow]) -> Bool {
-    if definition.block == use_block -> return definition.index < use_index
-    mir_pass_dominates(rows, definition.block, use_block)
+    if definition.block == use_block -> definition.index < use_index else -> mir_pass_dominates(rows, definition.block, use_block)
 }
+
 fn mir_pass_place_value_uses(places: [MirPlace], id: MirPlaceId) -> [MirValueId] {
     loop place in &places {
         if place.id == id {

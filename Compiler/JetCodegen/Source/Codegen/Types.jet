@@ -17,20 +17,20 @@ fn jet_codegen_is_type_parameter(names: [String], name: String) -> Bool {
 }
 
 fn jet_codegen_qualified_type_key(module_identity: String, name: String) -> String {
-    if module_identity == "" -> return name
-    "{module_identity}::{name}"
+    if module_identity == "" -> name else -> "{module_identity}::{name}"
 }
+
 fn jet_codegen_resolve_trait_ref(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> ?MirTraitRef {
     preferred := None
     other := None
     ambiguous_other := false
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.traits {
-            canonical := jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
-            canonical_module_name := "{semantic_module.module_name}::{definition.name}"
-            canonical_module_identity := "{semantic_module.module_identity}::{definition.name}"
+            canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
+            canonical_module_name :: "{semantic_module.module_name}::{definition.name}"
+            canonical_module_identity :: "{semantic_module.module_identity}::{definition.name}"
             if name != definition.key && name != definition.name && name != canonical && name != canonical_module_name && name != canonical_module_identity -> next
-            candidate := mir_trait_ref(canonical)
+            candidate :: mir_trait_ref(canonical)
             if semantic_module.module_identity == preferred_module_identity {
                 if preferred != None && (preferred ?? candidate).id != candidate.id -> return None
                 preferred = Val(candidate)
@@ -53,39 +53,44 @@ fn jet_codegen_is_native_rust_derive_name(name: String) -> Bool {
 }
 
 fn jet_codegen_native_rust_derive_name_for_id(id: MirTraitId) -> ?String {
-    if id == mir_trait_id("Clone") -> return Val("Clone")
-    if id == mir_trait_id("Copy") -> return Val("Copy")
-    if id == mir_trait_id("Debug") -> return Val("Debug")
-    if id == mir_trait_id("Default") -> return Val("Default")
-    if id == mir_trait_id("Eq") -> return Val("Eq")
-    if id == mir_trait_id("Hash") -> return Val("Hash")
-    if id == mir_trait_id("Ord") -> return Val("Ord")
-    if id == mir_trait_id("PartialEq") -> return Val("PartialEq")
-    if id == mir_trait_id("PartialOrd") -> return Val("PartialOrd")
-    None
+    if {
+        id == mir_trait_id("Clone") -> Val("Clone")
+        id == mir_trait_id("Copy") -> Val("Copy")
+        id == mir_trait_id("Debug") -> Val("Debug")
+        id == mir_trait_id("Default") -> Val("Default")
+        id == mir_trait_id("Eq") -> Val("Eq")
+        id == mir_trait_id("Hash") -> Val("Hash")
+        id == mir_trait_id("Ord") -> Val("Ord")
+        id == mir_trait_id("PartialEq") -> Val("PartialEq")
+        id == mir_trait_id("PartialOrd") -> Val("PartialOrd")
+        else -> None
+    }
 }
+
 fn jet_codegen_is_compiler_owned_trait_name(name: String) -> Bool {
     name == "Encode" || name == "Decode" || name == "Display" || name == "Debug" || name == "Equatable" || name == "Comparable" || name == "Close" || name == "Index" || name == "IndexMut" || name == "Iterable" || name == "Iterator" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Rollback"
 }
 
 fn jet_codegen_compiler_owned_trait_name_for_id(id: MirTraitId) -> ?String {
-    if id == mir_trait_id("Encode") -> return Val("Encode")
-    if id == mir_trait_id("Decode") -> return Val("Decode")
-    if id == mir_trait_id("Display") -> return Val("Display")
-    if id == mir_trait_id("Debug") -> return Val("Debug")
-    if id == mir_trait_id("Equatable") -> return Val("Equatable")
-    if id == mir_trait_id("Comparable") -> return Val("Comparable")
-    if id == mir_trait_id("Close") -> return Val("Close")
-    if id == mir_trait_id("Index") -> return Val("Index")
-    if id == mir_trait_id("IndexMut") -> return Val("IndexMut")
-    if id == mir_trait_id("Iterable") -> return Val("Iterable")
-    if id == mir_trait_id("Iterator") -> return Val("Iterator")
-    if id == mir_trait_id("Add") -> return Val("Add")
-    if id == mir_trait_id("Sub") -> return Val("Sub")
-    if id == mir_trait_id("Mul") -> return Val("Mul")
-    if id == mir_trait_id("Div") -> return Val("Div")
-    if id == mir_trait_id("Rollback") -> return Val("Rollback")
-    None
+    if {
+        id == mir_trait_id("Encode") -> Val("Encode")
+        id == mir_trait_id("Decode") -> Val("Decode")
+        id == mir_trait_id("Display") -> Val("Display")
+        id == mir_trait_id("Debug") -> Val("Debug")
+        id == mir_trait_id("Equatable") -> Val("Equatable")
+        id == mir_trait_id("Comparable") -> Val("Comparable")
+        id == mir_trait_id("Close") -> Val("Close")
+        id == mir_trait_id("Index") -> Val("Index")
+        id == mir_trait_id("IndexMut") -> Val("IndexMut")
+        id == mir_trait_id("Iterable") -> Val("Iterable")
+        id == mir_trait_id("Iterator") -> Val("Iterator")
+        id == mir_trait_id("Add") -> Val("Add")
+        id == mir_trait_id("Sub") -> Val("Sub")
+        id == mir_trait_id("Mul") -> Val("Mul")
+        id == mir_trait_id("Div") -> Val("Div")
+        id == mir_trait_id("Rollback") -> Val("Rollback")
+        else -> None
+    }
 }
 
 fn jet_codegen_is_checked_text_trait_id(id: MirTraitId) -> Bool {
@@ -93,20 +98,18 @@ fn jet_codegen_is_checked_text_trait_id(id: MirTraitId) -> Bool {
 }
 
 fn jet_codegen_lower_declared_or_builtin_trait_ref(modules: [SemaGraphModuleResult], name: String, module_identity: String) -> MirTraitRef {
-    resolved := jet_codegen_resolve_trait_ref(modules, name, module_identity)
-    if resolved != None -> return resolved ?? panic("resolved trait reference disappeared")
+    if jet_codegen_resolve_trait_ref(modules, name, module_identity) == .Val(resolved) -> return resolved
     if jet_codegen_trait_name_has_declaration(modules, name) -> panic("checked trait name is ambiguous")
     if jet_codegen_is_native_rust_derive_name(name) || jet_codegen_is_compiler_owned_trait_name(name) || name == "CheckedText" -> return mir_trait_ref(name)
     panic("checked trait name has no declared or registered builtin identity")
 }
 
-
 fn jet_codegen_trait_name_has_declaration(modules: [SemaGraphModuleResult], name: String) -> Bool {
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.traits {
-            canonical := jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
-            canonical_module_name := "{semantic_module.module_name}::{definition.name}"
-            canonical_module_identity := "{semantic_module.module_identity}::{definition.name}"
+            canonical :: jet_codegen_canonical_target_type(semantic_module.module_identity, definition.key)
+            canonical_module_name :: "{semantic_module.module_name}::{definition.name}"
+            canonical_module_identity :: "{semantic_module.module_identity}::{definition.name}"
             if name == definition.key || name == definition.name || name == canonical || name == canonical_module_name || name == canonical_module_identity -> return true
         }
     }
@@ -125,8 +128,7 @@ fn jet_codegen_core_owner_identity(owner: TCoreBuiltinOwner, semantic_module: Se
     if owner.name == "" || owner.symbol.key == "" -> panic("checked Core builtin owner has an empty canonical identity")
     module_identity := ""
     qualified_name := owner.name
-    if owner.module_identity != None {
-        identity :: owner.module_identity ?? panic("checked Core builtin owner module disappeared")
+    if owner.module_identity == .Val(identity) {
         if identity != semantic_module.module_identity -> panic("checked Core builtin owner has a module linkage mismatch")
         module_identity = identity
         qualified_name = jet_codegen_qualified_type_key(identity, owner.name)
@@ -155,7 +157,7 @@ fn jet_codegen_find_nominal_identity(modules: [SemaGraphModuleResult], current_m
     found := None
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
-            qualified_name := jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
+            qualified_name :: jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
             if name == nominal.symbol.name || name == qualified_name {
                 candidate := JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal.symbol.name, key: qualified_name, qualified_name: qualified_name}
                 found = jet_codegen_merge_nominal_identity(found, candidate)
@@ -238,16 +240,14 @@ fn jet_codegen_type_instance_id(ty: Type, modules: [SemaGraphModuleResult], modu
     if ty == {
         .Named(name) -> {
             nominal := jet_codegen_find_nominal_identity(modules, module_identity, name, generic_names)
-            if nominal != None {
-                value :: nominal ?? panic("checked nominal type lookup lost its unique result")
+            if nominal == .Val(value) {
                 return mir_type_id(value.key)
             }
         }
         .Apply(name, args) -> {
             if args.len() == 0 {
                 nominal := jet_codegen_find_nominal_identity(modules, module_identity, name, generic_names)
-                if nominal != None {
-                    value :: nominal ?? panic("checked nominal type lookup lost its unique result")
+                if nominal == .Val(value) {
                     return mir_type_id(value.key)
                 }
             }
@@ -266,12 +266,12 @@ fn jet_codegen_lower_type_for_function(ty: Type, builder: &JetCodegenBuilder) ->
 }
 
 fn jet_codegen_lower_type_with_modules(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType {
-    canonical := jet_codegen_qualify_type(ty, modules, module_identity, generic_names)
+    canonical :: jet_codegen_qualify_type(ty, modules, module_identity, generic_names)
     jet_codegen_lower_canonical_type(canonical, modules, module_identity, generic_names)
 }
 
 fn jet_codegen_lower_canonical_type(canonical: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MirType {
-    kind := if canonical == {
+    kind :: if canonical == {
         .Int -> MirTypeKind.Int
         .Float -> MirTypeKind.Float
         .Bool -> MirTypeKind.Bool
@@ -421,7 +421,7 @@ fn jet_codegen_lower_view_provenance_map(provenance: ?ViewProvenanceMap) -> ?[Mi
     loop entry in (provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}).entries {
         sources := [MirViewSourcePath]{}
         loop path in entry.value.sources {
-            source := if path.source == {
+            source :: if path.source == {
                 .Receiver -> MirViewSource.Receiver
                 .Parameter(index) -> MirViewSource.Parameter(index)
                 .Static(module_path, name) -> MirViewSource.Static(module_path, name)
@@ -436,11 +436,12 @@ fn jet_codegen_lower_view_provenance_map(provenance: ?ViewProvenanceMap) -> ?[Mi
             }
             sources.push(MirViewSourcePath{source: source, projections: projections})
         }
-        value := MirViewProvenance{sources: sources, mutable: entry.value.mutable}
+        value :: MirViewProvenance{sources: sources, mutable: entry.value.mutable}
         rows.push(MirViewProvenanceEntry{slot: entry.slot, provenance: value})
     }
     Val(rows)
 }
+
 struct JetCodegenResolvedField {
     pub module_identity: String
     pub nominal_name: String
@@ -469,7 +470,7 @@ fn jet_codegen_resolve_field_by_symbol(modules: [SemaGraphModuleResult], referen
 }
 
 fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField {
-    owner_name := if owner_type == {
+    owner_name :: if owner_type == {
         .Named(name) -> name
         .Apply(name, _) -> name
         else -> panic("checked field access owner is not a nominal type")
@@ -498,13 +499,14 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
 fn jet_codegen_mir_field_id(field: JetCodegenResolvedField) -> MirFieldId {
     mir_field_id("{jet_codegen_qualified_type_key(field.module_identity, field.nominal_name)}::{field.field_name}")
 }
+
 fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTypeId {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key -> return mir_type_id(jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name))
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
-            candidate := jet_codegen_core_owner_identity(owner, semantic_module)
+            candidate :: jet_codegen_core_owner_identity(owner, semantic_module)
             if owner.symbol.key == symbol.key -> return mir_type_id(candidate.key)
         }
     }
@@ -512,7 +514,7 @@ fn jet_codegen_mir_type_id_for_symbol(modules: [SemaGraphModuleResult], symbol: 
 }
 
 fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], ty: Type) -> MirTypeId {
-    name := if ty == {
+    name :: if ty == {
         .Named(value) -> value
         .Apply(value, _) -> value
         else -> panic("checked declaration owner is not a nominal type")
@@ -521,11 +523,12 @@ fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_mo
     value :: identity ?? panic("checked declaration owner has no registered nominal identity")
     mir_type_id(value.key)
 }
+
 fn jet_codegen_mir_trait_ref_for_symbol(modules: [SemaGraphModuleResult], symbol: SymbolId) -> MirTraitRef {
     loop semantic_module in modules {
         loop nominal in semantic_module.nominals {
             if nominal.symbol.id.key == symbol.key {
-                name := jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
+                name :: jet_codegen_qualified_type_key(semantic_module.module_identity, nominal.symbol.name)
                 return jet_codegen_resolve_trait_ref(modules, name, semantic_module.module_identity) ?? panic("checked trait symbol has no registered trait definition")
             }
         }

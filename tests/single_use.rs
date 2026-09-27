@@ -315,7 +315,7 @@ fn run() {
 #[test]
 fn drop_erases_no_unsafe_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ consume(db) }} }}\n",
+        "{}\nfn run() {{\n    db :: acquire(\"db\")\n    #Unsafe(\"gone\") {{ consume(db) }}\n}}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
@@ -356,7 +356,7 @@ fn run() {
 #[test]
 fn tag_erases_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ db :: acquire(\"db\"); release(^db) }}\n",
+        "{}\nfn run() {{\n    db :: acquire(\"db\")\n    release(^db)\n}}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");

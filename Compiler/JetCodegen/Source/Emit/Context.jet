@@ -79,7 +79,6 @@ pub struct JetRustEmitTraitMethodMetadata {
     pub return_type: String
 }
 
-
 pub struct JetRustEmitManifest {
     pub schema_version: Int
     pub target: String
@@ -101,11 +100,11 @@ pub struct JetRustEmitManifest {
     pub traits: [JetRustEmitTraitMetadata]
     pub trait_methods: [JetRustEmitTraitMethodMetadata]
 }
+
 pub enum JetRustEmitResult {
     Complete(source: String, manifest: JetRustEmitManifest)
     Incomplete(failure: JetRustEmitFailure)
 }
-
 
 pub struct JetRustEmitContext {
     pub program: MirProgram
@@ -123,6 +122,7 @@ pub struct JetRustEmitContext {
     pub current_function: ?MirFunctionId
     pub current_generic_params: [MirGenericParam]
 }
+
 fn jet_rust_emit_merge_generic_params(outer: [MirGenericParam], inner: [MirGenericParam]) -> [MirGenericParam] {
     merged := outer
     loop parameter in inner {
@@ -141,25 +141,19 @@ fn jet_rust_emit_merge_generic_params(outer: [MirGenericParam], inner: [MirGener
     merged
 }
 
-
 fn jet_rust_emit_id_key(value: Int) -> String { "{value}" }
 
 fn jet_rust_emit_sanitize(value: String) -> String {
-    bytes := value.bytes()
+    bytes :: value.bytes()
     out := [U8]{}
     loop byte in bytes {
-        code := Int.from_u8(byte)
-        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 {
-            out.push(byte)
-        } else {
-            out.push(U8{95})
-        }
+        code :: Int.from_u8(byte)
+        out.push(if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> byte else -> U8{95})
     }
-    result := String.from_bytes(out) ?? "_"
+    result :: String.from_bytes(out) ?? "_"
     if result.len() == 0 -> return "_"
     first := result.bytes()[0]
-    if first >= (U8{48}) && first <= (U8{57}) -> return "_{result}"
-    result
+    if first >= (U8{48}) && first <= (U8{57}) -> "_{result}" else -> result
 }
 
 fn jet_rust_emit_symbol(prefix: String, raw: String, id: Int) -> String {
@@ -169,30 +163,36 @@ fn jet_rust_emit_symbol(prefix: String, raw: String, id: Int) -> String {
 fn jet_rust_emit_quote(value: String) -> String {
     out := [U8]{34}
     loop byte in value.bytes() {
-        code := Int.from_u8(byte)
-        if code == 92 {
-            out.push(U8{92})
-            out.push(U8{92})
-        } else if code == 34 {
-            out.push(U8{92})
-            out.push(U8{34})
-        } else if code == 10 {
-            out.push(U8{92})
-            out.push(U8{110})
-        } else if code == 13 {
-            out.push(U8{92})
-            out.push(U8{114})
-        } else if code == 9 {
-            out.push(U8{92})
-            out.push(U8{116})
-        } else if code < 32 {
-            out.push(U8{92})
-            out.push(U8{120})
-            hex := "0123456789abcdef"
-            out.push(hex.bytes()[code / 16])
-            out.push(hex.bytes()[code % 16])
-        } else {
-            out.push(byte)
+        code :: Int.from_u8(byte)
+        if {
+            code == 92 -> {
+                out.push(U8{92})
+                out.push(U8{92})
+            }
+            code == 34 -> {
+                out.push(U8{92})
+                out.push(U8{34})
+            }
+            code == 10 -> {
+                out.push(U8{92})
+                out.push(U8{110})
+            }
+            code == 13 -> {
+                out.push(U8{92})
+                out.push(U8{114})
+            }
+            code == 9 -> {
+                out.push(U8{92})
+                out.push(U8{116})
+            }
+            code < 32 -> {
+                out.push(U8{92})
+                out.push(U8{120})
+                hex :: "0123456789abcdef"
+                out.push(hex.bytes()[code / 16])
+                out.push(hex.bytes()[code % 16])
+            }
+            else -> out.push(byte)
         }
     }
     out.push(U8{34})
@@ -210,48 +210,45 @@ fn jet_rust_emit_fail(ctx: &JetRustEmitContext, kind: JetRustEmitFailureKind, co
 }
 
 fn jet_rust_emit_function_name(ctx: &JetRustEmitContext, id: MirFunctionId) -> String {
-    name := ctx.function_names.get(jet_rust_emit_id_key(id.value))
-    if name != None -> return name ?? "__jet_missing_function"
+    if ctx.function_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function identity is missing from the emitter registry", "checked callees must resolve to one canonical source-emission symbol", None)
     "__jet_missing_function_{id.value}"
 }
 
 fn jet_rust_emit_type_name(ctx: &JetRustEmitContext, id: MirTypeId) -> String {
-    name := ctx.type_names.get(jet_rust_emit_id_key(id.value))
-    if name != None -> return name ?? "__jet_missing_type"
+    if ctx.type_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "checked nominal references must resolve to one canonical source-emission symbol", None)
     "__jet_missing_type_{id.value}"
 }
 
 fn jet_rust_emit_trait_name(ctx: &JetRustEmitContext, id: MirTraitId) -> String {
-    name := ctx.trait_names.get(jet_rust_emit_id_key(id.value))
-    if name != None -> return name ?? "__jet_missing_trait"
+    if ctx.trait_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait identity is missing from the emitter registry", "checked trait bounds must resolve to one canonical source-emission symbol", None)
     "__jet_missing_trait_{id.value}"
 }
 
 fn jet_rust_emit_field_name(ctx: &JetRustEmitContext, id: MirFieldId) -> String {
-    name := ctx.field_names.get(jet_rust_emit_id_key(id.value))
-    if name != None -> return name ?? "__jet_missing_field"
+    if ctx.field_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR field identity is missing from the emitter registry", "checked field projections must resolve to one canonical source-emission symbol", None)
     "__jet_missing_field_{id.value}"
 }
+
 fn jet_rust_emit_register_field(ctx: &JetRustEmitContext, id: MirFieldId, raw: String, span: Span) {
-    key := jet_rust_emit_id_key(id.value)
-    symbol := jet_rust_emit_symbol("__jet_field_", raw, id.value)
-    prior := ctx.field_names.get(key)
-    if prior != None {
-        if (prior ?? "") != symbol -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR field identity maps to conflicting symbols", "each checked field ID must retain one canonical source-emission name", Val(span))
+    key :: jet_rust_emit_id_key(id.value)
+    symbol :: jet_rust_emit_symbol("__jet_field_", raw, id.value)
+    prior :: ctx.field_names.get(key)
+    if prior == .Val(existing) {
+        if existing != symbol -> jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR field identity maps to conflicting symbols", "each checked field ID must retain one canonical source-emission name", Val(span))
         return
     }
     ctx.field_names.add(key, symbol)
 }
 
 fn jet_rust_emit_variant_name(ctx: &JetRustEmitContext, type_id: MirTypeId, variant: String) -> String {
-    key := "{type_id.value}:{variant}"
-    symbol := ctx.variant_names.get(key)
-    if symbol != None {
-        parts := (symbol ?? "").split("::")
+    key :: "{type_id.value}:{variant}"
+    symbol :: ctx.variant_names.get(key)
+    if symbol == .Val(path) {
+        parts :: path.split("::")
         if parts.len() > 0 -> return parts[parts.len() - 1]
     }
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR enum variant identity is missing from the emitter registry", "checked enum values must resolve to one canonical variant symbol", None)
@@ -259,29 +256,26 @@ fn jet_rust_emit_variant_name(ctx: &JetRustEmitContext, type_id: MirTypeId, vari
 }
 
 fn jet_rust_emit_variant_symbol(ctx: &JetRustEmitContext, type_name: String, variant: String) -> String {
-    symbol := ctx.variant_names.get("{type_name}:{variant}")
-    if symbol != None -> return symbol ?? "__jet_missing_variant"
+    if ctx.variant_names.get("{type_name}:{variant}") == .Val(symbol) -> return symbol
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR enum variant source identity is missing", "checked enum constants must resolve to one canonical variant path", None)
     "__jet_missing_variant"
 }
-
 
 fn jet_rust_emit_same_handle_type(left: MirType, right: MirType) -> Bool {
     if mir_type_same_checked_type(left, right) -> return true
     if left.kind == {
         .Apply(left_name, _) -> {
             if right.kind == {
-                .Apply(right_name, _) -> return left_name.name == right_name.name
-                else -> return false
+                .Apply(right_name, _) -> left_name.name == right_name.name
+                else -> false
             }
         }
-        else -> return false
+        else -> false
     }
 }
 
 fn jet_rust_emit_foreign_name(ctx: &JetRustEmitContext, id: MirForeignId) -> String {
-    name := ctx.foreign_names.get(jet_rust_emit_id_key(id.value))
-    if name != None -> return name ?? "__jet_missing_foreign"
+    if ctx.foreign_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
     jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign identity is missing from the emitter registry", "checked foreign calls must resolve to one canonical source-emission symbol", None)
     "__jet_missing_foreign_{id.value}"
 }
@@ -326,7 +320,7 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
     }
 
     loop function in ctx.program.functions {
-        key := jet_rust_emit_id_key(function.id.value)
+        key :: jet_rust_emit_id_key(function.id.value)
         if ctx.function_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR function identity is duplicated", "each checked function must have one stable source-emission symbol", Val(function.span))
             return ctx
@@ -334,13 +328,13 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
         ctx.function_names.add(key, jet_rust_emit_symbol("__jet_fn_", function.key, function.id.value))
     }
     loop definition in ctx.program.types {
-        key := jet_rust_emit_id_key(definition.id.value)
+        key :: jet_rust_emit_id_key(definition.id.value)
         if ctx.type_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type identity is duplicated", "each nominal type must have one stable source-emission symbol", Val(definition.span))
             return ctx
         }
-        symbol := if definition.compiler_builtin == {
-            .Some(MirCompilerBuiltin.DefaultErr) -> "{ctx.config.root_prefix}JetErr"
+        symbol :: if definition.compiler_builtin == {
+            .Val(MirCompilerBuiltin.DefaultErr) -> "{ctx.config.root_prefix}JetErr"
             else -> jet_rust_emit_symbol("__jet_ty_", definition.key, definition.id.value)
         }
         ctx.type_names.add(key, symbol)
@@ -354,12 +348,12 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
             }
             .Enum(variants, _) -> {
                 loop variant in variants {
-                    variant_key := "{key}:{variant.name}"
+                    variant_key :: "{key}:{variant.name}"
                     if ctx.variant_names.get(variant_key) != None {
                         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR enum variant identity is duplicated", "each checked variant key must map to one stable source-emission symbol", Val(variant.span))
                         return ctx
                     }
-                    variant_symbol := "{symbol}::{jet_rust_emit_sanitize(variant.name)}"
+                    variant_symbol :: "{symbol}::{jet_rust_emit_sanitize(variant.name)}"
                     ctx.variant_names.add(variant_key, variant_symbol)
                     ctx.variant_source_names.add(variant_key, variant.name)
                     ctx.variant_wire_names.add(variant_key, variant.wire_name)
@@ -375,7 +369,7 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
         }
     }
     loop trait_row in ctx.program.traits {
-        key := jet_rust_emit_id_key(trait_row.id.value)
+        key :: jet_rust_emit_id_key(trait_row.id.value)
         if ctx.trait_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR trait identity is duplicated", "each checked trait must have one stable source-emission symbol", Val(trait_row.span))
             return ctx
@@ -383,13 +377,12 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
         ctx.trait_names.add(key, jet_rust_emit_symbol("__jet_trait_", trait_row.key, trait_row.id.value))
     }
     loop foreign in ctx.program.foreign {
-        key := jet_rust_emit_id_key(foreign.id.value)
+        key :: jet_rust_emit_id_key(foreign.id.value)
         if ctx.foreign_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR foreign identity is duplicated", "each foreign declaration must have one stable source-emission symbol", Val(foreign.span))
             return ctx
         }
-        raw := foreign.name
-        if raw.len() == 0 -> raw = foreign.key
+        raw :: if foreign.name.len() == 0 -> foreign.key else -> foreign.name
         ctx.foreign_names.add(key, jet_rust_emit_symbol("__jet_foreign_", raw, foreign.id.value))
     }
     loop row in ctx.program.fields {
@@ -399,38 +392,36 @@ fn jet_rust_emit_context(program: MirProgram, config: JetRustEmitConfig) -> JetR
 }
 
 fn jet_rust_emit_source_line(lines: &[String], line: String) { lines.push(line) }
+
 fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMetadata] {
     out := [JetRustEmitTypeMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.types {
-        symbol := ctx.type_names.get(jet_rust_emit_id_key(definition.id.value))
-        if symbol == None {
+        symbol :: ctx.type_names.get(jet_rust_emit_id_key(definition.id.value)) ?? {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "type metadata must use the same canonical symbol as emitted type declarations", Val(definition.span))
             next
         }
         out.push(JetRustEmitTypeMetadata{
             ty: definition.id,
             source_name: definition.name,
-            symbol: symbol ?? "__jet_missing_type",
+            symbol: symbol,
         })
     }
     out
 }
 
-
 fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCallableMetadata] {
     out := [JetRustEmitCallableMetadata]{}
     loop function in ctx.program.functions {
         if !jet_rust_emit_function_target_enabled(ctx.config, function) -> next
-        top_level := false
-        if function.form == {
-            .TopLevel -> top_level = true
-            else -> {}
+        top_level :: if function.form == {
+            .TopLevel -> true
+            else -> false
         }
         if !top_level -> next
         previous_generic_params := ctx.current_generic_params
-        owner_generic_params := jet_rust_emit_function_owner_generic_params(ctx, function)
-        function_scope := jet_rust_emit_merge_generic_params(previous_generic_params, owner_generic_params)
+        owner_generic_params :: jet_rust_emit_function_owner_generic_params(ctx, function)
+        function_scope :: jet_rust_emit_merge_generic_params(previous_generic_params, owner_generic_params)
         ctx.current_generic_params = jet_rust_emit_merge_generic_params(function_scope, function.generic_params)
         parameter_types := [String]{}
         parameter_access := [MirAccess]{}
@@ -476,9 +467,8 @@ fn jet_rust_emit_variant_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitVaria
         if definition.kind == {
             .Enum(variants, _) -> {
                 loop variant in variants {
-                    key := "{definition.id.value}:{variant.name}"
-                    symbol := ctx.variant_names.get(key)
-                    if symbol == None {
+                    key :: "{definition.id.value}:{variant.name}"
+                    symbol :: ctx.variant_names.get(key) ?? {
                         jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR enum variant identity is missing from the emitter registry", "variant metadata must use the same canonical symbol as emitted enum declarations", Val(variant.span))
                         next
                     }
@@ -492,7 +482,7 @@ fn jet_rust_emit_variant_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitVaria
                         owner: definition.id,
                         source_name: variant.name,
                         wire_name: variant.wire_name,
-                        symbol: symbol ?? "__jet_missing_variant",
+                        symbol: symbol,
                         payload_types: payload_types,
                     })
                 }
@@ -526,11 +516,10 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
         loop module in ctx.program.modules {
             if module.id == definition.module_id -> module_key = Val(module.key)
         }
-        if module_key == None {
+        key_prefix :: module_key ?? {
             jet_rust_emit_fail(ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait module is missing", "trait method metadata keys require the canonical module key from the trait's owning module", Val(definition.span))
             next
         }
-        key_prefix :: module_key ?? ""
         loop method in definition.methods {
             parameter_types := [String]{}
             parameter_access := [MirAccess]{}
@@ -554,22 +543,17 @@ fn jet_rust_emit_trait_method_metadata(ctx: &JetRustEmitContext) -> [JetRustEmit
     out
 }
 
-
 fn jet_rust_emit_result(ctx: JetRustEmitContext, source: String) -> JetRustEmitResult {
-    if ctx.failure != None {
-        return JetRustEmitResult.Incomplete(ctx.failure ?? jet_rust_emit_failure(JetRustEmitFailureKind.InvalidSchema, "E0003", "Rust emission failed", "the emitter did not provide a failure detail", None))
-    }
-    bytes := source.bytes().len()
-    type_metadata := jet_rust_emit_type_metadata(&ctx)
-    callable_metadata := jet_rust_emit_callable_metadata(&ctx)
-    field_metadata := jet_rust_emit_field_metadata(&ctx)
-    variant_metadata := jet_rust_emit_variant_metadata(&ctx)
-    trait_metadata := jet_rust_emit_trait_metadata(&ctx)
-    trait_method_metadata := jet_rust_emit_trait_method_metadata(&ctx)
-    if ctx.failure != None {
-        return JetRustEmitResult.Incomplete(ctx.failure ?? jet_rust_emit_failure(JetRustEmitFailureKind.InvalidSchema, "E0003", "Rust emission failed", "metadata construction did not preserve checked identity facts", None))
-    }
-    manifest := JetRustEmitManifest{
+    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete(failure)
+    bytes :: source.bytes().len()
+    type_metadata :: jet_rust_emit_type_metadata(&ctx)
+    callable_metadata :: jet_rust_emit_callable_metadata(&ctx)
+    field_metadata :: jet_rust_emit_field_metadata(&ctx)
+    variant_metadata :: jet_rust_emit_variant_metadata(&ctx)
+    trait_metadata :: jet_rust_emit_trait_metadata(&ctx)
+    trait_method_metadata :: jet_rust_emit_trait_method_metadata(&ctx)
+    if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete(failure)
+    manifest :: JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,
         package_identity: ctx.program.package_identity,

@@ -19,54 +19,63 @@ fn jet_eval_route_core_row(machine: &JetEvalMachine, call: MirCoreCallId, span: 
 }
 
 fn jet_eval_route_arity(arity: Int, minimum: Int, maximum: Int, name: String, machine: &JetEvalMachine, span: Span) -> Bool {
-    if minimum < 0 || maximum < minimum || arity < minimum || arity > maximum {
-        jet_eval_compiler_fail(&machine, span, "MIR {name} route arity is outside its registered ABI")
-        return false
+    if {
+        minimum < 0 || maximum < minimum || arity < minimum || arity > maximum -> {
+            jet_eval_compiler_fail(&machine, span, "MIR {name} route arity is outside its registered ABI")
+            false
+        }
+        else -> true
     }
-    true
 }
 
 fn jet_eval_route_signature_prelude(row: MirPreludeCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool {
-    if !jet_eval_route_arity(count, row.signature.arity, row.signature.max_arity, "Prelude", &machine, span) -> return false
-    if row.signature.borrow_mask.len() != count {
-        jet_eval_compiler_fail(&machine, span, "MIR Prelude route borrow mask does not match its ABI")
-        return false
+    if {
+        !jet_eval_route_arity(count, row.signature.arity, row.signature.max_arity, "Prelude", &machine, span) -> false
+        row.signature.borrow_mask.len() != count -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Prelude route borrow mask does not match its ABI")
+            false
+        }
+        else -> true
     }
-    true
 }
 
 fn jet_eval_route_signature_core(row: MirCoreCall, count: Int, machine: &JetEvalMachine, span: Span) -> Bool {
-    if !jet_eval_route_arity(count, row.arity, row.max_arity, "Core", &machine, span) -> return false
-    if row.borrow_mask.len() != count {
-        jet_eval_compiler_fail(&machine, span, "MIR Core route borrow mask does not match its ABI")
-        return false
+    if {
+        !jet_eval_route_arity(count, row.arity, row.max_arity, "Core", &machine, span) -> false
+        row.borrow_mask.len() != count -> {
+            jet_eval_compiler_fail(&machine, span, "MIR Core route borrow mask does not match its ABI")
+            false
+        }
+        else -> true
     }
-    true
 }
 
 fn jet_eval_route_symbol_prelude(row: MirPreludeCall, machine: &JetEvalMachine, span: Span) -> ?String {
     if row.symbol == {
-        .Prelude(name) -> return Val(name)
-        .Runtime(_) -> {}
-        else -> {}
+        .Prelude(name) -> Val(name)
+        else -> {
+            jet_eval_unsupported(&machine, span, "a Runtime symbol in a pure Prelude route")
+            None
+        }
     }
-    jet_eval_unsupported(&machine, span, "a Runtime symbol in a pure Prelude route")
-    None
 }
 
 fn jet_eval_route_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> ?TComptimeValue {
-
     jet_eval_data(value, &machine, span)
 }
 
 fn jet_eval_route_string(value: TComptimeValue) -> ?String {
-    if value == {.String(text) -> return Val(text)}
-    None
+    if value == {
+        .String(text) -> Val(text)
+        else -> None
+    }
 }
 
 fn jet_eval_route_list(value: TComptimeValue) -> ?[TComptimeValue] {
-    if value == {.List(values) -> return Val(values)}
-    None
+    if value == {
+        .List(values) -> Val(values)
+        else -> None
+    }
 }
 
 fn jet_eval_route_args(values: [JetEvalRuntimeValue], machine: &JetEvalMachine, span: Span) -> ?[TComptimeValue] {
@@ -87,55 +96,47 @@ fn jet_eval_route_source_path(machine: &JetEvalMachine, file: MirSourceFileId, s
 
 fn jet_eval_route_failure_is_optional(fallibility: MirCallFallibility) -> Bool {
     if fallibility == {
-        .Failure(failure) -> {
-            if failure == {
-                .Optional(_) -> return true
-                else -> {}
-            }
+        .Failure(failure) -> if failure == {
+            .Optional(_) -> true
+            else -> false
         }
-        else -> {}
+        else -> false
     }
-    false
 }
 
 fn jet_eval_route_failure_is_result(fallibility: MirCallFallibility) -> Bool {
     if fallibility == {
-        .Failure(failure) -> {
-            if failure == {
-                .Result(_, _) -> return true
-                else -> {}
-            }
+        .Failure(failure) -> if failure == {
+            .Result(_, _) -> true
+            else -> false
         }
-        else -> {}
+        else -> false
     }
-    false
 }
 
 fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MirCallFallibility) -> JetEvalRuntimeValue {
     if fallibility == MirCallFallibility.Infallible -> return value
     if value == {
-        .Absent(_) -> return value
-        .Result(_, _) -> return value
-        .Data(data) -> {
-            if data == {.Present(_) | .Failed(_) -> return value}
-            if jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) {
-                return JetEvalRuntimeValue.Data(TComptimeValue.Present(data))
+        .Absent(_) | .Result(_, _) -> value
+        .Data(data) -> if data == {
+            .Present(_) | .Failed(_) -> value
+            else -> {
+                wrap :: jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility)
+                if wrap -> JetEvalRuntimeValue.Data(TComptimeValue.Present(data)) else -> value
             }
         }
         else -> {
-            if jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) {
-                return JetEvalRuntimeValue.Result(true, value)
-            }
+            wrap :: jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility)
+            if wrap -> JetEvalRuntimeValue.Result(true, value) else -> value
         }
     }
-    value
 }
 
 fn jet_eval_route_told_failure(message: String, fallibility: MirCallFallibility) -> ?JetEvalRuntimeValue {
-    if jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) {
-        return Val(JetEvalRuntimeValue.Data(TComptimeValue.Failed(TComptimeReport.Told(TComptimeValue.String(message)))))
+    if {
+        jet_eval_route_failure_is_optional(fallibility) || jet_eval_route_failure_is_result(fallibility) -> Val(JetEvalRuntimeValue.Data(TComptimeValue.Failed(TComptimeReport.Told(TComptimeValue.String(message)))))
+        else -> None
     }
-    None
 }
 
 fn jet_eval_route_not_supported(machine: &JetEvalMachine, span: Span, detail: String) -> ?JetEvalRuntimeValue {

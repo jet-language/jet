@@ -133,7 +133,7 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
     let entry = root.join("main.jet");
     fs::write(
         &entry,
-        "use \"./left\" as left\nuse \"./right\" as right\nfn clean() -[]> { right.same() }\nfn run() { clean(); left.same() }\n",
+        "use \"./left\" as left\nuse \"./right\" as right\nfn clean() -[]> { right.same() }\nfn run() {\n    clean()\n    left.same()\n}\n",
     )
     .unwrap();
 
@@ -428,7 +428,11 @@ impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
 fn sq(n: Int) -[]> Int { return n * n }
 fn load(p: String) -[IO]> { print(p) }
 fn invoke(n: Int) -[IO]> { load("{sq(n)}") }
-fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2) }
+fn run() {
+    s :: Square{ side: 3 }
+    print("{s.area()}")
+    invoke(2)
+}
 "#;
     let plain = r#"
 trait Shape { fn area(self) -> Int }
@@ -437,7 +441,11 @@ impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
 fn sq(n: Int) -> Int { return n * n }
 fn load(p: String) { print(p) }
 fn invoke(n: Int) { load("{sq(n)}") }
-fn run() { s :: Square{ side: 3 }; print("{s.area()}"); invoke(2) }
+fn run() {
+    s :: Square{ side: 3 }
+    print("{s.area()}")
+    invoke(2)
+}
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;
@@ -646,9 +654,15 @@ use core.files as fs
 trait Hasher { fn hash(self) -[]> Int }
 struct Doc { path: String }
 impl Doc.Hasher {
-    fn hash(self) -> Int { body :: fs.read(self.path) ?? ""; return body.len() }
+    fn hash(self) -> Int {
+        body :: fs.read(self.path) ?? ""
+        return body.len()
+    }
 }
-fn run() { d :: Doc{ path: "x" }; print(d.hash()) }
+fn run() {
+    d :: Doc{ path: "x" }
+    print(d.hash())
+}
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0742"),
@@ -666,7 +680,10 @@ struct Square { side: Int }
 impl Square.Shape {
     fn area(self) -> Int { return self.side * self.side }
 }
-fn run() { s :: Square{ side: 5 }; print("{s.area()}") }
+fn run() {
+    s :: Square{ side: 5 }
+    print("{s.area()}")
+}
 "#;
     assert!(
         codes(src).is_empty(),
@@ -1683,7 +1700,11 @@ fn bump(x: &Int) -> Int !Fail {
     }
     return Ok(0)
 }
-fn run() { a := 0; n :: bump(&a) ?? (-1); print("{n}") }
+fn run() {
+    a := 0
+    n :: bump(&a) ?? (-1)
+    print("{n}")
+}
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     assert!(
@@ -1745,7 +1766,10 @@ fn callback_pure_bound_impure_arg_is_e0747() {
 fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
     return items.map((x) -> f(x)).to_list()
 }
-fn noisy(n: Int) -> Int { print("{n}"); return n }
+fn noisy(n: Int) -> Int {
+    print("{n}")
+    return n
+}
 fn run() { print("{transform([1, 2], noisy)}") }
 "#;
     assert_eq!(
@@ -1781,7 +1805,10 @@ use core.files as fs
 fn invoke(p: String, act: fn(String) -[IO]>) {
     act(p)
 }
-fn read_it(p: String) { x :: fs.read(~p) ?? ""; print("{x}") }
+fn read_it(p: String) {
+    x :: fs.read(~p) ?? ""
+    print("{x}")
+}
 fn run() { invoke("f.txt", read_it) }
 "#;
     assert_eq!(
@@ -1834,7 +1861,10 @@ fn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> {
     act(n)
 }
 fn show(n: Int) { print("{n}") }
-fn caller() -[]> Int { invoke(5, show); return 0 }
+fn caller() -[]> Int {
+    invoke(5, show)
+    return 0
+}
 fn run() { print("{caller()}") }
 "#;
     assert_eq!(
@@ -1880,7 +1910,10 @@ fn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {
 fn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> { act(n) }
 fn inc(n: Int) -[]> Int { return n + 1 }
 fn show(n: Int) { print("{n}") }
-fn run() { print("{transform([1], inc)}"); invoke(5, show) }
+fn run() {
+    print("{transform([1], inc)}")
+    invoke(5, show)
+}
 "#;
     let plain = r#"
 fn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {
@@ -1889,7 +1922,10 @@ fn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {
 fn invoke(n: Int, act: fn(Int)) { act(n) }
 fn inc(n: Int) -> Int { return n + 1 }
 fn show(n: Int) { print("{n}") }
-fn run() { print("{transform([1], inc)}"); invoke(5, show) }
+fn run() {
+    print("{transform([1], inc)}")
+    invoke(5, show)
+}
 "#;
     let a = jet::compile(annotated).expect("annotated compiles").rust;
     let b = jet::compile(plain).expect("plain compiles").rust;

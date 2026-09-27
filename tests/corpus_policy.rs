@@ -126,7 +126,7 @@ fn fixture_roles_and_approved_builder_boundary_are_explicit() {
     let builder = policy
         .evaluate_source(
             "dogfood/jetpack/src/cli/main.jet",
-            "fn run() { args.spec(); process.argv() }",
+            "fn run() {\n    args.spec()\n    process.argv()\n}",
         )
         .unwrap();
     assert!(builder.iter().all(|violation| {
